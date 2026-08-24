@@ -317,6 +317,15 @@ impl ThreadRootProjectionState {
         );
     }
 
+    pub fn clear(&mut self, room_id: &str, root_event_id: &str) -> bool {
+        let removed = self
+            .entries
+            .remove(&(room_id.to_owned(), root_event_id.to_owned()))
+            .is_some();
+        self.cleanup_empty_room_tracking(room_id);
+        removed
+    }
+
     /// Reconcile terminal records with the current bounded canonical Room
     /// window. Pending workers are allowed to settle, but ready/failed records
     /// disappear as soon as their reply root is no longer active.

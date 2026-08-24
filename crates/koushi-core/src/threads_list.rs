@@ -13,7 +13,7 @@ use futures_util::{StreamExt, future::join_all};
 use koushi_state::{AppAction, OperationFailureKind, ThreadsListItem, ThreadsListScope};
 use matrix_sdk::ruma::RoomId;
 use matrix_sdk_ui::timeline::thread_list_service::{
-    ThreadListItem as SdkThreadListItem, ThreadListServiceError,
+    ThreadListItem as SdkThreadListItem, ThreadListServiceError, ThreadRelationAggregate,
 };
 use matrix_sdk_ui::timeline::{ThreadListPaginationState, ThreadListService, TimelineDetails};
 use tokio::sync::{broadcast, mpsc};
@@ -42,6 +42,71 @@ pub struct ThreadRootProjectionActivity {
     pub activity_body_preview: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum AggregateRefreshCause {
+    InitialHydration,
+    SelectedActivity,
+    CanonicalBatch,
+    /// The root left the accepted missing-root window through removal,
+    /// redaction, clear, or reset.
+    Removal,
+}
+
+impl AggregateRefreshCause {
+    fn is_disappearance(self) -> bool {
+        matches!(self, Self::Removal)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct AggregateRefresh {
+    pub activity: ThreadRootProjectionActivity,
+    pub activity_revision: u64,
+    pub summary_revision: u64,
+    pub cause: AggregateRefreshCause,
+    pub root_active: bool,
+    pub hydrate_root: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct AuthoritativeThreadAggregate {
+    pub reply_count: u32,
+    pub latest_event_id: Option<String>,
+    pub latest_sender: Option<String>,
+    pub latest_sender_label: Option<String>,
+    pub latest_body_preview: Option<String>,
+    pub latest_timestamp_ms: Option<u64>,
+}
+
+impl Default for AuthoritativeThreadAggregate {
+    fn default() -> Self {
+        Self {
+            reply_count: 0,
+            latest_event_id: None,
+            latest_sender: None,
+            latest_sender_label: None,
+            latest_body_preview: None,
+            latest_timestamp_ms: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ThreadRootProjectionRefreshResult {
+    Hydrated {
+        item: TimelineItem,
+        aggregate: AuthoritativeThreadAggregate,
+    },
+    Aggregate(AuthoritativeThreadAggregate),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ThreadRootProjectionCompletion {
+    Updated(ThreadRootProjectionRecord),
+    Cleared(ThreadRootProjectionActivity),
+    Ignored,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ThreadRootProjectionDecision {
     /// Start exactly one `Room::load_or_fetch_event(root_id, None)` request.
@@ -53,6 +118,8 @@ pub(crate) enum ThreadRootProjectionDecision {
     /// reply window. Re-emitting it lets a replacement Room actor restore its
     /// pending/ready/failed display state without another fetch.
     Existing(ThreadRootProjectionRecord),
+    /// A serial exhausted. The root is retired and must never reuse a counter.
+    Retired,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -65,6 +132,12 @@ enum ThreadRootProjectionAttempt {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ThreadRootProjectionRecord {
     pub activity: ThreadRootProjectionActivity,
+    pub aggregate: AuthoritativeThreadAggregate,
+    pub activity_revision: u64,
+    pub summary_revision: u64,
+    aggregate_refresh: Option<AggregateRefresh>,
+    aggregate_failure: Option<OperationFailureKind>,
+    pub retired: bool,
     attempt: ThreadRootProjectionAttempt,
 }
 
@@ -77,14 +150,22 @@ impl ThreadRootProjectionRecord {
     }
 
     pub(crate) fn failure_kind(&self) -> Option<OperationFailureKind> {
-        match self.attempt {
+        self.aggregate_failure.or_else(|| match self.attempt {
             ThreadRootProjectionAttempt::Failed(kind) => Some(kind),
             ThreadRootProjectionAttempt::Pending | ThreadRootProjectionAttempt::Ready(_) => None,
-        }
+        })
+    }
+
+    pub(crate) fn is_hydration_pending(&self) -> bool {
+        matches!(self.attempt, ThreadRootProjectionAttempt::Pending)
     }
 
     pub(crate) fn is_pending(&self) -> bool {
-        matches!(self.attempt, ThreadRootProjectionAttempt::Pending)
+        self.is_hydration_pending() || self.aggregate_refresh.is_some()
+    }
+
+    pub(crate) fn pending_refresh(&self) -> Option<AggregateRefresh> {
+        self.aggregate_refresh.clone()
     }
 }
 
@@ -108,12 +189,18 @@ impl ThreadRootProjectionService {
     ) -> ThreadRootProjectionDecision {
         let key = (activity.room_id.clone(), activity.root_event_id.clone());
         if let Some(record) = self.attempts.get_mut(&key) {
+            if record.retired {
+                return ThreadRootProjectionDecision::Retired;
+            }
             if activity_is_newer(&activity, &record.activity) {
-                // A failed root stays terminal while its reply remains in the
-                // active Room window. We still advance its activity identity
-                // so the unavailable placeholder follows the latest reply,
-                // but must never turn it into another fetch attempt.
+                if record.activity_revision == u64::MAX {
+                    record.retired = true;
+                    record.aggregate_refresh = None;
+                    return ThreadRootProjectionDecision::Retired;
+                }
+                record.activity_revision += 1;
                 record.activity = activity;
+                record.aggregate_failure = None;
                 return ThreadRootProjectionDecision::ActivityUpdated(record.clone());
             }
             return ThreadRootProjectionDecision::Existing(record.clone());
@@ -122,10 +209,126 @@ impl ThreadRootProjectionService {
             key,
             ThreadRootProjectionRecord {
                 activity: activity.clone(),
+                aggregate: AuthoritativeThreadAggregate::default(),
+                activity_revision: 1,
+                summary_revision: 0,
+                aggregate_refresh: None,
+                aggregate_failure: None,
+                retired: false,
                 attempt: ThreadRootProjectionAttempt::Pending,
             },
         );
         ThreadRootProjectionDecision::StartFetch(activity)
+    }
+
+    pub(crate) fn schedule_aggregate_refresh(
+        &mut self,
+        activity: &ThreadRootProjectionActivity,
+        cause: AggregateRefreshCause,
+        root_active: bool,
+        advance_activity_revision: bool,
+    ) -> Option<AggregateRefresh> {
+        let key = (activity.room_id.clone(), activity.root_event_id.clone());
+        let record = self.attempts.get_mut(&key)?;
+        if record.retired {
+            return None;
+        }
+        if advance_activity_revision {
+            if record.activity_revision == u64::MAX {
+                record.retired = true;
+                record.aggregate_refresh = None;
+                return None;
+            }
+            record.activity_revision += 1;
+        }
+        if record.summary_revision == u64::MAX {
+            record.retired = true;
+            record.aggregate_refresh = None;
+            return None;
+        }
+        record.summary_revision += 1;
+        record.activity = activity.clone();
+        record.aggregate_failure = None;
+        let refresh = AggregateRefresh {
+            activity: record.activity.clone(),
+            activity_revision: record.activity_revision,
+            summary_revision: record.summary_revision,
+            cause,
+            root_active,
+            hydrate_root: matches!(record.attempt, ThreadRootProjectionAttempt::Pending),
+        };
+        record.aggregate_refresh = Some(refresh.clone());
+        Some(refresh)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_refresh(
+        &self,
+        activity: &ThreadRootProjectionActivity,
+    ) -> Option<AggregateRefresh> {
+        self.attempts
+            .get(&(activity.room_id.clone(), activity.root_event_id.clone()))
+            .and_then(ThreadRootProjectionRecord::pending_refresh)
+    }
+
+    pub(crate) fn complete_refresh(
+        &mut self,
+        refresh: &AggregateRefresh,
+        result: Result<ThreadRootProjectionRefreshResult, OperationFailureKind>,
+    ) -> ThreadRootProjectionCompletion {
+        let key = (
+            refresh.activity.room_id.clone(),
+            refresh.activity.root_event_id.clone(),
+        );
+        let Some(record) = self.attempts.get_mut(&key) else {
+            return ThreadRootProjectionCompletion::Ignored;
+        };
+        if record.retired
+            || record.activity_revision != refresh.activity_revision
+            || record.summary_revision != refresh.summary_revision
+            || record.aggregate_refresh.as_ref() != Some(refresh)
+        {
+            return ThreadRootProjectionCompletion::Ignored;
+        }
+        record.aggregate_refresh = None;
+        match result {
+            Ok(ThreadRootProjectionRefreshResult::Hydrated { item, aggregate }) => {
+                record.attempt = ThreadRootProjectionAttempt::Ready(item);
+                record.aggregate = aggregate;
+                record.aggregate_failure = None;
+                if record.aggregate.reply_count == 0 && !refresh.root_active {
+                    let activity = record.activity.clone();
+                    self.attempts.remove(&key);
+                    self.cleanup_empty_room_tracking(&activity.room_id);
+                    ThreadRootProjectionCompletion::Cleared(activity)
+                } else {
+                    ThreadRootProjectionCompletion::Updated(record.clone())
+                }
+            }
+            Ok(ThreadRootProjectionRefreshResult::Aggregate(aggregate)) => {
+                record.aggregate = aggregate;
+                record.aggregate_failure = None;
+                if record.aggregate.reply_count == 0 && !refresh.root_active {
+                    let activity = record.activity.clone();
+                    self.attempts.remove(&key);
+                    self.cleanup_empty_room_tracking(&activity.room_id);
+                    ThreadRootProjectionCompletion::Cleared(activity)
+                } else {
+                    ThreadRootProjectionCompletion::Updated(record.clone())
+                }
+            }
+            Err(failure_kind) => {
+                if !refresh.root_active && refresh.cause.is_disappearance() {
+                    let activity = record.activity.clone();
+                    self.attempts.remove(&key);
+                    self.cleanup_empty_room_tracking(&activity.room_id);
+                    ThreadRootProjectionCompletion::Cleared(activity)
+                } else {
+                    record.aggregate_failure = Some(failure_kind);
+                    ThreadRootProjectionCompletion::Updated(record.clone())
+                }
+            }
+        }
     }
 
     /// Keep only projection data that still has a representation in the
@@ -134,10 +337,20 @@ impl ThreadRootProjectionService {
     /// corresponding root has no live reply. Thus a reconnect can dedupe a
     /// currently-active failure, while a later observation after cleanup is a
     /// new bounded attempt rather than a retry loop.
+    #[cfg(test)]
     pub(crate) fn reconcile_room(
         &mut self,
         room_id: &str,
         active_root_event_ids: &HashSet<String>,
+    ) {
+        self.reconcile_room_with_affected(room_id, active_root_event_ids, &HashSet::new());
+    }
+
+    pub(crate) fn reconcile_room_with_affected(
+        &mut self,
+        room_id: &str,
+        active_root_event_ids: &HashSet<String>,
+        affected_root_event_ids: &HashSet<String>,
     ) {
         self.active_root_event_ids
             .insert(room_id.to_owned(), active_root_event_ids.clone());
@@ -145,31 +358,63 @@ impl ThreadRootProjectionService {
             .retain(|(entry_room_id, root_event_id), record| {
                 entry_room_id != room_id
                     || active_root_event_ids.contains(root_event_id)
+                    || affected_root_event_ids.contains(root_event_id)
                     || record.is_pending()
+                    || record.retired
             });
         self.cleanup_empty_room_tracking(room_id);
     }
 
-    /// Reconcile the Room's current selected reply for every root. Unlike
-    /// [`Self::observe`], this may move a retained terminal record backwards:
-    /// a newer reply can leave the bounded SDK window while an older reply for
-    /// the same root remains. The bounded lookup is still exactly-once because
-    /// only the activity metadata changes; the attempt state is preserved.
+    #[cfg(test)]
     pub(crate) fn reconcile_room_activities(
         &mut self,
         room_id: &str,
         activities_by_root: &HashMap<String, ThreadRootProjectionActivity>,
-    ) {
+    ) -> HashSet<String> {
+        self.reconcile_room_activities_with_affected(room_id, activities_by_root, &HashSet::new())
+    }
+
+    pub(crate) fn reconcile_room_activities_with_affected(
+        &mut self,
+        room_id: &str,
+        activities_by_root: &HashMap<String, ThreadRootProjectionActivity>,
+        affected_root_event_ids: &HashSet<String>,
+    ) -> HashSet<String> {
         let active_root_event_ids = activities_by_root.keys().cloned().collect::<HashSet<_>>();
-        self.reconcile_room(room_id, &active_root_event_ids);
+        self.reconcile_room_with_affected(room_id, &active_root_event_ids, affected_root_event_ids);
+        let mut changed = HashSet::new();
         for (root_event_id, activity) in activities_by_root {
             if let Some(record) = self
                 .attempts
                 .get_mut(&(room_id.to_owned(), root_event_id.clone()))
             {
-                record.activity = activity.clone();
+                if activity_is_newer(activity, &record.activity) {
+                    if record.activity_revision == u64::MAX {
+                        record.retired = true;
+                        record.aggregate_refresh = None;
+                    } else {
+                        record.activity_revision += 1;
+                        record.activity = activity.clone();
+                        record.aggregate_failure = None;
+                        changed.insert(root_event_id.clone());
+                    }
+                }
             }
         }
+        changed
+    }
+
+    pub(crate) fn active_activities(
+        &self,
+        room_id: &str,
+    ) -> HashMap<String, ThreadRootProjectionActivity> {
+        self.attempts
+            .iter()
+            .filter_map(|((entry_room_id, root_event_id), record)| {
+                (entry_room_id == room_id && !record.retired)
+                    .then(|| (root_event_id.clone(), record.activity.clone()))
+            })
+            .collect()
     }
 
     /// Remove all state for a Room when its Room timeline is unsubscribed.
@@ -191,7 +436,7 @@ impl ThreadRootProjectionService {
     pub(crate) fn has_pending_attempt(&self, activity: &ThreadRootProjectionActivity) -> bool {
         self.attempts
             .get(&(activity.room_id.clone(), activity.root_event_id.clone()))
-            .is_some_and(ThreadRootProjectionRecord::is_pending)
+            .is_some_and(ThreadRootProjectionRecord::is_hydration_pending)
     }
 
     /// Returns the current terminal result for one active root without
@@ -271,16 +516,13 @@ impl ThreadRootProjectionService {
     }
 }
 
+/// Effective-content equality, not timestamp/ID ordering, is the activity
+/// revision boundary. Same-ID/same-timestamp edits are therefore changes.
 pub(crate) fn activity_is_newer(
     candidate: &ThreadRootProjectionActivity,
     existing: &ThreadRootProjectionActivity,
 ) -> bool {
-    candidate
-        .activity_timestamp_ms
-        .unwrap_or(0)
-        .cmp(&existing.activity_timestamp_ms.unwrap_or(0))
-        .then_with(|| candidate.activity_event_id.cmp(&existing.activity_event_id))
-        .is_gt()
+    candidate != existing
 }
 
 /// Messages routed to a `ThreadsListActor`.
@@ -756,7 +998,7 @@ impl Drop for SubscriptionTasks {
     }
 }
 
-fn classify_thread_list_error(error: &ThreadListServiceError) -> OperationFailureKind {
+pub(crate) fn classify_thread_list_error(error: &ThreadListServiceError) -> OperationFailureKind {
     match error {
         ThreadListServiceError::Sdk(matrix_sdk::Error::Http(_)) => OperationFailureKind::Network,
         ThreadListServiceError::Sdk(_) | ThreadListServiceError::EventCache(_) => {
@@ -828,19 +1070,43 @@ fn body_preview(content: Option<&matrix_sdk_ui::timeline::TimelineItemContent>) 
     None
 }
 
+/// Maps the SDK's proven relation aggregate without rebuilding relation
+/// semantics in Core. The event remains the SDK's original reply identity;
+/// only its already-effective content is used for the preview.
+pub(crate) fn authoritative_thread_aggregate_from_sdk(
+    aggregate: &ThreadRelationAggregate,
+) -> AuthoritativeThreadAggregate {
+    let latest = aggregate.latest_event.as_ref();
+    AuthoritativeThreadAggregate {
+        reply_count: aggregate.num_replies,
+        latest_event_id: latest.map(|event| event.event_id.to_string()),
+        latest_sender: latest.map(|event| event.sender.to_string()),
+        latest_sender_label: latest.and_then(|event| sender_label(&event.sender_profile)),
+        latest_body_preview: latest.and_then(|event| body_preview(event.content.as_ref())),
+        latest_timestamp_ms: latest.map(|event| event.timestamp.0.into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
+    use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, event_id, user_id};
+    use matrix_sdk_ui::timeline::thread_list_service::{
+        ThreadListItemEvent, ThreadRelationAggregate,
+    };
+    use matrix_sdk_ui::timeline::{Profile, TimelineDetails};
     use tokio::sync::{mpsc, oneshot};
 
     use crate::event::{TimelineItem, TimelineItemId, TimelineMessageActions};
 
     use super::{
-        ActiveSubscription, OperationFailureKind, SubscriptionTasks, ThreadRootProjectionActivity,
-        ThreadRootProjectionDecision, ThreadRootProjectionService,
+        ActiveSubscription, AggregateRefreshCause, OperationFailureKind, SubscriptionTasks,
+        ThreadRootProjectionActivity, ThreadRootProjectionDecision,
+        ThreadRootProjectionRefreshResult, ThreadRootProjectionService,
+        authoritative_thread_aggregate_from_sdk,
     };
 
     fn pending_task(settled: oneshot::Sender<()>) -> crate::executor::JoinHandle<()> {
@@ -929,6 +1195,35 @@ mod tests {
     }
 
     #[test]
+    fn sdk_aggregate_adapter_preserves_exact_count_and_latest_fields() {
+        let aggregate = ThreadRelationAggregate {
+            latest_event: Some(ThreadListItemEvent {
+                event_id: event_id!("$reply:example.invalid").to_owned(),
+                timestamp: MilliSecondsSinceUnixEpoch(matrix_sdk::ruma::UInt::new_saturating(42)),
+                sender: user_id!("@sender:example.invalid").to_owned(),
+                is_own: false,
+                sender_profile: TimelineDetails::Ready(Profile {
+                    display_name: Some("Sender".to_owned()),
+                    ..Profile::default()
+                }),
+                content: None,
+            }),
+            num_replies: u32::MAX,
+        };
+        assert_eq!(
+            authoritative_thread_aggregate_from_sdk(&aggregate),
+            super::AuthoritativeThreadAggregate {
+                reply_count: u32::MAX,
+                latest_event_id: Some("$reply:example.invalid".to_owned()),
+                latest_sender: Some("@sender:example.invalid".to_owned()),
+                latest_sender_label: Some("Sender".to_owned()),
+                latest_body_preview: None,
+                latest_timestamp_ms: Some(42),
+            }
+        );
+    }
+
+    #[test]
     fn thread_root_projection_service_emits_one_bounded_fetch_and_never_retries_terminal_failure() {
         let mut service = ThreadRootProjectionService::default();
         let activity = ThreadRootProjectionActivity {
@@ -957,6 +1252,10 @@ mod tests {
         );
 
         service.mark_failed(&activity, OperationFailureKind::NotFound);
+        assert!(
+            !service.has_pending_attempt(&activity),
+            "failed hydration is terminal and must not be retried"
+        );
         assert_eq!(
             service.observe(activity),
             ThreadRootProjectionDecision::Existing(
@@ -970,6 +1269,49 @@ mod tests {
                     .clone()
             ),
             "a failed root projection is terminal and must not loop"
+        );
+    }
+
+    #[test]
+    fn aggregate_refresh_is_pending_for_dto_but_not_hydration_dedupe() {
+        let mut service = ThreadRootProjectionService::default();
+        let activity = ThreadRootProjectionActivity {
+            room_id: "!room:example.invalid".to_owned(),
+            root_event_id: "$root:example.invalid".to_owned(),
+            activity_event_id: "$reply:example.invalid".to_owned(),
+            activity_timestamp_ms: Some(100),
+            activity_sender: None,
+            activity_sender_label: None,
+            activity_body_preview: None,
+        };
+        assert!(matches!(
+            service.observe(activity.clone()),
+            ThreadRootProjectionDecision::StartFetch(_)
+        ));
+        let refresh = service
+            .schedule_aggregate_refresh(
+                &activity,
+                AggregateRefreshCause::InitialHydration,
+                true,
+                false,
+            )
+            .expect("aggregate refresh");
+        service
+            .mark_ready(&activity, test_timeline_item(&activity.root_event_id))
+            .expect("hydration terminal");
+
+        let record = service
+            .attempts
+            .get(&(activity.room_id.clone(), activity.root_event_id.clone()))
+            .expect("retained aggregate refresh");
+        assert!(
+            record.is_pending(),
+            "DTO state stays pending during aggregation"
+        );
+        assert_eq!(record.pending_refresh(), Some(refresh));
+        assert!(
+            !service.has_pending_attempt(&activity),
+            "an aggregate worker must not be mistaken for a hydration attempt"
         );
     }
 
@@ -1063,6 +1405,314 @@ mod tests {
                 if record.failure_kind() == Some(OperationFailureKind::NotFound)
                     && record.activity.activity_event_id == "$newest-reply:example.invalid"
         ));
+    }
+
+    #[test]
+    fn same_reply_identity_edit_advances_activity_revision_boundary() {
+        let existing = ThreadRootProjectionActivity {
+            room_id: "!room:example.invalid".to_owned(),
+            root_event_id: "$root:example.invalid".to_owned(),
+            activity_event_id: "$reply:example.invalid".to_owned(),
+            activity_timestamp_ms: Some(100),
+            activity_sender: Some("@sender:example.invalid".to_owned()),
+            activity_sender_label: Some("Sender".to_owned()),
+            activity_body_preview: Some("old".to_owned()),
+        };
+        let edited = ThreadRootProjectionActivity {
+            activity_body_preview: Some("edited".to_owned()),
+            ..existing.clone()
+        };
+
+        assert!(
+            super::activity_is_newer(&edited, &existing),
+            "same-ID/same-timestamp effective edits must advance activity fencing"
+        );
+    }
+
+    #[test]
+    fn aggregate_refresh_reconciles_count_two_to_one_to_zero() {
+        let mut service = ThreadRootProjectionService::default();
+        let activity_b = ThreadRootProjectionActivity {
+            room_id: "!room:example.invalid".to_owned(),
+            root_event_id: "$root:example.invalid".to_owned(),
+            activity_event_id: "$reply-b:example.invalid".to_owned(),
+            activity_timestamp_ms: Some(200),
+            activity_sender: Some("@b:example.invalid".to_owned()),
+            activity_sender_label: Some("B".to_owned()),
+            activity_body_preview: Some("B".to_owned()),
+        };
+        assert!(matches!(
+            service.observe(activity_b.clone()),
+            ThreadRootProjectionDecision::StartFetch(_)
+        ));
+        let refresh = service
+            .schedule_aggregate_refresh(
+                &activity_b,
+                AggregateRefreshCause::InitialHydration,
+                true,
+                false,
+            )
+            .expect("initial aggregate refresh");
+        assert!(matches!(
+            service.complete_refresh(
+                &refresh,
+                Ok(ThreadRootProjectionRefreshResult::Aggregate(
+                    super::AuthoritativeThreadAggregate {
+                        reply_count: 2,
+                        latest_event_id: Some("$reply-b:example.invalid".to_owned()),
+                        latest_sender: Some("@b:example.invalid".to_owned()),
+                        latest_sender_label: Some("B".to_owned()),
+                        latest_body_preview: Some("B".to_owned()),
+                        latest_timestamp_ms: Some(200),
+                    }
+                )),
+            ),
+            super::ThreadRootProjectionCompletion::Updated(_)
+        ));
+
+        let activity_a = ThreadRootProjectionActivity {
+            activity_event_id: "$reply-a:example.invalid".to_owned(),
+            activity_timestamp_ms: Some(100),
+            activity_sender: Some("@a:example.invalid".to_owned()),
+            activity_sender_label: Some("A".to_owned()),
+            activity_body_preview: Some("A".to_owned()),
+            ..activity_b.clone()
+        };
+        assert!(matches!(
+            service.observe(activity_a.clone()),
+            ThreadRootProjectionDecision::ActivityUpdated(_)
+        ));
+        let refresh = service
+            .schedule_aggregate_refresh(
+                &activity_a,
+                AggregateRefreshCause::SelectedActivity,
+                true,
+                false,
+            )
+            .expect("changed activity aggregate refresh");
+        let completion = service.complete_refresh(
+            &refresh,
+            Ok(ThreadRootProjectionRefreshResult::Aggregate(
+                super::AuthoritativeThreadAggregate {
+                    reply_count: 1,
+                    latest_event_id: Some("$reply-a:example.invalid".to_owned()),
+                    latest_sender: Some("@a:example.invalid".to_owned()),
+                    latest_sender_label: Some("A".to_owned()),
+                    latest_body_preview: Some("A".to_owned()),
+                    latest_timestamp_ms: Some(100),
+                },
+            )),
+        );
+        assert!(
+            matches!(completion, super::ThreadRootProjectionCompletion::Updated(record)
+            if record.aggregate.reply_count == 1
+                && record.aggregate.latest_event_id.as_deref() == Some("$reply-a:example.invalid"))
+        );
+
+        service.reconcile_room_with_affected(
+            &activity_a.room_id,
+            &HashSet::new(),
+            &HashSet::from([activity_a.root_event_id.clone()]),
+        );
+        let refresh = service
+            .schedule_aggregate_refresh(&activity_a, AggregateRefreshCause::Removal, false, false)
+            .expect("disappeared root aggregate refresh");
+        assert!(matches!(
+            service.complete_refresh(
+                &refresh,
+                Ok(ThreadRootProjectionRefreshResult::Aggregate(
+                    super::AuthoritativeThreadAggregate::default()
+                )),
+            ),
+            super::ThreadRootProjectionCompletion::Cleared(_)
+        ));
+        assert!(
+            service
+                .terminal_record(&activity_a.room_id, &activity_a.root_event_id)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn hydrated_zero_count_for_inactive_root_clears_the_retained_record() {
+        let mut service = ThreadRootProjectionService::default();
+        let activity = ThreadRootProjectionActivity {
+            room_id: "!room:example.invalid".to_owned(),
+            root_event_id: "$root:example.invalid".to_owned(),
+            activity_event_id: "$reply:example.invalid".to_owned(),
+            activity_timestamp_ms: Some(100),
+            activity_sender: None,
+            activity_sender_label: None,
+            activity_body_preview: None,
+        };
+        assert!(matches!(
+            service.observe(activity.clone()),
+            ThreadRootProjectionDecision::StartFetch(_)
+        ));
+        let refresh = service
+            .schedule_aggregate_refresh(&activity, AggregateRefreshCause::Removal, false, false)
+            .expect("inactive hydration refresh");
+
+        assert!(matches!(
+            service.complete_refresh(
+                &refresh,
+                Ok(ThreadRootProjectionRefreshResult::Hydrated {
+                    item: test_timeline_item(&activity.root_event_id),
+                    aggregate: super::AuthoritativeThreadAggregate::default(),
+                }),
+            ),
+            super::ThreadRootProjectionCompletion::Cleared(cleared)
+                if cleared == activity
+        ));
+        assert!(
+            service
+                .terminal_record(&activity.room_id, &activity.root_event_id)
+                .is_none(),
+            "zero-count inactive hydration must remove the record"
+        );
+    }
+
+    #[test]
+    fn aggregate_refresh_ignores_stale_completion_and_retires_exhausted_serials() {
+        let mut service = ThreadRootProjectionService::default();
+        let activity = ThreadRootProjectionActivity {
+            room_id: "!room:example.invalid".to_owned(),
+            root_event_id: "$root:example.invalid".to_owned(),
+            activity_event_id: "$reply:example.invalid".to_owned(),
+            activity_timestamp_ms: Some(100),
+            activity_sender: None,
+            activity_sender_label: None,
+            activity_body_preview: None,
+        };
+        assert!(matches!(
+            service.observe(activity.clone()),
+            ThreadRootProjectionDecision::StartFetch(_)
+        ));
+        let first = service
+            .schedule_aggregate_refresh(
+                &activity,
+                AggregateRefreshCause::CanonicalBatch,
+                true,
+                false,
+            )
+            .expect("first refresh");
+        let second = service
+            .schedule_aggregate_refresh(
+                &activity,
+                AggregateRefreshCause::CanonicalBatch,
+                true,
+                false,
+            )
+            .expect("newer refresh");
+        assert!(matches!(
+            service.complete_refresh(
+                &first,
+                Ok(ThreadRootProjectionRefreshResult::Aggregate(
+                    super::AuthoritativeThreadAggregate {
+                        reply_count: 9,
+                        ..Default::default()
+                    }
+                )),
+            ),
+            super::ThreadRootProjectionCompletion::Ignored
+        ));
+        assert!(matches!(
+            service.complete_refresh(
+                &second,
+                Err(OperationFailureKind::Network),
+            ),
+            super::ThreadRootProjectionCompletion::Updated(record)
+                if record.failure_kind() == Some(OperationFailureKind::Network)
+        ));
+
+        let record = service
+            .attempts
+            .get_mut(&(activity.room_id.clone(), activity.root_event_id.clone()))
+            .expect("record");
+        record.activity_revision = u64::MAX;
+        assert!(matches!(
+            service.observe(ThreadRootProjectionActivity {
+                activity_event_id: "$new-reply:example.invalid".to_owned(),
+                ..activity.clone()
+            }),
+            ThreadRootProjectionDecision::Retired
+        ));
+        assert!(
+            service
+                .schedule_aggregate_refresh(
+                    &activity,
+                    AggregateRefreshCause::CanonicalBatch,
+                    true,
+                    true,
+                )
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn disappeared_aggregate_error_clears_the_retained_record() {
+        let mut service = ThreadRootProjectionService::default();
+        let activity = ThreadRootProjectionActivity {
+            room_id: "!room:example.invalid".to_owned(),
+            root_event_id: "$root:example.invalid".to_owned(),
+            activity_event_id: "$reply:example.invalid".to_owned(),
+            activity_timestamp_ms: Some(100),
+            activity_sender: None,
+            activity_sender_label: None,
+            activity_body_preview: None,
+        };
+        assert!(matches!(
+            service.observe(activity.clone()),
+            ThreadRootProjectionDecision::StartFetch(_)
+        ));
+        let initial = service
+            .schedule_aggregate_refresh(
+                &activity,
+                AggregateRefreshCause::InitialHydration,
+                true,
+                false,
+            )
+            .expect("initial refresh");
+        let _ = service.complete_refresh(
+            &initial,
+            Ok(ThreadRootProjectionRefreshResult::Aggregate(
+                super::AuthoritativeThreadAggregate {
+                    reply_count: 2,
+                    ..Default::default()
+                },
+            )),
+        );
+        service.reconcile_room_with_affected(
+            &activity.room_id,
+            &HashSet::new(),
+            &HashSet::from([activity.root_event_id.clone()]),
+        );
+        let disappeared = service
+            .schedule_aggregate_refresh(&activity, AggregateRefreshCause::Removal, false, false)
+            .expect("disappearance refresh");
+        assert!(matches!(
+            service.complete_refresh(&disappeared, Err(OperationFailureKind::Sdk)),
+            super::ThreadRootProjectionCompletion::Cleared(_)
+        ));
+    }
+
+    #[test]
+    fn aggregate_refresh_has_production_manager_start_and_finish_callers() {
+        let source = include_str!("timeline/manager.rs");
+        assert!(source.contains("StartAggregateRefresh"));
+        assert!(source.contains("AggregateRefreshFinished"));
+        assert!(source.contains("handle_aggregate_refresh"));
+
+        let thread_projection = include_str!("timeline/thread_projection.rs");
+        let commit = thread_projection
+            .split_once("async fn commit_prepared_thread_root_hydration_for_generation(")
+            .and_then(|(_, source)| {
+                source.split_once("fn thread_root_projection_action_from_record")
+            })
+            .map(|(source, _)| source)
+            .expect("thread-root hydration commit source");
+        assert!(commit.contains("schedule_aggregate_refresh"));
+        assert!(commit.contains("StartAggregateRefresh"));
     }
 
     #[test]
@@ -1327,7 +1977,7 @@ mod tests {
     fn thread_list_relays_are_reliable_and_paginate_errors_fail() {
         let source = include_str!("threads_list.rs");
         let production_source = source
-            .split("#[cfg(test)]")
+            .split("\n#[cfg(test)]\nmod tests")
             .next()
             .expect("production source should precede tests");
         let open_subscription = production_source

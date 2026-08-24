@@ -816,3 +816,105 @@ async fn activity_unread_removes_rooms_when_notification_mode_is_mute() {
         "muted event rows and muted unread placeholders must be hidden"
     );
 }
+
+#[tokio::test]
+async fn canonical_activity_window_replaces_omitted_event() {
+    let runtime = CoreRuntime::start();
+    let mut conn = runtime.attach();
+    runtime
+        .inject_actions(restore_ready_actions![
+            AppAction::RoomListUpdated {
+                spaces: vec![],
+                rooms: vec![notification_room_summary("!canonical:example.test", 1)],
+            },
+            AppAction::ActivityRowsObserved {
+                rows: vec![
+                    activity_row("!canonical:example.test", "$a:example.test", 10),
+                    activity_row("!canonical:example.test", "$b:example.test", 20),
+                ],
+            },
+        ])
+        .await;
+    wait_for_state(&mut conn, |state| {
+        matches!(state.session, SessionState::Ready(_)) && state.rooms.len() == 1
+    })
+    .await;
+
+    runtime
+        .inject_actions(vec![AppAction::ActivityRowsObserved {
+            rows: vec![activity_row(
+                "!canonical:example.test",
+                "$a:example.test",
+                10,
+            )],
+        }])
+        .await;
+    let request_id = conn.next_request_id();
+    conn.command(CoreCommand::App(AppCommand::OpenActivity { request_id }))
+        .await
+        .expect("open activity command");
+    let snapshot = wait_for_state(&mut conn, |state| {
+        matches!(
+            &state.activity,
+            ActivityState::Open { recent, .. }
+                if recent.rows.iter().filter_map(|row| row.event_id.as_deref()).count() == 1
+        )
+    })
+    .await;
+    let ActivityState::Open { recent, .. } = snapshot.activity else {
+        panic!("activity should be open");
+    };
+    assert_eq!(
+        recent
+            .rows
+            .iter()
+            .filter_map(|row| row.event_id.as_deref())
+            .collect::<Vec<_>>(),
+        vec!["$a:example.test"]
+    );
+}
+
+#[tokio::test]
+async fn canonical_activity_empty_window_removes_stale_room_rows() {
+    let runtime = CoreRuntime::start();
+    let mut conn = runtime.attach();
+    runtime
+        .inject_actions(restore_ready_actions![
+            AppAction::RoomListUpdated {
+                spaces: vec![],
+                rooms: vec![room_summary("!empty:example.test")],
+            },
+            AppAction::ActivityRowsObserved {
+                rows: vec![activity_row(
+                    "!empty:example.test",
+                    "$stale:example.test",
+                    10
+                )],
+            },
+        ])
+        .await;
+    wait_for_state(&mut conn, |state| {
+        matches!(state.session, SessionState::Ready(_)) && state.rooms.len() == 1
+    })
+    .await;
+
+    runtime
+        .inject_actions(vec![AppAction::ActivityRowsObserved { rows: vec![] }])
+        .await;
+    let request_id = conn.next_request_id();
+    conn.command(CoreCommand::App(AppCommand::OpenActivity { request_id }))
+        .await
+        .expect("open activity command");
+    let snapshot = wait_for_state(&mut conn, |state| {
+        matches!(
+            &state.activity,
+            ActivityState::Open { recent, .. }
+                if recent.rows.iter().all(|row| row.event_id.as_deref() != Some("$stale:example.test"))
+        )
+    })
+    .await;
+    let ActivityState::Open { recent, .. } = snapshot.activity else {
+        panic!("activity should be open");
+    };
+    assert!(recent.rows.is_empty());
+}

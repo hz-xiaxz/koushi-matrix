@@ -69,6 +69,10 @@ pub(crate) fn handle_activity_rows_observed(_state: &mut AppState) -> Vec<AppEff
     Vec::new()
 }
 
+pub(crate) fn handle_canonical_activity_window_reconciled(_state: &mut AppState) -> Vec<AppEffect> {
+    Vec::new()
+}
+
 pub(crate) fn handle_activity_rows_updated(
     state: &mut AppState,
     recent: ActivityStream,

@@ -451,6 +451,44 @@ impl From<TimelineActorControl> for TimelineActorMessage {
     }
 }
 
+pub(super) fn canonical_activity_window_action(
+    key: &TimelineKey,
+    items: &[TimelineItem],
+) -> Option<AppAction> {
+    let TimelineKind::Room { room_id } = &key.kind else {
+        return None;
+    };
+    let mut redacted_event_ids = Vec::new();
+    let mut hidden_event_ids = Vec::new();
+    for item in items {
+        let TimelineItemId::Event { event_id } = &item.id else {
+            continue;
+        };
+        if item.is_redacted {
+            redacted_event_ids.push(event_id.clone());
+        }
+        if item.is_hidden {
+            hidden_event_ids.push(event_id.clone());
+        }
+    }
+    Some(AppAction::CanonicalActivityWindowReconciled {
+        room_id: room_id.clone(),
+        rows: activity_rows_from_timeline_items(key, items),
+        redacted_event_ids,
+        hidden_event_ids,
+    })
+}
+
+pub(super) async fn reserve_canonical_activity_action(
+    action_tx: &mpsc::Sender<Vec<AppAction>>,
+    key: &TimelineKey,
+) -> Option<mpsc::OwnedPermit<Vec<AppAction>>> {
+    if !matches!(key.kind, TimelineKind::Room { .. }) {
+        return None;
+    }
+    action_tx.clone().reserve_owned().await.ok()
+}
+
 /// Ordered delivery for projection state-machine actions. These transitions
 /// must wait for reducer capacity; `try_send` would let Core/frontend retain a
 /// root snapshot while AppState permanently misses its matching transition.
@@ -822,6 +860,25 @@ impl Drop for TimelineActor {
 }
 
 impl TimelineActor {
+    async fn publish_current_canonical_activity(&self) {
+        let Some(activity_permit) =
+            reserve_canonical_activity_action(&self.action_tx, &self.key).await
+        else {
+            return;
+        };
+        let Some(commit_lease) = self
+            .timeline_actor_generations
+            .try_acquire(&self.key, self.actor_generation)
+        else {
+            drop(activity_permit);
+            return;
+        };
+        if let Some(action) = canonical_activity_window_action(&self.key, &self.navigation_items) {
+            activity_permit.send(vec![action]);
+        }
+        drop(commit_lease);
+    }
+
     /// Spawn the actor, emit InitialItems, and return the handle.
     pub(super) async fn spawn(
         key: TimelineKey,
@@ -990,7 +1047,6 @@ impl TimelineActor {
             &navigation_items,
             0..navigation_items.len(),
         );
-        let initial_activity_rows = activity_rows_from_timeline_items(&key, &initial_items);
         let initial_media_gallery_items =
             media_gallery_items_from_timeline_items(&key, &initial_items);
         let initial_receipts = live_event_receipts_from_sdk_items(initial_sdk_items.iter());
@@ -1119,18 +1175,58 @@ impl TimelineActor {
             &navigation_items,
             display_projection.display_items(),
         );
-        let initial_emitted = emit_initial_items_and_reconcile_replay_known_for_generation(
-            &event_tx,
-            &replay_known_thread_root_projections,
-            &thread_root_projection_service,
-            &timeline_actor_generations,
-            &key,
-            actor_generation,
-            InitialItemsRequestIdentity::fresh(subscribe_request_id),
-            generation,
-            initial_items.clone(),
-            replay_known_candidates,
-        );
+        // Reserve the reducer slot before taking the generation lease. The
+        // canonical replacement is sent while that lease remains held, so a
+        // retired actor cannot publish a timeline without its Activity mirror.
+        let initial_emitted = if matches!(key.kind, TimelineKind::Room { .. }) {
+            match reserve_canonical_activity_action(&action_tx, &key).await {
+                Some(activity_permit) => {
+                    match timeline_actor_generations.try_acquire(&key, actor_generation) {
+                        Some(commit_lease) => {
+                            let emitted =
+                                emit_initial_items_and_reconcile_replay_known_for_generation(
+                                    &event_tx,
+                                    &replay_known_thread_root_projections,
+                                    &thread_root_projection_service,
+                                    &timeline_actor_generations,
+                                    &key,
+                                    actor_generation,
+                                    InitialItemsRequestIdentity::fresh(subscribe_request_id),
+                                    generation,
+                                    initial_items.clone(),
+                                    replay_known_candidates,
+                                );
+                            if emitted {
+                                activity_permit.send(vec![
+                                    canonical_activity_window_action(&key, &navigation_items)
+                                        .expect("room initial Activity action"),
+                                ]);
+                            }
+                            drop(commit_lease);
+                            emitted
+                        }
+                        None => {
+                            drop(activity_permit);
+                            false
+                        }
+                    }
+                }
+                None => false,
+            }
+        } else {
+            emit_initial_items_and_reconcile_replay_known_for_generation(
+                &event_tx,
+                &replay_known_thread_root_projections,
+                &thread_root_projection_service,
+                &timeline_actor_generations,
+                &key,
+                actor_generation,
+                InitialItemsRequestIdentity::fresh(subscribe_request_id),
+                generation,
+                initial_items.clone(),
+                replay_known_candidates,
+            )
+        };
         record_subscribe_stage(
             if initial_emitted {
                 "initial_emitted"
@@ -1139,11 +1235,6 @@ impl TimelineActor {
             },
             Some(initial_items.len()),
         );
-        if !initial_activity_rows.is_empty() {
-            let _ = action_tx.try_send(vec![AppAction::ActivityRowsObserved {
-                rows: initial_activity_rows,
-            }]);
-        }
         if initial_emitted
             && let Some(action) = thread_activity_observed_action(&key, &navigation_items)
         {
@@ -2015,9 +2106,11 @@ impl TimelineActor {
             }
             TimelineActorMessage::SendQueueLagged => {
                 self.handle_send_queue_lagged().await;
+                self.publish_current_canonical_activity().await;
             }
             TimelineActorMessage::ReplayInitialItems { cause_request_id } => {
                 self.handle_replay_initial_items(cause_request_id);
+                self.publish_current_canonical_activity().await;
             }
             TimelineActorMessage::AcknowledgeProjection {
                 projection_request_id,

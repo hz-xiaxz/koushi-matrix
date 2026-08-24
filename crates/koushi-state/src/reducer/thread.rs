@@ -851,6 +851,22 @@ pub(crate) fn handle_thread_root_projection_failed(
     vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]
 }
 
+pub(crate) fn handle_thread_root_projection_cleared(
+    state: &mut AppState,
+    room_id: String,
+    root_event_id: String,
+) -> Vec<AppEffect> {
+    if !is_session_ready(state) {
+        return Vec::new();
+    }
+    state
+        .thread_root_projections
+        .clear(&room_id, &root_event_id)
+        .then_some(AppEffect::EmitUiEvent(UiEvent::ThreadChanged))
+        .into_iter()
+        .collect()
+}
+
 pub(crate) fn handle_thread_root_projections_reconciled(
     state: &mut AppState,
     room_id: String,

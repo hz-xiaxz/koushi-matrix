@@ -54,16 +54,17 @@ use crate::link_preview::{LinkPreviewContext, extract_link_ranges};
 use crate::search::SearchIndexMessage;
 
 // BEGIN GENERATED SIBLING IMPORTS
-use super::actor::{TimelineActor, TimelineActorMessage};
+use super::actor::{
+    TimelineActor, TimelineActorMessage, canonical_activity_window_action,
+    reserve_canonical_activity_action,
+};
 use super::composer::ruma_mentions_from_intent;
 use super::diagnostics::{
     trace_timeline_actor_operation, trace_timeline_actor_scan, trace_timeline_link_preview,
 };
 use super::manager::TimelineManagerActor;
 use super::media::PrivateMediaEntry;
-use super::navigation::{
-    TimelineActorGenerationGate, activity_rows_from_timeline_diffs, send_generation_fenced,
-};
+use super::navigation::{TimelineActorGenerationGate, send_generation_fenced};
 use super::room_key_recovery::{DecryptRetryReason, KeyRequestUiState};
 // END GENERATED SIBLING IMPORTS
 
@@ -592,6 +593,18 @@ impl TimelineActor {
         if self.ignored_user_ids == user_ids {
             return;
         }
+        let activity_permit = reserve_canonical_activity_action(&self.action_tx, &self.key).await;
+        let activity_commit_lease = if activity_permit.is_some() {
+            self.timeline_actor_generations
+                .try_acquire(&self.key, self.actor_generation)
+        } else {
+            None
+        };
+        if matches!(self.key.kind, TimelineKind::Room { .. })
+            && (activity_permit.is_none() || activity_commit_lease.is_none())
+        {
+            return;
+        }
         self.ignored_user_ids = user_ids;
 
         let mut core_diffs = Vec::new();
@@ -606,22 +619,23 @@ impl TimelineActor {
             }
         }
         if core_diffs.is_empty() {
+            drop(activity_commit_lease);
+            drop(activity_permit);
             return;
         }
 
-        let activity_rows = activity_rows_from_timeline_diffs(&self.key, &core_diffs);
-        if !activity_rows.is_empty() {
-            let _ = self
-                .action_tx
-                .try_send(vec![AppAction::ActivityRowsObserved {
-                    rows: activity_rows,
-                }]);
-        }
         self.emit_media_gallery_if_changed().await;
 
         if self.emit_non_sdk_item_sets_and_reconcile_replay_known(core_diffs) {
+            if let Some(activity_permit) = activity_permit {
+                activity_permit.send(vec![
+                    canonical_activity_window_action(&self.key, &self.navigation_items)
+                        .expect("room ignored-user Activity action"),
+                ]);
+            }
             self.emit_navigation_if_changed();
         }
+        drop(activity_commit_lease);
     }
     fn emit_timeline_item_set(&mut self, index: usize) -> bool {
         let core_diffs = vec![TimelineDiff::Set {
@@ -1324,11 +1338,17 @@ pub(super) fn apply_ignored_sender_suppression(
     item: &mut TimelineItem,
     ignored_user_ids: &std::collections::BTreeSet<String>,
 ) {
+    if !matches!(&item.id, TimelineItemId::Event { .. }) {
+        return;
+    }
     let sender_ignored = item
         .sender
         .as_deref()
         .is_some_and(|sender| ignored_user_ids.contains(sender));
-    item.is_hidden = item.is_hidden || sender_ignored;
+    // Recompute from projected content, not the previous ignored result. This
+    // keeps ignore→unignore reversible while retaining the normal bodyless
+    // suppression baseline.
+    item.is_hidden = (!has_user_visible_content(item) && !item.is_redacted) || sender_ignored;
 }
 
 pub(super) fn apply_ignored_sender_suppression_to_diff(
@@ -1395,14 +1415,31 @@ fn reset_loading_link_previews_to_pending(item: &mut TimelineItem) -> bool {
     changed
 }
 
+pub(super) fn eligible_activity_preview(item: &TimelineItem) -> Option<String> {
+    let source = item
+        .formatted
+        .as_ref()
+        .map(|formatted| formatted.plain_text.as_str())
+        .or(item.body.as_deref())
+        .or_else(|| item.media.as_ref().map(|media| media.filename.as_str()))?;
+    collapsed_preview(source, REPLY_QUOTE_PREVIEW_MAX_CHARS)
+}
+
+pub(super) fn is_attention_eligible_event(item: &TimelineItem) -> bool {
+    matches!(item.id, TimelineItemId::Event { .. })
+        && !item.is_redacted
+        && !item.is_hidden
+        && eligible_activity_preview(item).is_some()
+}
+
 pub(super) fn is_unread_navigation_item(item: &TimelineItem, own_user_id: Option<&str>) -> bool {
-    if item.is_hidden || !has_user_visible_content(item) {
+    if !is_attention_eligible_event(item) {
         return false;
     }
     if own_user_id.is_some_and(|own| item.sender.as_deref() == Some(own)) {
         return false;
     }
-    matches!(item.id, TimelineItemId::Event { .. })
+    true
 }
 
 pub(super) fn has_user_visible_content(item: &TimelineItem) -> bool {
@@ -4011,7 +4048,7 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
 mod tests {
     use super::super::test_source::item_body;
 
-    use std::collections::HashSet;
+    use std::collections::{BTreeSet, HashSet};
 
     use koushi_state::{
         ComposerDocument, ComposerInline, MentionIntent, MentionTarget, ReplyQuote, ReplyQuoteState,
@@ -4029,9 +4066,9 @@ mod tests {
 
     use crate::command::TimelineCommand;
     use crate::event::{
-        LinkPreview, LinkPreviewState, TimelineItemId, TimelineMessageKind, TimelineNoticeI18n,
-        TimelineNoticeI18nKey, TimelineSendFailureReason, TimelineSendState, TimelineSpoilerSpan,
-        TimelineViewportObservation, message_actions_for_timeline_item,
+        LinkPreview, LinkPreviewState, TimelineFormattedBody, TimelineItemId, TimelineMessageKind,
+        TimelineNoticeI18n, TimelineNoticeI18nKey, TimelineSendFailureReason, TimelineSendState,
+        TimelineSpoilerSpan, TimelineViewportObservation, message_actions_for_timeline_item,
     };
 
     use crate::failure::TimelineFailureKind;
@@ -4046,9 +4083,9 @@ mod tests {
 
     use super::super::diagnostics::timeline_item_diagnostic_event;
     use super::{
-        composer_document_from_event_json, edited_content_for_edit_target,
-        edited_document_content_for_edit_target, has_user_visible_content,
-        link_ranges_for_message_projection, membership_change_projection,
+        apply_ignored_sender_suppression, composer_document_from_event_json,
+        edited_content_for_edit_target, edited_document_content_for_edit_target,
+        has_user_visible_content, link_ranges_for_message_projection, membership_change_projection,
         message_edit_target_token, message_projection_from_msgtype,
         msgtype_carries_editable_caption, project_local_megolm_rotation_reason,
         reaction_groups_from_sdk, reply_quote_from_message_projection,
@@ -4060,6 +4097,44 @@ mod tests {
     };
 
     use super::super::test_support::{fake_rid, room_key, timeline_item};
+
+    #[test]
+    fn ignored_sender_suppression_preserves_divider_and_restores_event() {
+        let mut divider = timeline_item("$divider:test", None, "@ignored:test", false);
+        divider.id = TimelineItemId::Synthetic {
+            synthetic_id: "date-divider:test".to_owned(),
+        };
+        let mut event = timeline_item("$ignored:test", Some("body"), "@ignored:test", false);
+        let ignored = BTreeSet::from(["@ignored:test".to_owned()]);
+
+        apply_ignored_sender_suppression(&mut divider, &ignored);
+        apply_ignored_sender_suppression(&mut event, &ignored);
+        assert!(
+            !divider.is_hidden,
+            "ignoring a sender must not hide a date divider"
+        );
+        assert!(event.is_hidden);
+
+        apply_ignored_sender_suppression(&mut divider, &BTreeSet::new());
+        apply_ignored_sender_suppression(&mut event, &BTreeSet::new());
+        assert!(
+            !divider.is_hidden,
+            "unignore must leave the date divider visible"
+        );
+        assert!(!event.is_hidden, "unignore must restore eligible content");
+    }
+
+    #[test]
+    fn formatted_only_content_is_renderable_for_shared_eligibility() {
+        let mut item = timeline_item("$formatted:test", None, "@sender:test", false);
+        item.formatted = Some(TimelineFormattedBody {
+            html: "<b>formatted</b>".to_owned(),
+            plain_text: "formatted".to_owned(),
+            code_blocks: Vec::new(),
+        });
+
+        assert!(has_user_visible_content(&item));
+    }
 
     #[test]
     fn local_megolm_reason_is_exact_and_missing_evidence_is_unavailable() {
