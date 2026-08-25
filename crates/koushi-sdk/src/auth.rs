@@ -369,10 +369,11 @@ pub async fn login_with_password_with_store(
     client
         .send_queue()
         .require_secure_backup_for_encrypted_sends(false);
-    install_room_key_diagnostic_observer(&client).await;
+    let diagnostic_counters = install_room_key_diagnostic_observer(&client).await;
 
     Ok(MatrixClientSession {
         client,
+        diagnostic_counters,
         info: SessionInfo {
             homeserver: homeserver.normalized(),
             user_id,
@@ -404,10 +405,11 @@ pub async fn login_with_existing_device(
     client
         .send_queue()
         .require_secure_backup_for_encrypted_sends(false);
-    install_room_key_diagnostic_observer(&client).await;
+    let diagnostic_counters = install_room_key_diagnostic_observer(&client).await;
 
     Ok(MatrixClientSession {
         client,
+        diagnostic_counters,
         info: SessionInfo {
             homeserver: homeserver.normalized(),
             user_id: response.user_id.to_string(),
@@ -515,10 +517,11 @@ pub async fn finish_oidc_login(
     client
         .send_queue()
         .require_secure_backup_for_encrypted_sends(false);
-    install_room_key_diagnostic_observer(&client).await;
+    let diagnostic_counters = install_room_key_diagnostic_observer(&client).await;
 
     Ok(MatrixClientSession {
         client,
+        diagnostic_counters,
         info: SessionInfo {
             homeserver,
             user_id,

@@ -980,7 +980,11 @@ mod start_direct_message_tests {
                 .to_string(),
             authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
-        MatrixClientSession { client, info }
+        MatrixClientSession {
+            client,
+            info,
+            diagnostic_counters: koushi_diagnostics::DiagnosticCounterContext::registered(),
+        }
     }
 
     #[tokio::test]
@@ -2029,7 +2033,11 @@ mod space_member_role_convergence_tests {
             device_id: client.device_id().expect("mock device").to_string(),
             authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
-        MatrixClientSession { client, info }
+        MatrixClientSession {
+            client,
+            info,
+            diagnostic_counters: koushi_diagnostics::DiagnosticCounterContext::registered(),
+        }
     }
 
     #[test]
