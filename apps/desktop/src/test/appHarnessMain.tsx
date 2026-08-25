@@ -992,6 +992,7 @@ function isDesktopSnapshotLike(value: unknown): value is DesktopSnapshot {
 // Snapshot-returning commands the App calls. Default snapshot stays ready so
 // any unanticipated snapshot read still renders the shell.
 mock.setCommandResponse("get_snapshot", () => currentSnapshot);
+mock.setCommandResponse("discover_login_methods", () => currentSnapshot);
 mock.setCommandResponse("refresh_current_session_status", () =>
   setCurrentSnapshot({
     ...currentSnapshot,

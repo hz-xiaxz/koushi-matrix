@@ -171,13 +171,16 @@ test("E2EE trust controls dispatch Rust-owned commands and render snapshot updat
   await gotoReadyShell(page);
   await page.evaluate(() => {
     window.__harness.setSnapshot(window.__harness.e2eeTrustSnapshot());
+    window.__harness.setCommandResponse("refresh_current_session_status", () =>
+      window.__harness.currentSnapshot()
+    );
     window.__harness.pushStateChanged();
   });
 
   await page.getByRole("button", { name: "User settings" }).click();
   await expect(page.getByRole("heading", { name: "Encryption" })).toBeVisible();
   await expect(page.getByText("Device verification")).toBeVisible();
-  await expect(page.getByText("Device 1")).toBeVisible();
+  await expect(page.getByText("Device 1")).toHaveCount(0);
   await expect(page.getByText("redacted-trust-target")).toHaveCount(0);
 
   await page.evaluate(() => window.__harness.clearInvocations());
