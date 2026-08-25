@@ -80,6 +80,7 @@ async function openDiagnostics() {
 describe("App diagnostics lifecycle", () => {
   test("re-discovers account management metadata for an authenticated restored session", async () => {
     const api = createBrowserFakeApi();
+    await api.discoverLoginMethods("https://matrix.org");
     const discoverLoginMethods = vi.spyOn(api, "discoverLoginMethods");
 
     await renderAppWithApi(api);

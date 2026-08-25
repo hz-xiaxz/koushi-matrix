@@ -992,6 +992,32 @@ function isDesktopSnapshotLike(value: unknown): value is DesktopSnapshot {
 // Snapshot-returning commands the App calls. Default snapshot stays ready so
 // any unanticipated snapshot read still renders the shell.
 mock.setCommandResponse("get_snapshot", () => currentSnapshot);
+mock.setCommandResponse("refresh_current_session_status", () =>
+  setCurrentSnapshot({
+    ...currentSnapshot,
+    state: {
+      ...currentSnapshot.state,
+      domain: {
+        ...currentSnapshot.state.domain,
+        current_session_status: {
+          status: "ready",
+          request_id: 1,
+          details: {
+            device_display_name: "Koushi harness",
+            device_id: DEVICE_ID,
+            authentication_method: "password",
+            sync_state: "running",
+            is_cross_signed_by_owner: true,
+            own_identity_verification: "verified",
+            key_backup: "ready",
+            verification: "verified",
+            checked_at_ms: Date.UTC(2026, 7, 25, 12, 0, 0)
+          }
+        }
+      }
+    }
+  })
+);
 mock.setCommandResponse(
   "query_mention_candidates",
   ({

@@ -818,10 +818,10 @@ export function App() {
       session.device_id
     ]);
     const auth = snapshot.state.domain.auth;
-    if (auth.kind === "discovering") {
+    if (auth.kind !== "ready") {
       return;
     }
-    if (auth.kind === "ready" && auth.delegated.account_management_url) {
+    if (auth.delegated.account_management_url) {
       accountManagementDiscoveryAttemptRef.current = accountKey;
       return;
     }
