@@ -53,7 +53,7 @@ Claude Code and OpenCode have equivalent discovery entry points under
    npm --prefix apps/desktop audit --package-lock-only --audit-level=high
    npm --prefix apps/desktop run typecheck
    npm --prefix apps/desktop run lint
-   npm --prefix apps/desktop test -- --run src/scripts/releaseScripts.test.ts
+   npm --prefix apps/desktop test -- --run src/scripts/releaseConfiguration.test.ts
    git diff --check
    ```
 
