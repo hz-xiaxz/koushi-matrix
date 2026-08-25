@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_DIAGNOSTIC_CAPACITY: usize = 10_000;
@@ -286,6 +286,59 @@ pub struct DiagnosticBuffer {
     capacity: usize,
 }
 
+/// Aggregate diagnostic counters owned by one client/runtime.
+///
+/// Keeping resets and mutations on this context prevents replacing one
+/// account runtime from erasing counters that belong to another runtime.
+#[derive(Default)]
+pub struct DiagnosticCounterContext {
+    counters: Mutex<BTreeMap<&'static str, u64>>,
+}
+
+impl DiagnosticCounterContext {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a runtime-owned context that also contributes to the legacy
+    /// process-wide diagnostic export while the runtime remains alive.
+    pub fn registered() -> Arc<Self> {
+        let context = Arc::new(Self::new());
+        lock_best_effort(REGISTERED_COUNTER_CONTEXTS.get_or_init(|| Mutex::new(Vec::new())))
+            .push(Arc::downgrade(&context));
+        context
+    }
+
+    pub fn increment(&self, name: &'static str) {
+        let mut counters = lock_best_effort(&self.counters);
+        let counter = counters.entry(name).or_default();
+        *counter = counter.saturating_add(1);
+    }
+
+    pub fn reset(&self, name: &'static str) {
+        lock_best_effort(&self.counters).remove(name);
+    }
+
+    pub fn set(&self, name: &'static str, value: u64) {
+        lock_best_effort(&self.counters).insert(name, value);
+    }
+
+    /// Snapshot only this client/runtime's aggregate counters.
+    pub fn snapshot(&self) -> DiagnosticSnapshot {
+        DiagnosticSnapshot {
+            records: counter_records(
+                &lock_best_effort(&self.counters),
+                timestamp_millis_at(SystemTime::now()),
+            ),
+            dropped_records: 0,
+        }
+    }
+
+    fn values(&self) -> BTreeMap<&'static str, u64> {
+        lock_best_effort(&self.counters).clone()
+    }
+}
+
 impl DiagnosticBuffer {
     pub fn new(capacity: usize) -> Self {
         Self {
@@ -355,7 +408,9 @@ impl DiagnosticBuffer {
 
 static GLOBAL_BUFFER: OnceLock<DiagnosticBuffer> = OnceLock::new();
 static GLOBAL_ROTATION_LEDGER: OnceLock<RotationDiagnosticLedger> = OnceLock::new();
-static GLOBAL_COUNTERS: OnceLock<Mutex<BTreeMap<&'static str, u64>>> = OnceLock::new();
+static GLOBAL_COUNTER_CONTEXT: OnceLock<DiagnosticCounterContext> = OnceLock::new();
+static REGISTERED_COUNTER_CONTEXTS: OnceLock<Mutex<Vec<Weak<DiagnosticCounterContext>>>> =
+    OnceLock::new();
 
 /// Test-only coordination for assertions against the process-wide diagnostic
 /// buffer. Production diagnostics remain concurrent; tests that inspect the
@@ -436,23 +491,24 @@ pub fn reset_rotation_ledger() {
 /// Increment a closed, privacy-safe aggregate diagnostic counter. Counter
 /// summaries are appended outside the bounded detail ring when exported.
 pub fn increment_counter(name: &'static str) {
-    let mut counters =
-        lock_best_effort(GLOBAL_COUNTERS.get_or_init(|| Mutex::new(BTreeMap::new())));
-    let counter = counters.entry(name).or_default();
-    *counter = counter.saturating_add(1);
+    GLOBAL_COUNTER_CONTEXT
+        .get_or_init(DiagnosticCounterContext::new)
+        .increment(name);
 }
 
 /// Reset one aggregate counter when its owning account runtime is replaced.
 pub fn reset_counter(name: &'static str) {
-    lock_best_effort(GLOBAL_COUNTERS.get_or_init(|| Mutex::new(BTreeMap::new()))).remove(name);
+    GLOBAL_COUNTER_CONTEXT
+        .get_or_init(DiagnosticCounterContext::new)
+        .reset(name);
 }
 
 /// Set an aggregate counter to an absolute value. Used when mirroring an
 /// authoritative SDK snapshot so repeated summaries do not inflate the count.
 pub fn set_counter(name: &'static str, value: u64) {
-    let mut counters =
-        lock_best_effort(GLOBAL_COUNTERS.get_or_init(|| Mutex::new(BTreeMap::new())));
-    counters.insert(name, value);
+    GLOBAL_COUNTER_CONTEXT
+        .get_or_init(DiagnosticCounterContext::new)
+        .set(name, value);
 }
 
 pub fn snapshot() -> DiagnosticSnapshot {
@@ -464,21 +520,9 @@ pub fn snapshot() -> DiagnosticSnapshot {
         .snapshot();
     snapshot.records.extend(rotation_snapshot.records);
     let timestamp_ms = timestamp_millis_at(SystemTime::now());
-    let counters = lock_best_effort(GLOBAL_COUNTERS.get_or_init(|| Mutex::new(BTreeMap::new())));
     snapshot
         .records
-        .extend(counters.iter().map(|(name, count)| {
-            DiagnosticRecord {
-                timestamp_ms,
-                event: DiagnosticEvent::new(
-                    DiagnosticLevel::Info,
-                    "core.room_key_summary",
-                    "counter",
-                )
-                .field(DiagnosticField::token("name", name))
-                .field(DiagnosticField::count("count", *count)),
-            }
-        }));
+        .extend(counter_records(&aggregate_counter_values(), timestamp_ms));
     if rotation_snapshot.dropped_boundaries > 0 {
         snapshot.records.push(DiagnosticRecord {
             timestamp_ms,
@@ -494,6 +538,40 @@ pub fn snapshot() -> DiagnosticSnapshot {
         });
     }
     snapshot
+}
+
+fn aggregate_counter_values() -> BTreeMap<&'static str, u64> {
+    let mut totals = GLOBAL_COUNTER_CONTEXT
+        .get_or_init(DiagnosticCounterContext::new)
+        .values();
+    let mut registered =
+        lock_best_effort(REGISTERED_COUNTER_CONTEXTS.get_or_init(|| Mutex::new(Vec::new())));
+    registered.retain(|context| {
+        let Some(context) = context.upgrade() else {
+            return false;
+        };
+        for (name, count) in context.values() {
+            let total = totals.entry(name).or_default();
+            *total = total.saturating_add(count);
+        }
+        true
+    });
+    totals
+}
+
+fn counter_records(
+    counters: &BTreeMap<&'static str, u64>,
+    timestamp_ms: u64,
+) -> Vec<DiagnosticRecord> {
+    counters
+        .iter()
+        .map(|(name, count)| DiagnosticRecord {
+            timestamp_ms,
+            event: DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_summary", "counter")
+                .field(DiagnosticField::token("name", name))
+                .field(DiagnosticField::count("count", *count)),
+        })
+        .collect()
 }
 
 pub fn format_event(event: &DiagnosticEvent) -> String {
@@ -657,6 +735,29 @@ mod tests {
                 .any(|field| { field.key == "count" && field.value == DiagnosticValue::Count(2) })
         );
         reset_counter("synthetic_room_key_counter");
+    }
+
+    #[test]
+    fn runtime_counter_contexts_reset_independently() {
+        let first = DiagnosticCounterContext::new();
+        let second = DiagnosticCounterContext::new();
+        first.increment("runtime_counter");
+        second.increment("runtime_counter");
+        second.increment("runtime_counter");
+
+        first.reset("runtime_counter");
+
+        assert!(first.snapshot().records.is_empty());
+        let second_snapshot = second.snapshot();
+        assert!(second_snapshot.records.iter().any(|record| {
+            record.event.fields.iter().any(|field| {
+                field.key == "name" && field.value == DiagnosticValue::Token("runtime_counter")
+            }) && record
+                .event
+                .fields
+                .iter()
+                .any(|field| field.key == "count" && field.value == DiagnosticValue::Count(2))
+        }));
     }
 
     #[test]

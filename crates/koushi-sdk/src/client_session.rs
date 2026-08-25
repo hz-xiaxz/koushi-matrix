@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use url::Url;
 use zeroize::Zeroizing;
@@ -123,6 +124,7 @@ impl fmt::Debug for MatrixClientStoreKey {
 pub struct MatrixClientSession {
     pub(super) client: matrix_sdk::Client,
     pub info: SessionInfo,
+    pub(super) diagnostic_counters: Arc<koushi_diagnostics::DiagnosticCounterContext>,
 }
 
 /// Coarse result of the authenticated MSC4186 invite-list contract probe.
@@ -137,10 +139,17 @@ impl MatrixClientSession {
     #[cfg(any(test, feature = "test-hooks"))]
     #[doc(hidden)]
     pub fn from_client_for_testing(client: matrix_sdk::Client, info: SessionInfo) -> Self {
-        Self { client, info }
+        Self {
+            client,
+            info,
+            diagnostic_counters: koushi_diagnostics::DiagnosticCounterContext::registered(),
+        }
     }
     pub fn client(&self) -> matrix_sdk::Client {
         self.client.clone()
+    }
+    pub fn diagnostic_counter_snapshot(&self) -> koushi_diagnostics::DiagnosticSnapshot {
+        self.diagnostic_counters.snapshot()
     }
     pub fn device_cleanup_auth_mode(&self) -> DeviceCleanupAuthMode {
         if self.client.oauth().full_session().is_some() {
@@ -443,10 +452,11 @@ pub async fn restore_session_with_store(
     client
         .send_queue()
         .require_secure_backup_for_encrypted_sends(false);
-    install_room_key_diagnostic_observer(&client).await;
+    let diagnostic_counters = install_room_key_diagnostic_observer(&client).await;
 
     Ok(MatrixClientSession {
         client,
+        diagnostic_counters,
         info: session.info.clone(),
     })
 }

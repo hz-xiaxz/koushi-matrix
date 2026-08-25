@@ -5,7 +5,9 @@ use crate::client_session::{
 use crate::room_projection::matrix_room;
 use crate::{MatrixClientSession, MatrixDeviceSessionSummary, MatrixRoomOperationError};
 use futures_util::{Stream, StreamExt, stream};
-use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_diagnostics::{
+    DiagnosticCounterContext, DiagnosticEvent, DiagnosticField, DiagnosticLevel, record,
+};
 #[cfg(test)]
 use koushi_state::SessionInfo;
 use koushi_state::{
@@ -3229,6 +3231,7 @@ GYW19pdjg0qdXNk/eqZsQTsNWVo6A\n\
         server.mock_sync().ok_and_run(&bob, |_| {}).await;
         let session = super::MatrixClientSession {
             client: alice.clone(),
+            diagnostic_counters: koushi_diagnostics::DiagnosticCounterContext::registered(),
             info: SessionInfo {
                 homeserver: server.server().uri(),
                 user_id: alice_user_id.to_string(),
@@ -4588,152 +4591,63 @@ fn map_room_key_rotation_reason(
     }
 }
 
-pub(super) async fn install_room_key_diagnostic_observer(client: &matrix_sdk::Client) {
+pub(super) async fn install_room_key_diagnostic_observer(
+    client: &matrix_sdk::Client,
+) -> Arc<DiagnosticCounterContext> {
+    let counters = DiagnosticCounterContext::registered();
     koushi_diagnostics::reset_rotation_ledger();
-    for counter in [
-        "received_requests",
-        "cancellations",
-        "forwarded",
-        "queued",
-        "refused",
-        "missing_sessions",
-        "sdk_errors",
-        "initial_session_creations",
-        "rotations_expired_time",
-        "rotations_expired_message_count",
-        "rotations_membership_or_device_change",
-        "rotations_encryption_settings_changed",
-        "rotations_explicit_discard",
-        "rotations_full_member_list_reload",
-        "rotations_room_subscription",
-        "rotations_limited_sync_response",
-        "rotations_key_share_failure",
-        "rotations_store_missing",
-        "rotations_invalidated",
-        "rotations_unknown",
-        "member_reloads_room_subscription",
-        "member_reloads_limited_sync_response",
-        "member_reloads_membership_or_device_change",
-        "member_reloads_full_member_list_reload",
-        "member_reloads_unknown",
-        "member_reload_discarded",
-        "member_reload_no_active_session",
-        "member_reload_sdk_error",
-        "rotation_creation_failures",
-        "rotation_share_failures",
-        "requester_send_started",
-        "requester_sent",
-        "requester_awaiting",
-        "requester_still_waiting",
-        "requester_withheld",
-        "requester_key_received",
-        "requester_decryption_recovered",
-        "requester_send_failed",
-        "requester_unknown",
-        // Receive-side counters (issue #476).
-        "receive_ingress_direct",
-        "receive_ingress_forwarded",
-        "receive_olm_failed",
-        "receive_olm_wedged",
-        "receive_dehydrated_rejected",
-        "receive_malformed",
-        "receive_unsupported_algorithm",
-        "receive_forwarded_no_matching_request",
-        "receive_forwarded_untrusted_sender",
-        "receive_forwarded_unsupported",
-        "receive_forwarded_accepted",
-        "receive_merge_accepted_new",
-        "receive_merge_accepted_improved",
-        "receive_merge_duplicate_ignored",
-        "receive_merge_worse_ignored",
-        "receive_merge_unconnected_rejected",
-        "receive_merge_invalid_session_key",
-        "receive_merge_store_failed",
-        // Initial index-0 share counters (issue #509).
-        "initial_share_eligible_own",
-        "initial_share_eligible_peer",
-        "initial_share_olm_missing",
-        "initial_share_olm_encrypted",
-        "initial_share_olm_encryption_failed",
-        "initial_share_withheld",
-        "initial_share_request_queued",
-        "initial_share_homeserver_accepted",
-        "initial_share_request_failed",
-        "initial_share_share_committed_index0",
-        "initial_share_share_committed_after_index0",
-        "initial_share_first_event_all_settled",
-        "initial_share_first_event_pending",
-        "initial_share_sessions_at_index0",
-        "initial_share_sessions_after_index0",
-        // Index-0 duplicate share counters (issue #510).
-        "index0_reshare_sent",
-        "index0_reshare_failed",
-        "index0_reshare_deadline",
-        "index0_reshare_cancelled",
-        "index0_reshare_policy_blocked",
-        "index0_reshare_not_needed",
-        "index0_initial_share_accepted",
-        "index0_initial_share_failed",
-        "index0_initial_share_withheld",
-        "index0_initial_share_no_recipients",
-        "initial_repair_claim_not_needed",
-        "initial_repair_claim_requested",
-        "initial_repair_claim_accepted",
-        "initial_repair_claim_empty",
-        "initial_repair_claim_invalid",
-        "initial_repair_claim_network_failed",
-        "initial_repair_claim_sdk_failed",
-        "initial_repair_settled",
-        "initial_repair_waiting_wake",
-        "initial_repair_deadline",
-        "initial_repair_cancelled",
-        "initial_repair_no_recipients",
-        "initial_repair_failed",
-        // First-event encryption readiness counters (issue #577).
-        "encryption_readiness_ready",
-        "encryption_readiness_sync",
-        "encryption_readiness_key_query",
-        "encryption_readiness_second_share",
-        "encryption_readiness_session_changed",
-        "encryption_readiness_deadline",
-        "encryption_readiness_cancelled",
-    ] {
-        koushi_diagnostics::reset_counter(counter);
-    }
+    let observer_counters = Arc::clone(&counters);
     client
         .encryption()
-        .set_room_key_diagnostic_observer(Some(Arc::new(record_room_key_diagnostic)))
+        .set_room_key_diagnostic_observer(Some(Arc::new(move |event| {
+            record_room_key_diagnostic(&observer_counters, event);
+        })))
         .await;
+    counters
 }
 
-fn record_room_key_diagnostic(event: matrix_sdk::encryption::RoomKeyDiagnosticEvent) {
+fn record_room_key_diagnostic(
+    counters: &DiagnosticCounterContext,
+    event: matrix_sdk::encryption::RoomKeyDiagnosticEvent,
+) {
     use matrix_sdk::encryption::RoomKeyDiagnosticEvent;
 
     match event {
         RoomKeyDiagnosticEvent::IncomingRequest(event) => {
-            record_incoming_room_key_diagnostic(event)
+            record_incoming_room_key_diagnostic(counters, event)
         }
-        RoomKeyDiagnosticEvent::Rotation(event) => record_room_key_rotation_diagnostic(event),
+        RoomKeyDiagnosticEvent::Rotation(event) => {
+            record_room_key_rotation_diagnostic(counters, event)
+        }
         RoomKeyDiagnosticEvent::MemberReload(event) => {
-            record_room_key_member_reload_diagnostic(event)
+            record_room_key_member_reload_diagnostic(counters, event)
         }
-        RoomKeyDiagnosticEvent::Receive(event) => record_room_key_receive_diagnostic(event),
-        RoomKeyDiagnosticEvent::OlmRecovery(event) => record_olm_recovery_diagnostic(event),
-        RoomKeyDiagnosticEvent::InitialShare(event) => record_initial_share_diagnostic(event),
+        RoomKeyDiagnosticEvent::Receive(event) => {
+            record_room_key_receive_diagnostic(counters, event)
+        }
+        RoomKeyDiagnosticEvent::OlmRecovery(event) => {
+            record_olm_recovery_diagnostic(counters, event)
+        }
+        RoomKeyDiagnosticEvent::InitialShare(event) => {
+            record_initial_share_diagnostic(counters, event)
+        }
         RoomKeyDiagnosticEvent::InitialShareSession(event) => {
-            record_initial_share_session_diagnostic(event)
+            record_initial_share_session_diagnostic(counters, event)
         }
-        RoomKeyDiagnosticEvent::Index0Reshare(event) => record_index0_reshare_diagnostic(event),
+        RoomKeyDiagnosticEvent::Index0Reshare(event) => {
+            record_index0_reshare_diagnostic(counters, event)
+        }
         RoomKeyDiagnosticEvent::InitialShareRepair(event) => {
-            record_initial_share_repair_diagnostic(event)
+            record_initial_share_repair_diagnostic(counters, event)
         }
         RoomKeyDiagnosticEvent::EncryptionReadiness(event) => {
-            record_encryption_readiness_diagnostic(event)
+            record_encryption_readiness_diagnostic(counters, event)
         }
     }
 }
 
 fn record_encryption_readiness_diagnostic(
+    counters: &DiagnosticCounterContext,
     event: matrix_sdk::encryption::EncryptionReadinessDiagnostic,
 ) {
     use matrix_sdk::encryption::{
@@ -4763,7 +4677,7 @@ fn record_encryption_readiness_diagnostic(
         Outcome::Deadline => "deadline",
         Outcome::Cancelled => "cancelled",
     };
-    koushi_diagnostics::increment_counter(match event.outcome {
+    counters.increment(match event.outcome {
         Outcome::Ready => "encryption_readiness_ready",
         Outcome::Sync => "encryption_readiness_sync",
         Outcome::KeyQuery => "encryption_readiness_key_query",
@@ -4823,7 +4737,10 @@ fn record_encryption_readiness_diagnostic(
     );
 }
 
-fn record_olm_recovery_diagnostic(event: matrix_sdk::encryption::OlmRecoveryDiagnostic) {
+fn record_olm_recovery_diagnostic(
+    counters: &DiagnosticCounterContext,
+    event: matrix_sdk::encryption::OlmRecoveryDiagnostic,
+) {
     use matrix_sdk::encryption::{OlmRecoveryReshareOutcome, OlmRecoverySignalOutcome};
 
     let signal_token = match event.signal {
@@ -4840,9 +4757,9 @@ fn record_olm_recovery_diagnostic(event: matrix_sdk::encryption::OlmRecoveryDiag
         OlmRecoveryReshareOutcome::Failed => "failed",
     });
 
-    koushi_diagnostics::increment_counter("olm_recovery_signal");
+    counters.increment("olm_recovery_signal");
     if let Some(reshare) = reshare_token {
-        koushi_diagnostics::increment_counter("olm_recovery_reshare");
+        counters.increment("olm_recovery_reshare");
         let mut diagnostic =
             DiagnosticEvent::new(DiagnosticLevel::Info, "core.olm_recovery", "reshare")
                 .field(DiagnosticField::token("signal", signal_token))
@@ -4874,7 +4791,10 @@ fn record_olm_recovery_diagnostic(event: matrix_sdk::encryption::OlmRecoveryDiag
     }
 }
 
-fn record_room_key_receive_diagnostic(event: matrix_sdk::encryption::RoomKeyReceiveDiagnostic) {
+fn record_room_key_receive_diagnostic(
+    counters: &DiagnosticCounterContext,
+    event: matrix_sdk::encryption::RoomKeyReceiveDiagnostic,
+) {
     use matrix_sdk::encryption::{
         ForwardedRoomKeyAuthOutcome as ForwardOutcome, RoomKeyIngressKind as IngressKind,
         RoomKeyMergeDecision as MergeDecision, RoomKeyReceiveDiagnosticKind as Kind,
@@ -4940,14 +4860,17 @@ fn record_room_key_receive_diagnostic(event: matrix_sdk::encryption::RoomKeyRece
             decision: MergeDecision::StoreFailed,
         } => ("merge_store_failed", "receive_merge_store_failed"),
     };
-    koushi_diagnostics::increment_counter(counter);
+    counters.increment(counter);
     koushi_diagnostics::record(
         DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_receive", "outcome")
             .field(DiagnosticField::token("outcome", token)),
     );
 }
 
-fn record_initial_share_diagnostic(event: matrix_sdk::encryption::InitialShareDeviceDiagnostic) {
+fn record_initial_share_diagnostic(
+    counters: &DiagnosticCounterContext,
+    event: matrix_sdk::encryption::InitialShareDeviceDiagnostic,
+) {
     use matrix_sdk::encryption::{InitialShareDeviceClass as Class, InitialShareStage as Stage};
 
     let device_class = match event.device_class {
@@ -4984,14 +4907,14 @@ fn record_initial_share_diagnostic(event: matrix_sdk::encryption::InitialShareDe
             }
         }
     };
-    koushi_diagnostics::increment_counter(counter);
+    counters.increment(counter);
     match event.stage {
         Stage::Eligible => match event.device_class {
             Class::VerifiedOwn | Class::UnverifiedOwn => {
-                koushi_diagnostics::increment_counter("initial_share_eligible_own")
+                counters.increment("initial_share_eligible_own")
             }
             Class::VerifiedPeer | Class::UnverifiedPeer => {
-                koushi_diagnostics::increment_counter("initial_share_eligible_peer")
+                counters.increment("initial_share_eligible_peer")
             }
             Class::Dehydrated | Class::Unknown => {}
         },
@@ -5025,15 +4948,16 @@ fn record_initial_share_diagnostic(event: matrix_sdk::encryption::InitialShareDe
 }
 
 fn record_initial_share_session_diagnostic(
+    counters: &DiagnosticCounterContext,
     event: matrix_sdk::encryption::InitialShareSessionDiagnostic,
 ) {
     koushi_diagnostics::mark_rotation_first_send_correlation(event.session.ordinal());
-    koushi_diagnostics::increment_counter(if event.all_initial_shares_settled_first {
+    counters.increment(if event.all_initial_shares_settled_first {
         "initial_share_first_event_all_settled"
     } else {
         "initial_share_first_event_pending"
     });
-    koushi_diagnostics::increment_counter(if event.created_at_index0 {
+    counters.increment(if event.created_at_index0 {
         "initial_share_sessions_at_index0"
     } else {
         "initial_share_sessions_after_index0"
@@ -5088,7 +5012,10 @@ fn record_initial_share_session_diagnostic(
     );
 }
 
-fn record_index0_reshare_diagnostic(event: matrix_sdk::encryption::Index0ReshareDiagnostic) {
+fn record_index0_reshare_diagnostic(
+    counters: &DiagnosticCounterContext,
+    event: matrix_sdk::encryption::Index0ReshareDiagnostic,
+) {
     use matrix_sdk::encryption::{
         Index0InitialShareState as Share, Index0ReshareOutcome as Outcome,
     };
@@ -5121,8 +5048,8 @@ fn record_index0_reshare_diagnostic(event: matrix_sdk::encryption::Index0Reshare
         Share::Withheld => "index0_initial_share_withheld",
         Share::NoRecipients => "index0_initial_share_no_recipients",
     };
-    koushi_diagnostics::increment_counter(reshare_counter);
-    koushi_diagnostics::increment_counter(initial_share_counter);
+    counters.increment(reshare_counter);
+    counters.increment(initial_share_counter);
     koushi_diagnostics::record(
         DiagnosticEvent::new(DiagnosticLevel::Info, "core.index0_reshare", "outcome")
             .field(DiagnosticField::ordinal_alias(
@@ -5148,6 +5075,7 @@ fn record_index0_reshare_diagnostic(event: matrix_sdk::encryption::Index0Reshare
 }
 
 fn record_initial_share_repair_diagnostic(
+    counters: &DiagnosticCounterContext,
     event: matrix_sdk::encryption::InitialShareRepairDiagnostic,
 ) {
     use matrix_sdk::encryption::{
@@ -5195,8 +5123,8 @@ fn record_initial_share_repair_diagnostic(
         Repair::Failed => "initial_repair_failed",
     };
     if event.first_event_message_index.is_none() {
-        koushi_diagnostics::increment_counter(claim_counter);
-        koushi_diagnostics::increment_counter(repair_counter);
+        counters.increment(claim_counter);
+        counters.increment(repair_counter);
     }
     let mut diagnostic = DiagnosticEvent::new(
         DiagnosticLevel::Info,
@@ -5256,6 +5184,7 @@ fn record_initial_share_repair_diagnostic(
 }
 
 fn record_incoming_room_key_diagnostic(
+    counters: &DiagnosticCounterContext,
     event: matrix_sdk::encryption::IncomingRoomKeyRequestDiagnostic,
 ) {
     use matrix_sdk::encryption::{
@@ -5381,24 +5310,27 @@ fn record_incoming_room_key_diagnostic(
     record(diagnostic);
 
     if event.stage == Stage::Received {
-        koushi_diagnostics::increment_counter("received_requests");
+        counters.increment("received_requests");
         if event.action == Action::Cancellation {
-            koushi_diagnostics::increment_counter("cancellations");
+            counters.increment("cancellations");
         }
     }
     if event.stage == Stage::Outcome {
         match event.outcome {
-            Outcome::Forwarded => koushi_diagnostics::increment_counter("forwarded"),
-            Outcome::QueuedForOlm => koushi_diagnostics::increment_counter("queued"),
-            Outcome::Refused => koushi_diagnostics::increment_counter("refused"),
-            Outcome::MissingSession => koushi_diagnostics::increment_counter("missing_sessions"),
-            Outcome::SdkError => koushi_diagnostics::increment_counter("sdk_errors"),
+            Outcome::Forwarded => counters.increment("forwarded"),
+            Outcome::QueuedForOlm => counters.increment("queued"),
+            Outcome::Refused => counters.increment("refused"),
+            Outcome::MissingSession => counters.increment("missing_sessions"),
+            Outcome::SdkError => counters.increment("sdk_errors"),
             _ => {}
         }
     }
 }
 
-fn record_room_key_rotation_diagnostic(event: matrix_sdk::encryption::RoomKeyRotationDiagnostic) {
+fn record_room_key_rotation_diagnostic(
+    counters: &DiagnosticCounterContext,
+    event: matrix_sdk::encryption::RoomKeyRotationDiagnostic,
+) {
     use matrix_sdk::encryption::{
         RoomKeyCreationOutcome as Creation, RoomKeyFirstShareOutcome as Share,
         RoomKeyRotationReason as Reason,
@@ -5443,45 +5375,34 @@ fn record_room_key_rotation_diagnostic(event: matrix_sdk::encryption::RoomKeyRot
     });
 
     match event.reason {
-        Reason::Initial => koushi_diagnostics::increment_counter("initial_session_creations"),
-        Reason::ExpiredTime => koushi_diagnostics::increment_counter("rotations_expired_time"),
-        Reason::ExpiredMessageCount => {
-            koushi_diagnostics::increment_counter("rotations_expired_message_count")
-        }
+        Reason::Initial => counters.increment("initial_session_creations"),
+        Reason::ExpiredTime => counters.increment("rotations_expired_time"),
+        Reason::ExpiredMessageCount => counters.increment("rotations_expired_message_count"),
         Reason::MembershipOrDeviceChange => {
-            koushi_diagnostics::increment_counter("rotations_membership_or_device_change")
+            counters.increment("rotations_membership_or_device_change")
         }
         Reason::EncryptionSettingsChanged => {
-            koushi_diagnostics::increment_counter("rotations_encryption_settings_changed")
+            counters.increment("rotations_encryption_settings_changed")
         }
-        Reason::ExplicitDiscard => {
-            koushi_diagnostics::increment_counter("rotations_explicit_discard")
-        }
-        Reason::FullMemberListReload => {
-            koushi_diagnostics::increment_counter("rotations_full_member_list_reload")
-        }
-        Reason::RoomSubscription => {
-            koushi_diagnostics::increment_counter("rotations_room_subscription")
-        }
-        Reason::LimitedSyncResponse => {
-            koushi_diagnostics::increment_counter("rotations_limited_sync_response")
-        }
-        Reason::KeyShareFailure => {
-            koushi_diagnostics::increment_counter("rotations_key_share_failure")
-        }
-        Reason::StoreMissing => koushi_diagnostics::increment_counter("rotations_store_missing"),
-        Reason::Invalidated => koushi_diagnostics::increment_counter("rotations_invalidated"),
-        Reason::Unknown => koushi_diagnostics::increment_counter("rotations_unknown"),
+        Reason::ExplicitDiscard => counters.increment("rotations_explicit_discard"),
+        Reason::FullMemberListReload => counters.increment("rotations_full_member_list_reload"),
+        Reason::RoomSubscription => counters.increment("rotations_room_subscription"),
+        Reason::LimitedSyncResponse => counters.increment("rotations_limited_sync_response"),
+        Reason::KeyShareFailure => counters.increment("rotations_key_share_failure"),
+        Reason::StoreMissing => counters.increment("rotations_store_missing"),
+        Reason::Invalidated => counters.increment("rotations_invalidated"),
+        Reason::Unknown => counters.increment("rotations_unknown"),
     }
     if event.creation_outcome == Creation::Failed {
-        koushi_diagnostics::increment_counter("rotation_creation_failures");
+        counters.increment("rotation_creation_failures");
     }
     if event.first_share_outcome == Share::Failed {
-        koushi_diagnostics::increment_counter("rotation_share_failures");
+        counters.increment("rotation_share_failures");
     }
 }
 
 fn record_room_key_member_reload_diagnostic(
+    counters: &DiagnosticCounterContext,
     event: matrix_sdk::encryption::RoomKeyMemberReloadDiagnostic,
 ) {
     use matrix_sdk::encryption::{
@@ -5545,26 +5466,20 @@ fn record_room_key_member_reload_diagnostic(
     record(diagnostic);
 
     match event.reason {
-        Reason::RoomSubscription => {
-            koushi_diagnostics::increment_counter("member_reloads_room_subscription")
-        }
-        Reason::LimitedSyncResponse => {
-            koushi_diagnostics::increment_counter("member_reloads_limited_sync_response")
-        }
+        Reason::RoomSubscription => counters.increment("member_reloads_room_subscription"),
+        Reason::LimitedSyncResponse => counters.increment("member_reloads_limited_sync_response"),
         Reason::MembershipOrDeviceChange => {
-            koushi_diagnostics::increment_counter("member_reloads_membership_or_device_change")
+            counters.increment("member_reloads_membership_or_device_change")
         }
         Reason::FullMemberListReload => {
-            koushi_diagnostics::increment_counter("member_reloads_full_member_list_reload")
+            counters.increment("member_reloads_full_member_list_reload")
         }
-        _ => koushi_diagnostics::increment_counter("member_reloads_unknown"),
+        _ => counters.increment("member_reloads_unknown"),
     }
     match event.discard_outcome {
-        Outcome::Discarded => koushi_diagnostics::increment_counter("member_reload_discarded"),
-        Outcome::NoActiveSession => {
-            koushi_diagnostics::increment_counter("member_reload_no_active_session")
-        }
-        Outcome::SdkError => koushi_diagnostics::increment_counter("member_reload_sdk_error"),
+        Outcome::Discarded => counters.increment("member_reload_discarded"),
+        Outcome::NoActiveSession => counters.increment("member_reload_no_active_session"),
+        Outcome::SdkError => counters.increment("member_reload_sdk_error"),
     }
 }
 
@@ -6454,6 +6369,7 @@ fn map_sdk_recovery_state(
 #[cfg(test)]
 mod room_key_receive_diagnostics_tests {
     use super::record_room_key_receive_diagnostic;
+    use koushi_diagnostics::DiagnosticCounterContext;
     use matrix_sdk::encryption::{
         ForwardedRoomKeyAuthOutcome, RoomKeyIngressKind, RoomKeyMergeDecision,
         RoomKeyReceiveDiagnostic, RoomKeyReceiveDiagnosticKind,
@@ -6514,8 +6430,9 @@ mod room_key_receive_diagnostics_tests {
         let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .len();
+        let counters = DiagnosticCounterContext::new();
         for kind in cases {
-            record_room_key_receive_diagnostic(RoomKeyReceiveDiagnostic { kind });
+            record_room_key_receive_diagnostic(&counters, RoomKeyReceiveDiagnostic { kind });
         }
 
         let snapshot = koushi_diagnostics::test_support::detail_snapshot();
@@ -6542,7 +6459,7 @@ mod room_key_member_reload_diagnostics_tests {
         MatrixRoomKeyRotationReason, map_room_key_rotation_reason,
         record_room_key_member_reload_diagnostic, record_room_key_rotation_diagnostic,
     };
-    use koushi_diagnostics::{DiagnosticValue, test_support};
+    use koushi_diagnostics::{DiagnosticCounterContext, DiagnosticValue, test_support};
     use matrix_sdk::encryption::{
         RoomKeyCreationOutcome, RoomKeyDiagnosticAlias, RoomKeyFirstShareOutcome,
         RoomKeyMemberReloadDiagnostic, RoomKeyMemberReloadDiscardOutcome,
@@ -6598,37 +6515,38 @@ mod room_key_member_reload_diagnostics_tests {
     #[test]
     fn member_reload_and_rotation_records_are_privacy_safe_and_correlated() {
         let _guard = test_support::lock();
-        for counter in [
-            "member_reloads_room_subscription",
-            "member_reload_discarded",
-        ] {
-            koushi_diagnostics::reset_counter(counter);
-        }
+        let counters = DiagnosticCounterContext::new();
         koushi_diagnostics::reset_rotation_ledger();
         let diagnostic_start = test_support::detail_snapshot().records.len();
 
-        record_room_key_member_reload_diagnostic(RoomKeyMemberReloadDiagnostic {
-            room: RoomKeyDiagnosticAlias::new(3),
-            reason: RoomKeyRotationReason::RoomSubscription,
-            members_were_synced_before_invalidation: Some(true),
-            invalidation_count_bucket: 2,
-            invalidation_age_ms: Some(42),
-            request_elapsed_ms: Some(17),
-            response_member_count_bucket: 4,
-            processing_elapsed_ms: 3,
-            discard_outcome: RoomKeyMemberReloadDiscardOutcome::Discarded,
-        });
-        record_room_key_rotation_diagnostic(RoomKeyRotationDiagnostic {
-            room: RoomKeyDiagnosticAlias::new(3),
-            previous_session: Some(RoomKeyDiagnosticAlias::new(7)),
-            new_session: Some(RoomKeyDiagnosticAlias::new(8)),
-            reason: RoomKeyRotationReason::RoomSubscription,
-            creation_outcome: RoomKeyCreationOutcome::Created,
-            first_share_outcome: RoomKeyFirstShareOutcome::Pending,
-            first_send_correlation_present: false,
-            discard_elapsed_ms: Some(9),
-            elapsed_ms: 1,
-        });
+        record_room_key_member_reload_diagnostic(
+            &counters,
+            RoomKeyMemberReloadDiagnostic {
+                room: RoomKeyDiagnosticAlias::new(3),
+                reason: RoomKeyRotationReason::RoomSubscription,
+                members_were_synced_before_invalidation: Some(true),
+                invalidation_count_bucket: 2,
+                invalidation_age_ms: Some(42),
+                request_elapsed_ms: Some(17),
+                response_member_count_bucket: 4,
+                processing_elapsed_ms: 3,
+                discard_outcome: RoomKeyMemberReloadDiscardOutcome::Discarded,
+            },
+        );
+        record_room_key_rotation_diagnostic(
+            &counters,
+            RoomKeyRotationDiagnostic {
+                room: RoomKeyDiagnosticAlias::new(3),
+                previous_session: Some(RoomKeyDiagnosticAlias::new(7)),
+                new_session: Some(RoomKeyDiagnosticAlias::new(8)),
+                reason: RoomKeyRotationReason::RoomSubscription,
+                creation_outcome: RoomKeyCreationOutcome::Created,
+                first_share_outcome: RoomKeyFirstShareOutcome::Pending,
+                first_send_correlation_present: false,
+                discard_elapsed_ms: Some(9),
+                elapsed_ms: 1,
+            },
+        );
 
         let snapshot = test_support::detail_snapshot();
         let records: Vec<_> = snapshot.records.iter().skip(diagnostic_start).collect();
@@ -6666,7 +6584,7 @@ mod initial_share_diagnostics_tests {
         record_initial_share_diagnostic, record_initial_share_session_diagnostic,
         record_room_key_rotation_diagnostic,
     };
-    use koushi_diagnostics::test_support;
+    use koushi_diagnostics::{DiagnosticCounterContext, test_support};
     use matrix_sdk::encryption::{
         InitialShareDeviceClass as Class, InitialShareDeviceDiagnostic,
         InitialShareSessionDiagnostic, InitialShareStage as Stage, RoomKeyCreationOutcome,
@@ -6677,34 +6595,41 @@ mod initial_share_diagnostics_tests {
     #[test]
     fn first_event_updates_only_the_matching_rotation_boundary() {
         let _guard = test_support::lock();
+        let counters = DiagnosticCounterContext::new();
         koushi_diagnostics::reset_rotation_ledger();
         for session in [8, 9] {
-            record_room_key_rotation_diagnostic(RoomKeyRotationDiagnostic {
-                room: RoomKeyDiagnosticAlias::new(session - 7),
-                previous_session: None,
-                new_session: Some(RoomKeyDiagnosticAlias::new(session)),
-                reason: RoomKeyRotationReason::Initial,
-                creation_outcome: RoomKeyCreationOutcome::Created,
-                first_share_outcome: RoomKeyFirstShareOutcome::Pending,
-                first_send_correlation_present: false,
-                discard_elapsed_ms: None,
-                elapsed_ms: 1,
-            });
+            record_room_key_rotation_diagnostic(
+                &counters,
+                RoomKeyRotationDiagnostic {
+                    room: RoomKeyDiagnosticAlias::new(session - 7),
+                    previous_session: None,
+                    new_session: Some(RoomKeyDiagnosticAlias::new(session)),
+                    reason: RoomKeyRotationReason::Initial,
+                    creation_outcome: RoomKeyCreationOutcome::Created,
+                    first_share_outcome: RoomKeyFirstShareOutcome::Pending,
+                    first_send_correlation_present: false,
+                    discard_elapsed_ms: None,
+                    elapsed_ms: 1,
+                },
+            );
         }
 
-        record_initial_share_session_diagnostic(InitialShareSessionDiagnostic {
-            session: RoomKeyDiagnosticAlias::new(8),
-            first_event_message_index: 0,
-            all_initial_shares_settled_first: true,
-            pending_requests_bucket: 0,
-            eligible_own_devices: 1,
-            eligible_peer_devices: 1,
-            index0_shares_committed: 2,
-            after_index0_shares_committed: 0,
-            homeserver_accepted_devices: 2,
-            created_at_index0: true,
-            elapsed_ms: 2,
-        });
+        record_initial_share_session_diagnostic(
+            &counters,
+            InitialShareSessionDiagnostic {
+                session: RoomKeyDiagnosticAlias::new(8),
+                first_event_message_index: 0,
+                all_initial_shares_settled_first: true,
+                pending_requests_bucket: 0,
+                eligible_own_devices: 1,
+                eligible_peer_devices: 1,
+                index0_shares_committed: 2,
+                after_index0_shares_committed: 0,
+                homeserver_accepted_devices: 2,
+                created_at_index0: true,
+                elapsed_ms: 2,
+            },
+        );
 
         let snapshot = test_support::rotation_snapshot();
         assert_eq!(snapshot.records.len(), 2);
@@ -6716,8 +6641,8 @@ mod initial_share_diagnostics_tests {
         }
     }
 
-    fn counter_value(name: &'static str) -> u64 {
-        let snapshot = koushi_diagnostics::snapshot();
+    fn counter_value(counters: &DiagnosticCounterContext, name: &'static str) -> u64 {
+        let snapshot = counters.snapshot();
         snapshot
             .records
             .iter()
@@ -6758,75 +6683,105 @@ mod initial_share_diagnostics_tests {
     #[test]
     fn initial_share_diagnostic_records_closed_tokens_and_counters() {
         let _guard = test_support::lock();
-        for counter in [
-            "initial_share_eligible_own",
-            "initial_share_eligible_peer",
-            "initial_share_olm_missing",
-            "initial_share_olm_encrypted",
-            "initial_share_olm_encryption_failed",
-            "initial_share_withheld",
-            "initial_share_request_queued",
-            "initial_share_homeserver_accepted",
-            "initial_share_request_failed",
-            "initial_share_share_committed_index0",
-            "initial_share_share_committed_after_index0",
-            "initial_share_first_event_all_settled",
-            "initial_share_first_event_pending",
-            "initial_share_sessions_at_index0",
-            "initial_share_sessions_after_index0",
-        ] {
-            koushi_diagnostics::reset_counter(counter);
-        }
+        let counters = DiagnosticCounterContext::new();
         let diagnostic_start = test_support::detail_snapshot().records.len();
 
-        record_initial_share_diagnostic(device_event(Class::VerifiedPeer, Stage::Eligible));
-        record_initial_share_diagnostic(device_event(Class::Unknown, Stage::OlmMissing));
-        record_initial_share_diagnostic(device_event(Class::Unknown, Stage::OlmEncrypted));
-        record_initial_share_diagnostic(device_event(Class::Unknown, Stage::OlmEncryptionFailed));
-        record_initial_share_diagnostic(device_event(Class::Unknown, Stage::Withheld));
-        record_initial_share_diagnostic(device_event(Class::Unknown, Stage::RequestQueued));
-        record_initial_share_diagnostic(device_event(Class::Unknown, Stage::HomeserverAccepted));
-        record_initial_share_diagnostic(device_event(Class::Unknown, Stage::RequestFailed));
-        record_initial_share_diagnostic(device_event(
-            Class::Unknown,
-            Stage::ShareStateCommitted { message_index: 0 },
-        ));
-        record_initial_share_diagnostic(device_event(
-            Class::Unknown,
-            Stage::ShareStateCommitted { message_index: 4 },
-        ));
-        record_initial_share_session_diagnostic(InitialShareSessionDiagnostic {
-            session: RoomKeyDiagnosticAlias::new(7),
-            first_event_message_index: 0,
-            all_initial_shares_settled_first: true,
-            pending_requests_bucket: 0,
-            eligible_own_devices: 0,
-            eligible_peer_devices: 1,
-            index0_shares_committed: 1,
-            after_index0_shares_committed: 1,
-            homeserver_accepted_devices: 1,
-            created_at_index0: true,
-            elapsed_ms: 12,
-        });
+        record_initial_share_diagnostic(
+            &counters,
+            device_event(Class::VerifiedPeer, Stage::Eligible),
+        );
+        record_initial_share_diagnostic(&counters, device_event(Class::Unknown, Stage::OlmMissing));
+        record_initial_share_diagnostic(
+            &counters,
+            device_event(Class::Unknown, Stage::OlmEncrypted),
+        );
+        record_initial_share_diagnostic(
+            &counters,
+            device_event(Class::Unknown, Stage::OlmEncryptionFailed),
+        );
+        record_initial_share_diagnostic(&counters, device_event(Class::Unknown, Stage::Withheld));
+        record_initial_share_diagnostic(
+            &counters,
+            device_event(Class::Unknown, Stage::RequestQueued),
+        );
+        record_initial_share_diagnostic(
+            &counters,
+            device_event(Class::Unknown, Stage::HomeserverAccepted),
+        );
+        record_initial_share_diagnostic(
+            &counters,
+            device_event(Class::Unknown, Stage::RequestFailed),
+        );
+        record_initial_share_diagnostic(
+            &counters,
+            device_event(
+                Class::Unknown,
+                Stage::ShareStateCommitted { message_index: 0 },
+            ),
+        );
+        record_initial_share_diagnostic(
+            &counters,
+            device_event(
+                Class::Unknown,
+                Stage::ShareStateCommitted { message_index: 4 },
+            ),
+        );
+        record_initial_share_session_diagnostic(
+            &counters,
+            InitialShareSessionDiagnostic {
+                session: RoomKeyDiagnosticAlias::new(7),
+                first_event_message_index: 0,
+                all_initial_shares_settled_first: true,
+                pending_requests_bucket: 0,
+                eligible_own_devices: 0,
+                eligible_peer_devices: 1,
+                index0_shares_committed: 1,
+                after_index0_shares_committed: 1,
+                homeserver_accepted_devices: 1,
+                created_at_index0: true,
+                elapsed_ms: 12,
+            },
+        );
 
-        assert_eq!(counter_value("initial_share_eligible_peer"), 1);
-        assert_eq!(counter_value("initial_share_eligible_own"), 0);
-        assert_eq!(counter_value("initial_share_olm_missing"), 1);
-        assert_eq!(counter_value("initial_share_olm_encrypted"), 1);
-        assert_eq!(counter_value("initial_share_olm_encryption_failed"), 1);
-        assert_eq!(counter_value("initial_share_withheld"), 1);
-        assert_eq!(counter_value("initial_share_request_queued"), 1);
-        assert_eq!(counter_value("initial_share_homeserver_accepted"), 1);
-        assert_eq!(counter_value("initial_share_request_failed"), 1);
-        assert_eq!(counter_value("initial_share_share_committed_index0"), 1);
+        assert_eq!(counter_value(&counters, "initial_share_eligible_peer"), 1);
+        assert_eq!(counter_value(&counters, "initial_share_eligible_own"), 0);
+        assert_eq!(counter_value(&counters, "initial_share_olm_missing"), 1);
+        assert_eq!(counter_value(&counters, "initial_share_olm_encrypted"), 1);
         assert_eq!(
-            counter_value("initial_share_share_committed_after_index0"),
+            counter_value(&counters, "initial_share_olm_encryption_failed"),
             1
         );
-        assert_eq!(counter_value("initial_share_first_event_all_settled"), 1);
-        assert_eq!(counter_value("initial_share_first_event_pending"), 0);
-        assert_eq!(counter_value("initial_share_sessions_at_index0"), 1);
-        assert_eq!(counter_value("initial_share_sessions_after_index0"), 0);
+        assert_eq!(counter_value(&counters, "initial_share_withheld"), 1);
+        assert_eq!(counter_value(&counters, "initial_share_request_queued"), 1);
+        assert_eq!(
+            counter_value(&counters, "initial_share_homeserver_accepted"),
+            1
+        );
+        assert_eq!(counter_value(&counters, "initial_share_request_failed"), 1);
+        assert_eq!(
+            counter_value(&counters, "initial_share_share_committed_index0"),
+            1
+        );
+        assert_eq!(
+            counter_value(&counters, "initial_share_share_committed_after_index0"),
+            1
+        );
+        assert_eq!(
+            counter_value(&counters, "initial_share_first_event_all_settled"),
+            1
+        );
+        assert_eq!(
+            counter_value(&counters, "initial_share_first_event_pending"),
+            0
+        );
+        assert_eq!(
+            counter_value(&counters, "initial_share_sessions_at_index0"),
+            1
+        );
+        assert_eq!(
+            counter_value(&counters, "initial_share_sessions_after_index0"),
+            0
+        );
 
         let snapshot = test_support::detail_snapshot();
         let stage_records: Vec<_> = snapshot
@@ -6872,26 +6827,36 @@ mod initial_share_diagnostics_tests {
     #[test]
     fn initial_share_diagnostics_never_expose_private_values() {
         let _guard = test_support::lock();
+        let counters = DiagnosticCounterContext::new();
         let diagnostic_start = test_support::detail_snapshot().records.len();
 
-        record_initial_share_diagnostic(device_event(Class::VerifiedPeer, Stage::Eligible));
-        record_initial_share_diagnostic(device_event(
-            Class::Unknown,
-            Stage::ShareStateCommitted { message_index: 0 },
-        ));
-        record_initial_share_session_diagnostic(InitialShareSessionDiagnostic {
-            session: RoomKeyDiagnosticAlias::new(7),
-            first_event_message_index: 0,
-            all_initial_shares_settled_first: true,
-            pending_requests_bucket: 0,
-            eligible_own_devices: 1,
-            eligible_peer_devices: 2,
-            index0_shares_committed: 1,
-            after_index0_shares_committed: 0,
-            homeserver_accepted_devices: 1,
-            created_at_index0: true,
-            elapsed_ms: 12,
-        });
+        record_initial_share_diagnostic(
+            &counters,
+            device_event(Class::VerifiedPeer, Stage::Eligible),
+        );
+        record_initial_share_diagnostic(
+            &counters,
+            device_event(
+                Class::Unknown,
+                Stage::ShareStateCommitted { message_index: 0 },
+            ),
+        );
+        record_initial_share_session_diagnostic(
+            &counters,
+            InitialShareSessionDiagnostic {
+                session: RoomKeyDiagnosticAlias::new(7),
+                first_event_message_index: 0,
+                all_initial_shares_settled_first: true,
+                pending_requests_bucket: 0,
+                eligible_own_devices: 1,
+                eligible_peer_devices: 2,
+                index0_shares_committed: 1,
+                after_index0_shares_committed: 0,
+                homeserver_accepted_devices: 1,
+                created_at_index0: true,
+                elapsed_ms: 12,
+            },
+        );
 
         let snapshot = test_support::detail_snapshot();
         for record in snapshot.records.iter().skip(diagnostic_start) {
@@ -6908,33 +6873,32 @@ mod initial_share_diagnostics_tests {
     #[test]
     fn initial_share_counters_survive_detail_ring_eviction() {
         let _guard = test_support::lock();
-        koushi_diagnostics::reset_counter("initial_share_olm_encrypted");
+        let counters = DiagnosticCounterContext::new();
 
         // The aggregate counter lives outside the bounded detail ring: emit
         // without recording any detail and confirm the counter still exports.
         let detail_before = test_support::detail_snapshot().records.len();
-        koushi_diagnostics::increment_counter("initial_share_olm_encrypted");
+        counters.increment("initial_share_olm_encrypted");
         assert_eq!(
             test_support::detail_snapshot().records.len(),
             detail_before,
             "the counter must not consume detail-ring capacity"
         );
-        assert_eq!(counter_value("initial_share_olm_encrypted"), 1);
-        koushi_diagnostics::reset_counter("initial_share_olm_encrypted");
+        assert_eq!(counter_value(&counters, "initial_share_olm_encrypted"), 1);
     }
 }
 
 #[cfg(test)]
 mod index0_reshare_diagnostics_tests {
     use super::record_index0_reshare_diagnostic;
-    use koushi_diagnostics::test_support;
+    use koushi_diagnostics::{DiagnosticCounterContext, test_support};
     use matrix_sdk::encryption::{
         Index0InitialShareState as Share, Index0ReshareDiagnostic, Index0ReshareOutcome as Outcome,
         RoomKeyDiagnosticAlias,
     };
 
-    fn counter_value(name: &'static str) -> u64 {
-        let snapshot = koushi_diagnostics::snapshot();
+    fn counter_value(counters: &DiagnosticCounterContext, name: &'static str) -> u64 {
+        let snapshot = counters.snapshot();
         snapshot
             .records
             .iter()
@@ -6962,54 +6926,47 @@ mod index0_reshare_diagnostics_tests {
             .unwrap_or(0)
     }
 
-    fn record(outcome: Outcome, initial_share: Share) {
-        record_index0_reshare_diagnostic(Index0ReshareDiagnostic {
-            session: RoomKeyDiagnosticAlias::new(7),
-            initial_share,
-            reshare: outcome,
-            eligible_own_bucket: 0,
-            eligible_peer_bucket: 1,
-            elapsed_ms: 12,
-        });
+    fn record(counters: &DiagnosticCounterContext, outcome: Outcome, initial_share: Share) {
+        record_index0_reshare_diagnostic(
+            counters,
+            Index0ReshareDiagnostic {
+                session: RoomKeyDiagnosticAlias::new(7),
+                initial_share,
+                reshare: outcome,
+                eligible_own_bucket: 0,
+                eligible_peer_bucket: 1,
+                elapsed_ms: 12,
+            },
+        );
     }
 
     #[test]
     fn index0_reshare_diagnostic_records_closed_tokens_and_counters() {
         let _guard = test_support::lock();
-        for counter in [
-            "index0_reshare_sent",
-            "index0_reshare_failed",
-            "index0_reshare_deadline",
-            "index0_reshare_cancelled",
-            "index0_reshare_policy_blocked",
-            "index0_reshare_not_needed",
-            "index0_initial_share_accepted",
-            "index0_initial_share_failed",
-            "index0_initial_share_withheld",
-            "index0_initial_share_no_recipients",
-        ] {
-            koushi_diagnostics::reset_counter(counter);
-        }
+        let counters = DiagnosticCounterContext::new();
         let diagnostic_start = test_support::detail_snapshot().records.len();
 
-        record(Outcome::Sent, Share::Accepted);
-        record(Outcome::Failed, Share::Failed);
-        record(Outcome::Deadline, Share::Failed);
-        record(Outcome::Cancelled, Share::Failed);
-        record(Outcome::PolicyBlocked, Share::Failed);
-        record(Outcome::NotNeeded, Share::Withheld);
-        record(Outcome::NotNeeded, Share::NoRecipients);
+        record(&counters, Outcome::Sent, Share::Accepted);
+        record(&counters, Outcome::Failed, Share::Failed);
+        record(&counters, Outcome::Deadline, Share::Failed);
+        record(&counters, Outcome::Cancelled, Share::Failed);
+        record(&counters, Outcome::PolicyBlocked, Share::Failed);
+        record(&counters, Outcome::NotNeeded, Share::Withheld);
+        record(&counters, Outcome::NotNeeded, Share::NoRecipients);
 
-        assert_eq!(counter_value("index0_reshare_sent"), 1);
-        assert_eq!(counter_value("index0_reshare_failed"), 1);
-        assert_eq!(counter_value("index0_reshare_deadline"), 1);
-        assert_eq!(counter_value("index0_reshare_cancelled"), 1);
-        assert_eq!(counter_value("index0_reshare_policy_blocked"), 1);
-        assert_eq!(counter_value("index0_reshare_not_needed"), 2);
-        assert_eq!(counter_value("index0_initial_share_accepted"), 1);
-        assert_eq!(counter_value("index0_initial_share_failed"), 4);
-        assert_eq!(counter_value("index0_initial_share_withheld"), 1);
-        assert_eq!(counter_value("index0_initial_share_no_recipients"), 1);
+        assert_eq!(counter_value(&counters, "index0_reshare_sent"), 1);
+        assert_eq!(counter_value(&counters, "index0_reshare_failed"), 1);
+        assert_eq!(counter_value(&counters, "index0_reshare_deadline"), 1);
+        assert_eq!(counter_value(&counters, "index0_reshare_cancelled"), 1);
+        assert_eq!(counter_value(&counters, "index0_reshare_policy_blocked"), 1);
+        assert_eq!(counter_value(&counters, "index0_reshare_not_needed"), 2);
+        assert_eq!(counter_value(&counters, "index0_initial_share_accepted"), 1);
+        assert_eq!(counter_value(&counters, "index0_initial_share_failed"), 4);
+        assert_eq!(counter_value(&counters, "index0_initial_share_withheld"), 1);
+        assert_eq!(
+            counter_value(&counters, "index0_initial_share_no_recipients"),
+            1
+        );
 
         let snapshot = test_support::detail_snapshot();
         let records: Vec<_> = snapshot
@@ -7031,31 +6988,30 @@ mod index0_reshare_diagnostics_tests {
     #[test]
     fn index0_reshare_counters_survive_detail_ring_eviction() {
         let _guard = test_support::lock();
-        koushi_diagnostics::reset_counter("index0_reshare_sent");
+        let counters = DiagnosticCounterContext::new();
         let detail_before = test_support::detail_snapshot().records.len();
-        koushi_diagnostics::increment_counter("index0_reshare_sent");
+        counters.increment("index0_reshare_sent");
         assert_eq!(
             test_support::detail_snapshot().records.len(),
             detail_before,
             "the counter must not consume detail-ring capacity"
         );
-        assert_eq!(counter_value("index0_reshare_sent"), 1);
-        koushi_diagnostics::reset_counter("index0_reshare_sent");
+        assert_eq!(counter_value(&counters, "index0_reshare_sent"), 1);
     }
 }
 
 #[cfg(test)]
 mod initial_share_repair_diagnostics_tests {
     use super::record_initial_share_repair_diagnostic;
-    use koushi_diagnostics::test_support;
+    use koushi_diagnostics::{DiagnosticCounterContext, test_support};
     use matrix_sdk::encryption::{
         InitialShareRepairClaimOutcome as Claim, InitialShareRepairDiagnostic,
         InitialShareRepairOlmState as Olm, InitialShareRepairOutcome as Repair,
         RoomKeyDiagnosticAlias,
     };
 
-    fn counter_value(name: &'static str) -> u64 {
-        let snapshot = koushi_diagnostics::snapshot();
+    fn counter_value(counters: &DiagnosticCounterContext, name: &'static str) -> u64 {
+        let snapshot = counters.snapshot();
         snapshot
             .records
             .iter()
@@ -7083,50 +7039,37 @@ mod initial_share_repair_diagnostics_tests {
             .unwrap_or(0)
     }
 
-    fn record(claim: Claim, repair: Repair) {
-        record_initial_share_repair_diagnostic(InitialShareRepairDiagnostic {
-            session: RoomKeyDiagnosticAlias::new(11),
-            initial_olm: Olm::Missing,
-            claim,
-            repair,
-            own_coverage_bucket: 1,
-            peer_users_covered_bucket: 1,
-            peer_users_zero_coverage_bucket: 1,
-            missing_devices_bucket: 1,
-            first_event_message_index: None,
-            same_session: true,
-            elapsed_ms: 9,
-        });
+    fn record(counters: &DiagnosticCounterContext, claim: Claim, repair: Repair) {
+        record_initial_share_repair_diagnostic(
+            counters,
+            InitialShareRepairDiagnostic {
+                session: RoomKeyDiagnosticAlias::new(11),
+                initial_olm: Olm::Missing,
+                claim,
+                repair,
+                own_coverage_bucket: 1,
+                peer_users_covered_bucket: 1,
+                peer_users_zero_coverage_bucket: 1,
+                missing_devices_bucket: 1,
+                first_event_message_index: None,
+                same_session: true,
+                elapsed_ms: 9,
+            },
+        );
     }
 
     #[test]
     fn issue_523_initial_share_repair_records_closed_tokens_without_identifiers() {
         let _guard = test_support::lock();
-        for counter in [
-            "initial_repair_claim_not_needed",
-            "initial_repair_claim_requested",
-            "initial_repair_claim_accepted",
-            "initial_repair_claim_empty",
-            "initial_repair_claim_invalid",
-            "initial_repair_claim_network_failed",
-            "initial_repair_claim_sdk_failed",
-            "initial_repair_settled",
-            "initial_repair_waiting_wake",
-            "initial_repair_deadline",
-            "initial_repair_cancelled",
-            "initial_repair_no_recipients",
-            "initial_repair_failed",
-        ] {
-            koushi_diagnostics::reset_counter(counter);
-        }
+        let counters = DiagnosticCounterContext::new();
         let start = test_support::detail_snapshot().records.len();
-        record(Claim::NotNeeded, Repair::Settled);
-        record(Claim::Requested, Repair::WaitingWake);
-        record(Claim::Accepted, Repair::Deadline);
-        record(Claim::Empty, Repair::Cancelled);
-        record(Claim::Invalid, Repair::NoRecipients);
-        record(Claim::NetworkFailed, Repair::Failed);
-        record(Claim::SdkFailed, Repair::Failed);
+        record(&counters, Claim::NotNeeded, Repair::Settled);
+        record(&counters, Claim::Requested, Repair::WaitingWake);
+        record(&counters, Claim::Accepted, Repair::Deadline);
+        record(&counters, Claim::Empty, Repair::Cancelled);
+        record(&counters, Claim::Invalid, Repair::NoRecipients);
+        record(&counters, Claim::NetworkFailed, Repair::Failed);
+        record(&counters, Claim::SdkFailed, Repair::Failed);
 
         for counter in [
             "initial_repair_claim_not_needed",
@@ -7149,7 +7092,7 @@ mod initial_share_repair_diagnostics_tests {
                 1
             };
             assert_eq!(
-                counter_value(counter),
+                counter_value(&counters, counter),
                 expected,
                 "missing counter {counter}"
             );
@@ -7453,7 +7396,7 @@ mod tests {
 #[cfg(test)]
 mod encryption_readiness_diagnostics_tests {
     use super::record_encryption_readiness_diagnostic;
-    use koushi_diagnostics::test_support;
+    use koushi_diagnostics::{DiagnosticCounterContext, test_support};
     use matrix_sdk::encryption::{
         EncryptionReadinessDiagnostic, EncryptionReadinessOutcome, EncryptionReadinessQueryState,
         EncryptionReadinessSyncState, RoomKeyDiagnosticAlias,
@@ -7462,22 +7405,26 @@ mod encryption_readiness_diagnostics_tests {
     #[test]
     fn readiness_diagnostic_contains_only_closed_aliases_counts_and_tokens() {
         let _guard = test_support::lock();
+        let counters = DiagnosticCounterContext::new();
         let start = test_support::detail_snapshot().records.len();
-        record_encryption_readiness_diagnostic(EncryptionReadinessDiagnostic {
-            room: RoomKeyDiagnosticAlias::new(4),
-            session: RoomKeyDiagnosticAlias::new(9),
-            generation: 3,
-            sync: EncryptionReadinessSyncState::Received,
-            query: EncryptionReadinessQueryState::Accepted,
-            outcome: EncryptionReadinessOutcome::Ready,
-            active_members_bucket: 2,
-            returned_devices_bucket: 2,
-            eligible_devices_bucket: 1,
-            accepted_devices_bucket: 1,
-            message_index_bucket: 0,
-            registry_evictions: 0,
-            retryable: false,
-        });
+        record_encryption_readiness_diagnostic(
+            &counters,
+            EncryptionReadinessDiagnostic {
+                room: RoomKeyDiagnosticAlias::new(4),
+                session: RoomKeyDiagnosticAlias::new(9),
+                generation: 3,
+                sync: EncryptionReadinessSyncState::Received,
+                query: EncryptionReadinessQueryState::Accepted,
+                outcome: EncryptionReadinessOutcome::Ready,
+                active_members_bucket: 2,
+                returned_devices_bucket: 2,
+                eligible_devices_bucket: 1,
+                accepted_devices_bucket: 1,
+                message_index_bucket: 0,
+                registry_evictions: 0,
+                retryable: false,
+            },
+        );
 
         let snapshot = test_support::detail_snapshot();
         let record = snapshot.records[start..]

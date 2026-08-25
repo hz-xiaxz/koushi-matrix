@@ -496,7 +496,11 @@ mod joined_member_snapshot_tests {
                 .to_string(),
             authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
-        MatrixClientSession { client, info }
+        MatrixClientSession {
+            client,
+            info,
+            diagnostic_counters: koushi_diagnostics::DiagnosticCounterContext::registered(),
+        }
     }
 
     #[tokio::test]
@@ -617,7 +621,11 @@ mod room_permission_tests {
                 .to_string(),
             authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
-        MatrixClientSession { client, info }
+        MatrixClientSession {
+            client,
+            info,
+            diagnostic_counters: koushi_diagnostics::DiagnosticCounterContext::registered(),
+        }
     }
 
     #[tokio::test]
@@ -700,7 +708,11 @@ mod space_member_projection_tests {
                 .to_string(),
             authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         };
-        MatrixClientSession { client, info }
+        MatrixClientSession {
+            client,
+            info,
+            diagnostic_counters: koushi_diagnostics::DiagnosticCounterContext::registered(),
+        }
     }
 
     #[tokio::test]
