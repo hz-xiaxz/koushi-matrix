@@ -964,6 +964,19 @@ normal QA-title mode and cannot change product title semantics.
   `snapshot.state.e2ee_trust` and dispatch typed API methods; do not add
   React-local pending/success/failure state for verification, cross-signing, key
   backup, or identity reset.
+- User Settings uses Rust-owned `current_session_status` as the canonical
+  read-only summary of the active session's verification, owner cross-signing,
+  own identity, and key-backup readiness. `e2ee_trust` remains the owner of
+  trust operations, continuation state, and action availability. Its `devices`
+  projection is not a complete homeserver session inventory and an empty array
+  must never be labelled `0 devices`; homeserver session inventory and cleanup
+  render from Rust-owned `device_sessions` or delegate to the discovered Manage
+  account destination.
+- Account-management discovery remains Rust/Core-owned and URL-safe. The
+  desktop composition root may request the same typed discovery command once
+  per authenticated/restored account when the cached snapshot has no safe
+  destination. React must not fetch well-known metadata, construct a URL, or
+  retry without an account-identity fence.
 - Verification and device DTOs include user/device ids for Rust correlation, but
   the GUI should not display those ids by default. Use ordinal/status labels
   (`Device 1`, `Verified`, etc.) unless a Rust-owned redacted display model is

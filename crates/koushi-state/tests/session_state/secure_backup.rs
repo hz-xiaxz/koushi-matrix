@@ -60,8 +60,8 @@ fn signed_out_state_ignores_secure_backup_updates() {
 }
 
 #[test]
-fn every_non_ready_backup_state_keeps_combined_encrypted_admission_closed() {
-    let non_ready = vec![
+fn configured_backup_upload_health_does_not_close_encrypted_admission() {
+    let blocking = vec![
         SecureBackupGateState::Inactive,
         SecureBackupGateState::Checking,
         SecureBackupGateState::ExistingBackupNeedsRecovery { failure: None },
@@ -70,17 +70,11 @@ fn every_non_ready_backup_state_keeps_combined_encrypted_admission_closed() {
         SecureBackupGateState::ExplicitlyDisabledRequiresSetup,
         SecureBackupGateState::CreatingBackup,
         SecureBackupGateState::RecoveryKeyDeliveryRequired,
-        SecureBackupGateState::UploadingExistingKeys {
-            pending: koushi_state::PendingKeyCountBucket::TwoToTen,
-        },
-        SecureBackupGateState::DegradedRetrying {
-            failure: SecureBackupGateFailureKind::Network,
-        },
         SecureBackupGateState::BlockedFailed {
             failure: SecureBackupGateFailureKind::Sdk,
         },
     ];
-    for gate in non_ready {
+    for gate in blocking {
         let state = AppState {
             session: SessionState::Ready(session_info()),
             secure_backup_gate: gate.clone(),
@@ -92,12 +86,25 @@ fn every_non_ready_backup_state_keeps_combined_encrypted_admission_closed() {
         );
     }
 
-    let ready = AppState {
-        session: SessionState::Ready(session_info()),
-        secure_backup_gate: SecureBackupGateState::Ready,
-        ..AppState::default()
-    };
-    assert!(encrypted_messaging_is_admitted(&ready));
+    for gate in [
+        SecureBackupGateState::Ready,
+        SecureBackupGateState::UploadingExistingKeys {
+            pending: PendingKeyCountBucket::TwoToTen,
+        },
+        SecureBackupGateState::DegradedRetrying {
+            failure: SecureBackupGateFailureKind::Network,
+        },
+    ] {
+        let state = AppState {
+            session: SessionState::Ready(session_info()),
+            secure_backup_gate: gate.clone(),
+            ..AppState::default()
+        };
+        assert!(
+            encrypted_messaging_is_admitted(&state),
+            "operational backup health state blocked encrypted sending: {gate:?}"
+        );
+    }
 
     let unverified = AppState {
         session: SessionState::Locked(session_info()),

@@ -397,6 +397,32 @@ fn map_secure_backup_recovery_state(
     }
 }
 
+fn classify_secure_backup_upload(
+    counts: Result<matrix_sdk_base::crypto::store::types::RoomKeyCounts, ()>,
+    upload_state: matrix_sdk::encryption::backups::UploadState,
+) -> MatrixSecureBackupUploadState {
+    if matches!(
+        upload_state,
+        matrix_sdk::encryption::backups::UploadState::Error
+    ) {
+        return MatrixSecureBackupUploadState::Failed;
+    }
+    let Ok(counts) = counts else {
+        return MatrixSecureBackupUploadState::Failed;
+    };
+    let pending = counts.total.saturating_sub(counts.backed_up);
+    if pending == 0 {
+        return MatrixSecureBackupUploadState::Settled;
+    }
+    let bucket = match pending {
+        1 => PendingKeyCountBucket::One,
+        2..=10 => PendingKeyCountBucket::TwoToTen,
+        11..=100 => PendingKeyCountBucket::ElevenToOneHundred,
+        _ => PendingKeyCountBucket::OverOneHundred,
+    };
+    MatrixSecureBackupUploadState::Pending(bucket)
+}
+
 enum SecureBackupStateUpdate {
     Backup(MatrixSecureBackupLocalState),
     Recovery(MatrixSecureBackupRecoveryState),
@@ -2770,8 +2796,48 @@ mod secure_backup_inspection_tests {
         E2eeTrustError, MatrixSecureBackupInspection, MatrixSecureBackupLocalState,
         MatrixSecureBackupRecoveryState, MatrixSecureBackupServerState, MatrixSecureBackupState,
         MatrixSecureBackupStateObservation, MatrixSecureBackupTrustState,
-        MatrixSecureBackupUploadState, SecureBackupStateStream,
+        MatrixSecureBackupUploadState, SecureBackupStateStream, classify_secure_backup_upload,
     };
+
+    #[test]
+    fn secure_backup_upload_snapshot_classifies_without_waiting_for_settlement() {
+        use matrix_sdk::encryption::backups::UploadState;
+        use matrix_sdk_base::crypto::store::types::RoomKeyCounts;
+
+        assert_eq!(
+            classify_secure_backup_upload(
+                Ok(RoomKeyCounts {
+                    total: 125,
+                    backed_up: 20,
+                }),
+                UploadState::Uploading(RoomKeyCounts {
+                    total: 125,
+                    backed_up: 20,
+                }),
+            ),
+            MatrixSecureBackupUploadState::Pending(PendingKeyCountBucket::OverOneHundred)
+        );
+        assert_eq!(
+            classify_secure_backup_upload(
+                Ok(RoomKeyCounts {
+                    total: 125,
+                    backed_up: 125,
+                }),
+                UploadState::Done,
+            ),
+            MatrixSecureBackupUploadState::Settled
+        );
+        assert_eq!(
+            classify_secure_backup_upload(
+                Ok(RoomKeyCounts {
+                    total: 125,
+                    backed_up: 20,
+                }),
+                UploadState::Error,
+            ),
+            MatrixSecureBackupUploadState::Failed
+        );
+    }
 
     fn inspection(
         server: MatrixSecureBackupServerState,
@@ -4040,10 +4106,10 @@ impl MatrixClientSession {
         let upload = if local_sdk_state == matrix_sdk::encryption::backups::BackupState::Enabled
             && trust == MatrixSecureBackupTrustState::Trusted
         {
-            match backups.wait_for_steady_state().await {
-                Ok(()) => MatrixSecureBackupUploadState::Settled,
-                Err(_) => MatrixSecureBackupUploadState::Failed,
-            }
+            classify_secure_backup_upload(
+                backups.room_key_counts().await.map_err(|_| ()),
+                backups.upload_state(),
+            )
         } else {
             MatrixSecureBackupUploadState::Unknown
         };

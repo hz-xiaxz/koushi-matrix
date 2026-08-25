@@ -1348,12 +1348,14 @@ product behavior by default.
 
 Device verification and Secure Backup readiness are independent Rust-owned
 admission facts. Verification starts the normal sync owner so receiving and
-local decryption can continue, but `AppState.secure_backup_gate` remains
-`Checking` until `koushi-sdk` has established that Recovery is complete, the
-existing trusted backup is enabled locally, and pending room-key upload has
-reached SDK steady state. React exposes the normal shell only when both the
-session and backup gate are ready; it never infers readiness from a click or
-from backup existence alone.
+local decryption can continue. `AppState.secure_backup_gate` remains blocking
+until `koushi-sdk` has established that Recovery is complete and the existing
+trusted backup is enabled locally. Pending room-key upload is observed as
+health/progress after that authority is established; it does not keep the
+normal shell hidden or close ordinary encrypted sending. A transient failure
+before initial authority is established remains blocking and exposes explicit
+retry/diagnostics instead of entering an automatic retry loop. React never
+infers readiness from a click or from backup existence alone.
 
 An existing backup without its local decryption key is recovered in place.
 Automatic setup is permitted only when the authoritative probe reports no

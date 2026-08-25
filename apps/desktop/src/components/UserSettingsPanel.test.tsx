@@ -246,14 +246,14 @@ describe("UserSettingsPanel", () => {
     expect(markup).toContain("Compare emoji");
     expect(markup).toContain("🐶");
     expect(markup).toContain("Key backup");
-    expect(markup).toContain("Device 1");
-    expect(markup).toContain("Device 2");
-    expect(markup).toContain("Cross-signed");
+    expect(markup).not.toContain("Device 1");
+    expect(markup).not.toContain("Device 2");
+    expect(markup).toContain("Trusted");
     expect(markup).not.toContain("redacted-target-user");
     expect(markup).not.toContain("TARGETDEVICE");
   });
 
-  test("shows Manage account only when a discovered account-management URL exists", () => {
+  test("keeps Manage account discoverable and enables it when a safe URL exists", () => {
     const withoutUrl = renderToStaticMarkup(
       <UserSettingsPanel
         currentSession={{
@@ -274,7 +274,9 @@ describe("UserSettingsPanel", () => {
         {...handlers}
       />
     );
-    expect(withoutUrl).not.toContain("Manage account");
+    expect(withoutUrl).toContain("Manage account");
+    expect(withoutUrl).toContain("account-management destination is unavailable");
+    expect(withoutUrl).toMatch(/disabled="" data-testid="manage-account-button"/);
 
     const withUrl = renderToStaticMarkup(
       <UserSettingsPanel
@@ -298,6 +300,68 @@ describe("UserSettingsPanel", () => {
     );
     expect(withUrl).toContain("Manage account");
     expect(withUrl).toContain("Opens the account-management page");
+  });
+
+  test("uses current-session facts and keeps account controls together without a misleading device count", () => {
+    const markup = renderToStaticMarkup(
+      <UserSettingsPanel
+        currentSession={{
+          homeserver: "https://matrix.org",
+          user_id: "@demo-user:example.invalid",
+          device_id: "FAKEDEVICE"
+        }}
+        currentSessionStatus={{
+          status: "ready",
+          request_id: 41,
+          details: {
+            device_display_name: "Koushi on macOS",
+            device_id: "FAKEDEVICE",
+            authentication_method: "password",
+            sync_state: "running",
+            is_cross_signed_by_owner: true,
+            own_identity_verification: "verified",
+            key_backup: "ready",
+            verification: "verified",
+            checked_at_ms: 1_787_665_620_000
+          }
+        }}
+        e2eeTrust={idleE2eeTrust}
+        localEncryption={{ kind: "healthy" }}
+        platform="linux"
+        deviceSessions={idleDeviceSessions}
+        accountManagement={idleAccountManagement}
+        accountManagementCapabilities={idleAccountManagementCapabilities}
+        accountManagementUrl="https://account.example.test/account"
+        savedSessions={[
+          {
+            homeserver: "https://matrix.org",
+            user_id: "@demo-user:example.invalid",
+            device_id: "FAKEDEVICE"
+          }
+        ]}
+        profile={profile}
+        settings={settings}
+        {...handlers}
+      />
+    );
+
+    expect(markup).toContain("Koushi on macOS");
+    expect(markup).toContain("Cross-signed");
+    expect(markup).toContain("Identity verified");
+    expect(markup).toContain("Ready");
+    expect(markup).not.toContain("0 devices");
+    expect(markup).not.toContain("No devices");
+
+    const sessionPosition = markup.indexOf('aria-label="Session"');
+    const accountsPosition = markup.indexOf('aria-label="Account switcher"');
+    const remoteSessionsPosition = markup.indexOf('aria-label="Sessions"');
+    const accountManagementPosition = markup.indexOf('aria-label="Account management"');
+    const keyboardPosition = markup.indexOf('aria-label="Keyboard"');
+    expect(sessionPosition).toBeGreaterThanOrEqual(0);
+    expect(accountsPosition).toBeGreaterThan(sessionPosition);
+    expect(remoteSessionsPosition).toBeGreaterThan(accountsPosition);
+    expect(accountManagementPosition).toBeGreaterThan(remoteSessionsPosition);
+    expect(keyboardPosition).toBeGreaterThan(accountManagementPosition);
   });
 
   test("dispatches the manage-account open action from the account section", () => {

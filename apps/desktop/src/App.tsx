@@ -752,6 +752,7 @@ function composerDraftApiAccount(scope: ComposerDraftScope): {
 export function App() {
   const snapshot = useAppStore(selectSnapshot);
   const snapshotRef = useRef(snapshot);
+  const accountManagementDiscoveryAttemptRef = useRef<string | null>(null);
   const secureBackupShellAccountRef = useRef<string | null>(null);
   const secureBackupShellExposedRef = useRef(false);
   const diagnosticLogBufferRef = useRef<ReturnType<typeof createDiagnosticLogBuffer> | null>(null);
@@ -766,10 +767,11 @@ export function App() {
     secureBackupShellAccountRef.current = secureBackupShellAccount;
     secureBackupShellExposedRef.current = false;
   }
-  if (
-    secureBackupShellAccount !== null &&
-    snapshot?.state.domain.secure_backup_gate.kind === "ready"
-  ) {
+  const secureBackupGateIsOperational =
+    snapshot?.state.domain.secure_backup_gate.kind === "ready" ||
+    snapshot?.state.domain.secure_backup_gate.kind === "uploadingExistingKeys" ||
+    snapshot?.state.domain.secure_backup_gate.kind === "degradedRetrying";
+  if (secureBackupShellAccount !== null && secureBackupGateIsOperational) {
     secureBackupShellExposedRef.current = true;
   }
   const submissionAccountOwnerRef = useRef<string | null>(
@@ -800,6 +802,50 @@ export function App() {
     setSchemaMismatchVersion(null);
     setAppStoreSnapshot(next);
   }, [diagnosticLogBuffer]);
+  useEffect(() => {
+    if (!snapshot) {
+      accountManagementDiscoveryAttemptRef.current = null;
+      return;
+    }
+    const session = snapshot.state.domain.session;
+    if (session.kind !== "ready") {
+      accountManagementDiscoveryAttemptRef.current = null;
+      return;
+    }
+    const accountKey = JSON.stringify([
+      session.homeserver,
+      session.user_id,
+      session.device_id
+    ]);
+    const auth = snapshot.state.domain.auth;
+    if (auth.kind !== "ready") {
+      return;
+    }
+    if (auth.delegated.account_management_url) {
+      accountManagementDiscoveryAttemptRef.current = accountKey;
+      return;
+    }
+    if (accountManagementDiscoveryAttemptRef.current === accountKey) {
+      return;
+    }
+    accountManagementDiscoveryAttemptRef.current = accountKey;
+    void api
+      .discoverLoginMethods(session.homeserver)
+      .then((next) => {
+        const current = snapshotRef.current?.state.domain.session;
+        if (
+          current?.kind === "ready" &&
+          JSON.stringify([current.homeserver, current.user_id, current.device_id]) === accountKey
+        ) {
+          setSnapshot(next);
+        }
+      })
+      .catch(() => undefined);
+  }, [
+    setSnapshot,
+    snapshot?.state.domain.auth,
+    snapshot?.state.domain.session
+  ]);
   const latestTextMutationQueueRef = useRef(createLatestMutationOperationQueue<string>());
 
   async function applyLatestTextMutationSnapshot(
@@ -5193,7 +5239,7 @@ export function App() {
   const secureBackupGate = snapshot.state.domain.secure_backup_gate;
   const secureBackupStartupGateRequired =
     sessionKind === "ready" &&
-    secureBackupGate.kind !== "ready" &&
+    !secureBackupGateIsOperational &&
     !secureBackupShellExposedRef.current;
   const secureBackupRuntimeDegraded =
     sessionKind === "ready" &&
@@ -5278,7 +5324,7 @@ export function App() {
     (room) => room.room_id === snapshot.state.ui.navigation.active_room_id
   );
   const encryptedComposerBlocked =
-    secureBackupRuntimeDegraded && Boolean(activeRoom?.is_encrypted);
+    !secureBackupGateIsOperational && Boolean(activeRoom?.is_encrypted);
   const runtimeAlerts: RuntimeAlert[] = [];
   if (secureBackupRuntimeDegraded) {
     runtimeAlerts.push({
@@ -5914,6 +5960,9 @@ export function App() {
                 void openExternalHttpUrl(url);
               }
             }
+          }}
+          onRefreshCurrentSessionStatus={() => {
+            void api.refreshCurrentSessionStatus("open").then(setSnapshot);
           }}
           onProbeLocalEncryption={() => {
             void probeLocalEncryptionHealth();

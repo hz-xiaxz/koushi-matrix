@@ -1149,7 +1149,7 @@ test("device session manager renames and signs out from Rust-owned snapshot", as
   });
 
   await page.getByRole("button", { name: "User settings", exact: true }).click();
-  await page.getByRole("button", { name: "Sessions", exact: true }).click();
+  await page.getByRole("button", { name: "Session", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Sessions", exact: true })).toBeVisible();
 
   const secondSessionRow = page.locator(".session-row").filter({
