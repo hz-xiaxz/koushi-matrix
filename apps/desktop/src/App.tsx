@@ -752,6 +752,7 @@ function composerDraftApiAccount(scope: ComposerDraftScope): {
 export function App() {
   const snapshot = useAppStore(selectSnapshot);
   const snapshotRef = useRef(snapshot);
+  const accountManagementDiscoveryAttemptRef = useRef<string | null>(null);
   const secureBackupShellAccountRef = useRef<string | null>(null);
   const secureBackupShellExposedRef = useRef(false);
   const diagnosticLogBufferRef = useRef<ReturnType<typeof createDiagnosticLogBuffer> | null>(null);
@@ -801,6 +802,50 @@ export function App() {
     setSchemaMismatchVersion(null);
     setAppStoreSnapshot(next);
   }, [diagnosticLogBuffer]);
+  useEffect(() => {
+    if (!snapshot) {
+      accountManagementDiscoveryAttemptRef.current = null;
+      return;
+    }
+    const session = snapshot.state.domain.session;
+    if (session.kind !== "ready") {
+      accountManagementDiscoveryAttemptRef.current = null;
+      return;
+    }
+    const accountKey = JSON.stringify([
+      session.homeserver,
+      session.user_id,
+      session.device_id
+    ]);
+    const auth = snapshot.state.domain.auth;
+    if (auth.kind === "discovering") {
+      return;
+    }
+    if (auth.kind === "ready" && auth.delegated.account_management_url) {
+      accountManagementDiscoveryAttemptRef.current = accountKey;
+      return;
+    }
+    if (accountManagementDiscoveryAttemptRef.current === accountKey) {
+      return;
+    }
+    accountManagementDiscoveryAttemptRef.current = accountKey;
+    void api
+      .discoverLoginMethods(session.homeserver)
+      .then((next) => {
+        const current = snapshotRef.current?.state.domain.session;
+        if (
+          current?.kind === "ready" &&
+          JSON.stringify([current.homeserver, current.user_id, current.device_id]) === accountKey
+        ) {
+          setSnapshot(next);
+        }
+      })
+      .catch(() => undefined);
+  }, [
+    setSnapshot,
+    snapshot?.state.domain.auth,
+    snapshot?.state.domain.session
+  ]);
   const latestTextMutationQueueRef = useRef(createLatestMutationOperationQueue<string>());
 
   async function applyLatestTextMutationSnapshot(
@@ -5915,6 +5960,9 @@ export function App() {
                 void openExternalHttpUrl(url);
               }
             }
+          }}
+          onRefreshCurrentSessionStatus={() => {
+            void api.refreshCurrentSessionStatus("open").then(setSnapshot);
           }}
           onProbeLocalEncryption={() => {
             void probeLocalEncryptionHealth();

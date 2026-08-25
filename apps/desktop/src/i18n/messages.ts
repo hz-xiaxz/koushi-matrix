@@ -617,6 +617,7 @@ export type MessageId =
   | "settings.accountManagement"
   | "settings.manageAccount"
   | "settings.manageAccountHint"
+  | "settings.manageAccountUnavailable"
   | "settings.changePassword"
   | "settings.changePasswordLabel"
   | "settings.changePasswordConfirm"
@@ -1972,6 +1973,7 @@ const en: Catalog = {
   "settings.accountManagement": "Account management",
   "settings.manageAccount": "Manage account",
   "settings.manageAccountHint": "Opens the account-management page for this server in your browser.",
+  "settings.manageAccountUnavailable": "The server account-management destination is unavailable. Koushi will recheck it for this session.",
   "settings.changePassword": "Change password",
   "settings.changePasswordLabel": "New password",
   "settings.changePasswordConfirm": "Confirm new password",
@@ -3212,6 +3214,7 @@ const ja: Catalog = {
   "settings.accountManagement": "アカウント管理",
   "settings.manageAccount": "アカウントを管理",
   "settings.manageAccountHint": "このサーバーのアカウント管理ページをブラウザで開きます。",
+  "settings.manageAccountUnavailable": "サーバーのアカウント管理先を取得できません。Koushi がこのセッションで再確認します。",
   "settings.changePassword": "パスワードを変更",
   "settings.changePasswordLabel": "新しいパスワード",
   "settings.changePasswordConfirm": "新しいパスワード（確認）",

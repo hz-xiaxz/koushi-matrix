@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useRef, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import {
   Check,
   KeyRound,
@@ -6,7 +6,6 @@ import {
   ShieldAlert,
   ShieldCheck,
   ShieldQuestion,
-  ShieldX,
   X
 } from "lucide-react";
 
@@ -18,10 +17,9 @@ import {
   type TrustTone,
   failureKindLabel
 } from "./SettingsStatusPrimitives";
-import { TrustHelpButton } from "../TrustHelp";
 import type {
   CrossSigningStatus,
-  DeviceTrustLevel,
+  CurrentSessionStatusState,
   E2eeTrustState,
   IdentityResetState,
   KeyBackupStatus,
@@ -30,6 +28,7 @@ import type {
 
 export function TrustSection({
   trust,
+  currentSessionStatus,
   onBootstrapCrossSigning,
   onEnableKeyBackup,
   onAcceptVerification,
@@ -41,6 +40,7 @@ export function TrustSection({
   onSubmitIdentityResetOAuth
 }: {
   trust: E2eeTrustState;
+  currentSessionStatus: CurrentSessionStatusState;
   onBootstrapCrossSigning: () => void;
   onEnableKeyBackup: () => void;
   onAcceptVerification: (flowId: number) => void;
@@ -51,7 +51,11 @@ export function TrustSection({
   onSubmitIdentityResetPassword: (flowId: number, password: string) => void;
   onSubmitIdentityResetOAuth: (flowId: number) => void;
 }) {
-  const overall = trustOverallStatus(trust);
+  const currentSessionDetails =
+    currentSessionStatus.status === "ready" ? currentSessionStatus.details : null;
+  const overall = trustOverallStatus(trust, currentSessionStatus);
+  const crossSigningEstablished = currentSessionDetails?.is_cross_signed_by_owner === true;
+  const keyBackupEstablished = currentSessionDetails?.key_backup === "ready";
 
   return (
     <section className="settings-section trust-section" aria-label={t("trust.encryption")}>
@@ -71,10 +75,22 @@ export function TrustSection({
         <TrustStatusRow
           icon={<ShieldCheck size={16} />}
           label={t("trust.crossSigning")}
-          value={crossSigningStatusLabel(trust.cross_signing)}
-          tone={crossSigningTone(trust.cross_signing)}
+          value={
+            currentSessionDetails
+              ? currentSessionDetails.is_cross_signed_by_owner
+                ? t("sessionStatus.crossSigned")
+                : t("sessionStatus.notCrossSigned")
+              : crossSigningStatusLabel(trust.cross_signing)
+          }
+          tone={
+            currentSessionDetails
+              ? currentSessionDetails.is_cross_signed_by_owner
+                ? "good"
+                : "warning"
+              : crossSigningTone(trust.cross_signing)
+          }
           action={
-            crossSigningActionAvailable(trust.cross_signing) ? (
+            !crossSigningEstablished && crossSigningActionAvailable(trust.cross_signing) ? (
               <TrustActionButton
                 icon={<ShieldCheck size={14} />}
                 label={t("trust.setupCrossSigning")}
@@ -86,10 +102,22 @@ export function TrustSection({
         <TrustStatusRow
           icon={<KeyRound size={16} />}
           label={t("trust.keyBackup")}
-          value={keyBackupStatusLabel(trust.key_backup)}
-          tone={keyBackupTone(trust.key_backup)}
+          value={
+            currentSessionDetails
+              ? currentSessionKeyBackupLabel(currentSessionDetails.key_backup)
+              : keyBackupStatusLabel(trust.key_backup)
+          }
+          tone={
+            currentSessionDetails
+              ? currentSessionDetails.key_backup === "ready"
+                ? "good"
+                : currentSessionDetails.key_backup === "disabled"
+                  ? "warning"
+                  : "neutral"
+              : keyBackupTone(trust.key_backup)
+          }
           action={
-            keyBackupActionAvailable(trust.key_backup) ? (
+            !keyBackupEstablished && keyBackupActionAvailable(trust.key_backup) ? (
               <TrustActionButton
                 icon={<KeyRound size={14} />}
                 label={t("trust.enableKeyBackup")}
@@ -121,8 +149,6 @@ export function TrustSection({
         onSubmitIdentityResetOAuth={onSubmitIdentityResetOAuth}
         onSubmitIdentityResetPassword={onSubmitIdentityResetPassword}
       />
-
-      <DeviceTrustList devices={trust.devices} />
     </section>
   );
 }
@@ -312,49 +338,19 @@ function IdentityResetAuthControls({
   );
 }
 
-function DeviceTrustList({ devices }: { devices: E2eeTrustState["devices"] }) {
-  return (
-    <section className="trust-devices" aria-label={t("trust.devices")}>
-      <div className="trust-devices-heading">
-        <h4>
-          <span>{t("trust.devices")}</span>
-          <TrustHelpButton
-            title={t("help.userTrust.deviceStateTitle")}
-            body={t("help.userTrust.deviceStateBody")}
-          />
-        </h4>
-        <span>{t("trust.deviceCount", { count: devices.length })}</span>
-      </div>
-      <div className="trust-device-list">
-        {devices.length > 0 ? (
-          devices.map((device, index) => (
-            <div className="trust-device-row" key={`${device.user_id}|${device.device_id}`}>
-              <span className={`trust-device-icon ${device.trust_level}`} aria-hidden="true">
-                {deviceTrustIcon(device.trust_level)}
-              </span>
-              <span className="trust-device-copy">
-                <span>{t("trust.deviceOrdinal", { index: index + 1 })}</span>
-                <small>{deviceTrustLevelLabel(device.trust_level)}</small>
-              </span>
-            </div>
-          ))
-        ) : (
-          <div className="trust-device-row">
-            <span className="trust-device-icon unknown" aria-hidden="true">
-              <ShieldQuestion size={15} />
-            </span>
-            <span className="trust-device-copy">
-              <span>{t("trust.noDevices")}</span>
-              <small>{t("trust.statusUnknown")}</small>
-            </span>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function trustOverallStatus(trust: E2eeTrustState): { label: string; tone: TrustTone } {
+function trustOverallStatus(
+  trust: E2eeTrustState,
+  currentSessionStatus: CurrentSessionStatusState
+): { label: string; tone: TrustTone } {
+  if (currentSessionStatus.status === "ready") {
+    const details = currentSessionStatus.details;
+    return details.verification === "verified" &&
+      details.is_cross_signed_by_owner &&
+      details.own_identity_verification === "verified" &&
+      details.key_backup === "ready"
+      ? { label: t("sessionStatus.verified"), tone: "good" }
+      : { label: t("trust.statusNeedsAttention"), tone: "warning" };
+  }
   if (
     trust.verification.kind === "failed" ||
     trust.cross_signing.kind === "failed" ||
@@ -479,29 +475,14 @@ function verificationStatusLabel(status: VerificationFlowState): string {
   }
 }
 
-function deviceTrustLevelLabel(level: DeviceTrustLevel): string {
-  switch (level) {
+function currentSessionKeyBackupLabel(state: "ready" | "disabled" | "unknown"): string {
+  switch (state) {
+    case "ready":
+      return t("sessionStatus.backupReady");
+    case "disabled":
+      return t("sessionStatus.backupDisabled");
     case "unknown":
-      return t("trust.deviceUnknown");
-    case "unverified":
-      return t("trust.deviceNotCrossSigned");
-    case "verified":
-      return t("trust.deviceCrossSigned");
-    case "blocked":
-      return t("trust.deviceBlocked");
-  }
-}
-
-function deviceTrustIcon(level: DeviceTrustLevel): ReactNode {
-  switch (level) {
-    case "verified":
-      return <ShieldCheck size={15} />;
-    case "blocked":
-      return <ShieldX size={15} />;
-    case "unknown":
-      return <ShieldQuestion size={15} />;
-    case "unverified":
-      return <ShieldAlert size={15} />;
+      return t("sessionStatus.unknown");
   }
 }
 

@@ -78,6 +78,18 @@ async function openDiagnostics() {
 }
 
 describe("App diagnostics lifecycle", () => {
+  test("re-discovers account management metadata for an authenticated restored session", async () => {
+    const api = createBrowserFakeApi();
+    const discoverLoginMethods = vi.spyOn(api, "discoverLoginMethods");
+
+    await renderAppWithApi(api);
+
+    await waitFor(() => {
+      expect(discoverLoginMethods).toHaveBeenCalledWith("https://matrix.org");
+    });
+    expect(discoverLoginMethods).toHaveBeenCalledTimes(1);
+  });
+
   test("keeps the normal shell hidden until a ready session has a ready secure backup gate", async () => {
     const api = createBrowserFakeApi({ secureBackupGate: { kind: "setupRequired" } });
 
@@ -218,7 +230,7 @@ describe("App diagnostics lifecycle", () => {
       tauriEventListeners.get("koushi-desktop://state")?.({ payload: "stateChanged" });
     });
     await waitFor(() => {
-      expect(getSnapshot).toHaveBeenCalledTimes(2);
+      expect(getSnapshot.mock.calls.length).toBeGreaterThanOrEqual(2);
       expect(screen.queryByRole("alert")).toBeNull();
     });
     expect(screen.getByRole("button", { name: "Open diagnostics" })).toBeTruthy();

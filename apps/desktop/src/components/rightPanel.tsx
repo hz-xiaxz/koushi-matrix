@@ -121,6 +121,7 @@ export function ContextualRightPanel({
   onOpenKeyboardSettings,
   onOpenRecovery,
   onManageAccount = () => undefined,
+  onRefreshCurrentSessionStatus = () => undefined,
   onProbeLocalEncryption,
   onResetLocalData,
   onLogout = () => undefined,
@@ -253,6 +254,7 @@ export function ContextualRightPanel({
   onOpenKeyboardSettings: () => void;
   onOpenRecovery: () => void;
   onManageAccount?: () => void;
+  onRefreshCurrentSessionStatus?: () => void;
   accountManagementUrl?: string | null;
   onProbeLocalEncryption: () => void;
   onResetLocalData: () => void;
@@ -457,6 +459,7 @@ export function ContextualRightPanel({
         <PanelHeader title={t("panel.userSettings")} onClose={onClosePanel} />
         <UserSettingsPanel
           currentSession={currentSavedSession(snapshot)}
+          currentSessionStatus={snapshot.state.domain.current_session_status}
           displayDensity={displayDensity}
           e2eeTrust={snapshot.state.domain.e2ee_trust}
           localEncryption={snapshot.state.domain.local_encryption}
@@ -497,6 +500,7 @@ export function ContextualRightPanel({
           accountManagementCapabilities={snapshot.state.domain.account_management_capabilities}
           accountManagementUrl={accountManagementUrl}
           onManageAccount={onManageAccount}
+          onRefreshCurrentSessionStatus={onRefreshCurrentSessionStatus}
           onQueryDevices={onQueryDevices ?? (() => undefined)}
           onRenameDevice={onRenameDevice ?? (() => undefined)}
           onDeleteDevices={onDeleteDevices ?? (() => undefined)}
