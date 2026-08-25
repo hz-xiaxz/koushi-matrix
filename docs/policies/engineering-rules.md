@@ -229,6 +229,9 @@ Rules:
    upload delay or degraded backup state does not block ordinary encrypted user
    content after normal recipient-device key sharing succeeds. Sync, sending,
    receiving, local decryption, diagnostics, and logout may continue. An
+   inconclusive initial inspection does not establish that authority and stays
+   blocking with explicit retry/diagnostics; automatic health retries apply
+   only after operational backup authority has already been established. An
    existing backup is recovered in place and is never automatically deleted,
    replaced, or reset. Re-enabling an explicitly disabled account-wide backup
    requires an explicit action whose copy warns that other Matrix clients see

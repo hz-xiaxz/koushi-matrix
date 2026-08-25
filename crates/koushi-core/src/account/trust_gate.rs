@@ -1205,26 +1205,32 @@ mod tests {
 
     #[test]
     fn secure_backup_queue_latch_follows_authoritative_gate_lifecycle() {
-        for (source, start) in [
-            (
-                include_str!("recovery_backup.rs"),
-                "fn start_secure_backup_inspection",
-            ),
-            (
-                include_str!("recovery_backup.rs"),
-                "async fn handle_secure_backup_state_changed",
-            ),
-            (
-                include_str!("runtime_children.rs"),
-                "async fn stop_current_session_runtime",
-            ),
-        ] {
-            let lifecycle = crate::account::test_source::item_body(source, start);
-            assert!(
-                lifecycle.contains("set_secure_backup_send_admitted(false)"),
-                "{start} must close the SDK queue latch before degradation or teardown"
-            );
-        }
+        let inspection_start = crate::account::test_source::item_body(
+            include_str!("recovery_backup.rs"),
+            "fn start_secure_backup_inspection",
+        );
+        assert!(
+            !inspection_start.contains("set_secure_backup_send_admitted(false)"),
+            "a periodic health inspection must preserve established admission"
+        );
+
+        let state_change = crate::account::test_source::item_body(
+            include_str!("recovery_backup.rs"),
+            "async fn handle_secure_backup_state_changed",
+        );
+        assert!(
+            state_change.contains("set_secure_backup_send_admitted(false)"),
+            "loss of local backup or recovery readiness must close admission"
+        );
+
+        let teardown = crate::account::test_source::item_body(
+            include_str!("runtime_children.rs"),
+            "async fn stop_current_session_runtime",
+        );
+        assert!(
+            teardown.contains("set_secure_backup_send_admitted(false)"),
+            "runtime teardown must close admission"
+        );
 
         let completion = crate::account::test_source::item_body(
             include_str!("recovery_backup.rs"),
@@ -1232,7 +1238,7 @@ mod tests {
         );
         assert!(
             completion.contains("set_secure_backup_send_admitted(admitted)"),
-            "only the generation-fenced authoritative completion may reopen the SDK queue latch"
+            "the generation-fenced completion must project operational backup authority"
         );
     }
 

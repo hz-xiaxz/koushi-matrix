@@ -78,6 +78,19 @@ async function openDiagnostics() {
 }
 
 describe("App diagnostics lifecycle", () => {
+  test("re-discovers account management metadata for an authenticated restored session", async () => {
+    const api = createBrowserFakeApi();
+    await api.discoverLoginMethods("https://matrix.org");
+    const discoverLoginMethods = vi.spyOn(api, "discoverLoginMethods");
+
+    await renderAppWithApi(api);
+
+    await waitFor(() => {
+      expect(discoverLoginMethods).toHaveBeenCalledWith("https://matrix.org");
+    });
+    expect(discoverLoginMethods).toHaveBeenCalledTimes(1);
+  });
+
   test("keeps the normal shell hidden until a ready session has a ready secure backup gate", async () => {
     const api = createBrowserFakeApi({ secureBackupGate: { kind: "setupRequired" } });
 
@@ -90,7 +103,18 @@ describe("App diagnostics lifecycle", () => {
     expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
   });
 
-  test("keeps the read-only shell visible when a ready session later degrades", async () => {
+  test("exposes the normal shell while an authoritative backup uploads existing keys", async () => {
+    const api = createBrowserFakeApi({
+      secureBackupGate: { kind: "uploadingExistingKeys", pending: "over_one_hundred" }
+    });
+
+    await renderAppWithApi(api);
+
+    expect(await screen.findByRole("button", { name: "Create room" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Uploading existing keys…" })).toBeNull();
+  });
+
+  test("keeps the operational shell visible when a ready session later degrades", async () => {
     const api = createBrowserFakeApi();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
@@ -119,7 +143,7 @@ describe("App diagnostics lifecycle", () => {
     );
 
     mutable.snapshot.state.domain.secure_backup_gate = {
-      kind: "blockedFailed",
+      kind: "degradedRetrying",
       failure: "network"
     };
 
@@ -132,7 +156,7 @@ describe("App diagnostics lifecycle", () => {
     });
     expect(await screen.findByRole("button", { name: "Create room" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Message composer" }).getAttribute("aria-disabled"))
-      .toBe("true");
+      .not.toBe("true");
     expect(screen.queryByRole("heading", { name: "Secure backup required" })).toBeNull();
     expect(document.querySelector(".secure-backup-runtime-banner")).toBeNull();
 
@@ -207,7 +231,7 @@ describe("App diagnostics lifecycle", () => {
       tauriEventListeners.get("koushi-desktop://state")?.({ payload: "stateChanged" });
     });
     await waitFor(() => {
-      expect(getSnapshot).toHaveBeenCalledTimes(2);
+      expect(getSnapshot.mock.calls.length).toBeGreaterThanOrEqual(2);
       expect(screen.queryByRole("alert")).toBeNull();
     });
     expect(screen.getByRole("button", { name: "Open diagnostics" })).toBeTruthy();

@@ -617,6 +617,7 @@ export type MessageId =
   | "settings.accountManagement"
   | "settings.manageAccount"
   | "settings.manageAccountHint"
+  | "settings.manageAccountUnavailable"
   | "settings.changePassword"
   | "settings.changePasswordLabel"
   | "settings.changePasswordConfirm"
@@ -1972,6 +1973,7 @@ const en: Catalog = {
   "settings.accountManagement": "Account management",
   "settings.manageAccount": "Manage account",
   "settings.manageAccountHint": "Opens the account-management page for this server in your browser.",
+  "settings.manageAccountUnavailable": "The server account-management destination is unavailable. Koushi will recheck it for this session.",
   "settings.changePassword": "Change password",
   "settings.changePasswordLabel": "New password",
   "settings.changePasswordConfirm": "Confirm new password",
@@ -2211,7 +2213,7 @@ const en: Catalog = {
   "gate.secureBackupRetry": "Retry secure backup",
   "gate.secureBackupDiagnostics": "Open secure backup diagnostics",
   "gate.secureBackupCommandFailed": "Secure backup action failed. Try again.",
-  "gate.secureBackupRuntimeDegraded": "Secure Backup is unavailable. Encrypted sending is paused; drafts, receiving, and local decryption remain available.",
+  "gate.secureBackupRuntimeDegraded": "Secure Backup is temporarily degraded. Sending, drafts, receiving, and local decryption remain available while Koushi retries.",
   "slidingSync.blockedTitle": "Simplified Sliding Sync is required",
   "slidingSync.unsupported": "This homeserver does not support Simplified Sliding Sync.",
   "slidingSync.unreachable": "Koushi could not reach this homeserver to verify Simplified Sliding Sync support.",
@@ -3212,6 +3214,7 @@ const ja: Catalog = {
   "settings.accountManagement": "アカウント管理",
   "settings.manageAccount": "アカウントを管理",
   "settings.manageAccountHint": "このサーバーのアカウント管理ページをブラウザで開きます。",
+  "settings.manageAccountUnavailable": "サーバーのアカウント管理先を取得できません。Koushi がこのセッションで再確認します。",
   "settings.changePassword": "パスワードを変更",
   "settings.changePasswordLabel": "新しいパスワード",
   "settings.changePasswordConfirm": "新しいパスワード（確認）",
@@ -3452,7 +3455,7 @@ const ja: Catalog = {
   "gate.secureBackupRetry": "安全なバックアップを再試行",
   "gate.secureBackupDiagnostics": "安全なバックアップの診断を開く",
   "gate.secureBackupCommandFailed": "安全なバックアップの操作に失敗しました。もう一度お試しください。",
-  "gate.secureBackupRuntimeDegraded": "安全なバックアップを利用できないため、暗号化メッセージの送信を停止しています。下書き、受信、端末上の復号は引き続き利用できます。",
+  "gate.secureBackupRuntimeDegraded": "安全なバックアップが一時的に低下しています。Koushi が再試行している間も、送信、下書き、受信、端末上の復号は利用できます。",
   "slidingSync.blockedTitle": "Simplified Sliding Sync が必要です",
   "slidingSync.unsupported": "このホームサーバーは Simplified Sliding Sync に対応していません。",
   "slidingSync.unreachable": "このホームサーバーに接続できず、Simplified Sliding Sync 対応を確認できませんでした。",

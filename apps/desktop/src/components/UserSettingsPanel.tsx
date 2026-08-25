@@ -36,6 +36,7 @@ import { mediaSourceUrl } from "../domain/mediaUrl";
 import type {
   AccountManagementCapabilities,
   AccountManagementState,
+  CurrentSessionStatusState,
   DeviceSessionListState,
   DisplaySettings,
   E2eeTrustState,
@@ -53,6 +54,7 @@ import type {
 
 export function UserSettingsPanel({
   currentSession,
+  currentSessionStatus = { status: "idle" },
   displayDensity = "comfortable",
   savedSessions,
   settings,
@@ -94,6 +96,7 @@ export function UserSettingsPanel({
   onRenameDevice,
   onDeleteDevices,
   onLoadAccountManagementCapabilities,
+  onRefreshCurrentSessionStatus = () => undefined,
   onChangePassword,
   onDeactivateAccount,
   onSubmitAccountManagementUia,
@@ -105,6 +108,7 @@ export function UserSettingsPanel({
   rooms
 }: {
   currentSession: SavedSessionInfo | null;
+  currentSessionStatus?: CurrentSessionStatusState;
   displayDensity?: DisplayDensity;
   savedSessions: SavedSessionInfo[];
   settings: SettingsState;
@@ -154,6 +158,7 @@ export function UserSettingsPanel({
   onRenameDevice: (deviceOrdinal: number, displayName: string) => void;
   onDeleteDevices: (deviceOrdinals: number[]) => void;
   onLoadAccountManagementCapabilities: () => void;
+  onRefreshCurrentSessionStatus?: () => void;
   onChangePassword: (newPassword: string) => void;
   onDeactivateAccount: (eraseData: boolean) => void;
   onSubmitAccountManagementUia: (flowId: number, password: string) => void;
@@ -164,11 +169,26 @@ export function UserSettingsPanel({
   onManageAccount?: () => void;
   rooms?: RoomSummary[];
 }) {
+  const sessionStatusRefreshOwnerRef = useRef<string | null>(null);
   useEffect(() => {
     if (deviceSessions.kind === "idle" && currentSession) {
       onQueryDevices();
     }
   }, [deviceSessions.kind, currentSession, onQueryDevices]);
+  useEffect(() => {
+    const owner = currentSession ? sessionKey(currentSession) : null;
+    if (sessionStatusRefreshOwnerRef.current !== owner) {
+      sessionStatusRefreshOwnerRef.current = null;
+    }
+    if (
+      owner &&
+      currentSessionStatus.status === "idle" &&
+      sessionStatusRefreshOwnerRef.current !== owner
+    ) {
+      sessionStatusRefreshOwnerRef.current = owner;
+      onRefreshCurrentSessionStatus();
+    }
+  }, [currentSession, currentSessionStatus.status, onRefreshCurrentSessionStatus]);
   const selectedTheme = settings.values.appearance.theme;
   const selectedFont = settings.values.typography.font;
   const selectedEmoji = settings.values.typography.emoji;
@@ -185,6 +205,8 @@ export function UserSettingsPanel({
   const profileAvatarUrl = avatarSourceUrl(profile.own.avatar);
   const profileInitial = profile.own.display_name?.charAt(0).toUpperCase()
     || accountInitial(currentSession?.user_id ?? "");
+  const currentSessionDetails =
+    currentSessionStatus.status === "ready" ? currentSessionStatus.details : null;
 
   useEffect(() => {
     setDisplayNameDraft(profile.own.display_name ?? "");
@@ -236,6 +258,18 @@ export function UserSettingsPanel({
               <UserRound size={16} />
             </span>
             <span>{t("settings.general")}</span>
+          </span>
+        </button>
+        <button
+          className="settings-list-item"
+          type="button"
+          onClick={() => scrollToSection("settings-session")}
+        >
+          <span className="settings-list-label">
+            <span className="settings-list-icon" aria-hidden="true">
+              <Smartphone size={16} />
+            </span>
+            <span>{t("settings.session")}</span>
           </span>
         </button>
         <button
@@ -334,18 +368,6 @@ export function UserSettingsPanel({
             <span>{t("settings.securityPrivacy")}</span>
           </span>
         </button>
-        <button
-          className="settings-list-item"
-          type="button"
-          onClick={() => scrollToSection("settings-sessions")}
-        >
-          <span className="settings-list-label">
-            <span className="settings-list-icon" aria-hidden="true">
-              <Smartphone size={16} />
-            </span>
-            <span>{t("settings.sessions")}</span>
-          </span>
-        </button>
       </div>
 
       <section id="settings-general" className="settings-section" aria-label={t("settings.profile")}>
@@ -406,12 +428,36 @@ export function UserSettingsPanel({
         </div>
       </section>
 
-      <section className="settings-section" aria-label={t("settings.session")}>
+      <section
+        id="settings-session"
+        className="settings-section"
+        aria-label={t("settings.session")}
+      >
         <h3>{t("settings.session")}</h3>
         <div className="settings-detail-list">
           <DetailRow label={t("settings.homeserver")} value={currentSession?.homeserver ?? t("settings.notRestored")} />
           <DetailRow label={t("settings.userId")} value={currentSession?.user_id ?? t("settings.notRestored")} />
           <DetailRow label={t("settings.device")} value={currentSession?.device_id ?? t("settings.notRestored")} />
+          <DetailRow
+            label={t("sessionStatus.deviceName")}
+            value={currentSessionDetails?.device_display_name ?? t("sessionStatus.unavailable")}
+          />
+          <DetailRow
+            label={t("sessionStatus.verification")}
+            value={currentSessionVerificationLabel(currentSessionDetails?.verification)}
+          />
+          <DetailRow
+            label={t("sessionStatus.ownerCrossSigning")}
+            value={currentSessionCrossSigningLabel(currentSessionDetails?.is_cross_signed_by_owner)}
+          />
+          <DetailRow
+            label={t("sessionStatus.identity")}
+            value={currentSessionIdentityLabel(currentSessionDetails?.own_identity_verification)}
+          />
+          <DetailRow
+            label={t("sessionStatus.keyBackup")}
+            value={currentSessionBackupLabel(currentSessionDetails?.key_backup)}
+          />
           <DetailRow label={t("settings.localStoreLabel")} value={t("settings.localStore")} />
         </div>
         <div className="profile-settings-actions">
@@ -426,6 +472,47 @@ export function UserSettingsPanel({
           </button>
         </div>
       </section>
+
+      <AccountSwitcherSection
+        currentSession={currentSession}
+        savedSessions={savedSessions}
+        onSwitchAccount={onSwitchAccount}
+      />
+
+      <SessionsSection
+        deviceSessions={deviceSessions}
+        accountManagement={accountManagement}
+        onQueryDevices={onQueryDevices}
+        onRenameDevice={onRenameDevice}
+        onDeleteDevices={onDeleteDevices}
+        onSubmitAccountManagementUia={onSubmitAccountManagementUia}
+      />
+
+      <AccountManagementSection
+        accountManagement={accountManagement}
+        accountManagementCapabilities={accountManagementCapabilities}
+        accountManagementUrl={accountManagementUrl}
+        currentSession={currentSession}
+        onLoadAccountManagementCapabilities={onLoadAccountManagementCapabilities}
+        onChangePassword={onChangePassword}
+        onDeactivateAccount={onDeactivateAccount}
+        onManageAccount={onManageAccount}
+        onSubmitAccountManagementUia={onSubmitAccountManagementUia}
+      />
+
+      <TrustSection
+        trust={e2eeTrust}
+        currentSessionStatus={currentSessionStatus}
+        onAcceptVerification={onAcceptVerification}
+        onBootstrapCrossSigning={onBootstrapCrossSigning}
+        onCancelVerification={onCancelVerification}
+        onConfirmSasVerification={onConfirmSasVerification}
+        onEnableKeyBackup={onEnableKeyBackup}
+        onResetIdentity={onResetIdentity}
+        onCancelIdentityReset={onCancelIdentityReset}
+        onSubmitIdentityResetOAuth={onSubmitIdentityResetOAuth}
+        onSubmitIdentityResetPassword={onSubmitIdentityResetPassword}
+      />
 
       <section id="settings-keyboard" className="settings-section" aria-label={t("settings.keyboard")}>
         <div className="settings-section-heading">
@@ -616,74 +703,97 @@ export function UserSettingsPanel({
         />
       </section>
 
-      <SessionsSection
-        deviceSessions={deviceSessions}
-        accountManagement={accountManagement}
-        onQueryDevices={onQueryDevices}
-        onRenameDevice={onRenameDevice}
-        onDeleteDevices={onDeleteDevices}
-        onSubmitAccountManagementUia={onSubmitAccountManagementUia}
-      />
-
-      <AccountManagementSection
-        accountManagement={accountManagement}
-        accountManagementCapabilities={accountManagementCapabilities}
-        accountManagementUrl={accountManagementUrl}
-        currentSession={currentSession}
-        onLoadAccountManagementCapabilities={onLoadAccountManagementCapabilities}
-        onChangePassword={onChangePassword}
-        onDeactivateAccount={onDeactivateAccount}
-        onManageAccount={onManageAccount}
-        onSubmitAccountManagementUia={onSubmitAccountManagementUia}
-      />
-
-      <TrustSection
-        trust={e2eeTrust}
-        onAcceptVerification={onAcceptVerification}
-        onBootstrapCrossSigning={onBootstrapCrossSigning}
-        onCancelVerification={onCancelVerification}
-        onConfirmSasVerification={onConfirmSasVerification}
-        onEnableKeyBackup={onEnableKeyBackup}
-        onResetIdentity={onResetIdentity}
-        onCancelIdentityReset={onCancelIdentityReset}
-        onSubmitIdentityResetOAuth={onSubmitIdentityResetOAuth}
-        onSubmitIdentityResetPassword={onSubmitIdentityResetPassword}
-      />
-
-      {savedSessions.length > 0 ? (
-        <section className="account-switcher" aria-label={t("settings.accountSwitcher")}>
-          <h3>{t("settings.accounts")}</h3>
-          <div className="account-switcher-list">
-            {savedSessions.map((session) => {
-              const isCurrent = sessionMatches(currentSession, session);
-              return (
-                <article className="account-switcher-row" key={sessionKey(session)}>
-                  <div className="account-switcher-avatar" aria-hidden="true">
-                    {accountInitial(session.user_id)}
-                  </div>
-                  <div className="account-switcher-main">
-                    <div className="account-switcher-user" dir="auto">{session.user_id}</div>
-                    <div className="account-switcher-meta" dir="auto">
-                      {session.homeserver} / {session.device_id}
-                    </div>
-                  </div>
-                  <button
-                    className="account-switcher-action"
-                    type="button"
-                    disabled={isCurrent}
-                    onClick={() => onSwitchAccount(session)}
-                  >
-                    <RefreshCcw size={14} />
-                    <span>{isCurrent ? t("settings.current") : t("settings.switch")}</span>
-                  </button>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
     </section>
   );
+}
+
+function AccountSwitcherSection({
+  currentSession,
+  savedSessions,
+  onSwitchAccount
+}: {
+  currentSession: SavedSessionInfo | null;
+  savedSessions: SavedSessionInfo[];
+  onSwitchAccount: (session: SavedSessionInfo) => void;
+}) {
+  if (savedSessions.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="account-switcher" aria-label={t("settings.accountSwitcher")}>
+      <h3>{t("settings.accounts")}</h3>
+      <div className="account-switcher-list">
+        {savedSessions.map((session) => {
+          const isCurrent = sessionMatches(currentSession, session);
+          return (
+            <article className="account-switcher-row" key={sessionKey(session)}>
+              <div className="account-switcher-avatar" aria-hidden="true">
+                {accountInitial(session.user_id)}
+              </div>
+              <div className="account-switcher-main">
+                <div className="account-switcher-user" dir="auto">{session.user_id}</div>
+                <div className="account-switcher-meta" dir="auto">
+                  {session.homeserver} / {session.device_id}
+                </div>
+              </div>
+              <button
+                className="account-switcher-action"
+                type="button"
+                disabled={isCurrent}
+                onClick={() => onSwitchAccount(session)}
+              >
+                <RefreshCcw size={14} />
+                <span>{isCurrent ? t("settings.current") : t("settings.switch")}</span>
+              </button>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function currentSessionVerificationLabel(
+  state: "verified" | "unverified" | undefined
+): string {
+  if (state === undefined) return t("sessionStatus.unavailable");
+  return state === "verified" ? t("sessionStatus.verified") : t("sessionStatus.unverified");
+}
+
+function currentSessionCrossSigningLabel(state: boolean | undefined): string {
+  if (state === undefined) return t("sessionStatus.unavailable");
+  return state ? t("sessionStatus.crossSigned") : t("sessionStatus.notCrossSigned");
+}
+
+function currentSessionIdentityLabel(
+  state: "missing" | "unverified" | "verified" | undefined
+): string {
+  switch (state) {
+    case "verified":
+      return t("sessionStatus.identityVerified");
+    case "unverified":
+      return t("sessionStatus.identityUnverified");
+    case "missing":
+      return t("sessionStatus.identityMissing");
+    case undefined:
+      return t("sessionStatus.unavailable");
+  }
+}
+
+function currentSessionBackupLabel(
+  state: "ready" | "disabled" | "unknown" | undefined
+): string {
+  switch (state) {
+    case "ready":
+      return t("sessionStatus.backupReady");
+    case "disabled":
+      return t("sessionStatus.backupDisabled");
+    case "unknown":
+      return t("sessionStatus.unknown");
+    case undefined:
+      return t("sessionStatus.unavailable");
+  }
 }
 
 function NotificationSettingToggle({

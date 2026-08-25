@@ -102,20 +102,23 @@ export function AccountManagementSection({
         <h3>{t("settings.accountManagement")}</h3>
       </div>
 
-      {accountManagementUrl ? (
-        <div className="manage-account-row">
-          <button
-            className="trust-action-button"
-            type="button"
-            onClick={onManageAccount}
-            data-testid="manage-account-button"
-          >
-            <ExternalLink size={14} aria-hidden="true" />
-            <span>{t("settings.manageAccount")}</span>
-          </button>
-          <p className="profile-settings-hint">{t("settings.manageAccountHint")}</p>
-        </div>
-      ) : null}
+      <div className="manage-account-row">
+        <button
+          className="trust-action-button"
+          type="button"
+          disabled={!accountManagementUrl}
+          onClick={onManageAccount}
+          data-testid="manage-account-button"
+        >
+          <ExternalLink size={14} aria-hidden="true" />
+          <span>{t("settings.manageAccount")}</span>
+        </button>
+        <p className="profile-settings-hint">
+          {accountManagementUrl
+            ? t("settings.manageAccountHint")
+            : t("settings.manageAccountUnavailable")}
+        </p>
+      </div>
 
       {accountManagement.kind === "awaitingUia" && (isChangePassword || isDeactivate) ? (
         <AccountManagementUiaForm
