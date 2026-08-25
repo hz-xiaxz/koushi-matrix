@@ -133,6 +133,25 @@ jobs:
       - name: cargo-machete (unused deps)
         run: cargo machete
 
+  macos-cargo-check:
+    name: macOS Tauri cargo check
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target-macos-check
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Rust toolchain (1.96.0)
+        uses: dtolnay/rust-toolchain@1.96.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          shared-key: koushi-macos-cargo-check
+      - name: Check the macOS Tauri crate
+        run: cargo check -p koushi-desktop
+
   core-invites:
     # PR1 forces the debug-only SyncService selector because the obsolete
     # invite-only probe misclassifies these supported fixtures. PR2 removes

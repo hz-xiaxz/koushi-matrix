@@ -390,7 +390,7 @@ pub(crate) async fn synchronize_now<R: Runtime>(
             .map_err(|_| "viewport main-thread dispatch failed".to_owned())?;
         let native = receiver
             .await
-            .map_err(|_| "viewport main-thread result was dropped".to_owned())??;
+            .map_err(|_| "viewport main-thread result was dropped".to_owned())?;
         Ok(ViewportSyncReceipt::from_native(
             observation_generation,
             trigger,
