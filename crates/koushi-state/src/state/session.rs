@@ -164,7 +164,10 @@ pub enum SecureBackupGateState {
 
 impl SecureBackupGateState {
     pub fn backup_is_ready(&self) -> bool {
-        matches!(self, Self::Ready)
+        matches!(
+            self,
+            Self::Ready | Self::UploadingExistingKeys { .. } | Self::DegradedRetrying { .. }
+        )
     }
 }
 

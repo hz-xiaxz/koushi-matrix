@@ -90,7 +90,18 @@ describe("App diagnostics lifecycle", () => {
     expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
   });
 
-  test("keeps the read-only shell visible when a ready session later degrades", async () => {
+  test("exposes the normal shell while an authoritative backup uploads existing keys", async () => {
+    const api = createBrowserFakeApi({
+      secureBackupGate: { kind: "uploadingExistingKeys", pending: "over_one_hundred" }
+    });
+
+    await renderAppWithApi(api);
+
+    expect(await screen.findByRole("button", { name: "Create room" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Uploading existing keys…" })).toBeNull();
+  });
+
+  test("keeps the operational shell visible when a ready session later degrades", async () => {
     const api = createBrowserFakeApi();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
@@ -119,7 +130,7 @@ describe("App diagnostics lifecycle", () => {
     );
 
     mutable.snapshot.state.domain.secure_backup_gate = {
-      kind: "blockedFailed",
+      kind: "degradedRetrying",
       failure: "network"
     };
 
@@ -132,7 +143,7 @@ describe("App diagnostics lifecycle", () => {
     });
     expect(await screen.findByRole("button", { name: "Create room" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Message composer" }).getAttribute("aria-disabled"))
-      .toBe("true");
+      .not.toBe("true");
     expect(screen.queryByRole("heading", { name: "Secure backup required" })).toBeNull();
     expect(document.querySelector(".secure-backup-runtime-banner")).toBeNull();
 

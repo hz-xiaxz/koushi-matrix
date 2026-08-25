@@ -273,19 +273,25 @@ stateDiagram-v2
   verification gate.
 - `SessionState::Ready` is necessary but not sufficient for encrypted sending.
   The independent `SecureBackupGateState` starts at `Checking` after verified
-  promotion and opens encrypted admission only at `Ready`. This keeps one
-  session lifecycle while allowing sync, receiving, and local decryption to
-  continue during backup recovery or runtime degradation.
+  promotion and opens normal use only after inspection establishes that
+  Recovery is complete and the existing trusted backup is enabled locally.
+  `Ready`, `UploadingExistingKeys`, and `DegradedRetrying` are operational
+  states once that authority exists; upload progress or later degradation is
+  visible but does not close ordinary encrypted sending. Recovery/setup,
+  mismatch, incomplete storage, and an inconclusive initial inspection remain
+  blocking.
 - `SecureBackupGateState` distinguishes an existing backup needing recovery,
   incomplete secure storage, setup required, explicitly disabled setup,
   creation, native Recovery Key delivery, upload settlement, retrying,
   terminal blocking failure, and ready. Server existence, local enablement,
   recovery completeness, and upload health remain distinct SDK inspection
   facts and are not collapsed into a boolean.
-- A transition away from backup `Ready` closes encrypted admission
-  immediately but does not clear composer drafts or stop sync. A matching
-  authoritative return to `Ready` reopens admission. Account/session
-  generation fencing occurs in `AccountActor` before reducer projection.
+- A transition from an operational backup state to recovery/setup, mismatch,
+  or incomplete storage closes encrypted admission immediately but does not
+  clear composer drafts or stop sync. Upload progress and transient runtime
+  degradation retain normal use; an inconclusive initial inspection does not.
+  Account/session generation fencing occurs in `AccountActor` before reducer
+  projection.
 - Setup after an explicitly disabled state requires a separate user command;
   the UI states that re-enabling the account-wide backup setting changes the
   behavior observed by the user's other Matrix clients.

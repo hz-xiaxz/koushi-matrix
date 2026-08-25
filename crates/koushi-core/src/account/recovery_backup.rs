@@ -76,6 +76,7 @@ pub(super) fn record_recovery_verification_event(event: DiagnosticEvent) {
 fn secure_backup_inspection_completion_action(
     current_generation: u64,
     session_promoted: bool,
+    was_admitted: bool,
     generation: u64,
     result: Result<
         koushi_sdk::MatrixSecureBackupInspection,
@@ -91,7 +92,7 @@ fn secure_backup_inspection_completion_action(
             failure @ (koushi_state::SecureBackupGateFailureKind::Network
             | koushi_state::SecureBackupGateFailureKind::RateLimited
             | koushi_state::SecureBackupGateFailureKind::Timeout),
-        ) => koushi_state::SecureBackupGateState::DegradedRetrying { failure },
+        ) if was_admitted => koushi_state::SecureBackupGateState::DegradedRetrying { failure },
         Err(failure) => koushi_state::SecureBackupGateState::BlockedFailed { failure },
     };
     Some(AppAction::SecureBackupGateChanged(gate))
@@ -1368,7 +1369,6 @@ impl AccountActor {
     }
 
     pub(super) fn start_secure_backup_inspection(&mut self) {
-        self.set_secure_backup_send_admitted(false);
         if self.secure_backup_inspection_task.is_some() {
             self.secure_backup_inspection_pending = true;
             return;
@@ -1417,6 +1417,7 @@ impl AccountActor {
         let Some(mut action) = secure_backup_inspection_completion_action(
             self.trust_generation,
             self.session_promoted,
+            self.secure_backup_ready,
             generation,
             result,
         ) else {
@@ -1436,7 +1437,7 @@ impl AccountActor {
             );
         }
         if let AppAction::SecureBackupGateChanged(gate) = &action {
-            let admitted = matches!(gate, koushi_state::SecureBackupGateState::Ready);
+            let admitted = gate.backup_is_ready();
             self.set_secure_backup_send_admitted(admitted);
             let retrying = matches!(
                 gate,
@@ -1531,12 +1532,16 @@ impl AccountActor {
     pub(super) async fn handle_secure_backup_state_changed(
         &mut self,
         generation: u64,
-        _state: koushi_sdk::MatrixSecureBackupState,
+        state: koushi_sdk::MatrixSecureBackupState,
     ) {
         if generation != self.trust_generation || !self.session_promoted {
             return;
         }
-        self.set_secure_backup_send_admitted(false);
+        if state.backup != koushi_sdk::MatrixSecureBackupLocalState::Enabled
+            || state.recovery != koushi_sdk::MatrixSecureBackupRecoveryState::Enabled
+        {
+            self.set_secure_backup_send_admitted(false);
+        }
         self.send_actions(vec![AppAction::SecureBackupGateChanged(
             koushi_state::SecureBackupGateState::Checking,
         )])
@@ -1601,6 +1606,7 @@ mod tests {
                 secure_backup_inspection_completion_action(
                     current_generation,
                     promoted,
+                    false,
                     completed_generation,
                     Ok(ready_secure_backup_inspection()),
                 )
@@ -1612,6 +1618,7 @@ mod tests {
             secure_backup_inspection_completion_action(
                 5,
                 true,
+                false,
                 5,
                 Ok(ready_secure_backup_inspection()),
             ),
@@ -1623,11 +1630,26 @@ mod tests {
             secure_backup_inspection_completion_action(
                 5,
                 true,
+                true,
                 5,
                 Err(koushi_state::SecureBackupGateFailureKind::Timeout),
             ),
             Some(AppAction::SecureBackupGateChanged(
                 koushi_state::SecureBackupGateState::DegradedRetrying {
+                    failure: koushi_state::SecureBackupGateFailureKind::Timeout
+                }
+            ))
+        ));
+        assert!(matches!(
+            secure_backup_inspection_completion_action(
+                5,
+                true,
+                false,
+                5,
+                Err(koushi_state::SecureBackupGateFailureKind::Timeout),
+            ),
+            Some(AppAction::SecureBackupGateChanged(
+                koushi_state::SecureBackupGateState::BlockedFailed {
                     failure: koushi_state::SecureBackupGateFailureKind::Timeout
                 }
             ))

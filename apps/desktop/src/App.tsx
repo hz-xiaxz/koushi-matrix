@@ -766,10 +766,11 @@ export function App() {
     secureBackupShellAccountRef.current = secureBackupShellAccount;
     secureBackupShellExposedRef.current = false;
   }
-  if (
-    secureBackupShellAccount !== null &&
-    snapshot?.state.domain.secure_backup_gate.kind === "ready"
-  ) {
+  const secureBackupGateIsOperational =
+    snapshot?.state.domain.secure_backup_gate.kind === "ready" ||
+    snapshot?.state.domain.secure_backup_gate.kind === "uploadingExistingKeys" ||
+    snapshot?.state.domain.secure_backup_gate.kind === "degradedRetrying";
+  if (secureBackupShellAccount !== null && secureBackupGateIsOperational) {
     secureBackupShellExposedRef.current = true;
   }
   const submissionAccountOwnerRef = useRef<string | null>(
@@ -5193,7 +5194,7 @@ export function App() {
   const secureBackupGate = snapshot.state.domain.secure_backup_gate;
   const secureBackupStartupGateRequired =
     sessionKind === "ready" &&
-    secureBackupGate.kind !== "ready" &&
+    !secureBackupGateIsOperational &&
     !secureBackupShellExposedRef.current;
   const secureBackupRuntimeDegraded =
     sessionKind === "ready" &&
@@ -5278,7 +5279,7 @@ export function App() {
     (room) => room.room_id === snapshot.state.ui.navigation.active_room_id
   );
   const encryptedComposerBlocked =
-    secureBackupRuntimeDegraded && Boolean(activeRoom?.is_encrypted);
+    !secureBackupGateIsOperational && Boolean(activeRoom?.is_encrypted);
   const runtimeAlerts: RuntimeAlert[] = [];
   if (secureBackupRuntimeDegraded) {
     runtimeAlerts.push({
