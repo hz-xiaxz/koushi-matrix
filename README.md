@@ -93,6 +93,12 @@ On macOS, use the checked-in DMG wrapper script through the desktop package:
 npm --prefix apps/desktop run build:dmg
 ```
 
+The repository-root shell entry point forwards the same options to that build:
+
+```bash
+./scripts/desktop-build-dmg.sh
+```
+
 The wrapper runs the release preflight check, then builds the native DMG with:
 
 ```bash
@@ -110,6 +116,9 @@ npm --prefix apps/desktop run build:dmg -- --skip-preflight
 
 # Run the macOS signing preflight before building.
 npm --prefix apps/desktop run build:dmg:signed
+
+# Equivalent signed build through the shell entry point.
+./scripts/desktop-build-dmg.sh --signed
 ```
 
 The script prints the generated `.dmg` artifact path when the build completes.
