@@ -1776,6 +1776,20 @@ test("room sections follow Element-aligned order and render Rust-owned counts", 
     "data-mention-count",
     "1"
   );
+
+  await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      sidebar: {
+        ...snapshot.sidebar,
+        account_home: { ...snapshot.sidebar.account_home, is_active: true }
+      }
+    });
+    window.__harness.pushStateChanged();
+  });
+  await expect(page.locator('[data-room-section="favourites"]')).toHaveCount(0);
+  await expect(page.locator('[data-room-section="low-priority"]')).toBeVisible();
 });
 
 test("category unread badges keep DMs and Rooms attention visible from Rust sidebar counts", async ({

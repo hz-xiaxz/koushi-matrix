@@ -1103,21 +1103,19 @@ export function Sidebar({
             onToggleCollapsed={() => toggleSection("favourites")}
           />
         ) : null}
-        {!accountHomeActive ? (
-          <RoomSection
-            activeRoomId={activeRoomId}
-            collapsed={Boolean(collapsedSections["low-priority"])}
-            id="low-priority"
-            kind="room"
-            label={t("workspace.lowPriority")}
-            presence={presence}
-            roomById={roomById}
-            rooms={sections.lowPriority}
-            onOpenContextMenu={onOpenContextMenu}
-            onSelectRoom={onSelectRoom}
-            onToggleCollapsed={() => toggleSection("low-priority")}
-          />
-        ) : null}
+        <RoomSection
+          activeRoomId={activeRoomId}
+          collapsed={Boolean(collapsedSections["low-priority"])}
+          id="low-priority"
+          kind="room"
+          label={t("workspace.lowPriority")}
+          presence={presence}
+          roomById={roomById}
+          rooms={sections.lowPriority}
+          onOpenContextMenu={onOpenContextMenu}
+          onSelectRoom={onSelectRoom}
+          onToggleCollapsed={() => toggleSection("low-priority")}
+        />
       </div>
     </aside>
   );
