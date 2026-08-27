@@ -1,6 +1,6 @@
 # Issue #552 Remaining Frontend Ownership Migration — Phased Execution Plan
 
-Status: Phases 0 and 1 (#708, PR #710) merged. Phase 2A is implemented on its approved branch pending final verification/review/merge; later phases remain unauthorized by this document alone.
+Status: Phases 0, 1 (#708 / PR #710), and 2A (PR #711) merged. Phase 2B1 design is pending independent review; later implementation remains unauthorized by this document alone.
 
 Phase 0 base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`. Phase 1 #708 insertion base: `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
@@ -83,9 +83,11 @@ Task-level design: `2026-08-28-issue552-neutral-desktop-api-contract.md`.
 
 **Phase 2A implementation record:** `desktopApi.ts` is the neutral contract; `TauriDesktopApi` and `BrowserFakeApi` depend on it; `appRuntime` alone selects by the existing runtime predicate; client/browser method bodies, IPC/DTO contracts and `tauriTimelineTransport` are unchanged. Composition-root RED/GREEN tests prove exactly one adapter construction. This does not count as semantic migration.
 
-**Proof:** typecheck, focused client/fake/App tests, full Vitest, lint, build, and import-cycle check.
+**Proof:** typecheck, focused client/fake/App tests, full Vitest, lint, build, and explicit acyclic dependency-graph inspection.
 
 ### Phase 2B — Platform ports at existing seams
+
+Phase 2B1 task-level design: `2026-08-28-issue552-link-media-platform-ports.md`.
 
 **One PR per independently testable port family; do not bundle all families.**
 
