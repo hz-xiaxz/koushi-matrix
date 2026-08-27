@@ -1250,6 +1250,7 @@ describe("TimelineView", () => {
       is_edited: false,
       has_media: false,
       megolm_session_fingerprint: "AbCdEfGhIjKl",
+      megolm_message_index: 0,
       megolm_session_rotation_reason: "expiredTime",
       original_json: {
         type: "m.room.message",
@@ -1268,6 +1269,8 @@ describe("TimelineView", () => {
     expect(
       screen.getByRole("button", { name: "Copy Megolm session fingerprint" }).textContent
     ).toContain("Copy");
+    expect(screen.getByText("Megolm message index")).toBeTruthy();
+    expect(screen.getByText("0")).toBeTruthy();
     expect(screen.getByText("Time limit reached")).toBeTruthy();
   });
 

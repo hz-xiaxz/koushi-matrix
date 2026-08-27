@@ -3138,13 +3138,14 @@ dependencies = [
  "tokio",
  "tracing-subscriber",
  "url",
+ "vodozemac",
  "wiremock",
  "zeroize",
 ]
 
 [[package]]
 name = "koushi-desktop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "dirs",
  "keyring",

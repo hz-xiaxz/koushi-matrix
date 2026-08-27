@@ -1251,6 +1251,10 @@ impl TimelineActor {
                     project_local_megolm_rotation_reason(sent_by_current_device, reason);
             }
             source.original_json = original_json_for_event_item(event_item);
+            source.megolm_message_index = source
+                .original_json
+                .as_ref()
+                .and_then(megolm_message_index_from_original_json);
             return Some(source);
         }
         None
@@ -1496,6 +1500,20 @@ fn original_json_for_event_item(event_item: &EventTimelineItem) -> Option<serde_
     event_item
         .original_json()
         .and_then(|raw| serde_json::from_str(raw.json().get()).ok())
+}
+
+fn megolm_message_index_from_original_json(original_json: &serde_json::Value) -> Option<u32> {
+    if original_json.get("type")?.as_str()? != "m.room.encrypted" {
+        return None;
+    }
+    let content = original_json.get("content")?;
+    if content.get("algorithm")?.as_str()? != "m.megolm.v1.aes-sha2" {
+        return None;
+    }
+    let ciphertext = content.get("ciphertext")?.as_str()?;
+    vodozemac::megolm::MegolmMessage::from_base64(ciphertext)
+        .ok()
+        .map(|message| message.message_index())
 }
 
 fn project_local_megolm_rotation_reason(
@@ -4085,7 +4103,8 @@ mod tests {
     use super::{
         apply_ignored_sender_suppression, composer_document_from_event_json,
         edited_content_for_edit_target, edited_document_content_for_edit_target,
-        has_user_visible_content, link_ranges_for_message_projection, membership_change_projection,
+        has_user_visible_content, link_ranges_for_message_projection,
+        megolm_message_index_from_original_json, membership_change_projection,
         message_edit_target_token, message_projection_from_msgtype,
         msgtype_carries_editable_caption, project_local_megolm_rotation_reason,
         reaction_groups_from_sdk, reply_quote_from_message_projection,
@@ -4097,6 +4116,42 @@ mod tests {
     };
 
     use super::super::test_support::{fake_rid, room_key, timeline_item};
+
+    #[test]
+    fn extracts_megolm_message_index_from_encrypted_event_source() {
+        let mut session =
+            vodozemac::megolm::GroupSession::new(vodozemac::megolm::SessionConfig::version_1());
+        session.encrypt("index zero");
+        session.encrypt("index one");
+        let ciphertext = session.encrypt("index two").to_base64();
+        let event = serde_json::json!({
+            "type": "m.room.encrypted",
+            "content": {
+                "algorithm": "m.megolm.v1.aes-sha2",
+                "ciphertext": ciphertext,
+            }
+        });
+
+        assert_eq!(megolm_message_index_from_original_json(&event), Some(2));
+    }
+
+    #[test]
+    fn omits_megolm_message_index_for_unencrypted_or_invalid_source() {
+        let unencrypted = serde_json::json!({
+            "type": "m.room.message",
+            "content": { "body": "hello", "msgtype": "m.text" }
+        });
+        let invalid = serde_json::json!({
+            "type": "m.room.encrypted",
+            "content": {
+                "algorithm": "m.megolm.v1.aes-sha2",
+                "ciphertext": "not-megolm",
+            }
+        });
+
+        assert_eq!(megolm_message_index_from_original_json(&unencrypted), None);
+        assert_eq!(megolm_message_index_from_original_json(&invalid), None);
+    }
 
     #[test]
     fn ignored_sender_suppression_preserves_divider_and_restores_event() {

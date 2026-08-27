@@ -18,7 +18,11 @@ import { listen } from "@tauri-apps/api/event";
 // eslint-disable-next-line no-restricted-imports
 import { getCurrentWindow } from "@tauri-apps/api/window";
 // eslint-disable-next-line no-restricted-imports
-import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import {
+  confirm as confirmDialog,
+  open as openDialog,
+  save as saveDialog
+} from "@tauri-apps/plugin-dialog";
 
 import { api } from "./backend/appRuntime";
 import {
@@ -1020,6 +1024,7 @@ export function App() {
   >(null);
   const [newDmDialogOpen, setNewDmDialogOpen] = useState(false);
   const [resetLocalDataConfirmOpen, setResetLocalDataConfirmOpen] = useState(false);
+  const logoutConfirmationInFlightRef = useRef(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [secureBackupInspectionRetrying, setSecureBackupInspectionRetrying] = useState(false);
   const secureBackupInspectionRetryInFlightRef = useRef(false);
@@ -1461,7 +1466,7 @@ export function App() {
         void setRightPanelModeClosingFocusedContext("userSettings");
         return true;
       case "logout":
-        void logout();
+        void requestLogout();
         return true;
       case "searchInRoom":
         setSearchScope("currentRoom");
@@ -2167,6 +2172,24 @@ export function App() {
       await refreshSavedSessions();
     } finally {
       setIsBusy(false);
+    }
+  }
+
+  async function requestLogout() {
+    if (logoutConfirmationInFlightRef.current || isBusy) {
+      return;
+    }
+    logoutConfirmationInFlightRef.current = true;
+    try {
+      const confirmed = await confirmDialog(t("settings.signOutConfirm"), {
+        title: t("settings.signOutConfirmTitle"),
+        kind: "warning"
+      });
+      if (confirmed) {
+        await logout();
+      }
+    } finally {
+      logoutConfirmationInFlightRef.current = false;
     }
   }
 
@@ -5218,7 +5241,7 @@ export function App() {
       <SessionVerificationGate
         snapshot={snapshot}
         onSnapshot={setSnapshot}
-        onSignOut={() => void logout()}
+        onSignOut={() => void requestLogout()}
         operations={{
           startOwnUserSas: () => api.startOwnUserSas(),
           submitRecovery: (secret) => api.submitRecovery(secret),
@@ -5240,7 +5263,7 @@ export function App() {
         isBusy={isBusy}
         session={blockedSession}
         onRetry={() => void retrySlidingSyncCapability()}
-        onSignOut={() => void logout()}
+        onSignOut={() => void requestLogout()}
         onChangeHomeserver={() => void changeCapabilityHomeserver()}
       />
     );
@@ -5904,7 +5927,7 @@ export function App() {
             setResetLocalDataConfirmOpen(true);
           }}
           onLogout={() => {
-            void logout();
+            void requestLogout();
           }}
           onInviteUser={openInviteUserDialog}
           onReturnToInvite={() => {

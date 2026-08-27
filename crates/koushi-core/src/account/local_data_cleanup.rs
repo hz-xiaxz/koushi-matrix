@@ -943,6 +943,7 @@ mod tests {
             secure_backup_inspection_pending: false,
             secure_backup_observer: None,
             verification_method_discovery_task: None,
+            verification_method_discovery_admission_task: None,
             verification_method_discovery_serial: 0,
             verification_method_discovery_failed: false,
             recovery_task: None,
