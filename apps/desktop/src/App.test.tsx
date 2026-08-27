@@ -1354,13 +1354,21 @@ describe("ContextualRightPanel", () => {
     expect(source).not.toContain("composerDraftRevisionForTarget");
   });
 
-  test("desktop api exposes a search index rebuild command", () => {
+  test("desktop api contract is neutral and exposes the search index rebuild command", () => {
+    const contractSource = readFileSync(new URL("./backend/desktopApi.ts", import.meta.url), "utf8");
     const source = readFileSync(new URL("./backend/client.ts", import.meta.url), "utf8");
     const fakeSource = readFileSync(new URL("./backend/browserFakeApi.ts", import.meta.url), "utf8");
+    const runtimeSource = readFileSync(new URL("./backend/appRuntime.ts", import.meta.url), "utf8");
 
-    expect(source).toContain("rebuildSearchIndex(): Promise<DesktopSnapshot>");
+    expect(contractSource).toContain("export interface DesktopApi");
+    expect(contractSource).toContain("rebuildSearchIndex(): Promise<DesktopSnapshot>");
     expect(source).toContain('invoke<DesktopSnapshot>("rebuild_search_index"');
+    expect(source).not.toContain("createDesktopApi");
+    expect(source).not.toContain("function isTauriRuntime");
     expect(fakeSource).toContain("async rebuildSearchIndex(): Promise<DesktopSnapshot>");
+    expect(fakeSource).not.toContain("export interface DesktopApi");
+    expect(runtimeSource).toContain("new TauriDesktopApi()");
+    expect(runtimeSource).toContain("createBrowserFakeApi()");
   });
 
   test("renders encryption recovery as a contextual right panel mode", async () => {

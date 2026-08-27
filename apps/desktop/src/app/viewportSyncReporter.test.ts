@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { DesktopApi } from "../backend/browserFakeApi";
+import type { DesktopApi } from "../backend/desktopApi";
 import { createViewportSyncReporter } from "./viewportSyncReporter";
 
 function rect(width = 1200, height = 800): DOMRect {

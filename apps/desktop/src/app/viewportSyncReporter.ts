@@ -4,7 +4,7 @@ import type {
   ViewportSyncObservation,
   ViewportSyncReceipt,
   ViewportSyncTrigger
-} from "../backend/browserFakeApi";
+} from "../backend/desktopApi";
 
 export type FrontendViewportSyncTrigger = Extract<
   ViewportSyncTrigger,

@@ -35,8 +35,8 @@ transitions. It renders `DesktopSnapshot` DTOs and calls commands such as
 
 ## Browser Fallback
 
-When the app is opened through Vite outside Tauri,
-`createDesktopApi()` uses `createBrowserFakeApi()`. This lets UI work continue
+When the app is opened through Vite outside Tauri, the `appRuntime` composition
+root selects `createBrowserFakeApi()` through the shared runtime predicate. This lets UI work continue
 without a native app process while keeping the same DTO shape as the Tauri
 commands.
 

@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { createDesktopApi } from "./client";
+import { TauriDesktopApi } from "./client";
 import { documentFromText } from "../domain/composerDocument";
 import { parseComposerDraftRevision } from "../domain/composerDraftRevision";
 
@@ -18,7 +18,7 @@ describe("TauriDesktopApi", () => {
   test("gets the diagnostic snapshot without private arguments", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.getDiagnosticSnapshot();
 
     expect(invoke).toHaveBeenCalledWith("get_diagnostic_snapshot");
@@ -27,7 +27,7 @@ describe("TauriDesktopApi", () => {
   test("opens a thread with the Rust-owned creation intent", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.openThread(
       "!room:example.invalid",
       "$root:example.invalid",
@@ -43,7 +43,7 @@ describe("TauriDesktopApi", () => {
 
   test("acknowledges a rendered repair batch with every generation fence", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.acknowledgeTimelineBatchRendered(
       { account_key: "account", kind: { Room: { room_id: "!room:example.invalid" } } },
       9,
@@ -64,7 +64,7 @@ describe("TauriDesktopApi", () => {
   test("discovers login methods through typed Tauri command", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.discoverLoginMethods("https://example.test");
 
     expect(invoke).toHaveBeenCalledWith("discover_login_methods", {
@@ -75,7 +75,7 @@ describe("TauriDesktopApi", () => {
   test("refreshes current-session status with the Rust-owned trigger", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.refreshCurrentSessionStatus("manual");
 
     expect(invoke).toHaveBeenCalledWith("refresh_current_session_status", {
@@ -86,7 +86,7 @@ describe("TauriDesktopApi", () => {
   test("passes OIDC login flow commands to Rust", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.startOidcLogin("https://example.test");
     await api.completeOidcLogin(
       "https://example.test",
@@ -105,7 +105,7 @@ describe("TauriDesktopApi", () => {
   test("passes soft logout reauth to the Rust session command", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.submitSoftLogoutReauth("synthetic-password");
 
     expect(invoke).toHaveBeenCalledWith("submit_soft_logout_reauth", {
@@ -116,7 +116,7 @@ describe("TauriDesktopApi", () => {
   test("passes explicit device cleanup stages to Rust without exposing remote policy", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.startDeviceCleanup();
     await api.submitDeviceCleanupUia(370, "synthetic-password");
     await api.eraseLocalDataAnyway();
@@ -132,7 +132,7 @@ describe("TauriDesktopApi", () => {
   test("passes settings patches to the Rust update_settings command", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.updateSettings({ appearance: { theme: "dark" } });
 
     expect(invoke).toHaveBeenCalledWith("update_settings", {
@@ -143,7 +143,7 @@ describe("TauriDesktopApi", () => {
   test("passes room URL-preview overrides to the dedicated Rust command", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.setRoomUrlPreviewOverride("!room:example.invalid", false);
 
     expect(invoke).toHaveBeenCalledWith("set_room_url_preview_override", {
@@ -155,7 +155,7 @@ describe("TauriDesktopApi", () => {
   test("passes composer resolver facts to the Rust resolver command", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.resolveComposerKeyAction(
       "main",
       {
@@ -182,7 +182,7 @@ describe("TauriDesktopApi", () => {
 
   test("passes the renderer generation and composer draft lease to Rust", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     const account = {
       homeserver: "https://example.invalid",
       userId: "@user:example.invalid",
@@ -235,7 +235,7 @@ describe("TauriDesktopApi", () => {
 
   test("passes structured mention identity to send and edit commands without parallel text metadata", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     const account = {
       homeserver: "https://example.invalid",
       userId: "@user:example.invalid",
@@ -284,7 +284,7 @@ describe("TauriDesktopApi", () => {
   test("passes E2EE trust actions to Rust-owned commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.bootstrapCrossSigning();
     await api.enableKeyBackup();
     await api.acceptVerification(41);
@@ -312,7 +312,7 @@ describe("TauriDesktopApi", () => {
   test("passes E2EE key-management actions to Rust-owned commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.exportRoomKeys("/tmp/export.txt", "room-key-passphrase");
     await api.importRoomKeys("/tmp/import.txt", "room-key-passphrase");
     await api.bootstrapSecureBackup("secure-backup-passphrase", "/tmp/recovery.txt");
@@ -344,7 +344,7 @@ describe("TauriDesktopApi", () => {
   test("passes secure backup gate actions to their dedicated Rust commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.recoverSecureBackup("secure-backup-recovery-key");
     const { setupSecureBackup, reenableSecureBackup } = api;
     await setupSecureBackup("secure-backup-passphrase", "/tmp/recovery.txt");
@@ -368,7 +368,7 @@ describe("TauriDesktopApi", () => {
   test("passes reaction actions to Rust-owned timeline commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.sendReaction("!room:example.invalid", "$event:example.invalid", "👍");
     await api.redactReaction(
       "!room:example.invalid",
@@ -393,7 +393,7 @@ describe("TauriDesktopApi", () => {
   test("passes send queue actions to Rust-owned timeline commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.retrySend("!room:example.invalid", "txn-retry");
     await api.cancelSend("!room:example.invalid", "txn-cancel");
 
@@ -410,7 +410,7 @@ describe("TauriDesktopApi", () => {
   test("passes profile actions to Rust-owned account commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.setDisplayName("Alice");
     await api.setAvatar("image/png", [1, 2, 3, 4]);
     await api.setLocalUserAlias("@target:example.invalid", "Desk Alias");
@@ -434,7 +434,7 @@ describe("TauriDesktopApi", () => {
   test("passes invite and DM actions to Rust-owned room commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.acceptInvite("!invite:example.invalid");
     await api.declineInvite("!decline:example.invalid");
     await api.joinRoom("!child:example.invalid");
@@ -462,7 +462,7 @@ describe("TauriDesktopApi", () => {
   test("passes public directory actions to Rust-owned room commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.queryDirectory({
       term: "public rooms",
       server_name: "example.invalid",
@@ -486,7 +486,7 @@ describe("TauriDesktopApi", () => {
   test("passes room management actions to Rust-owned room commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.loadRoomSettings("!room:example.invalid");
     await api.queryMentionCandidates("!room:example.invalid", "thread", "ali");
     await api.repairRoomTimeline("!room:example.invalid");
@@ -532,7 +532,7 @@ describe("TauriDesktopApi", () => {
   test("passes Space member audit actions with the generation fence", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.loadSpaceMembers("!space:example.invalid", 4);
     await api.inviteUserToSpace(
       "!space:example.invalid",
@@ -581,7 +581,7 @@ describe("TauriDesktopApi", () => {
   test("passes activity actions to Rust-owned activity commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.openActivity();
     await api.setActivityTab("unread");
     await api.paginateActivity("recent", "recent-page-2");
@@ -613,7 +613,7 @@ describe("TauriDesktopApi", () => {
   test("passes credential health probe to Rust-owned account command", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
-    const api = createDesktopApi();
+    const api = new TauriDesktopApi();
     await api.probeLocalEncryptionHealth();
 
     expect(invoke).toHaveBeenCalledWith("probe_local_encryption_health");
