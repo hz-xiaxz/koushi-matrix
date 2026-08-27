@@ -33,10 +33,12 @@ use super::verification::send_observer_output_until_stopped;
 
 const VERIFICATION_METHOD_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 
+const VERIFICATION_METHOD_DISCOVERY_ADMISSION_TIMEOUT: Duration = Duration::from_secs(20);
+
 const CURRENT_SESSION_STATUS_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub(super) fn record_verification_admission_event(event: DiagnosticEvent) {
-    koushi_diagnostics::record(event);
+    koushi_diagnostics::record_and_stderr(event);
 }
 
 pub(super) fn verification_admission_event(
@@ -71,7 +73,7 @@ pub(super) fn current_device_trust_recheck_failure_token(
 }
 
 pub(super) fn record_verification_method_discovery_event(event: DiagnosticEvent) {
-    koushi_diagnostics::record(event);
+    koushi_diagnostics::record_and_stderr(event);
 }
 
 pub(super) fn verification_method_discovery_event(
@@ -310,15 +312,28 @@ pub(super) fn method_discovery_is_current(
 pub(super) fn retry_should_restart_method_discovery(
     session_promoted: bool,
     trust: Option<koushi_state::CurrentDeviceTrustState>,
-    discovery_task_active: bool,
-    discovery_failed: bool,
 ) -> bool {
     !session_promoted
-        && (discovery_task_active || discovery_failed)
         && matches!(
             trust,
             Some(koushi_state::CurrentDeviceTrustState::Unverified)
         )
+}
+
+pub(super) fn method_discovery_admission_timeout_is_current(
+    generation: u64,
+    current_generation: u64,
+    serial: u64,
+    current_serial: u64,
+    has_session: bool,
+    session_promoted: bool,
+    discovery_task_active: bool,
+) -> bool {
+    has_session
+        && !session_promoted
+        && !discovery_task_active
+        && generation == current_generation
+        && serial == current_serial
 }
 
 async fn wait_for_verification_method_discovery<F>(
@@ -390,6 +405,17 @@ pub(super) fn should_discover_verification_methods(
     trust: koushi_state::CurrentDeviceTrustState,
 ) -> bool {
     trust == koushi_state::CurrentDeviceTrustState::Unverified
+}
+
+pub(super) fn advance_observed_trust(
+    last_trust: &mut koushi_state::CurrentDeviceTrustState,
+    observed: koushi_state::CurrentDeviceTrustState,
+) -> bool {
+    if *last_trust == observed {
+        return false;
+    }
+    *last_trust = observed;
+    true
 }
 
 async fn run_recovery_state_observation<S>(
@@ -829,8 +855,13 @@ impl AccountActor {
                     encryption_sync_permit.clone(),
                     move || {
                         let callback_tx = callback_tx.clone();
-                        let first = !callback_first_response_seen.swap(true, Ordering::AcqRel);
+                        // Publish the first-response fence only after the actor
+                        // message is accepted. If a bounded mailbox send is
+                        // cancelled by the outer deadline, the failure path
+                        // must still report that admission never completed.
+                        let first = !callback_first_response_seen.load(Ordering::Acquire);
                         callback_failure_reported.store(false, Ordering::Release);
+                        let callback_first_response_seen = callback_first_response_seen.clone();
                         async move {
                             let message = if first {
                                 AccountMessage::FirstProvisionalEncryptionSyncFinished {
@@ -841,6 +872,9 @@ impl AccountActor {
                                 AccountMessage::ProvisionalEncryptionSyncSucceeded { generation }
                             };
                             if callback_tx.send(message).await.is_ok() {
+                                if first {
+                                    callback_first_response_seen.store(true, Ordering::Release);
+                                }
                                 koushi_sdk::MatrixSyncLoopControl::Continue
                             } else {
                                 koushi_sdk::MatrixSyncLoopControl::Stop
@@ -935,6 +969,10 @@ impl AccountActor {
                     trust,
                 }])
                 .await;
+                if should_discover_verification_methods(trust) {
+                    self.arm_verification_method_discovery_admission_timeout(generation)
+                        .await;
+                }
                 if self.provisional_encryption_sync.is_none()
                     && let Some(session) = self.session.clone()
                 {
@@ -1049,6 +1087,8 @@ impl AccountActor {
     }
 
     pub(super) async fn discover_verification_methods(&mut self, generation: u64) {
+        self.cancel_verification_method_discovery_admission_timeout()
+            .await;
         if let Some(owned) = self.verification_method_discovery_task.take() {
             owned.task.abort();
             let _ = owned.task.await;
@@ -1103,6 +1143,35 @@ impl AccountActor {
         });
     }
 
+    pub(super) async fn arm_verification_method_discovery_admission_timeout(
+        &mut self,
+        generation: u64,
+    ) {
+        if self.verification_method_discovery_admission_task.is_some() {
+            return;
+        }
+        let serial = self.verification_method_discovery_serial;
+        let tx = self.self_tx.clone();
+        self.verification_method_discovery_admission_task = Some(executor::spawn(async move {
+            executor::sleep(VERIFICATION_METHOD_DISCOVERY_ADMISSION_TIMEOUT).await;
+            let _ = tx
+                .send(
+                    AccountMessage::VerificationMethodDiscoveryAdmissionTimedOut {
+                        generation,
+                        serial,
+                    },
+                )
+                .await;
+        }));
+    }
+
+    pub(super) async fn cancel_verification_method_discovery_admission_timeout(&mut self) {
+        if let Some(task) = self.verification_method_discovery_admission_task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
     pub(super) async fn handle_trust_projection_applied(
         &mut self,
         generation: u64,
@@ -1144,6 +1213,12 @@ impl AccountActor {
             self.stop_normal_runtime_children().await;
             self.session_promoted = false;
             if let Some(session) = self.session.clone() {
+                if session.current_device_trust()
+                    == koushi_state::CurrentDeviceTrustState::Unverified
+                {
+                    self.arm_verification_method_discovery_admission_timeout(generation)
+                        .await;
+                }
                 self.start_provisional_encryption_sync(session.clone(), generation, transition_id);
                 if self.provisional_encryption_sync_ready
                     && session.current_device_trust()
@@ -1225,10 +1300,11 @@ mod tests {
     use super::refresh_device_keys_and_assert_known;
     use super::{
         PendingTrustTransition, TrustLifecycleDecision, VerificationMethodDiscoveryResult,
-        active_own_user_sas_flow_for_provisional_encryption_sync,
+        active_own_user_sas_flow_for_provisional_encryption_sync, advance_observed_trust,
         begin_provisional_encryption_sync_cursor_attempt, current_session_status_completion_action,
         current_session_status_observed_non_verified_trust, current_session_status_settled_event,
-        first_provisional_encryption_sync_is_current, method_discovery_is_current,
+        first_provisional_encryption_sync_is_current,
+        method_discovery_admission_timeout_is_current, method_discovery_is_current,
         own_user_sas_recheck_is_current, record_verification_admission_event,
         record_verification_method_discovery_event, recovery_sync_should_resume,
         retry_should_restart_method_discovery, run_recovery_state_observation,
@@ -1508,45 +1584,45 @@ mod tests {
     }
 
     #[test]
-    fn verification_method_discovery_retry_restarts_only_for_unverified_provisional_session() {
+    fn verification_method_discovery_retry_can_arm_a_cold_unverified_provisional_session() {
         assert!(retry_should_restart_method_discovery(
             false,
             Some(koushi_state::CurrentDeviceTrustState::Unverified),
-            true,
-            false,
-        ));
-        assert!(retry_should_restart_method_discovery(
-            false,
-            Some(koushi_state::CurrentDeviceTrustState::Unverified),
-            false,
-            true,
         ));
         assert!(!retry_should_restart_method_discovery(
             true,
             Some(koushi_state::CurrentDeviceTrustState::Unverified),
-            true,
-            false,
         ));
         assert!(!retry_should_restart_method_discovery(
             false,
             Some(koushi_state::CurrentDeviceTrustState::Unknown),
-            true,
-            false,
         ));
         assert!(!retry_should_restart_method_discovery(
             false,
             Some(koushi_state::CurrentDeviceTrustState::Verified),
-            true,
-            false,
         ));
-        assert!(!retry_should_restart_method_discovery(
-            false,
-            Some(koushi_state::CurrentDeviceTrustState::Unverified),
-            false,
-            false,
+        assert!(!retry_should_restart_method_discovery(false, None));
+    }
+
+    #[test]
+    fn admission_timeout_requires_the_current_cold_provisional_generation() {
+        assert!(method_discovery_admission_timeout_is_current(
+            4, 4, 9, 9, true, false, false,
         ));
-        assert!(!retry_should_restart_method_discovery(
-            false, None, true, true,
+        assert!(!method_discovery_admission_timeout_is_current(
+            3, 4, 9, 9, true, false, false,
+        ));
+        assert!(!method_discovery_admission_timeout_is_current(
+            4, 4, 8, 9, true, false, false,
+        ));
+        assert!(!method_discovery_admission_timeout_is_current(
+            4, 4, 9, 9, false, false, false,
+        ));
+        assert!(!method_discovery_admission_timeout_is_current(
+            4, 4, 9, 9, true, true, false,
+        ));
+        assert!(!method_discovery_admission_timeout_is_current(
+            4, 4, 9, 9, true, false, true,
         ));
     }
 
@@ -1584,6 +1660,37 @@ mod tests {
         assert!(branch_start < retry_sleep);
         assert!(retry_sleep < retry_continue);
         assert!(retry_continue < post_first_failure);
+    }
+
+    #[test]
+    fn provisional_first_response_is_published_only_after_actor_delivery() {
+        let source = include_str!("trust_gate.rs");
+        let owner = source
+            .split("fn start_provisional_encryption_sync")
+            .nth(1)
+            .expect("provisional owner")
+            .split("pub(super) async fn stop_provisional_encryption_sync")
+            .next()
+            .expect("provisional owner body");
+        let send = owner
+            .find("callback_tx.send(message).await.is_ok()")
+            .expect("actor delivery");
+        let publish = owner
+            .find("callback_first_response_seen.store(true, Ordering::Release)")
+            .expect("first-response publication");
+        assert!(
+            send < publish,
+            "a cancelled mailbox send must leave the first-response deadline armed"
+        );
+    }
+
+    #[test]
+    fn admission_timeout_is_cancelled_with_the_provisional_runtime() {
+        let shutdown = crate::account::test_source::item_body(
+            include_str!("session_lifecycle.rs"),
+            "pub(super) async fn stop_provisional_runtime",
+        );
+        assert!(shutdown.contains("cancel_verification_method_discovery_admission_timeout()"));
     }
 
     #[test]
@@ -1675,7 +1782,29 @@ mod tests {
     }
 
     #[test]
-    fn verification_admission_diagnostic_records_without_stderr() {
+    fn observed_trust_suppresses_duplicates_but_preserves_real_transitions() {
+        let mut last = koushi_state::CurrentDeviceTrustState::Unverified;
+
+        assert!(!advance_observed_trust(
+            &mut last,
+            koushi_state::CurrentDeviceTrustState::Unverified,
+        ));
+        assert!(advance_observed_trust(
+            &mut last,
+            koushi_state::CurrentDeviceTrustState::Verified,
+        ));
+        assert!(!advance_observed_trust(
+            &mut last,
+            koushi_state::CurrentDeviceTrustState::Verified,
+        ));
+        assert!(advance_observed_trust(
+            &mut last,
+            koushi_state::CurrentDeviceTrustState::Unverified,
+        ));
+    }
+
+    #[test]
+    fn verification_admission_diagnostic_is_mirrored_to_privacy_safe_stderr() {
         let output = std::process::Command::new(
             std::env::current_exe().expect("current test executable should be available"),
         )
@@ -1690,10 +1819,8 @@ mod tests {
         assert!(output.status.success(), "child failed: {output:?}");
 
         let stderr = String::from_utf8(output.stderr).expect("child stderr should be utf8");
-        assert!(
-            stderr.is_empty(),
-            "private diagnostics stay in the buffer only"
-        );
+        assert!(stderr.contains("core.verification_admission"));
+        assert!(stderr.contains("stage=trust_read_finished"));
         assert!(!stderr.contains('@'));
         assert!(!stderr.contains("access_token"));
 
@@ -1736,7 +1863,7 @@ mod tests {
     }
 
     #[test]
-    fn verification_method_discovery_diagnostic_records_without_stderr() {
+    fn verification_method_discovery_diagnostic_is_mirrored_to_privacy_safe_stderr() {
         let output = std::process::Command::new(
             std::env::current_exe().expect("current test executable should be available"),
         )
@@ -1751,10 +1878,10 @@ mod tests {
         assert!(output.status.success(), "child failed: {output:?}");
 
         let stderr = String::from_utf8(output.stderr).expect("child stderr should be utf8");
-        assert!(
-            stderr.is_empty(),
-            "private diagnostics stay in the buffer only"
-        );
+        assert!(stderr.contains("core.verification_method_discovery"));
+        assert!(stderr.contains("stage=finished"));
+        assert!(!stderr.contains('@'));
+        assert!(!stderr.contains("access_token"));
 
         let stdout = String::from_utf8(output.stdout).expect("child stdout should be utf8");
         let snapshot: serde_json::Value = serde_json::from_str(

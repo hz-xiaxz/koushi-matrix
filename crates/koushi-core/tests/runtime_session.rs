@@ -154,13 +154,6 @@ async fn account_switch_capability_gate_round_trips_through_reducer_effects() {
         .mount()
         .await;
     mount_echo_login(&server_a, "token-a", "@alpha:localhost").await;
-    server_a
-        .mock_logout()
-        .ignore_access_token()
-        .ok()
-        .mock_once()
-        .mount()
-        .await;
 
     let server_b = MatrixMockServer::new().await;
     server_b
@@ -183,14 +176,14 @@ async fn account_switch_capability_gate_round_trips_through_reducer_effects() {
     submit_runtime_password_login(&connection, server_a.uri(), "alpha").await;
     wait_for_runtime_account(&mut connection, Some("@alpha:localhost"), "alpha login").await;
 
-    let logout_request_id = connection.next_request_id();
+    let change_homeserver_request_id = connection.next_request_id();
     connection
-        .command(CoreCommand::Account(AccountCommand::Logout {
-            request_id: logout_request_id,
+        .command(CoreCommand::Account(AccountCommand::ChangeHomeserver {
+            request_id: change_homeserver_request_id,
         }))
         .await
-        .expect("submit local logout");
-    wait_for_runtime_account(&mut connection, None, "alpha logout").await;
+        .expect("submit change homeserver");
+    wait_for_runtime_account(&mut connection, None, "leave alpha admission").await;
 
     configure_verified_runtime_trust(&runtime).await;
     submit_runtime_password_login(&connection, server_b.uri(), "beta").await;

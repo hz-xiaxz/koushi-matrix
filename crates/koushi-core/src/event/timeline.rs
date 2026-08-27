@@ -716,6 +716,8 @@ pub struct TimelineMessageSource {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub megolm_session_fingerprint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub megolm_message_index: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub megolm_session_rotation_reason: Option<TimelineMegolmSessionReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_json: Option<JsonValue>,
@@ -746,6 +748,7 @@ impl fmt::Debug for TimelineMessageSource {
                     .as_ref()
                     .map(|_| "MegolmSessionFingerprint(..)"),
             )
+            .field("megolm_message_index", &self.megolm_message_index)
             .field(
                 "megolm_session_rotation_reason",
                 &self.megolm_session_rotation_reason,
@@ -773,6 +776,7 @@ pub fn message_source_for_timeline_item(item: &TimelineItem) -> Option<TimelineM
         is_edited: item.is_edited,
         has_media: item.media.is_some(),
         megolm_session_fingerprint: None,
+        megolm_message_index: None,
         megolm_session_rotation_reason: None,
         original_json: None,
     })
@@ -1908,6 +1912,7 @@ mod tests {
             is_edited: true,
             has_media: false,
             megolm_session_fingerprint: Some("AbCdEfGhIjKl".to_owned()),
+            megolm_message_index: Some(2),
             megolm_session_rotation_reason: Some(TimelineMegolmSessionReason::ExpiredTime),
             original_json: Some(json!({
                 "event_id": "$event:test",
@@ -1954,6 +1959,7 @@ mod tests {
                         "is_edited": true,
                         "has_media": false,
                         "megolm_session_fingerprint": "AbCdEfGhIjKl",
+                        "megolm_message_index": 2,
                         "megolm_session_rotation_reason": "expiredTime",
                         "original_json": {
                             "content": {

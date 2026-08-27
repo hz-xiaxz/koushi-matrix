@@ -28,7 +28,7 @@ use crate::store::{
 use super::actor::{AccountActor, AccountMessage, trace_account_request, trace_restore};
 use super::sliding_sync::PendingSlidingSyncAdmission;
 use super::trust_gate::{
-    current_device_trust_token, record_verification_admission_event,
+    advance_observed_trust, current_device_trust_token, record_verification_admission_event,
     record_verification_method_discovery_event, verification_admission_event,
     verification_method_discovery_event,
 };
@@ -1680,7 +1680,11 @@ impl AccountActor {
     }
 
     pub(super) async fn handle_logout(&mut self, request_id: RequestId) {
-        self.perform_logout(request_id, true, true).await;
+        // Match Element's explicit sign-out semantics: revoke the server
+        // session and remove this device's credentials and keyed local store.
+        // Persistence is retained only by non-destructive flows such as soft
+        // logout reauthentication and account switching.
+        self.perform_logout(request_id, true, false).await;
     }
 
     pub(super) async fn handle_change_homeserver(&mut self, request_id: RequestId) {
@@ -1782,7 +1786,16 @@ impl AccountActor {
         let tx = self.self_tx.clone();
         let mut updates = observation.updates;
         self.trust_observer = Some(executor::spawn(async move {
+            // The SDK verification-state subscriber may replay its current
+            // value and may emit the same coarse trust state for consecutive
+            // crypto updates. Re-projecting an unchanged Unverified value
+            // creates a fresh gate transition whose acknowledgement restarts
+            // (and aborts) verification-method discovery indefinitely.
+            let mut last_trust = current_trust;
             while let Some(trust) = updates.next().await {
+                if !advance_observed_trust(&mut last_trust, trust) {
+                    continue;
+                }
                 if tx
                     .send(AccountMessage::CurrentDeviceTrustChanged { generation, trust })
                     .await
@@ -1810,6 +1823,8 @@ impl AccountActor {
             task.abort();
             let _ = task.await;
         }
+        self.cancel_verification_method_discovery_admission_timeout()
+            .await;
         if let Some(owned) = self.verification_method_discovery_task.take() {
             owned.task.abort();
             let _ = owned.task.await;
@@ -2232,7 +2247,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn logout_cleanup_is_bounded_and_preserves_account_persistence() {
+    async fn hard_logout_cleanup_is_bounded_and_deletes_account_persistence() {
         let homeserver = spawn_quarantine_password_server();
         let cred_dir = tempdir().expect("tempdir");
         let data_dir = tempdir().expect("tempdir");
@@ -2294,7 +2309,7 @@ mod tests {
             .send(AccountMessage::RetrySessionTeardown { generation: 1 })
             .await;
         assert_eq!(probe_rx.recv().await, Some("session_store_closed"));
-        assert_eq!(probe_rx.recv().await, Some("session_persistence_preserved"));
+        assert_eq!(probe_rx.recv().await, Some("session_persistence_deleted"));
         while !matches!(
             action_rx.recv().await.as_deref(),
             Some([AppAction::LogoutFinished])
@@ -2308,6 +2323,14 @@ mod tests {
                 .expect("last pointer after logout")
                 .is_none()
         );
+        assert!(
+            backend
+                .load_saved_sessions()
+                .expect("saved sessions after logout")
+                .sessions()
+                .is_empty()
+        );
+        assert_eq!(recursive_file_count(data_dir.path()), baseline_files);
         loop {
             if let CoreEvent::Account(AccountEvent::LoggedOut {
                 request_id: terminal,
@@ -2322,24 +2345,28 @@ mod tests {
     }
 
     #[test]
-    fn logout_teardown_preserves_persistence_and_only_forgets_startup_pointer() {
+    fn explicit_logout_selects_the_non_preserving_teardown_path() {
+        let logout_handler = crate::account::test_source::item_body(
+            include_str!("session_lifecycle.rs"),
+            "pub(super) async fn handle_logout",
+        );
         let logout_continuation = crate::account::test_source::item_body(
             include_str!("session_lifecycle.rs"),
             "match pending.continuation",
         );
 
         assert!(
+            logout_handler.contains("perform_logout(request_id, true, false)"),
+            "explicit sign-out must revoke the server session and delete local persistence"
+        );
+        assert!(
             logout_continuation.contains("preserve_persistence")
                 && logout_continuation.contains("forget_last_session_pointer_if_matches(key_id)"),
-            "normal sign-out should preserve the keyed store and saved-session index"
+            "non-destructive teardown paths must still be able to preserve persistence"
         );
         assert!(
             logout_continuation.contains("clear_account_persistence(key_id)"),
-            "non-preserving teardown paths such as provisional rejection must still delete the local database"
-        );
-        assert!(
-            logout_continuation.contains("session_persistence_preserved"),
-            "logout diagnostics should make the preservation explicit"
+            "hard logout must retain the local database deletion path"
         );
         assert!(
             logout_continuation.contains("session_persistence_deleted"),

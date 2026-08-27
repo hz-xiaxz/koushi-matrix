@@ -1186,6 +1186,7 @@ mod tests {
                     is_edited: true,
                     has_media: false,
                     megolm_session_fingerprint: Some("AbCdEfGhIjKl".to_owned()),
+                    megolm_message_index: Some(2),
                     megolm_session_rotation_reason: Some(TimelineMegolmSessionReason::ExpiredTime),
                     original_json: None,
                 },

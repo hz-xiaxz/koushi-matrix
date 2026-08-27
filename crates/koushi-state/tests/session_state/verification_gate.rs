@@ -81,6 +81,22 @@ fn verification_method_discovery_failure_is_retryable_and_phase_scoped() {
 
     let effects = reduce(
         &mut discovering,
+        AppAction::VerificationMethodDiscoveryRetryStarted { generation: 7 },
+    );
+    assert_eq!(
+        discovering.session,
+        SessionState::Provisional {
+            info: info.clone(),
+            phase: ProvisionalPhase::DiscoveringMethods,
+        }
+    );
+    assert_eq!(
+        effects,
+        vec![AppEffect::EmitUiEvent(UiEvent::SessionChanged)]
+    );
+
+    let effects = reduce(
+        &mut discovering,
         AppAction::VerificationMethodDiscoveryFailed {
             generation: 7,
             kind: VerificationGateFailureKind::Timeout,

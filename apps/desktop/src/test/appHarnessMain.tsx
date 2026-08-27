@@ -605,6 +605,10 @@ function afterCreateSpaceSnapshot(): DesktopSnapshot {
 // ---------------------------------------------------------------------------
 
 const mock = new TauriIpcMock();
+// Native confirmation dialogs are accepted by default in the unattended app
+// harness. Individual dialog behavior belongs in focused unit tests; existing
+// end-to-end flows should continue past an explicit destructive confirmation.
+mock.setCommandResponse("plugin:dialog|message", "Ok");
 let currentSnapshot = readySnapshot();
 let nextGateFlowId = 80;
 const preparedUploadBytes = new Map<string, number[]>();

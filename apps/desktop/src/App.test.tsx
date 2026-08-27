@@ -201,6 +201,21 @@ describe("ContextualRightPanel", () => {
     expect(resetHandler).toContain("api.resetLocalData()");
   });
 
+  test("all user-facing sign-out entry points use native confirmation", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const confirmationHandler = source
+      .split("async function requestLogout()")
+      .at(1)
+      ?.split("async function logout()")
+      .at(0);
+
+    expect(confirmationHandler).toBeDefined();
+    expect(confirmationHandler).toContain("confirmDialog");
+    expect(confirmationHandler).toContain('t("settings.signOutConfirm")');
+    expect(confirmationHandler).toContain("await logout()");
+    expect(source.match(/void requestLogout\(\)/g)?.length).toBe(4);
+  });
+
   test("TimelineItemRow renders reaction pills with accessible labels", () => {
     const markup = renderToStaticMarkup(
       <TimelineItemRow

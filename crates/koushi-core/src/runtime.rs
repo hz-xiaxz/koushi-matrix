@@ -6636,6 +6636,23 @@ mod tests {
         assert!(tokens.contains(&"clear_room_session"));
 
         trust_tx
+            .send(koushi_state::CurrentDeviceTrustState::Unverified)
+            .expect("duplicate verification-gate update");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(matches!(
+            runtime.snapshot_rx.borrow().state.session,
+            SessionState::Provisional {
+                phase: koushi_state::ProvisionalPhase::DiscoveringMethods,
+                ..
+            }
+        ));
+        assert_eq!(
+            probe_rx.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty),
+            "duplicate trust must not restart the gate transition"
+        );
+
+        trust_tx
             .send(koushi_state::CurrentDeviceTrustState::Verified)
             .expect("repromotion update");
         wait_for_runtime_session(&runtime, "verified repromotion", |session| {

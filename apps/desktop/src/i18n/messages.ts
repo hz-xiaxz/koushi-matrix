@@ -625,6 +625,8 @@ export type MessageId =
   | "settings.accountDeactivated"
   | "settings.accountManagementFailed"
   | "settings.signOut"
+  | "settings.signOutConfirm"
+  | "settings.signOutConfirmTitle"
   | "settings.keyManagement"
   | "settings.roomKeyExport"
   | "settings.roomKeyExportDestination"
@@ -1054,6 +1056,7 @@ export type MessageId =
   | "timeline.copyEventId"
   | "timeline.encryptionDetails"
   | "timeline.megolmSessionFingerprint"
+  | "timeline.megolmMessageIndex"
   | "timeline.copyMegolmSessionFingerprint"
   | "timeline.megolmRotationReason"
   | "timeline.megolmReasonInitial"
@@ -1966,6 +1969,8 @@ const en: Catalog = {
   "settings.accountDeactivated": "Account deactivated",
   "settings.accountManagementFailed": "Account operation failed",
   "settings.signOut": "Sign out",
+  "settings.signOutConfirm": "Are you sure you want to sign out of Koushi on this device?",
+  "settings.signOutConfirmTitle": "Sign out?",
   "settings.keyManagement": "Key management",
   "settings.roomKeyExport": "Room key export",
   "settings.roomKeyExportDestination": "Key export destination",
@@ -2396,6 +2401,7 @@ const en: Catalog = {
   "timeline.copyEventId": "Copy event ID",
   "timeline.encryptionDetails": "Encryption details",
   "timeline.megolmSessionFingerprint": "Megolm session fingerprint",
+  "timeline.megolmMessageIndex": "Megolm message index",
   "timeline.copyMegolmSessionFingerprint": "Copy Megolm session fingerprint",
   "timeline.megolmRotationReason": "Session change reason",
   "timeline.megolmReasonInitial": "Initial session",
@@ -3192,6 +3198,8 @@ const ja: Catalog = {
   "settings.accountDeactivated": "アカウントを無効化しました",
   "settings.accountManagementFailed": "アカウント操作に失敗しました",
   "settings.signOut": "サインアウト",
+  "settings.signOutConfirm": "このデバイスの Koushi からサインアウトしてもよろしいですか？",
+  "settings.signOutConfirmTitle": "サインアウトしますか？",
   "settings.keyManagement": "鍵管理",
   "settings.roomKeyExport": "ルーム鍵エクスポート",
   "settings.roomKeyExportDestination": "鍵エクスポート先",
@@ -3623,6 +3631,7 @@ const ja: Catalog = {
   "timeline.copyEventId": "イベントIDをコピー",
   "timeline.encryptionDetails": "暗号化情報",
   "timeline.megolmSessionFingerprint": "Megolmセッション識別子",
+  "timeline.megolmMessageIndex": "Megolmメッセージインデックス",
   "timeline.copyMegolmSessionFingerprint": "Megolmセッション識別子をコピー",
   "timeline.megolmRotationReason": "セッション変更理由",
   "timeline.megolmReasonInitial": "最初のセッション",

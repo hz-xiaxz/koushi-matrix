@@ -1431,6 +1431,7 @@
           "is_edited": true,
           "is_redacted": false,
           "megolm_session_fingerprint": "AbCdEfGhIjKl",
+          "megolm_message_index": 2,
           "megolm_session_rotation_reason": "expiredTime",
           "sender": "@u:example.test",
           "thread_root": null,

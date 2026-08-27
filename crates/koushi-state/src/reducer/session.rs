@@ -250,16 +250,20 @@ pub(crate) fn handle_verification_method_discovery_failed(
 pub(crate) fn handle_verification_method_discovery_retry_started(
     state: &mut AppState,
 ) -> Vec<AppEffect> {
-    let SessionState::Provisional {
-        info,
-        phase: ProvisionalPhase::RecheckingTrust { failure: Some(_) },
-    } = &state.session
-    else {
-        return Vec::new();
+    let info = match &state.session {
+        SessionState::Provisional {
+            info,
+            phase: ProvisionalPhase::DiscoveringMethods,
+        }
+        | SessionState::Provisional {
+            info,
+            phase: ProvisionalPhase::RecheckingTrust { failure: Some(_) },
+        } => info.clone(),
+        _ => return Vec::new(),
     };
 
     state.session = SessionState::Provisional {
-        info: info.clone(),
+        info,
         phase: ProvisionalPhase::DiscoveringMethods,
     };
     state.device_cleanup = DeviceCleanupState::Idle;
