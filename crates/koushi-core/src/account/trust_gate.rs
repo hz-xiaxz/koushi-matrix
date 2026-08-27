@@ -407,6 +407,17 @@ pub(super) fn should_discover_verification_methods(
     trust == koushi_state::CurrentDeviceTrustState::Unverified
 }
 
+pub(super) fn advance_observed_trust(
+    last_trust: &mut koushi_state::CurrentDeviceTrustState,
+    observed: koushi_state::CurrentDeviceTrustState,
+) -> bool {
+    if *last_trust == observed {
+        return false;
+    }
+    *last_trust = observed;
+    true
+}
+
 async fn run_recovery_state_observation<S>(
     state_stream: S,
     account_key: AccountKey,
@@ -1289,7 +1300,7 @@ mod tests {
     use super::refresh_device_keys_and_assert_known;
     use super::{
         PendingTrustTransition, TrustLifecycleDecision, VerificationMethodDiscoveryResult,
-        active_own_user_sas_flow_for_provisional_encryption_sync,
+        active_own_user_sas_flow_for_provisional_encryption_sync, advance_observed_trust,
         begin_provisional_encryption_sync_cursor_attempt, current_session_status_completion_action,
         current_session_status_observed_non_verified_trust, current_session_status_settled_event,
         first_provisional_encryption_sync_is_current,
@@ -1767,6 +1778,28 @@ mod tests {
         ));
         assert!(!should_discover_verification_methods(
             koushi_state::CurrentDeviceTrustState::Verified
+        ));
+    }
+
+    #[test]
+    fn observed_trust_suppresses_duplicates_but_preserves_real_transitions() {
+        let mut last = koushi_state::CurrentDeviceTrustState::Unverified;
+
+        assert!(!advance_observed_trust(
+            &mut last,
+            koushi_state::CurrentDeviceTrustState::Unverified,
+        ));
+        assert!(advance_observed_trust(
+            &mut last,
+            koushi_state::CurrentDeviceTrustState::Verified,
+        ));
+        assert!(!advance_observed_trust(
+            &mut last,
+            koushi_state::CurrentDeviceTrustState::Verified,
+        ));
+        assert!(advance_observed_trust(
+            &mut last,
+            koushi_state::CurrentDeviceTrustState::Unverified,
         ));
     }
 

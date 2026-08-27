@@ -28,7 +28,7 @@ use crate::store::{
 use super::actor::{AccountActor, AccountMessage, trace_account_request, trace_restore};
 use super::sliding_sync::PendingSlidingSyncAdmission;
 use super::trust_gate::{
-    current_device_trust_token, record_verification_admission_event,
+    advance_observed_trust, current_device_trust_token, record_verification_admission_event,
     record_verification_method_discovery_event, verification_admission_event,
     verification_method_discovery_event,
 };
@@ -1786,7 +1786,16 @@ impl AccountActor {
         let tx = self.self_tx.clone();
         let mut updates = observation.updates;
         self.trust_observer = Some(executor::spawn(async move {
+            // The SDK verification-state subscriber may replay its current
+            // value and may emit the same coarse trust state for consecutive
+            // crypto updates. Re-projecting an unchanged Unverified value
+            // creates a fresh gate transition whose acknowledgement restarts
+            // (and aborts) verification-method discovery indefinitely.
+            let mut last_trust = current_trust;
             while let Some(trust) = updates.next().await {
+                if !advance_observed_trust(&mut last_trust, trust) {
+                    continue;
+                }
                 if tx
                     .send(AccountMessage::CurrentDeviceTrustChanged { generation, trust })
                     .await
