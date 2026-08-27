@@ -56,6 +56,8 @@ function dialog(items: StagedUploadItem[], onUpdateCaption = vi.fn()) {
       onRetryPreparation={vi.fn()}
       onUseOriginal={vi.fn()}
       loadPreview={vi.fn(async () => [])}
+      resolveComposerKeyAction={vi.fn(async () => "noop" as const)}
+      surface="main"
     />
   );
 }
@@ -152,6 +154,174 @@ describe("UploadStagingDialog", () => {
 
     expect(first.value).toBe("一つ目を変換中");
     expect(second.value).toBe("second from Rust");
+  });
+
+  it("resolves caption Enter and sends attachments only for send", async () => {
+    const resolveComposerKeyAction = vi.fn(async () => "send" as const);
+    const onSendAttachments = vi.fn();
+    render(
+      <UploadStagingDialog
+        items={[stagedImage("", { kind: "ready", variants: [], selected: { resize: "original", format: "keep" }, pending: null, generation: 0 })]}
+        onClear={vi.fn()}
+        onUpdateCaption={vi.fn()}
+        onSelectOutput={vi.fn()}
+        onRetryPreparation={vi.fn()}
+        onUseOriginal={vi.fn()}
+        onSendAttachments={onSendAttachments}
+        loadPreview={vi.fn(async () => [])}
+        resolveComposerKeyAction={resolveComposerKeyAction}
+        surface="main"
+      />
+    );
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Caption for synthetic.png" }), {
+      key: "Enter",
+      code: "Enter"
+    });
+
+    await waitFor(() => expect(onSendAttachments).toHaveBeenCalledTimes(1));
+    expect(resolveComposerKeyAction).toHaveBeenCalledWith(
+      "main",
+      {
+        key: "enter",
+        modifiers: { ctrl: false, meta: false, shift: false, alt: false },
+        is_composing: false,
+        selection: null
+      },
+      { autocomplete_open: false, send_enabled: true }
+    );
+  });
+
+  it("does not send when the caption resolver returns another action", async () => {
+    const resolveComposerKeyAction = vi.fn(async () => "insertNewline" as const);
+    const onSendAttachments = vi.fn();
+    render(
+      <UploadStagingDialog
+        items={[stagedImage("", { kind: "ready", variants: [], selected: { resize: "original", format: "keep" }, pending: null, generation: 0 })]}
+        onClear={vi.fn()}
+        onUpdateCaption={vi.fn()}
+        onSelectOutput={vi.fn()}
+        onRetryPreparation={vi.fn()}
+        onUseOriginal={vi.fn()}
+        onSendAttachments={onSendAttachments}
+        loadPreview={vi.fn(async () => [])}
+        resolveComposerKeyAction={resolveComposerKeyAction}
+        surface="thread"
+      />
+    );
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Caption for synthetic.png" }), {
+      key: "Enter",
+      code: "Enter"
+    });
+
+    await waitFor(() => expect(resolveComposerKeyAction).toHaveBeenCalledTimes(1));
+    expect(onSendAttachments).not.toHaveBeenCalled();
+  });
+
+  it("leaves composing Enter to ImeTextField", async () => {
+    const resolveComposerKeyAction = vi.fn(async () => "send" as const);
+    const onSendAttachments = vi.fn();
+    render(
+      <UploadStagingDialog
+        items={[stagedImage("", { kind: "ready", variants: [], selected: { resize: "original", format: "keep" }, pending: null, generation: 0 })]}
+        onClear={vi.fn()}
+        onUpdateCaption={vi.fn()}
+        onSelectOutput={vi.fn()}
+        onRetryPreparation={vi.fn()}
+        onUseOriginal={vi.fn()}
+        onSendAttachments={onSendAttachments}
+        loadPreview={vi.fn(async () => [])}
+        resolveComposerKeyAction={resolveComposerKeyAction}
+        surface="main"
+      />
+    );
+    const caption = screen.getByRole("textbox", { name: "Caption for synthetic.png" });
+    fireEvent.compositionStart(caption);
+    fireEvent.keyDown(caption, {
+      key: "Enter",
+      code: "Enter",
+      keyCode: 229,
+      isComposing: true
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(resolveComposerKeyAction).not.toHaveBeenCalled();
+    expect(onSendAttachments).not.toHaveBeenCalled();
+  });
+
+  it("moves forward Tab from the last sendable caption to Send", () => {
+    render(
+      <UploadStagingDialog
+        items={[
+          stagedImage("", { kind: "ready", variants: [], selected: { resize: "original", format: "keep" }, pending: null, generation: 0 }),
+          stagedImage("", { kind: "ready", variants: [], selected: { resize: "original", format: "keep" }, pending: null, generation: 0 }, "staged-2", "second.png")
+        ]}
+        onClear={vi.fn()}
+        onUpdateCaption={vi.fn()}
+        onSelectOutput={vi.fn()}
+        onRetryPreparation={vi.fn()}
+        onUseOriginal={vi.fn()}
+        onSendAttachments={vi.fn()}
+        loadPreview={vi.fn(async () => [])}
+        resolveComposerKeyAction={vi.fn(async () => "noop" as const)}
+        surface="main"
+      />
+    );
+    const first = screen.getByRole("textbox", { name: "Caption for synthetic.png" });
+    const last = screen.getByRole("textbox", { name: "Caption for second.png" });
+    const send = screen.getByRole("button", { name: "Send attachments" });
+
+    fireEvent.keyDown(first, { key: "Tab" });
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(send);
+  });
+
+  it("keeps native Tab behavior for disabled Send, earlier captions, and Shift+Tab", () => {
+    render(
+      <UploadStagingDialog
+        items={[
+          stagedImage("", { kind: "preparing" }, "staged-1", "first.png"),
+          stagedImage("", { kind: "preparing" }, "staged-2", "second.png")
+        ]}
+        onClear={vi.fn()}
+        onUpdateCaption={vi.fn()}
+        onSelectOutput={vi.fn()}
+        onRetryPreparation={vi.fn()}
+        onUseOriginal={vi.fn()}
+        onSendAttachments={vi.fn()}
+        loadPreview={vi.fn(async () => [])}
+        resolveComposerKeyAction={vi.fn(async () => "noop" as const)}
+        surface="main"
+      />
+    );
+    const first = screen.getByRole("textbox", { name: "Caption for first.png" });
+    const last = screen.getByRole("textbox", { name: "Caption for second.png" });
+    const send = screen.getByRole<HTMLButtonElement>("button", { name: "Send attachments" });
+
+    first.focus();
+    const earlierTab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    first.dispatchEvent(earlierTab);
+    expect(earlierTab.defaultPrevented).toBe(false);
+    last.focus();
+    const disabledTab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    last.dispatchEvent(disabledTab);
+    expect(disabledTab.defaultPrevented).toBe(false);
+    const shiftTab = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
+    last.dispatchEvent(shiftTab);
+    expect(shiftTab.defaultPrevented).toBe(false);
+    for (const modifier of ["ctrlKey", "metaKey", "altKey"] as const) {
+      const modifiedTab = new KeyboardEvent("keydown", {
+        key: "Tab",
+        [modifier]: true,
+        bubbles: true,
+        cancelable: true
+      });
+      last.dispatchEvent(modifiedTab);
+      expect(modifiedTab.defaultPrevented).toBe(false);
+    }
+    expect(send.disabled).toBe(true);
   });
 });
 
@@ -321,6 +491,8 @@ describe("UploadStagingDialog resize and format controls", () => {
         onUseOriginal={vi.fn()}
         onSendAttachments={vi.fn()}
         loadPreview={vi.fn(async () => [])}
+        resolveComposerKeyAction={vi.fn(async () => "noop" as const)}
+        surface="main"
       />
     );
 
@@ -401,7 +573,9 @@ describe("UploadStagingDialog preview URL lifecycle", () => {
       onRetryPreparation: vi.fn(),
       onUseOriginal: vi.fn(),
       onSendAttachments: vi.fn(),
-      loadPreview
+      loadPreview,
+      resolveComposerKeyAction: vi.fn(async () => "noop" as const),
+      surface: "main" as const
     };
 
     const { rerender, unmount } = render(
@@ -445,6 +619,8 @@ describe("UploadStagingDialog preview URL lifecycle", () => {
         onUseOriginal={vi.fn()}
         onSendAttachments={vi.fn()}
         loadPreview={loadPreview}
+        resolveComposerKeyAction={vi.fn(async () => "noop" as const)}
+        surface="main"
       />
     );
 
@@ -487,6 +663,8 @@ describe("UploadStagingDialog send action", () => {
         onUseOriginal={vi.fn()}
         onSendAttachments={onSendAttachments}
         loadPreview={vi.fn(async () => [])}
+        resolveComposerKeyAction={vi.fn(async () => "noop" as const)}
+        surface="main"
       />
     );
   }

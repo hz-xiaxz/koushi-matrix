@@ -953,6 +953,8 @@ export function ContextualRightPanel({
             onThreadUseOriginalStagedUpload(threadRoomId, rootEventId, stagedId)
           }
           loadPreview={threadPreviewLoader}
+          surface="thread"
+          resolveComposerKeyAction={onResolveComposerKeyAction}
         />
       ) : null}
       <ThreadComposer
