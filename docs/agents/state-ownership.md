@@ -380,6 +380,23 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   stale non-null summary. Replay/restart rehydrates the same Core projection
   from the SDK event cache; no frontend or first-party plaintext summary store
   exists.
+- Thread-root lifecycle and placement are also Rust-owned. The session-scoped
+  `ThreadRootProjectionService` retains canonical/hydrated root snapshots until
+  authoritative aggregate/redaction clear, Room unsubscribe, or session teardown;
+  a bounded display omission is dormant, never deletion. Rust State mirrors only
+  explicit Core lifecycle actions. The Room actor's `DisplayProjectionState`
+  applies root-event/latest-reply order, standalone-reply suppression, stable row
+  identity and display-relative diffs. `TimelineItem` display metadata is a
+  hand-maintained Rust/Tauri/TypeScript wire contract and must update every mirror
+  listed in [Snapshot and wire-contract mirrors](#snapshot-and-wire-contract-mirrors).
+  `timelineStore` applies the projected items/diffs and prunes only an entire
+  timeline key or an explicit Rust clear; frontend code must not scan current
+  items to infer projection death or choose placement. `TimelineKeyState.items`
+  is the Rust display-index domain consumed in production only by `TimelineView`;
+  Core's private `navigation_items` remains canonical for read state, search,
+  receipts, Activity and event-cache reconciliation. `TimelineView` keeps DOM
+  measurement, virtualization, date-divider rendering, anchoring and layout
+  settlement only.
   Pane-level thread attention is Rust-owned `AppState.thread_attention`; React
   may render the DTO but must not scan visible thread rows or row chips to derive
   indicator counts. The core producer uses the authoritative own threaded receipt

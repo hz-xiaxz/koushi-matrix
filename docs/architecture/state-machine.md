@@ -8,7 +8,7 @@ fixture/demo backend contract mentioned below is historical (dev/demo only).
 The state-transition diagrams in this document are normative and must track the
 reducer; see [Maintenance Contract](#maintenance-contract).
 
-Date: 2026-08-26
+Date: 2026-08-27
 
 ## Contract
 
@@ -1300,11 +1300,17 @@ stateDiagram-v2
   root event; stale thread signals are ignored.
 - Opening a thread is not complete when `ThreadPaneState` changes to `Opening`.
   The production runtime must also subscribe the corresponding
-  `TimelineKind::Thread { room_id, root_event_id }`. Only the actual thread
-  timeline subscription success may drive `ThreadSubscribed` and move the pane to
-  `Open`. Matching subscription failure drives `ThreadSubscriptionFailed`, closes
-  the pane, clears pane-level thread attention, and records a private-data-free
-  recoverable error.
+  `TimelineKind::Thread { room_id, root_event_id }`. For `ExistingThread` and
+  `PinnedReply`, an empty first SDK snapshot triggers one bounded scheduler-owned
+  backward page before any InitialItems or success action is published. The
+  reducer copies its accepted `ThreadOpenIntent` into the AppEffect; runtime and
+  manager carry a typed Core policy instead of rereading mutable state. Only a
+  settled page (including authoritative end-reached empty) and actual thread
+  timeline subscription success may drive `ThreadSubscribed` and move the pane
+  to `Open`. Non-end empty, pagination error, or subscription failure publishes
+  no InitialItems and drives `ThreadSubscriptionFailed`,
+  closes the pane, clears pane-level thread attention, and records a
+  private-data-free recoverable error. `NewThreadDraft` skips this page.
 - Thread pane identity and open/closed state are Rust-owned `AppState`. Visible
   thread items are not stored in `AppState`; they flow as `TimelineEvent`
   batches/diffs keyed by the thread `TimelineKey`. Legacy top-level frontend
@@ -1320,11 +1326,12 @@ stateDiagram-v2
   local thread submission or matching event-backed thread activity promotes
   the pane monotonically to `ExistingThread`; wrong-room/root and stale activity
   are ignored.
-- Existing threads retain ordinary automatic backfill eligibility. When their
-  local projection is empty, the centralized backfill policy may admit one
-  bounded request subject to its normal in-flight/transition fences and the
-  automatic-history setting. No independent empty-thread effect may issue a
-  second request.
+- Existing threads retain ordinary automatic backfill eligibility after their
+  settled initial projection. Underfilled non-empty windows may use the
+  centralized viewport backfill policy subject to its normal in-flight/transition
+  fences and the automatic-history setting. The pre-subscription empty-snapshot
+  page and later viewport policy are generation-fenced and cannot overlap; no
+  frontend empty-thread effect may issue another request.
 - The open thread pane owns its own Rust `ComposerState`. The thread composer
   sends by routing `TimelineCommand::SendReply` to
   `TimelineKind::Thread { room_id, root_event_id }`, with
@@ -1384,6 +1391,53 @@ stateDiagram-v2
 - React receives the resulting `ThreadSummaryDto` as render data. It does not
   infer latest activity, count, edit, redaction, or fallback fields from visible
   rows.
+
+Thread-root projection lifetime and display placement use the same service/actor
+owner:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: accepted off-window activity / bounded admission
+    [*] --> Ready: canonical root snapshot
+    Pending --> Ready: root hydration succeeds
+    Pending --> Failed: root hydration fails
+    Ready --> Dormant: root/reply absent from bounded display window
+    Failed --> Dormant: root/reply absent from bounded display window
+    Dormant --> Ready: bounded display includes accepted root/activity again
+    Ready --> Ready: SDK batch/replay/repair/setting change / Rust display diff
+    Dormant --> Dormant: temporary empty/reset/reorder / no clear
+    Pending --> Cleared: authoritative aggregate zero or Room unsubscribe
+    Ready --> Cleared: authoritative aggregate zero/redaction or Room unsubscribe
+    Failed --> Cleared: authoritative aggregate zero or Room unsubscribe
+    Dormant --> Cleared: authoritative aggregate zero/redaction or Room unsubscribe
+    Cleared --> [*]
+    Pending --> [*]: session teardown
+    Ready --> [*]: session teardown
+    Failed --> [*]: session teardown
+    Dormant --> [*]: session teardown
+```
+
+- `ThreadRootProjectionService` is the only lifecycle authority. A failed
+  disappearance lookup retains the last accepted record; bounded-window absence
+  changes visibility only. The service admits at most 120 roots per active Room
+  owner and rejects over-cap admission without evicting accepted roots.
+- Rust State mirrors only explicit Observed/Ready/Failed/Cleared/RoomCleared
+  actions. It does not keep an active-window set, roll activity backward, or
+  reject a terminal because the current window omitted a reply.
+- The current Room actor's `DisplayProjectionState` is the only placement owner.
+  It applies Rust `TimelineThreadRootOrder`, suppresses standalone replies,
+  projects one root block with stable content/activity identity, validates the
+  emitted display-relative diff, and removes it only after an explicit service
+  clear. The existing bounded latest-wins ingress carries per-root Updated or
+  Cleared wakes; a Clear is accepted only for the current generation and absent
+  service record, then emits one validated display removal. InitialItems uses the
+  same projected sequence as later ItemsUpdated.
+- TypeScript applies Rust display items/diffs and may add renderer-local date
+  dividers, but it never prunes projection state, chooses a root/reply slot,
+  synthesizes a pending/failed root, or interprets empty/reset/replay as deletion.
+- Room unsubscribe explicitly clears service, reducer mirror and emitted display
+  storage before actor retirement; session teardown drops the complete manager
+  owner and all retained workers.
 
 - Pane-level thread attention is Rust-owned `AppState.thread_attention`. It is
   initialized when a thread is opened, receives counts only for the currently

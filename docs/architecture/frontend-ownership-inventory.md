@@ -19,7 +19,8 @@ Decisions: **keep**, **derive/delete**, **migrate leaf**, or **investigate**. A 
 | --- | --- | --- | --- | --- |
 | `domain/appStore.ts::applyAppStoreDeltas` | Page lifetime; reset on account/session snapshot clear | **Transport/projection cache**. Rust `StateDelta.generation` and snapshots are authoritative. | Drops duplicate/stale generations, requests full refresh on a forward gap; never invents domain transitions. | **Keep.** Already-correct #111 projection cache. |
 | `domain/timelineStore.ts::TimelineStoreState`, `applyInitialItems`, `applyItemsUpdated` | Page lifetime, bounded inactive keys; keys clear on resync/account reset | **Transport/projection cache** for Rust `CoreEvent::Timeline`. Derived ID/timestamp indices are renderer acceleration only. | Actor/generation/batch fences reject stale diffs; pagination/gap fields copy Rust states. | **Keep.** Do not move maps/indices into Rust or reimplement the transport. |
-| `backend/browserFakeApi.ts::DesktopApi`, `backend/client.ts::TauriDesktopApi`, and direct `@tauri-apps/*` imports | Page/runtime adapter lifetime; fake implementation exists only in browser/test mode | **Renderer transport/adapter plus test-backend mirror.** The interface is currently declared by the fake module, while `client.ts` imports and implements it and also selects the runtime. | IPC names and Rust DTOs remain authoritative. The dependency direction is inverted, but it does not create a second Matrix/product state owner. | **Isolate structurally in Phase 1; do not count it as semantic migration.** Move the neutral contract and platform ports without changing behavior. |
+| `backend/browserFakeApi.ts::DesktopApi`, `backend/client.ts::TauriDesktopApi`, and direct `@tauri-apps/*` imports | Page/runtime adapter lifetime; fake implementation exists only in browser/test mode | **Renderer transport/adapter plus test-backend mirror.** The interface is currently declared by the fake module, while `client.ts` imports and implements it and also selects the runtime. | IPC names and Rust DTOs remain authoritative. The dependency direction is inverted, but it does not create a second Matrix/product state owner. | **Isolate structurally in Phase 2; do not count it as semantic migration.** Move the neutral contract and platform ports without changing behavior. |
+| Core `ThreadRootProjectionService`, Rust State `ThreadRootProjectionState::reconcile_room`, TypeScript `retainActiveThreadRootProjections`, and `timelineDisplayProjection.ts` | Account/Room actor, AppState, and page/timeline-key lifetimes disagree; a bounded replacement can remove one layer while another retains aggregate data | **Duplicated product/display lifecycle.** Core owns authoritative aggregate/hydration but Core reconciliation, State reconciliation, and TypeScript each infer projection death; TypeScript also chooses root/latest placement. | #708 diagnostics show cached thread data and stable Rust aggregate while initial/display rows move from empty/partial to populated after pagination/replay. Temporary absence is incorrectly treated as deletion. | **Phase 1 #708:** make Core service/actor the sole lifecycle and placement owner; State mirrors explicit transitions; TypeScript caches/renders Rust items/diffs only. |
 | `TimelineView.tsx` mounted viewport controller (`pendingMeasuredHeightsRef`, anchors, range epochs, observers, frames) | Mounted timeline key; ordered teardown on key change/unmount | **Renderer presentation**. DOM measurement, virtualization, scroll anchors and visible-range facts have no backend owner. | ResizeObserver/frames/timers cancel at one key reset; Rust receives typed viewport facts. | **Keep.** #551 residual audit proves this cohesive DOM owner. |
 | `TimelineView.tsx::projectionAcknowledgementRetryRef` / `repairAcknowledgementRetryRef` | Mounted timeline key; timers cancel on key reset/unmount | Mixed: DOM evidence is **renderer presentation**; retry/backoff and terminal delivery correspond to a Rust actor waiting for ACK. | Signature/in-flight fences, six-capped attempt counter with unbounded capped-delay reconstitution while mounted, command promise settlement. Owner disappears on unmount and cancels retries. | **Migrate-leaf candidate 2.** Keep evidence capture in React; investigate moving reliable retry/terminal ownership to transport/Rust. |
 | `TimelineView.tsx::pendingKeyRequests`, `keyRequestEpochRef`, `keyRequestToast` | Mounted key/account; reset on timeline-key change and Rust terminal DTO | **Renderer presentation/investigate**, not product admission. Rust owns `DecryptRetryController::admit`, `begin_decrypt_retry`, `handle_request_room_key`, and `TimelineActor.key_request_states`. | Frontend Set suppresses pre-projection duplicate dispatch and handles delayed rejection/toast; Rust already coalesces same event/generation and owns terminal state. | **Keep for now / investigate.** No proven Rust semantic gap; do not migrate merely because it is a Set. |
@@ -43,9 +44,9 @@ Decisions: **keep**, **derive/delete**, **migrate leaf**, or **investigate**. A 
 ## Current migration-boundary evidence
 
 - **Direct Tauri imports:** eight production modules currently import `@tauri-apps/*`: `App.tsx`; `app/useDesktopAttentionEffects.ts`; `backend/appRuntime.ts`, `backend/client.ts`, and `backend/tauriTimelineTransport.ts`; plus `domain/desktopNotification.ts`, `domain/externalLinks.ts`, and `domain/mediaUrl.ts`. The three `domain/` imports are adapter-boundary debt, not product-state ownership.
-- **Neutral API dependency:** `DesktopApi` is declared in `backend/browserFakeApi.ts`; `backend/client.ts::TauriDesktopApi` implements it and `createDesktopApi` selects Tauri versus fake. `backend/appRuntime.ts` is the renderer composition root. Phase 1A moves only this contract/selection dependency direction.
+- **Neutral API dependency:** `DesktopApi` is declared in `backend/browserFakeApi.ts`; `backend/client.ts::TauriDesktopApi` implements it and `createDesktopApi` selects Tauri versus fake. `backend/appRuntime.ts` is the renderer composition root. Phase 2A moves only this contract/selection dependency direction.
 - **Remaining mutation queue:** `App.tsx::latestTextMutationQueueRef` has only local-alias and main/thread staged-caption `run`/`invalidate` users. Invite and mention query keys were removed by merged PR #683.
-- **Acknowledgement ownership:** `TimelineView.tsx` captures committed DOM evidence and owns `projectionAcknowledgementRetryRef` / `repairAcknowledgementRetryRef`; Tauri `commands/navigation.rs` submits typed acknowledgement commands; `TimelineManager` routes them to `TimelineActor`, whose projection and gap-repair trackers own acceptance/continuation. Phase 2 must determine from RED evidence whether retry belongs nowhere, in the adapter, or in a retained Rust owner.
+- **Acknowledgement ownership:** `TimelineView.tsx` captures committed DOM evidence and owns `projectionAcknowledgementRetryRef` / `repairAcknowledgementRetryRef`; Tauri `commands/navigation.rs` submits typed acknowledgement commands; `TimelineManager` routes them to `TimelineActor`, whose projection and gap-repair trackers own acceptance/continuation. Phase 3 must determine from RED evidence whether retry belongs nowhere, in the adapter, or in a retained Rust owner.
 - **App request-ref families:** room/Space settings, room/Space navigation, Space-member open/invite/cancel/role, diagnostics snapshot generation, and Space invite search retain explicit frontend fences. Button/in-flight refs and local dialog lifetimes remain renderer presentation unless a duplicated semantic transition is proven.
 
 ## Already-correct Rust-owned paths
@@ -61,16 +62,24 @@ The following are not migration work:
 
 ## Duplicated semantics requiring evidence before change
 
-1. **Remaining alias/caption mutation ordering** — the TS mutation queue still serializes local-alias and staged-caption writes because current Rust admission does not yet prove latest-intent settlement for those mutation families. Invite/mention query ordering is already migrated.
-2. **Projection ACK retry/backoff** — frontend owns reliable-delivery policy while Rust owns actor terminal waiting. DOM evidence must remain frontend; transport retry may move.
-3. **App promise request refs** — may duplicate Rust request/demand generations, but each command-response path needs an equivalence test before deletion.
-4. **Browser Fake transitions** — intentional test mirror, not production duplication. Change only alongside the corresponding Rust contract.
+1. **Thread-root projection lifecycle and placement (#708)** — Core, Rust State and TypeScript each infer lifecycle from bounded contents; TypeScript additionally chooses placement. This observed consistency defect is the next Phase 1 leaf.
+2. **Remaining alias/caption mutation ordering** — the TS mutation queue still serializes local-alias and staged-caption writes because current Rust admission does not yet prove latest-intent settlement for those mutation families. Invite/mention query ordering is already migrated.
+3. **Projection ACK retry/backoff** — frontend owns reliable-delivery policy while Rust owns actor terminal waiting. DOM evidence must remain frontend; transport retry may move.
+4. **App promise request refs** — may duplicate Rust request/demand generations, but each command-response path needs an equivalence test before deletion.
+5. **Browser Fake transitions** — intentional test mirror, not production duplication. Change only alongside the corresponding Rust contract.
 
 Room-key `pendingKeyRequests` is excluded from this list until a semantic gap is proven: Rust already owns operation admission/coalescing; the Set is optimistic presentation and dispatch suppression.
 
 ## Ranked disjoint leaf candidates
 
-### 1. Shipped: retire invite/mention query admission from the latest-text queue
+### 1. Next: Rust-owned thread-root projection lifecycle (#708)
+
+- **Value:** fixes observed thread disappearance/reappearance by removing bounded-window deletion and placement authority from State/TypeScript.
+- **Owner:** `ThreadRootProjectionService` plus current Room `TimelineActor::DisplayProjectionState`; TypeScript remains cache/render only.
+- **Proof required:** dormant retention, authoritative zero/redaction/unsubscribe clear, Rust-owned root/latest ordering, existing-thread initial pagination, bounded teardown, and replay/repair/event-order convergence.
+- **Scope:** one reviewed #708 PR before adapter isolation; disjoint from later ACK/request-ref/mutation work.
+
+### 2. Shipped: retire invite/mention query admission from the latest-text queue
 
 - **Value:** removes the second “which async result wins” semantic owner from App for invite and mention queries while preserving the queue where it serializes unversioned mutations.
 - **Proof required:** delayed invite and main/thread mention A/B/A dispatch, adversarial settlement, explicit monotone nonzero snapshot generations, rendered final projection, and account/room/dialog replacement fences. Alias/caption A/B/A serialization and invalidation stay green.
@@ -78,13 +87,13 @@ Room-key `pendingKeyRequests` is excluded from this list until a semantic gap is
 - **Current result:** merged PR #683 migrated invite target search and main/thread mention query admission to existing Rust request/generation state plus `appStore`; alias and main/thread caption mutation serialization remain renderer-owned pending separate reviewed contracts.
 - **Disjointness:** merged #659 changed room-list reducer admission; #608 authentication invalidation diagnostics/copy; #559 read-state local/server boundaries; and #570 Activity/redaction/thread convergence. None share this query leaf.
 
-### 2. Move projection/repair ACK retry policy to a reliable transport owner
+### 3. Move projection/repair ACK retry policy to a reliable transport owner
 
 - **Value:** a mounted view currently owns backoff/attempt terminal policy for a Rust actor resource.
 - **Boundary:** React still computes committed DOM evidence and sends one typed observation. Tauri/Core owns reliable retry, cancellation and actor-generation settlement.
 - **Risk:** cross-file actor/transport design; larger than candidate 1.
 
-### 3. Retire redundant App request refs per command family
+### 4. Retire redundant App request refs per command family
 
 - **Value:** remove local stale-result fences already represented by Rust request IDs/generation and appStore admission.
 - **Method:** one family per PR, exact delayed-result test, no generic request manager.
@@ -119,14 +128,14 @@ The shipped invite/mention query leaf touches none of those owners; alias/captio
 | --- | --- |
 | Publish evidence-based inventory/classification | **Complete:** refreshed inventory above is pinned to current main and source/merge evidence. |
 | Identify already-correct Rust-owned/projection-only paths | **Complete:** listed above, including `appStore`, `timelineStore`, Core actors, and renderer-only DOM owners. |
-| Identify duplicated Rust/TS semantics | **Complete as inventory; remaining as migration:** acknowledgement retry, request refs, and alias/caption sequencing are named candidates with task-level proof gates. |
-| Migrate selected high-value leaf owners incrementally | **Partial:** invite target and main/thread mention query admission migrated in PR #683; acknowledgement, request-ref, and mutation leaves remain. |
-| One documented semantic owner per migrated subsystem | **Partial overall; complete for PR #683:** Rust request/generation state plus `appStore` owns invite/mention convergence; remaining candidates have not cut over. |
-| Async Rust owners have cancellation/awaited settlement where required | **Partial:** #550/#551 and later actor work ship explicit owners, but Phase 2 must settle acknowledgement reliability ownership before this epic criterion can close. |
-| Remove corresponding TS semantic state after cutover | **Partial:** invite/mention queue keys and invalidation are removed; acknowledgement retry and retained mutation/request fences remain pending proof. |
+| Identify duplicated Rust/TS semantics | **Complete as inventory; remaining as migration:** #708 thread-root lifecycle/placement, acknowledgement retry, request refs, and alias/caption sequencing are named candidates with task-level proof gates. |
+| Migrate selected high-value leaf owners incrementally | **Partial:** invite target and main/thread mention query admission migrated in PR #683; #708 is the next leaf, followed by acknowledgement, request-ref, and mutation leaves. |
+| One documented semantic owner per migrated subsystem | **Partial overall; complete for PR #683:** Rust request/generation state plus `appStore` owns invite/mention convergence; #708 and later candidates have not cut over. |
+| Async Rust owners have cancellation/awaited settlement where required | **Partial:** #550/#551 and later actor work ship explicit owners; #708 must settle thread projection lifecycle/teardown and Phase 3 must settle acknowledgement reliability before this epic criterion can close. |
+| Remove corresponding TS semantic state after cutover | **Partial:** invite/mention queue keys and invalidation are removed; #708 pruning/placement, acknowledgement retry, and retained mutation/request fences remain pending proof. |
 | Frontend cleanup primarily renderer-local | **Complete for current/shipped paths:** kept frontend owners are classified as presentation, transport cache, adapter resource, or test mirror. |
 | Preserve Tauri command/event compatibility unless separately reviewed | **Complete to date:** inventory and PR #683 changed no Rust/Tauri command, event, DTO, or IPC name; later contract changes remain separately gated. |
 | Focused transition/teardown/projection-equivalence tests | **Partial overall; complete for PR #683:** deterministic deferred invite/main/thread query tests cover monotone snapshots, adversarial settlement, and replacement; future leaves require their own RED/GREEN tests. |
-| Compatible with Tauri UI and future native Rust renderer | **Complete as an architectural invariant:** Core remains transport-neutral and React/Tauri remains supported; Phase 1/5 strengthen evidence without making GPUI part of #552 closure. |
+| Compatible with Tauri UI and future native Rust renderer | **Complete as an architectural invariant:** Core remains transport-neutral and React/Tauri remains supported; Phases 1, 2 and 6 strengthen evidence without making GPUI part of #552 closure. |
 
 #552 stays open. The refreshed inventory and one shipped semantic leaf do not satisfy the remaining migration criteria.

@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-08-26.
+Last amended: 2026-08-27.
 
 The evidence-based classification of remaining frontend-owned resources and
 semantic migration candidates is maintained in
@@ -631,6 +631,38 @@ bundled SDK summary; edits retain reply identity/count, redactions select the
 previous renderable reply or clear latest details, and replay/restart rebuilds
 the same result from the SDK event cache. React renders this DTO and never
 infers or repairs its fields from visible replies.
+
+Thread-root projection lifetime and placement use that same session-scoped Core
+owner. `ThreadRootProjectionService` retains one bounded per-root lifecycle and
+renderable root snapshot; absence from a temporary Room display window is
+*dormant visibility*, not deletion. Only an authoritative zero-reply aggregate
+with no active root/reply, accepted redaction reconciliation, Room unsubscribe,
+or session teardown clears the record. A failed disappearance check preserves
+the last accepted projection. Admission is capped at 120 roots per active Room
+owner and unsubscribe/session teardown releases the complete Room set.
+
+The current Room `TimelineActor` applies those records through its existing
+`DisplayProjectionState`. The manager's bounded latest-wins projection ingress
+carries generation-fenced Updated or Cleared wakes; an accepted clear rebuilds
+and emits the exact display removal instead of relying on a WebView cache scan.
+Rust chooses root-event versus latest-reply placement, suppresses standalone
+thread replies, assigns stable content/activity display identity, and emits
+validated display-relative InitialItems/diffs. Rust State
+mirrors explicit observed/ready/failed/cleared actions only; it does not prune
+from bounded-window absence. TypeScript caches and renders the Rust projection
+and retains DOM measurement, virtualization, date-divider presentation, scroll
+anchoring and layout settlement; it never infers projection death or thread
+placement from frontend timeline contents.
+
+Opening an `ExistingThread` or `PinnedReply` whose first SDK Thread snapshot is
+empty performs one bounded scheduler-owned backward page before any InitialItems
+or `ThreadSubscribed` success is published. The accepted Rust intent travels
+through AppEffect and an internal Core subscription policy; mutable reducer state
+is not reread later. End-reached plus empty is authoritative empty. A non-end
+empty page or SDK error takes the typed subscription-failure path and publishes
+no InitialItems. The existing Room empty-hydration policy remains separately
+non-fatal. `NewThreadDraft` stays immediately composer-capable and performs no
+initial history page.
 
 The runtime assigns each attached consumer a `RuntimeConnectionId`; the
 attached connection allocates a monotonically increasing `sequence` within that
