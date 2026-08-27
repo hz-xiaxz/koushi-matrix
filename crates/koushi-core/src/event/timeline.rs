@@ -1959,6 +1959,7 @@ mod tests {
                         "is_edited": true,
                         "has_media": false,
                         "megolm_session_fingerprint": "AbCdEfGhIjKl",
+                        "megolm_message_index": 2,
                         "megolm_session_rotation_reason": "expiredTime",
                         "original_json": {
                             "content": {
