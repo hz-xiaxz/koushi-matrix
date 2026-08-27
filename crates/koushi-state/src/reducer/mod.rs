@@ -1665,10 +1665,6 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             room_id,
             root_event_id,
         } => thread::handle_thread_root_projection_cleared(state, room_id, root_event_id),
-        AppAction::ThreadRootProjectionsReconciled {
-            room_id,
-            activities,
-        } => thread::handle_thread_root_projections_reconciled(state, room_id, activities),
         AppAction::ThreadRootProjectionsCleared { room_id } => {
             thread::handle_thread_root_projections_cleared(state, room_id)
         }

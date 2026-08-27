@@ -395,8 +395,11 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   is the Rust display-index domain consumed in production only by `TimelineView`;
   Core's private `navigation_items` remains canonical for read state, search,
   receipts, Activity and event-cache reconciliation. `TimelineView` keeps DOM
-  measurement, virtualization, date-divider rendering, anchoring and layout
-  settlement only.
+  measurement, virtualization, date-divider rendering, anchoring, layout
+  settlement, and post-subscription geometry-triggered pagination intent only.
+  That pagination intent may run after Core has published an authoritative-empty
+  existing thread; it does not confirm emptiness, choose projection lifetime, or
+  derive the pre-subscription `InitialBackfillPolicy` from promoted pane state.
   Pane-level thread attention is Rust-owned `AppState.thread_attention`; React
   may render the DTO but must not scan visible thread rows or row chips to derive
   indicator counts. The core producer uses the authoritative own threaded receipt

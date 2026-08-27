@@ -2945,6 +2945,7 @@ mod tests {
                             }
                             TimelineActorControl::ReadStateProjection { .. } => {}
                             TimelineActorControl::ReadStatePolicyChanged { .. } => {}
+                            TimelineActorControl::DisplayPolicyChanged { .. } => {}
                             TimelineActorControl::ReplayInitialItems { .. }
                             | TimelineActorControl::StartLiveTailRefresh { .. }
                             | TimelineActorControl::CancelLiveTailNetwork { .. }
@@ -3340,6 +3341,7 @@ mod tests {
                     }
                     TimelineActorControl::ReadStateProjection { .. } => {}
                     TimelineActorControl::ReadStatePolicyChanged { .. } => {}
+                    TimelineActorControl::DisplayPolicyChanged { .. } => {}
                     TimelineActorControl::ReplayInitialItems { .. }
                     | TimelineActorControl::StartLiveTailRefresh { .. }
                     | TimelineActorControl::CancelLiveTailNetwork { .. }
@@ -3773,6 +3775,7 @@ mod tests {
             .send(TimelineMessage::Command(TimelineCommand::Subscribe {
                 request_id: subscribe_request_id,
                 key,
+                initial_backfill: crate::command::InitialBackfillPolicy::Disabled,
             }))
             .await
             .expect("queue cached subscribe");

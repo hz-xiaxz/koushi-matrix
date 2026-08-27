@@ -144,7 +144,7 @@ export type TimelineAliasTarget = {
   originalDisplayLabel: string;
 };
 
-export function ThreadRootProjectionPlaceholder({
+export function ThreadRootStatusPlaceholder({
   row,
   state,
   showThreadSummary = true

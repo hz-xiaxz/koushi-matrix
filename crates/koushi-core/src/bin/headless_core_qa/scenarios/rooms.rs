@@ -431,6 +431,7 @@ pub(super) async fn run_room_people_projection_stage(
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe_id,
             key: key.clone(),
+            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("room people: submit timeline subscribe failed: {e}"))?;
@@ -441,6 +442,7 @@ pub(super) async fn run_room_people_projection_stage(
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe_b_id,
             key: key_b.clone(),
+            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("room people: submit receiver timeline subscribe failed: {e}"))?;

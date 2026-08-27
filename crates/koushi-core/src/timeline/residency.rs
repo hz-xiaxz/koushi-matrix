@@ -49,9 +49,7 @@ use super::read_state::ReadRetrySource;
 #[cfg(any(test, feature = "test-hooks"))]
 use super::read_state::ReadWorkerSupervisor;
 #[cfg(any(test, feature = "test-hooks"))]
-use super::thread_projection::{
-    ReplayKnownThreadRootProjectionRegistry, ThreadRootProjectionFetchRegistry,
-};
+use super::thread_projection::ThreadRootProjectionFetchRegistry;
 // END GENERATED SIBLING IMPORTS
 
 /// The only successful local room-removal causes that may mutate session
@@ -372,14 +370,12 @@ impl TimelineManagerActor {
             data_dir: None,
             link_preview_policy: LinkPreviewContext::default(),
             composer_formatting_options: ComposerFormattingOptions::default(),
+            thread_root_order: koushi_state::TimelineThreadRootOrder::LatestReply,
             account_work: AccountWorkScheduler::default(),
             thread_root_projection_service: Arc::new(Mutex::new(
                 ThreadRootProjectionService::default(),
             )),
             thread_root_projection_fetches: ThreadRootProjectionFetchRegistry::default(),
-            replay_known_thread_root_projections: Arc::new(Mutex::new(
-                ReplayKnownThreadRootProjectionRegistry::default(),
-            )),
             timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
             #[cfg(any(test, feature = "test-hooks"))]
@@ -409,8 +405,14 @@ impl TimelineManagerActor {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_admit_key(&mut self, key: TimelineKey) {
-        self.handle_subscribe(internal_timeline_request_id(), key, false, false)
-            .await;
+        self.handle_subscribe(
+            internal_timeline_request_id(),
+            key,
+            false,
+            false,
+            crate::command::InitialBackfillPolicy::Disabled,
+        )
+        .await;
     }
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
@@ -425,8 +427,14 @@ impl TimelineManagerActor {
                 root_event_id: "not-an-event-id".to_owned(),
             },
         };
-        self.handle_subscribe(internal_timeline_request_id(), key, false, false)
-            .await;
+        self.handle_subscribe(
+            internal_timeline_request_id(),
+            key,
+            false,
+            false,
+            crate::command::InitialBackfillPolicy::Disabled,
+        )
+        .await;
     }
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
@@ -927,6 +935,7 @@ impl TimelineManagerActor {
                 &key,
                 activation.generation,
                 subscription_generation,
+                crate::command::InitialBackfillPolicy::Disabled,
             )
             .await
         {

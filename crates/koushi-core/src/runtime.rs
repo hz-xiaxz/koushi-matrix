@@ -46,9 +46,9 @@ use koushi_state::{
     AccountManagementOperation, ActivityRowKind, ActivityState, AppAction, AppEffect, AppState,
     ComposerDraftStore, ComposerTarget, LoginAttemptId, NavigationState, OperationFailureKind,
     ProfileUpdateRequest, ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem,
-    SearchScope as AppSearchScope, SessionState, SpaceMembersCommandRejection, ThreadPaneState,
-    UiEvent, admit_space_member_cancellation, admit_space_member_invite, admit_space_member_role,
-    admit_space_members_load, reduce,
+    SearchScope as AppSearchScope, SessionState, SpaceMembersCommandRejection, ThreadOpenIntent,
+    ThreadPaneState, UiEvent, admit_space_member_cancellation, admit_space_member_invite,
+    admit_space_member_role, admit_space_members_load, reduce,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
@@ -3265,6 +3265,7 @@ impl AppActor {
                 AppEffect::OpenThreadTimeline {
                     room_id,
                     root_event_id,
+                    intent,
                 } => {
                     let Some(account_key) = self.current_account_key() else {
                         self.emit(CoreEvent::OperationFailed {
@@ -3283,6 +3284,15 @@ impl AppActor {
                                     room_id,
                                     root_event_id,
                                 },
+                            },
+                            initial_backfill: match intent {
+                                ThreadOpenIntent::ExistingThread
+                                | ThreadOpenIntent::PinnedReply { .. } => {
+                                    crate::command::InitialBackfillPolicy::RequiredForExistingThread
+                                }
+                                ThreadOpenIntent::NewThreadDraft => {
+                                    crate::command::InitialBackfillPolicy::Disabled
+                                }
                             },
                         },
                     )
@@ -3304,6 +3314,7 @@ impl AppActor {
                                 account_key,
                                 kind: TimelineKind::Focused { room_id, event_id },
                             },
+                            initial_backfill: crate::command::InitialBackfillPolicy::Disabled,
                         },
                     )
                     .await;
@@ -3785,6 +3796,12 @@ impl AppActor {
                 .account_actor
                 .send(crate::account::AccountMessage::ReadStatePolicyChanged {
                     send_read_receipts: self.state.settings.values.notifications.send_read_receipts,
+                })
+                .await;
+            let _ = self
+                .account_actor
+                .send(crate::account::AccountMessage::DisplayPolicyChanged {
+                    thread_root_order: self.state.settings.values.timeline.thread_root_order,
                 })
                 .await;
             self.broadcast_link_preview_policy().await;

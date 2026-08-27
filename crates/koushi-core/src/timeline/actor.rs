@@ -9,7 +9,9 @@ use koushi_sdk::{
     MatrixLiveTailRefreshCancellation, MatrixLiveTailRefreshResult, MatrixTimelineGapError,
     MatrixTimelineGapInspection, MatrixTimelineGapRepairResult,
 };
-use koushi_state::{AppAction, ComposerDocument, TimelineMediaGalleryItem};
+use koushi_state::{
+    AppAction, ComposerDocument, TimelineMediaGalleryItem, TimelineThreadRootOrder,
+};
 
 use matrix_sdk::send_queue::{RoomSendQueueUpdate, SendHandle};
 use matrix_sdk_ui::timeline::Timeline;
@@ -45,7 +47,7 @@ use super::diagnostics::{
     record_timeline_gap_repair, record_timeline_gap_repair_evaluation, trace_event_cache_diffs,
     trace_event_cache_items, trace_timeline_items, trace_timeline_paginate,
 };
-use super::display_projection::DisplayProjectionState;
+use super::display_projection::{DisplayProjectionContext, DisplayProjectionState};
 use super::gap_repair::{
     GapRepairEvaluationDiagnosticSignature, GapRepairViewportWakeDecision, GlobalCommitDecision,
     GlobalCommitFence, GlobalResponseCommit, PendingLiveTailRefreshCompletion,
@@ -57,7 +59,7 @@ use super::gap_repair::{
 };
 use super::item_projection::{
     ReceiptObservationTarget, apply_ignored_sender_suppression, apply_link_previews_to_item,
-    cache_sdk_item_media_source, emit_receipt_observation_actions, is_attention_eligible_event,
+    cache_sdk_item_media_source, emit_receipt_observation_actions,
     live_event_receipts_from_sdk_items, remember_local_echo, sdk_item_to_timeline_item,
     thread_auto_requestable_event_id, timeline_room_id, withheld_update_should_publish,
 };
@@ -70,10 +72,9 @@ use super::navigation::{
     ActivePaginationTask, INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT, InitialItemsRequestIdentity,
     PaginationCompletion, RestoreTimelineAnchorState, TimelineActorGenerationGate,
     TimelineProjectionAcknowledgement, activity_rows_from_timeline_items,
-    emit_initial_items_and_reconcile_replay_known_for_generation,
-    emit_non_sdk_item_sets_and_reconcile_replay_known_for_generation,
-    emit_timeline_events_for_generation, projection_acknowledgement_for_current_items,
-    send_generation_fenced, should_hydrate_empty_initial_room_timeline,
+    emit_initial_items_for_generation, emit_timeline_events_for_generation,
+    projection_acknowledgement_for_current_items, send_generation_fenced,
+    should_hydrate_empty_initial_room_timeline,
 };
 use super::outbound_send::{
     MatrixTimelineSendEnqueueContext, SharedSendCompletionCoordinator, TimelineSendEnqueueContext,
@@ -90,8 +91,7 @@ use super::room_key_recovery::{
     decrypt_retry_settlement_operation,
 };
 use super::thread_projection::{
-    ReplayKnownThreadRootProjectionRegistry, ThreadAttentionCounters, ThreadAttentionTracker,
-    replay_known_candidates_for_display_items, thread_root_item_with_authoritative_aggregate,
+    ThreadAttentionCounters, ThreadAttentionTracker, thread_root_item_with_authoritative_aggregate,
     thread_summary_observations_for_windows,
 };
 // END GENERATED SIBLING IMPORTS
@@ -110,10 +110,17 @@ fn should_fetch_members(kind: &TimelineKind) -> bool {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct ThreadSummaryProjectionWake {
-    pub(super) root_event_id: String,
-    pub(super) activity_revision: u64,
-    pub(super) summary_revision: u64,
+pub(super) enum ThreadSummaryProjectionWake {
+    Updated {
+        root_event_id: String,
+        activity_revision: u64,
+        summary_revision: u64,
+    },
+    Cleared {
+        root_event_id: String,
+        activity_revision: u64,
+        summary_revision: u64,
+    },
 }
 
 #[derive(Clone)]
@@ -134,13 +141,42 @@ impl ThreadSummaryProjectionIngress {
     /// the Room actor atomically drains it, so manager publication never waits
     /// for the ordinary actor mailbox.
     pub(super) fn publish(&self, wake: ThreadSummaryProjectionWake) {
+        let (root_event_id, activity_revision, summary_revision) = match &wake {
+            ThreadSummaryProjectionWake::Updated {
+                root_event_id,
+                activity_revision,
+                summary_revision,
+            }
+            | ThreadSummaryProjectionWake::Cleared {
+                root_event_id,
+                activity_revision,
+                summary_revision,
+            } => (root_event_id.clone(), *activity_revision, *summary_revision),
+        };
         self.tx.send_modify(|pending| {
             assert!(
-                pending.contains_key(&wake.root_event_id)
+                pending.contains_key(&root_event_id)
                     || pending.len() < crate::threads_list::THREAD_SUMMARY_PROJECTION_MAX_ROOTS,
                 "thread-summary projection wake slots exceeded"
             );
-            pending.insert(wake.root_event_id.clone(), wake);
+            let newer = pending.get(&root_event_id).is_none_or(|current| {
+                let current_revisions = match current {
+                    ThreadSummaryProjectionWake::Updated {
+                        activity_revision,
+                        summary_revision,
+                        ..
+                    }
+                    | ThreadSummaryProjectionWake::Cleared {
+                        activity_revision,
+                        summary_revision,
+                        ..
+                    } => (*activity_revision, *summary_revision),
+                };
+                (activity_revision, summary_revision) >= current_revisions
+            });
+            if newer {
+                pending.insert(root_event_id.clone(), wake);
+            }
         });
     }
 
@@ -336,6 +372,9 @@ pub(super) enum TimelineActorMessage {
     ReadStatePolicyChanged {
         send_read_receipts: bool,
     },
+    DisplayPolicyChanged {
+        thread_root_order: TimelineThreadRootOrder,
+    },
     SetTyping {
         request_id: RequestId,
         is_typing: bool,
@@ -440,6 +479,9 @@ pub(super) enum TimelineActorControl {
     ReadStatePolicyChanged {
         send_read_receipts: bool,
     },
+    DisplayPolicyChanged {
+        thread_root_order: TimelineThreadRootOrder,
+    },
     BeginGapRepairDemand,
     EndGapRepairDemand,
 }
@@ -535,6 +577,9 @@ impl From<TimelineActorControl> for TimelineActorMessage {
             },
             TimelineActorControl::ReadStatePolicyChanged { send_read_receipts } => {
                 Self::ReadStatePolicyChanged { send_read_receipts }
+            }
+            TimelineActorControl::DisplayPolicyChanged { thread_root_order } => {
+                Self::DisplayPolicyChanged { thread_root_order }
             }
             TimelineActorControl::BeginGapRepairDemand => Self::BeginGapRepairDemand,
             TimelineActorControl::EndGapRepairDemand => Self::EndGapRepairDemand,
@@ -837,12 +882,8 @@ pub(super) struct TimelineActor {
     pub(super) thread_root_projection_service: Arc<Mutex<ThreadRootProjectionService>>,
     pub(super) thread_summary_projection: ThreadSummaryProjectionIngress,
     thread_summary_projection_rx: watch::Receiver<BTreeMap<String, ThreadSummaryProjectionWake>>,
-    /// Manager-owned lifecycle registry for ready snapshots copied from a
-    /// bounded replay. It owns no SDK handle and cannot fetch or paginate.
-    pub(super) replay_known_thread_root_projections:
-        Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
-    /// Manager-owned serial fence. Replay-known registry changes and their
-    /// Core events require a lease for this actor generation.
+    pub(super) thread_root_order: TimelineThreadRootOrder,
+    /// Manager-owned serial fence for display events and their actor generation.
     pub(super) timeline_actor_generations: Arc<TimelineActorGenerationGate>,
     pub(super) actor_generation: u64,
     pub(super) subscription_generation: Option<u64>,
@@ -967,56 +1008,120 @@ impl Drop for TimelineActor {
 }
 
 impl TimelineActor {
+    pub(super) fn display_projection_context(&self) -> DisplayProjectionContext {
+        DisplayProjectionContext::for_timeline(
+            &self.key.kind,
+            &self.viewport_observation,
+            self.restore_anchor.is_some(),
+        )
+        .with_thread_roots(
+            self.thread_root_order,
+            self.thread_root_projection_service
+                .lock()
+                .expect("thread-root projection service lock must not be poisoned")
+                .display_data_for_room(self.key.room_id()),
+        )
+    }
+
+    pub(super) fn reproject_display_items(&mut self) -> Vec<TimelineDiff> {
+        let context = self.display_projection_context();
+        self.display_projection.reproject(&context)
+    }
+
     fn drain_thread_summary_projection_wakes(&mut self) {
+        if self
+            .timeline_actor_generations
+            .current_generation(&self.key)
+            != Some(self.actor_generation)
+        {
+            return;
+        }
         for wake in self
             .thread_summary_projection
             .drain(&mut self.thread_summary_projection_rx)
         {
-            let Some(aggregate) = self
+            let (root_event_id, activity_revision, summary_revision, cleared) = match wake {
+                ThreadSummaryProjectionWake::Updated {
+                    root_event_id,
+                    activity_revision,
+                    summary_revision,
+                } => (root_event_id, activity_revision, summary_revision, false),
+                ThreadSummaryProjectionWake::Cleared {
+                    root_event_id,
+                    activity_revision,
+                    summary_revision,
+                } => (root_event_id, activity_revision, summary_revision, true),
+            };
+            let service = self
+                .thread_root_projection_service
+                .lock()
+                .expect("thread-root projection service lock must not be poisoned");
+            let current = service.display_data_at_revision(
+                self.key.room_id(),
+                &root_event_id,
+                activity_revision,
+                summary_revision,
+            );
+            drop(service);
+            if cleared && current.is_some() || !cleared && current.is_none() {
+                continue;
+            }
+
+            let mut canonical_set = None;
+            if let Some(aggregate) = self
                 .thread_root_projection_service
                 .lock()
                 .expect("thread-root projection service lock must not be poisoned")
                 .aggregate_at_revision(
                     self.key.room_id(),
-                    &wake.root_event_id,
-                    wake.activity_revision,
-                    wake.summary_revision,
+                    &root_event_id,
+                    activity_revision,
+                    summary_revision,
                 )
-            else {
-                continue;
+                && let Some((index, item)) =
+                    self.navigation_items.iter().enumerate().find(|(_, item)| {
+                        matches!(
+                            &item.id,
+                            TimelineItemId::Event { event_id }
+                                if event_id == &root_event_id && item.thread_root.is_none()
+                        )
+                    })
+            {
+                let next = thread_root_item_with_authoritative_aggregate(item, &aggregate);
+                if *item != next {
+                    self.navigation_items[index] = next.clone();
+                    canonical_set = Some((index, next));
+                }
+            }
+
+            let canonical_set_applied = canonical_set.is_some();
+            let display_diffs = if let Some((index, item)) = canonical_set {
+                let context = self.display_projection_context();
+                super::display_projection::apply_non_sdk_item_set_diffs_to_display_items(
+                    &mut self.display_projection,
+                    &[TimelineDiff::Set { index, item }],
+                    &context,
+                )
+            } else {
+                self.reproject_display_items()
             };
-            let Some((index, current)) =
-                self.navigation_items.iter().enumerate().find(|(_, item)| {
-                    matches!(
-                        &item.id,
-                        TimelineItemId::Event { event_id }
-                            if event_id == &wake.root_event_id && item.thread_root.is_none()
-                    )
-                })
-            else {
-                continue;
-            };
-            let next = thread_root_item_with_authoritative_aggregate(current, &aggregate);
-            if *current == next {
+            if display_diffs.is_empty() {
                 continue;
             }
-            self.navigation_items[index] = next.clone();
             let batch_id = self.next_batch_id;
-            if emit_non_sdk_item_sets_and_reconcile_replay_known_for_generation(
+            if super::navigation::emit_items_updated_for_generation(
                 &self.event_tx,
-                &self.replay_known_thread_root_projections,
-                &self.thread_root_projection_service,
                 &self.timeline_actor_generations,
                 &self.key,
                 self.actor_generation,
                 self.generation,
                 batch_id,
-                vec![TimelineDiff::Set { index, item: next }],
-                &self.navigation_items,
-                &mut self.display_projection,
+                display_diffs,
             ) {
                 self.next_batch_id = TimelineBatchId(batch_id.0 + 1);
-                self.emit_navigation_if_changed();
+                if canonical_set_applied {
+                    self.emit_navigation_if_changed();
+                }
             }
         }
     }
@@ -1077,7 +1182,7 @@ impl TimelineActor {
         link_preview_policy: LinkPreviewContext,
         account_work: AccountWorkScheduler,
         thread_root_projection_service: Arc<Mutex<ThreadRootProjectionService>>,
-        replay_known_thread_root_projections: Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
+        thread_root_order: TimelineThreadRootOrder,
         timeline_actor_generations: Arc<TimelineActorGenerationGate>,
         actor_generation: u64,
         subscription_generation: Option<u64>,
@@ -1227,10 +1332,30 @@ impl TimelineActor {
         }
         trace_timeline_items("initial", &key, &initial_items);
         let navigation_items = initial_items.clone();
-        let display_projection = DisplayProjectionState::from_canonical_window(
+        for item in &navigation_items {
+            super::thread_projection::seed_thread_summary_item(
+                &thread_root_projection_service,
+                &key,
+                item,
+            );
+        }
+        let mut display_projection = DisplayProjectionState::from_canonical_window(
             &navigation_items,
             0..navigation_items.len(),
         );
+        let initial_display_context = DisplayProjectionContext::for_timeline(
+            &key.kind,
+            &TimelineViewportObservation::default(),
+            false,
+        )
+        .with_thread_roots(
+            thread_root_order,
+            thread_root_projection_service
+                .lock()
+                .expect("thread-root projection service lock must not be poisoned")
+                .display_data_for_room(key.room_id()),
+        );
+        display_projection.reproject(&initial_display_context);
         let initial_media_gallery_items =
             media_gallery_items_from_timeline_items(&key, &initial_items);
         let initial_receipts = live_event_receipts_from_sdk_items(initial_sdk_items.iter());
@@ -1354,65 +1479,21 @@ impl TimelineActor {
             }));
         }
 
-        // Emit InitialItems (generation 0).
+        // Emit InitialItems (generation 0) from the actor-owned display
+        // projection. Navigation items remain canonical and are used for the
+        // Activity mirror below.
         let generation = TimelineGeneration(0);
-        let replay_known_candidates = replay_known_candidates_for_display_items(
+        let initial_display_items = display_projection.display_items().to_vec();
+        let initial_emitted = emit_initial_items_for_generation(
+            &event_tx,
+            &timeline_actor_generations,
             &key,
-            &navigation_items,
-            display_projection.display_items(),
+            actor_generation,
+            InitialItemsRequestIdentity::fresh(subscribe_request_id),
+            generation,
+            initial_display_items,
+            Vec::new(),
         );
-        // Reserve the reducer slot before taking the generation lease. The
-        // canonical replacement is sent while that lease remains held, so a
-        // retired actor cannot publish a timeline without its Activity mirror.
-        let initial_emitted = if matches!(key.kind, TimelineKind::Room { .. }) {
-            match reserve_canonical_activity_action(&action_tx, &key).await {
-                Some(activity_permit) => {
-                    match timeline_actor_generations.try_acquire(&key, actor_generation) {
-                        Some(commit_lease) => {
-                            let emitted =
-                                emit_initial_items_and_reconcile_replay_known_for_generation(
-                                    &event_tx,
-                                    &replay_known_thread_root_projections,
-                                    &thread_root_projection_service,
-                                    &timeline_actor_generations,
-                                    &key,
-                                    actor_generation,
-                                    InitialItemsRequestIdentity::fresh(subscribe_request_id),
-                                    generation,
-                                    initial_items.clone(),
-                                    replay_known_candidates,
-                                );
-                            if emitted {
-                                activity_permit.send(vec![
-                                    canonical_activity_window_action(&key, &navigation_items)
-                                        .expect("room initial Activity action"),
-                                ]);
-                            }
-                            drop(commit_lease);
-                            emitted
-                        }
-                        None => {
-                            drop(activity_permit);
-                            false
-                        }
-                    }
-                }
-                None => false,
-            }
-        } else {
-            emit_initial_items_and_reconcile_replay_known_for_generation(
-                &event_tx,
-                &replay_known_thread_root_projections,
-                &thread_root_projection_service,
-                &timeline_actor_generations,
-                &key,
-                actor_generation,
-                InitialItemsRequestIdentity::fresh(subscribe_request_id),
-                generation,
-                initial_items.clone(),
-                replay_known_candidates,
-            )
-        };
         record_subscribe_stage(
             if initial_emitted {
                 "initial_emitted"
@@ -1421,6 +1502,13 @@ impl TimelineActor {
             },
             Some(initial_items.len()),
         );
+        if initial_emitted
+            && let Some(activity_permit) = reserve_canonical_activity_action(&action_tx, &key).await
+        {
+            if let Some(action) = canonical_activity_window_action(&key, &navigation_items) {
+                activity_permit.send(vec![action]);
+            }
+        }
         if initial_emitted
             && let Some(action) = thread_activity_observed_action(&key, &navigation_items)
         {
@@ -1589,7 +1677,7 @@ impl TimelineActor {
             thread_root_projection_service,
             thread_summary_projection: thread_summary_projection.clone(),
             thread_summary_projection_rx,
-            replay_known_thread_root_projections,
+            thread_root_order,
             timeline_actor_generations,
             actor_generation,
             subscription_generation,
@@ -1637,7 +1725,6 @@ impl TimelineActor {
         actor
             .forward_initial_items_to_search(initial_sdk_items.iter().cloned())
             .await;
-        actor.maybe_hydrate_missing_thread_roots(None).await;
         // Issue #460: automatic one-shot key requests for Thread timelines at
         // subscription time — existing UTD rows are delivered as InitialItems,
         // not as diffs, so the diff-batch scanner never sees them. The actor
@@ -1670,6 +1757,9 @@ impl TimelineActor {
         // manager. Publishing through the manager mailbox while construction
         // is still awaited can self-deadlock when that bounded mailbox is full.
         self.publish_authoritative_read_state().await;
+        if matches!(self.key.kind, TimelineKind::Room { .. }) {
+            self.maybe_hydrate_missing_thread_roots(None).await;
+        }
         if matches!(self.key.kind, TimelineKind::Thread { .. }) {
             let initial_items = self.navigation_items.clone();
             let _ = self
@@ -2291,6 +2381,26 @@ impl TimelineActor {
                     self.emit_navigation_if_changed();
                 }
             }
+            TimelineActorMessage::DisplayPolicyChanged { thread_root_order } => {
+                if self.thread_root_order != thread_root_order {
+                    self.thread_root_order = thread_root_order;
+                    let diffs = self.reproject_display_items();
+                    if !diffs.is_empty() {
+                        let batch_id = self.next_batch_id;
+                        if super::navigation::emit_items_updated_for_generation(
+                            &self.event_tx,
+                            &self.timeline_actor_generations,
+                            &self.key,
+                            self.actor_generation,
+                            self.generation,
+                            batch_id,
+                            diffs,
+                        ) {
+                            self.next_batch_id = TimelineBatchId(batch_id.0 + 1);
+                        }
+                    }
+                }
+            }
             TimelineActorMessage::SetTyping {
                 request_id,
                 is_typing,
@@ -2602,7 +2712,7 @@ mod tests {
     fn thread_summary_projection_watch_is_bounded_and_latest_wins() {
         let (ingress, mut receiver) = ThreadSummaryProjectionIngress::channel();
         for index in 0..crate::threads_list::THREAD_SUMMARY_PROJECTION_MAX_ROOTS {
-            ingress.publish(ThreadSummaryProjectionWake {
+            ingress.publish(ThreadSummaryProjectionWake::Updated {
                 root_event_id: format!("$root-{index}"),
                 activity_revision: 1,
                 summary_revision: 1,
@@ -2613,7 +2723,7 @@ mod tests {
             crate::threads_list::THREAD_SUMMARY_PROJECTION_MAX_ROOTS
         );
 
-        ingress.publish(ThreadSummaryProjectionWake {
+        ingress.publish(ThreadSummaryProjectionWake::Updated {
             root_event_id: "$root-0".to_owned(),
             activity_revision: 2,
             summary_revision: 3,
@@ -2622,7 +2732,13 @@ mod tests {
             receiver.borrow().len(),
             crate::threads_list::THREAD_SUMMARY_PROJECTION_MAX_ROOTS
         );
-        assert_eq!(receiver.borrow()["$root-0"].summary_revision, 3);
+        let summary_revision = match receiver.borrow().get("$root-0") {
+            Some(ThreadSummaryProjectionWake::Updated {
+                summary_revision, ..
+            }) => *summary_revision,
+            _ => panic!("updated wake expected"),
+        };
+        assert_eq!(summary_revision, 3);
 
         let drained = ingress.drain(&mut receiver);
         assert_eq!(
@@ -2639,19 +2755,100 @@ mod tests {
 
         // A publication racing the actor's next select belongs to the new
         // watch value rather than the atomically drained batch.
-        ingress.publish(ThreadSummaryProjectionWake {
+        ingress.publish(ThreadSummaryProjectionWake::Updated {
             root_event_id: "$root-new".to_owned(),
             activity_revision: 4,
             summary_revision: 5,
         });
         assert_eq!(receiver.borrow().len(), 1);
-        assert_eq!(ingress.drain(&mut receiver)[0].root_event_id, "$root-new");
+        let drained = ingress.drain(&mut receiver);
+        assert!(matches!(
+            drained.as_slice(),
+            [ThreadSummaryProjectionWake::Updated { root_event_id, .. }]
+                if root_event_id == "$root-new"
+        ));
+    }
+
+    #[test]
+    fn thread_summary_projection_clear_ordering_is_latest_wins() {
+        let (ingress, mut receiver) = ThreadSummaryProjectionIngress::channel();
+        // A newer Updated for the same root supersedes an older Cleared.
+        ingress.publish(ThreadSummaryProjectionWake::Cleared {
+            root_event_id: "$root:test".to_owned(),
+            activity_revision: 1,
+            summary_revision: 1,
+        });
+        ingress.publish(ThreadSummaryProjectionWake::Updated {
+            root_event_id: "$root:test".to_owned(),
+            activity_revision: 2,
+            summary_revision: 1,
+        });
+        let wake = receiver
+            .borrow()
+            .get("$root:test")
+            .cloned()
+            .expect("wake present");
+        assert!(matches!(
+            wake,
+            ThreadSummaryProjectionWake::Updated {
+                activity_revision: 2,
+                ..
+            }
+        ));
+
+        // An older Updated cannot un-clear a newer Cleared.
+        ingress.publish(ThreadSummaryProjectionWake::Cleared {
+            root_event_id: "$root:test".to_owned(),
+            activity_revision: 3,
+            summary_revision: 2,
+        });
+        ingress.publish(ThreadSummaryProjectionWake::Updated {
+            root_event_id: "$root:test".to_owned(),
+            activity_revision: 1,
+            summary_revision: 1,
+        });
+        let wake = receiver
+            .borrow()
+            .get("$root:test")
+            .cloned()
+            .expect("wake present");
+        assert!(matches!(
+            wake,
+            ThreadSummaryProjectionWake::Cleared {
+                activity_revision: 3,
+                ..
+            }
+        ));
+
+        // A later equal-revision publication is the latest service truth: a
+        // recreated Updated may supersede a prior Clear without growing the map.
+        ingress.publish(ThreadSummaryProjectionWake::Cleared {
+            root_event_id: "$root:test".to_owned(),
+            activity_revision: 4,
+            summary_revision: 4,
+        });
+        ingress.publish(ThreadSummaryProjectionWake::Updated {
+            root_event_id: "$root:test".to_owned(),
+            activity_revision: 4,
+            summary_revision: 4,
+        });
+        let drained = ingress.drain(&mut receiver);
+        assert_eq!(drained.len(), 1);
+        assert!(matches!(
+            drained.as_slice(),
+            [ThreadSummaryProjectionWake::Updated {
+                activity_revision: 4,
+                summary_revision: 4,
+                ..
+            }]
+        ));
+        assert!(receiver.borrow().is_empty());
     }
 
     #[test]
     fn replaced_thread_summary_projection_watch_drops_old_values() {
         let (ingress, receiver) = ThreadSummaryProjectionIngress::channel();
-        ingress.publish(ThreadSummaryProjectionWake {
+        ingress.publish(ThreadSummaryProjectionWake::Updated {
             root_event_id: "$old-root".to_owned(),
             activity_revision: 1,
             summary_revision: 1,

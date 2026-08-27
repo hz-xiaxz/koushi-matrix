@@ -1393,12 +1393,6 @@ pub enum AppAction {
         room_id: String,
         root_event_id: String,
     },
-    /// Bounded Room-window lifecycle for out-of-band root projections. This
-    /// carries no canonical timeline items and cannot trigger pagination.
-    ThreadRootProjectionsReconciled {
-        room_id: String,
-        activities: Vec<crate::state::ThreadRootProjectionActivity>,
-    },
     /// The Room timeline was unsubscribed, so no retained/pending root
     /// projection may survive into a future actor lifetime for that Room.
     ThreadRootProjectionsCleared {

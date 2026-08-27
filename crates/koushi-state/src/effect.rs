@@ -102,6 +102,7 @@ pub enum AppEffect {
     OpenThreadTimeline {
         room_id: String,
         root_event_id: String,
+        intent: crate::ThreadOpenIntent,
     },
     OpenFocusedTimeline {
         room_id: String,

@@ -413,6 +413,7 @@ async fn scan_existing_stress_timeline(
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: subscribe_id,
         key: key.clone(),
+        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .map_err(|e| format!("{label}: submit replay subscribe failed: {e}"))?;
@@ -565,6 +566,7 @@ pub(super) async fn run_timeline_stress_room_messages(
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: sender_subscribe_id,
             key: sender_key.clone(),
+            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("timeline_stress: submit sender subscribe failed: {e}"))?;
@@ -638,6 +640,7 @@ pub(super) async fn run_timeline_stress_room_messages(
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: receiver_subscribe_id,
             key: receiver_key.clone(),
+            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("timeline_stress: submit receiver subscribe failed: {e}"))?;
@@ -1111,6 +1114,7 @@ pub(super) async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), 
         conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: sub_id,
             key: key.clone(),
+            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("cache_restore: submit subscribe failed: {e}"))?;
@@ -1282,6 +1286,7 @@ pub(super) async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), 
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: shallow_sub_id,
         key: shallow_key.clone(),
+        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .map_err(|e| format!("cache_restore shallow: subscribe failed: {e}"))?;
@@ -1445,6 +1450,7 @@ pub(super) async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), 
             .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
                 request_id: sub_id,
                 key: key.clone(),
+                initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
             }))
             .await
             .map_err(|e| format!("cache_restore: offline subscribe failed: {e}"))?;
@@ -1568,6 +1574,7 @@ pub(super) async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), 
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: shallow_sub2,
             key: shallow_key2.clone(),
+            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("cache_restore shallow: offline subscribe failed: {e}"))?;
@@ -1800,6 +1807,7 @@ pub(super) async fn run_send_queue_stage(
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: subscribe_id,
         key: key.clone(),
+        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .map_err(|e| format!("send_queue: submit subscribe failed: {e}"))?;
@@ -1928,6 +1936,7 @@ pub(super) async fn run_send_queue_stage(
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: subscribe_id,
         key: key.clone(),
+        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .map_err(|e| format!("send_queue: submit restore subscribe failed: {e}"))?;
@@ -3312,6 +3321,7 @@ pub(super) async fn subscribe_and_ack_active_timeline_projection_for_qa(
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: subscribe_request_id,
         key: key.clone(),
+        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .map_err(|e| format!("{label}: submit timeline subscribe failed: {e}"))?;
@@ -4309,6 +4319,7 @@ pub(super) async fn run_link_preview_stage(
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: sub_a_id,
             key: enc_key_a.clone(),
+            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("link_preview subscribe encrypted room A: {e}"))?;
@@ -5337,7 +5348,7 @@ struct RoomThreadSummaryObserver<'a> {
     expected_latest_event_id: &'a str,
     expected_reply_count: u32,
     root_event_id: &'a str,
-    saw_canonical_reply: bool,
+    saw_projected_root_activity: bool,
     saw_summary: bool,
     saw_root_summary: bool,
     observed_reply_count: Option<u32>,
@@ -5358,7 +5369,7 @@ impl<'a> RoomThreadSummaryObserver<'a> {
             expected_latest_event_id,
             expected_reply_count,
             root_event_id,
-            saw_canonical_reply: false,
+            saw_projected_root_activity: false,
             saw_summary: false,
             saw_root_summary: false,
             observed_reply_count: None,
@@ -5369,11 +5380,15 @@ impl<'a> RoomThreadSummaryObserver<'a> {
     }
 
     fn observe_item(&mut self, item: &TimelineItem) -> Result<(), String> {
-        if timeline_item_body_contains(item, self.expected_thread_body) {
-            assert_thread_reply_relation(item, self.root_event_id).map_err(|_| {
-                "thread_canonical failed: canonical reply relation did not match root".to_owned()
-            })?;
-            self.saw_canonical_reply = true;
+        if item.display_metadata.as_ref().is_some_and(|metadata| {
+            metadata.content_event_id.as_deref() == Some(self.root_event_id)
+                && metadata.activity_event_id.as_deref() == Some(self.expected_latest_event_id)
+                && matches!(
+                    metadata.kind,
+                    koushi_core::event::TimelineDisplayKind::ThreadRoot
+                )
+        }) {
+            self.saw_projected_root_activity = true;
         }
         if timeline_item_event_id(item) == Some(self.root_event_id)
             && let Some(summary) = item.thread_summary.as_ref()
@@ -5399,7 +5414,7 @@ impl<'a> RoomThreadSummaryObserver<'a> {
     }
 
     fn is_complete(&self) -> bool {
-        self.saw_canonical_reply && self.saw_summary
+        self.saw_projected_root_activity && self.saw_summary
     }
 
     fn summary_is_complete(&self) -> bool {
@@ -5408,8 +5423,8 @@ impl<'a> RoomThreadSummaryObserver<'a> {
 
     fn diagnostic(&self) -> String {
         format!(
-            "canonical_reply={} root_summary={} reply_count={} expected_count={} latest_matches={} body_matches={} count_sequence={:?}",
-            self.saw_canonical_reply,
+            "projected_root_activity={} root_summary={} reply_count={} expected_count={} latest_matches={} body_matches={} count_sequence={:?}",
+            self.saw_projected_root_activity,
             self.saw_root_summary,
             self.observed_reply_count
                 .map_or_else(|| "none".to_owned(), |count| count.to_string()),
@@ -5595,21 +5610,29 @@ pub(super) async fn wait_for_thread_panel_and_room_summary(
 }
 
 #[allow(dead_code)]
-fn assert_room_timeline_exposes_canonical_reply_and_summarizes_root(
+fn assert_room_timeline_projects_root_activity_and_summary(
     items: &[TimelineItem],
     expected_thread_body: &str,
     root_event_id: &str,
 ) -> Result<(), String> {
-    let saw_reply = items
-        .iter()
-        .any(|item| timeline_item_body_contains(item, expected_thread_body));
-    let saw_summary = items
-        .iter()
-        .any(|item| timeline_item_has_thread_summary_reply(item, root_event_id));
-    if !saw_reply || !saw_summary {
+    let projected = items.iter().any(|item| {
+        let Some(summary) = item.thread_summary.as_ref() else {
+            return false;
+        };
+        let Some(metadata) = item.display_metadata.as_ref() else {
+            return false;
+        };
+        metadata.content_event_id.as_deref() == Some(root_event_id)
+            && metadata.activity_event_id.as_deref() == summary.latest_event_id.as_deref()
+            && summary.reply_count >= 1
+            && summary
+                .latest_body_preview
+                .as_deref()
+                .is_some_and(|body| body.contains(expected_thread_body))
+    });
+    if !projected {
         return Err(
-            "thread_canonical failed: root summary and canonical reply were not both observed"
-                .to_owned(),
+            "thread projection failed: Room root activity/summary was not observed".to_owned(),
         );
     }
     Ok(())

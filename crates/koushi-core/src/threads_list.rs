@@ -18,7 +18,7 @@ use matrix_sdk_ui::timeline::thread_list_service::{
 use matrix_sdk_ui::timeline::{ThreadListPaginationState, ThreadListService, TimelineDetails};
 use tokio::sync::{broadcast, mpsc};
 
-use crate::event::{CoreEvent, ThreadSummaryDto, ThreadsListEvent, TimelineItem};
+use crate::event::{CoreEvent, ThreadsListEvent, TimelineItem, TimelineItemId};
 use crate::executor;
 use crate::ids::RequestId;
 use crate::timeline::record_thread_summary_reconciliation;
@@ -53,12 +53,6 @@ pub(crate) enum AggregateRefreshCause {
     /// The root left the accepted missing-root window through removal,
     /// redaction, clear, or reset.
     Removal,
-}
-
-impl AggregateRefreshCause {
-    fn is_disappearance(self) -> bool {
-        matches!(self, Self::Removal)
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -133,7 +127,7 @@ enum ThreadRootProjectionAttempt {
     Pending,
     /// A canonical Room root needs the shared aggregate, but not a root fetch.
     Canonical,
-    Ready(TimelineItem),
+    Ready,
     Failed(OperationFailureKind),
 }
 
@@ -149,6 +143,9 @@ pub(crate) struct ThreadRootProjectionRecord {
     pub aggregate: AuthoritativeThreadAggregate,
     pub activity_revision: u64,
     pub summary_revision: u64,
+    /// One complete renderable root snapshot, retained for canonical roots and
+    /// hydrated off-window roots alike.
+    root_item: Option<TimelineItem>,
     aggregate_refresh: Option<AggregateRefresh>,
     aggregate_failure: Option<OperationFailureKind>,
     live_activity_floor: Option<LiveActivityFloor>,
@@ -158,14 +155,32 @@ pub(crate) struct ThreadRootProjectionRecord {
     attempt: ThreadRootProjectionAttempt,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ThreadRootDisplayData {
+    pub root_event_id: String,
+    pub activity_event_id: String,
+    pub activity_timestamp_ms: Option<u64>,
+    pub item: Option<TimelineItem>,
+    pub aggregate: AuthoritativeThreadAggregate,
+    pub pending: bool,
+    pub failure_kind: Option<OperationFailureKind>,
+}
+
 impl ThreadRootProjectionRecord {
-    pub(crate) fn item(&self) -> Option<&TimelineItem> {
-        match &self.attempt {
-            ThreadRootProjectionAttempt::Ready(item) => Some(item),
-            ThreadRootProjectionAttempt::Pending
-            | ThreadRootProjectionAttempt::Canonical
-            | ThreadRootProjectionAttempt::Failed(_) => None,
+    pub(crate) fn display_data(&self) -> ThreadRootDisplayData {
+        ThreadRootDisplayData {
+            root_event_id: self.activity.root_event_id.clone(),
+            activity_event_id: self.activity.activity_event_id.clone(),
+            activity_timestamp_ms: self.activity.activity_timestamp_ms,
+            item: self.root_item.clone(),
+            aggregate: effective_aggregate(self),
+            pending: self.is_pending(),
+            failure_kind: self.failure_kind(),
         }
+    }
+
+    pub(crate) fn item(&self) -> Option<&TimelineItem> {
+        self.root_item.as_ref()
     }
 
     pub(crate) fn failure_kind(&self) -> Option<OperationFailureKind> {
@@ -173,7 +188,7 @@ impl ThreadRootProjectionRecord {
             ThreadRootProjectionAttempt::Failed(kind) => Some(kind),
             ThreadRootProjectionAttempt::Pending
             | ThreadRootProjectionAttempt::Canonical
-            | ThreadRootProjectionAttempt::Ready(_) => None,
+            | ThreadRootProjectionAttempt::Ready => None,
         })
     }
 
@@ -242,12 +257,16 @@ impl ThreadSummaryDiagnosticOrdinals {
 }
 
 impl ThreadRootProjectionService {
-    pub(crate) fn seed_canonical_summary(
-        &mut self,
-        room_id: &str,
-        root_event_id: &str,
-        summary: &ThreadSummaryDto,
-    ) {
+    pub(crate) fn seed_canonical_root(&mut self, room_id: &str, item: &TimelineItem) {
+        let TimelineItemId::Event {
+            event_id: root_event_id,
+        } = &item.id
+        else {
+            return;
+        };
+        let Some(summary) = item.thread_summary.as_ref() else {
+            return;
+        };
         let Some(latest_event_id) = summary
             .latest_event_id
             .as_deref()
@@ -282,6 +301,7 @@ impl ThreadRootProjectionService {
             if record.retired {
                 return;
             }
+            record.root_item = Some(item.clone());
             if aggregate.reply_count < effective_aggregate(record).reply_count {
                 // Bundled roots are provisional: an edit can expose its
                 // replacement event identity and transient count. Only an
@@ -310,6 +330,7 @@ impl ThreadRootProjectionService {
                 aggregate,
                 activity_revision: 1,
                 summary_revision: 0,
+                root_item: Some(item.clone()),
                 aggregate_refresh: None,
                 aggregate_failure: None,
                 live_activity_floor: None,
@@ -380,6 +401,7 @@ impl ThreadRootProjectionService {
                 aggregate: AuthoritativeThreadAggregate::default(),
                 activity_revision: 1,
                 summary_revision: 0,
+                root_item: None,
                 aggregate_refresh: None,
                 aggregate_failure: None,
                 live_activity_floor: Some(LiveActivityFloor {
@@ -448,6 +470,7 @@ impl ThreadRootProjectionService {
         self.observe(activity)
     }
 
+    #[cfg(test)]
     pub(crate) fn schedule_aggregate_refresh(
         &mut self,
         activity: &ThreadRootProjectionActivity,
@@ -551,7 +574,7 @@ impl ThreadRootProjectionService {
         let candidate;
         let after;
         let activity;
-        let mut remove = false;
+        let clear;
         let mut merge_reason = "failure";
         let completion = {
             let record = self
@@ -563,59 +586,38 @@ impl ThreadRootProjectionService {
             match result {
                 Ok(ThreadRootProjectionRefreshResult::Hydrated { item, aggregate }) => {
                     candidate = Some(aggregate.clone());
-                    record.attempt = ThreadRootProjectionAttempt::Ready(item);
-                    merge_reason = merge_aggregate(
-                        record,
-                        aggregate,
-                        refresh.cause.is_disappearance()
-                            && !refresh.root_active
-                            && !refresh.canonical_root_active,
-                    );
+                    record.root_item = Some(item.clone());
+                    record.attempt = ThreadRootProjectionAttempt::Ready;
+                    merge_reason = merge_aggregate(record, aggregate, false);
                     record.aggregate_failure = None;
                 }
                 Ok(ThreadRootProjectionRefreshResult::Aggregate(aggregate)) => {
                     candidate = Some(aggregate.clone());
-                    merge_reason = merge_aggregate(
-                        record,
-                        aggregate,
-                        refresh.cause.is_disappearance()
-                            && !refresh.root_active
-                            && !refresh.canonical_root_active,
-                    );
+                    merge_reason = merge_aggregate(record, aggregate, false);
                     record.aggregate_failure = None;
                 }
                 Err(failure_kind) => {
                     candidate = None;
-                    if !refresh.root_active
-                        && !refresh.canonical_root_active
-                        && refresh.cause.is_disappearance()
-                    {
-                        remove = true;
-                    } else {
-                        record.aggregate_failure = Some(failure_kind);
-                    }
+                    record.aggregate_failure = Some(failure_kind);
                 }
             }
             activity = record.activity.clone();
             after = record.aggregate.clone();
-            if remove {
-                ThreadRootProjectionCompletion::Cleared(activity.clone())
-            } else if after.reply_count == 0
+            clear = after.reply_count == 0
                 && !refresh.root_active
                 && !refresh.canonical_root_active
-            {
-                remove = true;
+                && merge_reason == "invalidation";
+            if clear {
                 ThreadRootProjectionCompletion::Cleared(activity.clone())
             } else {
                 ThreadRootProjectionCompletion::Updated(record.clone())
             }
         };
 
-        if remove {
+        if clear {
             self.attempts.remove(&key);
             self.diagnostic_ordinals
                 .remove_root(&activity.room_id, &activity.root_event_id);
-            self.cleanup_empty_room_tracking(&activity.room_id);
         }
 
         let candidate = candidate.as_ref();
@@ -624,7 +626,7 @@ impl ThreadRootProjectionService {
             candidate.and_then(|candidate| candidate.latest_event_id.as_deref()),
         );
         let source = thread_summary_source(refresh, &before, candidate, merge_reason);
-        let decision = if remove
+        let decision = if clear
             || ((source == "redaction" || merge_reason == "rollback_confirmed")
                 && after.reply_count < before.reply_count)
         {
@@ -651,65 +653,24 @@ impl ThreadRootProjectionService {
         completion
     }
 
-    /// Keep only projection data that still has a representation in the
-    /// bounded canonical Room window. Pending requests are retained until
-    /// their one worker completes; terminal records are dropped as soon as the
-    /// corresponding root has no live reply. Thus a reconnect can dedupe a
-    /// currently-active failure, while a later observation after cleanup is a
-    /// new bounded attempt rather than a retry loop.
-    #[cfg(test)]
-    pub(crate) fn reconcile_room(
+    /// Update Core's current bounded visibility inputs. Visibility is a
+    /// scheduling input only; it never deletes an accepted lifecycle record.
+    pub(crate) fn reconcile_room_visibility(
         &mut self,
         room_id: &str,
         active_root_event_ids: &HashSet<String>,
-    ) {
-        self.reconcile_room_with_affected(room_id, active_root_event_ids, &HashSet::new());
-    }
-
-    pub(crate) fn reconcile_room_with_affected(
-        &mut self,
-        room_id: &str,
-        active_root_event_ids: &HashSet<String>,
-        affected_root_event_ids: &HashSet<String>,
     ) {
         self.active_root_event_ids
             .insert(room_id.to_owned(), active_root_event_ids.clone());
-        self.attempts
-            .retain(|(entry_room_id, root_event_id), record| {
-                entry_room_id != room_id
-                    || active_root_event_ids.contains(root_event_id)
-                    || affected_root_event_ids.contains(root_event_id)
-                    || record.is_pending()
-                    || record.retired
-            });
-        self.diagnostic_ordinals
-            .roots
-            .retain(|(entry_room_id, root_event_id), _| {
-                entry_room_id != room_id
-                    || self
-                        .attempts
-                        .contains_key(&(room_id.to_owned(), root_event_id.clone()))
-            });
-        self.cleanup_empty_room_tracking(room_id);
     }
 
-    #[cfg(test)]
     pub(crate) fn reconcile_room_activities(
         &mut self,
         room_id: &str,
         activities_by_root: &HashMap<String, ThreadRootProjectionActivity>,
     ) -> HashSet<String> {
-        self.reconcile_room_activities_with_affected(room_id, activities_by_root, &HashSet::new())
-    }
-
-    pub(crate) fn reconcile_room_activities_with_affected(
-        &mut self,
-        room_id: &str,
-        activities_by_root: &HashMap<String, ThreadRootProjectionActivity>,
-        affected_root_event_ids: &HashSet<String>,
-    ) -> HashSet<String> {
         let active_root_event_ids = activities_by_root.keys().cloned().collect::<HashSet<_>>();
-        self.reconcile_room_with_affected(room_id, &active_root_event_ids, affected_root_event_ids);
+        self.reconcile_room_visibility(room_id, &active_root_event_ids);
         let mut changed = HashSet::new();
         for (root_event_id, activity) in activities_by_root {
             if let Some(record) = self
@@ -842,6 +803,35 @@ impl ThreadRootProjectionService {
             .map(effective_aggregate)
     }
 
+    pub(crate) fn display_data_for_room(&self, room_id: &str) -> Vec<ThreadRootDisplayData> {
+        let mut roots = self
+            .attempts
+            .iter()
+            .filter_map(|((entry_room_id, _), record)| {
+                (entry_room_id == room_id && !record.retired).then(|| record.display_data())
+            })
+            .collect::<Vec<_>>();
+        roots.sort_by(|left, right| left.root_event_id.cmp(&right.root_event_id));
+        roots
+    }
+
+    pub(crate) fn display_data_at_revision(
+        &self,
+        room_id: &str,
+        root_event_id: &str,
+        activity_revision: u64,
+        summary_revision: u64,
+    ) -> Option<ThreadRootDisplayData> {
+        self.attempts
+            .get(&(room_id.to_owned(), root_event_id.to_owned()))
+            .filter(|record| {
+                !record.retired
+                    && record.activity_revision == activity_revision
+                    && record.summary_revision == summary_revision
+            })
+            .map(ThreadRootProjectionRecord::display_data)
+    }
+
     pub(crate) fn active_activities(
         &self,
         room_id: &str,
@@ -879,10 +869,10 @@ impl ThreadRootProjectionService {
             .is_some_and(ThreadRootProjectionRecord::is_hydration_pending)
     }
 
-    /// Returns the current terminal result for one active root without
-    /// observing it again or starting another bounded lookup. Replay-known
-    /// ownership uses this only to hand a previously suppressed terminal
-    /// snapshot back to the exact canonical reply slot when that owner ends.
+    /// Returns a retained terminal record without observing the root again or
+    /// starting another bounded lookup. Tests use this to prove that bounded
+    /// visibility changes cannot erase terminal lifecycle state.
+    #[cfg(test)]
     pub(crate) fn terminal_record(
         &self,
         room_id: &str,
@@ -900,19 +890,10 @@ impl ThreadRootProjectionService {
         item: TimelineItem,
     ) -> Option<ThreadRootProjectionRecord> {
         let key = (activity.room_id.clone(), activity.root_event_id.clone());
-        let is_active = self.is_active_or_unreported(&activity.room_id, &activity.root_event_id);
         let record = self.attempts.get_mut(&key)?;
-        record.attempt = ThreadRootProjectionAttempt::Ready(item);
-        let completed = record.clone();
-        if !is_active {
-            // The UI/state still need this one terminal notification to clear
-            // their pending placeholder. The returned snapshot is never
-            // retained by this service because its reply already left the
-            // canonical window.
-            self.attempts.remove(&key);
-            self.cleanup_empty_room_tracking(&activity.room_id);
-        }
-        Some(completed)
+        record.root_item = Some(item.clone());
+        record.attempt = ThreadRootProjectionAttempt::Ready;
+        Some(record.clone())
     }
 
     pub(crate) fn mark_failed(
@@ -921,38 +902,9 @@ impl ThreadRootProjectionService {
         failure_kind: OperationFailureKind,
     ) -> Option<ThreadRootProjectionRecord> {
         let key = (activity.room_id.clone(), activity.root_event_id.clone());
-        let is_active = self.is_active_or_unreported(&activity.room_id, &activity.root_event_id);
         let record = self.attempts.get_mut(&key)?;
         record.attempt = ThreadRootProjectionAttempt::Failed(failure_kind);
-        let completed = record.clone();
-        if !is_active {
-            // See `mark_ready`: terminal completion doubles as the explicit
-            // cleanup signal for the independent state/frontend maps.
-            self.attempts.remove(&key);
-            self.cleanup_empty_room_tracking(&activity.room_id);
-        }
-        Some(completed)
-    }
-
-    fn is_active_or_unreported(&self, room_id: &str, root_event_id: &str) -> bool {
-        self.active_root_event_ids
-            .get(room_id)
-            .is_none_or(|active| active.contains(root_event_id))
-    }
-
-    fn cleanup_empty_room_tracking(&mut self, room_id: &str) {
-        let has_pending_or_active_record = self
-            .attempts
-            .keys()
-            .any(|(entry_room_id, _)| entry_room_id == room_id);
-        if self
-            .active_root_event_ids
-            .get(room_id)
-            .is_some_and(HashSet::is_empty)
-            && !has_pending_or_active_record
-        {
-            self.active_root_event_ids.remove(room_id);
-        }
+        Some(record.clone())
     }
 }
 
@@ -1881,7 +1833,14 @@ mod tests {
             unable_to_decrypt: None,
             actions: TimelineMessageActions::default(),
             send_state: None,
+            display_metadata: None,
         }
+    }
+
+    fn canonical_timeline_item(event_id: &str, summary: ThreadSummaryDto) -> TimelineItem {
+        let mut item = test_timeline_item(event_id);
+        item.thread_summary = Some(summary);
+        item
     }
 
     #[test]
@@ -2043,7 +2002,7 @@ mod tests {
     }
 
     #[test]
-    fn active_failed_root_survives_recreated_actor_but_is_eligible_after_active_window_cleanup() {
+    fn active_failed_root_survives_recreated_actor_and_empty_window_reconciliation() {
         let shared = Arc::new(Mutex::new(ThreadRootProjectionService::default()));
         let activity = ThreadRootProjectionActivity {
             room_id: "!room:example.invalid".to_owned(),
@@ -2063,7 +2022,7 @@ mod tests {
                 ThreadRootProjectionDecision::StartFetch(_)
             ));
             service.mark_failed(&activity, OperationFailureKind::NotFound);
-            service.reconcile_room(
+            service.reconcile_room_visibility(
                 &activity.room_id,
                 &HashSet::from([activity.root_event_id.clone()]),
             );
@@ -2082,15 +2041,15 @@ mod tests {
             ));
         }
 
-        // Once the canonical reply window no longer contains this root, the
-        // terminal state is evicted. A later observation is a new bounded
-        // attempt rather than an automatic retry of an active failed reply.
+        // A bounded empty window is only dormant visibility. The retained
+        // terminal remains available to a replacement actor.
         {
             let mut service = shared.lock().expect("test service lock");
-            service.reconcile_room(&activity.room_id, &HashSet::new());
+            service.reconcile_room_visibility(&activity.room_id, &HashSet::new());
             assert!(matches!(
                 service.observe(activity),
-                ThreadRootProjectionDecision::StartFetch(_)
+                ThreadRootProjectionDecision::Existing(record)
+                    if record.failure_kind() == Some(OperationFailureKind::NotFound)
             ));
         }
     }
@@ -2111,7 +2070,7 @@ mod tests {
             service.observe(first_activity.clone()),
             ThreadRootProjectionDecision::StartFetch(_)
         ));
-        service.reconcile_room(
+        service.reconcile_room_visibility(
             &first_activity.room_id,
             &HashSet::from([first_activity.root_event_id.clone()]),
         );
@@ -2159,17 +2118,19 @@ mod tests {
     #[test]
     fn canonical_sdk_summary_is_provisional_until_live_observation_or_refresh() {
         let mut service = ThreadRootProjectionService::default();
-        service.seed_canonical_summary(
+        service.seed_canonical_root(
             "!room:example.invalid",
-            "$root:example.invalid",
-            &ThreadSummaryDto {
-                reply_count: 1,
-                latest_event_id: Some("$reply-a:example.invalid".to_owned()),
-                latest_sender: Some("@a:example.invalid".to_owned()),
-                latest_sender_label: Some("A".to_owned()),
-                latest_body_preview: Some("A".to_owned()),
-                latest_timestamp_ms: Some(100),
-            },
+            &canonical_timeline_item(
+                "$root:example.invalid",
+                ThreadSummaryDto {
+                    reply_count: 1,
+                    latest_event_id: Some("$reply-a:example.invalid".to_owned()),
+                    latest_sender: Some("@a:example.invalid".to_owned()),
+                    latest_sender_label: Some("A".to_owned()),
+                    latest_body_preview: Some("A".to_owned()),
+                    latest_timestamp_ms: Some(100),
+                },
+            ),
         );
         let activity_b = ThreadRootProjectionActivity {
             room_id: "!room:example.invalid".to_owned(),
@@ -2180,17 +2141,19 @@ mod tests {
             activity_sender_label: Some("B".to_owned()),
             activity_body_preview: Some("B".to_owned()),
         };
-        service.seed_canonical_summary(
+        service.seed_canonical_root(
             "!room:example.invalid",
-            "$root:example.invalid",
-            &ThreadSummaryDto {
-                reply_count: 1,
-                latest_event_id: Some(activity_b.activity_event_id.clone()),
-                latest_sender: activity_b.activity_sender.clone(),
-                latest_sender_label: activity_b.activity_sender_label.clone(),
-                latest_body_preview: activity_b.activity_body_preview.clone(),
-                latest_timestamp_ms: activity_b.activity_timestamp_ms,
-            },
+            &canonical_timeline_item(
+                "$root:example.invalid",
+                ThreadSummaryDto {
+                    reply_count: 1,
+                    latest_event_id: Some(activity_b.activity_event_id.clone()),
+                    latest_sender: activity_b.activity_sender.clone(),
+                    latest_sender_label: activity_b.activity_sender_label.clone(),
+                    latest_body_preview: activity_b.activity_body_preview.clone(),
+                    latest_timestamp_ms: activity_b.activity_timestamp_ms,
+                },
+            ),
         );
         let provisional = service
             .current_aggregate("!room:example.invalid", "$root:example.invalid")
@@ -2399,10 +2362,9 @@ mod tests {
             latest_body_preview: Some("A".to_owned()),
             latest_timestamp_ms: Some(100),
         };
-        service.seed_canonical_summary(
+        service.seed_canonical_root(
             "!room:example.invalid",
-            "$root:example.invalid",
-            &summary_a,
+            &canonical_timeline_item("$root:example.invalid", summary_a.clone()),
         );
         let activity_b = ThreadRootProjectionActivity {
             room_id: "!room:example.invalid".to_owned(),
@@ -2413,17 +2375,19 @@ mod tests {
             activity_sender_label: Some("B".to_owned()),
             activity_body_preview: Some("B".to_owned()),
         };
-        service.seed_canonical_summary(
+        service.seed_canonical_root(
             "!room:example.invalid",
-            "$root:example.invalid",
-            &ThreadSummaryDto {
-                reply_count: 1,
-                latest_event_id: Some(activity_b.activity_event_id.clone()),
-                latest_sender: activity_b.activity_sender.clone(),
-                latest_sender_label: activity_b.activity_sender_label.clone(),
-                latest_body_preview: activity_b.activity_body_preview.clone(),
-                latest_timestamp_ms: activity_b.activity_timestamp_ms,
-            },
+            &canonical_timeline_item(
+                "$root:example.invalid",
+                ThreadSummaryDto {
+                    reply_count: 1,
+                    latest_event_id: Some(activity_b.activity_event_id.clone()),
+                    latest_sender: activity_b.activity_sender.clone(),
+                    latest_sender_label: activity_b.activity_sender_label.clone(),
+                    latest_body_preview: activity_b.activity_body_preview.clone(),
+                    latest_timestamp_ms: activity_b.activity_timestamp_ms,
+                },
+            ),
         );
         assert!(matches!(
             service.observe_live_activity(activity_b.clone()),
@@ -2438,10 +2402,9 @@ mod tests {
         );
 
         // The older bundled root alone is not enough to regress B.
-        service.seed_canonical_summary(
+        service.seed_canonical_root(
             "!room:example.invalid",
-            "$root:example.invalid",
-            &summary_a,
+            &canonical_timeline_item("$root:example.invalid", summary_a.clone()),
         );
         assert_eq!(
             service
@@ -2686,11 +2649,12 @@ mod tests {
                 && record.aggregate.latest_event_id.as_deref() == Some("$reply-a:example.invalid"))
         );
 
-        service.reconcile_room_with_affected(
+        service.reconcile_room_visibility(&activity_a.room_id, &HashSet::new());
+        assert!(service.invalidate_live_activity(
             &activity_a.room_id,
-            &HashSet::new(),
-            &HashSet::from([activity_a.root_event_id.clone()]),
-        );
+            &activity_a.root_event_id,
+            &activity_a.activity_event_id,
+        ));
         let refresh = service
             .schedule_aggregate_refresh(&activity_a, AggregateRefreshCause::Removal, false, false)
             .expect("disappeared root aggregate refresh");
@@ -2701,17 +2665,19 @@ mod tests {
                     super::AuthoritativeThreadAggregate::default()
                 )),
             ),
-            super::ThreadRootProjectionCompletion::Cleared(_)
+            super::ThreadRootProjectionCompletion::Cleared(cleared)
+                if cleared.root_event_id == activity_a.root_event_id
         ));
         assert!(
             service
                 .terminal_record(&activity_a.room_id, &activity_a.root_event_id)
-                .is_none()
+                .is_none(),
+            "authoritative aggregate zero explicitly clears the retained root"
         );
     }
 
     #[test]
-    fn hydrated_zero_count_for_inactive_root_clears_the_retained_record() {
+    fn hydrated_zero_count_for_inactive_root_retains_the_root_snapshot() {
         let mut service = ThreadRootProjectionService::default();
         let activity = ThreadRootProjectionActivity {
             room_id: "!room:example.invalid".to_owned(),
@@ -2738,14 +2704,14 @@ mod tests {
                     aggregate: super::AuthoritativeThreadAggregate::default(),
                 }),
             ),
-            super::ThreadRootProjectionCompletion::Cleared(cleared)
-                if cleared == activity
+            super::ThreadRootProjectionCompletion::Updated(record)
+                if record.activity == activity && record.item().is_some()
         ));
         assert!(
             service
                 .terminal_record(&activity.room_id, &activity.root_event_id)
-                .is_none(),
-            "zero-count inactive hydration must remove the record"
+                .is_some(),
+            "a hydrated dormant root remains retained"
         );
     }
 
@@ -2860,17 +2826,14 @@ mod tests {
                 },
             )),
         );
-        service.reconcile_room_with_affected(
-            &activity.room_id,
-            &HashSet::new(),
-            &HashSet::from([activity.root_event_id.clone()]),
-        );
+        service.reconcile_room_visibility(&activity.room_id, &HashSet::new());
         let disappeared = service
             .schedule_aggregate_refresh(&activity, AggregateRefreshCause::Removal, false, false)
             .expect("disappearance refresh");
         assert!(matches!(
             service.complete_refresh(&disappeared, Err(OperationFailureKind::Sdk)),
-            super::ThreadRootProjectionCompletion::Cleared(_)
+            super::ThreadRootProjectionCompletion::Updated(record)
+                if record.failure_kind() == Some(OperationFailureKind::Sdk)
         ));
     }
 
@@ -2974,8 +2937,7 @@ mod tests {
     }
 
     #[test]
-    fn inactive_pending_completion_returns_terminal_snapshot_for_state_cleanup_then_evicts_core_record()
-     {
+    fn dormant_terminal_completion_retains_core_record_until_room_clear() {
         let mut service = ThreadRootProjectionService::default();
         let activity = ThreadRootProjectionActivity {
             room_id: "!room:example.invalid".to_owned(),
@@ -2990,27 +2952,21 @@ mod tests {
             service.observe(activity.clone()),
             ThreadRootProjectionDecision::StartFetch(_)
         ));
-        service.reconcile_room(&activity.room_id, &HashSet::new());
+        service.reconcile_room_visibility(&activity.room_id, &HashSet::new());
 
         let completed = service
             .mark_failed(&activity, OperationFailureKind::NotFound)
-            .expect(
-                "the terminal result must reach state/frontend cleanup even after activity leaves",
-            );
+            .expect("the terminal result must remain available after activity leaves");
         assert_eq!(
             completed.failure_kind(),
             Some(OperationFailureKind::NotFound)
         );
-        assert!(
-            !service
-                .active_root_event_ids
-                .contains_key(&activity.room_id),
-            "an inactive room with no pending records must not leave a session-long empty marker"
-        );
         assert!(matches!(
-            service.observe(activity),
-            ThreadRootProjectionDecision::StartFetch(_)
+            service.observe(activity.clone()),
+            ThreadRootProjectionDecision::Existing(record)
+                if record.failure_kind() == Some(OperationFailureKind::NotFound)
         ));
+        assert_eq!(service.clear_room(&activity.room_id).len(), 1);
     }
 
     #[test]
@@ -3029,7 +2985,7 @@ mod tests {
             service.observe(activity.clone()),
             ThreadRootProjectionDecision::StartFetch(_)
         ));
-        service.reconcile_room(
+        service.reconcile_room_visibility(
             &activity.room_id,
             &HashSet::from([activity.root_event_id.clone()]),
         );
@@ -3064,6 +3020,7 @@ mod tests {
             unable_to_decrypt: None,
             actions: TimelineMessageActions::default(),
             send_state: None,
+            display_metadata: None,
         };
         service
             .mark_ready(&activity, item)

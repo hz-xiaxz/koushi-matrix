@@ -955,6 +955,7 @@ fn projection_timeline_item(event_id: &str, is_redacted: bool) -> TimelineItem {
         actions: TimelineMessageActions::default(),
         send_state: None,
         unable_to_decrypt: None,
+        display_metadata: None,
     }
 }
 
@@ -1970,6 +1971,7 @@ async fn run_fast_send_queue_feedback() {
         conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe_id,
             key: key.clone(),
+            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
         })),
     )
     .await
@@ -2308,6 +2310,7 @@ async fn run_fast_send_queue_feedback() {
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: resubscribe_id,
         key: key.clone(),
+        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .expect("fast_send_queue submit post-proof resubscribe");
@@ -2564,6 +2567,7 @@ async fn run_fast_send_queue_feedback() {
         conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe_id,
             key: key.clone(),
+            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
         })),
     )
     .await

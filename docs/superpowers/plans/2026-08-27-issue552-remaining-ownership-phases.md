@@ -1,6 +1,6 @@
 # Issue #552 Remaining Frontend Ownership Migration — Phased Execution Plan
 
-Status: Phase 0 documentation implemented. No production implementation is authorized by this document alone.
+Status: Phase 0 merged; Phase 1 #708 implemented on its reviewed branch pending final verification/review/merge. Later phases remain unauthorized by this document alone.
 
 Phase 0 base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`. Phase 1 #708 insertion base: `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
@@ -63,6 +63,8 @@ The Phase 1 invariant is: `ThreadRootProjectionService` and the current Room `Ti
 Required outcomes are defined in `2026-08-27-issue708-thread-root-projection-ownership.md`: retained dormant roots, authoritative aggregate/redaction/unsubscribe/session clears, bounded storage, Rust-owned root/latest placement and row identity, no transient confirmed-empty existing-thread open, settled teardown, event-order convergence, and Browser Fake contract mirroring.
 
 This phase is independent of adapter isolation, ACK retry, App request refs and mutation sequencing. It closes #708 only; #552 remains open.
+
+**Phase 1 implementation record:** Core retains dormant root snapshots and owns explicit clear plus bounded awaited worker teardown; the Room actor emits stable Rust display metadata and root/latest placement through display-relative InitialItems/diffs; accepted thread-open intent carries the one-page initial-backfill policy; Rust State is an explicit transition mirror; the public projection event, replay-known registry, TypeScript projection map/pruning/placement and prop wiring are removed; Browser harness fixtures consume Rust-shaped display items. Deterministic RED evidence captured the former State/frontend deletion before the cutover. Final reviewer/CI/merge evidence is recorded in the #708 PR rather than claimed here before merge.
 
 ## Phase 2 — Isolate the renderer transport without changing semantics
 

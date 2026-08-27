@@ -196,6 +196,7 @@ pub(super) async fn run_startup_latency_scenario(
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: subscribe_id,
         key: timeline_key.clone(),
+        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .map_err(|e| format!("startup_latency subscribe submit failed: {e}"))?;

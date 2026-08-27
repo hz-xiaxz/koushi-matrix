@@ -2199,9 +2199,7 @@ mod tests {
     };
     use super::super::read_state::{ReadRetrySource, ReadWorkerSupervisor};
     use super::super::test_support::{fake_rid, room_key, timeline_item};
-    use super::super::thread_projection::{
-        ReplayKnownThreadRootProjectionRegistry, ThreadRootProjectionFetchRegistry,
-    };
+    use super::super::thread_projection::ThreadRootProjectionFetchRegistry;
     use super::{
         event_cache_diff_batch_diagnostic_event, event_cache_item_diagnostic_event,
         record_read_retry, record_thread_projection, record_thread_summary_reconciliation,
@@ -2743,16 +2741,20 @@ mod tests {
                 ThreadRootProjectionService::default(),
             )),
             thread_root_projection_fetches: ThreadRootProjectionFetchRegistry::default(),
-            replay_known_thread_root_projections: Arc::new(Mutex::new(
-                ReplayKnownThreadRootProjectionRegistry::default(),
-            )),
+            thread_root_order: koushi_state::TimelineThreadRootOrder::LatestReply,
             timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
             test_session_available: true,
         };
 
         manager
-            .handle_subscribe(fake_rid(7100), key, false, true)
+            .handle_subscribe(
+                fake_rid(7100),
+                key,
+                false,
+                true,
+                crate::command::InitialBackfillPolicy::Disabled,
+            )
             .await;
         drop(manager_tx);
 
@@ -2951,16 +2953,20 @@ mod tests {
                 ThreadRootProjectionService::default(),
             )),
             thread_root_projection_fetches: ThreadRootProjectionFetchRegistry::default(),
-            replay_known_thread_root_projections: Arc::new(Mutex::new(
-                ReplayKnownThreadRootProjectionRegistry::default(),
-            )),
+            thread_root_order: koushi_state::TimelineThreadRootOrder::LatestReply,
             timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
             test_session_available: true,
         };
 
         manager
-            .handle_subscribe(fake_rid(7199), key.clone(), false, true)
+            .handle_subscribe(
+                fake_rid(7199),
+                key.clone(),
+                false,
+                true,
+                crate::command::InitialBackfillPolicy::Disabled,
+            )
             .await;
 
         let commands = [

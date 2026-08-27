@@ -563,6 +563,7 @@ impl AccountActor {
                 account_key,
                 kind: TimelineKind::Focused { room_id, event_id },
             },
+            initial_backfill: crate::command::InitialBackfillPolicy::Disabled,
         })
         .await;
     }

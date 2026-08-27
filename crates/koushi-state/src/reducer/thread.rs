@@ -255,12 +255,12 @@ pub(crate) fn handle_open_thread(
     }
 
     state.upload_staging.clear_thread_targets_for_room(&room_id);
-    state.thread = match intent {
+    state.thread = match &intent {
         ThreadOpenIntent::ExistingThread | ThreadOpenIntent::PinnedReply { .. } => {
             ThreadPaneState::Opening {
                 room_id: room_id.clone(),
                 root_event_id: root_event_id.clone(),
-                intent,
+                intent: intent.clone(),
             }
         }
         ThreadOpenIntent::NewThreadDraft => ThreadPaneState::Open {
@@ -275,7 +275,7 @@ pub(crate) fn handle_open_thread(
                 }),
             room_id: room_id.clone(),
             root_event_id: root_event_id.clone(),
-            intent,
+            intent: intent.clone(),
             is_subscribed: false,
         },
     };
@@ -290,6 +290,7 @@ pub(crate) fn handle_open_thread(
         AppEffect::OpenThreadTimeline {
             room_id,
             root_event_id,
+            intent,
         },
         AppEffect::EmitUiEvent(UiEvent::ThreadChanged),
     ]
@@ -821,13 +822,17 @@ pub(crate) fn handle_thread_root_projection_ready(
     if !is_session_ready(state) {
         return Vec::new();
     }
-    state.thread_root_projections.mark_ready(
-        room_id,
-        root_event_id,
-        activity_event_id,
-        activity_timestamp_ms,
-    );
-    vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]
+    state
+        .thread_root_projections
+        .mark_ready(
+            room_id,
+            root_event_id,
+            activity_event_id,
+            activity_timestamp_ms,
+        )
+        .then_some(AppEffect::EmitUiEvent(UiEvent::ThreadChanged))
+        .into_iter()
+        .collect()
 }
 
 pub(crate) fn handle_thread_root_projection_failed(
@@ -841,14 +846,18 @@ pub(crate) fn handle_thread_root_projection_failed(
     if !is_session_ready(state) {
         return Vec::new();
     }
-    state.thread_root_projections.mark_failed(
-        room_id,
-        root_event_id,
-        activity_event_id,
-        activity_timestamp_ms,
-        failure_kind,
-    );
-    vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]
+    state
+        .thread_root_projections
+        .mark_failed(
+            room_id,
+            root_event_id,
+            activity_event_id,
+            activity_timestamp_ms,
+            failure_kind,
+        )
+        .then_some(AppEffect::EmitUiEvent(UiEvent::ThreadChanged))
+        .into_iter()
+        .collect()
 }
 
 pub(crate) fn handle_thread_root_projection_cleared(
@@ -862,24 +871,6 @@ pub(crate) fn handle_thread_root_projection_cleared(
     state
         .thread_root_projections
         .clear(&room_id, &root_event_id)
-        .then_some(AppEffect::EmitUiEvent(UiEvent::ThreadChanged))
-        .into_iter()
-        .collect()
-}
-
-pub(crate) fn handle_thread_root_projections_reconciled(
-    state: &mut AppState,
-    room_id: String,
-    activities: Vec<crate::state::ThreadRootProjectionActivity>,
-) -> Vec<AppEffect> {
-    if !is_session_ready(state) {
-        return Vec::new();
-    }
-    let before = state.thread_root_projections.clone();
-    state
-        .thread_root_projections
-        .reconcile_room(room_id, activities);
-    (before != state.thread_root_projections)
         .then_some(AppEffect::EmitUiEvent(UiEvent::ThreadChanged))
         .into_iter()
         .collect()

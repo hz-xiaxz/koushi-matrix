@@ -2473,9 +2473,18 @@ impl TimelineActor {
         projected
     }
     fn timeline_event_position(&self, event_id: &str) -> Option<usize> {
-        self.navigation_items.iter().position(|item| {
-            matches!(&item.id, TimelineItemId::Event { event_id: candidate } if candidate == event_id)
-        })
+        self.display_projection
+            .display_items()
+            .iter()
+            .position(|item| {
+                item.display_metadata.as_ref().is_some_and(|metadata| {
+                    metadata.content_event_id.as_deref() == Some(event_id)
+                        || metadata.activity_event_id.as_deref() == Some(event_id)
+                }) || matches!(
+                    &item.id,
+                    TimelineItemId::Event { event_id: candidate } if candidate == event_id
+                )
+            })
     }
     async fn start_timeline_gap_repair(
         &mut self,
@@ -3020,6 +3029,7 @@ mod tests {
             actions: TimelineMessageActions::default(),
             send_state: None,
             unable_to_decrypt: None,
+            display_metadata: None,
         }
     }
     fn projected_gap_position(
@@ -5140,7 +5150,13 @@ mod tests {
         manager.msg_tx = manager_tx;
         manager.test_session_available = false;
         manager
-            .handle_subscribe(projection_request_id, key.clone(), true, true)
+            .handle_subscribe(
+                projection_request_id,
+                key.clone(),
+                true,
+                true,
+                crate::command::InitialBackfillPolicy::Disabled,
+            )
             .await;
 
         let (old_actor_generation, timeline_generation) =

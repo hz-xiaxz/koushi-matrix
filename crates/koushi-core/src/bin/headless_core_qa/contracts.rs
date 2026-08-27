@@ -342,6 +342,7 @@ pub(super) fn synthetic_timeline_item(
         can_edit: false,
         actions: TimelineMessageActions::default(),
         send_state: None,
+        display_metadata: None,
         unable_to_decrypt: None,
     }
 }

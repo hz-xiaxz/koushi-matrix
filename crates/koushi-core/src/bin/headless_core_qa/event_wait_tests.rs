@@ -123,6 +123,7 @@ fn find_timeline_item_with_body_finds_thread_reply_in_one_batch() {
         can_edit: false,
         actions: TimelineMessageActions::default(),
         send_state: None,
+        display_metadata: None,
         unable_to_decrypt: None,
     }];
 
@@ -166,6 +167,7 @@ fn find_timeline_item_with_body_returns_none_when_missing() {
         can_edit: false,
         actions: TimelineMessageActions::default(),
         send_state: None,
+        display_metadata: None,
         unable_to_decrypt: None,
     }];
 
@@ -236,6 +238,7 @@ fn send_flow_waiter_accepts_send_completed_before_local_echo() {
                     can_edit: false,
                     actions: TimelineMessageActions::default(),
                     send_state: None,
+                    display_metadata: None,
                     unable_to_decrypt: None,
                 },
             }],
@@ -301,6 +304,7 @@ fn send_flow_waiter_status_reports_local_echo_send_state() {
                     can_edit: false,
                     actions: TimelineMessageActions::default(),
                     send_state: Some(TimelineSendState::Sending),
+                    display_metadata: None,
                     unable_to_decrypt: None,
                 },
             }],
@@ -370,6 +374,7 @@ fn send_flow_waiter_errors_when_local_echo_becomes_not_sent() {
                         reason: koushi_core::event::TimelineSendFailureReason::Recoverable,
                     }),
                     unable_to_decrypt: None,
+                    display_metadata: None,
                 },
             }],
         }))

@@ -13,7 +13,7 @@ use tokio::sync::{broadcast, mpsc};
 use crate::causal_projection::{CausalProjectionDomain, CausalProjectionId};
 use crate::event::{
     CoreEvent, TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent, TimelineItem,
-    TimelineResyncReason,
+    TimelineResyncReason, TimelineViewportObservation,
 };
 use crate::executor;
 use crate::failure::TimelineFailureKind;
@@ -50,14 +50,13 @@ use super::media::{PrivateMediaEntry, authoritative_media_gallery_replacement};
 use super::navigation::{
     InitialItemsRequestIdentity, PreparedInitialWindow, TimelineActorGenerationGate,
     commit_prepared_initial_window_with_lease, derive_timeline_navigation_snapshot,
-    emit_items_updated_and_reconcile_replay_known_with_lease, record_timeline_unread_consistency,
+    record_timeline_unread_consistency,
 };
 use super::outbound_send::thread_activity_observed_action_for_batch;
 use super::room_key_recovery::{decrypt_retry_diff_settlement, decrypt_retry_settlement_operation};
 use super::thread_projection::{
-    ReplayKnownThreadRootProjectionRegistry, ThreadAttentionBatchProvenance,
-    ThreadAttentionObservation, gap_repair_projections_from_sdk_diffs, overlay_thread_summary_diff,
-    replay_known_candidates_for_display_items, seed_thread_summary_diff,
+    ThreadAttentionBatchProvenance, ThreadAttentionObservation,
+    gap_repair_projections_from_sdk_diffs, overlay_thread_summary_diff, seed_thread_summary_diff,
     thread_summary_affected_root_event_ids,
 };
 // END GENERATED SIBLING IMPORTS
@@ -413,11 +412,6 @@ impl TimelineActor {
         let restore_diff_is_relevant = timeline_diffs_include_prepend(&core_diffs);
         let restore_active = self.restore_anchor.is_some();
         let previous_navigation_items = self.navigation_items.clone();
-        let display_context = DisplayProjectionContext::for_timeline(
-            &self.key.kind,
-            &self.viewport_observation,
-            restore_active,
-        );
         // Reserve the sole canonical Activity replacement before entering the
         // generation commit. The permit and lease remain live through the
         // timeline publication and the full-room replacement.
@@ -455,6 +449,18 @@ impl TimelineActor {
         for diff in &mut core_diffs {
             overlay_thread_summary_diff(&self.thread_root_projection_service, &self.key, diff);
         }
+        let display_context = DisplayProjectionContext::for_timeline(
+            &self.key.kind,
+            &self.viewport_observation,
+            restore_active,
+        )
+        .with_thread_roots(
+            self.thread_root_order,
+            self.thread_root_projection_service
+                .lock()
+                .expect("thread-root projection service lock must not be poisoned")
+                .display_data_for_room(self.key.room_id()),
+        );
         trace_timeline_diffs("diff_batch", &self.key, &core_diffs);
 
         let Some((emitted, emitted_batch_id)) = commit_sdk_batch_for_generation(
@@ -495,17 +501,15 @@ impl TimelineActor {
                     self.restore_emit_buffer.extend(display_diffs);
                     false
                 } else {
-                    emit_items_updated_and_reconcile_replay_known_with_lease(
+                    super::navigation::emit_timeline_events_with_lease(
                         &self.event_tx,
-                        &self.replay_known_thread_root_projections,
-                        &self.thread_root_projection_service,
                         projection_lease,
-                        &self.key,
-                        self.generation,
-                        emitted_batch_id,
-                        display_diffs,
-                        navigation_items,
-                        display_projection.display_items(),
+                        vec![TimelineEvent::ItemsUpdated {
+                            key: self.key.clone(),
+                            generation: self.generation,
+                            batch_id: emitted_batch_id,
+                            diffs: display_diffs,
+                        }],
                     );
                     self.next_batch_id = TimelineBatchId(emitted_batch_id.0 + 1);
                     true
@@ -931,8 +935,8 @@ impl TimelineActor {
             &mut self.navigation_items,
             &mut self.display_projection,
             &self.event_tx,
-            &self.replay_known_thread_root_projections,
             &self.thread_root_projection_service,
+            self.thread_root_order,
             &self.timeline_actor_generations,
             &self.key,
             self.actor_generation,
@@ -1012,7 +1016,7 @@ impl TimelineActor {
         }
         if !snapshot_gap_repair_projections.is_empty() {
             let recovery_batch_id = self.next_batch_id;
-            if self.emit_items_updated_and_reconcile_replay_known(Vec::new()) {
+            if self.emit_items_updated(Vec::new()) {
                 let Some(projection_lease) = self
                     .timeline_actor_generations
                     .try_acquire(&self.key, self.actor_generation)
@@ -1220,8 +1224,8 @@ pub(super) fn commit_authoritative_recovery_window<F>(
     navigation_items: &mut Vec<TimelineItem>,
     display_projection: &mut DisplayProjectionState,
     event_tx: &broadcast::Sender<CoreEvent>,
-    replay_known_thread_root_projections: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
     thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
+    thread_root_order: koushi_state::TimelineThreadRootOrder,
     timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
     key: &TimelineKey,
     actor_generation: u64,
@@ -1233,15 +1237,31 @@ pub(super) fn commit_authoritative_recovery_window<F>(
 where
     F: FnOnce(),
 {
-    let candidate_display = DisplayProjectionState::from_canonical_window(
+    for item in &authoritative_items {
+        super::thread_projection::seed_thread_summary_item(
+            thread_root_projection_service,
+            key,
+            item,
+        );
+    }
+    let mut candidate_display = DisplayProjectionState::from_canonical_window(
         &authoritative_items,
         0..authoritative_items.len(),
     );
-    let replay_known_candidates = replay_known_candidates_for_display_items(
-        key,
-        &authoritative_items,
-        candidate_display.display_items(),
+    let context = DisplayProjectionContext::for_timeline(
+        &key.kind,
+        &TimelineViewportObservation::default(),
+        false,
+    )
+    .with_thread_roots(
+        thread_root_order,
+        thread_root_projection_service
+            .lock()
+            .expect("thread-root projection service lock must not be poisoned")
+            .display_data_for_room(key.room_id()),
     );
+    candidate_display.reproject(&context);
+    let emitted_items = candidate_display.display_items().to_vec();
     let Some(lease) = timeline_actor_generations.try_acquire(key, actor_generation) else {
         return false;
     };
@@ -1249,8 +1269,6 @@ where
         navigation_items,
         display_projection,
         event_tx,
-        replay_known_thread_root_projections,
-        thread_root_projection_service,
         &lease,
         key,
         actor_generation,
@@ -1262,9 +1280,8 @@ where
         }],
         PreparedInitialWindow {
             display_projection: candidate_display,
-            navigation_items: Some(authoritative_items.clone()),
-            emitted_items: authoritative_items,
-            replay_known_candidates,
+            navigation_items: Some(authoritative_items),
+            emitted_items,
         },
         commit_synchronous_candidates,
     );
@@ -1482,16 +1499,12 @@ mod tests {
     use super::super::item_projection::sdk_vector_diffs_to_timeline_diffs;
     use super::super::navigation::{
         InitialItemsRequestIdentity, PreparedInitialWindow, TimelineActorGenerationGate,
-        commit_prepared_initial_window_for_generation,
-        emit_items_updated_and_reconcile_replay_known_for_generation,
+        commit_prepared_initial_window_for_generation, emit_items_updated_for_generation,
     };
     use super::super::test_support::{
-        fake_rid, replacement_generation_fixture, replay_projection_services, room_key,
-        timeline_item,
+        fake_rid, projection_service, replacement_generation_fixture, room_key, timeline_item,
     };
-    use super::super::thread_projection::{
-        ReplayKnownThreadRootProjectionRegistry, ThreadAttentionBatchProvenance,
-    };
+    use super::super::thread_projection::ThreadAttentionBatchProvenance;
     use super::{
         PreparedRelayRecovery, RelayRestartBackoff, RelayRestartSchedule, TimelineRelayBatch,
         TimelineRelayControl, accepted_relay_batch, authoritative_receipts_action,
@@ -1698,9 +1711,6 @@ mod tests {
             .activate_after_quiescence(&key)
             .await
             .generation;
-        let replay_registry = Arc::new(Mutex::new(
-            ReplayKnownThreadRootProjectionRegistry::default(),
-        ));
         let projection_service = Arc::new(Mutex::new(ThreadRootProjectionService::default()));
         let subscribe_count = Arc::new(AtomicU64::new(0));
         let subscribe_count_for_fake = subscribe_count.clone();
@@ -1734,8 +1744,8 @@ mod tests {
             &mut navigation_items,
             &mut display_projection,
             &event_tx,
-            &replay_registry,
             &projection_service,
+            koushi_state::TimelineThreadRootOrder::LatestReply,
             &actor_generations,
             &key,
             actor_generation,
@@ -1786,21 +1796,15 @@ mod tests {
             None,
             None,
         );
-        assert!(
-            emit_items_updated_and_reconcile_replay_known_for_generation(
-                &event_tx,
-                &replay_registry,
-                &projection_service,
-                &actor_generations,
-                &key,
-                actor_generation,
-                generation,
-                TimelineBatchId(0),
-                diffs,
-                &[],
-                &[],
-            )
-        );
+        assert!(emit_items_updated_for_generation(
+            &event_tx,
+            &actor_generations,
+            &key,
+            actor_generation,
+            generation,
+            TimelineBatchId(0),
+            diffs,
+        ));
         assert!(matches!(
             event_rx.recv().await,
             Ok(CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
@@ -1902,17 +1906,14 @@ mod tests {
             .activate_after_quiescence(&key)
             .await
             .generation;
-        let replay_registry = Arc::new(Mutex::new(
-            ReplayKnownThreadRootProjectionRegistry::default(),
-        ));
         let projection_service = Arc::new(Mutex::new(ThreadRootProjectionService::default()));
 
         commit_authoritative_recovery_window(
             &mut current,
             &mut display_projection,
             &event_tx,
-            &replay_registry,
             &projection_service,
+            koushi_state::TimelineThreadRootOrder::LatestReply,
             &actor_generations,
             &key,
             actor_generation,
@@ -1931,7 +1932,14 @@ mod tests {
             current[0].send_state,
             Some(TimelineSendState::Sending)
         ));
-        assert_eq!(display_projection.display_items(), current);
+        assert_eq!(display_projection.display_items().len(), current.len());
+        assert_eq!(display_projection.display_items()[0].id, current[0].id);
+        assert!(
+            display_projection.display_items()[0]
+                .display_metadata
+                .is_some()
+        );
+        assert!(current[0].display_metadata.is_none());
         assert!(matches!(
             event_rx.recv().await,
             Ok(CoreEvent::Timeline(TimelineEvent::ResyncRequired { .. }))
@@ -1964,15 +1972,15 @@ mod tests {
         );
         let display_before = display_projection.clone();
         let (event_tx, mut event_rx) = broadcast::channel(8);
-        let (replay_registry, projection_service) = replay_projection_services();
+        let projection_service = projection_service();
         let mut synchronous_candidate_committed = false;
 
         assert!(!commit_authoritative_recovery_window(
             &mut navigation_items,
             &mut display_projection,
             &event_tx,
-            &replay_registry,
             &projection_service,
+            koushi_state::TimelineThreadRootOrder::LatestReply,
             &actor_generations,
             &key,
             stale_generation,
@@ -2012,17 +2020,13 @@ mod tests {
             ),
             navigation_items: Some(candidate_navigation),
             emitted_items: vec![candidate],
-            replay_known_candidates: Vec::new(),
         };
         let (event_tx, mut event_rx) = broadcast::channel(8);
-        let (replay_registry, projection_service) = replay_projection_services();
 
         assert!(!commit_prepared_initial_window_for_generation(
             &mut navigation_items,
             &mut display_projection,
             &event_tx,
-            &replay_registry,
-            &projection_service,
             &actor_generations,
             &key,
             stale_generation,

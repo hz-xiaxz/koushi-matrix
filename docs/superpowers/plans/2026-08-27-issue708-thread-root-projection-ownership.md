@@ -1,6 +1,6 @@
 # Issue #708 — Rust-Owned Thread-Root Projection Lifecycle
 
-Status: design awaiting independent `reviewer-flash` verdict. Implementation is not authorized before `Correct-to-merge`.
+Status: design approved by `reviewer-flash`; implementation complete on the reviewed branch pending final gates, PR checks and merge.
 
 Delivery base: `origin/main` `ea7b802f48f9490f326b0e0839503c30bfa9a6ef` after PR #709 merged. Design reconnaissance began on `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
@@ -242,10 +242,17 @@ Also run wasm, cargo-deny, cargo-machete, secret/boundary/wire/golden checks and
 | required event permutations | deterministic table-driven Core/TS tests |
 | Browser Fake mirrors Core | wire artifact/fake/harness contract tests |
 
+## Implementation record
+
+The reviewed cutover is implemented in this branch: Core service retention/clear is authoritative; projection workers are manager-owned and awaited on teardown; Room `DisplayProjectionState` emits stable Rust metadata and display-relative InitialItems/diffs; Thread/Focused timelines remain ordinary projections; the accepted open intent carries the existing-thread backfill policy; State is an explicit transition mirror; and the public projection event, replay-known registry, TypeScript projection map/pruning/placement and `threadRootOrder` prop are deleted. Browser/Playwright fixtures now install Rust-shaped display rows. The QA `thread` lane reports `thread_projection_lifecycle=stable`, `thread_summary=ok`, and `thread_recv=ok`.
+
+RED evidence was recovered against pre-fix commit `a1888b2d`: State failed because empty-window reconciliation removed a Failed terminal; TypeScript failed because an empty InitialItems pruned the keyed projection. Surviving GREEN tests no longer name the deleted reconciliation action/event.
+
 ## Design review record
 
 - Round 1, `reviewer-flash`: `Not correct-to-merge`. Blocking findings required explicit intent transport, a terminal for `Ok(false)` plus zero initial Thread items, an authoritative Clear wake into the Room display actor, and an audit of every non-display consumer affected by making InitialItems display-relative. Minor findings required explicit dormant-cap rejection and exact removal/retention of Core activity helpers.
 - The design now carries accepted `ThreadOpenIntent` through AppEffect/Core policy, fails non-end empty without publishing InitialItems, extends the existing latest-wins wake with generation-fenced Updated/Cleared transitions, records the sole `TimelineKeyState.items` production consumer and canonical Rust owners, preserves the 120 dormant-inclusive admission cap, and removes inactive terminal gates while retaining Core visibility inputs only.
 - Round 2, `reviewer-flash`: **Correct-to-merge**. All six Round 1 findings were resolved; no Critical or Important finding remained. The five minor mechanics are applied: capture-only deleted-action RED tests become surviving-action GREEN tests, backend/runtime effect mirrors are in scope, draft promotion cannot rederive policy, metadata-only changes require a stable Set diff, and pending/failed placeholders use Synthetic identities.
+- Exact implementation diff review, `reviewer-flash`: **Correct-to-merge**. The reviewer found five Minor documentation/evidence residues; all were fixed (retention comment, dead affected parameter, status truth, table-driven permutation coverage, renderer pagination clarification). The focused exact-diff re-review verified all fixes plus awaited teardown, Room-only placement, equal-revision latest-wins, deterministic ordering, display-relative gaps, QA/wire/Subscribe mirrors, and returned **Correct-to-merge** with no findings.
 
 #552 remains open after #708; later adapter/ACK/request-ref/mutation phases continue from the updated plan.
