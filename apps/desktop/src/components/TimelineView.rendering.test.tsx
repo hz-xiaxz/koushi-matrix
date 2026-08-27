@@ -294,9 +294,9 @@ describe("TimelineView", () => {
       );
       expect(row).not.toBeNull();
       expect(row?.classList.contains("is-continuation")).toBe(true);
+      expect(screen.getByText("Virtual 8")).toBeTruthy();
     });
     expect(timeline.getAttribute("data-total-items")).toBe("601");
-    expect(screen.getByText("Virtual 8")).toBeTruthy();
   });
 
   it("preserves formatted Markdown structure inside a reply quote", () => {
