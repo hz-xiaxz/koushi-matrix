@@ -92,38 +92,26 @@ pub(super) async fn cleanup_after_login_sync(
 
     wait_for_logged_out(&mut conn_a2, logout_a_id, &account_key_a, "logout A").await?;
 
-    let restore_preserved_id = conn_a2.next_request_id();
+    let restore_deleted_id = conn_a2.next_request_id();
     conn_a2
         .command(CoreCommand::Account(AccountCommand::RestoreSession {
-            request_id: restore_preserved_id,
+            request_id: restore_deleted_id,
             account_key: account_key_a.clone(),
         }))
         .await
         .map_err(|e| format!("submit post-logout restore A: {e}"))?;
 
-    wait_for_session_restored(
+    let failure = wait_for_operation_failed_and_signed_out(
         &mut conn_a2,
-        restore_preserved_id,
-        &account_key_a,
-        "post-logout explicit restore A",
+        restore_deleted_id,
+        "post-logout explicit restore A (must be not-found)",
     )
     .await?;
-    wait_for_ready_snapshot(&mut conn_a2, "post-logout explicit restore A Ready").await?;
-
-    let restored_logout_id = conn_a2.next_request_id();
-    conn_a2
-        .command(CoreCommand::Account(AccountCommand::Logout {
-            request_id: restored_logout_id,
-        }))
-        .await
-        .map_err(|e| format!("submit restored logout A: {e}"))?;
-    wait_for_logged_out(
-        &mut conn_a2,
-        restored_logout_id,
-        &account_key_a,
-        "restored logout A",
-    )
-    .await?;
+    if failure != CoreFailure::SessionNotFound {
+        return Err(format!(
+            "post-logout explicit restore A failed with unexpected kind: {failure:?}"
+        ));
+    }
     drop(conn_a2);
     runtime_a2.shutdown().await;
     println!("restore_cleanup=ok");
@@ -285,38 +273,28 @@ pub(super) async fn cleanup_after_full_flow(
 
     wait_for_logged_out(&mut conn_a2, logout_a_id, &account_key_a, "logout A").await?;
 
-    let restore_preserved_id = conn_a2.next_request_id();
+    let restore_deleted_id = conn_a2.next_request_id();
     conn_a2
         .command(CoreCommand::Account(AccountCommand::RestoreSession {
-            request_id: restore_preserved_id,
+            request_id: restore_deleted_id,
             account_key: account_key_a.clone(),
         }))
         .await
         .map_err(|e| format!("submit post-logout restore A: {e}"))?;
 
-    wait_for_session_restored(
+    let failure = wait_for_operation_failed_and_signed_out(
         &mut conn_a2,
-        restore_preserved_id,
-        &account_key_a,
-        "post-logout explicit restore A",
+        restore_deleted_id,
+        "post-logout explicit restore A (must be not-found)",
     )
     .await?;
-    wait_for_ready_snapshot(&mut conn_a2, "post-logout explicit restore A Ready").await?;
-
-    let restored_logout_id = conn_a2.next_request_id();
-    conn_a2
-        .command(CoreCommand::Account(AccountCommand::Logout {
-            request_id: restored_logout_id,
-        }))
-        .await
-        .map_err(|e| format!("submit restored logout A: {e}"))?;
-    wait_for_logged_out(
-        &mut conn_a2,
-        restored_logout_id,
-        &account_key_a,
-        "restored logout A",
-    )
-    .await?;
+    if failure != CoreFailure::SessionNotFound {
+        return Err(format!(
+            "post-logout explicit restore A failed with unexpected kind: {failure:?}"
+        ));
+    }
+    drop(conn_a2);
+    runtime_a2.shutdown().await;
     let logout_b_id = conn_b.next_request_id();
     conn_b
         .command(CoreCommand::Account(AccountCommand::Logout {
