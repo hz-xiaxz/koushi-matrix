@@ -1,12 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import {
-  createBrowserFakeApi,
-  type ComposerDraftAccountOwner,
-  type DesktopApi,
-  type ViewportSyncObservation,
-  type ViewportSyncReceipt
-} from "./browserFakeApi";
+import type {
+  ComposerDraftAccountOwner,
+  DesktopApi,
+  ViewportSyncObservation,
+  ViewportSyncReceipt
+} from "./desktopApi";
 import { COMPOSER_DRAFT_REVISION_ZERO } from "../domain/composerDraftRevision";
 import type {
   ActivityMarkReadTarget,
@@ -56,15 +55,7 @@ import type {
 } from "../domain/composerDraftLifecycle";
 import type { DisplayPlatform } from "../domain/types";
 
-export function createDesktopApi(): DesktopApi {
-  if (isTauriRuntime()) {
-    return new TauriDesktopApi();
-  }
-
-  return createBrowserFakeApi();
-}
-
-class TauriDesktopApi implements DesktopApi {
+export class TauriDesktopApi implements DesktopApi {
   async getSnapshot(): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("get_snapshot");
   }
@@ -1134,8 +1125,4 @@ class TauriDesktopApi implements DesktopApi {
   async stopRoomCrawl(roomId: string): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("stop_room_crawl", { roomId });
   }
-}
-
-function isTauriRuntime(): boolean {
-  return "__TAURI_INTERNALS__" in window;
 }

@@ -12,8 +12,9 @@
  * window.__TAURI_INTERNALS__ so isTauriRuntime() is true and the App selects
  * TauriDesktopApi → invoke()).
  *
- * CRITICAL ORDERING: createDesktopApi() and the tauriTimelineTransport
- * constant both run at App MODULE-LOAD time and snapshot isTauriRuntime().
+ * CRITICAL ORDERING: appRuntime's DesktopApi selection and the
+ * tauriTimelineTransport constant both run at App MODULE-LOAD time and snapshot
+ * isTauriRuntime().
  * So the mock + window.__harness must be installed BEFORE the App module is
  * imported. We therefore set everything up first and dynamically import the
  * App only afterwards.

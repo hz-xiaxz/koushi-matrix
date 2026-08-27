@@ -79,7 +79,7 @@ export default tseslint.config(
             {
               group: ["@tauri-apps/**"],
               message:
-                "Do not import @tauri-apps directly here. Route through src/backend/client.ts or use props from App.tsx. Existing App.tsx transport wiring is acknowledged with eslint-disable-next-line; do not add new ones without a tracking comment.",
+                "Do not import @tauri-apps directly here. Route through an approved src/backend adapter/composition root or use props from App.tsx. Existing App.tsx transport wiring is acknowledged with eslint-disable-next-line; do not add new ones without a tracking comment.",
             },
             {
               group: ["**/src-tauri/**", "../../src-tauri/**", "../src-tauri/**"],

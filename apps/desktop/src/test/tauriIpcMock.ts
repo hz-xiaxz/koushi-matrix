@@ -16,7 +16,7 @@
  */
 
 import type { CoreEventPayload } from "../domain/coreEvents";
-import type { ViewportSyncReceipt } from "../backend/browserFakeApi";
+import type { ViewportSyncReceipt } from "../backend/desktopApi";
 
 // ---------------------------------------------------------------------------
 // Invocation record

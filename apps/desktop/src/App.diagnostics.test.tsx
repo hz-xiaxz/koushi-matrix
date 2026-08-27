@@ -3,7 +3,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { createBrowserFakeApi, type DesktopApi } from "./backend/browserFakeApi";
+import { createBrowserFakeApi } from "./backend/browserFakeApi";
+import type { DesktopApi } from "./backend/desktopApi";
 import type { DiagnosticLogSnapshot } from "./domain/diagnostics";
 
 const tauriEventListeners = vi.hoisted(
@@ -33,8 +34,9 @@ async function renderAppWithApi(api: DesktopApi) {
     get: () => document.body.textContent ?? ""
   });
   vi.resetModules();
-  vi.doMock("./backend/client", () => ({
-    createDesktopApi: () => api
+  vi.doMock("./backend/appRuntime", () => ({
+    api,
+    startSessionVerificationWindowDrag: vi.fn()
   }));
   const { App } = await import("./App");
   return render(<App />);
@@ -48,7 +50,7 @@ async function clearProjectedSnapshot() {
 afterEach(async () => {
   cleanup();
   await clearProjectedSnapshot();
-  vi.doUnmock("./backend/client");
+  vi.doUnmock("./backend/appRuntime");
   tauriEventListeners.clear();
   Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   vi.restoreAllMocks();

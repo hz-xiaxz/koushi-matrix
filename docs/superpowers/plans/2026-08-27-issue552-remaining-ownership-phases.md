@@ -1,6 +1,6 @@
 # Issue #552 Remaining Frontend Ownership Migration — Phased Execution Plan
 
-Status: Phases 0 and 1 (#708, PR #710) merged. Phase 2A design is pending independent review; later implementation remains unauthorized by this document alone.
+Status: Phases 0 and 1 (#708, PR #710) merged. Phase 2A is implemented on its approved branch pending final verification/review/merge; later phases remain unauthorized by this document alone.
 
 Phase 0 base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`. Phase 1 #708 insertion base: `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
@@ -80,6 +80,8 @@ Task-level design: `2026-08-28-issue552-neutral-desktop-api-contract.md`.
 - Make `client.ts` the Tauri implementation and `browserFakeApi.ts` a test implementation of that neutral contract.
 - Move API implementation selection to the `appRuntime.ts` composition root, remove `client.ts`'s duplicate local `isTauriRuntime()` branch, and leave the separately scoped `tauriTimelineTransport.ts` adapter guard unchanged until its Phase 2B seam.
 - Update imports only; do not rename IPC commands, alter DTOs, split the interface speculatively, or change behavior.
+
+**Phase 2A implementation record:** `desktopApi.ts` is the neutral contract; `TauriDesktopApi` and `BrowserFakeApi` depend on it; `appRuntime` alone selects by the existing runtime predicate; client/browser method bodies, IPC/DTO contracts and `tauriTimelineTransport` are unchanged. Composition-root RED/GREEN tests prove exactly one adapter construction. This does not count as semantic migration.
 
 **Proof:** typecheck, focused client/fake/App tests, full Vitest, lint, build, and import-cycle check.
 

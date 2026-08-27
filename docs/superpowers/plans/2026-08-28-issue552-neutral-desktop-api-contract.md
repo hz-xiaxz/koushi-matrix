@@ -1,6 +1,6 @@
 # Issue #552 Phase 2A — Neutral DesktopApi Contract
 
-Status: design awaiting independent `reviewer-flash` verdict. No implementation is authorized before `Correct-to-merge`.
+Status: design approved by `reviewer-flash`; implementation complete on the reviewed branch pending final gates, exact-diff review and merge.
 
 Base: `origin/main` `f61a9eef2c102b767997365587459c9ea2941230` after merged #708.
 
@@ -59,12 +59,18 @@ Existing client/fake/App tests remain behavior equivalence checks. TypeScript co
 - `apps/desktop/src/test/tauriIpcMock.ts`
 - `apps/desktop/eslint.config.js` (correct the stale adapter guidance text only)
 - `docs/architecture/frontend-ownership-inventory.md`
+- `docs/architecture/tauri-react-shell.md`
 - `docs/superpowers/plans/2026-08-27-issue552-remaining-ownership-phases.md`
 - `docs/agents/plans.md`
 
+## Implementation record
+
+The composition test failed on the base because `appRuntime` requested the missing mocked `client::createDesktopApi` export, proving selection still lived in the adapter. It is GREEN after moving the neutral interface and selector: Tauri runtime constructs only `TauriDesktopApi`; browser runtime constructs only `createBrowserFakeApi`. All contract type importers and App injection mocks now target the neutral contract/composition root; client tests instantiate the Tauri adapter directly. No implementation method, IPC name, DTO or timeline transport changed.
+
 ## Design review record
 
-- `reviewer-flash`: **Correct-to-merge**. No Critical or Important finding. The four Minor documentation gaps were fixed: the nonexistent cycle-tool claim was replaced by an explicit graph audit, all type importers/stale ESLint guidance are in scope, App mocks retain the drag export, and the RED test environment/mocks are specified.
+- Design, `reviewer-flash`: **Correct-to-merge**. No Critical or Important finding. The four Minor documentation gaps were fixed: the nonexistent cycle-tool claim was replaced by an explicit graph audit, all type importers/stale ESLint guidance are in scope, App mocks retain the drag export, and the RED test environment/mocks are specified.
+- Exact implementation diff, `reviewer-flash`: **Correct-to-merge**. The stale pre-Phase-2A inventory bullet was corrected before focused re-review; that review then found one historical shell-doc `createDesktopApi()` reference, also corrected before the final confirmation.
 
 ## Acceptance
 
