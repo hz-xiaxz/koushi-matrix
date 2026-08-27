@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
@@ -12,17 +12,15 @@ use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::account_work::{AccountWorkKind, AccountWorkPermit, AccountWorkScheduler};
 use crate::event::{
-    CoreEvent, PaginationDirection, PaginationState, ThreadRootProjectionDto,
-    ThreadRootProjectionSourceDto, ThreadRootProjectionStateDto, TimelineAnchorRestoreStatus,
-    TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId, TimelineNavigationSnapshot,
-    TimelineReadStateSync, TimelineUnreadPosition, TimelineViewportObservation,
+    CoreEvent, PaginationDirection, PaginationState, TimelineAnchorRestoreStatus, TimelineDiff,
+    TimelineEvent, TimelineItem, TimelineItemId, TimelineNavigationSnapshot, TimelineReadStateSync,
+    TimelineUnreadPosition, TimelineViewportObservation,
 };
 use crate::executor;
 use crate::failure::{CoreFailure, TimelineFailureKind};
 use crate::ids::{RequestId, TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 use crate::live_tail_freshness::LiveTailSchedulerAction;
 use crate::startup_trace::{self};
-use crate::threads_list::ThreadRootProjectionService;
 use koushi_sdk::MatrixLiveTailRefreshOutcome as LiveTailRefreshOutcome;
 
 // BEGIN GENERATED SIBLING IMPORTS
@@ -31,23 +29,14 @@ use super::diagnostics::{
     record_live_tail_queue, record_live_tail_state, record_subscribe_stage,
     timeline_key_trace_kind, trace_timeline_items, trace_timeline_paginate,
 };
-use super::display_projection::{
-    DisplayProjectionState, apply_non_sdk_item_set_diffs_to_display_items,
-};
+use super::display_projection::DisplayProjectionState;
 use super::gap_repair::{LIVE_TAIL_CANCELLATION_DEADLINE, RestoreCausalProjectionBuffer};
 use super::item_projection::{
     eligible_activity_preview, has_user_visible_content, is_attention_eligible_event,
     is_unread_navigation_item, item_index_for_event_id, timeline_item_event_id,
 };
 use super::manager::TimelineManagerActor;
-use super::thread_projection::{
-    JAVASCRIPT_SAFE_INTEGER_MAX, ReplayKnownDisplayContext, ReplayKnownThreadRootProjection,
-    ReplayKnownThreadRootProjectionRegistry, ReplayKnownThreadRootProjectionUpdate,
-    ThreadAttentionObservation, ThreadAttentionTracker,
-    known_thread_root_projections_for_display_context, overlay_thread_summary_item,
-    replay_known_candidates_for_display_items,
-    replay_known_timeline_events_with_hydration_handoffs, seed_thread_summary_item,
-};
+use super::thread_projection::{ThreadAttentionObservation, ThreadAttentionTracker};
 // END GENERATED SIBLING IMPORTS
 
 pub(super) const INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT: u16 = 100;
@@ -536,149 +525,73 @@ pub(super) fn emit_timeline_events_with_lease(
     }
 }
 
-/// Commits one canonical display diff batch and its resulting replay-known
-/// ownership transition under one generation lease. The registry is mutated
-/// only after the lease proves this actor is still current; a SyncStarted
-/// fence therefore rejects both halves of the UI-visible transition.
-///
-/// The helper is deliberately synchronous. In particular, no root hydration,
-/// media work, or reducer delivery may run while the lease is held.
-pub(super) fn emit_items_updated_and_reconcile_replay_known_for_generation(
+/// Publish one validated display-relative `ItemsUpdated` batch.
+pub(super) fn emit_items_updated_for_generation(
     event_tx: &broadcast::Sender<CoreEvent>,
-    registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
-    thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
     timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
     key: &TimelineKey,
     actor_generation: u64,
     generation: TimelineGeneration,
     batch_id: TimelineBatchId,
     diffs: Vec<TimelineDiff>,
-    navigation_items: &[TimelineItem],
-    display_items: &[TimelineItem],
 ) -> bool {
     let Some(lease) = timeline_actor_generations.try_acquire(key, actor_generation) else {
         return false;
     };
-    emit_items_updated_and_reconcile_replay_known_with_lease(
+    emit_timeline_events_with_lease(
         event_tx,
-        registry,
-        thread_root_projection_service,
         &lease,
-        key,
-        generation,
-        batch_id,
-        diffs,
-        navigation_items,
-        display_items,
+        vec![TimelineEvent::ItemsUpdated {
+            key: key.clone(),
+            generation,
+            batch_id,
+            diffs,
+        }],
     );
     true
 }
 
-/// Commits a non-SDK `Set` mutation beside its bounded replay display update
-/// and replay-known ownership transition. These mutations originate in actor
-/// policy/state handlers rather than an SDK vector diff. Their canonical index
-/// is resolved against the exact retained slot owner; a replay-only root may
-/// be outside the bounded mirror and therefore intentionally emit no display
-/// mutation.
-///
-/// The actor generation lease is acquired *before* the mirror is changed and
-/// retained until the display-safe `ItemsUpdated` event and scoped replay
-/// Ready/Clear events have all been synchronously broadcast. This is the same
-/// current-generation boundary used for SDK diff batches.
-pub(super) fn emit_non_sdk_item_sets_and_reconcile_replay_known_for_generation(
+/// A fresh actor projection is already display-relative. Canonical navigation
+/// state remains actor-owned and is never sent through this event.
+pub(super) fn emit_initial_items_for_generation(
     event_tx: &broadcast::Sender<CoreEvent>,
-    registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
-    thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
     timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
     key: &TimelineKey,
     actor_generation: u64,
+    request_identity: InitialItemsRequestIdentity,
     generation: TimelineGeneration,
-    batch_id: TimelineBatchId,
-    diffs: Vec<TimelineDiff>,
-    navigation_items: &[TimelineItem],
-    display_projection: &mut DisplayProjectionState,
+    items: Vec<TimelineItem>,
+    prefix_events: Vec<TimelineEvent>,
 ) -> bool {
     let Some(lease) = timeline_actor_generations.try_acquire(key, actor_generation) else {
         return false;
     };
-    let display_diffs = apply_non_sdk_item_set_diffs_to_display_items(display_projection, &diffs);
-    emit_items_updated_and_reconcile_replay_known_with_lease(
+    emit_timeline_events_with_lease(event_tx, &lease, prefix_events);
+    emit_timeline_events_with_lease(
         event_tx,
-        registry,
-        thread_root_projection_service,
         &lease,
-        key,
-        generation,
-        batch_id,
-        display_diffs,
-        navigation_items,
-        display_projection.display_items(),
+        vec![TimelineEvent::InitialItems {
+            request_id: request_identity.projection_request_id,
+            cause_request_id: request_identity.cause_request_id,
+            key: key.clone(),
+            actor_generation,
+            generation,
+            items,
+        }],
     );
     true
 }
 
-/// Sends one `ItemsUpdated` event and all replay-known lifecycle consequences
-/// under a generation lease already acquired by the caller.
-/// Keeping the registry mutation and every broadcast in this helper prevents
-/// an observer from seeing only one half of a display transition.
-pub(super) fn emit_items_updated_and_reconcile_replay_known_with_lease(
-    event_tx: &broadcast::Sender<CoreEvent>,
-    registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
-    thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
-    lease: &TimelineActorGenerationLease,
-    key: &TimelineKey,
-    generation: TimelineGeneration,
-    batch_id: TimelineBatchId,
-    diffs: Vec<TimelineDiff>,
-    navigation_items: &[TimelineItem],
-    display_items: &[TimelineItem],
-) {
-    let mut registry = registry
-        .lock()
-        .expect("replay-known root registry lock must not be poisoned");
-    let replay_known_update = registry.reconcile_navigation(
-        key,
-        navigation_items,
-        &ReplayKnownDisplayContext::from_display_items(display_items),
-    );
-    let mut events =
-        Vec::with_capacity(1 + replay_known_update.stale.len() + replay_known_update.ready.len());
-    events.push(TimelineEvent::ItemsUpdated {
-        key: key.clone(),
-        generation,
-        batch_id,
-        diffs,
-    });
-    events.extend(replay_known_timeline_events_with_hydration_handoffs(
-        key,
-        &mut registry,
-        thread_root_projection_service,
-        replay_known_update,
-    ));
-    emit_timeline_events_with_lease(event_tx, lease, events);
-}
-
-/// The UI-visible terminal state of one anchor-restore walk.  Every member of
-/// this group is published while the same actor-generation lease is held so a
-/// replacement actor cannot expose an `ItemsUpdated` without its matching
-/// navigation/terminal state (or vice versa).
 pub(super) struct RestoreSettlement {
     pub(super) navigation_snapshot: Option<TimelineNavigationSnapshot>,
     pub(super) terminal: Option<(RequestId, TimelineAnchorRestoreStatus)>,
 }
 
-/// Publish a restore terminal group for the current actor generation.
-///
-/// `None` means the actor was already stale and no state, buffer, batch id, or
-/// event was changed.  `Some(true)` means a coalesced `ItemsUpdated` batch was
-/// included; `Some(false)` means only navigation/terminal events were needed.
 pub(super) fn publish_restore_settlement_for_generation(
     restore_emit_buffer: &mut Vec<TimelineDiff>,
     force_items_updated: bool,
     next_batch_id: &mut TimelineBatchId,
     event_tx: &broadcast::Sender<CoreEvent>,
-    registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
-    thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
     timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
     key: &TimelineKey,
     actor_generation: u64,
@@ -688,58 +601,22 @@ pub(super) fn publish_restore_settlement_for_generation(
     settlement: RestoreSettlement,
 ) -> Option<bool> {
     let lease = timeline_actor_generations.try_acquire(key, actor_generation)?;
-    Some(publish_restore_settlement_with_lease(
-        restore_emit_buffer,
-        force_items_updated,
-        next_batch_id,
-        event_tx,
-        registry,
-        thread_root_projection_service,
-        &lease,
-        key,
-        generation,
-        navigation_items,
-        display_items,
-        settlement,
-    ))
-}
-
-pub(super) fn publish_restore_settlement_with_lease(
-    restore_emit_buffer: &mut Vec<TimelineDiff>,
-    force_items_updated: bool,
-    next_batch_id: &mut TimelineBatchId,
-    event_tx: &broadcast::Sender<CoreEvent>,
-    registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
-    thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
-    lease: &TimelineActorGenerationLease,
-    key: &TimelineKey,
-    generation: TimelineGeneration,
-    navigation_items: &[TimelineItem],
-    display_items: &[TimelineItem],
-    settlement: RestoreSettlement,
-) -> bool {
-    // A causal projection may correspond to a display no-op (for example a
-    // duplicate SDK slot collapsed by render identity).  It still needs an
-    // empty ItemsUpdated batch as the authoritative render fence.
     let published_items = force_items_updated || !restore_emit_buffer.is_empty();
     if published_items {
         let batch_id = *next_batch_id;
         let diffs = std::mem::take(restore_emit_buffer);
-        emit_items_updated_and_reconcile_replay_known_with_lease(
+        emit_timeline_events_with_lease(
             event_tx,
-            registry,
-            thread_root_projection_service,
-            lease,
-            key,
-            generation,
-            batch_id,
-            diffs,
-            navigation_items,
-            display_items,
+            &lease,
+            vec![TimelineEvent::ItemsUpdated {
+                key: key.clone(),
+                generation,
+                batch_id,
+                diffs,
+            }],
         );
         *next_batch_id = TimelineBatchId(batch_id.0 + 1);
     }
-
     let mut terminal_events = Vec::with_capacity(2);
     if let Some(snapshot) = settlement.navigation_snapshot {
         terminal_events.push(TimelineEvent::NavigationUpdated {
@@ -754,150 +631,21 @@ pub(super) fn publish_restore_settlement_with_lease(
             status,
         });
     }
-    emit_timeline_events_with_lease(event_tx, lease, terminal_events);
-    published_items
-}
-
-/// Commits a fresh UI `InitialItems` window and its replay-known ownership
-/// transition under one shared synchronous boundary. The caller derives
-/// `replay_known_candidates` before entering this function; no fetch,
-/// pagination, reducer delivery, or other await is allowed while the
-/// generation lease and registry mutex are held.
-///
-/// In particular, a hydration terminal cannot observe an owner-less interval
-/// after the frontend has replaced its window but before its replay-known
-/// Ready is registered. Event order remains `InitialItems`, then any scoped
-/// replay Clear/Ready/hydration handoff events.
-pub(super) fn emit_initial_items_and_reconcile_replay_known_for_generation(
-    event_tx: &broadcast::Sender<CoreEvent>,
-    registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
-    thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
-    timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
-    key: &TimelineKey,
-    actor_generation: u64,
-    request_identity: InitialItemsRequestIdentity,
-    generation: TimelineGeneration,
-    items: Vec<TimelineItem>,
-    replay_known_candidates: Vec<ThreadRootProjectionDto>,
-) -> bool {
-    emit_initial_items_and_reconcile_replay_known_for_generation_after_initial(
-        event_tx,
-        registry,
-        thread_root_projection_service,
-        timeline_actor_generations,
-        key,
-        actor_generation,
-        request_identity,
-        generation,
-        items,
-        replay_known_candidates,
-        || {},
-    )
-}
-
-/// Internal synchronous boundary used by the production no-op callback above
-/// and the deterministic test-only interleaving hook below. The callback is
-/// invoked after `InitialItems` delivery while both the generation lease and
-/// replay registry mutex remain held; it must never await.
-fn emit_initial_items_and_reconcile_replay_known_for_generation_after_initial<F>(
-    event_tx: &broadcast::Sender<CoreEvent>,
-    registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
-    thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
-    timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
-    key: &TimelineKey,
-    actor_generation: u64,
-    request_identity: InitialItemsRequestIdentity,
-    generation: TimelineGeneration,
-    items: Vec<TimelineItem>,
-    replay_known_candidates: Vec<ThreadRootProjectionDto>,
-    after_initial: F,
-) -> bool
-where
-    F: FnOnce(),
-{
-    let Some(lease) = timeline_actor_generations.try_acquire(key, actor_generation) else {
-        return false;
-    };
-    emit_initial_items_and_reconcile_replay_known_with_lease_after_initial(
-        event_tx,
-        registry,
-        thread_root_projection_service,
-        &lease,
-        key,
-        actor_generation,
-        request_identity,
-        generation,
-        items,
-        replay_known_candidates,
-        Vec::new(),
-        after_initial,
-    );
-    true
-}
-
-fn emit_initial_items_and_reconcile_replay_known_with_lease_after_initial<F>(
-    event_tx: &broadcast::Sender<CoreEvent>,
-    registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
-    thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
-    lease: &TimelineActorGenerationLease,
-    key: &TimelineKey,
-    actor_generation: u64,
-    request_identity: InitialItemsRequestIdentity,
-    generation: TimelineGeneration,
-    items: Vec<TimelineItem>,
-    replay_known_candidates: Vec<ThreadRootProjectionDto>,
-    prefix_events: Vec<TimelineEvent>,
-    after_initial: F,
-) where
-    F: FnOnce(),
-{
-    let mut registry = registry
-        .lock()
-        .expect("replay-known root registry lock must not be poisoned");
-    for item in &items {
-        seed_thread_summary_item(thread_root_projection_service, key, item);
-    }
-    let items = items
-        .into_iter()
-        .map(|item| overlay_thread_summary_item(thread_root_projection_service, key, &item))
-        .collect();
-    let replay_known_update = registry.replace(key, replay_known_candidates);
-    emit_timeline_events_with_lease(event_tx, lease, prefix_events);
-    emit_timeline_events_with_lease(
-        event_tx,
-        lease,
-        vec![TimelineEvent::InitialItems {
-            request_id: request_identity.projection_request_id,
-            cause_request_id: request_identity.cause_request_id,
-            key: key.clone(),
-            actor_generation,
-            generation,
-            items,
-        }],
-    );
-    after_initial();
-    let events = replay_known_timeline_events_with_hydration_handoffs(
-        key,
-        &mut registry,
-        thread_root_projection_service,
-        replay_known_update,
-    );
-    emit_timeline_events_with_lease(event_tx, lease, events);
+    emit_timeline_events_with_lease(event_tx, &lease, terminal_events);
+    let _ = (navigation_items, display_items);
+    Some(published_items)
 }
 
 pub(super) struct PreparedInitialWindow {
     pub(super) display_projection: DisplayProjectionState,
     pub(super) navigation_items: Option<Vec<TimelineItem>>,
     pub(super) emitted_items: Vec<TimelineItem>,
-    pub(super) replay_known_candidates: Vec<ThreadRootProjectionDto>,
 }
 
 pub(super) fn commit_prepared_initial_window_for_generation(
     navigation_items: &mut Vec<TimelineItem>,
     display_projection: &mut DisplayProjectionState,
     event_tx: &broadcast::Sender<CoreEvent>,
-    registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
-    thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
     timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
     key: &TimelineKey,
     actor_generation: u64,
@@ -909,20 +657,22 @@ pub(super) fn commit_prepared_initial_window_for_generation(
     let Some(lease) = timeline_actor_generations.try_acquire(key, actor_generation) else {
         return false;
     };
-    commit_prepared_initial_window_with_lease(
-        navigation_items,
-        display_projection,
+    if let Some(candidate_navigation_items) = prepared.navigation_items {
+        *navigation_items = candidate_navigation_items;
+    }
+    *display_projection = prepared.display_projection;
+    emit_timeline_events_with_lease(event_tx, &lease, prefix_events);
+    emit_timeline_events_with_lease(
         event_tx,
-        registry,
-        thread_root_projection_service,
         &lease,
-        key,
-        actor_generation,
-        request_identity,
-        generation,
-        prefix_events,
-        prepared,
-        || {},
+        vec![TimelineEvent::InitialItems {
+            request_id: request_identity.projection_request_id,
+            cause_request_id: request_identity.cause_request_id,
+            key: key.clone(),
+            actor_generation,
+            generation,
+            items: prepared.emitted_items,
+        }],
     );
     true
 }
@@ -931,8 +681,6 @@ pub(super) fn commit_prepared_initial_window_with_lease<F>(
     navigation_items: &mut Vec<TimelineItem>,
     display_projection: &mut DisplayProjectionState,
     event_tx: &broadcast::Sender<CoreEvent>,
-    registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
-    thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
     lease: &TimelineActorGenerationLease,
     key: &TimelineKey,
     actor_generation: u64,
@@ -944,268 +692,24 @@ pub(super) fn commit_prepared_initial_window_with_lease<F>(
 ) where
     F: FnOnce(),
 {
-    let PreparedInitialWindow {
-        display_projection: candidate_display_projection,
-        navigation_items: candidate_navigation_items,
-        emitted_items,
-        replay_known_candidates,
-    } = prepared;
-    if let Some(candidate_navigation_items) = candidate_navigation_items {
+    if let Some(candidate_navigation_items) = prepared.navigation_items {
         *navigation_items = candidate_navigation_items;
     }
-    *display_projection = candidate_display_projection;
+    *display_projection = prepared.display_projection;
     commit_synchronous_candidates();
-    emit_initial_items_and_reconcile_replay_known_with_lease_after_initial(
+    emit_timeline_events_with_lease(event_tx, lease, prefix_events);
+    emit_timeline_events_with_lease(
         event_tx,
-        registry,
-        thread_root_projection_service,
         lease,
-        key,
-        actor_generation,
-        request_identity,
-        generation,
-        emitted_items,
-        replay_known_candidates,
-        prefix_events,
-        || {},
+        vec![TimelineEvent::InitialItems {
+            request_id: request_identity.projection_request_id,
+            cause_request_id: request_identity.cause_request_id,
+            key: key.clone(),
+            actor_generation,
+            generation,
+            items: prepared.emitted_items,
+        }],
     );
-}
-
-#[cfg(test)]
-pub(super) fn emit_initial_items_and_reconcile_replay_known_for_generation_with_test_hook<F>(
-    event_tx: &broadcast::Sender<CoreEvent>,
-    registry: &Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
-    thread_root_projection_service: &Arc<Mutex<ThreadRootProjectionService>>,
-    timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
-    key: &TimelineKey,
-    actor_generation: u64,
-    request_identity: InitialItemsRequestIdentity,
-    generation: TimelineGeneration,
-    items: Vec<TimelineItem>,
-    replay_known_candidates: Vec<ThreadRootProjectionDto>,
-    after_initial: F,
-) -> bool
-where
-    F: FnOnce(),
-{
-    emit_initial_items_and_reconcile_replay_known_for_generation_after_initial(
-        event_tx,
-        registry,
-        thread_root_projection_service,
-        timeline_actor_generations,
-        key,
-        actor_generation,
-        request_identity,
-        generation,
-        items,
-        replay_known_candidates,
-        after_initial,
-    )
-}
-
-impl ReplayKnownThreadRootProjectionRegistry {
-    /// Replaces this replay's known snapshots and returns roots that were in a
-    /// prior replay for the same key but are no longer eligible for display.
-    pub(super) fn replace(
-        &mut self,
-        key: &TimelineKey,
-        projections: Vec<ThreadRootProjectionDto>,
-    ) -> ReplayKnownThreadRootProjectionUpdate {
-        self.replace_with_emit_unchanged(key, projections, true)
-    }
-
-    fn replace_with_emit_unchanged(
-        &mut self,
-        key: &TimelineKey,
-        projections: Vec<ThreadRootProjectionDto>,
-        emit_unchanged: bool,
-    ) -> ReplayKnownThreadRootProjectionUpdate {
-        let mut previous = self.entries.remove(key).unwrap_or_default();
-        // Keep every live and just-staled epoch occupied while allocating. A
-        // Clear from the old owner can be delivered in the same synchronous
-        // group as a new Ready, so reusing it would make source-scoped clears
-        // ambiguous after JavaScript deserializes the JSON number.
-        let mut occupied_epochs = previous
-            .values()
-            .filter_map(|projection| match projection.source {
-                ThreadRootProjectionSourceDto::ReplayKnown { epoch } => Some(epoch),
-                ThreadRootProjectionSourceDto::Hydration => None,
-            })
-            .collect::<HashSet<_>>();
-        let mut next = HashMap::new();
-        let mut ready = Vec::new();
-        let mut stale = Vec::new();
-
-        for mut projection in projections {
-            let ThreadRootProjectionStateDto::Ready { item } = &projection.state else {
-                continue;
-            };
-            let ready_item = item.clone();
-            if !projection.retain_without_reply {
-                continue;
-            }
-            let (source, is_unchanged) = match previous.remove(&projection.root_event_id) {
-                Some(existing)
-                    if existing.activity_event_id == projection.activity_event_id
-                        && existing.activity_timestamp_ms == projection.activity_timestamp_ms =>
-                {
-                    (existing.source, existing.item == ready_item)
-                }
-                Some(existing) => {
-                    stale.push(existing);
-                    let epoch = self.allocate_safe_epoch(&mut occupied_epochs);
-                    (ThreadRootProjectionSourceDto::ReplayKnown { epoch }, false)
-                }
-                None => {
-                    let epoch = self.allocate_safe_epoch(&mut occupied_epochs);
-                    (ThreadRootProjectionSourceDto::ReplayKnown { epoch }, false)
-                }
-            };
-            projection.source = source.clone();
-            next.insert(
-                projection.root_event_id.clone(),
-                ReplayKnownThreadRootProjection {
-                    root_event_id: projection.root_event_id.clone(),
-                    activity_event_id: projection.activity_event_id.clone(),
-                    activity_timestamp_ms: projection.activity_timestamp_ms,
-                    item: ready_item,
-                    source,
-                },
-            );
-            if emit_unchanged || !is_unchanged {
-                ready.push(projection);
-            }
-        }
-        stale.extend(previous.into_values());
-        if !next.is_empty() {
-            self.entries.insert(key.clone(), next);
-        }
-        ReplayKnownThreadRootProjectionUpdate { ready, stale }
-    }
-
-    pub(super) fn clear(&mut self, key: &TimelineKey) -> Vec<ReplayKnownThreadRootProjection> {
-        self.suppressed_hydration_terminals.remove(key);
-        self.emitted_hydration_terminals.remove(key);
-        self.entries
-            .remove(key)
-            .map(|entries| entries.into_values().collect())
-            .unwrap_or_default()
-    }
-
-    pub(super) fn reconcile_navigation(
-        &mut self,
-        key: &TimelineKey,
-        navigation_items: &[TimelineItem],
-        display_context: &ReplayKnownDisplayContext,
-    ) -> ReplayKnownThreadRootProjectionUpdate {
-        self.replace_with_emit_unchanged(
-            key,
-            known_thread_root_projections_for_display_context(navigation_items, display_context),
-            false,
-        )
-    }
-
-    /// True when this Room timeline currently owns the root with a
-    /// replay-known snapshot. Manager-owned hydration workers consult this
-    /// before they publish late terminal events, while still recording their
-    /// result in the hydration service/reducer state.
-    pub(super) fn owns_root(&self, key: &TimelineKey, root_event_id: &str) -> bool {
-        self.entries
-            .get(key)
-            .is_some_and(|entries| entries.contains_key(root_event_id))
-    }
-
-    pub(super) fn mark_hydration_terminal_suppressed(
-        &mut self,
-        key: &TimelineKey,
-        root_event_id: String,
-    ) {
-        self.suppressed_hydration_terminals
-            .entry(key.clone())
-            .or_default()
-            .insert(root_event_id);
-    }
-
-    pub(super) fn take_suppressed_hydration_terminal(
-        &mut self,
-        key: &TimelineKey,
-        root_event_id: &str,
-    ) -> bool {
-        let Some(roots) = self.suppressed_hydration_terminals.get_mut(key) else {
-            return false;
-        };
-        let was_suppressed = roots.remove(root_event_id);
-        if roots.is_empty() {
-            self.suppressed_hydration_terminals.remove(key);
-        }
-        was_suppressed
-    }
-
-    pub(super) fn mark_hydration_terminal_emitted(
-        &mut self,
-        key: &TimelineKey,
-        root_event_id: String,
-    ) {
-        self.emitted_hydration_terminals
-            .entry(key.clone())
-            .or_default()
-            .insert(root_event_id);
-    }
-
-    pub(super) fn take_emitted_hydration_terminal(
-        &mut self,
-        key: &TimelineKey,
-        root_event_id: &str,
-    ) -> bool {
-        let Some(roots) = self.emitted_hydration_terminals.get_mut(key) else {
-            return false;
-        };
-        let was_emitted = roots.remove(root_event_id);
-        if roots.is_empty() {
-            self.emitted_hydration_terminals.remove(key);
-        }
-        was_emitted
-    }
-
-    /// Allocate a positive JavaScript-safe source epoch that does not collide
-    /// with any owner in the current replacement group. The registry is
-    /// bounded to 32 entries, so this loop cannot approach the safe range's
-    /// upper bound in practice.
-    fn allocate_safe_epoch(&mut self, occupied_epochs: &mut HashSet<u64>) -> u64 {
-        let mut epoch = if (1..=JAVASCRIPT_SAFE_INTEGER_MAX).contains(&self.next_epoch) {
-            self.next_epoch
-        } else {
-            1
-        };
-        loop {
-            if occupied_epochs.insert(epoch) {
-                self.next_epoch = if epoch == JAVASCRIPT_SAFE_INTEGER_MAX {
-                    1
-                } else {
-                    epoch + 1
-                };
-                return epoch;
-            }
-            epoch = if epoch == JAVASCRIPT_SAFE_INTEGER_MAX {
-                1
-            } else {
-                epoch + 1
-            };
-        }
-    }
-
-    #[cfg(test)]
-    pub(super) fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    #[cfg(test)]
-    pub(super) fn get(
-        &self,
-        key: &TimelineKey,
-    ) -> Option<&HashMap<String, ReplayKnownThreadRootProjection>> {
-        self.entries.get(key)
-    }
 }
 
 pub(super) async fn receive_navigation_projection(
@@ -1310,6 +814,7 @@ impl TimelineManagerActor {
             key.clone(),
             replay_existing,
             emit_failure_terminal,
+            crate::command::InitialBackfillPolicy::Disabled,
         )
         .await;
         if let Some(handle) = self.timelines.get(&key) {
@@ -2079,19 +1584,14 @@ impl TimelineActor {
         let items = self.navigation_items[window.clone()].to_vec();
         let item_count = items.len();
         trace_timeline_items("replay_initial", &self.key, &items);
-        let candidate_display_projection =
+        let mut candidate_display_projection =
             DisplayProjectionState::from_canonical_window(&self.navigation_items, window);
-        let replay_known_candidates = replay_known_candidates_for_display_items(
-            &self.key,
-            &self.navigation_items,
-            candidate_display_projection.display_items(),
-        );
+        let candidate_context = self.display_projection_context();
+        candidate_display_projection.reproject(&candidate_context);
         let emitted = commit_prepared_initial_window_for_generation(
             &mut self.navigation_items,
             &mut self.display_projection,
             &self.event_tx,
-            &self.replay_known_thread_root_projections,
-            &self.thread_root_projection_service,
             &self.timeline_actor_generations,
             &self.key,
             self.actor_generation,
@@ -2103,10 +1603,9 @@ impl TimelineActor {
             self.generation,
             Vec::new(),
             PreparedInitialWindow {
+                emitted_items: candidate_display_projection.display_items().to_vec(),
                 display_projection: candidate_display_projection,
                 navigation_items: None,
-                emitted_items: items,
-                replay_known_candidates,
             },
         );
         if emitted {
@@ -2211,8 +1710,6 @@ impl TimelineActor {
             !self.restore_causal_projections.projections.is_empty(),
             &mut self.next_batch_id,
             &self.event_tx,
-            &self.replay_known_thread_root_projections,
-            &self.thread_root_projection_service,
             &self.timeline_actor_generations,
             &self.key,
             self.actor_generation,
@@ -2240,27 +1737,17 @@ impl TimelineActor {
         }
         Some(published_items)
     }
-    /// Emit one canonical batch plus replay-known ownership changes. This is
-    /// the sole normal/restore flush path for `ItemsUpdated`; it preserves the
-    /// intentional restore buffering while keeping the final group atomic
-    /// with respect to actor-generation replacement.
-    pub(super) fn emit_items_updated_and_reconcile_replay_known(
-        &mut self,
-        diffs: Vec<TimelineDiff>,
-    ) -> bool {
+    /// Emit one display-relative batch through the current actor generation.
+    pub(super) fn emit_items_updated(&mut self, diffs: Vec<TimelineDiff>) -> bool {
         let batch_id = self.next_batch_id;
-        if emit_items_updated_and_reconcile_replay_known_for_generation(
+        if super::navigation::emit_items_updated_for_generation(
             &self.event_tx,
-            &self.replay_known_thread_root_projections,
-            &self.thread_root_projection_service,
             &self.timeline_actor_generations,
             &self.key,
             self.actor_generation,
             self.generation,
             batch_id,
             diffs,
-            &self.navigation_items,
-            self.display_projection.display_items(),
         ) {
             self.next_batch_id = TimelineBatchId(batch_id.0 + 1);
             true
@@ -2268,28 +1755,27 @@ impl TimelineActor {
             false
         }
     }
-    /// Commit a local actor mutation through the same generation-fenced
-    /// display/replay group as an SDK diff. The bounded replay mirror resolves
-    /// each local Set through the exact canonical owner retained on its slot;
-    /// roots omitted from the bounded window intentionally produce no display
-    /// diff and are handled by replay reconciliation.
-    pub(super) fn emit_non_sdk_item_sets_and_reconcile_replay_known(
-        &mut self,
-        diffs: Vec<TimelineDiff>,
-    ) -> bool {
+
+    pub(super) fn emit_non_sdk_item_sets(&mut self, diffs: Vec<TimelineDiff>) -> bool {
         let batch_id = self.next_batch_id;
-        if emit_non_sdk_item_sets_and_reconcile_replay_known_for_generation(
+        let context = self.display_projection_context();
+        let display_diffs =
+            super::display_projection::apply_non_sdk_item_set_diffs_to_display_items(
+                &mut self.display_projection,
+                &diffs,
+                &context,
+            );
+        if display_diffs.is_empty() {
+            return false;
+        }
+        if super::navigation::emit_items_updated_for_generation(
             &self.event_tx,
-            &self.replay_known_thread_root_projections,
-            &self.thread_root_projection_service,
             &self.timeline_actor_generations,
             &self.key,
             self.actor_generation,
             self.generation,
             batch_id,
-            diffs,
-            &self.navigation_items,
-            &mut self.display_projection,
+            display_diffs,
         ) {
             self.next_batch_id = TimelineBatchId(batch_id.0 + 1);
             true
@@ -2824,9 +2310,7 @@ mod tests {
         fake_rid, focused_key, gap_demand_test_actor_handle, live_tail_test_manager, room_key,
         test_timeline_actor_handle, thread_key, timeline_item,
     };
-    use super::super::thread_projection::{
-        ReplayKnownThreadRootProjectionRegistry, ThreadAttentionTracker,
-    };
+    use super::super::thread_projection::ThreadAttentionTracker;
     use super::{
         NavigationProjectionCleanup, NavigationProjectionIngress, NavigationProjectionIntent,
         ROOM_REPLAY_INITIAL_ITEMS_MAX, TimelineActorGenerationGate,
@@ -3237,10 +2721,22 @@ mod tests {
         let mut manager = live_tail_test_manager(HashMap::from([(key.clone(), actor_handle)]));
 
         manager
-            .handle_subscribe(first_subscribe_request_id, key.clone(), true, true)
+            .handle_subscribe(
+                first_subscribe_request_id,
+                key.clone(),
+                true,
+                true,
+                crate::command::InitialBackfillPolicy::Disabled,
+            )
             .await;
         manager
-            .handle_subscribe(second_subscribe_request_id, key, true, true)
+            .handle_subscribe(
+                second_subscribe_request_id,
+                key,
+                true,
+                true,
+                crate::command::InitialBackfillPolicy::Disabled,
+            )
             .await;
 
         assert!(matches!(
@@ -3281,7 +2777,13 @@ mod tests {
 
         executor::timeout(
             Duration::from_millis(250),
-            manager.handle_subscribe(request_id, key, true, true),
+            manager.handle_subscribe(
+                request_id,
+                key,
+                true,
+                true,
+                crate::command::InitialBackfillPolicy::Disabled,
+            ),
         )
         .await
         .expect("cached replay must not wait for the ordinary actor mailbox");
@@ -4071,7 +3573,7 @@ mod tests {
             LinkPreviewContext::default(),
             manager.account_work.clone(),
             Arc::clone(&manager.thread_root_projection_service),
-            Arc::clone(&manager.replay_known_thread_root_projections),
+            manager.thread_root_order,
             Arc::clone(&manager.timeline_actor_generations),
             actor_generation,
             None,
@@ -4223,7 +3725,7 @@ mod tests {
             LinkPreviewContext::default(),
             manager.account_work.clone(),
             Arc::clone(&manager.thread_root_projection_service),
-            Arc::clone(&manager.replay_known_thread_root_projections),
+            manager.thread_root_order,
             Arc::clone(&manager.timeline_actor_generations),
             actor_generation,
             None,
@@ -4543,9 +4045,7 @@ mod tests {
                 LinkPreviewContext::default(),
                 AccountWorkScheduler::default(),
                 Arc::new(Mutex::new(ThreadRootProjectionService::default())),
-                Arc::new(Mutex::new(
-                    ReplayKnownThreadRootProjectionRegistry::default(),
-                )),
+                koushi_state::TimelineThreadRootOrder::LatestReply,
                 generations,
                 actor_generation,
                 None,
@@ -5045,6 +4545,7 @@ mod tests {
         conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: rid,
             key: room_key(),
+            initial_backfill: crate::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .expect("submit");

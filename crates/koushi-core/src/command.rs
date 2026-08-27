@@ -391,6 +391,7 @@ pub use room::{CreateRoomOptions, CreateRoomParentSpace, CreateRoomVisibility, R
 pub use search::{SearchCommand, SearchScope, ThreadsListCommand};
 pub use timeline::{
     ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,
-    ImageUploadVariantInfo, ImageUploadVariantKind, KeyRequestOrigin, MediaDownloadSelection,
-    TimelineCommand, UploadMediaKind, UploadMediaRequest, UploadMediaThumbnail,
+    ImageUploadVariantInfo, ImageUploadVariantKind, InitialBackfillPolicy, KeyRequestOrigin,
+    MediaDownloadSelection, TimelineCommand, UploadMediaKind, UploadMediaRequest,
+    UploadMediaThumbnail,
 };

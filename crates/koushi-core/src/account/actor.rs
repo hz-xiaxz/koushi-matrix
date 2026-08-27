@@ -155,6 +155,9 @@ pub(crate) enum AccountMessage {
     ReadStatePolicyChanged {
         send_read_receipts: bool,
     },
+    DisplayPolicyChanged {
+        thread_root_order: koushi_state::TimelineThreadRootOrder,
+    },
     TimelineCommandWithComposerFormatting {
         command: TimelineCommand,
         formatting_options: koushi_state::ComposerFormattingOptions,
@@ -1199,6 +1202,12 @@ impl AccountActor {
                             self.read_persistence_session_generation,
                             send_read_receipts,
                         )
+                        .await;
+                }
+                AccountMessage::DisplayPolicyChanged { thread_root_order } => {
+                    let _ = self
+                        .timeline_manager
+                        .set_display_policy(thread_root_order)
                         .await;
                 }
                 AccountMessage::TimelineCommandWithComposerFormatting {

@@ -626,7 +626,7 @@ impl TimelineActor {
 
         self.emit_media_gallery_if_changed().await;
 
-        if self.emit_non_sdk_item_sets_and_reconcile_replay_known(core_diffs) {
+        if self.emit_non_sdk_item_sets(core_diffs) {
             if let Some(activity_permit) = activity_permit {
                 activity_permit.send(vec![
                     canonical_activity_window_action(&self.key, &self.navigation_items)
@@ -642,7 +642,7 @@ impl TimelineActor {
             index,
             item: self.navigation_items[index].clone(),
         }];
-        self.emit_non_sdk_item_sets_and_reconcile_replay_known(core_diffs)
+        self.emit_non_sdk_item_sets(core_diffs)
     }
     pub(super) async fn handle_load_link_previews(
         &mut self,
@@ -855,7 +855,7 @@ impl TimelineActor {
             return;
         }
 
-        let _ = self.emit_non_sdk_item_sets_and_reconcile_replay_known(core_diffs);
+        let _ = self.emit_non_sdk_item_sets(core_diffs);
     }
     pub(super) async fn handle_hide_link_preview(
         &mut self,
@@ -884,7 +884,7 @@ impl TimelineActor {
             return;
         }
 
-        let _ = self.emit_non_sdk_item_sets_and_reconcile_replay_known(core_diffs);
+        let _ = self.emit_non_sdk_item_sets(core_diffs);
     }
     pub(super) async fn handle_link_preview_policy_changed(
         &mut self,
@@ -915,7 +915,7 @@ impl TimelineActor {
             return;
         }
 
-        let _ = self.emit_non_sdk_item_sets_and_reconcile_replay_known(core_diffs);
+        let _ = self.emit_non_sdk_item_sets(core_diffs);
     }
     pub(super) fn maybe_fetch_visible_reply_details(&mut self) {
         let event_ids = visible_missing_reply_detail_event_ids(
@@ -2383,6 +2383,7 @@ pub(super) fn sdk_item_to_timeline_item_with_send_states(
                 unable_to_decrypt,
                 actions,
                 send_state,
+                display_metadata: None,
             }
         }
         TimelineItemKind::Virtual(virtual_item) => {
@@ -2422,6 +2423,7 @@ pub(super) fn sdk_item_to_timeline_item_with_send_states(
                 unable_to_decrypt: None,
                 actions: TimelineMessageActions::default(),
                 send_state: None,
+                display_metadata: None,
             }
         }
     }

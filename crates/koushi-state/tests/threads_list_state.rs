@@ -1,7 +1,7 @@
 use koushi_state::{
     AppAction, AppEffect, AppState, OperationFailureKind, RoomSummary, RoomTags, SessionInfo,
-    SessionState, SpaceSummary, ThreadRootProjectionActivity, ThreadRootProjectionStatus,
-    ThreadsListItem, ThreadsListState, UiEvent, reduce,
+    SessionState, SpaceSummary, ThreadRootProjectionStatus, ThreadsListItem, ThreadsListState,
+    UiEvent, reduce,
 };
 
 fn session_info() -> SessionInfo {
@@ -182,10 +182,40 @@ fn thread_root_projection_is_keyed_by_room_and_root_and_terminal_failures_do_not
         Some(ThreadRootProjectionStatus::Failed { activity_event_id, .. })
             if activity_event_id == "$newer-reply:example.invalid"
     ));
+
+    let duplicate_failure = reduce(
+        &mut state,
+        AppAction::ThreadRootProjectionFailed {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$old-root:example.invalid".to_owned(),
+            activity_event_id: "$newer-reply:example.invalid".to_owned(),
+            activity_timestamp_ms: Some(1_700_000_200_000),
+            failure_kind: OperationFailureKind::NotFound,
+        },
+    );
+    assert!(duplicate_failure.is_empty());
+
+    let clear_effects = reduce(
+        &mut state,
+        AppAction::ThreadRootProjectionCleared {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$old-root:example.invalid".to_owned(),
+        },
+    );
+    assert_eq!(
+        clear_effects,
+        vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]
+    );
+    assert_eq!(
+        state
+            .thread_root_projections
+            .get("room-a", "$old-root:example.invalid"),
+        None
+    );
 }
 
 #[test]
-fn thread_root_projection_cleanup_keeps_active_terminal_records_and_evicts_inactive_ones() {
+fn thread_root_projection_cleanup_keeps_terminal_records_until_explicit_clear() {
     let mut state = selected_room_state("room-a");
     let root_event_id = "$old-root:example.invalid".to_owned();
 
@@ -209,124 +239,64 @@ fn thread_root_projection_cleanup_keeps_active_terminal_records_and_evicts_inact
         },
     );
 
-    reduce(
-        &mut state,
-        AppAction::ThreadRootProjectionsReconciled {
-            room_id: "room-a".to_owned(),
-            activities: vec![ThreadRootProjectionActivity {
-                root_event_id: root_event_id.clone(),
-                activity_event_id: "$latest-reply:example.invalid".to_owned(),
-                activity_timestamp_ms: Some(1_700_000_100_000),
-            }],
-        },
-    );
     assert!(matches!(
         state.thread_root_projections.get("room-a", &root_event_id),
         Some(ThreadRootProjectionStatus::Failed { .. })
     ));
 
-    reduce(
-        &mut state,
-        AppAction::ThreadRootProjectionsReconciled {
-            room_id: "room-a".to_owned(),
-            activities: Vec::new(),
-        },
-    );
-    assert_eq!(
+    assert!(matches!(
         state.thread_root_projections.get("room-a", &root_event_id),
-        None
-    );
-    assert_eq!(
-        serde_json::to_value(&state.thread_root_projections)
-            .expect("projection state must serialize")["active_root_event_ids"],
-        serde_json::json!({}),
-        "empty room activity markers must not grow for the session lifetime"
-    );
+        Some(ThreadRootProjectionStatus::Failed { .. })
+    ));
 }
 
 #[test]
-fn reconciliation_moves_ready_and_failed_roots_to_the_remaining_older_reply_without_retrying() {
+fn thread_root_projection_room_and_session_clear_are_explicit() {
     let mut state = selected_room_state("room-a");
-    let newer = "$newer-reply:example.invalid".to_owned();
-    let older = "$older-reply:example.invalid".to_owned();
-
-    for (root_event_id, terminal) in [
-        ("$ready-root:example.invalid", None),
-        (
-            "$failed-root:example.invalid",
-            Some(OperationFailureKind::NotFound),
-        ),
+    for (room_id, root_event_id) in [
+        ("room-a", "$root-a:example.invalid"),
+        ("room-b", "$root-b:example.invalid"),
     ] {
         reduce(
             &mut state,
-            AppAction::ThreadRootProjectionObserved {
-                room_id: "room-a".to_owned(),
+            AppAction::ThreadRootProjectionFailed {
+                room_id: room_id.to_owned(),
                 root_event_id: root_event_id.to_owned(),
-                activity_event_id: newer.clone(),
-                activity_timestamp_ms: Some(200),
+                activity_event_id: "$reply:example.invalid".to_owned(),
+                activity_timestamp_ms: Some(1),
+                failure_kind: OperationFailureKind::Sdk,
             },
         );
-        match terminal {
-            Some(failure_kind) => reduce(
-                &mut state,
-                AppAction::ThreadRootProjectionFailed {
-                    room_id: "room-a".to_owned(),
-                    root_event_id: root_event_id.to_owned(),
-                    activity_event_id: newer.clone(),
-                    activity_timestamp_ms: Some(200),
-                    failure_kind,
-                },
-            ),
-            None => reduce(
-                &mut state,
-                AppAction::ThreadRootProjectionReady {
-                    room_id: "room-a".to_owned(),
-                    root_event_id: root_event_id.to_owned(),
-                    activity_event_id: newer.clone(),
-                    activity_timestamp_ms: Some(200),
-                },
-            ),
-        };
     }
-
-    reduce(
-        &mut state,
-        AppAction::ThreadRootProjectionsReconciled {
-            room_id: "room-a".to_owned(),
-            activities: vec![
-                ThreadRootProjectionActivity {
-                    root_event_id: "$ready-root:example.invalid".to_owned(),
-                    activity_event_id: older.clone(),
-                    activity_timestamp_ms: Some(100),
-                },
-                ThreadRootProjectionActivity {
-                    root_event_id: "$failed-root:example.invalid".to_owned(),
-                    activity_event_id: older.clone(),
-                    activity_timestamp_ms: Some(100),
-                },
-            ],
-        },
+    assert!(
+        reduce(
+            &mut state,
+            AppAction::ThreadRootProjectionsCleared {
+                room_id: "room-a".to_owned(),
+            },
+        )
+        .contains(&AppEffect::EmitUiEvent(UiEvent::ThreadChanged))
+    );
+    assert!(
+        state
+            .thread_root_projections
+            .get("room-a", "$root-a:example.invalid")
+            .is_none()
+    );
+    assert!(
+        state
+            .thread_root_projections
+            .get("room-b", "$root-b:example.invalid")
+            .is_some()
     );
 
-    assert!(matches!(
+    reduce(&mut state, AppAction::LogoutFinished);
+    assert!(
         state
             .thread_root_projections
-            .get("room-a", "$ready-root:example.invalid"),
-        Some(ThreadRootProjectionStatus::Ready {
-            activity_event_id,
-            activity_timestamp_ms: Some(100),
-        }) if activity_event_id == &older
-    ));
-    assert!(matches!(
-        state
-            .thread_root_projections
-            .get("room-a", "$failed-root:example.invalid"),
-        Some(ThreadRootProjectionStatus::Failed {
-            activity_event_id,
-            activity_timestamp_ms: Some(100),
-            failure_kind: OperationFailureKind::NotFound,
-        }) if activity_event_id == &older
-    ));
+            .get("room-b", "$root-b:example.invalid")
+            .is_none()
+    );
 }
 
 #[test]

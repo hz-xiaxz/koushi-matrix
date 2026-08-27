@@ -246,6 +246,7 @@ pub(super) async fn run_async_inner(
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: subscribe_id,
         key: timeline_key.clone(),
+        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .map_err(|e| format!("subscribe timeline command submit failed: {e}"))?;
@@ -538,6 +539,7 @@ pub(super) async fn run_async_inner(
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe2_id,
             key: timeline_key2.clone(),
+            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("subscribe restored timeline command submit failed: {e}"))?;

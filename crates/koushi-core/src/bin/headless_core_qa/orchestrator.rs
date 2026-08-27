@@ -546,6 +546,7 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe_a_id,
             key: key_a.clone(),
+            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("submit subscribe timeline A: {e}"))?;
@@ -618,6 +619,7 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe_b_id,
             key: key_b.clone(),
+            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("submit subscribe timeline B: {e}"))?;
@@ -882,6 +884,7 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
             .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
                 request_id: subscribe_thread_b_id,
                 key: thread_key_b.clone(),
+                initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
             }))
             .await
             .map_err(|e| format!("submit subscribe thread B: {e}"))?;
@@ -922,6 +925,7 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
             .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
                 request_id: refresh_room_a_id,
                 key: key_a.clone(),
+                initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
             }))
             .await
             .map_err(|e| format!("submit refresh room timeline A: {e}"))?;
@@ -944,7 +948,7 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
             "wait for A room live thread summary",
         )
         .await?;
-        println!("thread_canonical=ok");
+        println!("thread_projection_lifecycle=stable");
         println!("thread_summary=ok");
 
         let thread_key_a = TimelineKey {
@@ -959,6 +963,8 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
             .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
                 request_id: subscribe_thread_a_id,
                 key: thread_key_a.clone(),
+                initial_backfill:
+                    koushi_core::command::InitialBackfillPolicy::RequiredForExistingThread,
             }))
             .await
             .map_err(|e| format!("submit subscribe thread A: {e}"))?;
@@ -1207,6 +1213,7 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe_search_id,
             key: key_a_search.clone(),
+            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("submit subscribe timeline A (search): {e}"))?;
@@ -1473,6 +1480,7 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
             .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
                 request_id: restored_subscribe_id,
                 key: restored_room_key.clone(),
+                initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
             }))
             .await
             .map_err(|e| format!("submit restored thread-summary room: {e}"))?;

@@ -1249,6 +1249,7 @@ fn opening_thread_requests_thread_timeline_and_subscription_success_opens_pane()
             AppEffect::OpenThreadTimeline {
                 room_id: "room-a".to_owned(),
                 root_event_id: "$root".to_owned(),
+                intent: ThreadOpenIntent::ExistingThread,
             },
             AppEffect::EmitUiEvent(UiEvent::ThreadChanged),
         ]
@@ -1282,13 +1283,24 @@ fn opening_thread_requests_thread_timeline_and_subscription_success_opens_pane()
 #[test]
 fn new_thread_draft_intent_is_retained_and_promoted_by_matching_submission() {
     let mut state = selected_room_state("room-a");
-    reduce(
+    let open_effects = reduce(
         &mut state,
         AppAction::OpenThread {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
             intent: ThreadOpenIntent::NewThreadDraft,
         },
+    );
+    assert_eq!(
+        open_effects,
+        vec![
+            AppEffect::OpenThreadTimeline {
+                room_id: "room-a".to_owned(),
+                root_event_id: "$root".to_owned(),
+                intent: ThreadOpenIntent::NewThreadDraft,
+            },
+            AppEffect::EmitUiEvent(UiEvent::ThreadChanged),
+        ]
     );
     assert_eq!(
         state.thread,

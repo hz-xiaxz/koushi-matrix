@@ -38,11 +38,21 @@ function ordinaryItem(index: number): TimelineItem {
     is_hidden: false,
     can_redact: false,
     is_edited: false,
-    can_edit: false
+    can_edit: false,
+    display_metadata: {
+      row_id: `$window-normal-${String(index).padStart(3, "0")}:example.invalid`,
+      kind: { kind: "event" },
+      content_event_id: `$window-normal-${String(index).padStart(3, "0")}:example.invalid`,
+      activity_event_id: `$window-normal-${String(index).padStart(3, "0")}:example.invalid`,
+      display_timestamp_ms: 1_800_200_000_000 + index * 1_000
+    }
   };
 }
 
-function rootItem(): TimelineItem {
+function rootItem(
+  activityEventId = ROOT_EVENT_ID,
+  displayTimestampMs = 1_800_199_000_000
+): TimelineItem {
   return {
     id: { Event: { event_id: ROOT_EVENT_ID } },
     sender: "@root-sender:example.invalid",
@@ -65,27 +75,14 @@ function rootItem(): TimelineItem {
     is_hidden: false,
     can_redact: true,
     is_edited: false,
-    can_edit: true
-  };
-}
-
-function latestReplyItem(): TimelineItem {
-  return {
-    id: { Event: { event_id: LATEST_REPLY_EVENT_ID } },
-    sender: "@reply-sender:example.invalid",
-    sender_label: "Reply Sender",
-    body: LATEST_REPLY_BODY,
-    timestamp_ms: 1_800_200_100_000,
-    in_reply_to_event_id: ROOT_EVENT_ID,
-    thread_root: ROOT_EVENT_ID,
-    thread_summary: null,
-    reactions: [],
-    can_react: true,
-    is_redacted: false,
-    is_hidden: false,
-    can_redact: false,
-    is_edited: false,
-    can_edit: false
+    can_edit: true,
+    display_metadata: {
+      row_id: `thread-root:${ROOT_EVENT_ID}`,
+      kind: { kind: "threadRoot" },
+      content_event_id: ROOT_EVENT_ID,
+      activity_event_id: activityEventId,
+      display_timestamp_ms: displayTimestampMs
+    }
   };
 }
 
@@ -119,9 +116,13 @@ async function pushInitialItems(
   );
 }
 
-async function pushLatestReplyAndHydratedRoot(page: Page, generation: number): Promise<void> {
+async function pushRootDisplayReset(
+  page: Page,
+  generation: number,
+  items: readonly TimelineItem[]
+): Promise<void> {
   await page.evaluate(
-    async ({ key, nextGeneration, rootEventId, latestReplyEventId, root, reply }) => {
+    async ({ key, nextGeneration, nextItems }) => {
       await window.__harness.pushCoreEvent({
         kind: "Timeline",
         event: {
@@ -129,71 +130,13 @@ async function pushLatestReplyAndHydratedRoot(page: Page, generation: number): P
             key,
             generation: nextGeneration,
             batch_id: 1,
-            diffs: [{ PushBack: { item: reply } }]
-          }
-        }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
-      await window.__harness.pushCoreEvent({
-        kind: "Timeline",
-        event: {
-          ThreadRootProjection: {
-            key,
-            projection: {
-              root_event_id: rootEventId,
-              activity_event_id: latestReplyEventId,
-              activity_timestamp_ms: reply.timestamp_ms,
-              state: { kind: "ready", item: root }
-            }
+            diffs: [{ Reset: { items: nextItems } }]
           }
         }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any);
     },
-    {
-      key: ROOM_KEY,
-      nextGeneration: generation,
-      rootEventId: ROOT_EVENT_ID,
-      latestReplyEventId: LATEST_REPLY_EVENT_ID,
-      root: rootItem(),
-      reply: latestReplyItem()
-    }
-  );
-}
-
-/**
- * The app harness has no Rust actor, so this supplies the exact CoreEvent
- * contract that `handle_replay_initial_items` emits after a bounded replay.
- * The focused Rust actor test proves the event is derived from an already-known
- * root without fetch, pagination, or anchor materialization.
- */
-async function pushReplayKnownRoot(page: Page): Promise<void> {
-  await page.evaluate(
-    async ({ key, rootEventId, latestReplyEventId, root }) => {
-      await window.__harness.pushCoreEvent({
-        kind: "Timeline",
-        event: {
-          ThreadRootProjection: {
-            key,
-            projection: {
-              root_event_id: rootEventId,
-              activity_event_id: latestReplyEventId,
-              activity_timestamp_ms: 1_800_200_100_000,
-              retain_without_reply: true,
-              source: { kind: "replayKnown", epoch: 1 },
-              state: { kind: "ready", item: root }
-            }
-          }
-        }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
-    },
-    {
-      key: ROOM_KEY,
-      rootEventId: ROOT_EVENT_ID,
-      latestReplyEventId: LATEST_REPLY_EVENT_ID,
-      root: rootItem()
-    }
+    { key: ROOM_KEY, nextGeneration: generation, nextItems: items }
   );
 }
 
@@ -230,47 +173,28 @@ async function waitForTimelineLayout(page: Page): Promise<void> {
   );
 }
 
-test("latest-reply placement keeps an old root whole without room backfill", async ({ page }) => {
+test("Rust display updates keep an old root whole without room backfill", async ({ page }) => {
   await gotoReadyApp(page);
 
-  // The default remains the root's canonical time.  This gives the regression
-  // a direct origin assertion before the fresh live window intentionally
-  // excludes the old root below.
-  await pushInitialItems(page, 101, [rootItem(), ...Array.from({ length: 3 }, (_, i) => ordinaryItem(i))]);
-  const rootAtOrigin = page.locator(`[data-row-id="thread-root:${ROOT_EVENT_ID}"]`);
-  await expect(rootAtOrigin).toHaveCount(1);
-  await expect(rootAtOrigin).toHaveAttribute("data-content-event-id", ROOT_EVENT_ID);
-  await expect(rootAtOrigin).toHaveAttribute("data-activity-event-id", ROOT_EVENT_ID);
-  await expect(rootAtOrigin).toContainText(ROOT_BODY);
-  const defaultRowIds = await displayRowIds(page);
-  expect(defaultRowIds.indexOf(`thread-root:${ROOT_EVENT_ID}`)).toBeLessThan(
-    defaultRowIds.indexOf("$window-normal-000:example.invalid")
-  );
+  await pushInitialItems(page, 101, [
+    rootItem(),
+    ...Array.from({ length: 3 }, (_, index) => ordinaryItem(index))
+  ]);
+  const root = page.locator(`[data-row-id="thread-root:${ROOT_EVENT_ID}"]`);
+  await expect(root).toHaveCount(1);
+  await expect(root).toHaveAttribute("data-content-event-id", ROOT_EVENT_ID);
+  await expect(root).toHaveAttribute("data-activity-event-id", ROOT_EVENT_ID);
+  await expect(root).toContainText(ROOT_BODY);
 
-  // Model the next Room initial window after an old root has fallen out of
-  // live coverage.  It contains enough ordinary events to make the absent
-  // root meaningful, then receives the latest threaded reply and the bounded
-  // root hydration event.  No test reads canonical-store internals.
   const freshWindow = Array.from(
     { length: INITIAL_WINDOW_NORMAL_MESSAGE_COUNT },
     (_, index) => ordinaryItem(index + 10)
   );
-  await pushInitialItems(page, 102, freshWindow);
-  await expect(rootAtOrigin).toHaveCount(0);
+  await pushInitialItems(page, 102, [rootItem(), ...freshWindow]);
+  await expect(root).toHaveCount(1);
+  await expect(page.locator(`[data-content-event-id="${LATEST_REPLY_EVENT_ID}"]`)).toHaveCount(0);
+
   await clearInvocations(page);
-  await pushLatestReplyAndHydratedRoot(page, 102);
-
-  const standaloneReply = page.locator(
-    `[data-content-event-id="${LATEST_REPLY_EVENT_ID}"]`
-  );
-  // The Core stream retains this reply as the canonical projection anchor,
-  // but Room presentation suppresses standalone reply rows both before and
-  // after opting in. The default root placement therefore remains unchanged.
-  await expect(standaloneReply).toHaveCount(0);
-  await expect(rootAtOrigin).toHaveCount(0);
-
-  // Enable through the real settings control.  The harness applies the
-  // Rust-shaped update_settings response, just like the desktop boundary.
   await page.getByRole("button", { name: t("workspace.userSettings") }).click();
   const placementToggle = page.getByRole("switch", {
     name: t("settings.threadRootLatestReply")
@@ -286,74 +210,56 @@ test("latest-reply placement keeps an old root whole without room backfill", asy
       }
     }
   });
-  await expect(placementToggle).toHaveAttribute("aria-checked", "true");
 
-  // A single root/summary block takes the exact latest-reply activity slot.
-  const movedRoot = page.locator(`[data-row-id="thread-root:${ROOT_EVENT_ID}"]`);
-  await expect(movedRoot).toHaveCount(1);
-  await expect(movedRoot).toHaveAttribute("data-content-event-id", ROOT_EVENT_ID);
-  await expect(movedRoot).toHaveAttribute("data-activity-event-id", LATEST_REPLY_EVENT_ID);
-  await expect(movedRoot).toContainText(ROOT_BODY);
-  await expect(movedRoot.getByRole("button", { name: /^Open thread,/ })).toHaveCount(1);
-  await expect(standaloneReply).toHaveCount(0);
+  await pushRootDisplayReset(page, 102, [
+    ...freshWindow,
+    rootItem(LATEST_REPLY_EVENT_ID, 1_800_200_100_000)
+  ]);
+  await expect(root).toHaveCount(1);
+  await expect(root).toHaveAttribute("data-content-event-id", ROOT_EVENT_ID);
+  await expect(root).toHaveAttribute("data-activity-event-id", LATEST_REPLY_EVENT_ID);
+  await expect(root).toContainText(ROOT_BODY);
+  await expect(root.getByRole("button", { name: /^Open thread,/ })).toHaveCount(1);
   expect((await displayRowIds(page)).filter((id) => id === `thread-root:${ROOT_EVENT_ID}`)).toHaveLength(1);
-
-  // The projection hydration and setting toggle must not turn into a viewport
-  // driven Room backfill.  Opening the summary still carries the content/root
-  // identity to the Rust command boundary.
   expect(await invocationCount(page, "paginate_timeline_backwards")).toBe(0);
-  await movedRoot.getByRole("button", { name: /^Open thread,/ }).click({ force: true });
-  await expect.poll(() => invocationCount(page, "open_thread")).toBe(1);
+
+  await root.getByRole("button", { name: /^Open thread,/ }).click({ force: true });
   await expect.poll(() => latestInvocationArgs(page, "open_thread")).toEqual({
     roomId: ROOM_ID,
     rootEventId: ROOT_EVENT_ID,
     intent: "existingThread"
   });
-  expect(await invocationCount(page, "paginate_timeline_backwards")).toBe(0);
 });
 
-test("a replay-known root uses summary activity when the Room stream has no reply row", async ({
-  page
-}) => {
+test("room replay retains the Rust-provided dormant root activity", async ({ page }) => {
   await gotoReadyApp(page);
-  await pushInitialItems(
-    page,
-    201,
-    Array.from({ length: INITIAL_WINDOW_NORMAL_MESSAGE_COUNT }, (_, index) => ordinaryItem(index + 100))
-  );
-  await expect(page.locator('[data-content-event-id="$window-normal-100:example.invalid"]')).toHaveCount(1);
-  // The harness viewport intentionally starts underfilled, so allow its
-  // ordinary initial-window backfill request to settle before measuring the
-  // delta caused by replay projection or the setting switch.
+  const projectedRoot = rootItem(LATEST_REPLY_EVENT_ID, 1_800_200_100_000);
+  await pushInitialItems(page, 201, [
+    ...Array.from({ length: INITIAL_WINDOW_NORMAL_MESSAGE_COUNT }, (_, index) =>
+      ordinaryItem(index + 100)
+    ),
+    projectedRoot
+  ]);
+
+  const root = page.locator(`[data-row-id="thread-root:${ROOT_EVENT_ID}"]`);
+  await expect(root).toHaveCount(1);
+  await expect(root).toHaveAttribute("data-content-event-id", ROOT_EVENT_ID);
+  await expect(root).toHaveAttribute("data-activity-event-id", LATEST_REPLY_EVENT_ID);
+  await expect(root).toContainText(ROOT_BODY);
   await waitForTimelineLayout(page);
   await clearInvocations(page);
-  await pushReplayKnownRoot(page);
 
-  const knownRoot = page.locator(`[data-row-id="thread-root:${ROOT_EVENT_ID}"]`);
-  await expect(knownRoot).toHaveCount(0);
-  await expect(
-    page.locator(`[data-content-event-id="${LATEST_REPLY_EVENT_ID}"]`)
-  ).toHaveCount(0);
-  await waitForTimelineLayout(page);
+  await pushInitialItems(page, 202, [
+    ...Array.from({ length: INITIAL_WINDOW_NORMAL_MESSAGE_COUNT }, (_, index) =>
+      ordinaryItem(index + 200)
+    ),
+    projectedRoot
+  ]);
+  await expect(root).toHaveCount(1);
+  expect((await displayRowIds(page)).filter((id) => id === `thread-root:${ROOT_EVENT_ID}`)).toHaveLength(1);
   expect(await invocationCount(page, "paginate_timeline_backwards")).toBe(0);
 
-  await page.getByRole("button", { name: t("workspace.userSettings") }).click();
-  const placementToggle = page.getByRole("switch", {
-    name: t("settings.threadRootLatestReply")
-  });
-  await expect(placementToggle).toHaveAttribute("aria-checked", "false");
-  await placementToggle.click();
-  await expect.poll(() => invocationCount(page, "update_settings")).toBe(1);
-
-  await expect(knownRoot).toHaveCount(1);
-  await expect(knownRoot).toHaveAttribute("data-content-event-id", ROOT_EVENT_ID);
-  await expect(knownRoot).toHaveAttribute("data-activity-event-id", LATEST_REPLY_EVENT_ID);
-  await expect(knownRoot).toContainText(ROOT_BODY);
-  await expect(knownRoot.getByRole("button", { name: /^Open thread,/ })).toHaveCount(1);
-  await waitForTimelineLayout(page);
-  expect(await invocationCount(page, "paginate_timeline_backwards")).toBe(0);
-
-  await knownRoot.getByRole("button", { name: /^Open thread,/ }).click({ force: true });
+  await root.getByRole("button", { name: /^Open thread,/ }).click({ force: true });
   await expect.poll(() => latestInvocationArgs(page, "open_thread")).toEqual({
     roomId: ROOM_ID,
     rootEventId: ROOT_EVENT_ID,

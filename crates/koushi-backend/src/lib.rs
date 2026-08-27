@@ -384,6 +384,7 @@ impl FakeDesktopBackend {
             AppEffect::OpenThreadTimeline {
                 room_id,
                 root_event_id,
+                intent: _,
             } => vec![AppAction::ThreadSubscribed {
                 room_id: room_id.clone(),
                 root_event_id: root_event_id.clone(),

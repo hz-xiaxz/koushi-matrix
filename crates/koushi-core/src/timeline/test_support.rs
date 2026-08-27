@@ -3,7 +3,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
-use futures_util::{FutureExt, StreamExt};
 use koushi_state::ComposerFormattingOptions;
 
 use tokio::sync::{broadcast, mpsc};
@@ -29,9 +28,7 @@ use super::outbound_send::{
     TimelineSendTerminalIngress,
 };
 use super::read_state::ReadWorkerSupervisor;
-use super::thread_projection::{
-    ReplayKnownThreadRootProjectionRegistry, ThreadRootProjectionFetchRegistry,
-};
+use super::thread_projection::ThreadRootProjectionFetchRegistry;
 
 pub(super) fn fake_rid(seq: u64) -> RequestId {
     RequestId {
@@ -53,16 +50,8 @@ pub(super) async fn replacement_generation_fixture(
     (generations, stale, current)
 }
 
-pub(super) fn replay_projection_services() -> (
-    Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
-    Arc<Mutex<ThreadRootProjectionService>>,
-) {
-    (
-        Arc::new(Mutex::new(
-            ReplayKnownThreadRootProjectionRegistry::default(),
-        )),
-        Arc::new(Mutex::new(ThreadRootProjectionService::default())),
-    )
+pub(super) fn projection_service() -> Arc<Mutex<ThreadRootProjectionService>> {
+    Arc::new(Mutex::new(ThreadRootProjectionService::default()))
 }
 
 pub(super) fn timeline_item(
@@ -102,6 +91,7 @@ pub(super) fn timeline_item(
         actions: TimelineMessageActions::default(),
         send_state: None,
         unable_to_decrypt: None,
+        display_metadata: None,
     }
 }
 
@@ -202,13 +192,11 @@ pub(super) fn live_tail_test_manager(
         link_preview_policy: LinkPreviewContext::default(),
         composer_formatting_options: ComposerFormattingOptions::default(),
         account_work: AccountWorkScheduler::default(),
+        thread_root_order: koushi_state::TimelineThreadRootOrder::LatestReply,
         thread_root_projection_service: Arc::new(
             Mutex::new(ThreadRootProjectionService::default()),
         ),
         thread_root_projection_fetches: ThreadRootProjectionFetchRegistry::default(),
-        replay_known_thread_root_projections: Arc::new(Mutex::new(
-            ReplayKnownThreadRootProjectionRegistry::default(),
-        )),
         timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
         live_tail_refreshes: LiveTailRefreshCoordinator::new(),
         test_session_available: true,

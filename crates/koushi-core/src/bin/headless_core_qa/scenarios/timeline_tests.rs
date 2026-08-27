@@ -1,6 +1,6 @@
 use super::{
     QaVisibleGapCapture, ReconnectProjection, RoomThreadSummaryObserver,
-    assert_room_timeline_exposes_canonical_reply_and_summarizes_root, assert_thread_reply_relation,
+    assert_room_timeline_projects_root_activity_and_summary, assert_thread_reply_relation,
     observe_reconnect_pagination_state, select_visible_gap_for_qa,
     thread_initial_items_need_paginate_backfill, thread_reply_should_repaginate_on_idle,
     timeline_item_has_thread_summary_reply, timeline_item_has_visible_payload,
@@ -471,6 +471,7 @@ fn finds_timeline_item_in_initial_items_by_body_substring() {
             can_edit: false,
             actions: TimelineMessageActions::default(),
             send_state: None,
+            display_metadata: None,
             unable_to_decrypt: None,
         },
         koushi_core::event::TimelineItem {
@@ -503,6 +504,7 @@ fn finds_timeline_item_in_initial_items_by_body_substring() {
             can_edit: true,
             actions: TimelineMessageActions::default(),
             send_state: None,
+            display_metadata: None,
             unable_to_decrypt: None,
         },
     ];
@@ -546,6 +548,7 @@ fn thread_reply_missing_from_initial_items_requires_paginate_backfill() {
         can_edit: false,
         actions: TimelineMessageActions::default(),
         send_state: None,
+        display_metadata: None,
         unable_to_decrypt: None,
     }];
 
@@ -587,6 +590,7 @@ fn thread_reply_present_in_initial_items_does_not_require_backfill() {
         can_edit: false,
         actions: TimelineMessageActions::default(),
         send_state: None,
+        display_metadata: None,
         unable_to_decrypt: None,
     }];
 
@@ -638,62 +642,46 @@ fn thread_summary_helper_requires_root_item_with_reply_count() {
 }
 
 #[test]
-fn room_thread_assertion_requires_canonical_reply_and_root_summary() {
-    let root = synthetic_timeline_item(
+fn room_thread_assertion_requires_rust_projected_root_activity_and_summary() {
+    let unprojected = synthetic_timeline_item(
         "$root:test",
         Some("root message"),
         None,
         None,
         Some(ThreadSummaryDto {
             reply_count: 1,
-            latest_event_id: None,
+            latest_event_id: Some("$reply:test".to_owned()),
             latest_sender: None,
             latest_sender_label: None,
-            latest_body_preview: None,
-            latest_timestamp_ms: None,
+            latest_body_preview: Some("Phase 11 QA thread reply from B".to_owned()),
+            latest_timestamp_ms: Some(2),
         }),
     );
-    let unrelated = synthetic_timeline_item("$other:test", Some("other"), None, None, None);
-
     assert!(
-        assert_room_timeline_exposes_canonical_reply_and_summarizes_root(
-            &[root.clone(), unrelated],
+        assert_room_timeline_projects_root_activity_and_summary(
+            std::slice::from_ref(&unprojected),
             "Phase 11 QA thread reply from B",
             "$root:test",
         )
         .is_err(),
-        "a Room canonical stream must include the thread reply as the projection anchor"
+        "a Room display stream must carry Rust projection metadata"
     );
 
-    let canonical_reply = synthetic_timeline_item(
-        "$reply:test",
-        Some("Phase 11 QA thread reply from B"),
-        Some("$root:test"),
-        Some("$root:test"),
-        None,
-    );
+    let mut projected = unprojected;
+    projected.display_metadata = Some(koushi_core::event::TimelineDisplayMetadata {
+        row_id: "thread-root:$root:test".to_owned(),
+        kind: koushi_core::event::TimelineDisplayKind::ThreadRoot,
+        content_event_id: Some("$root:test".to_owned()),
+        activity_event_id: Some("$reply:test".to_owned()),
+        display_timestamp_ms: Some(2),
+    });
     assert!(
-        assert_room_timeline_exposes_canonical_reply_and_summarizes_root(
-            &[root.clone(), canonical_reply],
+        assert_room_timeline_projects_root_activity_and_summary(
+            &[projected],
             "Phase 11 QA thread reply from B",
             "$root:test",
         )
         .is_ok()
-    );
-
-    assert!(
-        assert_room_timeline_exposes_canonical_reply_and_summarizes_root(
-            &[synthetic_timeline_item(
-                "$root:test",
-                Some("root message"),
-                None,
-                None,
-                None,
-            )],
-            "Phase 11 QA thread reply from B",
-            "$root:test",
-        )
-        .is_err()
     );
 }
 
@@ -733,7 +721,7 @@ fn room_thread_summary_observer_waits_for_late_summary_diff() {
             }])
             .unwrap()
             == false,
-        "the root summary alone is insufficient; canonical reply observation is the anchor contract"
+        "the root summary alone is insufficient without Rust display activity metadata"
     );
 }
 
@@ -765,7 +753,7 @@ fn room_thread_summary_observer_rejects_stale_non_null_summary_until_rust_advanc
     assert!(!observer.observe_items(&[stale_root]).unwrap());
     assert!(!observer.observe_items(&[live_reply]).unwrap());
 
-    let current_root = synthetic_timeline_item(
+    let mut current_root = synthetic_timeline_item(
         "$root:test",
         Some("root message"),
         None,
@@ -779,6 +767,13 @@ fn room_thread_summary_observer_rejects_stale_non_null_summary_until_rust_advanc
             latest_timestamp_ms: Some(200),
         }),
     );
+    current_root.display_metadata = Some(koushi_core::event::TimelineDisplayMetadata {
+        row_id: "thread-root:$root:test".to_owned(),
+        kind: koushi_core::event::TimelineDisplayKind::ThreadRoot,
+        content_event_id: Some("$root:test".to_owned()),
+        activity_event_id: Some("$reply-b:test".to_owned()),
+        display_timestamp_ms: Some(200),
+    });
     assert!(
         observer
             .observe_diffs(&[TimelineDiff::Set {
@@ -811,7 +806,8 @@ fn room_thread_summary_observer_accepts_canonical_thread_reply() {
 #[test]
 fn thread_qa_reports_canonical_reply_contract() {
     assert!(
-        final_tokens_for_scenario(QaScenario::Thread).contains(&"thread_canonical=ok"),
+        final_tokens_for_scenario(QaScenario::Thread)
+            .contains(&"thread_projection_lifecycle=stable"),
         "the public QA summary must describe the canonical Room stream contract"
     );
 }

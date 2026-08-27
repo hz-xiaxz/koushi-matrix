@@ -579,6 +579,7 @@ mod tests {
                 actions: Default::default(),
                 send_state: None,
                 unable_to_decrypt: None,
+                display_metadata: None,
             }],
         }));
 
@@ -646,6 +647,7 @@ mod tests {
                     actions: Default::default(),
                     send_state: None,
                     unable_to_decrypt: None,
+                    display_metadata: None,
                 },
             }],
         }));

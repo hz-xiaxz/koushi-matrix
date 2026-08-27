@@ -1,5 +1,5 @@
 import {
-ThreadRootProjectionPlaceholder,
+ThreadRootStatusPlaceholder,
 TimelineItemRow,
 aliasTargetIsActive,
 type TimelineAliasTarget,
@@ -175,7 +175,6 @@ getItems,
 getKeyState,
 getMediaUploadProgress,
 getPaginationState,
-getThreadRootProjections,
 timelineProjectionEvidence,
 timelineStoreKeyId,
 timelineStoreLookupDiagnosticMessage,
@@ -194,7 +193,6 @@ RoomLatestEventSummary,
 TimelineContinuityState,
 TimelineMediaDownloadState,
 TimelineScrollAnchor,
-TimelineThreadRootOrder,
 UserProfile
 } from "../domain/types";
 import { ImeSafeForm,ImeTextField } from "./ImeTextControl";
@@ -295,8 +293,6 @@ const TIMELINE_SCROLL_IDLE_FLUSH_MS = 100;
 const TIMELINE_SCROLL_MAX_DEFER_MS = 500;
 const ignoreComposerKeyAction: ResolveComposerKeyAction = async () => "noop";
 
-const ROOT_EVENT_THREAD_ORDER: TimelineThreadRootOrder = { kind: "rootEvent" };
-
 type ViewportIntent = { kind: "free-scroll" } | { kind: "live-edge" };
 
 // ---------------------------------------------------------------------------
@@ -329,7 +325,6 @@ export const TimelineView = memo(function TimelineView({
   onReturnToLive,
   liveLatestEventId = null,
   autoLoadOlderMessages = false,
-  threadRootOrder = ROOT_EVENT_THREAD_ORDER,
   codeBlockWrap = true,
   searchQuery = "",
   mediaDownloads = {},
@@ -387,8 +382,6 @@ export const TimelineView = memo(function TimelineView({
   onReturnToLive?: ReturnToLiveHandler;
   liveLatestEventId?: string | null;
   autoLoadOlderMessages?: boolean;
-  /** Presentation-only Room order; the canonical store remains SDK ordered. */
-  threadRootOrder?: TimelineThreadRootOrder;
   codeBlockWrap?: boolean;
   searchQuery?: string;
   mediaDownloads?: Record<string, TimelineMediaDownloadState>;
@@ -721,14 +714,6 @@ export const TimelineView = memo(function TimelineView({
     }
     return labels;
   }, [items, profileUsers]);
-  // The selector returns an array. Memoize it by the separately-owned map so
-  // ordinary scroll/measurement renders keep the existing display-row
-  // identity; otherwise an empty projection source would churn Task 4's
-  // height-model transaction on every render.
-  const threadRootProjections = useMemo(
-    () => getThreadRootProjections(store, timelineKey),
-    [store.threadRootProjections, timelineKey]
-  );
   const timelineKeyState = getKeyState(store, timelineKey);
   const generation = timelineKeyState?.generation ?? 0;
   const emitDiagnosticLog = useCallback(
@@ -1308,9 +1293,7 @@ export const TimelineView = memo(function TimelineView({
                             ? event.MessageSourceLoaded.key
                               : "NavigationUpdated" in event
                                 ? event.NavigationUpdated.key
-                                : "ThreadRootProjection" in event
-                                  ? event.ThreadRootProjection.key
-                                  : "GapPositionsUpdated" in event
+                                : "GapPositionsUpdated" in event
                                     ? event.GapPositionsUpdated.key
                                     : "GapRepairReleased" in event
                                       ? event.GapRepairReleased.key
@@ -1731,13 +1714,8 @@ export const TimelineView = memo(function TimelineView({
       timelineKeyState?.gapPositions ?? [],
       timelineKeyState?.gapGeneration ?? 0
     );
-    return projectTimelineDisplayRows(
-      itemsWithGaps,
-      timelineKey,
-      threadRootOrder,
-      threadRootProjections
-    ).filter((row) => !row.item.is_hidden);
-  }, [items, threadRootOrder, threadRootProjections, timelineKey, timelineKeyState]);
+    return projectTimelineDisplayRows(itemsWithGaps).filter((row) => !row.item.is_hidden);
+  }, [items, timelineKeyState]);
   const committedProjection =
     committedVisibleRowsRef.current?.timelineKeyHash === timelineKeyHash
       ? committedVisibleRowsRef.current.rows
@@ -3677,7 +3655,7 @@ export const TimelineView = memo(function TimelineView({
                   ) : null}
                 </div>
               ) : row.kind === "threadRootPending" || row.kind === "threadRootFailed" ? (
-                <ThreadRootProjectionPlaceholder
+                <ThreadRootStatusPlaceholder
                   row={row}
                   state={row.kind === "threadRootPending" ? "pending" : "failed"}
                   showThreadSummary={presentationContext !== "thread"}

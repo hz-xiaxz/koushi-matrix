@@ -278,6 +278,7 @@ export interface TimelineItem {
   send_state?: TimelineSendState | null;
   unable_to_decrypt?: TimelineUnableToDecrypt | null;
   request_state?: RoomKeyRequestStateDto | null;
+  display_metadata?: TimelineDisplayMetadata | null;
 }
 
 export interface RoomKeyRequestStateDto {
@@ -322,27 +323,19 @@ export interface ThreadSummaryDto {
   latest_timestamp_ms: number | null;
 }
 
-/** Out-of-band root snapshot for Room latest-reply presentation. Never part of TimelineDiff. */
-export type ThreadRootProjectionSourceDto =
-  | { kind: "hydration" }
-  | { kind: "replayKnown"; epoch: number };
+export type TimelineDisplayKind =
+  | { kind: "event" }
+  | { kind: "threadRoot" }
+  | { kind: "threadRootPending" }
+  | { kind: "threadRootFailed"; failure_kind: OperationFailureKind };
 
-export interface ThreadRootProjectionDto {
-  root_event_id: string;
-  activity_event_id: string;
-  activity_timestamp_ms: number | null;
-  /** Keep a replay-known ready root even when this display window lacks its reply. */
-  retain_without_reply?: boolean;
-  /** Scopes replay-known clear events so they cannot remove a hydration result for the same root. */
-  source?: ThreadRootProjectionSourceDto;
-  state: ThreadRootProjectionStateDto;
+export interface TimelineDisplayMetadata {
+  row_id: string;
+  kind: TimelineDisplayKind;
+  content_event_id: string | null;
+  activity_event_id: string | null;
+  display_timestamp_ms: number | null;
 }
-
-export type ThreadRootProjectionStateDto =
-  | { kind: "pending" }
-  | { kind: "ready"; item: TimelineItem }
-  | { kind: "failed"; failure_kind: OperationFailureKind }
-  | { kind: "cleared" };
 
 /** Stable string id usable as a React key and a `data-item-id` DOM hook. */
 export function timelineItemDomId(id: TimelineItemId): string {
@@ -573,12 +566,6 @@ export type TimelineEvent =
         key: TimelineKey;
         event_id: string;
         kind: TimelineFailureKind;
-      };
-    }
-  | {
-      ThreadRootProjection: {
-        key: TimelineKey;
-        projection: ThreadRootProjectionDto;
       };
     }
   | {

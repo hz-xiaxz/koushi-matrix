@@ -124,6 +124,7 @@ pub(super) fn build_subscribe_focused_timeline_command(
             account_key,
             kind: TimelineKind::Focused { room_id, event_id },
         },
+        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
     })
 }
 
@@ -1284,6 +1285,7 @@ pub async fn ensure_timeline_subscribed(
                 account_key,
                 kind: timeline_key.kind,
             },
+            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
         }),
     )
     .await?;
@@ -3830,9 +3832,17 @@ mod issue551_moved_tests {
         );
 
         match command {
-            CoreCommand::Timeline(TimelineCommand::Subscribe { request_id, key }) => {
+            CoreCommand::Timeline(TimelineCommand::Subscribe {
+                request_id,
+                key,
+                initial_backfill,
+            }) => {
                 assert_eq!(request_id, fake_request_id(21));
                 assert_eq!(key.account_key, account_key);
+                assert_eq!(
+                    initial_backfill,
+                    koushi_core::command::InitialBackfillPolicy::Disabled
+                );
                 assert_eq!(
                     key.kind,
                     koushi_core::TimelineKind::Focused {

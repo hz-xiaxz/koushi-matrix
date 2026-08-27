@@ -1211,6 +1211,11 @@ pub(super) async fn subscribe_timeline_for_qa(
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id,
         key: key.clone(),
+        initial_backfill: if matches!(key.kind, koushi_core::TimelineKind::Thread { .. }) {
+            koushi_core::command::InitialBackfillPolicy::RequiredForExistingThread
+        } else {
+            koushi_core::command::InitialBackfillPolicy::Disabled
+        },
     }))
     .await
     .map_err(|e| format!("{label}: submit timeline subscribe failed: {e}"))?;
@@ -2669,6 +2674,7 @@ pub(super) fn projection_timeline_item(event_id: &str, is_redacted: bool) -> Tim
         can_edit: false,
         actions: TimelineMessageActions::default(),
         send_state: None,
+        display_metadata: None,
         unable_to_decrypt: None,
     }
 }

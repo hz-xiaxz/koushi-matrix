@@ -167,12 +167,6 @@ pub enum TimelineEvent {
         event_id: String,
         kind: TimelineFailureKind,
     },
-    /// A bounded, out-of-band root snapshot for latest-reply Room
-    /// presentation. This never changes the canonical VectorDiff item list.
-    ThreadRootProjection {
-        key: TimelineKey,
-        projection: ThreadRootProjectionDto,
-    },
     ResyncRequired {
         key: TimelineKey,
         reason: TimelineResyncReason,
@@ -368,11 +362,6 @@ impl fmt::Debug for TimelineEvent {
                 .field("key", &"TimelineKey(..)")
                 .field("event_id", &"EventId(..)")
                 .field("kind", kind)
-                .finish(),
-            Self::ThreadRootProjection { projection, .. } => formatter
-                .debug_struct("ThreadRootProjection")
-                .field("key", &"TimelineKey(..)")
-                .field("projection", projection)
                 .finish(),
             Self::ResyncRequired { reason, .. } => formatter
                 .debug_struct("ResyncRequired")
@@ -963,6 +952,10 @@ pub struct TimelineItem {
     pub actions: TimelineMessageActions,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send_state: Option<TimelineSendState>,
+    /// Rust-owned metadata for the bounded display projection. Canonical
+    /// navigation items deliberately leave this unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_metadata: Option<TimelineDisplayMetadata>,
 }
 /// Rust-owned room-key request presentation state for a timeline item
 /// (issue #460). Only closed tokens cross the wire.
@@ -1071,6 +1064,10 @@ impl fmt::Debug for TimelineItem {
             .field("unable_to_decrypt", &self.unable_to_decrypt)
             .field("actions", &self.actions)
             .field("send_state", &self.send_state)
+            .field(
+                "display_metadata",
+                &self.display_metadata.as_ref().map(|metadata| metadata.kind),
+            )
             .finish()
     }
 }
@@ -1181,76 +1178,40 @@ pub struct ThreadSummaryDto {
     pub latest_body_preview: Option<String>,
     pub latest_timestamp_ms: Option<u64>,
 }
-/// Root hydration payload keyed by the Room and `root_event_id` carried in
-/// the surrounding `TimelineEvent`. The activity identity is intentionally
-/// distinct from the root/content identity: it places the root block while
-/// actions continue targeting `root_event_id`.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
-pub enum ThreadRootProjectionSourceDto {
-    /// A bounded load-or-fetch projection whose lifetime follows a canonical
-    /// reply row in the Room window.
-    #[default]
-    Hydration,
-    /// A Ready snapshot copied from an already-known root during bounded
-    /// replay. Its epoch scopes later Clear events to this exact ownership.
-    ReplayKnown { epoch: u64 },
+pub enum TimelineDisplayKind {
+    Event,
+    ThreadRoot,
+    ThreadRootPending,
+    ThreadRootFailed { failure_kind: OperationFailureKind },
 }
+
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ThreadRootProjectionDto {
-    pub root_event_id: String,
-    pub activity_event_id: String,
-    pub activity_timestamp_ms: Option<u64>,
-    /// A replay already had this complete root in the actor cache but omitted
-    /// it from the bounded display window. The frontend may retain this ready
-    /// snapshot without a canonical reply row until the Room projection is
-    /// explicitly cleared or replaced.
-    #[serde(default)]
-    pub retain_without_reply: bool,
-    /// The owner of this snapshot. Clears are source-scoped so a stale replay
-    /// clear cannot delete a newer ordinary hydration for the same root.
-    #[serde(default)]
-    pub source: ThreadRootProjectionSourceDto,
-    pub state: ThreadRootProjectionStateDto,
+pub struct TimelineDisplayMetadata {
+    pub row_id: String,
+    pub kind: TimelineDisplayKind,
+    pub content_event_id: Option<String>,
+    pub activity_event_id: Option<String>,
+    pub display_timestamp_ms: Option<u64>,
 }
-impl fmt::Debug for ThreadRootProjectionDto {
+
+impl fmt::Debug for TimelineDisplayMetadata {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("ThreadRootProjectionDto")
-            .field("root_event_id", &"EventId(..)")
-            .field("activity_event_id", &"EventId(..)")
-            .field("activity_timestamp_ms", &self.activity_timestamp_ms)
-            .field("retain_without_reply", &self.retain_without_reply)
-            .field("source", &self.source)
-            .field("state", &self.state)
+            .debug_struct("TimelineDisplayMetadata")
+            .field("row_id", &"RowId(..)")
+            .field("kind", &self.kind)
+            .field(
+                "content_event_id",
+                &self.content_event_id.as_ref().map(|_| "EventId(..)"),
+            )
+            .field(
+                "activity_event_id",
+                &self.activity_event_id.as_ref().map(|_| "EventId(..)"),
+            )
+            .field("display_timestamp_ms", &self.display_timestamp_ms)
             .finish()
-    }
-}
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum ThreadRootProjectionStateDto {
-    Pending,
-    Ready {
-        item: TimelineItem,
-    },
-    Failed {
-        failure_kind: OperationFailureKind,
-    },
-    /// Explicit owner-lifecycle cleanup. The projection is not renderable and
-    /// frontend stores must delete the keyed snapshot immediately.
-    Cleared,
-}
-impl fmt::Debug for ThreadRootProjectionStateDto {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Pending => formatter.write_str("Pending"),
-            Self::Ready { item } => formatter.debug_struct("Ready").field("item", item).finish(),
-            Self::Failed { failure_kind } => formatter
-                .debug_struct("Failed")
-                .field("failure_kind", failure_kind)
-                .finish(),
-            Self::Cleared => formatter.write_str("Cleared"),
-        }
     }
 }
 pub fn project_timeline_event_display_labels(event: &mut TimelineEvent, state: &AppState) {
@@ -1263,11 +1224,6 @@ pub fn project_timeline_event_display_labels(event: &mut TimelineEvent, state: &
         TimelineEvent::ItemsUpdated { diffs, .. } => {
             for diff in diffs {
                 project_timeline_diff_display_labels(diff, state);
-            }
-        }
-        TimelineEvent::ThreadRootProjection { projection, .. } => {
-            if let ThreadRootProjectionStateDto::Ready { item } = &mut projection.state {
-                project_timeline_item_display_labels(item, state);
             }
         }
         TimelineEvent::PaginationStateChanged { .. }
@@ -1456,6 +1412,7 @@ mod tests {
             actions: TimelineMessageActions::default(),
             send_state: None,
             unable_to_decrypt: None,
+            display_metadata: None,
         }
     }
 
@@ -1543,6 +1500,7 @@ mod tests {
             actions: TimelineMessageActions::default(),
             send_state: None,
             unable_to_decrypt: None,
+            display_metadata: None,
         };
 
         let value = serde_json::to_value(&item).expect("timeline item serializes");
@@ -1626,6 +1584,7 @@ mod tests {
             actions: TimelineMessageActions::default(),
             send_state: None,
             unable_to_decrypt: None,
+            display_metadata: None,
         };
 
         let value = serde_json::to_value(&item).expect("timeline item serializes");
@@ -1695,6 +1654,7 @@ mod tests {
             actions: TimelineMessageActions::default(),
             send_state: None,
             unable_to_decrypt: None,
+            display_metadata: None,
         };
 
         let value = serde_json::to_value(&item).expect("timeline item serializes");
@@ -1772,6 +1732,7 @@ mod tests {
             ),
             send_state: None,
             unable_to_decrypt: None,
+            display_metadata: None,
         };
 
         let value = serde_json::to_value(&item).expect("timeline item serializes");
@@ -2026,6 +1987,7 @@ mod tests {
                 reason: TimelineSendFailureReason::Recoverable,
             }),
             unable_to_decrypt: None,
+            display_metadata: None,
         };
 
         let value = serde_json::to_value(&item).expect("timeline item serializes");
@@ -2097,6 +2059,7 @@ mod tests {
             actions: TimelineMessageActions::default(),
             send_state: None,
             unable_to_decrypt: None,
+            display_metadata: None,
         };
 
         let value = serde_json::to_value(&item).expect("timeline item serializes");

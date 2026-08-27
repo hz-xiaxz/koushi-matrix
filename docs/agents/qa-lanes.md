@@ -86,9 +86,9 @@ binary.
 | `reply` | reply quote and pin lifecycle | `reply_quote=ok`, `pin_event=ok`, `pinned_state=ok`, `unpin_event=ok` |
 | `media` | upload staging, captions, compression, receive, gallery | `upload_staging=ok`, `media_gallery=ok`, `send_media=ok`, `media_caption=ok`, `image_compress=ok`, `recv_media=ok`, `media_caption_edit=ok` |
 | `live_signals` | receipts, read markers, typing, presence | `read_receipt=ok`, `fully_read=ok`, `typing=ok`, `presence=ok`, `live_signals=ok` |
-| `thread` | thread projection | — |
+| `thread` | Rust-owned thread-root projection lifecycle, Room display block, and Thread panel relation | `thread_projection_lifecycle=stable`, `thread_summary=ok`, `thread_recv=ok` |
 | `edit_redact_search` | edit, redact, search | — |
-| `redact_edit_convergence` | redaction/edit room-latest and Activity convergence plus live canonical/thread-panel summary advance, edit, redaction rollback, and real-runtime restore parity | `redact_edit_convergence=ok`, `thread_summary_convergence=ok` |
+| `redact_edit_convergence` | redaction/edit room-latest and Activity convergence plus live Rust-projected Room/thread-panel summary advance, edit, redaction rollback, and real-runtime restore parity | `redact_edit_convergence=ok`, `thread_summary_convergence=ok` |
 | `search_crawler` | crawler-fed search index | — |
 | `scheduled_send` | schedule, reschedule, cancel, fire | `scheduled_capability=local_fallback`, `scheduled_create=ok`, `scheduled_reschedule=ok`, `scheduled_cancel=ok`, `scheduled_fire=ok` |
 | `send_queue` | retry/cancel across injected offline failure (`--features qa-bin`) | — |

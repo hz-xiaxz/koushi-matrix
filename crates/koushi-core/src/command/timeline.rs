@@ -212,10 +212,17 @@ pub enum KeyRequestOrigin {
     Automatic,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InitialBackfillPolicy {
+    RequiredForExistingThread,
+    Disabled,
+}
+
 pub enum TimelineCommand {
     Subscribe {
         request_id: RequestId,
         key: TimelineKey,
+        initial_backfill: InitialBackfillPolicy,
     },
     EnsureSubscribed {
         request_id: RequestId,
@@ -431,10 +438,15 @@ impl TimelineCommand {
 impl fmt::Debug for TimelineCommand {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Subscribe { request_id, key } => formatter
+            Self::Subscribe {
+                request_id,
+                key,
+                initial_backfill,
+            } => formatter
                 .debug_struct("Subscribe")
                 .field("request_id", request_id)
                 .field("key", key)
+                .field("initial_backfill", initial_backfill)
                 .finish(),
             Self::EnsureSubscribed {
                 request_id,

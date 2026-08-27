@@ -6,14 +6,16 @@ use koushi_sdk::{
     MatrixClientSession, MatrixCommittedRoomTimelineCheckpoint as MatrixRoomSubscriptionCheckpoint,
     MatrixLiveTailRefreshOutcome, MatrixOutboundGroupSessionToken, MatrixRoomKeyReshareTarget,
 };
-use koushi_state::{AppAction, ComposerFormattingOptions, OperationFailureKind};
+use koushi_state::{
+    AppAction, ComposerFormattingOptions, OperationFailureKind, TimelineThreadRootOrder,
+};
 
 use matrix_sdk::ruma::OwnedRoomId;
 use matrix_sdk_ui::timeline::TimelineFocus;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
-use crate::account_work::AccountWorkScheduler;
-use crate::command::TimelineCommand;
+use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
+use crate::command::{InitialBackfillPolicy, TimelineCommand};
 use crate::event::{CoreEvent, TimelineAnchorRestoreStatus, TimelineEvent, TimelineItem};
 use crate::executor;
 use crate::failure::{CoreFailure, TimelineFailureKind};
@@ -47,8 +49,8 @@ use super::gap_repair::{
     GlobalResponseCommit, LIVE_TAIL_CANCELLATION_DEADLINE, TimelineGapRepairTrigger,
 };
 use super::navigation::{
-    NavigationProjectionIntent, TimelineActorGenerationGate, TimelineProjectionAcknowledgement,
-    receive_navigation_projection,
+    INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT, NavigationProjectionIntent,
+    TimelineActorGenerationGate, TimelineProjectionAcknowledgement, receive_navigation_projection,
 };
 use super::outbound_send::{
     GlobalSendCompletionObserverFuture, SendComposerProjection, SendEnqueueWorkerSupervisor,
@@ -65,14 +67,17 @@ use super::residency::{
 };
 use super::room_key_recovery::RoomKeyReshareCompletion;
 use super::thread_projection::{
-    ReplayKnownThreadRootProjectionRegistry, ThreadRootProjectionFetchRegistry,
-    ThreadSummaryActivityObservation,
+    ThreadRootProjectionFetchRegistry, ThreadSummaryActivityObservation,
 };
 // END GENERATED SIBLING IMPORTS
 
 /// Bounded diff queue capacity per subscribed timeline (overview.md, Async rule 10).
 
 pub const TIMELINE_DIFF_QUEUE_CAPACITY: usize = 128;
+
+fn initial_thread_backfill_is_authoritative(end_reached: bool, item_count: usize) -> bool {
+    end_reached || item_count > 0
+}
 
 /// Messages routed to the `TimelineManagerActor`.
 pub(crate) enum TimelineMessage {
@@ -159,16 +164,6 @@ pub(crate) enum TimelineMessage {
     IgnoredUsersUpdated {
         user_ids: std::collections::BTreeSet<String>,
     },
-    /// A Room actor observed an absent thread root and has already committed
-    /// its pending state transition. The manager owns the resulting worker so
-    /// unsubscribe/shutdown can cancel it deterministically.
-    #[cfg(test)]
-    StartThreadRootProjectionFetch {
-        key: TimelineKey,
-        actor_generation: u64,
-        own_user_id: Option<matrix_sdk::ruma::OwnedUserId>,
-        activities: Vec<ThreadRootProjectionActivity>,
-    },
     /// Terminal result of the manager-owned bounded root lookup. It returns to
     /// the manager mailbox rather than publishing state/frontend changes from
     /// an unowned detached task.
@@ -249,6 +244,10 @@ pub(super) enum TimelineManagerControl {
         send_read_receipts: bool,
         acknowledged: oneshot::Sender<()>,
     },
+    DisplayPolicyChanged {
+        thread_root_order: TimelineThreadRootOrder,
+        acknowledged: oneshot::Sender<()>,
+    },
     Shutdown {
         acknowledged: oneshot::Sender<()>,
     },
@@ -296,6 +295,25 @@ impl TimelineManagerHandle {
             .send(TimelineManagerControl::ReadStatePolicyChanged {
                 session_generation,
                 send_read_receipts,
+                acknowledged,
+            })
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        acknowledgement.await.is_ok()
+    }
+
+    pub(crate) async fn set_display_policy(
+        &self,
+        thread_root_order: TimelineThreadRootOrder,
+    ) -> bool {
+        let (acknowledged, acknowledgement) = oneshot::channel();
+        if self
+            .control_tx
+            .send(TimelineManagerControl::DisplayPolicyChanged {
+                thread_root_order,
                 acknowledged,
             })
             .await
@@ -383,17 +401,12 @@ pub struct TimelineManagerActor {
     /// URL preview policy broadcast from AppState.
     pub(super) link_preview_policy: LinkPreviewContext,
     pub(super) composer_formatting_options: ComposerFormattingOptions,
+    pub(super) thread_root_order: TimelineThreadRootOrder,
     pub(super) account_work: AccountWorkScheduler,
     /// Room-root hydration is shared across replacement actors so SyncStarted
     /// cannot restart a failed/pending bounded lookup.
     pub(super) thread_root_projection_service: Arc<Mutex<ThreadRootProjectionService>>,
     pub(super) thread_root_projection_fetches: ThreadRootProjectionFetchRegistry,
-    /// Ready snapshots copied from bounded replays, tracked separately so
-    /// unsubscribe/shutdown can explicitly clear retained frontend rows.
-    pub(super) replay_known_thread_root_projections:
-        Arc<Mutex<ReplayKnownThreadRootProjectionRegistry>>,
-    /// Serializes ownership transfer between replacement actors before either
-    /// generation may touch the shared replay-known registry.
     pub(super) timeline_actor_generations: Arc<TimelineActorGenerationGate>,
     pub(super) live_tail_refreshes: LiveTailRefreshCoordinator<TimelineKey>,
     #[cfg(any(test, feature = "test-hooks"))]
@@ -448,6 +461,7 @@ impl TimelineManagerActor {
             global_send_completion_observer_future: None,
             send_enqueue_workers: SendEnqueueWorkerSupervisor::new(terminal_ingress.clone()),
             read_workers: ReadWorkerSupervisor::unavailable(),
+            thread_root_order: TimelineThreadRootOrder::LatestReply,
             action_tx,
             event_tx,
             msg_tx: tx.clone(),
@@ -467,9 +481,6 @@ impl TimelineManagerActor {
                 ThreadRootProjectionService::default(),
             )),
             thread_root_projection_fetches: ThreadRootProjectionFetchRegistry::default(),
-            replay_known_thread_root_projections: Arc::new(Mutex::new(
-                ReplayKnownThreadRootProjectionRegistry::default(),
-            )),
             timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
             #[cfg(any(test, feature = "test-hooks"))]
@@ -541,6 +552,7 @@ impl TimelineManagerActor {
                 read_persistence,
                 send_read_receipts,
             ),
+            thread_root_order: TimelineThreadRootOrder::LatestReply,
             action_tx,
             event_tx,
             msg_tx: tx.clone(),
@@ -560,9 +572,6 @@ impl TimelineManagerActor {
                 ThreadRootProjectionService::default(),
             )),
             thread_root_projection_fetches: ThreadRootProjectionFetchRegistry::default(),
-            replay_known_thread_root_projections: Arc::new(Mutex::new(
-                ReplayKnownThreadRootProjectionRegistry::default(),
-            )),
             timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
             #[cfg(any(test, feature = "test-hooks"))]
@@ -603,6 +612,21 @@ impl TimelineManagerActor {
                                 send_read_receipts,
                             )
                             .await;
+                            let _ = acknowledged.send(());
+                            continue;
+                        }
+                        Some(TimelineManagerControl::DisplayPolicyChanged {
+                            thread_root_order,
+                            acknowledged,
+                        }) => {
+                            self.thread_root_order = thread_root_order;
+                            for actor in self.timelines.values() {
+                                let _ = actor
+                                    .send_control(TimelineActorControl::DisplayPolicyChanged {
+                                        thread_root_order,
+                                    })
+                                    .await;
+                            }
                             let _ = acknowledged.send(());
                             continue;
                         }
@@ -763,21 +787,6 @@ impl TimelineManagerActor {
                 }
                 TimelineMessage::IgnoredUsersUpdated { user_ids } => {
                     self.handle_ignored_users_updated(user_ids).await;
-                }
-                #[cfg(test)]
-                TimelineMessage::StartThreadRootProjectionFetch {
-                    key,
-                    actor_generation,
-                    own_user_id,
-                    activities,
-                } => {
-                    self.handle_thread_root_projection_fetch_start(
-                        key,
-                        actor_generation,
-                        own_user_id,
-                        activities,
-                    )
-                    .await;
                 }
                 TimelineMessage::ThreadRootProjectionFetchFinished {
                     key,
@@ -996,7 +1005,7 @@ impl TimelineManagerActor {
         for key in room_keys {
             self.clear_thread_root_projections_for_room(&key).await;
         }
-        self.thread_root_projection_fetches.abort_all();
+        self.thread_root_projection_fetches.abort_all().await;
         if let Some(task) = self.room_subscription_checkpoint_task.take() {
             task.abort();
         }
@@ -1033,9 +1042,14 @@ impl TimelineManagerActor {
         mut composer_permit: Option<ForwardedComposerDraftPermit>,
     ) {
         match command {
-            TimelineCommand::Subscribe { request_id, key } => {
+            TimelineCommand::Subscribe {
+                request_id,
+                key,
+                initial_backfill,
+            } => {
                 trace_timeline_route("manager_received", "subscribe", request_id, &key);
-                self.handle_subscribe(request_id, key, true, true).await;
+                self.handle_subscribe(request_id, key, true, true, initial_backfill)
+                    .await;
             }
             TimelineCommand::EnsureSubscribed {
                 request_id,
@@ -1047,8 +1061,14 @@ impl TimelineManagerActor {
                     self.handle_committed_room_selection(request_id, key, replay_existing, true)
                         .await;
                 } else {
-                    self.handle_subscribe(request_id, key, replay_existing, true)
-                        .await;
+                    self.handle_subscribe(
+                        request_id,
+                        key,
+                        replay_existing,
+                        true,
+                        InitialBackfillPolicy::Disabled,
+                    )
+                    .await;
                 }
             }
             TimelineCommand::ReplaySubscribed { request_id } => {
@@ -1648,6 +1668,7 @@ impl TimelineManagerActor {
         key: TimelineKey,
         replay_existing: bool,
         emit_failure_terminal: bool,
+        initial_backfill: InitialBackfillPolicy,
     ) {
         let trace = |stage: &str| {
             record_subscribe_stage(stage, None);
@@ -1790,6 +1811,7 @@ impl TimelineManagerActor {
                 &key,
                 activation.generation,
                 subscription_generation,
+                initial_backfill,
             )
             .await
         {
@@ -1825,6 +1847,7 @@ impl TimelineManagerActor {
         key: &TimelineKey,
         actor_generation: u64,
         subscription_generation: Option<u64>,
+        initial_backfill: InitialBackfillPolicy,
     ) -> Result<TimelineActorHandle, TimelineFailureKind> {
         let trace = |stage: &str| {
             record_subscribe_stage(stage, None);
@@ -1896,6 +1919,29 @@ impl TimelineManagerActor {
             Ok(t) => Arc::new(t),
             Err(_) => return Err(TimelineFailureKind::Sdk),
         };
+
+        if matches!(
+            initial_backfill,
+            InitialBackfillPolicy::RequiredForExistingThread
+        ) && matches!(key.kind, TimelineKind::Thread { .. })
+        {
+            let (initial_items, _) = timeline.subscribe().await;
+            if initial_items.is_empty() {
+                let _permit = self
+                    .account_work
+                    .acquire(AccountWorkKind::ExplicitPagination)
+                    .await;
+                let end_reached = timeline
+                    .paginate_backwards(INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT)
+                    .await
+                    .map_err(|_| TimelineFailureKind::Sdk)?;
+                let (settled_items, _) = timeline.subscribe().await;
+                if !initial_thread_backfill_is_authoritative(end_reached, settled_items.len()) {
+                    return Err(TimelineFailureKind::Sdk);
+                }
+            }
+        }
+
         trace("spawn_begin");
         let handle = TimelineActor::spawn(
             key.clone(),
@@ -1911,7 +1957,7 @@ impl TimelineManagerActor {
             self.link_preview_policy.for_room(key.room_id()),
             self.account_work.clone(),
             Arc::clone(&self.thread_root_projection_service),
-            Arc::clone(&self.replay_known_thread_root_projections),
+            self.thread_root_order,
             Arc::clone(&self.timeline_actor_generations),
             actor_generation,
             subscription_generation,
@@ -2007,6 +2053,13 @@ mod tests {
     use super::super::test_source::item_body;
 
     use futures_util::StreamExt;
+
+    #[test]
+    fn existing_thread_initial_backfill_requires_items_or_authoritative_end() {
+        assert!(super::initial_thread_backfill_is_authoritative(true, 0));
+        assert!(super::initial_thread_backfill_is_authoritative(false, 1));
+        assert!(!super::initial_thread_backfill_is_authoritative(false, 0));
+    }
 
     #[test]
     fn room_subscribe_success_reduces_timeline_subscribed_action() {

@@ -3,8 +3,13 @@ use std::sync::{Arc, atomic::Ordering};
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
 
-use crate::event::{TimelineDiff, TimelineItem, TimelineItemId, TimelineViewportObservation};
+use crate::event::{
+    TimelineDiff, TimelineDisplayKind, TimelineDisplayMetadata, TimelineItem, TimelineItemId,
+    TimelineViewportObservation,
+};
 use crate::ids::{TimelineKey, TimelineKind};
+use crate::threads_list::ThreadRootDisplayData;
+use koushi_state::TimelineThreadRootOrder;
 
 // BEGIN GENERATED SIBLING IMPORTS
 use super::navigation::{
@@ -46,7 +51,10 @@ impl DisplayProjectionState {
                 item,
             })
             .collect::<Vec<_>>();
-        let display_items = normalize_display_projection_slots(&slots);
+        let display_items = normalize_display_projection_slots(&slots)
+            .iter()
+            .filter_map(decorate_event_item)
+            .collect();
         Self {
             slots,
             display_items,
@@ -57,8 +65,10 @@ impl DisplayProjectionState {
         &self.display_items
     }
 
-    fn refresh_display_items(&mut self) {
-        self.display_items = normalize_display_projection_slots(&self.slots);
+    pub(super) fn reproject(&mut self, context: &DisplayProjectionContext) -> Vec<TimelineDiff> {
+        let before = self.display_items.clone();
+        self.display_items = project_display_items(&self.slots, context);
+        finalize_display_projection_diffs(&before, &self.display_items, false).0
     }
 }
 
@@ -522,11 +532,13 @@ impl DisplayMembershipRope {
         self.root = root;
     }
 
-    fn materialize(mut self, display_state: &mut DisplayProjectionState) -> (usize, usize) {
+    fn materialize(
+        mut self,
+        display_state: &mut DisplayProjectionState,
+        context: &DisplayProjectionContext,
+    ) -> (usize, usize) {
         let visible_len = self.visible_len();
         let mut slots = Vec::with_capacity(visible_len);
-        let mut display_items = Vec::with_capacity(visible_len);
-        let mut seen = HashSet::new();
         let mut canonical_index = 0_usize;
         let mut pending = Vec::new();
         let mut cursor = self.root.take();
@@ -546,9 +558,6 @@ impl DisplayMembershipRope {
                     {
                         self.display_payload_visits = self.display_payload_visits.saturating_add(1);
                     }
-                    if seen.insert(timeline_item_render_id(&item)) {
-                        display_items.push(item.clone());
-                    }
                     slots.push(DisplayProjectionSlot {
                         canonical_index,
                         item,
@@ -559,7 +568,7 @@ impl DisplayMembershipRope {
             cursor = node.right.take();
         }
         display_state.slots = slots;
-        display_state.display_items = display_items;
+        display_state.display_items = project_display_items(&display_state.slots, context);
         #[cfg(test)]
         {
             (self.display_payload_visits, self.structural_node_visits)
@@ -571,11 +580,14 @@ impl DisplayMembershipRope {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct DisplayProjectionContext {
     max_live_edge_items: Option<usize>,
     include_prepend: bool,
     include_append: bool,
+    project_thread_roots: bool,
+    pub(super) thread_root_order: TimelineThreadRootOrder,
+    pub(super) thread_roots: Vec<ThreadRootDisplayData>,
 }
 
 impl DisplayProjectionContext {
@@ -590,7 +602,20 @@ impl DisplayProjectionContext {
             max_live_edge_items: bounded_live_edge.then_some(ROOM_REPLAY_INITIAL_ITEMS_MAX),
             include_prepend: !bounded_live_edge,
             include_append: true,
+            project_thread_roots: matches!(kind, TimelineKind::Room { .. }),
+            thread_root_order: TimelineThreadRootOrder::RootEvent,
+            thread_roots: Vec::new(),
         }
+    }
+
+    pub(super) fn with_thread_roots(
+        mut self,
+        order: TimelineThreadRootOrder,
+        thread_roots: Vec<ThreadRootDisplayData>,
+    ) -> Self {
+        self.thread_root_order = order;
+        self.thread_roots = thread_roots;
+        self
     }
 
     #[cfg(test)]
@@ -599,6 +624,9 @@ impl DisplayProjectionContext {
             max_live_edge_items: Some(ROOM_REPLAY_INITIAL_ITEMS_MAX),
             include_prepend: false,
             include_append: true,
+            project_thread_roots: true,
+            thread_root_order: TimelineThreadRootOrder::RootEvent,
+            thread_roots: Vec::new(),
         }
     }
 }
@@ -731,7 +759,8 @@ fn project_sdk_batch(
     if membership.canonical_len() != canonical_items.len() {
         translation_ambiguous = true;
     }
-    let (display_payload_visits, structural_node_visits) = membership.materialize(display_state);
+    let (display_payload_visits, structural_node_visits) =
+        membership.materialize(display_state, context);
     #[cfg(not(test))]
     let _ = (display_payload_visits, structural_node_visits);
     let display_after = display_state.display_items.clone();
@@ -756,6 +785,252 @@ fn normalize_display_projection_slots(slots: &[DisplayProjectionSlot]) -> Vec<Ti
         .filter(|slot| seen.insert(timeline_item_render_id(&slot.item)))
         .map(|slot| slot.item.clone())
         .collect()
+}
+
+fn project_display_items(
+    slots: &[DisplayProjectionSlot],
+    context: &DisplayProjectionContext,
+) -> Vec<TimelineItem> {
+    if !context.project_thread_roots {
+        return slots
+            .iter()
+            .filter_map(|slot| decorate_event_item(&slot.item))
+            .collect();
+    }
+
+    let roots = context
+        .thread_roots
+        .iter()
+        .map(|root| (root.root_event_id.as_str(), root))
+        .collect::<HashMap<_, _>>();
+    let mut activity_slots = HashMap::<&str, (usize, &TimelineItem)>::new();
+    for slot in slots {
+        if let TimelineItemId::Event { event_id } = &slot.item.id
+            && let Some(root_event_id) = slot.item.thread_root.as_deref()
+        {
+            activity_slots
+                .entry(root_event_id)
+                .or_insert((slot.canonical_index, &slot.item));
+            if let Some(root) = roots.get(root_event_id)
+                && root.activity_event_id == *event_id
+            {
+                activity_slots.insert(root_event_id, (slot.canonical_index, &slot.item));
+            }
+        }
+    }
+
+    let mut root_at_index = HashMap::<usize, TimelineItem>::new();
+    let mut suppressed = HashSet::new();
+    for slot in slots {
+        let event_id = match &slot.item.id {
+            TimelineItemId::Event { event_id } => event_id.as_str(),
+            TimelineItemId::Transaction { .. } | TimelineItemId::Synthetic { .. } => "",
+        };
+        if slot.item.thread_root.is_some() {
+            continue;
+        }
+        let Some(root) = roots.get(event_id) else {
+            root_at_index.insert(
+                slot.canonical_index,
+                decorate_event_item(&slot.item).unwrap(),
+            );
+            continue;
+        };
+
+        let (display_index, activity_event_id, display_timestamp_ms) =
+            match context.thread_root_order {
+                TimelineThreadRootOrder::RootEvent => (
+                    slot.canonical_index,
+                    event_id.to_owned(),
+                    slot.item.timestamp_ms,
+                ),
+                TimelineThreadRootOrder::LatestReply => {
+                    let activity = activity_slots.get(event_id);
+                    (
+                        activity
+                            .map(|(index, _)| *index)
+                            .unwrap_or(slot.canonical_index),
+                        root.activity_event_id.clone(),
+                        root.activity_timestamp_ms.or(slot.item.timestamp_ms),
+                    )
+                }
+            };
+        let item = root_display_item(root, &slot.item, activity_event_id, display_timestamp_ms);
+        root_at_index.insert(display_index, item);
+        if display_index != slot.canonical_index {
+            suppressed.insert(slot.canonical_index);
+        }
+        if let Some((activity_index, _)) = activity_slots.get(event_id)
+            && context.thread_root_order == TimelineThreadRootOrder::LatestReply
+        {
+            suppressed.insert(*activity_index);
+        }
+    }
+
+    let mut projected = Vec::new();
+    let mut rendered_ids = HashSet::new();
+    for slot in slots {
+        if let Some(item) = root_at_index.remove(&slot.canonical_index) {
+            if rendered_ids.insert(timeline_item_render_id(&item)) {
+                projected.push(item);
+            }
+            continue;
+        }
+        if suppressed.contains(&slot.canonical_index) {
+            continue;
+        }
+        if slot.item.thread_root.is_none() {
+            let item = decorate_event_item(&slot.item).unwrap();
+            if rendered_ids.insert(timeline_item_render_id(&item)) {
+                projected.push(item);
+            }
+        }
+    }
+    for root in &context.thread_roots {
+        let root_id = root.root_event_id.as_str();
+        if activity_slots.contains_key(root_id)
+            || slots.iter().any(|slot| {
+                matches!(&slot.item.id, TimelineItemId::Event { event_id } if event_id == root_id)
+            })
+        {
+            continue;
+        }
+        let Some(item) = root.item.as_ref() else {
+            projected.push(root_placeholder_item(root));
+            continue;
+        };
+        let display_timestamp_ms = root.activity_timestamp_ms.or(item.timestamp_ms);
+        let projected_item = root_display_item(
+            root,
+            item,
+            root.activity_event_id.clone(),
+            display_timestamp_ms,
+        );
+        if !rendered_ids.insert(timeline_item_render_id(&projected_item)) {
+            continue;
+        }
+        let insertion_index = projected
+            .iter()
+            .position(|current| {
+                current
+                    .display_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.display_timestamp_ms)
+                    .unwrap_or(u64::MAX)
+                    > display_timestamp_ms.unwrap_or(u64::MAX)
+            })
+            .unwrap_or(projected.len());
+        projected.insert(insertion_index, projected_item);
+    }
+    projected
+}
+
+fn decorate_event_item(item: &TimelineItem) -> Option<TimelineItem> {
+    let mut item = item.clone();
+    let (content_event_id, row_id) = match &item.id {
+        TimelineItemId::Event { event_id } => (Some(event_id.clone()), event_id.clone()),
+        TimelineItemId::Transaction { transaction_id } => (None, format!("txn:{transaction_id}")),
+        TimelineItemId::Synthetic { synthetic_id } => (None, format!("syn:{synthetic_id}")),
+    };
+    let timestamp = item.timestamp_ms;
+    item.display_metadata = Some(TimelineDisplayMetadata {
+        row_id,
+        kind: TimelineDisplayKind::Event,
+        content_event_id: content_event_id.clone(),
+        activity_event_id: content_event_id,
+        display_timestamp_ms: timestamp,
+    });
+    Some(item)
+}
+
+fn root_display_item(
+    root: &ThreadRootDisplayData,
+    fallback: &TimelineItem,
+    activity_event_id: String,
+    display_timestamp_ms: Option<u64>,
+) -> TimelineItem {
+    let mut item = root.item.clone().unwrap_or_else(|| fallback.clone());
+    let summary = item
+        .thread_summary
+        .get_or_insert_with(|| crate::event::ThreadSummaryDto {
+            reply_count: 0,
+            latest_event_id: None,
+            latest_sender: None,
+            latest_sender_label: None,
+            latest_body_preview: None,
+            latest_timestamp_ms: None,
+        });
+    summary.reply_count = root.aggregate.reply_count;
+    summary.latest_event_id = root.aggregate.latest_event_id.clone();
+    summary.latest_sender = root.aggregate.latest_sender.clone();
+    summary.latest_sender_label = root.aggregate.latest_sender_label.clone();
+    summary.latest_body_preview = root.aggregate.latest_body_preview.clone();
+    summary.latest_timestamp_ms = root.aggregate.latest_timestamp_ms;
+    item.display_metadata = Some(TimelineDisplayMetadata {
+        row_id: format!("thread-root:{}", root.root_event_id),
+        kind: if root.pending {
+            TimelineDisplayKind::ThreadRootPending
+        } else if let Some(failure_kind) = root.failure_kind {
+            TimelineDisplayKind::ThreadRootFailed { failure_kind }
+        } else {
+            TimelineDisplayKind::ThreadRoot
+        },
+        content_event_id: Some(root.root_event_id.clone()),
+        activity_event_id: Some(activity_event_id),
+        display_timestamp_ms,
+    });
+    item
+}
+
+fn root_placeholder_item(root: &ThreadRootDisplayData) -> TimelineItem {
+    let mut item = TimelineItem {
+        id: TimelineItemId::Synthetic {
+            synthetic_id: format!("thread-root-slot:{}", root.root_event_id),
+        },
+        sender: None,
+        sender_label: None,
+        sender_avatar: None,
+        body: None,
+        notice_i18n: None,
+        message_kind: Default::default(),
+        spoiler_spans: Vec::new(),
+        timestamp_ms: None,
+        in_reply_to_event_id: None,
+        formatted: None,
+        reply_quote: None,
+        thread_root: None,
+        thread_summary: None,
+        media: None,
+        link_previews: None,
+        link_ranges: Vec::new(),
+        reactions: Vec::new(),
+        can_react: false,
+        is_redacted: false,
+        is_hidden: false,
+        can_redact: false,
+        is_edited: false,
+        can_edit: false,
+        unable_to_decrypt: None,
+        request_state: None,
+        actions: Default::default(),
+        send_state: None,
+        display_metadata: None,
+    };
+    let summary = crate::event::ThreadSummaryDto {
+        reply_count: root.aggregate.reply_count,
+        latest_event_id: root.aggregate.latest_event_id.clone(),
+        latest_sender: root.aggregate.latest_sender.clone(),
+        latest_sender_label: root.aggregate.latest_sender_label.clone(),
+        latest_body_preview: root.aggregate.latest_body_preview.clone(),
+        latest_timestamp_ms: root.aggregate.latest_timestamp_ms,
+    };
+    item.thread_summary = Some(summary);
+    root_display_item(
+        root,
+        &item,
+        root.activity_event_id.clone(),
+        root.activity_timestamp_ms,
+    )
 }
 
 /// Diff program produced by the one projection builder. Keeping the wrapper's
@@ -1171,6 +1446,7 @@ pub(super) fn apply_timeline_diffs_to_display_items(
 pub(super) fn apply_non_sdk_item_set_diffs_to_display_items(
     display_projection: &mut DisplayProjectionState,
     diffs: &[TimelineDiff],
+    context: &DisplayProjectionContext,
 ) -> Vec<TimelineDiff> {
     let display_before = display_projection.display_items.clone();
     for diff in diffs {
@@ -1185,7 +1461,7 @@ pub(super) fn apply_non_sdk_item_set_diffs_to_display_items(
             existing.item = item.clone();
         }
     }
-    display_projection.refresh_display_items();
+    display_projection.display_items = project_display_items(&display_projection.slots, context);
     let display_after = display_projection.display_items.clone();
     finalize_display_projection_diffs(&display_before, &display_after, false).0
 }
@@ -1234,6 +1510,9 @@ fn normalize_display_timeline_items(items: &[TimelineItem]) -> Vec<TimelineItem>
 
 /// Matches `timelineItemDomId` in the TypeScript TimelineStore exactly.
 fn timeline_item_render_id(item: &TimelineItem) -> String {
+    if let Some(metadata) = &item.display_metadata {
+        return metadata.row_id.clone();
+    }
     match &item.id {
         TimelineItemId::Event { event_id } => event_id.clone(),
         TimelineItemId::Transaction { transaction_id } => format!("txn:{transaction_id}"),
@@ -1257,17 +1536,15 @@ pub(super) fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
 #[cfg(test)]
 mod tests {
 
-    use std::collections::HashSet;
+    use std::sync::Arc;
 
-    use std::sync::{Arc, Mutex};
-
-    use koushi_state::AppAction;
+    use koushi_state::{AppAction, TimelineThreadRootOrder};
 
     use tokio::sync::{broadcast, mpsc};
 
     use crate::event::{
-        CoreEvent, ThreadSummaryDto, TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent,
-        TimelineItem, TimelineItemId, TimelineMediaKind, TimelineViewportObservation,
+        CoreEvent, TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent, TimelineItem,
+        TimelineItemId, TimelineMediaKind, TimelineViewportObservation,
     };
 
     use crate::ids::{TimelineBatchId, TimelineGeneration};
@@ -1276,16 +1553,11 @@ mod tests {
     use super::super::navigation::{
         ROOM_REPLAY_INITIAL_ITEMS_MAX, RestoreSettlement, TimelineActorGenerationGate,
         accept_projection_ack_for_active_actor, derive_timeline_navigation_snapshot,
-        publish_restore_settlement_for_generation, publish_restore_settlement_with_lease,
+        publish_restore_settlement_for_generation,
     };
     use super::super::test_support::{
-        fake_rid, focused_key, replacement_generation_fixture, replay_projection_services,
-        room_key, timeline_item, timeline_media_item,
-    };
-    use super::super::thread_projection::{
-        ReplayKnownDisplayContext, ReplayKnownThreadRootProjectionRegistry,
-        reconcile_replay_known_root_projections_after_navigation_update,
-        refresh_replay_known_root_projections,
+        fake_rid, focused_key, replacement_generation_fixture, room_key, thread_key, timeline_item,
+        timeline_media_item,
     };
     use super::{
         DisplayProjectionBatch, DisplayProjectionContext, DisplayProjectionState,
@@ -1377,6 +1649,9 @@ mod tests {
             max_live_edge_items: None,
             include_prepend: true,
             include_append: true,
+            project_thread_roots: true,
+            thread_root_order: TimelineThreadRootOrder::RootEvent,
+            thread_roots: Vec::new(),
         }
     }
 
@@ -1424,6 +1699,10 @@ mod tests {
         assert_eq!(desktop_model, projection.display_after);
     }
 
+    fn displayed(item: &TimelineItem) -> TimelineItem {
+        super::decorate_event_item(item).expect("test item must be displayable")
+    }
+
     #[test]
     fn display_projection_retains_duplicate_identity_until_its_last_owner_is_removed() {
         let first_owner = timeline_item("$duplicate:test", Some("first"), "@sender:test", false);
@@ -1445,7 +1724,10 @@ mod tests {
 
         assert!(!projection.used_reset_fallback);
         assert_display_projection_converges(display_before, &projection);
-        assert_eq!(state.display_items(), &[neighbor, second_owner]);
+        assert_eq!(
+            state.display_items(),
+            &[displayed(&neighbor), displayed(&second_owner)]
+        );
         assert_eq!(
             state
                 .display_items()
@@ -1517,9 +1799,15 @@ mod tests {
             &historical_display_projection_context(),
         );
 
-        assert!(!projection.used_reset_fallback);
         assert_display_projection_converges(display_before, &projection);
-        assert_eq!(state.display_items(), &[owner, neighbor, confirmed]);
+        assert_eq!(
+            state.display_items(),
+            &[
+                displayed(&owner),
+                displayed(&neighbor),
+                displayed(&confirmed)
+            ]
+        );
         assert_eq!(
             state
                 .display_items()
@@ -1599,7 +1887,7 @@ mod tests {
 
         assert!(!projection.used_reset_fallback);
         assert_display_projection_converges(display_before, &projection);
-        assert_eq!(state.display_items().first(), Some(&boundary));
+        assert_eq!(state.display_items().first(), Some(&displayed(&boundary)));
     }
 
     #[test]
@@ -1619,7 +1907,7 @@ mod tests {
         assert!(!projection.used_reset_fallback);
         assert_display_projection_converges(display_before, &projection);
         assert_eq!(state.display_items().len(), ROOM_REPLAY_INITIAL_ITEMS_MAX);
-        assert_eq!(state.display_items().last(), Some(&live));
+        assert_eq!(state.display_items().last(), Some(&displayed(&live)));
         assert_eq!(
             state
                 .display_items()
@@ -1819,7 +2107,7 @@ mod tests {
 
         assert!(!projection.used_reset_fallback);
         assert_display_projection_converges(display_before, &projection);
-        assert_eq!(state.display_items().first(), Some(&older));
+        assert_eq!(state.display_items().first(), Some(&displayed(&older)));
         assert_eq!(
             state.display_items().len(),
             ROOM_REPLAY_INITIAL_ITEMS_MAX + 1
@@ -1862,7 +2150,10 @@ mod tests {
         );
         assert!(!reset.used_reset_fallback);
         assert_display_projection_converges(reset_before, &reset);
-        assert_eq!(state.display_items(), reset_items);
+        assert_eq!(
+            state.display_items(),
+            reset_items.iter().map(displayed).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -1922,7 +2213,6 @@ mod tests {
         let (actor_generations, stale_generation, current_generation) =
             replacement_generation_fixture(&key).await;
         let (event_tx, mut event_rx) = broadcast::channel(8);
-        let (replay_registry, projection_service) = replay_projection_services();
         let mut next_batch_id = TimelineBatchId(7);
 
         assert_eq!(
@@ -1931,8 +2221,6 @@ mod tests {
                 false,
                 &mut next_batch_id,
                 &event_tx,
-                &replay_registry,
-                &projection_service,
                 &actor_generations,
                 &key,
                 stale_generation,
@@ -1953,48 +2241,31 @@ mod tests {
             Err(broadcast::error::TryRecvError::Empty)
         ));
 
-        let lease = actor_generations
-            .try_acquire(&key, current_generation)
-            .expect("current restore lease");
-        let replacement_gate = actor_generations.clone();
-        let replacement_key = key.clone();
-        let replacement = tokio::spawn(async move {
-            replacement_gate
-                .activate_after_quiescence(&replacement_key)
-                .await
-        });
-        for _ in 0..10 {
-            if actor_generations
-                .try_acquire(&key, current_generation)
-                .is_none()
-            {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
         let navigation_snapshot = derive_timeline_navigation_snapshot(
             &canonical_items,
             None,
             &TimelineViewportObservation::default(),
             None,
         );
-        assert!(publish_restore_settlement_with_lease(
-            &mut restore_emit_buffer,
-            false,
-            &mut next_batch_id,
-            &event_tx,
-            &replay_registry,
-            &projection_service,
-            &lease,
-            &key,
-            TimelineGeneration(3),
-            &canonical_items,
-            state.display_items(),
-            RestoreSettlement {
-                navigation_snapshot: Some(navigation_snapshot.clone()),
-                terminal: Some((fake_rid(71), TimelineAnchorRestoreStatus::Found)),
-            },
-        ));
+        assert_eq!(
+            publish_restore_settlement_for_generation(
+                &mut restore_emit_buffer,
+                false,
+                &mut next_batch_id,
+                &event_tx,
+                &actor_generations,
+                &key,
+                current_generation,
+                TimelineGeneration(3),
+                &canonical_items,
+                state.display_items(),
+                RestoreSettlement {
+                    navigation_snapshot: Some(navigation_snapshot.clone()),
+                    terminal: Some((fake_rid(71), TimelineAnchorRestoreStatus::Found)),
+                },
+            ),
+            Some(true)
+        );
         let CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
             batch_id, diffs, ..
         }) = event_rx.recv().await.expect("one terminal restore update")
@@ -2021,13 +2292,6 @@ mod tests {
                 ..
             })) if request_id == fake_rid(71)
         ));
-        assert!(
-            !replacement.is_finished(),
-            "replacement must wait for the full restore terminal group"
-        );
-        drop(lease);
-        replacement.await.expect("replacement task");
-
         let live = timeline_item(
             "$live-after-restore:test",
             Some("live"),
@@ -2042,7 +2306,7 @@ mod tests {
         );
         assert_display_projection_converges(desktop_model, &live_projection);
         assert_eq!(state.display_items().len(), ROOM_REPLAY_INITIAL_ITEMS_MAX);
-        assert_eq!(state.display_items().last(), Some(&live));
+        assert_eq!(state.display_items().last(), Some(&displayed(&live)));
     }
 
     #[tokio::test]
@@ -2088,7 +2352,228 @@ mod tests {
     }
 
     #[test]
-    fn replay_known_display_mirror_matches_webview_identity_normalization() {
+    fn room_latest_reply_projection_emits_one_stable_root_and_suppresses_reply() {
+        let key = room_key();
+        let before = timeline_item("$before:test", Some("before"), "@a:test", false);
+        let mut root = timeline_item("$root:test", Some("root"), "@a:test", false);
+        root.timestamp_ms = Some(100);
+        let between = timeline_item("$between:test", Some("between"), "@a:test", false);
+        let mut reply = timeline_item("$reply:test", Some("reply"), "@b:test", false);
+        reply.thread_root = Some("$root:test".to_owned());
+        reply.timestamp_ms = Some(400);
+        let after = timeline_item("$after:test", Some("after"), "@a:test", false);
+        let canonical = vec![before, root.clone(), between, reply, after];
+        let mut state =
+            DisplayProjectionState::from_canonical_window(&canonical, 0..canonical.len());
+        let context = DisplayProjectionContext::for_timeline(
+            &key.kind,
+            &TimelineViewportObservation::default(),
+            false,
+        )
+        .with_thread_roots(
+            TimelineThreadRootOrder::LatestReply,
+            vec![crate::threads_list::ThreadRootDisplayData {
+                root_event_id: "$root:test".to_owned(),
+                activity_event_id: "$reply:test".to_owned(),
+                activity_timestamp_ms: Some(400),
+                item: Some(root),
+                aggregate: crate::threads_list::AuthoritativeThreadAggregate {
+                    reply_count: 1,
+                    latest_event_id: Some("$reply:test".to_owned()),
+                    latest_sender: Some("@b:test".to_owned()),
+                    latest_sender_label: Some("B".to_owned()),
+                    latest_body_preview: Some("reply".to_owned()),
+                    latest_timestamp_ms: Some(400),
+                },
+                pending: false,
+                failure_kind: None,
+            }],
+        );
+
+        state.reproject(&context);
+        let rows = state.display_items();
+        assert_eq!(rows.len(), 4);
+        assert_eq!(
+            rows.iter()
+                .filter_map(|item| item.display_metadata.as_ref())
+                .filter(|metadata| metadata.row_id == "thread-root:$root:test")
+                .count(),
+            1
+        );
+        let projected_root = rows
+            .iter()
+            .find(|item| {
+                item.display_metadata
+                    .as_ref()
+                    .is_some_and(|metadata| metadata.row_id == "thread-root:$root:test")
+            })
+            .expect("projected root");
+        let metadata = projected_root.display_metadata.as_ref().unwrap();
+        assert_eq!(metadata.content_event_id.as_deref(), Some("$root:test"));
+        assert_eq!(metadata.activity_event_id.as_deref(), Some("$reply:test"));
+        assert!(rows.iter().all(|item| {
+            !matches!(&item.id, TimelineItemId::Event { event_id } if event_id == "$reply:test")
+        }));
+    }
+
+    #[test]
+    fn reset_push_and_reordered_batches_converge_without_root_disappearance() {
+        let key = room_key();
+        let root = timeline_item("$root:test", Some("root"), "@a:test", false);
+        let mut reply = timeline_item("$reply:test", Some("reply"), "@b:test", false);
+        reply.thread_root = Some("$root:test".to_owned());
+        reply.timestamp_ms = Some(400);
+        let root_data = crate::threads_list::ThreadRootDisplayData {
+            root_event_id: "$root:test".to_owned(),
+            activity_event_id: "$reply:test".to_owned(),
+            activity_timestamp_ms: Some(400),
+            item: Some(root.clone()),
+            aggregate: crate::threads_list::AuthoritativeThreadAggregate {
+                reply_count: 1,
+                latest_event_id: Some("$reply:test".to_owned()),
+                latest_sender: None,
+                latest_sender_label: None,
+                latest_body_preview: Some("reply".to_owned()),
+                latest_timestamp_ms: Some(400),
+            },
+            pending: false,
+            failure_kind: None,
+        };
+        let cases = [
+            vec![vec![TimelineDiff::Reset {
+                items: vec![root.clone(), reply.clone()],
+            }]],
+            vec![
+                vec![TimelineDiff::PushBack { item: root.clone() }],
+                vec![TimelineDiff::PushBack {
+                    item: reply.clone(),
+                }],
+            ],
+            vec![
+                vec![TimelineDiff::Reset {
+                    items: vec![reply.clone()],
+                }],
+                vec![TimelineDiff::PushFront { item: root.clone() }],
+            ],
+        ];
+        let mut final_rows = Vec::new();
+        for batches in cases {
+            let mut canonical = Vec::new();
+            let mut state = DisplayProjectionState::from_canonical_window(&canonical, 0..0);
+            let context = DisplayProjectionContext::for_timeline(
+                &key.kind,
+                &TimelineViewportObservation::default(),
+                false,
+            )
+            .with_thread_roots(
+                TimelineThreadRootOrder::LatestReply,
+                vec![root_data.clone()],
+            );
+            let mut root_seen = false;
+            for batch in batches {
+                project_sdk_batch(&mut canonical, &mut state, &batch, &context);
+                let present = state.display_items().iter().any(|item| {
+                    item.display_metadata
+                        .as_ref()
+                        .is_some_and(|metadata| metadata.row_id == "thread-root:$root:test")
+                });
+                assert!(
+                    !root_seen || present,
+                    "an admitted root must not oscillate out"
+                );
+                root_seen |= present;
+            }
+            assert!(root_seen);
+            final_rows.push(
+                state
+                    .display_items()
+                    .iter()
+                    .map(super::timeline_item_render_id)
+                    .collect::<Vec<_>>(),
+            );
+        }
+        assert!(final_rows.windows(2).all(|pair| pair[0] == pair[1]));
+        assert_eq!(final_rows[0], ["thread-root:$root:test"]);
+    }
+
+    #[test]
+    fn thread_timeline_preserves_ordinary_reply_rows_even_when_room_roots_exist() {
+        let key = thread_key();
+        let mut reply = timeline_item("$reply:test", Some("reply"), "@b:test", false);
+        reply.thread_root = Some("$root:test".to_owned());
+        let canonical = vec![reply.clone()];
+        let mut state = DisplayProjectionState::from_canonical_window(&canonical, 0..1);
+        let context = DisplayProjectionContext::for_timeline(
+            &key.kind,
+            &TimelineViewportObservation::default(),
+            false,
+        )
+        .with_thread_roots(
+            TimelineThreadRootOrder::LatestReply,
+            vec![crate::threads_list::ThreadRootDisplayData {
+                root_event_id: "$root:test".to_owned(),
+                activity_event_id: "$reply:test".to_owned(),
+                activity_timestamp_ms: Some(1),
+                item: None,
+                aggregate: crate::threads_list::AuthoritativeThreadAggregate::default(),
+                pending: true,
+                failure_kind: None,
+            }],
+        );
+        state.reproject(&context);
+        assert_eq!(state.display_items().len(), 1);
+        assert_eq!(
+            timeline_item_event_id(&state.display_items()[0]),
+            Some("$reply:test")
+        );
+    }
+
+    #[test]
+    fn metadata_only_thread_activity_change_emits_one_stable_set() {
+        let key = room_key();
+        let root = timeline_item("$root:test", Some("root"), "@a:test", false);
+        let canonical = vec![root.clone()];
+        let mut state = DisplayProjectionState::from_canonical_window(&canonical, 0..1);
+        let display_data = |timestamp| crate::threads_list::ThreadRootDisplayData {
+            root_event_id: "$root:test".to_owned(),
+            activity_event_id: "$reply:test".to_owned(),
+            activity_timestamp_ms: Some(timestamp),
+            item: Some(root.clone()),
+            aggregate: crate::threads_list::AuthoritativeThreadAggregate {
+                reply_count: 1,
+                latest_event_id: Some("$reply:test".to_owned()),
+                latest_sender: None,
+                latest_sender_label: None,
+                latest_body_preview: Some("reply".to_owned()),
+                latest_timestamp_ms: Some(timestamp),
+            },
+            pending: false,
+            failure_kind: None,
+        };
+        let context = |timestamp| {
+            DisplayProjectionContext::for_timeline(
+                &key.kind,
+                &TimelineViewportObservation::default(),
+                false,
+            )
+            .with_thread_roots(
+                TimelineThreadRootOrder::LatestReply,
+                vec![display_data(timestamp)],
+            )
+        };
+        state.reproject(&context(400));
+        let diffs = state.reproject(&context(401));
+        assert!(matches!(
+            diffs.as_slice(),
+            [TimelineDiff::Set { index: 0, item }]
+                if item.display_metadata.as_ref().is_some_and(|metadata|
+                    metadata.row_id == "thread-root:$root:test"
+                        && metadata.display_timestamp_ms == Some(401))
+        ));
+    }
+
+    #[test]
+    fn display_diff_application_normalizes_duplicate_render_identities() {
         let mut before = timeline_item("$before:test", Some("before"), "@a:test", false);
         before.timestamp_ms = Some(200);
         let mut latest_reply = timeline_item("$latest:test", Some("reply"), "@b:test", false);
@@ -2193,78 +2678,20 @@ mod tests {
             }],
         );
         assert_eq!(display_items.len(), 4);
-        let normalized_context = ReplayKnownDisplayContext::from_display_items(&display_items);
-        assert!(normalized_context.event_ids.contains("$latest:test"));
-        assert!(
-            normalized_context
-                .exact_thread_reply_pairs
-                .contains(&("$known-root:test".to_owned(), "$latest:test".to_owned()))
-        );
-        assert_eq!(normalized_context.activity_range, Some((400, 400)));
 
         // Truncate and Clear operate on the same normalized sequence, so stale
-        // IDs/pairs cannot survive in replay-known display evidence.
+        // IDs cannot survive in the display mirror.
         apply_timeline_diffs_to_display_items(
             &mut display_items,
             &[TimelineDiff::Truncate { length: 1 }],
         );
-        let truncated_context = ReplayKnownDisplayContext::from_display_items(&display_items);
+        assert_eq!(display_items.len(), 1);
         assert_eq!(
-            truncated_context.event_ids,
-            HashSet::from(["$latest:test".to_owned()])
-        );
-        assert_eq!(truncated_context.activity_range, Some((400, 400)));
-        assert!(
-            truncated_context
-                .exact_thread_reply_pairs
-                .contains(&("$known-root:test".to_owned(), "$latest:test".to_owned()))
+            timeline_item_event_id(&display_items[0]),
+            Some("$latest:test")
         );
         apply_timeline_diffs_to_display_items(&mut display_items, &[TimelineDiff::Clear]);
-        assert_eq!(
-            ReplayKnownDisplayContext::from_display_items(&display_items),
-            ReplayKnownDisplayContext::default()
-        );
-
-        // A duplicate, non-displayed cache overlap leaves a retained
-        // replay-known root untouched: the mirror cannot invent a Clear/Ready
-        // transition that the webview itself would not render.
-        let key = room_key();
-        let mut root = timeline_item("$known-root:test", Some("root"), "@a:test", false);
-        root.thread_summary = Some(ThreadSummaryDto {
-            reply_count: 1,
-            latest_event_id: Some("$latest:test".to_owned()),
-            latest_sender: None,
-            latest_sender_label: None,
-            latest_body_preview: None,
-            latest_timestamp_ms: Some(400),
-        });
-        let mut base_before = timeline_item("$base-before:test", Some("before"), "@a:test", false);
-        base_before.timestamp_ms = Some(200);
-        let mut base_after = timeline_item("$base-after:test", Some("after"), "@a:test", false);
-        base_after.timestamp_ms = Some(500);
-        let mut bounded_display = vec![base_before, base_after.clone()];
-        let registry = Arc::new(Mutex::new(
-            ReplayKnownThreadRootProjectionRegistry::default(),
-        ));
-        let initial = refresh_replay_known_root_projections(
-            &registry,
-            &key,
-            &[root.clone(), latest_reply],
-            &bounded_display,
-        );
-        assert_eq!(initial.ready.len(), 1);
-        apply_timeline_diffs_to_display_items(
-            &mut bounded_display,
-            &[TimelineDiff::PushBack { item: base_after }],
-        );
-        let unchanged = reconcile_replay_known_root_projections_after_navigation_update(
-            &registry,
-            &key,
-            &[root],
-            &ReplayKnownDisplayContext::from_display_items(&bounded_display),
-        );
-        assert!(unchanged.ready.is_empty());
-        assert!(unchanged.stale.is_empty());
+        assert!(display_items.is_empty());
     }
 
     #[tokio::test]

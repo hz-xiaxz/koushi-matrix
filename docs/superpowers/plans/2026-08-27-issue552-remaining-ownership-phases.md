@@ -1,8 +1,8 @@
 # Issue #552 Remaining Frontend Ownership Migration — Phased Execution Plan
 
-Status: Phase 0 documentation implemented. No production implementation is authorized by this document alone.
+Status: Phase 0 merged; Phase 1 #708 implemented on its reviewed branch pending final verification/review/merge. Later phases remain unauthorized by this document alone.
 
-Base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`.
+Phase 0 base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`. Phase 1 #708 insertion base: `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
 ## Objective
 
@@ -52,22 +52,36 @@ Phase 0 recon on this base confirms:
 
 **Phase 0 implementation record:** the inventory is pinned to the base above; records eight direct-Tauri production modules, the fake-owned `DesktopApi` declaration, alias/caption-only mutation queue, React/Tauri/Core acknowledgement boundary, and current App request-ref families; marks #559/#570/#582/#608/#659 and PR #683 as shipped; and preserves #552 as open with criterion-by-criterion complete/partial/remaining status. Production code, wire contracts, state machines, dependencies, and generated artifacts are unchanged.
 
-## Phase 1 — Isolate the renderer transport without changing semantics
+## Phase 1 — Rust-owned thread-root projection lifecycle (#708)
+
+**Deliverable:** one bug-fix PR containing the reviewed #708 design, canon, RED/GREEN tests, Rust/TypeScript cutover, QA and final review.
+
+Observed v0.3.1 diagnostics show cached thread events and a stable Rust aggregate while the initial/display projection moves from empty or partial to populated after pagination/replay. Current Core, Rust State and TypeScript each infer projection death from bounded-window absence.
+
+The Phase 1 invariant is: `ThreadRootProjectionService` and the current Room `TimelineActor` own lifecycle and display placement; Rust State mirrors explicit transitions; TypeScript caches/renders Rust items/diffs and never prunes or places a root from canonical-window contents.
+
+Required outcomes are defined in `2026-08-27-issue708-thread-root-projection-ownership.md`: retained dormant roots, authoritative aggregate/redaction/unsubscribe/session clears, bounded storage, Rust-owned root/latest placement and row identity, no transient confirmed-empty existing-thread open, settled teardown, event-order convergence, and Browser Fake contract mirroring.
+
+This phase is independent of adapter isolation, ACK retry, App request refs and mutation sequencing. It closes #708 only; #552 remains open.
+
+**Phase 1 implementation record:** Core retains dormant root snapshots and owns explicit clear plus bounded awaited worker teardown; the Room actor emits stable Rust display metadata and root/latest placement through display-relative InitialItems/diffs; accepted thread-open intent carries the one-page initial-backfill policy; Rust State is an explicit transition mirror; the public projection event, replay-known registry, TypeScript projection map/pruning/placement and prop wiring are removed; Browser harness fixtures consume Rust-shaped display items. Deterministic RED evidence captured the former State/frontend deletion before the cutover. Final reviewer/CI/merge evidence is recorded in the #708 PR rather than claimed here before merge.
+
+## Phase 2 — Isolate the renderer transport without changing semantics
 
 This phase improves dependency direction and future frontend portability. It does not count as a semantic migration by itself.
 
-### Phase 1A — Neutral `DesktopApi` contract
+### Phase 2A — Neutral `DesktopApi` contract
 
 **One PR.**
 
 - Move the `DesktopApi` interface and contract-only supporting types from `backend/browserFakeApi.ts` to `backend/desktopApi.ts`.
 - Make `client.ts` the Tauri implementation and `browserFakeApi.ts` a test implementation of that neutral contract.
-- Move API implementation selection to the `appRuntime.ts` composition root, remove `client.ts`'s duplicate local `isTauriRuntime()` branch, and leave the separately scoped `tauriTimelineTransport.ts` adapter guard unchanged until its Phase 1B seam.
+- Move API implementation selection to the `appRuntime.ts` composition root, remove `client.ts`'s duplicate local `isTauriRuntime()` branch, and leave the separately scoped `tauriTimelineTransport.ts` adapter guard unchanged until its Phase 2B seam.
 - Update imports only; do not rename IPC commands, alter DTOs, split the interface speculatively, or change behavior.
 
 **Proof:** typecheck, focused client/fake/App tests, full Vitest, lint, build, and import-cycle check.
 
-### Phase 1B — Platform ports at existing seams
+### Phase 2B — Platform ports at existing seams
 
 **One PR per independently testable port family; do not bundle all families.**
 
@@ -89,7 +103,7 @@ For each family:
 
 **Exit:** `domain/**` has no Tauri imports; remaining direct imports are adapter-owned and statically enumerated. IPC names and serialized contracts are unchanged.
 
-## Phase 2 — Projection acknowledgement reliability leaf
+## Phase 3 — Projection acknowledgement reliability leaf
 
 **Deliverable:** one semantic-owner PR, preceded by a reviewed design document.
 
@@ -131,7 +145,7 @@ React keeps one-shot DOM evidence capture and generation data. Delete `projectio
 
 **Exit:** one documented acknowledgement owner, deterministic failure/replacement/teardown coverage, and no duplicate TS retry state.
 
-## Phase 3 — Remove redundant App request fences by command family
+## Phase 4 — Remove redundant App request fences by command family
 
 **One family per PR.** Suggested order after fresh recon:
 
@@ -152,7 +166,7 @@ No generic TypeScript request manager and no generic Rust queue.
 
 **Exit:** each migrated family has one Rust authority; retained refs are documented renderer-lifetime guards.
 
-## Phase 4 — Resolve remaining text-mutation sequencing
+## Phase 5 — Resolve remaining text-mutation sequencing
 
 **Separate design and PR per mutation family.**
 
@@ -166,7 +180,7 @@ Prove ordering across A/B/A edits, target/account replacement, item removal, and
 
 **Exit:** either the TS mutation queue is deleted, or every retained user has a documented renderer-only necessity. “Still convenient” is not sufficient.
 
-## Phase 5 — Audit the frontend-neutral Core consumption boundary
+## Phase 6 — Audit the frontend-neutral Core consumption boundary
 
 **Deliverable:** one Rust integration-test PR unless all evidence already exists.
 
@@ -182,7 +196,7 @@ Keep IPC-only DTOs in `src-tauri`. Move a presentation DTO into shared Rust only
 
 **Exit:** a test starts Core, sends a command, observes event/snapshot convergence, and shuts down cleanly with no Tauri type in the contract.
 
-## Phase 6 — Epic completion audit
+## Phase 7 — Epic completion audit
 
 **Deliverable:** one documentation/closure PR or the final semantic PR’s documentation section.
 
@@ -193,11 +207,11 @@ Keep IPC-only DTOs in `src-tauri`. Move a presentation DTO into shared Rust only
 5. Confirm corresponding TS semantic state was removed.
 6. Run full repository gates and close #552 only if no semantic owner remains merely “investigate”.
 
-## Optional Phase 7 — Non-shipping GPUI vertical slice
+## Optional Phase 8 — Non-shipping GPUI vertical slice
 
 This is separately approved follow-up work, not required to claim #552 semantic-ownership completion.
 
-After Phase 5, a small `apps/gpui/` spike may consume Core directly for runtime/session state, room list, and a read-only timeline. Composer/send work starts only after Japanese/CJK IME, accessibility, virtualization, media, clipboard, notifications, and shutdown behavior have measurable gates. React/Tauri remains production until separately agreed parity exists.
+After Phase 6, a small `apps/gpui/` spike may consume Core directly for runtime/session state, room list, and a read-only timeline. Composer/send work starts only after Japanese/CJK IME, accessibility, virtualization, media, clipboard, notifications, and shutdown behavior have measurable gates. React/Tauri remains production until separately agreed parity exists.
 
 ## Verification matrix
 
@@ -235,7 +249,7 @@ Before each semantic implementation:
 
 - Round 1, `reviewer-flash`: initial blocking run exhausted its turn budget and issued no verdict; it did not satisfy the gate.
 - Round 1 focused retry, `reviewer-flash`: `Correct-to-merge`. The reviewer verified the current ACK path through React, Tauri, TimelineManager and TimelineActor; confirmed the phase boundaries, renderer-only exclusions, non-semantic classification of adapter isolation, and optional GPUI scope; and found no Critical or Important issue.
-- The four minor findings are applied: current direct-Tauri production imports are eight, state/wire mirror and state-machine obligations are explicit, `isTauriRuntime()` selection is assigned to `appRuntime.ts`, and each Phase 1B App hot-file edit must name the exact import removed.
+- The four minor findings are applied: current direct-Tauri production imports are eight, state/wire mirror and state-machine obligations are explicit, `isTauriRuntime()` selection is assigned to `appRuntime.ts`, and each Phase 2B App hot-file edit must name the exact import removed.
 
 ## Explicit non-goals
 

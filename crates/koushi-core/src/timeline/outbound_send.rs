@@ -43,7 +43,7 @@ use super::diagnostics::{
     OutboundSessionLookupDiagnostic, record_post_send_encryption_snapshot,
     record_send_diagnostic_snapshot_skipped, trace_timeline_items,
 };
-use super::display_projection::DisplayProjectionState;
+use super::display_projection::{DisplayProjectionContext, DisplayProjectionState};
 use super::item_projection::{
     apply_ignored_sender_suppression, apply_link_previews_to_item, attachment_info_for_upload,
     attachment_reply_for_key, is_attention_eligible_event, remember_local_echo,
@@ -57,10 +57,7 @@ use super::navigation::{
     commit_prepared_initial_window_for_generation,
 };
 use super::room_key_recovery::RoomKeyReshareSchedule;
-use super::thread_projection::{
-    ThreadAttentionBatchProvenance, ThreadAttentionCounters,
-    replay_known_candidates_for_display_items,
-};
+use super::thread_projection::{ThreadAttentionBatchProvenance, ThreadAttentionCounters};
 // END GENERATED SIBLING IMPORTS
 
 /// One absolute deadline for the complete set of manager-owned enqueue workers.
@@ -1667,19 +1664,33 @@ impl TimelineActor {
             .await;
         }
         trace_timeline_items("send_queue_lagged_initial", &self.key, &items);
-        let candidate_display_projection =
+        for item in &items {
+            super::thread_projection::seed_thread_summary_item(
+                &self.thread_root_projection_service,
+                &self.key,
+                item,
+            );
+        }
+        let mut candidate_display_projection =
             DisplayProjectionState::from_canonical_window(&items, 0..items.len());
-        let replay_known_candidates = replay_known_candidates_for_display_items(
-            &self.key,
-            &items,
-            candidate_display_projection.display_items(),
+        let context = DisplayProjectionContext::for_timeline(
+            &self.key.kind,
+            &self.viewport_observation,
+            false,
+        )
+        .with_thread_roots(
+            self.thread_root_order,
+            self.thread_root_projection_service
+                .lock()
+                .expect("thread-root projection service lock must not be poisoned")
+                .display_data_for_room(self.key.room_id()),
         );
+        candidate_display_projection.reproject(&context);
+        let emitted_items = candidate_display_projection.display_items().to_vec();
         let _ = commit_prepared_initial_window_for_generation(
             &mut self.navigation_items,
             &mut self.display_projection,
             &self.event_tx,
-            &self.replay_known_thread_root_projections,
-            &self.thread_root_projection_service,
             &self.timeline_actor_generations,
             &self.key,
             self.actor_generation,
@@ -1688,9 +1699,8 @@ impl TimelineActor {
             Vec::new(),
             PreparedInitialWindow {
                 display_projection: candidate_display_projection,
-                navigation_items: Some(items.clone()),
-                emitted_items: items,
-                replay_known_candidates,
+                navigation_items: Some(items),
+                emitted_items,
             },
         );
     }
@@ -2831,9 +2841,7 @@ mod tests {
         fake_rid, gap_demand_test_actor_handle, live_tail_test_manager, room_key,
         test_timeline_actor_handle,
     };
-    use super::super::thread_projection::{
-        ReplayKnownThreadRootProjectionRegistry, ThreadRootProjectionFetchRegistry,
-    };
+    use super::super::thread_projection::ThreadRootProjectionFetchRegistry;
     use super::{
         EncryptedSendDiagnosticSnapshot, MAX_CONCURRENT_SEND_DIAGNOSTICS,
         MAX_SETTLED_SEND_TOMBSTONES, MAX_SUBMISSION_TOMBSTONES, MediaSendQueuedDelivery,
@@ -3368,9 +3376,7 @@ mod tests {
                 ThreadRootProjectionService::default(),
             )),
             thread_root_projection_fetches: ThreadRootProjectionFetchRegistry::default(),
-            replay_known_thread_root_projections: Arc::new(Mutex::new(
-                ReplayKnownThreadRootProjectionRegistry::default(),
-            )),
+            thread_root_order: koushi_state::TimelineThreadRootOrder::LatestReply,
             timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
             test_session_available: true,
@@ -3774,9 +3780,7 @@ mod tests {
                 ThreadRootProjectionService::default(),
             )),
             thread_root_projection_fetches: ThreadRootProjectionFetchRegistry::default(),
-            replay_known_thread_root_projections: Arc::new(Mutex::new(
-                ReplayKnownThreadRootProjectionRegistry::default(),
-            )),
+            thread_root_order: koushi_state::TimelineThreadRootOrder::LatestReply,
             timeline_actor_generations: generations.clone(),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
             test_session_available: true,
@@ -3862,9 +3866,7 @@ mod tests {
                 ThreadRootProjectionService::default(),
             )),
             thread_root_projection_fetches: ThreadRootProjectionFetchRegistry::default(),
-            replay_known_thread_root_projections: Arc::new(Mutex::new(
-                ReplayKnownThreadRootProjectionRegistry::default(),
-            )),
+            thread_root_order: koushi_state::TimelineThreadRootOrder::LatestReply,
             timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
             test_session_available: true,

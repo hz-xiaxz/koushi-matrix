@@ -125,6 +125,7 @@ async fn privacy_settings_patch_gates_read_receipt_dispatch() {
                 room_id: "!room:example.test".to_owned(),
             },
         },
+        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .expect("submit subscribe");
@@ -219,6 +220,7 @@ async fn privacy_settings_patch_gates_typing_dispatch() {
                 room_id: "!room:example.test".to_owned(),
             },
         },
+        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .expect("submit subscribe");
