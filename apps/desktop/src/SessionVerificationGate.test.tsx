@@ -260,7 +260,7 @@ describe("SessionVerificationGate interactions", () => {
     expect(screen.queryByRole("button", { name: "Verify with another device" })).toBeNull();
   });
 
-  test.each(provisionalPhaseCases)("renders provisional phase %j with retry only while rechecking", async (phase, copy) => {
+  test.each(provisionalPhaseCases)("renders provisional phase %j with retry once discovery begins", async (phase, copy) => {
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     snapshot.state.domain.session = {
       kind: "provisional",
@@ -279,7 +279,7 @@ describe("SessionVerificationGate interactions", () => {
     );
 
     expect(screen.getByText(copy)).toBeTruthy();
-    if (copy === "Finishing sign-in…") {
+    if (copy !== "Checking device trust…") {
       expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
     } else {
       expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();

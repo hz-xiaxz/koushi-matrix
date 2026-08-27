@@ -70,11 +70,11 @@ use super::trust_gate::{
     TrustLifecycleDecision, VerificationMethodDiscoveryResult,
     active_own_user_sas_flow_for_provisional_encryption_sync,
     current_device_trust_recheck_failure_token, first_provisional_encryption_sync_is_current,
-    method_discovery_is_current, own_user_sas_recheck_is_current,
-    record_verification_admission_event, record_verification_method_discovery_event,
-    retry_should_restart_method_discovery, should_discover_verification_methods,
-    verification_admission_event, verification_gate_failure_token,
-    verification_method_discovery_event,
+    method_discovery_admission_timeout_is_current, method_discovery_is_current,
+    own_user_sas_recheck_is_current, record_verification_admission_event,
+    record_verification_method_discovery_event, retry_should_restart_method_discovery,
+    should_discover_verification_methods, verification_admission_event,
+    verification_gate_failure_token, verification_method_discovery_event,
 };
 use super::verification::{
     INCOMING_VERIFICATION_FLOW_ID_BASE, IncomingVerificationObservation, PendingSasVerification,
@@ -297,6 +297,10 @@ pub(crate) enum AccountMessage {
     FirstProvisionalEncryptionSyncFinished {
         generation: u64,
         succeeded: bool,
+    },
+    VerificationMethodDiscoveryAdmissionTimedOut {
+        generation: u64,
+        serial: u64,
     },
     ProvisionalEncryptionSyncSucceeded {
         generation: u64,
@@ -735,6 +739,8 @@ pub struct AccountActor {
     pub(super) secure_backup_inspection_pending: bool,
     pub(super) secure_backup_observer: Option<crate::executor::JoinHandle<()>>,
     pub(super) verification_method_discovery_task: Option<OwnedVerificationMethodDiscoveryTask>,
+    pub(super) verification_method_discovery_admission_task:
+        Option<crate::executor::JoinHandle<()>>,
     pub(super) verification_method_discovery_serial: u64,
     pub(super) verification_method_discovery_failed: bool,
     pub(super) recovery_task: Option<PendingRecoveryTask>,
@@ -1006,6 +1012,7 @@ impl AccountActor {
             secure_backup_inspection_pending: false,
             secure_backup_observer: None,
             verification_method_discovery_task: None,
+            verification_method_discovery_admission_task: None,
             verification_method_discovery_serial: 0,
             verification_method_discovery_failed: false,
             recovery_task: None,
@@ -1537,6 +1544,8 @@ impl AccountActor {
                         self.session.is_some(),
                         self.session_promoted,
                     ) {
+                        self.cancel_verification_method_discovery_admission_timeout()
+                            .await;
                         self.provisional_encryption_sync_ready = succeeded;
                         let trust = self
                             .session
@@ -1559,6 +1568,35 @@ impl AccountActor {
                             }])
                             .await;
                         }
+                    }
+                }
+                AccountMessage::VerificationMethodDiscoveryAdmissionTimedOut {
+                    generation,
+                    serial,
+                } => {
+                    if method_discovery_admission_timeout_is_current(
+                        generation,
+                        self.trust_generation,
+                        serial,
+                        self.verification_method_discovery_serial,
+                        self.session.is_some(),
+                        self.session_promoted,
+                        self.verification_method_discovery_task.is_some(),
+                    ) {
+                        self.verification_method_discovery_admission_task.take();
+                        self.verification_method_discovery_failed = true;
+                        record_verification_method_discovery_event(
+                            verification_method_discovery_event(
+                                "admission_timeout",
+                                generation,
+                                serial,
+                            ),
+                        );
+                        self.send_actions(vec![AppAction::VerificationMethodDiscoveryFailed {
+                            generation,
+                            kind: koushi_state::VerificationGateFailureKind::Timeout,
+                        }])
+                        .await;
                     }
                 }
                 AccountMessage::ProvisionalEncryptionSyncSucceeded { generation } => {
@@ -1699,6 +1737,26 @@ impl AccountActor {
                                 .await;
                             }
                         }
+                    } else if method_discovery_is_current(
+                        generation,
+                        self.trust_generation,
+                        serial,
+                        self.verification_method_discovery_serial,
+                        self.session.is_some(),
+                    ) {
+                        self.verification_method_discovery_failed = true;
+                        record_verification_method_discovery_event(
+                            verification_method_discovery_event(
+                                "completion_owner_missing",
+                                generation,
+                                serial,
+                            ),
+                        );
+                        self.send_actions(vec![AppAction::VerificationMethodDiscoveryFailed {
+                            generation,
+                            kind: koushi_state::VerificationGateFailureKind::Sdk,
+                        }])
+                        .await;
                     } else {
                         record_verification_method_discovery_event(
                             verification_method_discovery_event(
@@ -2381,21 +2439,11 @@ impl AccountActor {
                     .session
                     .as_ref()
                     .map(|session| session.current_device_trust());
-                let discovery_task_active = self.verification_method_discovery_task.is_some();
-                if retry_should_restart_method_discovery(
-                    self.session_promoted,
-                    current_trust,
-                    discovery_task_active,
-                    self.verification_method_discovery_failed,
-                ) {
-                    if self.verification_method_discovery_failed {
-                        self.send_actions(vec![
-                            AppAction::VerificationMethodDiscoveryRetryStarted {
-                                generation: self.trust_generation,
-                            },
-                        ])
-                        .await;
-                    }
+                if retry_should_restart_method_discovery(self.session_promoted, current_trust) {
+                    self.send_actions(vec![AppAction::VerificationMethodDiscoveryRetryStarted {
+                        generation: self.trust_generation,
+                    }])
+                    .await;
                     self.discover_verification_methods(self.trust_generation)
                         .await;
                 } else {

@@ -491,7 +491,7 @@ export function SessionVerificationGate({
       </div>
     )}
     {discovering && <p>{t("gate.discovering")}</p>}
-    {rechecking && <button
+    {(discovering || rechecking) && <button
       className="dialog-button is-primary"
       type="button"
       disabled={gateOperation !== null}
