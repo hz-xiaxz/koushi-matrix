@@ -1072,6 +1072,8 @@ export function TimelinePane({
           onRetryPreparation={onRetryStagedUploadPreparationStable}
           onUseOriginal={onUseOriginalStagedUploadStable}
           loadPreview={onLoadStagedUploadPreviewStable}
+          surface="main"
+          resolveComposerKeyAction={resolveComposerKeyActionStable}
         />
       ) : null}
       <Composer

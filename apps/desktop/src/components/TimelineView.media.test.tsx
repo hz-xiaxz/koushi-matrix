@@ -209,6 +209,191 @@ describe("TimelineView", () => {
     });
   });
 
+  it("saves an initially idle file after its first download becomes ready", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const downloadMedia = vi.fn(async () => undefined);
+    const saveMediaFile = vi.fn(async () => undefined);
+    const transport = baseTransport({
+      downloadMedia,
+      saveMediaFile,
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+    const props = {
+      timelineKey: KEY,
+      roomId: "!room:example.invalid",
+      transport,
+      onReply: vi.fn()
+    };
+
+    const { rerender } = render(<TimelineView {...props} onReply={vi.fn()} />);
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [fileMessage("$idle-file")]
+          }
+        }
+      });
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Download notes.pdf" }));
+    await waitFor(() =>
+      expect(downloadMedia).toHaveBeenCalledWith("!room:example.invalid", "$idle-file")
+    );
+
+    rerender(
+      <TimelineView
+        {...props}
+        onReply={vi.fn()}
+        mediaDownloads={{
+          "$idle-file": {
+            kind: "ready",
+            source_url: "asset://localhost/notes.pdf",
+            width: null,
+            height: null,
+            mime_type: "application/pdf"
+          }
+        }}
+      />
+    );
+
+    await waitFor(() =>
+      expect(saveMediaFile).toHaveBeenCalledWith("asset://localhost/notes.pdf", "notes.pdf")
+    );
+    expect(saveMediaFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not save a file that becomes ready without a download click", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const saveMediaFile = vi.fn(async () => undefined);
+    const transport = baseTransport({
+      saveMediaFile,
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+    const { rerender } = render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+      />
+    );
+
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [fileMessage("$ready-without-click")]
+          }
+        }
+      });
+    });
+    rerender(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        mediaDownloads={{
+          "$ready-without-click": {
+            kind: "ready",
+            source_url: "asset://localhost/notes.pdf",
+            width: null,
+            height: null,
+            mime_type: "application/pdf"
+          }
+        }}
+        onReply={vi.fn()}
+      />
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(saveMediaFile).not.toHaveBeenCalled();
+  });
+
+  it("clears save intent on failure and rearms it for a retry", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const downloadMedia = vi.fn(async () => undefined);
+    const saveMediaFile = vi.fn(async () => undefined);
+    const transport = baseTransport({
+      downloadMedia,
+      saveMediaFile,
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+    const props = {
+      timelineKey: KEY,
+      roomId: "!room:example.invalid",
+      transport,
+      onReply: vi.fn()
+    };
+    const { rerender } = render(<TimelineView {...props} onReply={vi.fn()} />);
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [fileMessage("$retry-file")]
+          }
+        }
+      });
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Download notes.pdf" }));
+    await waitFor(() => expect(downloadMedia).toHaveBeenCalledTimes(1));
+    rerender(
+      <TimelineView
+        {...props}
+        onReply={vi.fn()}
+        mediaDownloads={{
+          "$retry-file": { kind: "failed", failure_kind: "network" }
+        }}
+      />
+    );
+    expect(saveMediaFile).not.toHaveBeenCalled();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(downloadMedia).toHaveBeenCalledTimes(2);
+    rerender(
+      <TimelineView
+        {...props}
+        onReply={vi.fn()}
+        mediaDownloads={{
+          "$retry-file": {
+            kind: "ready",
+            source_url: "asset://localhost/notes.pdf",
+            width: null,
+            height: null,
+            mime_type: "application/pdf"
+          }
+        }}
+      />
+    );
+
+    await waitFor(() =>
+      expect(saveMediaFile).toHaveBeenCalledWith("asset://localhost/notes.pdf", "notes.pdf")
+    );
+    expect(saveMediaFile).toHaveBeenCalledTimes(1);
+  });
+
   it("routes ready image preview downloads through the transport when available", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const fetchMock = vi.fn(async () => new Response(new Blob(["image"], { type: "image/png" })));

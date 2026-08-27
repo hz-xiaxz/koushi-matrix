@@ -164,6 +164,27 @@ export function TimelineMediaAttachment({
         };
   const progressPercent =
     uploadProgressPercentValue ?? downloadProgressPercent;
+  const saveIntentRef = useRef(false);
+  const requestDownload = useCallback(() => {
+    saveIntentRef.current = true;
+    onDownload();
+  }, [onDownload]);
+  useEffect(() => {
+    if (downloadState?.kind === "failed") {
+      saveIntentRef.current = false;
+      return;
+    }
+    if (downloadState?.kind !== "ready" || !saveIntentRef.current) {
+      return;
+    }
+    saveIntentRef.current = false;
+    void saveMediaSource(
+      downloadState.source_url,
+      mediaSourceUrl(downloadState.source_url),
+      media.filename,
+      onSaveMediaFile
+    );
+  }, [downloadState, media.filename, onSaveMediaFile]);
   useEffect(() => {
     if (!detailsOpen) {
       return;
@@ -263,7 +284,7 @@ export function TimelineMediaAttachment({
                 aria-label={t("timeline.mediaDownloadRetry")}
                 onClick={(event) => {
                   event.stopPropagation();
-                  onDownload();
+                  requestDownload();
                 }}
               >
                 <RefreshCw size={16} />
@@ -293,7 +314,7 @@ export function TimelineMediaAttachment({
                 aria-label={t("timeline.downloadMedia", { filename: media.filename })}
                 onClick={(event) => {
                   event.stopPropagation();
-                  onDownload();
+                  requestDownload();
                 }}
               >
                 <Download size={16} />
@@ -388,7 +409,7 @@ export function TimelineMediaAttachment({
             className="message-media-download message-media-retry"
             type="button"
             aria-label={t("timeline.mediaDownloadRetry")}
-            onClick={onDownload}
+            onClick={requestDownload}
           >
             <RefreshCw size={15} />
           </button>
@@ -414,7 +435,7 @@ export function TimelineMediaAttachment({
             type="button"
             disabled={downloadState?.kind === "pending"}
             aria-label={t("timeline.downloadMedia", { filename: media.filename })}
-            onClick={onDownload}
+            onClick={requestDownload}
           >
             <Download size={15} />
           </button>

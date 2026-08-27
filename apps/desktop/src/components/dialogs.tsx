@@ -20,6 +20,7 @@ import type {
   DirectoryPreviewState,
   InviteScopeSelection,
   InviteWorkflowState,
+  ResolveComposerKeyAction,
   StagedUploadFormatChoice,
   StagedUploadItem,
   StagedUploadOutputSelection,
@@ -34,6 +35,7 @@ import {
   type ImageUploadVariantKindPayload,
   type ImageCompressionPlan
 } from "../app/uiShared";
+import { composerKeyEventFromDom } from "../domain/composerKeyEvents";
 import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
 import { diagnosticReportPreview } from "../domain/diagnostics";
 
@@ -883,7 +885,9 @@ export function UploadStagingDialog({
   onRetryPreparation,
   onUseOriginal,
   onSendAttachments,
-  loadPreview
+  loadPreview,
+  resolveComposerKeyAction,
+  surface
 }: {
   items: StagedUploadItem[];
   onClear: () => void | Promise<void>;
@@ -901,7 +905,43 @@ export function UploadStagingDialog({
    */
   onSendAttachments: () => void | Promise<void>;
   loadPreview: (stagedId: string, variantId: string) => Promise<number[]>;
+  resolveComposerKeyAction: ResolveComposerKeyAction;
+  surface: "main" | "thread";
 }) {
+  const sendable = uploadStagingItemsAreSendable(items);
+  const sendButtonRef = useRef<HTMLButtonElement>(null);
+  const onCaptionKeyDown = (event: KeyboardEvent<HTMLInputElement>, index: number) => {
+    if (event.key === "Tab") {
+      if (
+        !event.shiftKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        index === items.length - 1 &&
+        sendable
+      ) {
+        event.preventDefault();
+        sendButtonRef.current?.focus();
+      }
+      return;
+    }
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    void resolveComposerKeyAction(
+      surface,
+      composerKeyEventFromDom(event, null),
+      { autocomplete_open: false, send_enabled: sendable }
+    )
+      .then((action) => {
+        if (action === "send") {
+          void onSendAttachments();
+        }
+      })
+      .catch(() => undefined);
+  };
+
   return (
     <section
       className="upload-staging-dialog"
@@ -915,7 +955,7 @@ export function UploadStagingDialog({
         </button>
       </div>
       <div className="upload-staging-list">
-        {items.map((item) => (
+        {items.map((item, index) => (
           <article className="upload-staging-item" key={item.staged_id}>
             <div className="upload-staging-file">
               {item.kind.kind === "image" ? (
@@ -939,6 +979,7 @@ export function UploadStagingDialog({
                 onChange={(event) => {
                   void onUpdateCaption(item.staged_id, event.currentTarget.value);
                 }}
+                onKeyDown={(event) => onCaptionKeyDown(event, index)}
               />
             </label>
             {item.preparation.kind === "preparing" ? (
@@ -972,9 +1013,10 @@ export function UploadStagingDialog({
       </div>
       <div className="upload-staging-actions">
         <button
+          ref={sendButtonRef}
           className="dialog-button primary upload-staging-send"
           type="button"
-          disabled={!uploadStagingItemsAreSendable(items)}
+          disabled={!sendable}
           onClick={() => void onSendAttachments()}
         >
           {t("upload.sendAttachments")}
