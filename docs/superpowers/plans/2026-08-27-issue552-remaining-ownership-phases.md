@@ -1,6 +1,6 @@
 # Issue #552 Remaining Frontend Ownership Migration — Phased Execution Plan
 
-Status: Phase 0 merged; Phase 1 #708 implemented on its reviewed branch pending final verification/review/merge. Later phases remain unauthorized by this document alone.
+Status: Phases 0 and 1 (#708, PR #710) merged. Phase 2A design is pending independent review; later implementation remains unauthorized by this document alone.
 
 Phase 0 base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`. Phase 1 #708 insertion base: `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
@@ -71,6 +71,8 @@ This phase is independent of adapter isolation, ACK retry, App request refs and 
 This phase improves dependency direction and future frontend portability. It does not count as a semantic migration by itself.
 
 ### Phase 2A — Neutral `DesktopApi` contract
+
+Task-level design: `2026-08-28-issue552-neutral-desktop-api-contract.md`.
 
 **One PR.**
 
