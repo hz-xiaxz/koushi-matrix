@@ -1,6 +1,6 @@
 # Issue #552 Remaining Frontend Ownership Migration — Phased Execution Plan
 
-Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), 2B1–2B4 (PRs #712–#715), 3 (PR #716), 4.1 (PR #720), 4.2 (PR #721), 4.3a (PR #722), 4.3b (PR #723), 4.3c (PR #724), 4.3d (PR #726), 4.3e (PR #727), 4.4 (PR #728), 5A (PR #729), and 5B (PR #731) merged. Phase 6 is implemented, locally verified and approved by exact-final-diff review, pending PR/CI; Phase 7 remains.
+Status: Phases 0–6 are merged through PR #734; CI-stability PRs #733/#735 are also merged. Phase 7 final inventory/acceptance audit is locally verified and approved by exact-final-diff review against `origin/main` `ca9dc74529655b0eeba8e7b1babcbfc333d0b8c3`, pending PR/CI, merge and #552 closure.
 
 Phase 0 base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`. Phase 1 #708 insertion base: `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
@@ -226,6 +226,8 @@ Keep IPC-only DTOs in `src-tauri`. Move a presentation DTO into shared Rust only
 **Exit:** a test starts Core, sends a command, observes event/snapshot convergence, and shuts down cleanly with no Tauri type in the contract.
 
 ## Phase 7 — Epic completion audit
+
+Task-level audit: `2026-08-29-issue552-final-acceptance-audit.md`.
 
 **Deliverable:** one documentation/closure PR or the final semantic PR’s documentation section.
 
