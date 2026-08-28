@@ -1736,6 +1736,13 @@ duplicate-share helper has no production caller; its default-off builder flag is
 consumed only by the testing seam until a separately reviewed caller is restored.
 Neither path is React or reducer presentation state.
 
+The normal send terminal does not enter a post-send re-share state machine.
+Core must not schedule fixed-delay forced shares of the current Megolm ratchet
+after `SendCompleted`; doing so can turn an initial index-0 delivery failure
+into a receiver whose first known index is a later value without recovering the
+first event. Manual room-key debug operations remain separately admitted and
+fenced explicit commands.
+
 ```mermaid
 stateDiagram-v2
     [*] --> InitialSharing

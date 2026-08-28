@@ -1401,6 +1401,15 @@ environment, or product setting controls them. A disabled path creates no fence,
 timer, task, claim, wake listener, duplicate to-device request, or terminal
 diagnostic.
 
+Normal sends do not schedule a Koushi-owned post-send room-key re-share. In
+particular, Core does not force-share the current ratchet at fixed delays after
+the first event: Element-compatible SDK pre-share, recipient key requests,
+verified-device gossip, and backup recovery remain the production mechanisms.
+Manual encryption-debug commands remain explicit user actions and are not part
+of the send lifecycle. Homeserver acceptance of the initial `m.room_key` is
+diagnostic evidence only; a later current-index share must not be presented as
+recovery of a missing earlier index.
+
 When #523 is explicitly enabled, its first-event fence is runtime-local and
 bounded. It permits at most one additional event-driven attempt after a matching
 device-key, one-time/fallback-key, or Olm recovery update, then settles or
