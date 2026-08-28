@@ -9,19 +9,13 @@ import {
   useRef,
   useState
 } from "react";
-// The remaining direct Tauri event import is deferred to Phase 2B4. The
-// disable keeps any additional platform import visible to the boundary rule.
-// eslint-disable-next-line no-restricted-imports
-import { listen } from "@tauri-apps/api/event";
 
 import { api } from "./backend/appRuntime";
+import { desktopEventPort } from "./backend/desktopEventRuntime";
 import { openExternalHttpUrl } from "./backend/linkMediaRuntime";
 import { isTauriRuntime } from "./backend/runtimeEnvironment";
 import { windowDialogPort } from "./backend/windowDialogRuntime";
-import {
-  CORE_EVENT_NAME,
-  tauriTimelineTransport
-} from "./backend/tauriTimelineTransport";
+import { tauriTimelineTransport } from "./backend/tauriTimelineTransport";
 import {
   classifySubmissionFailure,
   createComposerSubmissionControllerRegistry,
@@ -328,8 +322,6 @@ function spaceInviteCancellationAvailabilityReasonForSnapshot(
 }
 
 const DEFAULT_HOMESERVER = "https://matrix.org";
-const MENU_EVENT_NAME = "koushi-desktop://menu";
-const STATE_EVENT_NAME = "koushi-desktop://state";
 const STATE_EVENT_REFRESH_DEBOUNCE_MS = 250;
 declare global {
   interface Window {
@@ -1717,11 +1709,11 @@ export function App() {
     // send status while a WebDriver-driven send is pending.
     let disposed = false;
     let unlisten: (() => void) | null = null;
-    void listen<CoreEventPayload>(CORE_EVENT_NAME, (event) => {
+    void desktopEventPort.listenCoreEvents((payload) => {
       if (!qaSendPending.current) {
         return;
       }
-      const eventStatus = qaSendCompletionStatusFromCoreEvent(event.payload);
+      const eventStatus = qaSendCompletionStatusFromCoreEvent(payload);
       if (eventStatus) {
         qaSendPending.current = false;
         setQaSendStatus(eventStatus);
@@ -1763,8 +1755,8 @@ export function App() {
 
     let disposed = false;
     let unlisten: (() => void) | null = null;
-    void listen<string>(MENU_EVENT_NAME, (event) => {
-      const shortcutId = shortcutActionFromMenuPayload(event.payload);
+    void desktopEventPort.listenMenuActions((payload) => {
+      const shortcutId = shortcutActionFromMenuPayload(payload);
       if (shortcutId) {
         handleShortcutAction(shortcutId);
       }
@@ -1802,11 +1794,11 @@ export function App() {
         void refresh();
       }
     });
-    void listen<CoreEventPayload>(CORE_EVENT_NAME, (event) => {
-      if (event.payload.kind !== "StateDelta") {
+    void desktopEventPort.listenCoreEvents((payload) => {
+      if (payload.kind !== "StateDelta") {
         return;
       }
-      deltaBatcher.enqueue(event.payload);
+      deltaBatcher.enqueue(payload);
     }).then((dispose) => {
       if (disposed) {
         dispose();
@@ -1999,7 +1991,7 @@ export function App() {
 
     let disposed = false;
     let unlisten: (() => void) | null = null;
-    void listen<string>(STATE_EVENT_NAME, () => {
+    void desktopEventPort.listenStateChanges(() => {
       if (stateRefreshTimerRef.current !== null) {
         return;
       }

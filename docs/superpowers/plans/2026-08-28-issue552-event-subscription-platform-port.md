@@ -106,6 +106,14 @@ No appRuntime, domain, component, Rust, IPC, DTO, generated artifact, CSS, depen
 
 - Round 1, `reviewer-flash`: `Correct-to-merge` with four Minor precision findings. The concrete runtime import target, App.test/ESLint six-module allowlist gate, RED ordering for source contracts, and exact QA regex are incorporated above; a focused Round 2 confirms them before implementation.
 
+## Implementation evidence
+
+- RED: runtime composition failed because `desktopEventRuntime` did not exist; App/timeline/Linux-GUI source contracts failed on all four old raw-listener/import paths before production edits.
+- Focused runtime/Tauri adapter/App/timeline/Linux-GUI tests: 4 files / 125 tests passed.
+- Full Vitest: 98 files / 1480 tests passed.
+- Playwright: 263 tests passed.
+- Typecheck, lint/IME/docs, production build, Tauri/domain guards, SDK-submodule check, secret scan, and `git diff --check` passed.
+
 ## Acceptance
 
 - App and all neutral/domain/app-hook layers import no Tauri package;

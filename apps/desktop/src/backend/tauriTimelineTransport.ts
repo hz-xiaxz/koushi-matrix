@@ -1,13 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 
+import { desktopEventPort } from "./desktopEventRuntime";
 import { saveReadyMediaFile } from "./linkMediaRuntime";
 import { isTauriRuntime } from "./runtimeEnvironment";
 import type { TimelineTransport } from "../components/timeline/TimelineTransport";
 import type { CoreEventPayload, TimelineGapId, TimelineKey } from "../domain/coreEvents";
 import type { ComposerDocument, TimelineScrollAnchor } from "../domain/types";
 
-const CORE_EVENT_NAME = "koushi-desktop://event";
 let tauriCoreEventListenerReady: Promise<void> = Promise.resolve();
 
 /**
@@ -21,9 +20,7 @@ const tauriTimelineTransport: TimelineTransport | null = isTauriRuntime()
       listenCoreEvents(listener: (payload: CoreEventPayload) => void) {
         let disposed = false;
         let unlisten: (() => void) | null = null;
-        tauriCoreEventListenerReady = listen<CoreEventPayload>(CORE_EVENT_NAME, (event) => {
-          listener(event.payload);
-        }).then((dispose) => {
+        tauriCoreEventListenerReady = desktopEventPort.listenCoreEvents(listener).then((dispose) => {
           if (disposed) {
             dispose();
           } else {
@@ -163,4 +160,4 @@ const tauriTimelineTransport: TimelineTransport | null = isTauriRuntime()
     }
   : null;
 
-export { CORE_EVENT_NAME, tauriTimelineTransport };
+export { tauriTimelineTransport };
