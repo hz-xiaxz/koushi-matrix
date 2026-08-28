@@ -917,7 +917,6 @@ impl TimelineManagerActor {
                 event_id: completion.event_id,
             }));
             self.spawn_post_send_encryption_diagnostics(&key, diagnostic_correlation);
-            self.schedule_room_key_reshares(&key).await;
         }
         if let Some(failure) = failure {
             self.emit(CoreEvent::OperationFailed {
@@ -4179,8 +4178,9 @@ mod tests {
         assert!(
             manager_delivery_source.contains("deliver_submission_terminal_action")
                 && manager_delivery_source.contains(".await")
-                && !manager_delivery_source.contains("try_send"),
-            "the stable manager must wait for reducer capacity before completion emission"
+                && !manager_delivery_source.contains("try_send")
+                && !manager_delivery_source.contains("schedule_room_key_reshares"),
+            "the stable manager must wait for reducer capacity and must not schedule Koushi-only post-send room-key reshares"
         );
         let manager_run_source = item_body(manager, "async fn run(mut self)");
         assert!(

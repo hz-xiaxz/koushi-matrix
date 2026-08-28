@@ -253,6 +253,11 @@ Rules:
    expose only aliases, closed states, count/time
    buckets, and unchanged-index facts—not identifiers, keys, sync positions,
    request data, content, or raw errors.
+   A successful send must not schedule fixed-delay forced re-shares of the
+   current outbound Megolm ratchet. Normal delivery and recovery use the
+   Element-compatible SDK pre-share, key-request/gossip, and backup paths;
+   manual encryption-debug shares remain explicit commands outside the send
+   lifecycle.
    Every crypto-capable authentication flow is persistent-store-first. Core
    journals a fresh encrypted local store and generated Matrix device ID before
    password/OAuth/SSO authorization, retains pre-auth and bound-tokenless states
