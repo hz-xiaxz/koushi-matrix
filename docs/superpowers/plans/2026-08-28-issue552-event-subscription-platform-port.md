@@ -1,6 +1,6 @@
 # Issue #552 Phase 2B4 — Event subscription platform port
 
-Status: design pending independent review. Implementation is unauthorized until `reviewer-flash` returns `Correct-to-merge`.
+Status: implemented and fully verified on the approved branch; pending final exact-diff re-review and merge.
 
 ## Scope and invariant
 

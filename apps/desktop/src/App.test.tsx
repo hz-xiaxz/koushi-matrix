@@ -1393,9 +1393,12 @@ describe("ContextualRightPanel", () => {
     expect(listenerSource.match(/\.then\(\(dispose\)/g)).toHaveLength(3);
     expect(listenerSource.match(/unlisten\?\.\(\)/g)).toHaveLength(3);
     expect(listenerSource).toContain("deltaBatcher.dispose()");
+    expect(stateStart).toBeGreaterThanOrEqual(0);
+    expect(stateEnd).toBeGreaterThan(stateStart);
     expect(stateSource).toContain("stateRefreshTimerRef.current");
     expect(stateSource).toContain("window.clearTimeout");
     expect(stateSource).toContain("unlisten?.()");
+    expect(source.slice(stateEnd, stateEnd + 10)).toContain("}, []);");
   });
 
   test("Tauri timeline ensure waits for the webview CoreEvent listener registration", () => {
