@@ -13,7 +13,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 dirs = "6"
-keyring = { version = "3", features = ["apple-native", "windows-native"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 koushi-core = { path = "../../../crates/koushi-core" }
 koushi-diagnostics = { path = "../../../crates/koushi-diagnostics" }
 koushi-key = { path = "../../../crates/koushi-key" }

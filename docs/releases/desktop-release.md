@@ -35,6 +35,9 @@ Claude Code and OpenCode have equivalent discovery entry points under
   an Intel Mac artifact.
 - The Windows x64 NSIS installer remains explicitly unsigned until a Windows
   certificate and signing gate are approved.
+- The Linux x64 AppImage, deb, and RPM packages are unsigned; users verify
+  the adjacent SHA-256 files. Credentials use the freedesktop Secret Service
+  (GNOME Keyring / KWallet) via the `koushi-desktop` service.
 - High or critical npm vulnerabilities stop the release.
 - Never expose GitHub Environment secrets or copy signing material into the
   repository, logs, release notes, or artifacts.
@@ -78,8 +81,9 @@ The workflow:
 4. builds the macOS arm64 DMG using the protected `release-macos` Environment;
 5. verifies signatures, notarization tickets, stapling, and Gatekeeper trust;
 6. builds the unsigned Windows x64 NSIS trial installer;
-7. creates SHA-256 files for every installer;
-8. waits for all platform jobs, verifies the downloaded checksums, creates a
+7. builds the unsigned Linux x64 AppImage, deb, and RPM packages;
+8. creates SHA-256 files for every installer;
+9. waits for all platform jobs, verifies the downloaded checksums, creates a
    hidden draft Release, uploads every artifact, and finally publishes it.
 
 No public partial release is created when a platform build or verification gate
@@ -101,16 +105,22 @@ gh release view "v<version>" \
   --json url,isDraft,isPrerelease,tagName,targetCommitish,assets
 ```
 
-Confirm that the release contains both installers and their `.sha256`
-files:
+Confirm that the release contains every installer and its `.sha256`
+file:
 
 - `Koushi-macos-arm64.dmg`
 - `Koushi-windows-x64-unsigned.exe`
+- `Koushi-linux-x64.AppImage`
+- `Koushi-linux-x64.deb`
+- `Koushi-linux-x64.rpm`
 
 Stable download links:
 
 - <https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-macos-arm64.dmg>
 - <https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-windows-x64-unsigned.exe>
+- <https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-linux-x64.AppImage>
+- <https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-linux-x64.deb>
+- <https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-linux-x64.rpm>
 
 GitHub's `releases/latest` links select the latest full release, not a
 prerelease. Inspect a prerelease through its versioned Release page.

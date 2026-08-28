@@ -22,6 +22,9 @@ after all platform builds succeed:
 
 - [macOS Apple Silicon DMG](https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-macos-arm64.dmg)
 - [Windows x64 trial installer](https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-windows-x64-unsigned.exe) — currently unsigned; Windows SmartScreen may warn
+- [Linux x64 AppImage](https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-linux-x64.AppImage)
+- [Linux x64 deb package](https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-linux-x64.deb)
+- [Linux x64 RPM package](https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-linux-x64.rpm)
 - [Latest release and checksums](https://github.com/shinaoka/koushi-matrix/releases/latest)
 - [Maintainer release runbook](docs/releases/desktop-release.md)
 
@@ -125,6 +128,23 @@ The script prints the generated `.dmg` artifact path when the build completes.
 Installed-app data is stored under
 `~/Library/Application Support/koushi-desktop`; credentials use the macOS
 Keychain service `koushi-desktop`.
+
+### Build Linux packages
+
+On Linux, build the unsigned AppImage and deb packages through the desktop
+package:
+
+```bash
+npm --prefix apps/desktop run build:linux
+```
+
+The script prints the generated artifact paths and SHA-256 checksums when the
+build completes. Bundling requires the Tauri Linux system dependencies
+(`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`,
+`librsvg2-dev`, `libssl-dev`, `libdbus-1-dev`, `libxdo-dev`, `patchelf`, and
+`pkg-config` on Debian/Ubuntu). Installed-app data is stored under
+`~/.local/share/koushi-desktop`; credentials use the freedesktop Secret
+Service (GNOME Keyring / KWallet) with the service name `koushi-desktop`.
 
 ## Open The Desktop Shell
 

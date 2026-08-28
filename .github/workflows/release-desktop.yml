@@ -274,9 +274,94 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  build-linux:
+    name: Linux x64 AppImage, deb, and RPM packages
+    needs: prepare
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libdbus-1-dev \
+            libxdo-dev \
+            patchelf \
+            pkg-config
+
+      - name: Install Rust toolchain (1.96.0)
+        uses: dtolnay/rust-toolchain@01ba1edad32c6f80dbcce879d3e0fa5a00b2a84e # 1.96.0
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+        with:
+          workspaces: . -> target
+          shared-key: koushi-release-linux-x64
+          cache-on-failure: true
+          cache-all-crates: true
+          cache-workspace-crates: true
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: npm audit (lockfile, before install)
+        run: npm --prefix apps/desktop audit --package-lock-only --audit-level=high
+      - name: npm ci
+        run: npm --prefix apps/desktop ci
+      - name: npm audit (full)
+        run: npm --prefix apps/desktop audit --audit-level=high
+      - name: npm audit (runtime deps only)
+        run: npm --prefix apps/desktop audit --omit=dev --audit-level=high
+
+      - name: Submodule sync guard
+        run: node scripts/check-sdk-submodule.mjs
+
+      - name: Build Linux AppImage, deb, and RPM packages
+        run: npm --prefix apps/desktop run build:linux
+
+      - name: Stage Linux artifacts and checksums
+        run: |
+          bundle_root="target/x86_64-unknown-linux-gnu/release/bundle"
+          declare -A artifacts=(
+            [appimage]="*.AppImage:Koushi-linux-x64.AppImage"
+            [deb]="*.deb:Koushi-linux-x64.deb"
+            [rpm]="*.rpm:Koushi-linux-x64.rpm"
+          )
+          mkdir -p release-assets
+          for dir in "${!artifacts[@]}"; do
+            pattern="${artifacts[$dir]%%:*}"
+            asset="${artifacts[$dir]##*:}"
+            count="$(find "$bundle_root/$dir" -maxdepth 1 -name "$pattern" -print | wc -l | tr -d ' ')"
+            [[ "$count" == "1" ]]
+            cp "$(find "$bundle_root/$dir" -maxdepth 1 -name "$pattern" -print)" "release-assets/$asset"
+            (cd release-assets && sha256sum "$asset" > "$asset.sha256")
+          done
+
+      - name: Upload Linux release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-linux-x64
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
   publish-release:
     name: Publish GitHub Release
-    needs: [prepare, build-macos, build-windows]
+    needs: [prepare, build-macos, build-windows, build-linux]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
