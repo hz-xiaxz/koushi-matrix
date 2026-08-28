@@ -1,6 +1,6 @@
 # Issue #552 Remaining Frontend Ownership Migration — Phased Execution Plan
 
-Status: Phases 0, 1 (#708 / PR #710), and 2A (PR #711) merged. Phase 2B1 is implemented on its approved branch pending final verification/review/merge; later phases remain unauthorized by this document alone.
+Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), and 2B1 (PR #712) merged. Phase 2B2 design is pending independent review; later implementation remains unauthorized by this document alone.
 
 Phase 0 base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`. Phase 1 #708 insertion base: `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
@@ -87,14 +87,17 @@ Task-level design: `2026-08-28-issue552-neutral-desktop-api-contract.md`.
 
 ### Phase 2B — Platform ports at existing seams
 
-Phase 2B1 task-level design: `2026-08-28-issue552-link-media-platform-ports.md`.
+Task-level designs:
+
+- Phase 2B1: `2026-08-28-issue552-link-media-platform-ports.md`.
+- Phase 2B2: `2026-08-28-issue552-desktop-attention-platform-port.md`.
 
 **One PR per independently testable port family; do not bundle all families.**
 
 Candidate order:
 
 1. external links and media URL conversion/save — **implemented in Phase 2B1:** one neutral three-operation port, browser/Tauri implementations, leaf runtime predicate, migrated callers and domain import guard; no IPC/DTO/product-semantic change;
-2. native notification/attention operations;
+2. native notification/attention operations — Phase 2B2 design pending review;
 3. window/dialog operations;
 4. Core/state/menu event subscriptions.
 
