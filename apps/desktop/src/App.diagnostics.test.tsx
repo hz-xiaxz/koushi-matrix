@@ -388,14 +388,22 @@ describe("App diagnostics lifecycle", () => {
       await second.promise;
     });
     const dialog = await screen.findByRole("dialog", { name: "Diagnostics" });
+    expect(dialog.textContent).toContain("newest-runtime");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Close {title}" }));
+    });
+    expect(screen.queryByRole("dialog", { name: "Diagnostics" })).toBeNull();
 
     await act(async () => {
       first.reject(new Error("stale failure"));
       await first.promise.catch(() => undefined);
     });
-    expect(dialog.textContent).toContain("newest-runtime");
-    expect(dialog.textContent).not.toContain("kind=unavailable");
-    expect(dialog.textContent).not.toContain("stale failure");
+    expect(screen.queryByRole("dialog", { name: "Diagnostics" })).toBeNull();
+
+    const reopened = await openDiagnostics();
+    expect(getDiagnosticSnapshot).toHaveBeenCalledTimes(3);
+    expect(reopened.textContent).not.toContain("kind=unavailable");
+    expect(reopened.textContent).not.toContain("stale failure");
   });
 
   test("records manual room-key reshare failure with fixed private-data-free tokens", async () => {
@@ -572,7 +580,7 @@ describe("App diagnostics lifecycle", () => {
 });
 
 describe("diagnostics runtime source contract", () => {
-  test("contains no verbose diagnostics runtime gate or Vite variable", async () => {
+  test("keeps diagnostics runtime source private and renderer-local", async () => {
     const { readFile } = await import("node:fs/promises");
     const files = ["./App.tsx", "./domain/diagnostics.ts", "./vite-env.d.ts", "./app/qaDiagnostics.ts"];
     const contents = await Promise.all(files.map(async (file) => [file, await readFile(new URL(file, import.meta.url), "utf8")] as const));
@@ -581,5 +589,28 @@ describe("diagnostics runtime source contract", () => {
       expect(source, file).not.toContain("VITE_KOUSHI_VERBOSE_DIAGNOSTICS");
       expect(source, file).not.toContain("verboseDiagnosticsEnabled");
     }
+
+    const source = contents.find(([file]) => file === "./App.tsx")?.[1];
+    if (!source) {
+      throw new Error("expected App source");
+    }
+    const openStart = source.indexOf("async function openDiagnostics()");
+    const openEnd = source.indexOf("async function retrySecureBackupInspection()", openStart);
+    expect(openStart).toBeGreaterThanOrEqual(0);
+    expect(openEnd).toBeGreaterThan(openStart);
+    const openSource = source.slice(openStart, openEnd);
+
+    expect(openSource).toContain("++diagnosticsOpenIntentEpochRef.current");
+    expect(openSource.match(/diagnosticsOpenIntentEpochRef\.current/g)).toHaveLength(3);
+    expect(openSource).toContain("setRuntimeDiagnosticSnapshot(nextSnapshot)");
+    expect(openSource).toContain("setDiagnosticsOpen(true)");
+    expect(openSource).not.toContain("setSnapshot(");
+    expect(openSource).not.toContain("setAppStoreSnapshot(");
+
+    const copyStart = source.indexOf("async function copyDiagnostics(");
+    const copyEnd = source.indexOf("\n  function ", copyStart);
+    const copySource = source.slice(copyStart, copyEnd);
+    expect(copySource).toContain("api.getDiagnosticSnapshot()");
+    expect(copySource).not.toContain("diagnosticsOpenIntentEpochRef");
   });
 });

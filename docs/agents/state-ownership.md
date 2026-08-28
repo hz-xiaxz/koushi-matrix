@@ -118,6 +118,17 @@ carry tokens and counts only. The full prohibited list is in
 - `koushi-sdk` maps SDK cross-signing/backup states into private-data-free
   `koushi-state` DTOs and redacts SDK error details in `Debug`.
 - Local aliases are private "only I see this" data.
+- Rust/Tauri own diagnostic records, bounded retention, dropped counts and the
+  privacy-safe `FrontendDiagnosticLogSnapshot`. App's page-lifetime
+  `diagnosticsOpenIntentEpochRef` is renderer presentation only: it orders
+  overlapping clicks that may open one dialog because the diagnostic DTO is
+  outside AppState/appStore and carries no request/state generation. Both stale
+  success and stale failure must return before replacing the runtime snapshot,
+  appending the fixed unavailable token or reopening a later-closed dialog. The
+  epoch deliberately survives account replacement because the Rust DTO is
+  global/runtime and contains no private account values; the report composes it
+  with current AppState. `copyDiagnostics` is a separate stateless clipboard
+  action and does not use the dialog epoch.
 - `build_upload_media_command` Debug output redacts filenames, captions, media
   bytes, and thumbnail bytes.
 
