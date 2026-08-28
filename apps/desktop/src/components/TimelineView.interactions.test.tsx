@@ -3,10 +3,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { openExternalHttpUrl } from "../domain/externalLinks";
+import { openExternalHttpUrl } from "../backend/linkMediaRuntime";
 
-vi.mock("../domain/externalLinks", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../domain/externalLinks")>()),
+vi.mock("../backend/linkMediaRuntime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../backend/linkMediaRuntime")>()),
   openExternalHttpUrl: vi.fn(async () => undefined)
 }));
 

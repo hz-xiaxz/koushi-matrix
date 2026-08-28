@@ -31,7 +31,7 @@ import { AppearanceControls } from "./user-settings/AppearanceControls";
 import { DetailRow } from "./user-settings/SettingsStatusPrimitives";
 import type { DisplayDensity } from "../app/localPresentation";
 import type { ShortcutLabelProfile } from "../domain/shortcuts";
-import { mediaSourceUrl } from "../domain/mediaUrl";
+import { mediaSourceUrl } from "../backend/linkMediaRuntime";
 import type {
   AccountManagementCapabilities,
   AccountManagementState,

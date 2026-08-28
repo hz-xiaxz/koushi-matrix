@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createBrowserFakeApi } from "./browserFakeApi";
 import { TauriDesktopApi } from "./client";
 import type { DesktopApi } from "./desktopApi";
-import { isTauriRuntime } from "./tauriTimelineTransport";
+import { isTauriRuntime } from "./runtimeEnvironment";
 
 export const api: DesktopApi = isTauriRuntime()
   ? new TauriDesktopApi()

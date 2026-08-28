@@ -13,7 +13,7 @@ async function loadRuntime(tauriRuntime: boolean) {
 
   vi.doMock("./client", () => ({ TauriDesktopApi }));
   vi.doMock("./browserFakeApi", () => ({ createBrowserFakeApi }));
-  vi.doMock("./tauriTimelineTransport", () => ({
+  vi.doMock("./runtimeEnvironment", () => ({
     isTauriRuntime: () => tauriRuntime
   }));
   vi.doMock("@tauri-apps/api/window", () => ({

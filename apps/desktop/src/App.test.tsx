@@ -1287,7 +1287,7 @@ describe("ContextualRightPanel", () => {
       "utf8"
     );
     const transportStart = source.indexOf("const tauriTimelineTransport");
-    const transportEnd = source.indexOf("function safeDownloadFilename", transportStart);
+    const transportEnd = source.indexOf("export {", transportStart);
     const transportBranch = source.slice(transportStart, transportEnd);
 
     expect(transportBranch).toContain("paginate_timeline_backwards");
@@ -1313,7 +1313,7 @@ describe("ContextualRightPanel", () => {
       "utf8"
     );
     const transportStart = source.indexOf("const tauriTimelineTransport");
-    const transportEnd = source.indexOf("function safeDownloadFilename", transportStart);
+    const transportEnd = source.indexOf("export {", transportStart);
     const transportBranch = source.slice(transportStart, transportEnd);
 
     expect(source).toContain("let tauriCoreEventListenerReady");

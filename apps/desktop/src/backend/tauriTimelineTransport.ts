@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 
+import { saveReadyMediaFile } from "./linkMediaRuntime";
+import { isTauriRuntime } from "./runtimeEnvironment";
 import type { TimelineTransport } from "../components/timeline/TimelineTransport";
 import type { CoreEventPayload, TimelineGapId, TimelineKey } from "../domain/coreEvents";
 import type { ComposerDocument, TimelineScrollAnchor } from "../domain/types";
-import { t } from "../i18n/messages";
 
 const CORE_EVENT_NAME = "koushi-desktop://event";
 let tauriCoreEventListenerReady: Promise<void> = Promise.resolve();
@@ -163,34 +163,4 @@ const tauriTimelineTransport: TimelineTransport | null = isTauriRuntime()
     }
   : null;
 
-function safeDownloadFilename(filename: string): string {
-  const trimmed = filename.trim();
-  return (trimmed || "download").replace(/[\\/:*?"<>|]+/g, "_");
-}
-
-async function saveReadyMediaFile(sourceUrl: string, filename: string): Promise<void> {
-  if (!isTauriRuntime()) {
-    return;
-  }
-  const safeFilename = safeDownloadFilename(filename);
-  const defaultPath = await invoke<string>("default_media_save_path", {
-    filename: safeFilename
-  }).catch(() => safeFilename);
-  const selected = await saveDialog({
-    title: t("timeline.downloadMedia", { filename: safeFilename }),
-    defaultPath
-  });
-  if (!selected) {
-    return;
-  }
-  await invoke("save_downloaded_media", {
-    sourceUrl,
-    destinationPath: selected
-  });
-}
-
-function isTauriRuntime(): boolean {
-  return "__TAURI_INTERNALS__" in window;
-}
-
-export { CORE_EVENT_NAME, isTauriRuntime, tauriTimelineTransport };
+export { CORE_EVENT_NAME, tauriTimelineTransport };
