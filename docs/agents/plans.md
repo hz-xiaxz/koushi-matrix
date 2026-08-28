@@ -105,6 +105,18 @@ Phase A is Rust/headless work and comes before Phase B GUI wiring.
 | Window and dialog platform port (#552 Phase 2B3) | [2026-08-28-issue552-window-dialog-platform-port.md](../superpowers/plans/2026-08-28-issue552-window-dialog-platform-port.md) | — |
 | Event subscription platform port (#552 Phase 2B4) | [2026-08-28-issue552-event-subscription-platform-port.md](../superpowers/plans/2026-08-28-issue552-event-subscription-platform-port.md) | — |
 | Timeline acknowledgement delivery ownership (#552 Phase 3) | [2026-08-28-issue552-timeline-acknowledgement-delivery.md](../superpowers/plans/2026-08-28-issue552-timeline-acknowledgement-delivery.md) | — |
+| Room-settings view-fence decision (#552 Phase 4.1) | [2026-08-28-issue552-room-settings-view-fences.md](../superpowers/plans/2026-08-28-issue552-room-settings-view-fences.md) | — |
+| Diagnostics dialog request-fence decision (#552 Phase 4.2) | [2026-08-28-issue552-diagnostics-view-fence.md](../superpowers/plans/2026-08-28-issue552-diagnostics-view-fence.md) | — |
+| Space-member panel demand ownership (#552 Phase 4.3a) | [2026-08-28-issue552-space-member-panel-demand.md](../superpowers/plans/2026-08-28-issue552-space-member-panel-demand.md) | — |
+| Space invite-search lifetime/convergence (#552 Phase 4.3b) | [2026-08-28-issue552-space-invite-search-lifetime.md](../superpowers/plans/2026-08-28-issue552-space-invite-search-lifetime.md) | — |
+| Space-member invite admission ownership (#552 Phase 4.3c) | [2026-08-29-issue552-space-member-invite-admission.md](../superpowers/plans/2026-08-29-issue552-space-member-invite-admission.md) | — |
+| Space invite-cancellation failure epoch (#552 Phase 4.3d) | [2026-08-29-issue552-space-invite-cancel-failure-epoch.md](../superpowers/plans/2026-08-29-issue552-space-invite-cancel-failure-epoch.md) | — |
+| Space-member role failure epoch (#552 Phase 4.3e) | [2026-08-29-issue552-space-member-role-failure-epoch.md](../superpowers/plans/2026-08-29-issue552-space-member-role-failure-epoch.md) | — |
+| Navigation intent epochs (#552 Phase 4.4) | [2026-08-29-issue552-navigation-intent-epochs.md](../superpowers/plans/2026-08-29-issue552-navigation-intent-epochs.md) | — |
+| Alias mutation sequencing ownership (#552 Phase 5A) | [2026-08-29-issue552-alias-mutation-sequencing.md](../superpowers/plans/2026-08-29-issue552-alias-mutation-sequencing.md) | — |
+| Staged-caption mutation sequencing ownership (#552 Phase 5B) | [2026-08-29-issue552-caption-mutation-sequencing.md](../superpowers/plans/2026-08-29-issue552-caption-mutation-sequencing.md) | — |
+| Frontend-neutral Core boundary proof (#552 Phase 6) | [2026-08-29-issue552-frontend-neutral-core-boundary.md](../superpowers/plans/2026-08-29-issue552-frontend-neutral-core-boundary.md) | — |
+| Final acceptance audit (#552 Phase 7) | [2026-08-29-issue552-final-acceptance-audit.md](../superpowers/plans/2026-08-29-issue552-final-acceptance-audit.md) | — |
 | Activity/edit/redaction convergence (#570 umbrella) | [2026-08-23-issue570-redaction-edit-convergence.md](../superpowers/plans/2026-08-23-issue570-redaction-edit-convergence.md) | [2026-08-23-issue570-redaction-edit-convergence.md](../superpowers/plans/2026-08-23-issue570-redaction-edit-convergence.md) |
 | SDK thread relation aggregate (#570 Task A) | [2026-08-23-issue570-sdk-thread-aggregate-spike.md](../superpowers/plans/2026-08-23-issue570-sdk-thread-aggregate-spike.md) | — |
 | Space member role management (#582) | [2026-08-23-issue582-space-member-role-management.md](../superpowers/plans/2026-08-23-issue582-space-member-role-management.md) | [2026-08-23-issue582-space-member-role-management.md](../superpowers/plans/2026-08-23-issue582-space-member-role-management.md) |

@@ -267,6 +267,73 @@ describe("App query ownership leaf", () => {
     expect(screen.queryByText("Stale invite projection")).toBeNull();
   });
 
+  test("does not restore a late room invite query after account replacement", async () => {
+    const api = createBrowserFakeApi();
+    const baseline = await api.getSnapshot();
+    const pending = deferred<DesktopSnapshot>();
+    const stale = inviteSnapshot(baseline, 50, "old", "Old account invite");
+    vi.spyOn(api, "searchInviteTargets").mockReturnValueOnce(pending.promise);
+
+    await openInviteDialog(api);
+    const input = screen.getByRole("textbox", { name: "Name, alias, or Matrix ID" });
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "old" } });
+    });
+    await waitFor(() => expect(api.searchInviteTargets).toHaveBeenCalledTimes(1));
+
+    const replacement = snapshotWithGeneration(baseline, 50);
+    const session = replacement.state.domain.session;
+    if (session.kind !== "ready") {
+      throw new Error("expected ready synthetic session");
+    }
+    replacement.state.domain.session = {
+      ...session,
+      homeserver: "https://second.example.invalid",
+      user_id: "@second:example.invalid",
+      device_id: "SECONDDEVICE"
+    };
+    replacement.state.domain.invite_workflow = {
+      ...replacement.state.domain.invite_workflow!,
+      query: {
+        ...replacement.state.domain.invite_workflow!.query,
+        room_id: null,
+        query: "",
+        candidates: [],
+        explicit_user_id: null
+      }
+    };
+    const { getAppStoreSnapshot, setAppStoreSnapshot } = await import("./domain/appStore");
+    await act(async () => {
+      setAppStoreSnapshot(replacement);
+    });
+    await act(async () => {
+      pending.resolve(stale);
+      await pending.promise;
+    });
+    await flushReact();
+
+    expect(getAppStoreSnapshot()?.state.domain.session.user_id).toBe("@second:example.invalid");
+    expect(getAppStoreSnapshot()?.state.domain.invite_workflow?.query.query).toBe("");
+    expect(screen.queryByText("Old account invite")).toBeNull();
+  });
+
+  test("keeps the room invite dialog usable when query convergence rejects", async () => {
+    const api = createBrowserFakeApi();
+    vi.spyOn(api, "searchInviteTargets").mockRejectedValueOnce(
+      new Error("synthetic invite convergence timeout")
+    );
+
+    await openInviteDialog(api);
+    const input = screen.getByRole("textbox", { name: "Name, alias, or Matrix ID" });
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "timeout" } });
+    });
+    await waitFor(() => expect(api.searchInviteTargets).toHaveBeenCalledTimes(1));
+
+    expect(screen.getByRole("dialog", { name: /Invite people to/ })).toBeTruthy();
+    expect(input).toHaveProperty("value", "timeout");
+  });
+
   test("dispatches every deferred main mention A/B/A query and renders its final Rust projection", async () => {
     const api = createBrowserFakeApi();
     const baseline = await api.getSnapshot();

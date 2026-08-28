@@ -22,6 +22,13 @@ key change and unmount. Pending operations, retries/backoff, correlation,
 session cleanup, SDK subscriptions, and background task ownership remain Rust
 actor state.
 
+A non-Tauri renderer consumes the same public Rust boundary: start `CoreRuntime`,
+attach a connection, allocate connection-scoped request IDs, submit typed
+`CoreCommand`s, observe `CoreEvent`/versioned snapshots, drop consumers, then
+await `CoreRuntime::shutdown`. Tauri-only serde DTO mirrors stay in
+`apps/desktop/src-tauri`; do not move them into Core without a concrete shared
+consumer.
+
 ## Session authentication invalidation
 
 Rust distinguishes an authenticated E2EE trust lock from Matrix authentication
@@ -118,6 +125,17 @@ carry tokens and counts only. The full prohibited list is in
 - `koushi-sdk` maps SDK cross-signing/backup states into private-data-free
   `koushi-state` DTOs and redacts SDK error details in `Debug`.
 - Local aliases are private "only I see this" data.
+- Rust/Tauri own diagnostic records, bounded retention, dropped counts and the
+  privacy-safe `FrontendDiagnosticLogSnapshot`. App's page-lifetime
+  `diagnosticsOpenIntentEpochRef` is renderer presentation only: it orders
+  overlapping clicks that may open one dialog because the diagnostic DTO is
+  outside AppState/appStore and carries no request/state generation. Both stale
+  success and stale failure must return before replacing the runtime snapshot,
+  appending the fixed unavailable token or reopening a later-closed dialog. The
+  epoch deliberately survives account replacement because the Rust DTO is
+  global/runtime and contains no private account values; the report composes it
+  with current AppState. `copyDiagnostics` is a separate stateless clipboard
+  action and does not use the dialog epoch.
 - `build_upload_media_command` Debug output redacts filenames, captions, media
   bytes, and thumbnail bytes.
 
@@ -569,6 +587,16 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   without changing that head. Coalesce wakes and reproject only on invite payload
   or membership changes (plus one lag recovery); do not start another sync owner
   or `RoomListService`.
+- Rust owns invite target queries, candidate/status derivation, scope/history
+  policy and workflow state. Tauri `open/search/close` waits at most two seconds
+  for an exact Rust `InviteWorkflowState` terminal; queue acceptance alone is not
+  convergence. React retains two presentation fences: the mounted Space panel's
+  debounce/candidate-list epoch and one App epoch shared across room-dialog and
+  Space-panel workflow lifetimes. Stale returned promises cannot directly apply a
+  mismatched snapshot or candidate list; Rust StateDelta remains authoritative.
+  Every convergence rejection is caught with fixed private-data-free diagnostics,
+  and Space search resolves `[]` so its spinner cannot stick. Scope/target/invite
+  execution settlement remains a separate audit family.
 
 ## Public directory and Explore
 
@@ -706,7 +734,12 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
 - Local alias GUI affordances dispatch only the typed `set_local_user_alias(user_id, alias)`
   account command. React may own dialog visibility and input draft text,
   including trimming empty input to a clear, but it must not update member rows,
-  DM titles, timeline labels, receipts, or mention candidates locally.
+  DM titles, timeline labels, receipts, or mention candidates locally. The bounded
+  `alias:${userId}` mutation lane is a renderer-specific autosave transport/result
+  owner, not alias state: Tauri returns a pre-terminal snapshot and browser results
+  share one generation, so it serializes started input writes, skips superseded
+  pending writes and applies only the latest result. Rust still exclusively owns
+  durable aliases, `Saving`/failure, reconciliation and every display projection.
 - Room summaries use the same Rust-owned display projection:
   `RoomSummary.display_label` is the sidebar/header/search/forward/space-child
   display value, while `RoomSummary.original_display_label` is the alias-free
@@ -742,6 +775,16 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   or repair permission, setting, or kick/ban/unban state locally. Tauri
   room-management commands wait for correlated `RoomEvent`s and must not call SDK
   wrappers directly.
+- App's room/Space settings request epochs and load markers are renderer-only
+  panel-demand fences, not settings authority. Rust/Core owns each correlated
+  load terminal and the returned settings snapshot, while React must distinguish
+  same-room People/Profile intents (including equal snapshot generations) and
+  suppress duplicate mount-effect dispatch because Rust intentionally projects no
+  panel-open or settings-load Pending state. A rejected effect load may release
+  only its still-current request/target marker; it must not log the raw error,
+  clear a newer same-target demand, or add retry/backoff. Navigation and panel
+  replacement continue to fence completion before the Rust-shaped snapshot enters
+  the monotone appStore.
 - SDK room-setting state events can return before the SDK room cache reflects the
   just-sent state event. The success snapshot must project the submitted setting
   change or wait for a refreshed cache; do not make React patch the visible
@@ -757,6 +800,18 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   the failed `room_management` snapshot; event delivery can lead the connection
   snapshot by one `StateDelta` generation.
 
+## Room and Space navigation intent
+
+- Rust owns every submitted `SelectRoom`/`SelectSpace` command, request terminal,
+  active-room/Space state and projection. React owns only the earlier view intent:
+  `roomNavigationIntentEpochRef` and `spaceNavigationIntentEpochRef` are captured
+  before async composer draining and prevent an older drain, promise or panel
+  follow-up from applying after a newer click. Rust cannot classify an intent that
+  has not yet crossed the command boundary. Keep the epochs separate because room
+  and Space/Home lifetimes have distinct settings/profile and Space-mutation
+  consumers. Do not rename them back to request refs, delete them, merge them into
+  one generic manager or move renderer composer-drain intent into Rust.
+
 ## Space member roles
 
 - `AppState.space_members` is the authoritative Space-member projection. Rust
@@ -765,6 +820,29 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   role operation/failure state. React renders those DTOs and dispatches the
   typed `update_space_member_role` command; it must not derive options from
   role labels, child-room completion, or local permission guesses.
+- The Space-members panel owns one bounded load-demand record and one panel-open
+  intent epoch. The demand key is the full ready account
+  (homeserver/user/device), Space id and Rust generation. It coalesces only the
+  pre-projection gap before Rust's `Loading` request id is visible and retains a
+  loaded marker for a legitimate empty projection. Exact record identity plus
+  full live/returned fences are required before applying or settling; an old
+  account completion cannot mutate or clear a newer demand. Do not restore the
+  former page-lifetime Map/Set or move panel-open intent into Rust. Invite
+  search has separate renderer lifetimes and converged Tauri returns. Invite
+  execution has no frontend latest-request epoch: Rust's first-admitted
+  `Inviting(request_id, Space, user, generation)` operation owns settlement, and
+  App applies only a full-fence matching authoritative snapshot. A rapid
+  duplicate rejection must not suppress the accepted success. Cancellation uses
+  Rust's equivalent first-admitted operation for membership settlement: the
+  renderer captures Space navigation/full fences for success and keeps a
+  separately named epoch only for latest transport-failure presentation. A
+  resolved Rust Failed operation still drives retry UI; non-failed settlement and
+  navigation clear local failure. Role updates use the same split: Rust's
+  first-admitted request owns projected success/failure, Space navigation and full
+  fences gate semantic application, and `spaceMembersRoleFailureEpochRef` owns only
+  current local transport-failure presentation. Panel close/reopen does not reject
+  a valid result; navigation does. Non-failed settlement advances the failure epoch
+  before clearing it so a duplicate rejection cannot outlive accepted success.
 - The Space Members panel may own only confirmation-dialog visibility and DOM
   focus. A select remains on the projected current role until a later Rust
   snapshot projects the requested role; failure/retry leaves the authoritative
@@ -788,7 +866,12 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
 - Selecting a file shows the Rust-owned Upload attachments staging dialog and
   must not invoke `upload_media` until Send. Captions are edited through the
   staging dialog (`TimelinePaneState.staged_uploads[*].caption`), not inferred
-  from the Composer draft.
+  from the Composer draft. Rust exclusively owns staged items, caption DTOs,
+  residency and send content. The bounded main/thread `caption:*` mutation lanes
+  own only mounted-editor intent ordering through the correlated Tauri terminal;
+  their keys include target/item identity and clear/send invalidates them so late
+  results cannot restore removed items. Browser snapshots have no caption revision,
+  so do not delete these lanes without a separately reviewed Rust editor revision.
 - Image upload compression keeps the same split: Rust owns
   `SettingsValues.media.image_upload_compression`, policy
   threshold/target/quality values, original-vs-selected variant metadata,

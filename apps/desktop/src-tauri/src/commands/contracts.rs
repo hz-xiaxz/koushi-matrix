@@ -163,6 +163,10 @@ fn event_wait_loops_resync_on_lag_instead_of_failing_immediately() {
     let source = production_source();
     let waiters = [
         (
+            "async fn wait_for_invite_workflow_snapshot_from",
+            "async fn wait_for_invite_workflow_snapshot",
+        ),
+        (
             "async fn wait_for_logged_in_authenticated",
             "async fn wait_for_auth_changed",
         ),

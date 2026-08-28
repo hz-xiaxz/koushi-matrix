@@ -205,7 +205,12 @@ surfaces, and `docs/upstream/matrix-rust-sdk-feedback.md` is the required ledger
 for every local SDK behavior or API divergence.
 
 GUI, Tauri, CLI, and QA all use the same command/event boundary. There is no
-standalone daemon; the runtime is in-process.
+standalone daemon; the runtime is in-process. The boundary is frontend-neutral:
+public Rust integration evidence starts `CoreRuntime`, attaches independent
+consumers, submits a connection-scoped typed command, observes `CoreEvent` plus
+versioned-snapshot convergence, recovers a lagged consumer from the latest
+snapshot, and awaits ordered shutdown without importing Tauri. Serialized
+`FrontendDesktopSnapshot` mirrors remain adapter-only in `apps/desktop/src-tauri`.
 
 ## Platform Portability
 

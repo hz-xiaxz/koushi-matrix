@@ -2651,6 +2651,77 @@ describe("Timeline item row rendering", () => {
     );
   });
 
+  test("main and thread caption edits retain bounded mounted-editor ordering", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const mainStart = source.indexOf("async function updateStagedUploadCaption(");
+    const mainEnd = source.indexOf("async function selectStagedUploadOutput(", mainStart);
+    const threadStart = source.indexOf("async function updateThreadStagedUploadCaption(");
+    const threadEnd = source.indexOf("async function selectThreadStagedUploadOutput(", threadStart);
+    const mainSource = source.slice(mainStart, mainEnd);
+    const threadSource = source.slice(threadStart, threadEnd);
+
+    expect(mainSource).toContain("applyLatestTextMutationSnapshot(`caption:main:");
+    expect(mainSource).toContain("api.updateStagedUploadCaption(");
+    expect(threadSource).toContain("applyLatestTextMutationSnapshot(`caption:thread:");
+    expect(threadSource).toContain("api.updateStagedUploadCaption(");
+    expect(source.match(/api\.updateStagedUploadCaption\(/g)).toHaveLength(2);
+    expect(source.match(/`caption:main:/g)).toHaveLength(3);
+    expect(source.match(/`caption:thread:/g)).toHaveLength(3);
+    expect(source).toContain("Renderer-owned mounted-editor ordering");
+  });
+
+  test("room and Space settings effects retain renderer-local demand ownership", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const roomEffectStart = source.indexOf('rightPanelMode !== "roomInfo"');
+    const spaceEffectStart = source.indexOf('rightPanelMode !== "spaceInfo"');
+    const nextEffectStart = source.indexOf("\n  useEffect(() => {", spaceEffectStart + 1);
+    const roomEffect = source.slice(roomEffectStart, spaceEffectStart);
+    const spaceEffect = source.slice(spaceEffectStart, nextEffectStart);
+
+    expect(roomEffect).toContain("roomSettingsRequestRef.current !== requestId");
+    expect(roomEffect).toContain("roomSettingsLoadRef.current = null");
+    expect(roomEffect).toContain(".catch(() => {");
+    expect(spaceEffect).toContain("spaceSettingsRequestRef.current !== requestId");
+    expect(spaceEffect).toContain(
+      "const navigationRequestId = spaceNavigationIntentEpochRef.current"
+    );
+    expect(spaceEffect).toContain(
+      "spaceNavigationIntentEpochRef.current !== navigationRequestId"
+    );
+    expect(spaceEffect).toContain("spaceSettingsLoadRef.current = null");
+    expect(spaceEffect).toContain(".catch(() => {");
+
+    const panelModeHelperStart = source.indexOf(
+      "async function setRightPanelModeClosingFocusedContext"
+    );
+    const openSpaceMembersStart = source.indexOf("async function openSpaceMembers");
+    const panelModeHelper = source.slice(panelModeHelperStart, openSpaceMembersStart);
+    const openSpaceMembersEnd = source.indexOf("\n    try {", openSpaceMembersStart);
+    const openSpaceMembersPrelude = source.slice(openSpaceMembersStart, openSpaceMembersEnd);
+    expect(panelModeHelper.match(/spaceSettingsRequestRef\.current \+= 1/g)).toHaveLength(1);
+    expect(openSpaceMembersPrelude).not.toContain("spaceSettingsRequestRef.current += 1");
+    expect(openSpaceMembersPrelude).toContain(
+      'setRightPanelModeClosingFocusedContext(\n      "people"'
+    );
+  });
+
+  test("invite workflow Tauri commands return converged snapshots", () => {
+    const source = readFileSync(
+      new URL("../src-tauri/src/commands/room.rs", import.meta.url),
+      "utf8"
+    );
+    const start = source.indexOf("pub async fn open_invite_workflow");
+    const end = source.indexOf("pub async fn set_invite_scope", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const workflowCommands = source.slice(start, end);
+
+    expect(source).toContain("INVITE_WORKFLOW_CONVERGENCE_TIMEOUT");
+    expect(source).toContain("wait_for_invite_workflow_snapshot");
+    expect(workflowCommands).not.toContain("current_snapshot(state.inner())");
+    expect(workflowCommands.match(/wait_for_invite_workflow_snapshot/g)).toHaveLength(3);
+  });
+
   test("rejected login transport refreshes authoritative gate state without rejecting", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { settleLoginTransport } = await import("./App");
