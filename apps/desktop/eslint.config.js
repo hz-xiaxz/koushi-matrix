@@ -10,9 +10,9 @@
 // 1. src/components/**, src/app/**, and src/App.tsx must not import
 //    @tauri-apps/* directly. The transport boundary is
 //    apps/desktop/src/backend/*. React components/hooks receive neutral ports;
-//    they must not reach Tauri IPC themselves. App.tsx alone has three
-//    grandfathered import lines acknowledged with inline eslint-disable-next-line
-//    no-restricted-imports comments. Any NEW direct import without a disable
+//    they must not reach Tauri IPC themselves. App.tsx has one deferred event
+//    import acknowledged with an inline eslint-disable-next-line
+//    no-restricted-imports comment. Any NEW direct import without a disable
 //    comment will be caught by this rule. Production domain/** is separately
 //    guarded below; domain tests and test/** retain only their mock boundaries.
 //
@@ -81,15 +81,17 @@ export default tseslint.config(
   // @tauri-apps/*. App tests are covered and must mock neutral ports.
   // - src/components/** and src/app/** — zero current violations; any new
   //   import is a bug.
-  // - src/App.tsx        — the 3 existing @tauri-apps lines are acknowledged
-  //   with eslint-disable-next-line no-restricted-imports comments and tracked
-  //   for Phase 2 migration. Any NEW import without a disable comment is caught.
+  // - src/App.tsx — one event import is acknowledged until Phase 2B4.
+  // - src/backend/appRuntime.ts — composition only; concrete platform imports
+  //   belong under src/backend/tauri/.
+  // Any NEW import without a disable comment is caught.
   {
     files: [
       "src/components/**/*.ts",
       "src/components/**/*.tsx",
       "src/app/**/*.ts",
       "src/app/**/*.tsx",
+      "src/backend/appRuntime.ts",
       "src/App.tsx",
     ],
     rules: {

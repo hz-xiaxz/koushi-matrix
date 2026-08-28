@@ -203,6 +203,10 @@ describe("ContextualRightPanel", () => {
 
   test("all user-facing sign-out entry points use native confirmation", () => {
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const appRuntimeSource = readFileSync(
+      new URL("./backend/appRuntime.ts", import.meta.url),
+      "utf8"
+    );
     const confirmationHandler = source
       .split("async function requestLogout()")
       .at(1)
@@ -210,10 +214,45 @@ describe("ContextualRightPanel", () => {
       .at(0);
 
     expect(confirmationHandler).toBeDefined();
-    expect(confirmationHandler).toContain("confirmDialog");
+    expect(confirmationHandler).toContain("windowDialogPort.confirm");
     expect(confirmationHandler).toContain('t("settings.signOutConfirm")');
     expect(confirmationHandler).toContain("await logout()");
     expect(source.match(/void requestLogout\(\)/g)?.length).toBe(4);
+
+    const tauriImportStatements =
+      source.match(/^import\s+[^;]+from\s+["']@tauri-apps\/[^"']+["'];$/gm) ?? [];
+    expect(tauriImportStatements).toEqual([
+      'import { listen } from "@tauri-apps/api/event";'
+    ]);
+    expect(tauriImportStatements.join("\n")).not.toContain("@tauri-apps/api/window");
+    expect(tauriImportStatements.join("\n")).not.toContain("@tauri-apps/plugin-dialog");
+    expect(appRuntimeSource).not.toMatch(/from\s+["']@tauri-apps\//);
+  });
+
+  test("preserves window and key-file dialog guards through the neutral port", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const exportStart = source.indexOf("async function chooseRoomKeyExportDestination");
+    const backupStart = source.indexOf("async function chooseSecureBackupDestination");
+    const importStart = source.indexOf("async function chooseRoomKeyImportSource");
+    const importEnd = source.indexOf("async function bootstrapSecureBackup", importStart);
+    const exportSource = source.slice(exportStart, backupStart);
+    const backupSource = source.slice(backupStart, importStart);
+    const importSource = source.slice(importStart, importEnd);
+
+    expect(exportSource).toContain("if (!isTauriRuntime())");
+    expect(exportSource).toContain("windowDialogPort.saveFile");
+    expect(exportSource).toContain('defaultPath: "koushi-room-keys.txt"');
+    expect(exportSource).toContain("return selected || null");
+    expect(backupSource).toContain("if (!isTauriRuntime())");
+    expect(backupSource).toContain("windowDialogPort.saveFile");
+    expect(backupSource).toContain('defaultPath: "koushi-secure-backup-recovery-key.txt"');
+    expect(importSource).toContain("if (!isTauriRuntime())");
+    expect(importSource).toContain("windowDialogPort.openFile");
+    expect(importSource).toContain("multiple: false");
+    expect(importSource).toContain('fileAccessMode: "scoped"');
+    expect(importSource).toContain('typeof selected === "string" ? selected : null');
+    expect(source).toContain("await windowDialogPort.toggleFullscreen()");
+    expect(source).toContain("windowDialogPort.startDragging().catch(() => undefined)");
   });
 
   test("TimelineItemRow renders reaction pills with accessible labels", () => {
