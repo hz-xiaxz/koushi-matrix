@@ -1,6 +1,6 @@
 # Issue #552 Remaining Frontend Ownership Migration — Phased Execution Plan
 
-Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), 2B1–2B4 (PRs #712–#715), 3 (PR #716), 4.1 (PR #720), 4.2 (PR #721), and 4.3a (PR #722) merged. Phase 4.3b is implemented and locally verified after approved design review, pending exact-final-diff review; later families remain unauthorized by this document alone.
+Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), 2B1–2B4 (PRs #712–#715), 3 (PR #716), 4.1 (PR #720), 4.2 (PR #721), 4.3a (PR #722), and 4.3b (PR #723) merged. Phase 4.3c is implemented and locally verified after approved design review, pending exact-final-diff review; later families remain unauthorized by this document alone.
 
 Phase 0 base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`. Phase 1 #708 insertion base: `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
@@ -166,6 +166,7 @@ Phase 4.1 task-level design: `2026-08-28-issue552-room-settings-view-fences.md`.
 Phase 4.2 task-level design: `2026-08-28-issue552-diagnostics-view-fence.md`.
 Phase 4.3a task-level design: `2026-08-28-issue552-space-member-panel-demand.md`.
 Phase 4.3b task-level design: `2026-08-28-issue552-space-invite-search-lifetime.md`.
+Phase 4.3c task-level design: `2026-08-29-issue552-space-member-invite-admission.md`.
 
 **One family per PR.** Suggested order after fresh recon:
 

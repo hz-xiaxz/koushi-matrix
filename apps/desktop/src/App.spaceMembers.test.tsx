@@ -167,6 +167,7 @@ describe("App Space Members integration", () => {
 
     expect(source).not.toContain("spaceMembersLoadInFlightRef");
     expect(source).not.toContain("spaceMembersLoadedRef");
+    expect(source).not.toContain("spaceMembersInviteRequestRef");
     expect(source).toContain("spaceMembersLoadDemandRef");
     expect(source).toContain("spaceMembersPanelOpenIntentEpochRef");
     const loaderStart = source.indexOf("const ensureSpaceMembersLoaded");
@@ -526,6 +527,49 @@ describe("App Space Members integration", () => {
       "Child-only Member"
     );
     expect(screen.queryByRole("list", { name: "Not in Space" })).toBeNull();
+  });
+
+  test("applies the first Rust-admitted invite when a rapid duplicate is rejected", async () => {
+    const api = createBrowserFakeApi();
+    const first = deferred<DesktopSnapshot>();
+    const second = deferred<DesktopSnapshot>();
+    const inviteUserToSpace = vi
+      .spyOn(api, "inviteUserToSpace")
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const resultApi = createBrowserFakeApi();
+    const success = await resultApi.inviteUserToSpace(
+      "!space-alpha:example.invalid",
+      "@child-only:example.invalid",
+      1
+    );
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+    const { getAppStoreSnapshot } = await import("./domain/appStore");
+    success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    const button = screen.getByRole("button", { name: "Invite to Space" });
+    await act(async () => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+    });
+    await waitFor(() => expect(inviteUserToSpace).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      second.reject(new Error("duplicate request rejected"));
+      await second.promise.catch(() => undefined);
+    });
+    await act(async () => {
+      first.resolve(success);
+      await first.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("list", { name: "Invitation pending" }).textContent).toContain(
+        "Child-only Member"
+      );
+      expect(screen.queryByRole("list", { name: "Not in Space" })).toBeNull();
+    });
   });
 
   test("treats a pending Space invite cancellation as an operation-pending invite state", async () => {

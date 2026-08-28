@@ -803,8 +803,13 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   loaded marker for a legitimate empty projection. Exact record identity plus
   full live/returned fences are required before applying or settling; an old
   account completion cannot mutate or clear a newer demand. Do not restore the
-  former page-lifetime Map/Set or move panel-open intent into Rust. Invite,
-  search, cancel and role epochs remain separate audit families.
+  former page-lifetime Map/Set or move panel-open intent into Rust. Invite
+  search has separate renderer lifetimes and converged Tauri returns. Invite
+  execution has no frontend latest-request epoch: Rust's first-admitted
+  `Inviting(request_id, Space, user, generation)` operation owns settlement, and
+  App applies only a full-fence matching authoritative snapshot. A rapid
+  duplicate rejection must not suppress the accepted success. Cancel and role
+  epochs remain separate audit families because they also guard local failure UI.
 - The Space Members panel may own only confirmation-dialog visibility and DOM
   focus. A select remains on the projected current role until a later Rust
   snapshot projects the requested role; failure/retry leaves the authoritative
