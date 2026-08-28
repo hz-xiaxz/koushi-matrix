@@ -1,6 +1,6 @@
 # Issue #552 Remaining Frontend Ownership Migration — Phased Execution Plan
 
-Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), 2B1–2B4 (PRs #712–#715), 3 (PR #716), and 4.1 (PR #720) merged. Phase 4.2 is implemented and locally verified after approved design review, pending exact-final-diff review; later families remain unauthorized by this document alone.
+Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), 2B1–2B4 (PRs #712–#715), 3 (PR #716), 4.1 (PR #720), and 4.2 (PR #721) merged. Phase 4.3a is implemented and locally verified after approved design review, pending exact-final-diff review; later families remain unauthorized by this document alone.
 
 Phase 0 base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`. Phase 1 #708 insertion base: `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
@@ -164,6 +164,7 @@ React keeps one-shot DOM evidence capture and generation data. Delete `projectio
 
 Phase 4.1 task-level design: `2026-08-28-issue552-room-settings-view-fences.md`.
 Phase 4.2 task-level design: `2026-08-28-issue552-diagnostics-view-fence.md`.
+Phase 4.3a task-level design: `2026-08-28-issue552-space-member-panel-demand.md`.
 
 **One family per PR.** Suggested order after fresh recon:
 

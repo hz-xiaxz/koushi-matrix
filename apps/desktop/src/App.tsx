@@ -241,7 +241,15 @@ type ActivityOpenTrigger = "home_rail" | "activity_sidebar" | "initial_home" | "
 type SpaceMembersOpenTrigger = "sidebar" | "space_info";
 type SpaceMemberInviteTrigger = "inline" | "context" | "search";
 type SpaceMemberCancelTrigger = "inline";
-type SpaceMemberFence = { spaceId: string; generation: number };
+type SpaceMemberFence = {
+  accountOwnerKey: string;
+  spaceId: string;
+  generation: number;
+};
+type SpaceMembersLoadDemand = {
+  key: string;
+  promise: Promise<DesktopSnapshot | null> | null;
+};
 
 function exactRoomSettingsForRoom(
   snapshot: Pick<DesktopSnapshot, "state"> | null,
@@ -257,26 +265,36 @@ function exactRoomSettingsForRoom(
     : null;
 }
 
-function spaceMembersFenceForSnapshot(
-  snapshot: Pick<DesktopSnapshot, "state"> | null
-): SpaceMemberFence | null {
+function spaceMembersFenceForSnapshot(snapshot: DesktopSnapshot | null): SpaceMemberFence | null {
+  const account = readyComposerDraftAccountOwner(snapshot);
   const spaceId = snapshot?.state.ui.navigation.active_space_id;
   const members = snapshot?.state.domain.space_members;
-  if (!spaceId || !members || members.selected_space_id !== spaceId) {
+  if (!account || !spaceId || !members || members.selected_space_id !== spaceId) {
     return null;
   }
-  return { spaceId, generation: members.generation };
+  return {
+    accountOwnerKey: composerDraftAccountOwnerKey(account),
+    spaceId,
+    generation: members.generation
+  };
 }
 
 function spaceMembersSnapshotMatches(
-  snapshot: Pick<DesktopSnapshot, "state"> | null,
+  snapshot: DesktopSnapshot | null,
   fence: SpaceMemberFence
 ): boolean {
+  const account = readyComposerDraftAccountOwner(snapshot);
   return (
+    account !== null &&
+    composerDraftAccountOwnerKey(account) === fence.accountOwnerKey &&
     snapshot?.state.ui.navigation.active_space_id === fence.spaceId &&
     snapshot.state.domain.space_members.selected_space_id === fence.spaceId &&
     snapshot.state.domain.space_members.generation === fence.generation
   );
+}
+
+function spaceMembersLoadDemandKey(fence: SpaceMemberFence): string {
+  return `${fence.accountOwnerKey}\u0000${fence.spaceId}\u0000${fence.generation}`;
 }
 
 function spaceInviteAvailabilityReasonForSnapshot(
@@ -1141,14 +1159,14 @@ export function App() {
   const spaceSettingsRequestRef = useRef(0);
   const roomNavigationRequestRef = useRef(0);
   const spaceNavigationRequestRef = useRef(0);
-  const spaceMembersOpenRequestRef = useRef(0);
+  // Renderer-only Space-members demand: Rust owns the projection and request/generation
+  // admission; this epoch owns same-target panel intent and the single record coalesces the gap
+  // before Rust's Loading projection arrives. The record is bounded and full-account scoped.
+  const spaceMembersPanelOpenIntentEpochRef = useRef(0);
+  const spaceMembersLoadDemandRef = useRef<SpaceMembersLoadDemand | null>(null);
   const spaceMembersInviteRequestRef = useRef(0);
   const spaceMembersCancelRequestRef = useRef(0);
   const spaceMembersRoleRequestRef = useRef(0);
-  const spaceMembersLoadInFlightRef = useRef<Map<string, Promise<DesktopSnapshot | null>>>(
-    new Map()
-  );
-  const spaceMembersLoadedRef = useRef<Set<string>>(new Set());
   const appTimelineTransport = useMemo<TimelineTransport | null>(() => {
     if (!tauriTimelineTransport) {
       return null;
@@ -1245,42 +1263,45 @@ export function App() {
     });
   }, [appendDiagnosticLog]);
   const ensureSpaceMembersLoaded = useCallback(
-    (spaceId: string, generation: number): Promise<DesktopSnapshot | null> => {
-      const fence = { spaceId, generation };
+    (fence: SpaceMemberFence): Promise<DesktopSnapshot | null> => {
       if (!spaceMembersSnapshotMatches(snapshotRef.current, fence)) {
         return Promise.resolve(null);
       }
 
-      const key = `${spaceId}\u0000${generation}`;
-      const completed = spaceMembersLoadedRef.current;
-      if (completed.has(key)) {
-        return Promise.resolve(snapshotRef.current);
+      const key = spaceMembersLoadDemandKey(fence);
+      const current = spaceMembersLoadDemandRef.current;
+      if (current?.key === key) {
+        return current.promise ?? Promise.resolve(snapshotRef.current);
       }
 
-      const inFlight = spaceMembersLoadInFlightRef.current;
-      const existing = inFlight.get(key);
-      if (existing) {
-        return existing;
-      }
-
-      const request = api.loadSpaceMembers(spaceId, generation).then((nextSnapshot) => {
-        if (
-          !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
-          !spaceMembersSnapshotMatches(nextSnapshot, fence)
-        ) {
-          return null;
+      let demand: SpaceMembersLoadDemand;
+      const request = api
+        .loadSpaceMembers(fence.spaceId, fence.generation)
+        .then((nextSnapshot) => {
+          if (
+            spaceMembersLoadDemandRef.current !== demand ||
+            !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
+            !spaceMembersSnapshotMatches(nextSnapshot, fence)
+          ) {
+            return null;
+          }
+          setSnapshot(nextSnapshot);
+          return nextSnapshot;
+        });
+      demand = { key, promise: request };
+      spaceMembersLoadDemandRef.current = demand;
+      request.then(
+        (nextSnapshot) => {
+          if (spaceMembersLoadDemandRef.current === demand) {
+            spaceMembersLoadDemandRef.current = nextSnapshot ? { key, promise: null } : null;
+          }
+        },
+        () => {
+          if (spaceMembersLoadDemandRef.current === demand) {
+            spaceMembersLoadDemandRef.current = null;
+          }
         }
-        completed.add(key);
-        setSnapshot(nextSnapshot);
-        return nextSnapshot;
-      });
-      inFlight.set(key, request);
-      const clearInFlight = () => {
-        if (inFlight.get(key) === request) {
-          inFlight.delete(key);
-        }
-      };
-      request.then(clearInFlight, clearInFlight);
+      );
       return request;
     },
     [setSnapshot]
@@ -2189,7 +2210,7 @@ export function App() {
       return;
     }
 
-    void ensureSpaceMembersLoaded(fence.spaceId, fence.generation).catch(() => {
+    void ensureSpaceMembersLoaded(fence).catch(() => {
       if (spaceMembersSnapshotMatches(snapshotRef.current, fence)) {
         appendSpaceMembersDiagnosticLog("load outcome=failed");
       }
@@ -2197,6 +2218,10 @@ export function App() {
   }, [
     appendSpaceMembersDiagnosticLog,
     ensureSpaceMembersLoaded,
+    snapshot?.state.domain.session.kind,
+    snapshot?.state.domain.session.homeserver,
+    snapshot?.state.domain.session.user_id,
+    snapshot?.state.domain.session.device_id,
     snapshot?.state.domain.space_members?.generation,
     snapshot?.state.domain.space_members?.selected_space_id,
     snapshot?.state.ui.navigation.active_space_id
@@ -2787,7 +2812,7 @@ export function App() {
     spaceNavigationRequestRef.current += 1;
     spaceSettingsRequestRef.current += 1;
     spaceSettingsLoadRef.current = null;
-    spaceMembersOpenRequestRef.current += 1;
+    spaceMembersPanelOpenIntentEpochRef.current += 1;
     spaceMembersInviteRequestRef.current += 1;
     spaceMembersCancelRequestRef.current += 1;
     setPeoplePanelScope(null);
@@ -4696,7 +4721,7 @@ export function App() {
     fence: SpaceMemberFence
   ): boolean {
     return (
-      spaceMembersOpenRequestRef.current === requestId &&
+      spaceMembersPanelOpenIntentEpochRef.current === requestId &&
       spaceMembersSnapshotMatches(snapshotRef.current, fence)
     );
   }
@@ -4706,7 +4731,7 @@ export function App() {
     if (!fence) {
       return;
     }
-    const requestId = ++spaceMembersOpenRequestRef.current;
+    const requestId = ++spaceMembersPanelOpenIntentEpochRef.current;
     spaceSettingsLoadRef.current = null;
     appendSpaceMembersDiagnosticLog(`open trigger=${trigger}`);
     setPeoplePanelScope({ kind: "space", spaceId: fence.spaceId });
@@ -4729,7 +4754,7 @@ export function App() {
       }
       setSnapshot(settingsSnapshot);
 
-      const membersSnapshot = await ensureSpaceMembersLoaded(fence.spaceId, fence.generation);
+      const membersSnapshot = await ensureSpaceMembersLoaded(fence);
       if (
         !spaceMemberRequestStillCurrent(requestId, fence) ||
         !membersSnapshot ||
@@ -4935,8 +4960,11 @@ export function App() {
     if (!fence || operation?.kind !== "roleUpdateFailed") {
       return;
     }
-    spaceMembersLoadedRef.current.delete(`${fence.spaceId}\u0000${fence.generation}`);
-    await ensureSpaceMembersLoaded(fence.spaceId, fence.generation);
+    const key = spaceMembersLoadDemandKey(fence);
+    if (spaceMembersLoadDemandRef.current?.key === key) {
+      spaceMembersLoadDemandRef.current = null;
+    }
+    await ensureSpaceMembersLoaded(fence);
   }
 
   async function updateSpaceMemberRole(
@@ -5075,12 +5103,13 @@ export function App() {
 
     const { target } = activeMenu;
     if (target.kind === "spaceMember") {
-      if (actionId === "inviteUserToSpace") {
-        void inviteUserToSpace(
-          target.userId,
-          "context",
-          { spaceId: target.spaceId, generation: target.generation }
-        );
+      const fence = spaceMembersFenceForSnapshot(snapshotRef.current);
+      if (
+        actionId === "inviteUserToSpace" &&
+        fence?.spaceId === target.spaceId &&
+        fence.generation === target.generation
+      ) {
+        void inviteUserToSpace(target.userId, "context", fence);
       }
       return;
     }

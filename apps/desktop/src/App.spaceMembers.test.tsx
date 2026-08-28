@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -94,6 +96,92 @@ describe("App Space Members integration", () => {
         1
       );
     });
+  });
+
+  test("reloads the same Space generation for a replacement account and rejects the old result", async () => {
+    const api = createBrowserFakeApi();
+    const initial = await api.getSnapshot();
+    const first = deferred<DesktopSnapshot>();
+    const second = deferred<DesktopSnapshot>();
+    const loadSpaceMembers = vi
+      .spyOn(api, "loadSpaceMembers")
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const replacement = structuredClone(initial);
+    const resultGeneration = (initial.state_generation ?? 0) + 1;
+    replacement.state_generation = resultGeneration;
+    const initialSession = replacement.state.domain.session;
+    if (initialSession.kind !== "ready") {
+      throw new Error("expected a ready synthetic session");
+    }
+    replacement.state.domain.session = {
+      ...initialSession,
+      homeserver: "https://second.example.invalid",
+      user_id: "@second:example.invalid",
+      device_id: "SECONDDEVICE"
+    };
+    const replacementResult = structuredClone(replacement);
+    const oldResult = structuredClone(initial);
+    oldResult.state_generation = resultGeneration;
+    const replacementMember = replacementResult.state.domain.space_members.space_joined[0];
+    const oldMember = oldResult.state.domain.space_members.space_joined[0];
+    if (!replacementMember || !oldMember) {
+      throw new Error("expected synthetic Space members");
+    }
+    replacementMember.display_label = "Replacement account member";
+    oldMember.display_label = "Old account member";
+
+    await renderAppWithApi(api);
+    await waitFor(() => expect(loadSpaceMembers).toHaveBeenCalledTimes(1));
+    const { getAppStoreSnapshot, setAppStoreSnapshot } = await import("./domain/appStore");
+    await act(async () => {
+      setAppStoreSnapshot(replacement);
+    });
+
+    await waitFor(() => expect(loadSpaceMembers).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      second.resolve(replacementResult);
+      await second.promise;
+    });
+    await waitFor(() => {
+      expect(getAppStoreSnapshot()?.state.domain.session.user_id).toBe(
+        "@second:example.invalid"
+      );
+      expect(
+        getAppStoreSnapshot()?.state.domain.space_members.space_joined[0]?.display_label
+      ).toBe("Replacement account member");
+    });
+
+    await act(async () => {
+      first.resolve(oldResult);
+      await first.promise;
+    });
+    expect(getAppStoreSnapshot()?.state.domain.session.user_id).toBe("@second:example.invalid");
+    expect(
+      getAppStoreSnapshot()?.state.domain.space_members.space_joined[0]?.display_label
+    ).toBe("Replacement account member");
+  });
+
+  test("keeps Space-member load demand bounded and account-scoped", () => {
+    const source = readFileSync("src/App.tsx", "utf8");
+
+    expect(source).not.toContain("spaceMembersLoadInFlightRef");
+    expect(source).not.toContain("spaceMembersLoadedRef");
+    expect(source).toContain("spaceMembersLoadDemandRef");
+    expect(source).toContain("spaceMembersPanelOpenIntentEpochRef");
+    const loaderStart = source.indexOf("const ensureSpaceMembersLoaded");
+    const loaderEnd = source.indexOf("const attentionSummary", loaderStart);
+    const loaderSource = source.slice(loaderStart, loaderEnd);
+    expect(loaderSource).not.toContain("new Map");
+    expect(loaderSource).not.toContain("new Set");
+    expect(loaderSource).toContain("spaceMembersLoadDemandRef.current === demand");
+
+    const effectStart = source.indexOf("void ensureSpaceMembersLoaded(");
+    const effectEnd = source.indexOf("async function refresh()", effectStart);
+    const effectSource = source.slice(effectStart, effectEnd);
+    expect(effectSource).toContain("snapshot?.state.domain.session.homeserver");
+    expect(effectSource).toContain("snapshot?.state.domain.session.user_id");
+    expect(effectSource).toContain("snapshot?.state.domain.session.device_id");
   });
 
   test("does not issue a second Space member request while selection loading is in flight", async () => {
