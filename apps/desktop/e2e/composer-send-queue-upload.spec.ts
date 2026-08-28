@@ -1553,7 +1553,10 @@ test("paste/drop upload UX stages ordinary files for the captured main composer 
     )
     .toMatchObject({
       target: { kind: "main", room_id: "!harness-room:example.invalid" },
-      caption: "caption from staging"
+      document: {
+        version: 2,
+        inlines: [{ kind: "text", text: "caption from staging" }]
+      }
     });
 
   // Attachments are sent from the staging panel; the composer send is

@@ -21,22 +21,24 @@ import type {
   InviteScopeSelection,
   InviteWorkflowState,
   ResolveComposerKeyAction,
+  ComposerDocument,
   StagedUploadFormatChoice,
   StagedUploadItem,
   StagedUploadOutputSelection,
   StagedUploadResizeChoice
 } from "../domain/types";
+import type { MentionCandidate } from "../domain/projectionTypes";
 import {
   ICON_SIZE,
   formatUploadBytes,
   formatUploadDimensions,
-  captionBody,
   operationFailureLabel,
   type ImageUploadVariantKindPayload,
   type ImageCompressionPlan
 } from "../app/uiShared";
-import { composerKeyEventFromDom } from "../domain/composerKeyEvents";
 import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
+import { Composer } from "./composer";
+import { documentFromText } from "../domain/composerDocument";
 import { diagnosticReportPreview } from "../domain/diagnostics";
 
 async function writeClipboardText(value: string): Promise<void> {
@@ -887,11 +889,17 @@ export function UploadStagingDialog({
   onSendAttachments,
   loadPreview,
   resolveComposerKeyAction,
-  surface
+  surface,
+  mentionCandidates = [],
+  mentionCandidatesLoading = false,
+  onMentionQueryChange,
+  mathModeEnabled = true,
+  onMathModeChange = () => undefined,
+  roomName = t("panel.thread")
 }: {
   items: StagedUploadItem[];
   onClear: () => void | Promise<void>;
-  onUpdateCaption: (stagedId: string, caption: string) => void | Promise<void>;
+  onUpdateCaption: (stagedId: string, document: ComposerDocument) => void | Promise<void>;
   onSelectOutput: (
     stagedId: string,
     selection: StagedUploadOutputSelection
@@ -907,39 +915,26 @@ export function UploadStagingDialog({
   loadPreview: (stagedId: string, variantId: string) => Promise<number[]>;
   resolveComposerKeyAction: ResolveComposerKeyAction;
   surface: "main" | "thread";
+  mentionCandidates?: MentionCandidate[];
+  mentionCandidatesLoading?: boolean;
+  onMentionQueryChange?: (query: string | null) => void;
+  mathModeEnabled?: boolean;
+  onMathModeChange?: (enabled: boolean) => void | Promise<void>;
+  roomName?: string;
 }) {
   const sendable = uploadStagingItemsAreSendable(items);
   const sendButtonRef = useRef<HTMLButtonElement>(null);
-  const onCaptionKeyDown = (event: KeyboardEvent<HTMLInputElement>, index: number) => {
-    if (event.key === "Tab") {
-      if (
-        !event.shiftKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        !event.altKey &&
-        index === items.length - 1 &&
-        sendable
-      ) {
-        event.preventDefault();
-        sendButtonRef.current?.focus();
-      }
-      return;
+  const pendingCaptionUpdatesRef = useRef(new Set<Promise<void>>());
+  const sendAttachments = async () => {
+    if (!sendable) return;
+    const pendingUpdates = [...pendingCaptionUpdatesRef.current];
+    const results = await Promise.allSettled(pendingUpdates);
+    if (results.some((result) => result.status === "rejected")) return;
+    try {
+      await onSendAttachments();
+    } catch {
+      // The owning command reports send failures through its normal state path.
     }
-    if (event.key !== "Enter") {
-      return;
-    }
-    event.preventDefault();
-    void resolveComposerKeyAction(
-      surface,
-      composerKeyEventFromDom(event, null),
-      { autocomplete_open: false, send_enabled: sendable }
-    )
-      .then((action) => {
-        if (action === "send") {
-          void onSendAttachments();
-        }
-      })
-      .catch(() => undefined);
   };
 
   return (
@@ -970,18 +965,42 @@ export function UploadStagingDialog({
                 {formatUploadBytes(item.byte_count)}
               </span>
             </div>
-            <label className="upload-staging-caption">
+            <div className="upload-staging-caption">
               <span>{t("upload.captionForFile", { filename: item.filename })}</span>
-              <ImeTextField
-                value={captionBody(item)}
-                syncKey={item.staged_id}
-                aria-label={t("upload.captionForFile", { filename: item.filename })}
-                onChange={(event) => {
-                  void onUpdateCaption(item.staged_id, event.currentTarget.value);
+              <Composer
+                editorOnly
+                surface={surface}
+                composerMode={{ kind: "plain" }}
+                isSending={false}
+                stagedUploadsReady={sendable}
+                mathModeEnabled={mathModeEnabled}
+                mentionCandidates={mentionCandidates}
+                mentionCandidatesLoading={mentionCandidatesLoading}
+                resolveComposerKeyAction={resolveComposerKeyAction}
+                document={item.caption ?? documentFromText("")}
+                draftKey={item.staged_id}
+                ariaLabel={t("upload.captionForFile", { filename: item.filename })}
+                roomName={roomName}
+                onCancelReply={() => undefined}
+                onDocumentChange={(document) => {
+                  const update = Promise.resolve(onUpdateCaption(item.staged_id, document));
+                  pendingCaptionUpdatesRef.current.add(update);
+                  void update.then(
+                    () => pendingCaptionUpdatesRef.current.delete(update),
+                    () => pendingCaptionUpdatesRef.current.delete(update)
+                  );
                 }}
-                onKeyDown={(event) => onCaptionKeyDown(event, index)}
+                onMathModeChange={onMathModeChange}
+                onMentionQueryChange={onMentionQueryChange}
+                onSend={sendAttachments}
+                onSendStagedUploads={sendable ? sendAttachments : undefined}
+                onTabToSend={
+                  index === items.length - 1 && sendable
+                    ? () => sendButtonRef.current?.focus()
+                    : undefined
+                }
               />
-            </label>
+            </div>
             {item.preparation.kind === "preparing" ? (
               <p className="upload-staging-status">{t("upload.preparing")}</p>
             ) : item.preparation.kind === "failed" ? (
@@ -1017,7 +1036,7 @@ export function UploadStagingDialog({
           className="dialog-button primary upload-staging-send"
           type="button"
           disabled={!sendable}
-          onClick={() => void onSendAttachments()}
+          onClick={sendAttachments}
         >
           {t("upload.sendAttachments")}
         </button>

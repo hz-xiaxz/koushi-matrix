@@ -436,7 +436,7 @@ pub(crate) fn handle_upload_staging_caption_changed(
     state: &mut AppState,
     target: crate::ComposerTarget,
     staged_id: String,
-    caption: Option<crate::FormattedMessageDraft>,
+    caption: Option<crate::ComposerDocument>,
 ) -> Vec<AppEffect> {
     if !is_session_ready(state) || !composer_target_is_active(state, &target) {
         return Vec::new();

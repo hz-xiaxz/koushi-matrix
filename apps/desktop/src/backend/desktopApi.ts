@@ -251,7 +251,7 @@ export interface DesktopApi {
   updateStagedUploadCaption(
     target: ComposerTarget,
     stagedId: string,
-    caption: string | null
+    document: ComposerDocument | null
   ): Promise<DesktopSnapshot>;
   updateStagedUploadCompression(
     stagedId: string,

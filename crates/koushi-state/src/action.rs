@@ -1086,7 +1086,7 @@ pub enum AppAction {
     UploadStagingCaptionChanged {
         target: crate::ComposerTarget,
         staged_id: String,
-        caption: Option<crate::FormattedMessageDraft>,
+        caption: Option<crate::ComposerDocument>,
     },
     UploadStagingCompressionChanged {
         target: crate::ComposerTarget,

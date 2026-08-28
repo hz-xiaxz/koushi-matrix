@@ -4119,14 +4119,17 @@ export function App() {
   // Renderer-owned mounted-editor ordering: Tauri waits for the exact Rust projection, while this
   // bounded target/item lane preserves input order and suppresses results after item invalidation.
   // Rust remains the staged-item, caption DTO, residency, preparation and send-content owner.
-  async function updateStagedUploadCaption(stagedId: string, caption: string): Promise<void> {
+  async function updateStagedUploadCaption(
+    stagedId: string,
+    document: ComposerDocument
+  ): Promise<void> {
     const roomId = snapshot?.state.ui.timeline.room_id;
     if (!roomId) return;
     await applyLatestTextMutationSnapshot(`caption:main:${roomId}:${stagedId}`, () =>
       api.updateStagedUploadCaption(
         { kind: "main", room_id: roomId },
         stagedId,
-        caption
+        document
       )
     );
   }
@@ -4612,13 +4615,13 @@ export function App() {
     roomId: string,
     rootEventId: string,
     stagedId: string,
-    caption: string
+    document: ComposerDocument
   ) {
     await applyLatestTextMutationSnapshot(`caption:thread:${roomId}:${rootEventId}:${stagedId}`, () =>
       api.updateStagedUploadCaption(
         { kind: "thread", room_id: roomId, root_event_id: rootEventId },
         stagedId,
-        caption
+        document
       )
     );
   }
@@ -5945,9 +5948,9 @@ export function App() {
             onClearUploadStaging={() => {
               void clearUploadStaging();
             }}
-            onUpdateStagedUploadCaption={(stagedId, caption) => {
-              void updateStagedUploadCaption(stagedId, caption);
-            }}
+            onUpdateStagedUploadCaption={(stagedId, document) =>
+              updateStagedUploadCaption(stagedId, document)
+            }
             onSelectStagedUploadOutput={(stagedId, selection) => {
               void selectStagedUploadOutput(stagedId, selection);
             }}
@@ -6259,9 +6262,9 @@ export function App() {
           onThreadClearUploadStaging={(roomId, rootEventId) => {
             void clearThreadUploadStaging(roomId, rootEventId);
           }}
-          onThreadUpdateStagedUploadCaption={(roomId, rootEventId, stagedId, caption) => {
-            void updateThreadStagedUploadCaption(roomId, rootEventId, stagedId, caption);
-          }}
+          onThreadUpdateStagedUploadCaption={(roomId, rootEventId, stagedId, document) =>
+            updateThreadStagedUploadCaption(roomId, rootEventId, stagedId, document)
+          }
           onThreadSelectStagedUploadOutput={(roomId, rootEventId, stagedId, selection) => {
             void selectThreadStagedUploadOutput(roomId, rootEventId, stagedId, selection);
           }}

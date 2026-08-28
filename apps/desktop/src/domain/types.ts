@@ -1582,7 +1582,7 @@ export interface StagedUploadItem {
   mime_type: string;
   byte_count: number;
   kind: StagedUploadKind;
-  caption: FormattedMessageDraft | null;
+  caption: ComposerDocument | null;
   compression_choice: StagedUploadCompressionChoice;
   preparation: StagedUploadPreparation;
 }

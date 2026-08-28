@@ -487,9 +487,9 @@ export class TauriDesktopApi implements DesktopApi {
   async updateStagedUploadCaption(
     target: ComposerTarget,
     stagedId: string,
-    caption: string | null
+    document: ComposerDocument | null
   ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("update_staged_upload_caption", { target, stagedId, caption });
+    return invoke<DesktopSnapshot>("update_staged_upload_caption", { target, stagedId, document });
   }
 
   async updateStagedUploadCompression(

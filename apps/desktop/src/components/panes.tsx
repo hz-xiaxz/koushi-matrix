@@ -739,7 +739,7 @@ export function TimelinePane({
   onCancelScheduledSend: (scheduledId: string) => void;
   onAttachFiles: (files: File[]) => void | Promise<void>;
   onClearUploadStaging: () => void | Promise<void>;
-  onUpdateStagedUploadCaption: (stagedId: string, caption: string) => void | Promise<void>;
+  onUpdateStagedUploadCaption: (stagedId: string, document: ComposerDocument) => void | Promise<void>;
   onSelectStagedUploadOutput: (
     stagedId: string,
     selection: StagedUploadOutputSelection
@@ -1073,6 +1073,12 @@ export function TimelinePane({
           loadPreview={onLoadStagedUploadPreviewStable}
           surface="main"
           resolveComposerKeyAction={resolveComposerKeyActionStable}
+          mentionCandidates={mentionCandidates}
+          mentionCandidatesLoading={mentionCandidatesLoading}
+          onMentionQueryChange={onMentionQueryChangeStable}
+          mathModeEnabled={snapshot.state.domain.settings.values.composer?.math_mode ?? true}
+          onMathModeChange={onComposerMathModeChangeStable}
+          roomName={activeRoomName}
         />
       ) : null}
       <Composer

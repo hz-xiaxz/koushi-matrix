@@ -233,6 +233,24 @@ describe("TauriDesktopApi", () => {
     });
   });
 
+  test("passes a structured staged caption document through the Tauri command", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    const api = new TauriDesktopApi();
+    const document = documentFromText("**caption**");
+
+    await api.updateStagedUploadCaption(
+      { kind: "main", room_id: "!room:example.invalid" },
+      "staged-1",
+      document
+    );
+
+    expect(invoke).toHaveBeenCalledWith("update_staged_upload_caption", {
+      target: { kind: "main", room_id: "!room:example.invalid" },
+      stagedId: "staged-1",
+      document
+    });
+  });
+
   test("passes structured mention identity to send and edit commands without parallel text metadata", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
     const api = new TauriDesktopApi();

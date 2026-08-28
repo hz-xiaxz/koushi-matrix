@@ -32,14 +32,15 @@ use koushi_core::{
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentSort, AuthSecret,
-    ComposerDocument, ComposerDraftRevision, ComposerKeyEvent, ComposerResolvedAction,
-    ComposerResolverContext, ComposerSurface, DirectoryQuery, DisplayPlatform, FilesViewScope,
-    FocusedContextState, IdentityResetAuthRequest, ImageUploadCompressionMode,
-    InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface, PresenceKind,
-    RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode, RoomSettingChange,
-    RoomTagKind, SessionInfo, SessionState, SettingsPatch, StagedUploadCompressionChoice,
-    StagedUploadItem, StagedUploadKind, SubmissionId, ThreadOpenIntent, ThreadsListScope,
-    TimelineScrollAnchor, VerificationCancelReason, build_formatted_message_draft,
+    ComposerDocument, ComposerDraftRevision, ComposerFormattingOptions, ComposerKeyEvent,
+    ComposerResolvedAction, ComposerResolverContext, ComposerSurface, DirectoryQuery,
+    DisplayPlatform, FilesViewScope, FocusedContextState, IdentityResetAuthRequest,
+    ImageUploadCompressionMode, InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface,
+    PresenceKind, RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode,
+    RoomSettingChange, RoomTagKind, SessionInfo, SessionState, SettingsPatch,
+    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind, SubmissionId,
+    ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor, VerificationCancelReason,
+    build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};

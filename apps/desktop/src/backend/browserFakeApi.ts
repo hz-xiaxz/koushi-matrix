@@ -1740,20 +1740,18 @@ class BrowserFakeApi implements DesktopApi {
   async updateStagedUploadCaption(
     target: ComposerTarget,
     stagedId: string,
-    caption: string | null
+    document: ComposerDocument | null
   ): Promise<DesktopSnapshot> {
     if (!this.canUseSyncedViews() || !browserComposerTargetIsActive(this.snapshot, target)) {
       return this.getSnapshot();
     }
-    const normalized = caption?.trim() ? caption : null;
+    const normalized = document && plainBodyFromDocument(document).trim() ? document : null;
     setBrowserStagedUploadsForTarget(this.snapshot, target, browserStagedUploadsForTarget(this.snapshot, target).map(
       (item) =>
         item.staged_id === stagedId
           ? {
               ...item,
               caption: normalized
-                ? { plain_body: normalized, formatted_body: null, mentions: { targets: [] } }
-                : null
             }
           : item
     ));

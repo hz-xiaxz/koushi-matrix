@@ -14,7 +14,6 @@ import type {
   OperationFailureKind,
   ResolveComposerKeyAction,
   RoomTags,
-  StagedUploadItem,
   TimelineMediaGalleryItem,
   TimelineMessage
 } from "../domain/types";
@@ -178,10 +177,6 @@ export function formatUploadBytes(byteCount: number): string {
 
 export function formatUploadDimensions(dimensions: ImageUploadDimensionsPayload): string {
   return `${dimensions.width}x${dimensions.height}`;
-}
-
-export function captionBody(item: StagedUploadItem): string {
-  return item.caption?.plain_body ?? "";
 }
 
 export function mediaGalleryItemLabel(item: TimelineMediaGalleryItem): string {

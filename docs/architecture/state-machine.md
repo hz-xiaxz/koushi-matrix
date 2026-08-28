@@ -2027,11 +2027,12 @@ stateDiagram-v2
   visible-content payloads: `Debug`, QA output, logs, and errors must redact
   them.
 - Media captions are part of the single media event, not a follow-up text
-  event. Tauri converts the Composer draft into an optional
-  `FormattedMessageDraft` on `UploadMediaRequest.caption`; the core maps that
-  to Matrix caption-capable attachment content (`body` / optional
-  `formatted_body`) on the same `m.image`, `m.file`, `m.video`, or `m.audio`
-  event. Incoming media captions are projected back through
+  event. Each staged item stores a nullable `ComposerDocument`; at the Tauri
+  send boundary Rust derives an optional `FormattedMessageDraft` from its plain
+  body, formatted body, and mention intent on `UploadMediaRequest.caption`.
+  The core maps that to Matrix caption-capable attachment content (`body` /
+  optional `formatted_body`) on the same `m.image`, `m.file`, `m.video`, or
+  `m.audio` event. Incoming media captions are projected back through
   `TimelineItem.body` / `TimelineItem.formatted` beside `TimelineItem.media`.
 - Image preparation policy is Rust-owned. `SettingsValues.media` supplies the
   initial selection policy, while `koushi-media` deterministically decodes,
