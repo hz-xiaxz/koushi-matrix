@@ -109,7 +109,8 @@ No domain, component, Rust, IPC, DTO, generated-artifact, CSS, dependency, Brows
 ## Design review record
 
 - Round 1 timed out before reading the design and returned unverified `Not correct-to-merge`; it established no actionable design finding.
-- Round 2, `reviewer-flash`: `Correct-to-merge` with four Minor/Nit precision findings. The appRuntime lint/source gate, import-statement regex, literal option value domains, and narrowed App comment are incorporated above; a focused Round 3 confirms them before implementation.
+- Round 2, `reviewer-flash`: `Correct-to-merge` with four Minor/Nit precision findings. The appRuntime lint/source gate, import-statement regex, literal option value domains, and narrowed App comment were incorporated.
+- Round 3, `reviewer-flash`: `Correct-to-merge`; the final contract-module/runtime-module import-target clarification was accepted before implementation.
 
 ## Implementation evidence
 
