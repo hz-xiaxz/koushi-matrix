@@ -10,18 +10,26 @@ async function loadRuntime(tauriRuntime: boolean) {
     return tauriApi;
   });
   const createBrowserFakeApi = vi.fn(() => browserApi);
+  const windowDialogPort = {
+    startDragging: vi.fn(async () => undefined)
+  };
 
   vi.doMock("./client", () => ({ TauriDesktopApi }));
   vi.doMock("./browserFakeApi", () => ({ createBrowserFakeApi }));
   vi.doMock("./runtimeEnvironment", () => ({
     isTauriRuntime: () => tauriRuntime
   }));
-  vi.doMock("@tauri-apps/api/window", () => ({
-    getCurrentWindow: () => ({ startDragging: vi.fn() })
-  }));
+  vi.doMock("./windowDialogRuntime", () => ({ windowDialogPort }));
 
   const runtime = await import("./appRuntime");
-  return { runtime, tauriApi, browserApi, TauriDesktopApi, createBrowserFakeApi };
+  return {
+    runtime,
+    tauriApi,
+    browserApi,
+    TauriDesktopApi,
+    createBrowserFakeApi,
+    windowDialogPort
+  };
 }
 
 afterEach(() => {
@@ -35,6 +43,8 @@ describe("desktop API composition", () => {
     expect(result.runtime.api).toBe(result.tauriApi);
     expect(result.TauriDesktopApi).toHaveBeenCalledOnce();
     expect(result.createBrowserFakeApi).not.toHaveBeenCalled();
+    result.runtime.startSessionVerificationWindowDrag();
+    expect(result.windowDialogPort.startDragging).toHaveBeenCalledOnce();
   });
 
   test("constructs only the browser fake outside Tauri", async () => {
@@ -43,5 +53,17 @@ describe("desktop API composition", () => {
     expect(result.runtime.api).toBe(result.browserApi);
     expect(result.createBrowserFakeApi).toHaveBeenCalledOnce();
     expect(result.TauriDesktopApi).not.toHaveBeenCalled();
+    result.runtime.startSessionVerificationWindowDrag();
+    expect(result.windowDialogPort.startDragging).not.toHaveBeenCalled();
+  });
+
+  test("swallows a Tauri title-bar drag rejection", async () => {
+    const result = await loadRuntime(true);
+    result.windowDialogPort.startDragging.mockRejectedValueOnce(new Error("drag failed"));
+
+    result.runtime.startSessionVerificationWindowDrag();
+    await Promise.resolve();
+
+    expect(result.windowDialogPort.startDragging).toHaveBeenCalledOnce();
   });
 });

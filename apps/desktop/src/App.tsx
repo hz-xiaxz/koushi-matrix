@@ -9,24 +9,15 @@ import {
   useRef,
   useState
 } from "react";
-// App.tsx is the Tauri integration host. The @tauri-apps imports below
-// are acknowledged in-progress transport wiring tracked for Phase 2 migration
-// to backend/client.ts (#87). Each line has its own disable directive so the
-// rule still catches any NEW @tauri-apps import added without a comment.
+// The remaining direct Tauri event import is deferred to Phase 2B4. The
+// disable keeps any additional platform import visible to the boundary rule.
 // eslint-disable-next-line no-restricted-imports
 import { listen } from "@tauri-apps/api/event";
-// eslint-disable-next-line no-restricted-imports
-import { getCurrentWindow } from "@tauri-apps/api/window";
-// eslint-disable-next-line no-restricted-imports
-import {
-  confirm as confirmDialog,
-  open as openDialog,
-  save as saveDialog
-} from "@tauri-apps/plugin-dialog";
 
 import { api } from "./backend/appRuntime";
 import { openExternalHttpUrl } from "./backend/linkMediaRuntime";
 import { isTauriRuntime } from "./backend/runtimeEnvironment";
+import { windowDialogPort } from "./backend/windowDialogRuntime";
 import {
   CORE_EVENT_NAME,
   tauriTimelineTransport
@@ -1483,9 +1474,7 @@ export function App() {
         return true;
       case "toggleFullscreen":
         void (async () => {
-          const win = getCurrentWindow();
-          const fullscreen = await win.isFullscreen();
-          await win.setFullscreen(!fullscreen);
+          await windowDialogPort.toggleFullscreen();
         })();
         return true;
       default:
@@ -2181,7 +2170,7 @@ export function App() {
     }
     logoutConfirmationInFlightRef.current = true;
     try {
-      const confirmed = await confirmDialog(t("settings.signOutConfirm"), {
+      const confirmed = await windowDialogPort.confirm(t("settings.signOutConfirm"), {
         title: t("settings.signOutConfirmTitle"),
         kind: "warning"
       });
@@ -2486,7 +2475,7 @@ export function App() {
     if (!isTauriRuntime()) {
       return null;
     }
-    const selected = await saveDialog({
+    const selected = await windowDialogPort.saveFile({
       title: t("settings.roomKeyExport"),
       defaultPath: "koushi-room-keys.txt",
       filters: [{ name: t("settings.roomKeyExport"), extensions: ["txt", "json"] }]
@@ -2498,7 +2487,7 @@ export function App() {
     if (!isTauriRuntime()) {
       return null;
     }
-    const selected = await saveDialog({
+    const selected = await windowDialogPort.saveFile({
       title: t("gate.secureBackupRecoveryKeyDestination"),
       defaultPath: "koushi-secure-backup-recovery-key.txt",
       filters: [
@@ -2515,7 +2504,7 @@ export function App() {
     if (!isTauriRuntime()) {
       return null;
     }
-    const selected = await openDialog({
+    const selected = await windowDialogPort.openFile({
       title: t("settings.roomKeyImport"),
       multiple: false,
       filters: [{ name: t("settings.roomKeyImport"), extensions: ["txt", "json"] }],
@@ -5470,7 +5459,7 @@ export function App() {
     if (!isTauriRuntime()) {
       return;
     }
-    void getCurrentWindow().startDragging().catch(() => undefined);
+    void windowDialogPort.startDragging().catch(() => undefined);
   }
 
   return (

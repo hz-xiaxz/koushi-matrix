@@ -111,6 +111,14 @@ No domain, component, Rust, IPC, DTO, generated-artifact, CSS, dependency, Brows
 - Round 1 timed out before reading the design and returned unverified `Not correct-to-merge`; it established no actionable design finding.
 - Round 2, `reviewer-flash`: `Correct-to-merge` with four Minor/Nit precision findings. The appRuntime lint/source gate, import-statement regex, literal option value domains, and narrowed App comment are incorporated above; a focused Round 3 confirms them before implementation.
 
+## Implementation evidence
+
+- RED: focused composition test failed before production edits because `backend/windowDialogRuntime` did not exist.
+- Focused runtime/Tauri adapter/appRuntime/App tests: 4 files / 88 tests passed.
+- Full Vitest: 96 files / 1475 tests passed.
+- Playwright: 263 tests passed.
+- Typecheck, lint/IME/docs, production build, Tauri/domain guards, SDK-submodule check, secret scan, and `git diff --check` passed.
+
 ## Acceptance
 
 - App has one direct Tauri event import and no direct window/dialog import;
