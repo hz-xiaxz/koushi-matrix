@@ -44,7 +44,12 @@ const SERVER_LOGOUT_TIMEOUT: Duration = Duration::from_secs(10);
 /// endpoint hold up login on the critical path (#474 review).
 const DEVICE_NAME_TIMEOUT: Duration = Duration::from_secs(5);
 
-const OIDC_REDIRECT_URI: &str = "koushi-desktop://auth/callback";
+// Hostless private-use URI in reverse-DNS notation (RFC 8252 §7.1). MAS
+// deployments (matrix.org) reject both a bare scheme like `koushi-desktop`
+// and the `scheme://host/path` form with `invalid_redirect_uri`; the scheme
+// must be derived from the client_uri host (github.com) and the URI must
+// carry no authority component.
+const OIDC_REDIRECT_URI: &str = "com.github.shinaoka.koushi-matrix:/auth/callback";
 
 /// Redacted message used in reducer error projections (never raw SDK text).
 pub(super) const RESTORE_FAILED_MESSAGE: &str = "session restore failed";

@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -93,6 +95,200 @@ describe("App Space Members integration", () => {
         "!space-alpha:example.invalid",
         1
       );
+    });
+  });
+
+  test("reloads the same Space generation for a replacement account and rejects the old result", async () => {
+    const api = createBrowserFakeApi();
+    const initial = await api.getSnapshot();
+    const first = deferred<DesktopSnapshot>();
+    const second = deferred<DesktopSnapshot>();
+    const loadSpaceMembers = vi
+      .spyOn(api, "loadSpaceMembers")
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const replacement = structuredClone(initial);
+    const resultGeneration = (initial.state_generation ?? 0) + 1;
+    replacement.state_generation = resultGeneration;
+    const initialSession = replacement.state.domain.session;
+    if (initialSession.kind !== "ready") {
+      throw new Error("expected a ready synthetic session");
+    }
+    replacement.state.domain.session = {
+      ...initialSession,
+      homeserver: "https://second.example.invalid",
+      user_id: "@second:example.invalid",
+      device_id: "SECONDDEVICE"
+    };
+    const replacementResult = structuredClone(replacement);
+    const oldResult = structuredClone(initial);
+    oldResult.state_generation = resultGeneration;
+    const replacementMember = replacementResult.state.domain.space_members.space_joined[0];
+    const oldMember = oldResult.state.domain.space_members.space_joined[0];
+    if (!replacementMember || !oldMember) {
+      throw new Error("expected synthetic Space members");
+    }
+    replacementMember.display_label = "Replacement account member";
+    oldMember.display_label = "Old account member";
+
+    await renderAppWithApi(api);
+    await waitFor(() => expect(loadSpaceMembers).toHaveBeenCalledTimes(1));
+    const { getAppStoreSnapshot, setAppStoreSnapshot } = await import("./domain/appStore");
+    await act(async () => {
+      setAppStoreSnapshot(replacement);
+    });
+
+    await waitFor(() => expect(loadSpaceMembers).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      second.resolve(replacementResult);
+      await second.promise;
+    });
+    await waitFor(() => {
+      expect(getAppStoreSnapshot()?.state.domain.session.user_id).toBe(
+        "@second:example.invalid"
+      );
+      expect(
+        getAppStoreSnapshot()?.state.domain.space_members.space_joined[0]?.display_label
+      ).toBe("Replacement account member");
+    });
+
+    await act(async () => {
+      first.resolve(oldResult);
+      await first.promise;
+    });
+    expect(getAppStoreSnapshot()?.state.domain.session.user_id).toBe("@second:example.invalid");
+    expect(
+      getAppStoreSnapshot()?.state.domain.space_members.space_joined[0]?.display_label
+    ).toBe("Replacement account member");
+  });
+
+  test("keeps Space-member load demand bounded and account-scoped", () => {
+    const source = readFileSync("src/App.tsx", "utf8");
+
+    expect(source).not.toContain("spaceMembersLoadInFlightRef");
+    expect(source).not.toContain("spaceMembersLoadedRef");
+    expect(source).not.toContain("spaceMembersInviteRequestRef");
+    expect(source).not.toContain("spaceMembersCancelRequestRef");
+    expect(source).not.toContain("roomNavigationRequestRef");
+    expect(source).not.toContain("spaceNavigationRequestRef");
+    expect(source).toContain("roomNavigationIntentEpochRef");
+    expect(source).toContain("spaceNavigationIntentEpochRef");
+    expect(source).toContain("before async composer draining and command submission");
+    expect(source).toContain("spaceMembersCancelFailureEpochRef");
+    expect(source).toContain("spaceMembersLoadDemandRef");
+    expect(source).toContain("spaceMembersPanelOpenIntentEpochRef");
+    const loaderStart = source.indexOf("const ensureSpaceMembersLoaded");
+    const loaderEnd = source.indexOf("const attentionSummary", loaderStart);
+    const loaderSource = source.slice(loaderStart, loaderEnd);
+    expect(loaderSource).not.toContain("new Map");
+    expect(loaderSource).not.toContain("new Set");
+    expect(loaderSource).toContain("spaceMembersLoadDemandRef.current === demand");
+
+    const effectStart = source.indexOf("void ensureSpaceMembersLoaded(");
+    const effectEnd = source.indexOf("async function refresh()", effectStart);
+    const effectSource = source.slice(effectStart, effectEnd);
+    expect(effectSource).toContain("snapshot?.state.domain.session.homeserver");
+    expect(effectSource).toContain("snapshot?.state.domain.session.user_id");
+    expect(effectSource).toContain("snapshot?.state.domain.session.device_id");
+
+    const cancelStart = source.indexOf("async function cancelSpaceInvite(");
+    const cancelCatch = source.indexOf("    } catch {", cancelStart);
+    const cancelSuccessSource = source.slice(cancelStart, cancelCatch);
+    expect(cancelSuccessSource).toContain("spaceNavigationIntentEpochRef.current !== navigationEpoch");
+    expect(cancelSuccessSource).not.toContain("spaceMembersCancelFailureEpochRef.current ===");
+    expect(source.slice(cancelCatch)).toContain("space_invited.some");
+
+    expect(source).not.toContain("spaceMembersRoleRequestRef");
+    expect(source).toContain("spaceMembersRoleFailureEpochRef");
+    const roleStart = source.indexOf("async function updateSpaceMemberRole(");
+    const roleCatch = source.indexOf("    } catch {", roleStart);
+    const roleSuccessSource = source.slice(roleStart, roleCatch);
+    expect(roleSuccessSource).toContain("spaceNavigationIntentEpochRef.current !== navigationEpoch");
+    expect(roleSuccessSource).not.toContain("spaceMembersRoleFailureEpochRef.current ===");
+    expect(source.slice(roleCatch)).toContain("entry.power_level === expectedPowerLevel");
+
+    const aliasStart = source.indexOf("async function setLocalUserAlias(");
+    const aliasEnd = source.indexOf("async function setRoomNotificationMode(", aliasStart);
+    const aliasSource = source.slice(aliasStart, aliasEnd);
+    expect(aliasSource).toContain("applyLatestTextMutationSnapshot(`alias:${userId}`");
+    expect(aliasSource).toContain("api.setLocalUserAlias(userId, alias)");
+    expect(source.match(/api\.setLocalUserAlias\(/g)).toHaveLength(1);
+    expect(source).toContain("Renderer-owned autosave sequencing only");
+  });
+
+  test("serializes alias autosaves and applies only the latest returned snapshot", async () => {
+    const api = createBrowserFakeApi();
+    const loaded = await api.loadRoomSettings("!room-alpha:example.invalid");
+    const target = loaded.state.domain.room_management.settings?.members.find(
+      (member) => member.user_id !== loaded.state.domain.session.user_id
+    );
+    if (!target) {
+      throw new Error("expected a synthetic room member");
+    }
+    const first = deferred<DesktopSnapshot>();
+    const latest = deferred<DesktopSnapshot>();
+    const setLocalUserAlias = vi
+      .spyOn(api, "setLocalUserAlias")
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(latest.promise);
+    const resultApi = createBrowserFakeApi();
+    await resultApi.loadRoomSettings("!room-alpha:example.invalid");
+    const firstResult = await resultApi.setLocalUserAlias(target.user_id, "First alias");
+    const latestResult = await resultApi.setLocalUserAlias(target.user_id, "Latest alias");
+
+    await renderAppWithApi(api);
+    const peopleButton = screen
+      .getAllByRole("button", { name: "People" })
+      .find((button) => button.classList.contains("icon-button"));
+    expect(peopleButton).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(peopleButton!);
+    });
+    await screen.findByRole("heading", { name: "People", level: 2 });
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: `Open profile for ${target.display_label}` })
+      );
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Set alias" }));
+    });
+    const input = screen.getByRole("textbox", { name: "Alias" });
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "First alias" } });
+    });
+    await waitFor(() => expect(setLocalUserAlias).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "Latest alias" } });
+    });
+    expect(setLocalUserAlias).toHaveBeenCalledTimes(1);
+
+    const { getAppStoreSnapshot } = await import("./domain/appStore");
+    const generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    firstResult.state_generation = generation;
+    latestResult.state_generation = generation;
+    await act(async () => {
+      first.resolve(firstResult);
+      await first.promise;
+    });
+    await waitFor(() => expect(setLocalUserAlias).toHaveBeenCalledTimes(2));
+    expect(setLocalUserAlias.mock.calls[1]).toEqual([target.user_id, "Latest alias"]);
+    expect(
+      getAppStoreSnapshot()?.state.domain.room_management.settings?.members.find(
+        (member) => member.user_id === target.user_id
+      )?.display_label
+    ).toBe(target.display_label);
+
+    await act(async () => {
+      latest.resolve(latestResult);
+      await latest.promise;
+    });
+    await waitFor(() => {
+      expect(
+        getAppStoreSnapshot()?.state.domain.room_management.settings?.members.find(
+          (member) => member.user_id === target.user_id
+        )?.display_label
+      ).toBe("Latest alias");
     });
   });
 
@@ -222,6 +418,97 @@ describe("App Space Members integration", () => {
     expect(loadSpaceMembers).toHaveBeenCalledWith(spaceId, generation);
   });
 
+  test("retries a rejected Room Info settings load after the panel reopens", async () => {
+    const api = createBrowserFakeApi();
+    const originalLoadRoomSettings = api.loadRoomSettings.bind(api);
+    const loadRoomSettings = vi.spyOn(api, "loadRoomSettings");
+    loadRoomSettings
+      .mockRejectedValueOnce(new Error("synthetic room settings failure"))
+      .mockImplementation((roomId) => originalLoadRoomSettings(roomId));
+
+    await renderAppWithApi(api);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Room info" }));
+    });
+    await waitFor(() => expect(loadRoomSettings).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Room info" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Room info" }));
+    });
+
+    await waitFor(() => expect(loadRoomSettings).toHaveBeenCalledTimes(2));
+    await screen.findByRole("textbox", { name: "Room name" });
+  });
+
+  test("does not duplicate a pending Room Info settings load when the panel reopens", async () => {
+    const api = createBrowserFakeApi();
+    const pending = deferred<DesktopSnapshot>();
+    const settingsApi = createBrowserFakeApi();
+    const loaded = await settingsApi.loadRoomSettings("!room-alpha:example.invalid");
+    const loadRoomSettings = vi
+      .spyOn(api, "loadRoomSettings")
+      .mockReturnValue(pending.promise);
+
+    await renderAppWithApi(api);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Room info" }));
+    });
+    await waitFor(() => expect(loadRoomSettings).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Room info" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Room info" }));
+    });
+    expect(loadRoomSettings).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pending.resolve(loaded);
+      await pending.promise;
+    });
+    await screen.findByRole("textbox", { name: "Room name" });
+  });
+
+  test("does not apply a late Space Info settings result after opening same-Space members", async () => {
+    const api = createBrowserFakeApi();
+    const pending = deferred<DesktopSnapshot>();
+    const settingsApi = createBrowserFakeApi();
+    const staleResult = await settingsApi.loadRoomSettings("!space-alpha:example.invalid");
+    const staleMember = staleResult.state.domain.room_management.settings?.members[0];
+    if (!staleMember) {
+      throw new Error("expected a synthetic Space settings member");
+    }
+    staleMember.display_label = "Stale Space Info member";
+    staleMember.original_display_label = "Stale Space Info member";
+    const originalLoadRoomSettings = api.loadRoomSettings.bind(api);
+    let spaceSettingsCalls = 0;
+    vi.spyOn(api, "loadRoomSettings").mockImplementation((roomId) => {
+      if (roomId === "!space-alpha:example.invalid" && ++spaceSettingsCalls === 1) {
+        return pending.promise;
+      }
+      return originalLoadRoomSettings(roomId);
+    });
+
+    await renderAppWithApi(api);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Space info and settings" }));
+    });
+    await waitFor(() => expect(spaceSettingsCalls).toBe(1));
+
+    await openSpaceMembersFromSidebar();
+    await act(async () => {
+      pending.resolve(staleResult);
+      await pending.promise;
+    });
+
+    expect(screen.getByRole("heading", { name: "Space members", level: 2 })).toBeTruthy();
+    expect(screen.queryByText("Stale Space Info member")).toBeNull();
+  });
+
   test("fences a late prior-Space member result after navigation", async () => {
     const api = createBrowserFakeApi();
     const initial = await api.getSnapshot();
@@ -268,6 +555,64 @@ describe("App Space Members integration", () => {
     expect(screen.queryByText("Stale prior Space member")).toBeNull();
   });
 
+  test("settles Space invite-search loading when query convergence rejects", async () => {
+    const api = createBrowserFakeApi();
+    vi.spyOn(api, "searchInviteTargets").mockRejectedValueOnce(
+      new Error("synthetic invite convergence timeout")
+    );
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Invite people" }));
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByRole("searchbox", { name: "Name, alias, or Matrix ID" }), {
+        target: { value: "timeout" }
+      });
+    });
+    await waitFor(() => expect(api.searchInviteTargets).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText("Loading activity")).toBeNull());
+    expect(screen.getByRole("searchbox", { name: "Name, alias, or Matrix ID" })).toHaveProperty(
+      "value",
+      "timeout"
+    );
+  });
+
+  test("rejects a mismatched Space invite-search snapshot", async () => {
+    const api = createBrowserFakeApi();
+    const mismatched = await api.getSnapshot();
+    mismatched.state_generation = (mismatched.state_generation ?? 0) + 10;
+    const workflow = mismatched.state.domain.invite_workflow;
+    if (!workflow) {
+      throw new Error("expected synthetic invite workflow");
+    }
+    workflow.query = {
+      ...workflow.query,
+      room_id: "!space-alpha:example.invalid",
+      query: "other",
+      candidates: [],
+      explicit_user_id: null
+    };
+    vi.spyOn(api, "searchInviteTargets").mockResolvedValueOnce(mismatched);
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Invite people" }));
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByRole("searchbox", { name: "Name, alias, or Matrix ID" }), {
+        target: { value: "wanted" }
+      });
+    });
+    await waitFor(() => expect(api.searchInviteTargets).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText("Loading activity")).toBeNull());
+
+    const { getAppStoreSnapshot } = await import("./domain/appStore");
+    expect(getAppStoreSnapshot()?.state.domain.invite_workflow?.query.query ?? "").toBe("");
+  });
+
   test("uses the shared inline invite command and moves a child-only user to pending", async () => {
     const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "pending" });
     const inviteUserToSpace = vi.spyOn(api, "inviteUserToSpace");
@@ -289,6 +634,151 @@ describe("App Space Members integration", () => {
       "Child-only Member"
     );
     expect(screen.queryByRole("list", { name: "Not in Space" })).toBeNull();
+  });
+
+  test("applies the first Rust-admitted invite when a rapid duplicate is rejected", async () => {
+    const api = createBrowserFakeApi();
+    const first = deferred<DesktopSnapshot>();
+    const second = deferred<DesktopSnapshot>();
+    const inviteUserToSpace = vi
+      .spyOn(api, "inviteUserToSpace")
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const resultApi = createBrowserFakeApi();
+    const success = await resultApi.inviteUserToSpace(
+      "!space-alpha:example.invalid",
+      "@child-only:example.invalid",
+      1
+    );
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+    const { getAppStoreSnapshot } = await import("./domain/appStore");
+    success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    const button = screen.getByRole("button", { name: "Invite to Space" });
+    await act(async () => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+    });
+    await waitFor(() => expect(inviteUserToSpace).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      second.reject(new Error("duplicate request rejected"));
+      await second.promise.catch(() => undefined);
+    });
+    await act(async () => {
+      first.resolve(success);
+      await first.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("list", { name: "Invitation pending" }).textContent).toContain(
+        "Child-only Member"
+      );
+      expect(screen.queryByRole("list", { name: "Not in Space" })).toBeNull();
+    });
+  });
+
+  test.each(["duplicate-first", "success-first"] as const)(
+    "applies first-admitted cancellation and suppresses duplicate failure (%s)",
+    async (settlementOrder) => {
+      const api = createBrowserFakeApi();
+      const first = deferred<DesktopSnapshot>();
+      const second = deferred<DesktopSnapshot>();
+      const loadSpaceMembers = vi.spyOn(api, "loadSpaceMembers");
+      const loadRoomSettings = vi.spyOn(api, "loadRoomSettings");
+      const cancelSpaceInvite = vi
+        .spyOn(api, "cancelSpaceInvite")
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise);
+      const resultApi = createBrowserFakeApi();
+      const success = await resultApi.cancelSpaceInvite(
+        "!space-alpha:example.invalid",
+        "@invited:example.invalid",
+        1
+      );
+
+      await renderAppWithApi(api);
+      await openSpaceMembersFromSidebar();
+      await waitFor(() => {
+        expect(loadSpaceMembers).toHaveBeenCalledTimes(1);
+        expect(loadRoomSettings).toHaveBeenCalledWith("!space-alpha:example.invalid");
+      });
+      await act(async () => {
+        await Promise.all([
+          ...loadSpaceMembers.mock.results.map((result) => result.value),
+          ...loadRoomSettings.mock.results.map((result) => result.value)
+        ]);
+      });
+      const { getAppStoreSnapshot } = await import("./domain/appStore");
+      await waitFor(() => {
+        expect(getAppStoreSnapshot()?.state.domain.room_management.selected_room_id).toBe(
+          "!space-alpha:example.invalid"
+        );
+        expect(getAppStoreSnapshot()?.state.domain.space_members.operation.kind).toBe("idle");
+      });
+      success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+      const button = screen.getByRole("button", { name: "Cancel invitation" });
+      await act(async () => {
+        fireEvent.click(button);
+        fireEvent.click(button);
+      });
+      await waitFor(() => expect(cancelSpaceInvite).toHaveBeenCalledTimes(2));
+
+      const rejectDuplicate = async () => {
+        second.reject(new Error("duplicate cancellation rejected"));
+        await second.promise.catch(() => undefined);
+      };
+      const resolveAccepted = async () => {
+        first.resolve(success);
+        await first.promise;
+      };
+      await act(async () => {
+        if (settlementOrder === "duplicate-first") {
+          await rejectDuplicate();
+          await resolveAccepted();
+        } else {
+          await resolveAccepted();
+          await rejectDuplicate();
+        }
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByRole("button", { name: "Cancel invitation" })).toBeNull();
+        expect(screen.queryByRole("alert")).toBeNull();
+      });
+    }
+  );
+
+  test("applies a valid cancellation after the same Space panel closes and reopens", async () => {
+    const api = createBrowserFakeApi();
+    const pending = deferred<DesktopSnapshot>();
+    const resultApi = createBrowserFakeApi();
+    const success = await resultApi.cancelSpaceInvite(
+      "!space-alpha:example.invalid",
+      "@invited:example.invalid",
+      1
+    );
+    vi.spyOn(api, "cancelSpaceInvite").mockReturnValueOnce(pending.promise);
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel invitation" }));
+      fireEvent.click(screen.getByRole("button", { name: "Close Space members" }));
+    });
+    await openSpaceMembersFromSidebar();
+    const { getAppStoreSnapshot } = await import("./domain/appStore");
+    success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    await act(async () => {
+      pending.resolve(success);
+      await pending.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Cancel invitation" })).toBeNull();
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
   });
 
   test("treats a pending Space invite cancellation as an operation-pending invite state", async () => {
@@ -605,6 +1095,74 @@ describe("App Space Members integration", () => {
     expect(screen.queryByRole("heading", { name: "People", level: 2 })).toBeNull();
   });
 
+  test("keeps the latest room intent when rapid selections settle out of order", async () => {
+    const api = createBrowserFakeApi();
+    const first = deferred<DesktopSnapshot>();
+    const second = deferred<DesktopSnapshot>();
+    const selectRoom = vi
+      .spyOn(api, "selectRoom")
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const resultApi = createBrowserFakeApi();
+    const firstResult = await resultApi.selectRoom("!room-alpha:example.invalid");
+    const secondResult = await resultApi.selectRoom("!room-planning:example.invalid");
+
+    await renderAppWithApi(api);
+    const { getAppStoreSnapshot } = await import("./domain/appStore");
+    const generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    firstResult.state_generation = generation;
+    secondResult.state_generation = generation;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "synthetic-room" }));
+      fireEvent.click(screen.getByRole("button", { name: "planning-room" }));
+    });
+    await waitFor(() => expect(selectRoom).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      second.resolve(secondResult);
+      await second.promise;
+      first.resolve(firstResult);
+      await first.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "planning-room" }).className).toContain(
+        "is-active"
+      );
+    });
+  });
+
+  test("submits only the latest rapid Space intent after renderer drains", async () => {
+    const api = createBrowserFakeApi();
+    const pending = deferred<DesktopSnapshot>();
+    const selectSpace = vi.spyOn(api, "selectSpace").mockReturnValueOnce(pending.promise);
+    const resultApi = createBrowserFakeApi();
+    const result = await resultApi.selectSpace("!space-beta:example.invalid");
+
+    await renderAppWithApi(api);
+    const { getAppStoreSnapshot } = await import("./domain/appStore");
+    result.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Synthetic Workspace" }));
+      fireEvent.click(screen.getByRole("button", { name: "Synthetic Lab" }));
+    });
+    await waitFor(() => {
+      expect(selectSpace).toHaveBeenCalledTimes(1);
+      expect(selectSpace).toHaveBeenCalledWith("!space-beta:example.invalid");
+    });
+
+    await act(async () => {
+      pending.resolve(result);
+      await pending.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Synthetic Lab" }).className).toContain(
+        "is-active"
+      );
+    });
+  });
+
   test("does not apply a late room selection after a newer Home navigation", async () => {
     const api = createBrowserFakeApi();
     const pending = deferred<DesktopSnapshot>();
@@ -891,6 +1449,199 @@ describe("App Space Members integration", () => {
     ]) {
       expect(dialog.textContent).not.toContain(privateValue);
     }
+  });
+
+  test.each(["duplicate-first", "success-first"] as const)(
+    "applies first-admitted role update and suppresses duplicate failure (%s)",
+    async (settlementOrder) => {
+      const api = createBrowserFakeApi();
+      const first = deferred<DesktopSnapshot>();
+      const second = deferred<DesktopSnapshot>();
+      const updateSpaceMemberRole = vi
+        .spyOn(api, "updateSpaceMemberRole")
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise);
+      const resultApi = createBrowserFakeApi();
+      const success = await resultApi.updateSpaceMemberRole(
+        "!space-alpha:example.invalid",
+        "@joined:example.invalid",
+        1,
+        "revision-1",
+        0,
+        50,
+        false
+      );
+
+      await renderAppWithApi(api);
+      await openSpaceMembersFromSidebar();
+      const { getAppStoreSnapshot } = await import("./domain/appStore");
+      success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+      const select = screen.getByRole("combobox", { name: "Role for Joined Member" });
+      await act(async () => {
+        fireEvent.change(select, { target: { value: "50" } });
+        fireEvent.change(select, { target: { value: "50" } });
+      });
+      await waitFor(() => expect(updateSpaceMemberRole).toHaveBeenCalledTimes(2));
+
+      const rejectDuplicate = async () => {
+        second.reject(new Error("duplicate role update rejected"));
+        await second.promise.catch(() => undefined);
+      };
+      const resolveAccepted = async () => {
+        first.resolve(success);
+        await first.promise;
+      };
+      await act(async () => {
+        if (settlementOrder === "duplicate-first") {
+          await rejectDuplicate();
+          await resolveAccepted();
+        } else {
+          await resolveAccepted();
+          await rejectDuplicate();
+        }
+      });
+
+      await waitFor(() => {
+        expect(
+          (screen.getByRole("combobox", { name: "Role for Joined Member" }) as HTMLSelectElement)
+            .value
+        ).toBe("50");
+        expect(screen.queryByRole("alert")).toBeNull();
+      });
+    }
+  );
+
+  test("applies a valid role update after the same Space panel closes and reopens", async () => {
+    const api = createBrowserFakeApi();
+    const pending = deferred<DesktopSnapshot>();
+    const resultApi = createBrowserFakeApi();
+    const success = await resultApi.updateSpaceMemberRole(
+      "!space-alpha:example.invalid",
+      "@joined:example.invalid",
+      1,
+      "revision-1",
+      0,
+      50,
+      false
+    );
+    vi.spyOn(api, "updateSpaceMemberRole").mockReturnValueOnce(pending.promise);
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+    await act(async () => {
+      fireEvent.change(screen.getByRole("combobox", { name: "Role for Joined Member" }), {
+        target: { value: "50" }
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Close Space members" }));
+    });
+    await openSpaceMembersFromSidebar();
+    const { getAppStoreSnapshot } = await import("./domain/appStore");
+    success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    await act(async () => {
+      pending.resolve(success);
+      await pending.promise;
+    });
+
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("combobox", { name: "Role for Joined Member" }) as HTMLSelectElement)
+          .value
+      ).toBe("50");
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+  });
+
+  test.each(["completion", "rejection"] as const)(
+    "ignores a late role %s after same-Space room navigation",
+    async (outcome) => {
+      const api = createBrowserFakeApi();
+      const pending = deferred<DesktopSnapshot>();
+      const updateSpaceMemberRole = vi
+        .spyOn(api, "updateSpaceMemberRole")
+        .mockReturnValueOnce(pending.promise);
+      const resultApi = createBrowserFakeApi();
+      const success = await resultApi.updateSpaceMemberRole(
+        "!space-alpha:example.invalid",
+        "@joined:example.invalid",
+        1,
+        "revision-1",
+        0,
+        50,
+        false
+      );
+
+      await renderAppWithApi(api);
+      await openSpaceMembersFromSidebar();
+      await act(async () => {
+        fireEvent.change(screen.getByRole("combobox", { name: "Role for Joined Member" }), {
+          target: { value: "50" }
+        });
+      });
+      await waitFor(() => expect(updateSpaceMemberRole).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Rooms, 10 unread/ }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "planning-room" }));
+      });
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "planning-room" }).className).toContain(
+          "is-active"
+        );
+      });
+
+      const { getAppStoreSnapshot } = await import("./domain/appStore");
+      success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+      await act(async () => {
+        if (outcome === "completion") {
+          pending.resolve(success);
+          await pending.promise;
+        } else {
+          pending.reject(new Error("late role rejection"));
+          await pending.promise.catch(() => undefined);
+        }
+      });
+
+      await openSpaceMembersFromSidebar();
+      expect(
+        (screen.getByRole("combobox", { name: "Role for Joined Member" }) as HTMLSelectElement)
+          .value
+      ).toBe("0");
+      expect(screen.queryByRole("alert")).toBeNull();
+      await act(async () => {
+        fireEvent.click(await screen.findByRole("button", { name: "Open diagnostics" }));
+      });
+      expect((await screen.findByRole("dialog", { name: "Diagnostics" })).textContent).not.toContain(
+        "role outcome="
+      );
+    }
+  );
+
+  test("shows a fixed private failure for a current role transport rejection", async () => {
+    const api = createBrowserFakeApi();
+    vi.spyOn(api, "updateSpaceMemberRole").mockRejectedValueOnce(
+      new Error("private role transport details @joined:example.invalid")
+    );
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    await act(async () => {
+      fireEvent.change(screen.getByRole("combobox", { name: "Role for Joined Member" }), {
+        target: { value: "50" }
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toBe(
+        "Could not update this member's role. Try again."
+      );
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Open diagnostics" }));
+    });
+    const dialog = await screen.findByRole("dialog", { name: "Diagnostics" });
+    expect(dialog.textContent).toContain("role outcome=transport_rejected");
+    expect(dialog.textContent).not.toContain("private role transport details");
+    expect(dialog.textContent).not.toContain("@joined:example.invalid");
   });
 
   test("requires admin confirmation and keeps Cancel inert", async () => {

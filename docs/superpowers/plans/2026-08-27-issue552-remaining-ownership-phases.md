@@ -1,6 +1,6 @@
 # Issue #552 Remaining Frontend Ownership Migration — Phased Execution Plan
 
-Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), and 2B1–2B4 (PRs #712–#715) merged. Phase 3 is implemented on its approved branch pending final verification/review/merge; later phases remain unauthorized by this document alone.
+Status: Phases 0–6 are merged through PR #734; CI-stability PRs #733/#735 are also merged. Phase 7 final inventory/acceptance audit is locally verified and approved by exact-final-diff review against `origin/main` `ca9dc74529655b0eeba8e7b1babcbfc333d0b8c3`, pending PR/CI, merge and #552 closure.
 
 Phase 0 base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`. Phase 1 #708 insertion base: `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
@@ -162,6 +162,15 @@ React keeps one-shot DOM evidence capture and generation data. Delete `projectio
 
 ## Phase 4 — Remove redundant App request fences by command family
 
+Phase 4.1 task-level design: `2026-08-28-issue552-room-settings-view-fences.md`.
+Phase 4.2 task-level design: `2026-08-28-issue552-diagnostics-view-fence.md`.
+Phase 4.3a task-level design: `2026-08-28-issue552-space-member-panel-demand.md`.
+Phase 4.3b task-level design: `2026-08-28-issue552-space-invite-search-lifetime.md`.
+Phase 4.3c task-level design: `2026-08-29-issue552-space-member-invite-admission.md`.
+Phase 4.3d task-level design: `2026-08-29-issue552-space-invite-cancel-failure-epoch.md`.
+Phase 4.3e task-level design: `2026-08-29-issue552-space-member-role-failure-epoch.md`.
+Phase 4.4 task-level design: `2026-08-29-issue552-navigation-intent-epochs.md`.
+
 **One family per PR.** Suggested order after fresh recon:
 
 1. room settings;
@@ -185,17 +194,22 @@ No generic TypeScript request manager and no generic Rust queue.
 
 **Separate design and PR per mutation family.**
 
+Phase 5A task-level design: `2026-08-29-issue552-alias-mutation-sequencing.md`.
+Phase 5B task-level design: `2026-08-29-issue552-caption-mutation-sequencing.md`.
+
 ### Alias mutations
 
-Prove whether the Rust `Saving` admission and projected terminal can accept the latest user intent without frontend serialization. If not, add the smallest alias-specific Rust pending/latest rule before deleting the TS queue entry.
+**Phase 5A decision:** retain the bounded `alias:${userId}` renderer lane. Rust owns durable aliases, `Saving`, reconciliation and projections, but Tauri returns a pre-terminal snapshot and browser results share one generation; Rust cannot reconstruct autosave order before concurrent command submission. Deferred App and queue evidence proves serialization, latest-only result application, rejection continuation and cleanup. Deletion would require a separately reviewed correlated-terminal/latest-intent contract, not a safe leaf simplification.
 
 ### Main/thread staged-upload captions
 
-Prove ordering across A/B/A edits, target/account replacement, item removal, and stale snapshots. If Rust lacks revision admission, add a caption-specific revision/request fence; do not add a general-purpose mutation framework.
+**Phase 5B decision:** retain the bounded target/root/staged-id renderer lanes. Tauri waits for exact Rust caption projection, but commands carry no mounted-editor revision and browser snapshots cannot recover input order. Concrete A/B/A, independent main/thread, rejection and invalidation evidence plus dirty/IME dialog tests prove the lanes own only editor-to-terminal ordering; Rust owns caption DTOs, residency and send content.
 
 **Exit:** either the TS mutation queue is deleted, or every retained user has a documented renderer-only necessity. “Still convenient” is not sufficient.
 
 ## Phase 6 — Audit the frontend-neutral Core consumption boundary
+
+Task-level design: `2026-08-29-issue552-frontend-neutral-core-boundary.md`.
 
 **Deliverable:** one Rust integration-test PR unless all evidence already exists.
 
@@ -212,6 +226,8 @@ Keep IPC-only DTOs in `src-tauri`. Move a presentation DTO into shared Rust only
 **Exit:** a test starts Core, sends a command, observes event/snapshot convergence, and shuts down cleanly with no Tauri type in the contract.
 
 ## Phase 7 — Epic completion audit
+
+Task-level audit: `2026-08-29-issue552-final-acceptance-audit.md`.
 
 **Deliverable:** one documentation/closure PR or the final semantic PR’s documentation section.
 

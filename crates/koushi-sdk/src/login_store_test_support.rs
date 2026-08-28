@@ -19,6 +19,7 @@ type TestResult<T> = Result<T, String>;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LoginStoreCase {
     MissingCryptoDb,
+    EmptyCryptoDb,
     CorruptCryptoDb,
     WrongKey,
     WrongAccount,
@@ -62,6 +63,7 @@ impl LoginStoreReport {
             crypto_identity_generations: "none",
             saved_device: match preflight {
                 SavedCryptoStorePreflight::Missing => "refused_missing_crypto",
+                SavedCryptoStorePreflight::Empty => "refused_empty_crypto",
                 SavedCryptoStorePreflight::OpenFailed
                 | SavedCryptoStorePreflight::IdentityMismatch => "refused_mismatch",
                 SavedCryptoStorePreflight::PresentMatching => "reused_matching_crypto",
@@ -98,6 +100,18 @@ async fn run_async(case: LoginStoreCase) -> TestResult<LoginStoreReport> {
 
     let preflight = match case {
         LoginStoreCase::MissingCryptoDb => {
+            preflight_saved_crypto_store(&config, Some(expected_user), Some(expected_device)).await
+        }
+        LoginStoreCase::EmptyCryptoDb => {
+            // An aborted earlier attempt: the store file exists under the
+            // correct key, but no account was ever created in it.
+            let store =
+                SqliteCryptoStore::open_with_key(config.path(), Some(config.sdk_store_key()))
+                    .await
+                    .map_err(|_| "store open failed".to_owned())?;
+            CryptoStore::close(&store)
+                .await
+                .map_err(|_| "store close failed".to_owned())?;
             preflight_saved_crypto_store(&config, Some(expected_user), Some(expected_device)).await
         }
         LoginStoreCase::CorruptCryptoDb => {

@@ -43,7 +43,10 @@ use koushi_core::renderable_thumbnail::{
 use koushi_core::{AccountCommand, AppCommand, CoreCommand, CoreConnection, CoreRuntime};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
 
-const OIDC_CALLBACK_URL_PREFIX: &str = "koushi-desktop://auth/callback";
+// Must stay in sync with `OIDC_REDIRECT_URI` in koushi-core. The scheme is
+// reverse-DNS per RFC 8252 §7.1 because MAS deployments reject bare schemes.
+const OIDC_CALLBACK_SCHEME_PREFIX: &str = "com.github.shinaoka.koushi-matrix:";
+const OIDC_CALLBACK_PATH: &str = "auth/callback";
 #[cfg(any(debug_assertions, test))]
 const QA_LOGIN_PIPE_ENV: &str = "KOUSHI_QA_LOGIN_PIPE";
 #[cfg(any(debug_assertions, test))]
@@ -433,9 +436,15 @@ impl MacosCloseRequestedAction {
 }
 
 fn is_oidc_callback_url(url: &str) -> bool {
-    match url.strip_prefix(OIDC_CALLBACK_URL_PREFIX) {
+    // The registered redirect URI is hostless (`scheme:/auth/callback`), but
+    // URL normalization between the browser, the OS opener, and the deep-link
+    // plugin may add authority slashes; accept any number of leading slashes.
+    let Some(rest) = url.strip_prefix(OIDC_CALLBACK_SCHEME_PREFIX) else {
+        return false;
+    };
+    match rest.trim_start_matches('/').strip_prefix(OIDC_CALLBACK_PATH) {
         Some("") => true,
-        Some(rest) => rest.starts_with('?') || rest.starts_with('#'),
+        Some(tail) => tail.starts_with('?') || tail.starts_with('#'),
         None => false,
     }
 }
@@ -1300,14 +1309,24 @@ mod tests {
     #[test]
     fn oidc_callback_url_accepts_only_expected_auth_callback_shape() {
         assert!(super::is_oidc_callback_url(
-            "koushi-desktop://auth/callback"
+            "com.github.shinaoka.koushi-matrix:/auth/callback"
         ));
         assert!(super::is_oidc_callback_url(
-            "koushi-desktop://auth/callback?code=synthetic&state=synthetic"
+            "com.github.shinaoka.koushi-matrix:/auth/callback?code=synthetic&state=synthetic"
         ));
-        assert!(!super::is_oidc_callback_url("koushi-desktop://event"));
+        // Slash-count tolerance: URL normalization along the browser → OS
+        // opener → deep-link path may add authority slashes.
+        assert!(super::is_oidc_callback_url(
+            "com.github.shinaoka.koushi-matrix://auth/callback?code=synthetic"
+        ));
         assert!(!super::is_oidc_callback_url(
-            "koushi-desktop://auth/callback-extra?code=synthetic"
+            "com.github.shinaoka.koushi-matrix:/event"
+        ));
+        assert!(!super::is_oidc_callback_url(
+            "com.github.shinaoka.koushi-matrix:/auth/callback-extra?code=synthetic"
+        ));
+        assert!(!super::is_oidc_callback_url(
+            "koushi-desktop://auth/callback?code=synthetic"
         ));
         assert!(!super::is_oidc_callback_url(
             "https://auth.example.test/callback?code=synthetic"
