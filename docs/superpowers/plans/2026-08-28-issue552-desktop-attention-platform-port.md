@@ -24,7 +24,7 @@ Out of scope: general App window/dialog operations, menu/Core/state event subscr
 4. Native badge invokes `set_native_attention_badge` with `{ count }` and returns `applied | unsupported | mismatch`.
 5. Sound invokes `play_native_attention_sound` and returns `played | unsupported | failed | skipped`; the domain dispatcher retains cooldown/in-flight policy and diagnostics.
 6. Passive notification delivery calls `isPermissionGranted` once per adapter lifetime, never calls `requestPermission`, and sends only when already granted.
-7. Notification clear settles both `cancelAll()` and `removeAllActive()`; either rejection becomes the fixed adapter error consumed as `attention_notification_clear_failed`.
+7. Notification clear settles both `cancelAll()` and `removeAllActive()`; either rejection throws the fixed adapter error `native_notification_clear_failed`, which the unchanged domain wrapper catches and reports as the fixed diagnostic token `attention_notification_clear_failed`.
 8. Notification payload construction remains privacy-safe and domain-owned: title/body only, from the Rust candidate's allowed room display name and counts.
 9. All async effect calls and fixed diagnostic tokens retain their current fire-and-observe behavior.
 
