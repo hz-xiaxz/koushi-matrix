@@ -1173,7 +1173,6 @@ export function App() {
   // before Rust's Loading projection arrives. The record is bounded and full-account scoped.
   const spaceMembersPanelOpenIntentEpochRef = useRef(0);
   const spaceMembersLoadDemandRef = useRef<SpaceMembersLoadDemand | null>(null);
-  const spaceMembersInviteRequestRef = useRef(0);
   const spaceMembersCancelRequestRef = useRef(0);
   const spaceMembersRoleRequestRef = useRef(0);
   const appTimelineTransport = useMemo<TimelineTransport | null>(() => {
@@ -2822,7 +2821,6 @@ export function App() {
     spaceSettingsRequestRef.current += 1;
     spaceSettingsLoadRef.current = null;
     spaceMembersPanelOpenIntentEpochRef.current += 1;
-    spaceMembersInviteRequestRef.current += 1;
     spaceMembersCancelRequestRef.current += 1;
     setPeoplePanelScope(null);
     setSelectedProfileUserId(null);
@@ -5012,11 +5010,9 @@ export function App() {
       return;
     }
 
-    const requestId = ++spaceMembersInviteRequestRef.current;
     try {
       const nextSnapshot = await api.inviteUserToSpace(fence.spaceId, userId, fence.generation);
       if (
-        spaceMembersInviteRequestRef.current !== requestId ||
         !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
         !spaceMembersSnapshotMatches(nextSnapshot, fence)
       ) {
@@ -5024,10 +5020,7 @@ export function App() {
       }
       setSnapshot(nextSnapshot);
     } catch {
-      if (
-        spaceMembersInviteRequestRef.current === requestId &&
-        spaceMembersSnapshotMatches(snapshotRef.current, fence)
-      ) {
+      if (spaceMembersSnapshotMatches(snapshotRef.current, fence)) {
         appendSpaceMembersDiagnosticLog("invite outcome=transport_rejected");
       }
     }
