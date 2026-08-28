@@ -685,6 +685,8 @@ describe("App Space Members integration", () => {
       const api = createBrowserFakeApi();
       const first = deferred<DesktopSnapshot>();
       const second = deferred<DesktopSnapshot>();
+      const loadSpaceMembers = vi.spyOn(api, "loadSpaceMembers");
+      const loadRoomSettings = vi.spyOn(api, "loadRoomSettings");
       const cancelSpaceInvite = vi
         .spyOn(api, "cancelSpaceInvite")
         .mockReturnValueOnce(first.promise)
@@ -698,7 +700,23 @@ describe("App Space Members integration", () => {
 
       await renderAppWithApi(api);
       await openSpaceMembersFromSidebar();
+      await waitFor(() => {
+        expect(loadSpaceMembers).toHaveBeenCalledTimes(1);
+        expect(loadRoomSettings).toHaveBeenCalledWith("!space-alpha:example.invalid");
+      });
+      await act(async () => {
+        await Promise.all([
+          ...loadSpaceMembers.mock.results.map((result) => result.value),
+          ...loadRoomSettings.mock.results.map((result) => result.value)
+        ]);
+      });
       const { getAppStoreSnapshot } = await import("./domain/appStore");
+      await waitFor(() => {
+        expect(getAppStoreSnapshot()?.state.domain.room_management.selected_room_id).toBe(
+          "!space-alpha:example.invalid"
+        );
+        expect(getAppStoreSnapshot()?.state.domain.space_members.operation.kind).toBe("idle");
+      });
       success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
       const button = screen.getByRole("button", { name: "Cancel invitation" });
       await act(async () => {
