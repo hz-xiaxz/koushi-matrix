@@ -786,6 +786,15 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   role operation/failure state. React renders those DTOs and dispatches the
   typed `update_space_member_role` command; it must not derive options from
   role labels, child-room completion, or local permission guesses.
+- The Space-members panel owns one bounded load-demand record and one panel-open
+  intent epoch. The demand key is the full ready account
+  (homeserver/user/device), Space id and Rust generation. It coalesces only the
+  pre-projection gap before Rust's `Loading` request id is visible and retains a
+  loaded marker for a legitimate empty projection. Exact record identity plus
+  full live/returned fences are required before applying or settling; an old
+  account completion cannot mutate or clear a newer demand. Do not restore the
+  former page-lifetime Map/Set or move panel-open intent into Rust. Invite,
+  search, cancel and role epochs remain separate audit families.
 - The Space Members panel may own only confirmation-dialog visibility and DOM
   focus. A select remains on the projected current role until a later Rust
   snapshot projects the requested role; failure/retry leaves the authoritative
