@@ -1547,7 +1547,13 @@ stateDiagram-v2
   They do not open the right panel.
 - `EnsureSubscribed` reprojects the actor-owned InitialItems identity while it
   remains unacknowledged. There is no sleep, fixed retry count, visibility
-  heuristic, or command-side event observer in this success contract.
+  heuristic, or command-side event observer inside the Rust success contract.
+  Before Core acceptance, one App-lifetime adapter may retry captured renderer
+  evidence at most seven total attempts on one of four closed channels (Room,
+  Thread, Focused, repair). View unmount does not cancel that job; account
+  replacement/reset and App teardown do. Queue acceptance ends adapter retry,
+  after which actor/request/generation/render fences and repair timeout are
+  Rust-owned.
 - `EnterAnchoredTimeline` is accepted only for a Ready session when `room_id` is
   the active, known room; otherwise it is ignored.
 - `CloseFocusedContext` is the live-edge return: it clears

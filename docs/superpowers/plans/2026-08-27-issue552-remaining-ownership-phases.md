@@ -1,6 +1,6 @@
 # Issue #552 Remaining Frontend Ownership Migration — Phased Execution Plan
 
-Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), and 2B1–2B4 (PRs #712–#715) merged. Phase 3 design is pending independent review; later implementation remains unauthorized by this document alone.
+Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), and 2B1–2B4 (PRs #712–#715) merged. Phase 3 is implemented on its approved branch pending final verification/review/merge; later phases remain unauthorized by this document alone.
 
 Phase 0 base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`. Phase 1 #708 insertion base: `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
@@ -157,6 +157,8 @@ Choose the first option supported by the evidence:
 React keeps one-shot DOM evidence capture and generation data. Delete `projectionAcknowledgementRetryRef`, `repairAcknowledgementRetryRef`, and browser timers only after the selected owner is proven.
 
 **Exit:** one documented acknowledgement owner, deterministic failure/replacement/teardown coverage, and no duplicate TS retry state.
+
+**Phase 3 implementation record:** option 2 is selected. TimelineView retains one-shot Room DOM evidence and App retains Focused/Thread canonical-store evidence. One App-lifetime controller owns four bounded pre-Core delivery channels with seven total attempts, actor-aware identity, same-kind supersession, account reset and renderer disposal. Queue acceptance is its terminal; Rust retains every post-acceptance fence/continuation/timeout. TimelineView retry refs/timers are removed and IPC is unchanged.
 
 ## Phase 4 — Remove redundant App request fences by command family
 

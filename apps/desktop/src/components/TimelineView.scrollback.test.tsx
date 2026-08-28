@@ -11,6 +11,7 @@ import {
   type TimelineItem
 } from "../domain/coreEvents";
 import type { TimelineContinuityState } from "../domain/types";
+import { createTimelineAcknowledgementDelivery } from "../backend/timelineAcknowledgementDelivery";
 import { setActiveLocaleProfile } from "../i18n/messages";
 import {
   KEY,
@@ -1776,6 +1777,7 @@ describe("TimelineView", () => {
     expect(acknowledgeProjection).toHaveBeenCalledWith(
       { connection_id: 4, sequence: 8 },
       KEY,
+      9,
       1,
       1,
       true
@@ -1981,85 +1983,18 @@ describe("TimelineView", () => {
     expect(acknowledgeRenderedBatch).toHaveBeenCalledWith(KEY, 9, 3, 11, 5);
   });
 
-  it("retries a rejected rendered-batch acknowledgement", async () => {
-    vi.useFakeTimers();
-    let emit: (payload: CoreEventPayload) => void = () => undefined;
-    const acknowledgeRenderedBatch = vi
-      .fn<() => Promise<void>>()
-      .mockRejectedValueOnce(new Error("queue timeout"))
-      .mockResolvedValue(undefined);
-    const frames: FrameRequestCallback[] = [];
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-      frames.push(callback);
-      return frames.length;
-    });
-    const transport = baseTransport({
-      listenCoreEvents(nextListener) {
-        emit = nextListener;
-        return () => undefined;
-      },
-      acknowledgeRenderedBatch
-    });
-    render(
-      <TimelineView
-        timelineKey={KEY}
-        roomId="!room:example.invalid"
-        transport={transport}
-        continuity={{
-          kind: "repairing",
-          generation: 11,
-          gap_count: 1,
-          batches_processed: 1,
-          minimum_batch_id: 5
-        }}
-        onReply={vi.fn()}
-      />
-    );
-    act(() => {
-      emit({
-        kind: "Timeline",
-        event: {
-          InitialItems: {
-            request_id: null,
-            key: KEY,
-            actor_generation: 9,
-            generation: 3,
-            items: [message("$repair", "Repair")]
-          }
-        }
-      });
-    });
-    act(() => {
-      while (frames.length > 0) {
-        frames.shift()?.(0);
-      }
-    });
-    await act(async () => Promise.resolve());
-    expect(acknowledgeRenderedBatch).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(50);
-    });
-    act(() => {
-      while (frames.length > 0) {
-        frames.shift()?.(0);
-      }
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(acknowledgeRenderedBatch).toHaveBeenCalledTimes(2);
-    expect(acknowledgeRenderedBatch).toHaveBeenLastCalledWith(KEY, 9, 3, 11, 5);
-    vi.useRealTimers();
-  });
-
-  it("cancels superseded acknowledgement retry timers on unmount", async () => {
+  it("retries a rejected rendered-batch acknowledgement through the App-lifetime owner", async () => {
     vi.useFakeTimers();
     try {
       let emit: (payload: CoreEventPayload) => void = () => undefined;
-      const acknowledgeRenderedBatch = vi.fn<() => Promise<void>>().mockRejectedValue(
-        new Error("queue timeout")
-      );
+      const submitRepair = vi
+        .fn<() => Promise<void>>()
+        .mockRejectedValueOnce(new Error("queue timeout"))
+        .mockResolvedValue(undefined);
+      const delivery = createTimelineAcknowledgementDelivery({
+        submitProjection: vi.fn(async () => undefined),
+        submitRepair
+      });
       const frames: FrameRequestCallback[] = [];
       vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
         frames.push(callback);
@@ -2070,9 +2005,9 @@ describe("TimelineView", () => {
           emit = nextListener;
           return () => undefined;
         },
-        acknowledgeRenderedBatch
+        acknowledgeRenderedBatch: (...args) => delivery.acknowledgeRenderedBatch(...args)
       });
-      const view = (minimumBatchId: number, batchesProcessed: number) => (
+      render(
         <TimelineView
           timelineKey={KEY}
           roomId="!room:example.invalid"
@@ -2081,13 +2016,12 @@ describe("TimelineView", () => {
             kind: "repairing",
             generation: 11,
             gap_count: 1,
-            batches_processed: batchesProcessed,
-            minimum_batch_id: minimumBatchId
+            batches_processed: 1,
+            minimum_batch_id: 5
           }}
           onReply={vi.fn()}
         />
       );
-      const { rerender, unmount } = render(view(5, 1));
       act(() => {
         emit({
           kind: "Timeline",
@@ -2103,24 +2037,88 @@ describe("TimelineView", () => {
         });
       });
       act(() => {
-        while (frames.length > 0) {
-          frames.shift()?.(0);
-        }
+        while (frames.length > 0) frames.shift()?.(0);
       });
       await act(async () => Promise.resolve());
-      expect(acknowledgeRenderedBatch).toHaveBeenCalledTimes(1);
+      expect(submitRepair).toHaveBeenCalledTimes(1);
 
-      act(() => rerender(view(6, 2)));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(submitRepair).toHaveBeenCalledTimes(2);
+      expect(submitRepair).toHaveBeenLastCalledWith(KEY, 9, 3, 11, 5);
+      delivery.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps rejected acknowledgement delivery alive after TimelineView unmount", async () => {
+    vi.useFakeTimers();
+    try {
+      let emit: (payload: CoreEventPayload) => void = () => undefined;
+      const submitRepair = vi
+        .fn<() => Promise<void>>()
+        .mockRejectedValueOnce(new Error("queue timeout"))
+        .mockResolvedValue(undefined);
+      const delivery = createTimelineAcknowledgementDelivery({
+        submitProjection: vi.fn(async () => undefined),
+        submitRepair
+      });
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+      const transport = baseTransport({
+        listenCoreEvents(nextListener) {
+          emit = nextListener;
+          return () => undefined;
+        },
+        acknowledgeRenderedBatch: (...args) => delivery.acknowledgeRenderedBatch(...args)
+      });
+      const { unmount } = render(
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={transport}
+          continuity={{
+            kind: "repairing",
+            generation: 11,
+            gap_count: 1,
+            batches_processed: 1,
+            minimum_batch_id: 5
+          }}
+          onReply={vi.fn()}
+        />
+      );
       act(() => {
-        while (frames.length > 0) {
-          frames.shift()?.(0);
-        }
+        emit({
+          kind: "Timeline",
+          event: {
+            InitialItems: {
+              request_id: null,
+              key: KEY,
+              actor_generation: 9,
+              generation: 3,
+              items: [message("$repair", "Repair")]
+            }
+          }
+        });
+      });
+      act(() => {
+        while (frames.length > 0) frames.shift()?.(0);
       });
       await act(async () => Promise.resolve());
-      expect(acknowledgeRenderedBatch).toHaveBeenCalledTimes(2);
-
+      expect(submitRepair).toHaveBeenCalledTimes(1);
       unmount();
+      expect(vi.getTimerCount()).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(50);
+      await Promise.resolve();
+      expect(submitRepair).toHaveBeenCalledTimes(2);
       expect(vi.getTimerCount()).toBe(0);
+      delivery.dispose();
     } finally {
       vi.useRealTimers();
     }

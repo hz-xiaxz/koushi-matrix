@@ -1083,6 +1083,14 @@ UI responsibilities:
   InitialItems key/generation. Until then the actor retains that projection
   identity and `EnsureSubscribed` reprojects it after consumer remount or lost
   delivery. Tauri transports this handshake but does not own its state.
+- Consumer evidence is renderer-specific: TimelineView captures committed Room
+  DOM evidence and App's canonical store captures Focused/Thread application.
+  One App-lifetime adapter owns at most four finite delivery jobs only until the
+  bounded Core queue accepts them; identical intents coalesce, newer same-kind
+  actor/generation intent supersedes older work, and view unmount does not cancel
+  delivery. Account replacement and renderer teardown reset/dispose it. After
+  queue acceptance, Rust alone owns acknowledgement admission, navigation/repair
+  consequences, stale rejection and repair timeout.
 - Before a backward pagination request can affect the viewport, capture an
   anchor item (first visible stable item ID plus pixel offset, or an equivalent
   bottom-aligned strategy). After applying the diff and after React commits the

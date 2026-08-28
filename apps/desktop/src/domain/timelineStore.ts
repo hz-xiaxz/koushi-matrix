@@ -286,6 +286,7 @@ export type TimelineProjectionApplication =
       kind: "applied";
       requestId: RequestId;
       key: TimelineKey;
+      actorGeneration: number;
       generation: number;
       itemCount: number;
       targetPresent: boolean;
@@ -342,6 +343,7 @@ export function applyTimelineEventWithProjectionResult(
       kind: "applied",
       requestId,
       key: payload.key,
+      actorGeneration,
       generation: payload.generation,
       ...timelineProjectionEvidence(payload.key, payload.items)
     }

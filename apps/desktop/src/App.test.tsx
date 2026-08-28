@@ -1401,6 +1401,39 @@ describe("ContextualRightPanel", () => {
     expect(source.slice(stateEnd, stateEnd + 10)).toContain("}, []);");
   });
 
+  test("timeline acknowledgement retry lifetime is not owned by TimelineView", () => {
+    const source = readFileSync(new URL("./components/TimelineView.tsx", import.meta.url), "utf8");
+    const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const transportSource = readFileSync(
+      new URL("./components/timeline/TimelineTransport.ts", import.meta.url),
+      "utf8"
+    );
+
+    expect(source).not.toContain("projectionAcknowledgementRetryRef");
+    expect(source).not.toContain("repairAcknowledgementRetryRef");
+    expect(source).not.toContain("retry.attempts");
+    expect(source).not.toContain("50 * 2 ** (retry.attempts - 1)");
+    expect(source).toContain("projectionAcknowledgementInFlightRef.current = null");
+    expect(source).toContain("repairAcknowledgementInFlightRef.current = null");
+    expect(appSource).toContain("timelineAcknowledgementDeliveryRef");
+    expect(appSource).toContain("timelineAcknowledgementDeliveryRef.current?.reset()");
+    expect(appSource).toContain("timelineAcknowledgementDeliveryRef.current?.dispose()");
+    expect(appSource).toContain("getTimelineAcknowledgementDelivery().acknowledgeProjection");
+    expect(appSource).toContain("getTimelineAcknowledgementDelivery().acknowledgeRenderedBatch");
+    const postStoreAckStart = appSource.indexOf(
+      'applied.projection.kind === "applied"'
+    );
+    const postStoreAckEnd = appSource.indexOf("next = applied.store", postStoreAckStart);
+    const postStoreAckSource = appSource.slice(postStoreAckStart, postStoreAckEnd);
+    expect(postStoreAckSource).toContain("getTimelineAcknowledgementDelivery()");
+    expect(postStoreAckSource).toContain("applied.projection.actorGeneration");
+    expect(postStoreAckSource).toContain(".catch(() => undefined)");
+    expect(postStoreAckSource).not.toContain("api.acknowledgeTimelineProjection");
+    expect(transportSource).toMatch(
+      /acknowledgeProjection\?\([\s\S]*actorGeneration: number[\s\S]*generation: number/
+    );
+  });
+
   test("Tauri timeline ensure waits for the webview CoreEvent listener registration", () => {
     const source = readFileSync(
       new URL("./backend/tauriTimelineTransport.ts", import.meta.url),

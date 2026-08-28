@@ -19,6 +19,7 @@ export interface TimelineTransport {
   acknowledgeProjection?(
     projectionRequestId: RequestId,
     timelineKey: TimelineKey,
+    actorGeneration: number,
     generation: number,
     itemCount: number,
     targetPresent: boolean
