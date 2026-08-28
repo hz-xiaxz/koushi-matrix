@@ -1,6 +1,6 @@
 # Issue #552 Remaining Frontend Ownership Migration — Phased Execution Plan
 
-Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), and 2B1 (PR #712) merged. Phase 2B2 is implemented on its approved branch pending final verification/review/merge; later phases remain unauthorized by this document alone.
+Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), 2B1 (PR #712), and 2B2 (PR #713) merged. Phase 2B3 design is pending independent review; later implementation remains unauthorized by this document alone.
 
 Phase 0 base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`. Phase 1 #708 insertion base: `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
@@ -91,6 +91,7 @@ Task-level designs:
 
 - Phase 2B1: `2026-08-28-issue552-link-media-platform-ports.md`.
 - Phase 2B2: `2026-08-28-issue552-desktop-attention-platform-port.md`.
+- Phase 2B3: `2026-08-28-issue552-window-dialog-platform-port.md`.
 
 **One PR per independently testable port family; do not bundle all families.**
 
@@ -98,7 +99,7 @@ Candidate order:
 
 1. external links and media URL conversion/save — **implemented in Phase 2B1:** one neutral three-operation port, browser/Tauri implementations, leaf runtime predicate, migrated callers and domain import guard; no IPC/DTO/product-semantic change;
 2. native notification/attention operations — **implemented in Phase 2B2:** one neutral selected port and one Tauri factory own current-window, notification, sound and native-badge operations; domain policy and hook timing remain unchanged;
-3. window/dialog operations;
+3. window/dialog operations — Phase 2B3 design pending review;
 4. Core/state/menu event subscriptions.
 
 For each family:
