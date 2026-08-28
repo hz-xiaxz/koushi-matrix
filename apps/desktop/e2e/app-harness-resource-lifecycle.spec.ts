@@ -225,7 +225,11 @@ test("account retirement rejects the old lease while the new account can acquire
     rendererGeneration
   });
 
-  const newLease = await acquireLease(page, rendererGeneration, MAIN_TARGET, {
+  // Account retirement invalidates all prior renderer leases. Begin a fresh
+  // renderer generation for the replacement account instead of racing whatever
+  // generation was current before the snapshot transition.
+  const replacementRendererGeneration = await beginLease(page);
+  const newLease = await acquireLease(page, replacementRendererGeneration, MAIN_TARGET, {
     accountHomeserver: "https://other-account.example.invalid",
     accountUserId: "@other-account:example.invalid",
     accountDeviceId: "OTHERDEVICE"
