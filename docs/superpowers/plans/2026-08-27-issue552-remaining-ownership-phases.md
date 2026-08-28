@@ -1,6 +1,6 @@
 # Issue #552 Remaining Frontend Ownership Migration — Phased Execution Plan
 
-Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), 2B1 (PR #712), 2B2 (PR #713), and 2B3 (PR #714) merged. Phase 2B4 is implemented on its approved branch pending final verification/review/merge; later phases remain unauthorized by this document alone.
+Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), and 2B1–2B4 (PRs #712–#715) merged. Phase 3 design is pending independent review; later implementation remains unauthorized by this document alone.
 
 Phase 0 base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`. Phase 1 #708 insertion base: `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
@@ -115,6 +115,8 @@ For each family:
 **Exit:** `domain/**` has no Tauri imports; remaining direct imports are adapter-owned and statically enumerated. IPC names and serialized contracts are unchanged.
 
 ## Phase 3 — Projection acknowledgement reliability leaf
+
+Task-level design: `2026-08-28-issue552-timeline-acknowledgement-delivery.md`.
 
 **Deliverable:** one semantic-owner PR, preceded by a reviewed design document.
 
