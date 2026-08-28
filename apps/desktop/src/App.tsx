@@ -1120,7 +1120,10 @@ export function App() {
   const qaSendBaselineTimelineItems = useRef(0);
   const stateRefreshTimerRef = useRef<number | null>(null);
   const panelDiagnosticRef = useRef<string | null>(null);
-  const diagnosticSnapshotRequestGenerationRef = useRef(0);
+  // Page-lifetime renderer intent only: Rust owns privacy-safe diagnostic content, while this
+  // epoch orders overlapping requests to open the one dialog. It deliberately survives account
+  // replacement because the diagnostic DTO is global/runtime and composes with current AppState.
+  const diagnosticsOpenIntentEpochRef = useRef(0);
   const typingSignalRef = useRef<{ roomId: string | null; isTyping: boolean }>({
     roomId: null,
     isTyping: false
@@ -2406,15 +2409,15 @@ export function App() {
   }
 
   async function openDiagnostics() {
-    const requestGeneration = ++diagnosticSnapshotRequestGenerationRef.current;
+    const requestGeneration = ++diagnosticsOpenIntentEpochRef.current;
     try {
       const nextSnapshot = await api.getDiagnosticSnapshot();
-      if (requestGeneration !== diagnosticSnapshotRequestGenerationRef.current) {
+      if (requestGeneration !== diagnosticsOpenIntentEpochRef.current) {
         return;
       }
       setRuntimeDiagnosticSnapshot(nextSnapshot);
     } catch {
-      if (requestGeneration !== diagnosticSnapshotRequestGenerationRef.current) {
+      if (requestGeneration !== diagnosticsOpenIntentEpochRef.current) {
         return;
       }
       appendDiagnosticLog({
