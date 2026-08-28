@@ -7,16 +7,14 @@
 //
 // Rules encoded here:
 //
-// 1. src/components/** AND src/App.tsx must not import @tauri-apps/* directly.
-//    The transport boundary is apps/desktop/src/backend/*. React components
-//    receive the API surface through props/context from App.tsx; they must not
-//    reach Tauri IPC themselves. App.tsx and the desktop-attention hook have
+// 1. src/components/**, src/app/**, and src/App.tsx must not import
+//    @tauri-apps/* directly. The transport boundary is
+//    apps/desktop/src/backend/*. React components/hooks receive neutral ports;
+//    they must not reach Tauri IPC themselves. App.tsx alone has three
 //    grandfathered import lines acknowledged with inline eslint-disable-next-line
-//    no-restricted-imports comments. Any NEW direct @tauri-apps import without a
-//    disable comment will be caught by this rule.
-//    domain/** is separately guarded below; only the deferred notification
-//    adapter and test files may still import @tauri-apps directly. test/** keeps
-//    the official @tauri-apps/api/mocks boundary.
+//    no-restricted-imports comments. Any NEW direct import without a disable
+//    comment will be caught by this rule. Production domain/** is separately
+//    guarded below; domain tests and test/** retain only their mock boundaries.
 //
 // 2. No source file may import from ../../src-tauri (path escape into the
 //    Rust adapter layer). TypeScript types from src-tauri are hand-mirrored
@@ -58,12 +56,11 @@ export default tseslint.config(
     },
   },
 
-  // Phase 2B domain guard: platform APIs belong under backend adapters. The
-  // notification family is a separately reviewed follow-up; domain tests may
-  // mock Tauri directly.
+  // Phase 2B domain guard: platform APIs belong under backend adapters. Domain
+  // tests may mock Tauri directly; production domain modules may not import it.
   {
     files: ["src/domain/**/*.ts"],
-    ignores: ["src/domain/**/*.test.ts", "src/domain/desktopNotification.ts"],
+    ignores: ["src/domain/**/*.test.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -80,8 +77,10 @@ export default tseslint.config(
     },
   },
 
-  // Rule 1 (components + App.tsx): Must not directly import @tauri-apps/*.
-  // - src/components/**  — zero current violations; any new import is a bug.
+  // Rule 1 (components + app hooks + App.tsx): Must not directly import
+  // @tauri-apps/*. App tests are covered and must mock neutral ports.
+  // - src/components/** and src/app/** — zero current violations; any new
+  //   import is a bug.
   // - src/App.tsx        — the 3 existing @tauri-apps lines are acknowledged
   //   with eslint-disable-next-line no-restricted-imports comments and tracked
   //   for Phase 2 migration. Any NEW import without a disable comment is caught.
@@ -89,9 +88,9 @@ export default tseslint.config(
     files: [
       "src/components/**/*.ts",
       "src/components/**/*.tsx",
+      "src/app/**/*.ts",
+      "src/app/**/*.tsx",
       "src/App.tsx",
-      "src/app/useDesktopAttentionEffects.ts",
-      "src/app/useUiLatencyDiagnostics.ts",
     ],
     rules: {
       "no-restricted-imports": [

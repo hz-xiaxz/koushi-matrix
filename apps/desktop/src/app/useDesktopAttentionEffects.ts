@@ -1,24 +1,18 @@
 import { useEffect, useMemo } from "react";
-// This hook is the React-owned platform-lifecycle seam for desktop attention.
-// eslint-disable-next-line no-restricted-imports
-import { invoke } from "@tauri-apps/api/core";
-// eslint-disable-next-line no-restricted-imports
-import { getCurrentWindow } from "@tauri-apps/api/window";
 
+// This hook is the React-owned platform-lifecycle seam for desktop attention.
+import { desktopAttentionPort } from "../backend/desktopAttentionRuntime";
+import type { TimelineDiagnosticLogEntry } from "../components/TimelineView";
 import {
   applyDesktopAttentionToWindow,
   createDesktopBadgeSoundDispatcher,
-  createTauriDesktopAttentionTransientTransport,
   dispatchDesktopAttentionTransientEffects,
   desktopAttentionNotificationCandidate
 } from "../domain/desktopAttention";
 import {
   clearDesktopAttentionNotifications,
-  createTauriDesktopNotificationTransport,
   sendDesktopAttentionNotification
 } from "../domain/desktopNotification";
-import type { TimelineDiagnosticLogEntry } from "../components/TimelineView";
-import { isTauriRuntime } from "../backend/runtimeEnvironment";
 import type { DesktopAttentionSummary } from "../domain/desktopAttention";
 import type { DesktopSnapshot } from "../domain/types";
 
@@ -29,20 +23,6 @@ type DesktopAttentionEffectsInput = {
   appendDiagnosticLog: (entry: TimelineDiagnosticLogEntry) => void;
 };
 
-const tauriNotificationTransport = isTauriRuntime()
-  ? createTauriDesktopNotificationTransport()
-  : null;
-const tauriAttentionTransientTransport = isTauriRuntime()
-  ? createTauriDesktopAttentionTransientTransport(() =>
-        invoke<"played" | "unsupported" | "failed" | "skipped">("play_native_attention_sound")
-    )
-  : null;
-const tauriNativeBadgeTransport = isTauriRuntime()
-  ? {
-      setBadgeCount: (count?: number) =>
-        invoke<"applied" | "unsupported" | "mismatch">("set_native_attention_badge", { count })
-    }
-  : null;
 const desktopBadgeSoundDispatcher = createDesktopBadgeSoundDispatcher();
 
 export function useDesktopAttentionEffects({
@@ -65,12 +45,12 @@ export function useDesktopAttentionEffects({
 
   useEffect(() => {
     document.title = attentionWindowTitle;
-    if (!isTauriRuntime()) {
+    if (!desktopAttentionPort) {
       return;
     }
 
     void applyDesktopAttentionToWindow(
-      getCurrentWindow(),
+      desktopAttentionPort.currentWindow(),
       attentionWindowTitle,
       safeAttentionSummary.badgeCount,
       attentionCapabilities,
@@ -79,19 +59,16 @@ export function useDesktopAttentionEffects({
         source: "native.attention",
         message: token
       }),
-      tauriNativeBadgeTransport ?? undefined
+      desktopAttentionPort.nativeBadge
     );
 
-    if (
-      !snapshot || snapshot.state.domain.session.kind !== "ready" ||
-      !tauriAttentionTransientTransport
-    ) {
+    if (!snapshot || snapshot.state.domain.session.kind !== "ready") {
       desktopBadgeSoundDispatcher.reset();
       return;
     }
 
     void desktopBadgeSoundDispatcher.observe(
-      tauriAttentionTransientTransport,
+      desktopAttentionPort.sound,
       safeAttentionSummary.badgeCount,
       snapshot.state.domain.native_attention.summary.capabilities,
       snapshot.state.domain.settings.values.notifications,
@@ -118,11 +95,11 @@ export function useDesktopAttentionEffects({
       snapshot.state.domain.native_attention
     );
 
-    if (!candidate || !tauriNotificationTransport) {
+    if (!candidate || !desktopAttentionPort) {
       return;
     }
 
-    const currentWindow = getCurrentWindow();
+    const currentWindow = desktopAttentionPort.currentWindow();
     void dispatchDesktopAttentionTransientEffects(
       {
         requestUserAttention: (requestType) => currentWindow.requestUserAttention(requestType)
@@ -136,7 +113,7 @@ export function useDesktopAttentionEffects({
         message: token
       })
     );
-    void sendDesktopAttentionNotification(candidate, tauriNotificationTransport, (token) =>
+    void sendDesktopAttentionNotification(candidate, desktopAttentionPort.notifications, (token) =>
       appendDiagnosticLog({ timestampMs: Date.now(), source: "native.attention", message: token })
     );
   }, [
@@ -148,11 +125,11 @@ export function useDesktopAttentionEffects({
   ]);
 
   useEffect(() => {
-    if (!tauriNotificationTransport || safeAttentionSummary.badgeCount !== 0) {
+    if (!desktopAttentionPort || safeAttentionSummary.badgeCount !== 0) {
       return;
     }
 
-    void clearDesktopAttentionNotifications(tauriNotificationTransport, (token) =>
+    void clearDesktopAttentionNotifications(desktopAttentionPort.notifications, (token) =>
       appendDiagnosticLog({ timestampMs: Date.now(), source: "native.attention", message: token })
     );
   }, [safeAttentionSummary.badgeCount]);

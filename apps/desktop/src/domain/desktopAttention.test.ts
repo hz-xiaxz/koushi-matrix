@@ -3,7 +3,6 @@ import { describe, expect, test, vi } from "vitest";
 import {
   applyDesktopAttentionToWindow,
   createDesktopBadgeSoundDispatcher,
-  createTauriDesktopAttentionTransientTransport,
   dispatchDesktopAttentionTransientEffects,
   desktopAttentionNotificationCandidate,
   desktopAttentionSummary,
@@ -629,10 +628,4 @@ describe("desktop notification candidate", () => {
     expect(diagnostic).toHaveBeenCalledWith(expect.stringContaining("policy_sound=false"));
   });
 
-  test("bundled Tauri sound adapter plays through the platform boundary", async () => {
-    const invokeNative = vi.fn().mockResolvedValue("played" as const);
-    const adapter = createTauriDesktopAttentionTransientTransport(invokeNative);
-    await adapter.playAttentionSound?.();
-    expect(invokeNative).toHaveBeenCalledOnce();
-  });
 });

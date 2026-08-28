@@ -110,6 +110,14 @@ No `App.tsx`, Rust, IPC, DTO, generated artifact, browser fake, CSS, or dependen
 
 - Round 1, `reviewer-flash`: `Correct-to-merge` with five Minor precision findings. The factory/non-construction shape, literal request type, deterministic mock recipe, all-app ESLint scope, and exact App test assertion placement are incorporated above; a focused Round 2 confirms the amended document before implementation.
 
+## Implementation evidence
+
+- RED: focused runtime-selection test failed before production edits because `backend/desktopAttentionRuntime` did not exist.
+- Focused runtime/Tauri adapter/domain/App tests: 5 files / 119 tests passed.
+- Full Vitest: 94 files / 1467 tests passed.
+- Playwright: 263 tests passed.
+- Typecheck, lint/IME/docs, production build, Tauri/domain guards, SDK-submodule check, secret scan, and `git diff --check` passed.
+
 ## Acceptance
 
 - notification and attention platform imports exist only in the approved Tauri adapter;

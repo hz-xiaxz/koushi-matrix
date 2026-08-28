@@ -1,10 +1,3 @@
-import {
-  cancelAll,
-  isPermissionGranted,
-  removeAllActive,
-  sendNotification
-} from "@tauri-apps/plugin-notification";
-
 import type {
   DesktopAttentionDiagnosticSink,
   DesktopAttentionNotificationCandidate
@@ -66,30 +59,6 @@ export async function clearDesktopAttentionNotifications(
   } catch {
     diagnostic?.("attention_notification_clear_failed");
   }
-}
-
-export function createTauriDesktopNotificationTransport(): DesktopNotificationTransport {
-  let permissionPromise: Promise<boolean> | null = null;
-
-  return {
-    async notify(content: DesktopNotificationContent) {
-      permissionPromise ??= ensureNotificationPermission();
-      if (!(await permissionPromise)) {
-        return;
-      }
-      await sendNotification(content);
-    },
-    async clear() {
-      const outcomes = await Promise.allSettled([cancelAll(), removeAllActive()]);
-      if (outcomes.some((outcome) => outcome.status === "rejected")) {
-        throw new Error("native_notification_clear_failed");
-      }
-    }
-  };
-}
-
-async function ensureNotificationPermission(): Promise<boolean> {
-  return isPermissionGranted();
 }
 
 function joinAttentionCounts(parts: string[]): string {
