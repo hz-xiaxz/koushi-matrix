@@ -2053,6 +2053,105 @@ describe("TimelineView", () => {
     }
   });
 
+  it("supersedes an in-flight repair delivery when the rendered batch advances", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    let resolveOld: () => void = () => undefined;
+    const oldSubmission = new Promise<void>((resolve) => {
+      resolveOld = resolve;
+    });
+    const submitRepair = vi
+      .fn<() => Promise<void>>()
+      .mockReturnValueOnce(oldSubmission)
+      .mockResolvedValue(undefined);
+    const delivery = createTimelineAcknowledgementDelivery({
+      submitProjection: vi.fn(async () => undefined),
+      submitRepair
+    });
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      },
+      acknowledgeRenderedBatch: (...args) => delivery.acknowledgeRenderedBatch(...args)
+    });
+    const view = (batchesProcessed: number, minimumBatchId: number) => (
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        continuity={{
+          kind: "repairing",
+          generation: 11,
+          gap_count: 1,
+          batches_processed: batchesProcessed,
+          minimum_batch_id: minimumBatchId
+        }}
+        onReply={vi.fn()}
+      />
+    );
+    const { rerender } = render(view(1, 5));
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            actor_generation: 9,
+            generation: 3,
+            items: [message("$repair", "Repair")]
+          }
+        }
+      });
+      emit({
+        kind: "Timeline",
+        event: {
+          ItemsUpdated: {
+            key: KEY,
+            generation: 3,
+            batch_id: 5,
+            diffs: []
+          }
+        }
+      });
+    });
+    act(() => {
+      while (frames.length > 0) frames.shift()?.(0);
+    });
+    expect(submitRepair).toHaveBeenCalledWith(KEY, 9, 3, 11, 5);
+
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          ItemsUpdated: {
+            key: KEY,
+            generation: 3,
+            batch_id: 6,
+            diffs: []
+          }
+        }
+      });
+      rerender(view(2, 6));
+    });
+    act(() => {
+      while (frames.length > 0) frames.shift()?.(0);
+    });
+    await act(async () => Promise.resolve());
+    expect(submitRepair).toHaveBeenCalledTimes(2);
+    expect(submitRepair).toHaveBeenLastCalledWith(KEY, 9, 3, 11, 6);
+
+    resolveOld();
+    await act(async () => Promise.resolve());
+    expect(submitRepair).toHaveBeenCalledTimes(2);
+    delivery.dispose();
+  });
+
   it("keeps rejected acknowledgement delivery alive after TimelineView unmount", async () => {
     vi.useFakeTimers();
     try {

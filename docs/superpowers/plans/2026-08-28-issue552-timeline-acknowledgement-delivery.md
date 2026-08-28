@@ -121,7 +121,7 @@ Before production edits:
    - seven failures reject with no remaining timer/job;
    - `reset` and `dispose` cancel timers and fence late completion;
    - resolved Core queue acceptance schedules no retry.
-2. Rewrite both existing component-owned retry tests in `TimelineView.scrollback.test.tsx`: replace "retries a rejected rendered-batch acknowledgement" with an externally owned controller transport that proves one 50 ms controller retry recovers, and replace "cancels superseded acknowledgement retry timers on unmount" with RED evidence that the same externally owned job survives TimelineView unmount and resolves. On the pre-fix component-owned implementation, the first test depends on React's timer and the second cancels the only retry, so the new expectations fail.
+2. Rewrite both existing component-owned retry tests in `TimelineView.scrollback.test.tsx`: replace "retries a rejected rendered-batch acknowledgement" with an externally owned controller transport that proves one 50 ms controller retry recovers (GREEN parity, not the sole RED discriminator), and replace "cancels superseded acknowledgement retry timers on unmount" with the guaranteed RED evidence that the same externally owned job survives TimelineView unmount and resolves. Add a component-to-controller test where a newer rendered repair batch supersedes an in-flight older batch while mounted. On the pre-fix implementation, the unmount expectation fails because React cancels the only retry; the separate source contract also fails on the old retry refs/timers.
 3. Keep stable-frame, exact projection evidence, exact repair fence and once-per-signature tests green.
 4. Keep existing Rust tests green for exact projection request/generation admission, matching repair fences, stale rejection/idempotence, Rust repair timeout recovery, and `focused_anchor_action_is_impossible_before_actor_acceptance` (actor rejection retains pending navigation; later accepted acknowledgement settles it). Add no Rust production path or retry task.
 
@@ -154,8 +154,8 @@ No Rust production, State, SDK, Tauri command, IPC/DTO, generated artifact, Brow
 ## Implementation evidence
 
 - RED: controller test failed because the delivery module did not exist; the App source contract failed on both TimelineView retry refs/backoff; legacy unmount behavior cancelled the only retry.
-- Focused controller/store/App/TimelineView tests: 5 files / 201 tests passed.
-- Full Vitest: 99 files / 1489 tests passed.
+- Focused controller/store/App/TimelineView tests: 5 files / 202 tests passed.
+- Full Vitest: 99 files / 1490 tests passed.
 - Playwright: 263 tests passed.
 - Core post-acceptance focused projection/gap-repair fence tests passed; full Core 1076 passed / 8 ignored, State 40, SDK 169, Tauri 170 passed / 1 ignored.
 - Typecheck, lint/IME/docs, build, rustfmt, adapter/domain guards, SDK-submodule check, secret scan, and `git diff --check` passed.
