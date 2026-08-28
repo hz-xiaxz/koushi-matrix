@@ -169,6 +169,11 @@ describe("App Space Members integration", () => {
     expect(source).not.toContain("spaceMembersLoadedRef");
     expect(source).not.toContain("spaceMembersInviteRequestRef");
     expect(source).not.toContain("spaceMembersCancelRequestRef");
+    expect(source).not.toContain("roomNavigationRequestRef");
+    expect(source).not.toContain("spaceNavigationRequestRef");
+    expect(source).toContain("roomNavigationIntentEpochRef");
+    expect(source).toContain("spaceNavigationIntentEpochRef");
+    expect(source).toContain("before async composer draining and command submission");
     expect(source).toContain("spaceMembersCancelFailureEpochRef");
     expect(source).toContain("spaceMembersLoadDemandRef");
     expect(source).toContain("spaceMembersPanelOpenIntentEpochRef");
@@ -189,7 +194,7 @@ describe("App Space Members integration", () => {
     const cancelStart = source.indexOf("async function cancelSpaceInvite(");
     const cancelCatch = source.indexOf("    } catch {", cancelStart);
     const cancelSuccessSource = source.slice(cancelStart, cancelCatch);
-    expect(cancelSuccessSource).toContain("spaceNavigationRequestRef.current !== navigationEpoch");
+    expect(cancelSuccessSource).toContain("spaceNavigationIntentEpochRef.current !== navigationEpoch");
     expect(cancelSuccessSource).not.toContain("spaceMembersCancelFailureEpochRef.current ===");
     expect(source.slice(cancelCatch)).toContain("space_invited.some");
 
@@ -198,7 +203,7 @@ describe("App Space Members integration", () => {
     const roleStart = source.indexOf("async function updateSpaceMemberRole(");
     const roleCatch = source.indexOf("    } catch {", roleStart);
     const roleSuccessSource = source.slice(roleStart, roleCatch);
-    expect(roleSuccessSource).toContain("spaceNavigationRequestRef.current !== navigationEpoch");
+    expect(roleSuccessSource).toContain("spaceNavigationIntentEpochRef.current !== navigationEpoch");
     expect(roleSuccessSource).not.toContain("spaceMembersRoleFailureEpochRef.current ===");
     expect(source.slice(roleCatch)).toContain("entry.power_level === expectedPowerLevel");
   });
@@ -986,6 +991,74 @@ describe("App Space Members integration", () => {
     });
 
     expect(screen.queryByRole("heading", { name: "People", level: 2 })).toBeNull();
+  });
+
+  test("keeps the latest room intent when rapid selections settle out of order", async () => {
+    const api = createBrowserFakeApi();
+    const first = deferred<DesktopSnapshot>();
+    const second = deferred<DesktopSnapshot>();
+    const selectRoom = vi
+      .spyOn(api, "selectRoom")
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const resultApi = createBrowserFakeApi();
+    const firstResult = await resultApi.selectRoom("!room-alpha:example.invalid");
+    const secondResult = await resultApi.selectRoom("!room-planning:example.invalid");
+
+    await renderAppWithApi(api);
+    const { getAppStoreSnapshot } = await import("./domain/appStore");
+    const generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    firstResult.state_generation = generation;
+    secondResult.state_generation = generation;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "synthetic-room" }));
+      fireEvent.click(screen.getByRole("button", { name: "planning-room" }));
+    });
+    await waitFor(() => expect(selectRoom).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      second.resolve(secondResult);
+      await second.promise;
+      first.resolve(firstResult);
+      await first.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "planning-room" }).className).toContain(
+        "is-active"
+      );
+    });
+  });
+
+  test("submits only the latest rapid Space intent after renderer drains", async () => {
+    const api = createBrowserFakeApi();
+    const pending = deferred<DesktopSnapshot>();
+    const selectSpace = vi.spyOn(api, "selectSpace").mockReturnValueOnce(pending.promise);
+    const resultApi = createBrowserFakeApi();
+    const result = await resultApi.selectSpace("!space-beta:example.invalid");
+
+    await renderAppWithApi(api);
+    const { getAppStoreSnapshot } = await import("./domain/appStore");
+    result.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Synthetic Workspace" }));
+      fireEvent.click(screen.getByRole("button", { name: "Synthetic Lab" }));
+    });
+    await waitFor(() => {
+      expect(selectSpace).toHaveBeenCalledTimes(1);
+      expect(selectSpace).toHaveBeenCalledWith("!space-beta:example.invalid");
+    });
+
+    await act(async () => {
+      pending.resolve(result);
+      await pending.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Synthetic Lab" }).className).toContain(
+        "is-active"
+      );
+    });
   });
 
   test("does not apply a late room selection after a newer Home navigation", async () => {
