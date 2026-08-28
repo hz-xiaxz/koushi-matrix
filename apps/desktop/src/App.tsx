@@ -1176,7 +1176,7 @@ export function App() {
   // Renderer-only latest transport-failure presentation. Rust owns cancellation request
   // admission/settlement; success is gated by the separate Space navigation epoch.
   const spaceMembersCancelFailureEpochRef = useRef(0);
-  const spaceMembersRoleRequestRef = useRef(0);
+  const spaceMembersRoleFailureEpochRef = useRef(0);
   const appTimelineTransport = useMemo<TimelineTransport | null>(() => {
     if (!tauriTimelineTransport) {
       return null;
@@ -2825,6 +2825,8 @@ export function App() {
     spaceMembersPanelOpenIntentEpochRef.current += 1;
     spaceMembersCancelFailureEpochRef.current += 1;
     setSpaceMembersCancelFailure(null);
+    spaceMembersRoleFailureEpochRef.current += 1;
+    setSpaceMembersRoleTransportFailure(null);
     setPeoplePanelScope(null);
     setSelectedProfileUserId(null);
     setRightPanelMode((mode) =>
@@ -5147,7 +5149,9 @@ export function App() {
       return;
     }
 
-    const requestId = ++spaceMembersRoleRequestRef.current;
+    const failureEpoch = ++spaceMembersRoleFailureEpochRef.current;
+    const navigationEpoch = spaceNavigationRequestRef.current;
+    const expectedPowerLevel = entry.power_level;
     setSpaceMembersRoleTransportFailure(null);
     appendSpaceMembersDiagnosticLog("role trigger=select");
     try {
@@ -5156,27 +5160,34 @@ export function App() {
         userId,
         fence.generation,
         members.power_levels_revision,
-        entry.power_level,
+        expectedPowerLevel,
         option.power_level,
         option.requires_confirmation
       );
       if (
-        spaceMembersRoleRequestRef.current !== requestId ||
+        spaceNavigationRequestRef.current !== navigationEpoch ||
         !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
         !spaceMembersSnapshotMatches(nextSnapshot, fence)
       ) {
         return;
       }
+      const operation = nextSnapshot.state.domain.space_members.operation;
+      if (operation.kind !== "roleUpdateFailed") {
+        spaceMembersRoleFailureEpochRef.current += 1;
+      }
       setSpaceMembersRoleTransportFailure(null);
       setSnapshot(nextSnapshot);
-      const operation = nextSnapshot.state.domain.space_members.operation;
       appendSpaceMembersDiagnosticLog(
         `role outcome=${operation.kind === "roleUpdateFailed" ? "failed" : operation.kind === "updatingRole" ? "pending" : "settled"}`
       );
     } catch {
       if (
-        spaceMembersRoleRequestRef.current === requestId &&
-        spaceMembersSnapshotMatches(snapshotRef.current, fence)
+        spaceMembersRoleFailureEpochRef.current === failureEpoch &&
+        spaceNavigationRequestRef.current === navigationEpoch &&
+        spaceMembersSnapshotMatches(snapshotRef.current, fence) &&
+        snapshotRef.current?.state.domain.space_members.space_joined.some(
+          (entry) => entry.user_id === userId && entry.power_level === expectedPowerLevel
+        )
       ) {
         setSpaceMembersRoleTransportFailure(fence);
         appendSpaceMembersDiagnosticLog("role outcome=transport_rejected");
