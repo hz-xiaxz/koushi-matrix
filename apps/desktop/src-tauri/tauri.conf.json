@@ -61,6 +61,14 @@
     "category": "SocialNetworking",
     "shortDescription": "Koushi — a Matrix desktop client.",
     "longDescription": "Koushi is a Matrix desktop client used to validate Matrix Rust SDK desktop integration, encrypted local stores, search, and Element-like desktop workflows.",
+    "linux": {
+      "deb": {
+        "desktopTemplate": "./koushi.desktop"
+      },
+      "rpm": {
+        "desktopTemplate": "./koushi.desktop"
+      }
+    },
     "macOS": {
       "minimumSystemVersion": "12.0",
       "hardenedRuntime": true,
