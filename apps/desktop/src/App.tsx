@@ -1128,6 +1128,10 @@ export function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const loginPasswordRef = useRef<HTMLInputElement>(null);
   const recoverySecretRef = useRef<HTMLInputElement>(null);
+  // Renderer-only demand ownership: load refs dedupe mount-effect dispatch while Rust has no
+  // settings-load Pending projection; request epochs fence same-target panel/profile intents.
+  // Rust remains the settings/request-terminal owner. A current rejection releases only its
+  // matching target marker so a later panel transition can retry without duplicate in-flight work.
   const roomSettingsLoadRef = useRef<string | null>(null);
   const roomSettingsRequestRef = useRef(0);
   const spaceSettingsLoadRef = useRef<string | null>(null);
@@ -2086,18 +2090,29 @@ export function App() {
     roomSettingsLoadRef.current = activeRoomId;
     const requestId = ++roomSettingsRequestRef.current;
     const navigationRequestId = roomNavigationRequestRef.current;
-    void api.loadRoomSettings(activeRoomId).then((nextSnapshot) => {
-      if (
-        roomSettingsRequestRef.current !== requestId ||
-        roomNavigationRequestRef.current !== navigationRequestId ||
-        snapshotRef.current?.state.ui.navigation.active_room_id !== activeRoomId ||
-        nextSnapshot.state.ui.navigation.active_room_id !== activeRoomId ||
-        !exactRoomSettingsForRoom(nextSnapshot, activeRoomId)
-      ) {
-        return;
-      }
-      setSnapshot(nextSnapshot);
-    });
+    void api
+      .loadRoomSettings(activeRoomId)
+      .then((nextSnapshot) => {
+        if (
+          roomSettingsRequestRef.current !== requestId ||
+          roomNavigationRequestRef.current !== navigationRequestId ||
+          snapshotRef.current?.state.ui.navigation.active_room_id !== activeRoomId ||
+          nextSnapshot.state.ui.navigation.active_room_id !== activeRoomId ||
+          !exactRoomSettingsForRoom(nextSnapshot, activeRoomId)
+        ) {
+          return;
+        }
+        setSnapshot(nextSnapshot);
+      })
+      .catch(() => {
+        if (
+          roomSettingsRequestRef.current === requestId &&
+          roomNavigationRequestRef.current === navigationRequestId &&
+          roomSettingsLoadRef.current === activeRoomId
+        ) {
+          roomSettingsLoadRef.current = null;
+        }
+      });
   }, [
     rightPanelMode,
     snapshot?.state.ui.navigation.active_room_id,
@@ -2133,19 +2148,30 @@ export function App() {
     }
     spaceSettingsLoadRef.current = activeSpaceId;
     const requestId = ++spaceSettingsRequestRef.current;
-    const navigationRequestId = roomNavigationRequestRef.current;
-    void api.loadRoomSettings(activeSpaceId).then((nextSnapshot) => {
-      if (
-        spaceSettingsRequestRef.current !== requestId ||
-        roomNavigationRequestRef.current !== navigationRequestId ||
-        snapshotRef.current?.state.ui.navigation.active_space_id !== activeSpaceId ||
-        nextSnapshot.state.ui.navigation.active_space_id !== activeSpaceId ||
-        !exactRoomSettingsForRoom(nextSnapshot, activeSpaceId)
-      ) {
-        return;
-      }
-      setSnapshot(nextSnapshot);
-    });
+    const navigationRequestId = spaceNavigationRequestRef.current;
+    void api
+      .loadRoomSettings(activeSpaceId)
+      .then((nextSnapshot) => {
+        if (
+          spaceSettingsRequestRef.current !== requestId ||
+          spaceNavigationRequestRef.current !== navigationRequestId ||
+          snapshotRef.current?.state.ui.navigation.active_space_id !== activeSpaceId ||
+          nextSnapshot.state.ui.navigation.active_space_id !== activeSpaceId ||
+          !exactRoomSettingsForRoom(nextSnapshot, activeSpaceId)
+        ) {
+          return;
+        }
+        setSnapshot(nextSnapshot);
+      })
+      .catch(() => {
+        if (
+          spaceSettingsRequestRef.current === requestId &&
+          spaceNavigationRequestRef.current === navigationRequestId &&
+          spaceSettingsLoadRef.current === activeSpaceId
+        ) {
+          spaceSettingsLoadRef.current = null;
+        }
+      });
   }, [
     rightPanelMode,
     snapshot?.state.ui.navigation.active_space_id,
@@ -4678,7 +4704,6 @@ export function App() {
       return;
     }
     const requestId = ++spaceMembersOpenRequestRef.current;
-    spaceSettingsRequestRef.current += 1;
     spaceSettingsLoadRef.current = null;
     appendSpaceMembersDiagnosticLog(`open trigger=${trigger}`);
     setPeoplePanelScope({ kind: "space", spaceId: fence.spaceId });

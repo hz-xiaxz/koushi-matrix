@@ -1,6 +1,6 @@
 # Issue #552 Phase 3 — Timeline acknowledgement delivery ownership
 
-Status: implemented and fully verified on the approved branch; pending exact-final-diff review and merge.
+Status: merged in PR #716 (`0604334e25d782f84e299d13f07a3bfe8c152112`) after full verification and exact-final-diff approval.
 
 ## Decision
 

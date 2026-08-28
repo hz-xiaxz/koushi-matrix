@@ -742,6 +742,16 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   or repair permission, setting, or kick/ban/unban state locally. Tauri
   room-management commands wait for correlated `RoomEvent`s and must not call SDK
   wrappers directly.
+- App's room/Space settings request epochs and load markers are renderer-only
+  panel-demand fences, not settings authority. Rust/Core owns each correlated
+  load terminal and the returned settings snapshot, while React must distinguish
+  same-room People/Profile intents (including equal snapshot generations) and
+  suppress duplicate mount-effect dispatch because Rust intentionally projects no
+  panel-open or settings-load Pending state. A rejected effect load may release
+  only its still-current request/target marker; it must not log the raw error,
+  clear a newer same-target demand, or add retry/backoff. Navigation and panel
+  replacement continue to fence completion before the Rust-shaped snapshot enters
+  the monotone appStore.
 - SDK room-setting state events can return before the SDK room cache reflects the
   just-sent state event. The success snapshot must project the submitted setting
   change or wait for a refreshed cache; do not make React patch the visible

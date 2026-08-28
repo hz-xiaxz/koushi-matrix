@@ -222,6 +222,97 @@ describe("App Space Members integration", () => {
     expect(loadSpaceMembers).toHaveBeenCalledWith(spaceId, generation);
   });
 
+  test("retries a rejected Room Info settings load after the panel reopens", async () => {
+    const api = createBrowserFakeApi();
+    const originalLoadRoomSettings = api.loadRoomSettings.bind(api);
+    const loadRoomSettings = vi.spyOn(api, "loadRoomSettings");
+    loadRoomSettings
+      .mockRejectedValueOnce(new Error("synthetic room settings failure"))
+      .mockImplementation((roomId) => originalLoadRoomSettings(roomId));
+
+    await renderAppWithApi(api);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Room info" }));
+    });
+    await waitFor(() => expect(loadRoomSettings).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Room info" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Room info" }));
+    });
+
+    await waitFor(() => expect(loadRoomSettings).toHaveBeenCalledTimes(2));
+    await screen.findByRole("textbox", { name: "Room name" });
+  });
+
+  test("does not duplicate a pending Room Info settings load when the panel reopens", async () => {
+    const api = createBrowserFakeApi();
+    const pending = deferred<DesktopSnapshot>();
+    const settingsApi = createBrowserFakeApi();
+    const loaded = await settingsApi.loadRoomSettings("!room-alpha:example.invalid");
+    const loadRoomSettings = vi
+      .spyOn(api, "loadRoomSettings")
+      .mockReturnValue(pending.promise);
+
+    await renderAppWithApi(api);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Room info" }));
+    });
+    await waitFor(() => expect(loadRoomSettings).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Room info" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Room info" }));
+    });
+    expect(loadRoomSettings).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pending.resolve(loaded);
+      await pending.promise;
+    });
+    await screen.findByRole("textbox", { name: "Room name" });
+  });
+
+  test("does not apply a late Space Info settings result after opening same-Space members", async () => {
+    const api = createBrowserFakeApi();
+    const pending = deferred<DesktopSnapshot>();
+    const settingsApi = createBrowserFakeApi();
+    const staleResult = await settingsApi.loadRoomSettings("!space-alpha:example.invalid");
+    const staleMember = staleResult.state.domain.room_management.settings?.members[0];
+    if (!staleMember) {
+      throw new Error("expected a synthetic Space settings member");
+    }
+    staleMember.display_label = "Stale Space Info member";
+    staleMember.original_display_label = "Stale Space Info member";
+    const originalLoadRoomSettings = api.loadRoomSettings.bind(api);
+    let spaceSettingsCalls = 0;
+    vi.spyOn(api, "loadRoomSettings").mockImplementation((roomId) => {
+      if (roomId === "!space-alpha:example.invalid" && ++spaceSettingsCalls === 1) {
+        return pending.promise;
+      }
+      return originalLoadRoomSettings(roomId);
+    });
+
+    await renderAppWithApi(api);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Space info and settings" }));
+    });
+    await waitFor(() => expect(spaceSettingsCalls).toBe(1));
+
+    await openSpaceMembersFromSidebar();
+    await act(async () => {
+      pending.resolve(staleResult);
+      await pending.promise;
+    });
+
+    expect(screen.getByRole("heading", { name: "Space members", level: 2 })).toBeTruthy();
+    expect(screen.queryByText("Stale Space Info member")).toBeNull();
+  });
+
   test("fences a late prior-Space member result after navigation", async () => {
     const api = createBrowserFakeApi();
     const initial = await api.getSnapshot();
