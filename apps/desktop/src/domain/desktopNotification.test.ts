@@ -1,24 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-vi.mock("@tauri-apps/plugin-notification", () => ({
-  cancelAll: vi.fn(),
-  isPermissionGranted: vi.fn(),
-  removeAllActive: vi.fn(),
-  requestPermission: vi.fn(),
-  sendNotification: vi.fn()
-}));
-
-import {
-  cancelAll,
-  isPermissionGranted,
-  removeAllActive,
-  requestPermission,
-  sendNotification
-} from "@tauri-apps/plugin-notification";
-
 import {
   clearDesktopAttentionNotifications,
-  createTauriDesktopNotificationTransport,
   desktopAttentionNotificationContent,
   sendDesktopAttentionNotification
 } from "./desktopNotification";
@@ -139,61 +122,4 @@ describe("desktop notification content", () => {
     expect(transport.clear).toHaveBeenCalledOnce();
   });
 
-  test("sends through the Tauri transport when permission is already granted", async () => {
-    vi.mocked(isPermissionGranted).mockResolvedValue(true);
-    vi.mocked(sendNotification).mockResolvedValue(undefined);
-
-    await createTauriDesktopNotificationTransport().notify({
-      title: "Mention in Announcements",
-      body: "1 mention, 6 unread"
-    });
-
-    expect(isPermissionGranted).toHaveBeenCalledOnce();
-    expect(requestPermission).not.toHaveBeenCalled();
-    expect(sendNotification).toHaveBeenCalledOnce();
-    expect(sendNotification).toHaveBeenCalledWith({
-      title: "Mention in Announcements",
-      body: "1 mention, 6 unread"
-    });
-  });
-
-  test("clears pending and active notifications in the Tauri transport", async () => {
-    vi.mocked(cancelAll).mockResolvedValue(undefined);
-    vi.mocked(removeAllActive).mockResolvedValue(undefined);
-
-    await createTauriDesktopNotificationTransport().clear();
-
-    expect(cancelAll).toHaveBeenCalledOnce();
-    expect(removeAllActive).toHaveBeenCalledOnce();
-  });
-
-  test("does not prompt for notification permission during passive attention dispatch", async () => {
-    vi.mocked(isPermissionGranted).mockResolvedValue(false);
-    vi.mocked(requestPermission).mockResolvedValue("granted");
-    vi.mocked(sendNotification).mockResolvedValue(undefined);
-
-    await createTauriDesktopNotificationTransport().notify({
-      title: "Mention in Announcements",
-      body: "1 mention, 6 unread"
-    });
-
-    expect(isPermissionGranted).toHaveBeenCalledOnce();
-    expect(requestPermission).not.toHaveBeenCalled();
-    expect(sendNotification).not.toHaveBeenCalled();
-  });
-
-  test("skips notification delivery when permission is denied", async () => {
-    vi.mocked(isPermissionGranted).mockResolvedValue(false);
-    vi.mocked(requestPermission).mockResolvedValue("denied");
-    vi.mocked(sendNotification).mockResolvedValue(undefined);
-
-    await createTauriDesktopNotificationTransport().notify({
-      title: "Message in General",
-      body: "1 unread"
-    });
-
-    expect(isPermissionGranted).toHaveBeenCalledOnce();
-    expect(requestPermission).not.toHaveBeenCalled();
-    expect(sendNotification).not.toHaveBeenCalled();
-  });
 });

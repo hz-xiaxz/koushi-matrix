@@ -343,16 +343,6 @@ function normalizeAttentionCount(count: number): number {
   return Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0;
 }
 
-export function createTauriDesktopAttentionTransientTransport(
-  invokeNative: () => Promise<NativeAttentionSoundOutcome>
-): DesktopAttentionTransientLike {
-  return {
-    async playAttentionSound() {
-      return invokeNative();
-    }
-  };
-}
-
 export function desktopAttentionNotificationCandidate(
   attention: NativeAttentionState
 ): DesktopAttentionNotificationCandidate | null {

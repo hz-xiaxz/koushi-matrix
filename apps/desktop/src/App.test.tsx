@@ -1842,6 +1842,14 @@ describe("desktop integration source guards", () => {
       new URL("./app/useDesktopAttentionEffects.ts", import.meta.url),
       "utf8"
     );
+    const attentionDomainSource = readFileSync(
+      new URL("./domain/desktopAttention.ts", import.meta.url),
+      "utf8"
+    );
+    const notificationDomainSource = readFileSync(
+      new URL("./domain/desktopNotification.ts", import.meta.url),
+      "utf8"
+    );
 
     const summaryStart = appSource.indexOf("const attentionSummary");
     const summaryEnd = appSource.indexOf("function handleShortcutAction", summaryStart);
@@ -1869,7 +1877,7 @@ describe("desktop integration source guards", () => {
     const clearSource = hookSource.slice(clearStart, clearEnd);
     expect(clearSource).toContain("safeAttentionSummary.badgeCount !== 0");
     expect(clearSource).toContain("void clearDesktopAttentionNotifications");
-    expect(clearSource).toContain("tauriNotificationTransport");
+    expect(clearSource).toContain("desktopAttentionPort.notifications");
 
     expect(appSource).toContain("desktopAttentionWindowTitle");
     expect(hookSource).toContain("sendDesktopAttentionNotification");
@@ -1880,7 +1888,10 @@ describe("desktop integration source guards", () => {
     expect(appSource).toContain("effectiveRightPanelModeForSnapshot");
     expect(appSource).toContain("rightPanelMode");
     expect(appSource).toContain("qaSendStatus");
-    expect(hookSource).toContain("getCurrentWindow()");
+    expect(hookSource).toContain("desktopAttentionPort.currentWindow()");
+    expect(hookSource).not.toContain("@tauri-apps");
+    expect(attentionDomainSource).not.toContain("@tauri-apps");
+    expect(notificationDomainSource).not.toContain("@tauri-apps");
     expect(hookSource).toContain("snapshot?.state.domain.native_attention.summary.capabilities");
     expect(hookSource).toContain("document.title = attentionWindowTitle");
     const windowEffectStart = hookSource.indexOf("useEffect(() => {\n    document.title");
