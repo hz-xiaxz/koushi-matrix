@@ -235,6 +235,10 @@ describe("desktop release scripts", () => {
       "spctl --assess",
       "Koushi-macos-arm64.dmg",
       "Koushi-windows-x64-unsigned.exe",
+      "build:linux",
+      "Koushi-linux-x64.AppImage",
+      "Koushi-linux-x64.deb",
+      "Koushi-linux-x64.rpm",
       "[System.IO.File]::WriteAllText",
       "gh release create",
       "--draft",
@@ -251,7 +255,9 @@ describe("desktop release scripts", () => {
       expect(workflow).not.toContain(retiredIntelToken);
     }
     expect(workflow).not.toContain('Set-Content -Path "release-assets/$asset.sha256"');
-    expect(workflow).toMatch(/publish-release:[\s\S]*needs:\s*\[prepare, build-macos, build-windows\]/);
+    expect(workflow).toMatch(
+      /publish-release:[\s\S]*needs:\s*\[prepare, build-macos, build-windows, build-linux\]/
+    );
   });
 
   test("desktop release workflow preserves trusted Rust build outputs across retries", () => {
@@ -268,7 +274,7 @@ describe("desktop release scripts", () => {
       "cache-workspace-crates: true",
     ]) {
       expect(workflow.match(new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")))
-        .toHaveLength(2);
+        .toHaveLength(3);
     }
   });
 

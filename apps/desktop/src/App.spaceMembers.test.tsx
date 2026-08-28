@@ -460,9 +460,13 @@ describe("App Space Members integration", () => {
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Room info" }));
+      await Promise.resolve();
+      await Promise.resolve();
     });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Room info" }));
+      await Promise.resolve();
+      await Promise.resolve();
     });
     expect(loadRoomSettings).toHaveBeenCalledTimes(1);
 
