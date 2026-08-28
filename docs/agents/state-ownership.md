@@ -813,8 +813,12 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   renderer captures Space navigation/full fences for success and keeps a
   separately named epoch only for latest transport-failure presentation. A
   resolved Rust Failed operation still drives retry UI; non-failed settlement and
-  navigation clear local failure. Role remains the final Space-member mutation
-  epoch audit family.
+  navigation clear local failure. Role updates use the same split: Rust's
+  first-admitted request owns projected success/failure, Space navigation and full
+  fences gate semantic application, and `spaceMembersRoleFailureEpochRef` owns only
+  current local transport-failure presentation. Panel close/reopen does not reject
+  a valid result; navigation does. Non-failed settlement advances the failure epoch
+  before clearing it so a duplicate rejection cannot outlive accepted success.
 - The Space Members panel may own only confirmation-dialog visibility and DOM
   focus. A select remains on the projected current role until a later Rust
   snapshot projects the requested role; failure/retry leaves the authoritative

@@ -192,6 +192,15 @@ describe("App Space Members integration", () => {
     expect(cancelSuccessSource).toContain("spaceNavigationRequestRef.current !== navigationEpoch");
     expect(cancelSuccessSource).not.toContain("spaceMembersCancelFailureEpochRef.current ===");
     expect(source.slice(cancelCatch)).toContain("space_invited.some");
+
+    expect(source).not.toContain("spaceMembersRoleRequestRef");
+    expect(source).toContain("spaceMembersRoleFailureEpochRef");
+    const roleStart = source.indexOf("async function updateSpaceMemberRole(");
+    const roleCatch = source.indexOf("    } catch {", roleStart);
+    const roleSuccessSource = source.slice(roleStart, roleCatch);
+    expect(roleSuccessSource).toContain("spaceNavigationRequestRef.current !== navigationEpoch");
+    expect(roleSuccessSource).not.toContain("spaceMembersRoleFailureEpochRef.current ===");
+    expect(source.slice(roleCatch)).toContain("entry.power_level === expectedPowerLevel");
   });
 
   test("does not issue a second Space member request while selection loading is in flight", async () => {
@@ -1265,6 +1274,199 @@ describe("App Space Members integration", () => {
     ]) {
       expect(dialog.textContent).not.toContain(privateValue);
     }
+  });
+
+  test.each(["duplicate-first", "success-first"] as const)(
+    "applies first-admitted role update and suppresses duplicate failure (%s)",
+    async (settlementOrder) => {
+      const api = createBrowserFakeApi();
+      const first = deferred<DesktopSnapshot>();
+      const second = deferred<DesktopSnapshot>();
+      const updateSpaceMemberRole = vi
+        .spyOn(api, "updateSpaceMemberRole")
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise);
+      const resultApi = createBrowserFakeApi();
+      const success = await resultApi.updateSpaceMemberRole(
+        "!space-alpha:example.invalid",
+        "@joined:example.invalid",
+        1,
+        "revision-1",
+        0,
+        50,
+        false
+      );
+
+      await renderAppWithApi(api);
+      await openSpaceMembersFromSidebar();
+      const { getAppStoreSnapshot } = await import("./domain/appStore");
+      success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+      const select = screen.getByRole("combobox", { name: "Role for Joined Member" });
+      await act(async () => {
+        fireEvent.change(select, { target: { value: "50" } });
+        fireEvent.change(select, { target: { value: "50" } });
+      });
+      await waitFor(() => expect(updateSpaceMemberRole).toHaveBeenCalledTimes(2));
+
+      const rejectDuplicate = async () => {
+        second.reject(new Error("duplicate role update rejected"));
+        await second.promise.catch(() => undefined);
+      };
+      const resolveAccepted = async () => {
+        first.resolve(success);
+        await first.promise;
+      };
+      await act(async () => {
+        if (settlementOrder === "duplicate-first") {
+          await rejectDuplicate();
+          await resolveAccepted();
+        } else {
+          await resolveAccepted();
+          await rejectDuplicate();
+        }
+      });
+
+      await waitFor(() => {
+        expect(
+          (screen.getByRole("combobox", { name: "Role for Joined Member" }) as HTMLSelectElement)
+            .value
+        ).toBe("50");
+        expect(screen.queryByRole("alert")).toBeNull();
+      });
+    }
+  );
+
+  test("applies a valid role update after the same Space panel closes and reopens", async () => {
+    const api = createBrowserFakeApi();
+    const pending = deferred<DesktopSnapshot>();
+    const resultApi = createBrowserFakeApi();
+    const success = await resultApi.updateSpaceMemberRole(
+      "!space-alpha:example.invalid",
+      "@joined:example.invalid",
+      1,
+      "revision-1",
+      0,
+      50,
+      false
+    );
+    vi.spyOn(api, "updateSpaceMemberRole").mockReturnValueOnce(pending.promise);
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+    await act(async () => {
+      fireEvent.change(screen.getByRole("combobox", { name: "Role for Joined Member" }), {
+        target: { value: "50" }
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Close Space members" }));
+    });
+    await openSpaceMembersFromSidebar();
+    const { getAppStoreSnapshot } = await import("./domain/appStore");
+    success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    await act(async () => {
+      pending.resolve(success);
+      await pending.promise;
+    });
+
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("combobox", { name: "Role for Joined Member" }) as HTMLSelectElement)
+          .value
+      ).toBe("50");
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+  });
+
+  test.each(["completion", "rejection"] as const)(
+    "ignores a late role %s after same-Space room navigation",
+    async (outcome) => {
+      const api = createBrowserFakeApi();
+      const pending = deferred<DesktopSnapshot>();
+      const updateSpaceMemberRole = vi
+        .spyOn(api, "updateSpaceMemberRole")
+        .mockReturnValueOnce(pending.promise);
+      const resultApi = createBrowserFakeApi();
+      const success = await resultApi.updateSpaceMemberRole(
+        "!space-alpha:example.invalid",
+        "@joined:example.invalid",
+        1,
+        "revision-1",
+        0,
+        50,
+        false
+      );
+
+      await renderAppWithApi(api);
+      await openSpaceMembersFromSidebar();
+      await act(async () => {
+        fireEvent.change(screen.getByRole("combobox", { name: "Role for Joined Member" }), {
+          target: { value: "50" }
+        });
+      });
+      await waitFor(() => expect(updateSpaceMemberRole).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Rooms, 10 unread/ }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "planning-room" }));
+      });
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "planning-room" }).className).toContain(
+          "is-active"
+        );
+      });
+
+      const { getAppStoreSnapshot } = await import("./domain/appStore");
+      success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+      await act(async () => {
+        if (outcome === "completion") {
+          pending.resolve(success);
+          await pending.promise;
+        } else {
+          pending.reject(new Error("late role rejection"));
+          await pending.promise.catch(() => undefined);
+        }
+      });
+
+      await openSpaceMembersFromSidebar();
+      expect(
+        (screen.getByRole("combobox", { name: "Role for Joined Member" }) as HTMLSelectElement)
+          .value
+      ).toBe("0");
+      expect(screen.queryByRole("alert")).toBeNull();
+      await act(async () => {
+        fireEvent.click(await screen.findByRole("button", { name: "Open diagnostics" }));
+      });
+      expect((await screen.findByRole("dialog", { name: "Diagnostics" })).textContent).not.toContain(
+        "role outcome="
+      );
+    }
+  );
+
+  test("shows a fixed private failure for a current role transport rejection", async () => {
+    const api = createBrowserFakeApi();
+    vi.spyOn(api, "updateSpaceMemberRole").mockRejectedValueOnce(
+      new Error("private role transport details @joined:example.invalid")
+    );
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+
+    await act(async () => {
+      fireEvent.change(screen.getByRole("combobox", { name: "Role for Joined Member" }), {
+        target: { value: "50" }
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toBe(
+        "Could not update this member's role. Try again."
+      );
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Open diagnostics" }));
+    });
+    const dialog = await screen.findByRole("dialog", { name: "Diagnostics" });
+    expect(dialog.textContent).toContain("role outcome=transport_rejected");
+    expect(dialog.textContent).not.toContain("private role transport details");
+    expect(dialog.textContent).not.toContain("@joined:example.invalid");
   });
 
   test("requires admin confirmation and keeps Cancel inert", async () => {
