@@ -1,6 +1,6 @@
 # Issue #552 Remaining Frontend Ownership Migration — Phased Execution Plan
 
-Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), 2B1–2B4 (PRs #712–#715), 3 (PR #716), 4.1 (PR #720), 4.2 (PR #721), 4.3a (PR #722), 4.3b (PR #723), 4.3c (PR #724), 4.3d (PR #726), and 4.3e (PR #727) merged. Phase 4.4 is implemented, locally verified and approved by exact-final-diff review, pending PR/CI; later implementation remains unauthorized by this document alone.
+Status: Phases 0, 1 (#708 / PR #710), 2A (PR #711), 2B1–2B4 (PRs #712–#715), 3 (PR #716), 4.1 (PR #720), 4.2 (PR #721), 4.3a (PR #722), 4.3b (PR #723), 4.3c (PR #724), 4.3d (PR #726), 4.3e (PR #727), and 4.4 (PR #728) merged. Phase 5A is implemented, locally verified and approved by exact-final-diff review, pending PR/CI; later implementation remains unauthorized by this document alone.
 
 Phase 0 base: `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01`. Phase 1 #708 insertion base: `aea695f63a588c63cd7f9c0d9a5717752cef1d69`.
 
@@ -194,9 +194,11 @@ No generic TypeScript request manager and no generic Rust queue.
 
 **Separate design and PR per mutation family.**
 
+Phase 5A task-level design: `2026-08-29-issue552-alias-mutation-sequencing.md`.
+
 ### Alias mutations
 
-Prove whether the Rust `Saving` admission and projected terminal can accept the latest user intent without frontend serialization. If not, add the smallest alias-specific Rust pending/latest rule before deleting the TS queue entry.
+**Phase 5A decision:** retain the bounded `alias:${userId}` renderer lane. Rust owns durable aliases, `Saving`, reconciliation and projections, but Tauri returns a pre-terminal snapshot and browser results share one generation; Rust cannot reconstruct autosave order before concurrent command submission. Deferred App and queue evidence proves serialization, latest-only result application, rejection continuation and cleanup. Deletion would require a separately reviewed correlated-terminal/latest-intent contract, not a safe leaf simplification.
 
 ### Main/thread staged-upload captions
 
