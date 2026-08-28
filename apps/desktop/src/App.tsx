@@ -714,6 +714,11 @@ function readyComposerDraftAccountOwner(snapshot: DesktopSnapshot | null): {
     : null;
 }
 
+function readyAccountOwnerKey(snapshot: DesktopSnapshot | null): string | null {
+  const account = readyComposerDraftAccountOwner(snapshot);
+  return account ? composerDraftAccountOwnerKey(account) : null;
+}
+
 function composerDraftScope(
   account: { homeserver: string; userId: string; deviceId: string },
   target: ComposerTarget
@@ -1084,6 +1089,10 @@ export function App() {
   const [inviteUserDialog, setInviteUserDialog] = useState<InviteUserDialogState>(null);
   const [inviteUserDialogVisible, setInviteUserDialogVisible] = useState(false);
   const [inviteUserDraftQuery, setInviteUserDraftQuery] = useState("");
+  // Renderer-only lifetime across the room dialog and Space-panel views of the shared
+  // Rust invite workflow. Newer open/query/reset intent invalidates older returned promises;
+  // Rust remains the candidate/scope/operation owner.
+  const inviteWorkflowLifetimeEpochRef = useRef(0);
   // React-local ephemeral state only: which create dialog is open and the
   // unsent name draft. The pending op status comes from the snapshot
   // (basic_operation); the created room/space identity comes from the API.
@@ -3291,21 +3300,76 @@ export function App() {
   }
 
   async function openInviteUserDialog(roomId: string, title: string) {
+    const accountOwnerKey = readyAccountOwnerKey(snapshotRef.current);
+    if (!accountOwnerKey) {
+      return;
+    }
+    const epoch = ++inviteWorkflowLifetimeEpochRef.current;
     setInviteUserDraftQuery("");
     setInviteUserDialog({ roomId, title });
     setInviteUserDialogVisible(true);
-    const settingsSnapshot = await api.loadRoomSettings(roomId);
-    setSnapshot(settingsSnapshot);
-    const nextSnapshot = await api.openInviteWorkflow(roomId);
-    setInviteUserDraftQuery(nextSnapshot.state.domain.invite_workflow?.query.query ?? "");
-    setSnapshot(nextSnapshot);
+    try {
+      const settingsSnapshot = await api.loadRoomSettings(roomId);
+      if (
+        inviteWorkflowLifetimeEpochRef.current !== epoch ||
+        readyAccountOwnerKey(snapshotRef.current) !== accountOwnerKey ||
+        readyAccountOwnerKey(settingsSnapshot) !== accountOwnerKey
+      ) {
+        return;
+      }
+      setSnapshot(settingsSnapshot);
+      const nextSnapshot = await api.openInviteWorkflow(roomId);
+      if (
+        inviteWorkflowLifetimeEpochRef.current !== epoch ||
+        readyAccountOwnerKey(snapshotRef.current) !== accountOwnerKey ||
+        readyAccountOwnerKey(nextSnapshot) !== accountOwnerKey ||
+        nextSnapshot.state.domain.invite_workflow?.query.room_id !== roomId
+      ) {
+        return;
+      }
+      setInviteUserDraftQuery(nextSnapshot.state.domain.invite_workflow.query.query);
+      setSnapshot(nextSnapshot);
+    } catch {
+      if (
+        inviteWorkflowLifetimeEpochRef.current === epoch &&
+        readyAccountOwnerKey(snapshotRef.current) === accountOwnerKey
+      ) {
+        appendDiagnosticLog({
+          timestampMs: Date.now(),
+          source: "invite.workflow",
+          message: "surface=room operation=open outcome=transport_rejected"
+        });
+      }
+    }
   }
 
   async function closeInviteUserDialog() {
+    const accountOwnerKey = readyAccountOwnerKey(snapshotRef.current);
+    const epoch = ++inviteWorkflowLifetimeEpochRef.current;
     setInviteUserDialog(null);
     setInviteUserDialogVisible(false);
     setInviteUserDraftQuery("");
-    setSnapshot(await api.closeInviteWorkflow());
+    try {
+      const nextSnapshot = await api.closeInviteWorkflow();
+      if (
+        inviteWorkflowLifetimeEpochRef.current === epoch &&
+        readyAccountOwnerKey(snapshotRef.current) === accountOwnerKey &&
+        readyAccountOwnerKey(nextSnapshot) === accountOwnerKey
+      ) {
+        setSnapshot(nextSnapshot);
+      }
+    } catch {
+      if (
+        inviteWorkflowLifetimeEpochRef.current === epoch &&
+        readyAccountOwnerKey(snapshotRef.current) === accountOwnerKey
+      ) {
+        appendDiagnosticLog({
+          timestampMs: Date.now(),
+          source: "invite.workflow",
+          message: "surface=room operation=close outcome=transport_rejected"
+        });
+      }
+    }
   }
 
   async function openRoomInfoFromInvite() {
@@ -3326,27 +3390,82 @@ export function App() {
 
   async function returnToInviteUserDialog() {
     const dialog = inviteUserDialog;
-    if (!dialog) {
+    const accountOwnerKey = readyAccountOwnerKey(snapshotRef.current);
+    if (!dialog || !accountOwnerKey) {
       return;
     }
-    const settingsSnapshot = await api.loadRoomSettings(dialog.roomId);
-    setSnapshot(settingsSnapshot);
-    const nextSnapshot = await api.openInviteWorkflow(dialog.roomId);
-    const workflow = nextSnapshot.state.domain.invite_workflow ?? DEFAULT_INVITE_WORKFLOW;
-    setInviteUserDraftQuery(workflow.query.query);
-    setInviteUserDialogVisible(true);
-    setSnapshot(nextSnapshot);
-    await setRightPanelModeClosingFocusedContext("closed");
+    const epoch = ++inviteWorkflowLifetimeEpochRef.current;
+    try {
+      const settingsSnapshot = await api.loadRoomSettings(dialog.roomId);
+      if (
+        inviteWorkflowLifetimeEpochRef.current !== epoch ||
+        readyAccountOwnerKey(snapshotRef.current) !== accountOwnerKey ||
+        readyAccountOwnerKey(settingsSnapshot) !== accountOwnerKey
+      ) {
+        return;
+      }
+      setSnapshot(settingsSnapshot);
+      const nextSnapshot = await api.openInviteWorkflow(dialog.roomId);
+      if (
+        inviteWorkflowLifetimeEpochRef.current !== epoch ||
+        readyAccountOwnerKey(snapshotRef.current) !== accountOwnerKey ||
+        readyAccountOwnerKey(nextSnapshot) !== accountOwnerKey ||
+        nextSnapshot.state.domain.invite_workflow?.query.room_id !== dialog.roomId
+      ) {
+        return;
+      }
+      const workflow = nextSnapshot.state.domain.invite_workflow;
+      setInviteUserDraftQuery(workflow.query.query);
+      setInviteUserDialogVisible(true);
+      setSnapshot(nextSnapshot);
+      await setRightPanelModeClosingFocusedContext("closed");
+    } catch {
+      if (
+        inviteWorkflowLifetimeEpochRef.current === epoch &&
+        readyAccountOwnerKey(snapshotRef.current) === accountOwnerKey
+      ) {
+        appendDiagnosticLog({
+          timestampMs: Date.now(),
+          source: "invite.workflow",
+          message: "surface=room operation=reopen outcome=transport_rejected"
+        });
+      }
+    }
   }
 
   async function updateInviteUserQuery(value: string) {
     const dialog = inviteUserDialog;
+    const accountOwnerKey = readyAccountOwnerKey(snapshotRef.current);
     setInviteUserDraftQuery(value);
-    if (!dialog) {
+    if (!dialog || !accountOwnerKey) {
       return;
     }
-    const nextSnapshot = await api.searchInviteTargets(dialog.roomId, value);
-    setSnapshot(nextSnapshot);
+    const epoch = ++inviteWorkflowLifetimeEpochRef.current;
+    try {
+      const nextSnapshot = await api.searchInviteTargets(dialog.roomId, value);
+      const query = nextSnapshot.state.domain.invite_workflow?.query;
+      if (
+        inviteWorkflowLifetimeEpochRef.current !== epoch ||
+        readyAccountOwnerKey(snapshotRef.current) !== accountOwnerKey ||
+        readyAccountOwnerKey(nextSnapshot) !== accountOwnerKey ||
+        query?.room_id !== dialog.roomId ||
+        query.query !== value
+      ) {
+        return;
+      }
+      setSnapshot(nextSnapshot);
+    } catch {
+      if (
+        inviteWorkflowLifetimeEpochRef.current === epoch &&
+        readyAccountOwnerKey(snapshotRef.current) === accountOwnerKey
+      ) {
+        appendDiagnosticLog({
+          timestampMs: Date.now(),
+          source: "invite.workflow",
+          message: "surface=room operation=search outcome=transport_rejected"
+        });
+      }
+    }
   }
 
   async function selectInviteScope(scope: InviteScopeSelection) {
@@ -4769,42 +4888,78 @@ export function App() {
     }
   }
 
-  // #508: stable callback for the Space members invite search. Reads the
-  // latest snapshot via refs so the identity never changes across renders
-  // (which would re-trigger the panel's debounced effect indefinitely) and
-  // merges the Rust-owned exact-MXID candidate into the result list.
-  // #508: invalidates in-flight space invite searches when the panel leaves
-  // invite mode, so a stale response can never re-dirty the shared workflow.
-  const spaceInviteSearchRequestRef = useRef(0);
-
+  // Stable Space-panel callbacks read refs so their identity never restarts the panel debounce.
+  // The shared App epoch is distinct from the panel's mounted candidate-list epoch.
   const resetSpaceInviteSearch = useCallback(async () => {
-    spaceInviteSearchRequestRef.current += 1;
-    const nextSnapshot = await api.closeInviteWorkflow();
-    setSnapshot(nextSnapshot);
-  }, []);
+    const fence = spaceMembersFenceForSnapshot(snapshotRef.current);
+    const epoch = ++inviteWorkflowLifetimeEpochRef.current;
+    try {
+      const nextSnapshot = await api.closeInviteWorkflow();
+      if (
+        fence &&
+        inviteWorkflowLifetimeEpochRef.current === epoch &&
+        readyAccountOwnerKey(snapshotRef.current) === fence.accountOwnerKey &&
+        readyAccountOwnerKey(nextSnapshot) === fence.accountOwnerKey
+      ) {
+        setSnapshot(nextSnapshot);
+      }
+    } catch {
+      if (
+        fence &&
+        inviteWorkflowLifetimeEpochRef.current === epoch &&
+        readyAccountOwnerKey(snapshotRef.current) === fence.accountOwnerKey
+      ) {
+        appendDiagnosticLog({
+          timestampMs: Date.now(),
+          source: "invite.workflow",
+          message: "surface=space operation=close outcome=transport_rejected"
+        });
+      }
+    }
+  }, [appendDiagnosticLog, setSnapshot]);
 
   const searchSpaceInviteTargets = useCallback(async (query: string) => {
     const fence = spaceMembersFenceForSnapshot(snapshotRef.current);
     if (!fence) {
       return [];
     }
-    const requestId = spaceInviteSearchRequestRef.current;
-    const nextSnapshot = await api.searchInviteTargets(fence.spaceId, query);
-    if (spaceInviteSearchRequestRef.current !== requestId) {
+    const epoch = ++inviteWorkflowLifetimeEpochRef.current;
+    try {
+      const nextSnapshot = await api.searchInviteTargets(fence.spaceId, query);
+      const inviteQuery = nextSnapshot.state.domain.invite_workflow?.query;
+      if (
+        inviteWorkflowLifetimeEpochRef.current !== epoch ||
+        !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
+        !spaceMembersSnapshotMatches(nextSnapshot, fence) ||
+        inviteQuery?.room_id !== fence.spaceId ||
+        inviteQuery.query !== query
+      ) {
+        return [];
+      }
+      setSnapshot(nextSnapshot);
+      const candidates = inviteQuery.candidates;
+      if (!inviteQuery.explicit_user_id) {
+        return candidates;
+      }
+      return candidates.some(
+        (candidate) => candidate.user_id === inviteQuery.explicit_user_id!.user_id
+      )
+        ? candidates
+        : [...candidates, inviteQuery.explicit_user_id];
+    } catch {
+      if (
+        inviteWorkflowLifetimeEpochRef.current === epoch &&
+        spaceMembersSnapshotMatches(snapshotRef.current, fence)
+      ) {
+        appendDiagnosticLog({
+          timestampMs: Date.now(),
+          source: "invite.workflow",
+          message: "surface=space operation=search outcome=transport_rejected"
+        });
+      }
       return [];
     }
-    setSnapshot(nextSnapshot);
-    const inviteQuery = nextSnapshot.state.domain.invite_workflow?.query;
-    const candidates = inviteQuery?.candidates ?? [];
-    if (!inviteQuery?.explicit_user_id) {
-      return candidates;
-    }
-    return candidates.some(
-      (candidate) => candidate.user_id === inviteQuery.explicit_user_id!.user_id
-    )
-      ? candidates
-      : [...candidates, inviteQuery.explicit_user_id];
-  }, []);
+  }, [appendDiagnosticLog, setSnapshot]);
 
   async function inviteUserToSpace(
     userId: string,

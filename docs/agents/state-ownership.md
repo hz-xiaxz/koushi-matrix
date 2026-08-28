@@ -580,6 +580,16 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   without changing that head. Coalesce wakes and reproject only on invite payload
   or membership changes (plus one lag recovery); do not start another sync owner
   or `RoomListService`.
+- Rust owns invite target queries, candidate/status derivation, scope/history
+  policy and workflow state. Tauri `open/search/close` waits at most two seconds
+  for an exact Rust `InviteWorkflowState` terminal; queue acceptance alone is not
+  convergence. React retains two presentation fences: the mounted Space panel's
+  debounce/candidate-list epoch and one App epoch shared across room-dialog and
+  Space-panel workflow lifetimes. Stale returned promises cannot directly apply a
+  mismatched snapshot or candidate list; Rust StateDelta remains authoritative.
+  Every convergence rejection is caught with fixed private-data-free diagnostics,
+  and Space search resolves `[]` so its spinner cannot stick. Scope/target/invite
+  execution settlement remains a separate audit family.
 
 ## Public directory and Explore
 

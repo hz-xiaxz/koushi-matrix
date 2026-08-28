@@ -11,31 +11,133 @@ use super::directory::{
 };
 use super::navigation::SELECT_ROOM_EVENT_TIMEOUT;
 use super::*;
+
+const INVITE_WORKFLOW_CONVERGENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+const INVITE_WORKFLOW_CONVERGENCE_ERROR: &str = "invite workflow convergence timed out";
+
+enum InviteWorkflowTerminal<'a> {
+    Open { room_id: &'a str },
+    Search { room_id: &'a str, query: &'a str },
+    Closed,
+}
+
+fn invite_workflow_snapshot_matches(
+    snapshot: &koushi_state::AppState,
+    terminal: &InviteWorkflowTerminal<'_>,
+) -> bool {
+    match terminal {
+        InviteWorkflowTerminal::Open { room_id } => {
+            snapshot.invite_workflow.query.room_id.as_deref() == Some(*room_id)
+        }
+        InviteWorkflowTerminal::Search { room_id, query } => {
+            snapshot.invite_workflow.query.room_id.as_deref() == Some(*room_id)
+                && snapshot.invite_workflow.query.query == *query
+        }
+        InviteWorkflowTerminal::Closed => {
+            snapshot.invite_workflow == koushi_state::InviteWorkflowState::default()
+        }
+    }
+}
+
+#[derive(Debug)]
+struct InviteWorkflowVersionedSnapshot {
+    state: koushi_state::AppState,
+    generation: u64,
+}
+
+trait InviteWorkflowSnapshotSource {
+    fn versioned_snapshot(&self) -> InviteWorkflowVersionedSnapshot;
+    fn recv_event(
+        &mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<(), EventStreamLag>> + Send + '_>>;
+}
+
+impl InviteWorkflowSnapshotSource for CoreConnection {
+    fn versioned_snapshot(&self) -> InviteWorkflowVersionedSnapshot {
+        let snapshot = CoreConnection::versioned_snapshot(self);
+        InviteWorkflowVersionedSnapshot {
+            state: snapshot.state,
+            generation: snapshot.generation,
+        }
+    }
+
+    fn recv_event(
+        &mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<(), EventStreamLag>> + Send + '_>> {
+        Box::pin(async move { CoreConnection::recv_event(self).await.map(|_| ()) })
+    }
+}
+
+async fn wait_for_invite_workflow_snapshot_from<S: InviteWorkflowSnapshotSource>(
+    source: &mut S,
+    terminal: InviteWorkflowTerminal<'_>,
+    timeout: std::time::Duration,
+) -> Result<InviteWorkflowVersionedSnapshot, String> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let snapshot = source.versioned_snapshot();
+        if invite_workflow_snapshot_matches(&snapshot.state, &terminal) {
+            return Ok(snapshot);
+        }
+
+        match tokio::time::timeout_at(deadline, source.recv_event()).await {
+            Err(_) => return Err(INVITE_WORKFLOW_CONVERGENCE_ERROR.to_owned()),
+            Ok(Err(lag)) if lag.skipped == 0 => {
+                return Err(INVITE_WORKFLOW_CONVERGENCE_ERROR.to_owned());
+            }
+            Ok(Ok(())) | Ok(Err(_)) => {}
+        }
+    }
+}
+
+async fn wait_for_invite_workflow_snapshot(
+    event_conn: &mut CoreConnection,
+    terminal: InviteWorkflowTerminal<'_>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let snapshot = wait_for_invite_workflow_snapshot_from(
+        event_conn,
+        terminal,
+        INVITE_WORKFLOW_CONVERGENCE_TIMEOUT,
+    )
+    .await?;
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
+}
+
 #[tauri::command]
 pub async fn open_invite_workflow(
     room_id: String,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
-        state.inner(),
-        build_open_invite_workflow_command(request_id, room_id),
+    let mut event_conn = state.runtime.attach();
+    let request_id = event_conn.next_request_id();
+    event_conn
+        .command(build_open_invite_workflow_command(
+            request_id,
+            room_id.clone(),
+        ))
+        .await
+        .map_err(|error| format!("command submit failed: {error}"))?;
+    wait_for_invite_workflow_snapshot(
+        &mut event_conn,
+        InviteWorkflowTerminal::Open { room_id: &room_id },
     )
-    .await?;
-    current_snapshot(state.inner()).await
+    .await
 }
 
 #[tauri::command]
 pub async fn close_invite_workflow(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
-        state.inner(),
-        build_close_invite_workflow_command(request_id),
-    )
-    .await?;
-    current_snapshot(state.inner()).await
+    let mut event_conn = state.runtime.attach();
+    let request_id = event_conn.next_request_id();
+    event_conn
+        .command(build_close_invite_workflow_command(request_id))
+        .await
+        .map_err(|error| format!("command submit failed: {error}"))?;
+    wait_for_invite_workflow_snapshot(&mut event_conn, InviteWorkflowTerminal::Closed).await
 }
 
 #[tauri::command]
@@ -44,13 +146,24 @@ pub async fn search_invite_targets(
     query: String,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
-        state.inner(),
-        build_search_invite_targets_command(request_id, room_id, query),
+    let mut event_conn = state.runtime.attach();
+    let request_id = event_conn.next_request_id();
+    event_conn
+        .command(build_search_invite_targets_command(
+            request_id,
+            room_id.clone(),
+            query.clone(),
+        ))
+        .await
+        .map_err(|error| format!("command submit failed: {error}"))?;
+    wait_for_invite_workflow_snapshot(
+        &mut event_conn,
+        InviteWorkflowTerminal::Search {
+            room_id: &room_id,
+            query: &query,
+        },
     )
-    .await?;
-    current_snapshot(state.inner()).await
+    .await
 }
 
 #[tauri::command]
@@ -1371,6 +1484,135 @@ fn commands_source() -> String {
 mod tests {
     use super::*;
     use crate::commands::contracts::fake_request_id;
+
+    #[test]
+    fn invite_workflow_snapshot_terminals_are_exact_and_short_bounded() {
+        assert_eq!(
+            INVITE_WORKFLOW_CONVERGENCE_TIMEOUT,
+            std::time::Duration::from_secs(2)
+        );
+        let mut state = koushi_state::AppState::default();
+        assert!(invite_workflow_snapshot_matches(
+            &state,
+            &InviteWorkflowTerminal::Closed,
+        ));
+        assert!(!invite_workflow_snapshot_matches(
+            &state,
+            &InviteWorkflowTerminal::Open {
+                room_id: "!room:test"
+            },
+        ));
+
+        state.invite_workflow.query.room_id = Some("!room:test".to_owned());
+        state.invite_workflow.query.query = "alice".to_owned();
+        assert!(invite_workflow_snapshot_matches(
+            &state,
+            &InviteWorkflowTerminal::Open {
+                room_id: "!room:test"
+            },
+        ));
+        assert!(invite_workflow_snapshot_matches(
+            &state,
+            &InviteWorkflowTerminal::Search {
+                room_id: "!room:test",
+                query: "alice",
+            },
+        ));
+        assert!(!invite_workflow_snapshot_matches(
+            &state,
+            &InviteWorkflowTerminal::Search {
+                room_id: "!room:test",
+                query: "bob",
+            },
+        ));
+        assert!(!invite_workflow_snapshot_matches(
+            &state,
+            &InviteWorkflowTerminal::Closed,
+        ));
+    }
+
+    enum InviteWorkflowWaitStep {
+        Snapshot(koushi_state::AppState, u64),
+        Lag(u64),
+    }
+
+    struct ScriptedInviteWorkflowSource {
+        current: InviteWorkflowVersionedSnapshot,
+        steps: std::collections::VecDeque<InviteWorkflowWaitStep>,
+    }
+
+    impl InviteWorkflowSnapshotSource for ScriptedInviteWorkflowSource {
+        fn versioned_snapshot(&self) -> InviteWorkflowVersionedSnapshot {
+            InviteWorkflowVersionedSnapshot {
+                state: self.current.state.clone(),
+                generation: self.current.generation,
+            }
+        }
+
+        fn recv_event(
+            &mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<(), EventStreamLag>> + Send + '_>> {
+            match self.steps.pop_front() {
+                Some(InviteWorkflowWaitStep::Snapshot(state, generation)) => {
+                    self.current = InviteWorkflowVersionedSnapshot { state, generation };
+                    Box::pin(std::future::ready(Ok(())))
+                }
+                Some(InviteWorkflowWaitStep::Lag(skipped)) => {
+                    Box::pin(std::future::ready(Err(EventStreamLag { skipped })))
+                }
+                None => Box::pin(std::future::pending()),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn invite_workflow_wait_rechecks_after_lag_and_times_out_with_fixed_error() {
+        let initial = koushi_state::AppState::default();
+        let mut matching = initial.clone();
+        matching.invite_workflow.query.room_id = Some("!space:test".to_owned());
+        matching.invite_workflow.query.query = "alice".to_owned();
+        let mut lagged = ScriptedInviteWorkflowSource {
+            current: InviteWorkflowVersionedSnapshot {
+                state: initial.clone(),
+                generation: 1,
+            },
+            steps: [
+                InviteWorkflowWaitStep::Lag(3),
+                InviteWorkflowWaitStep::Snapshot(matching, 2),
+            ]
+            .into(),
+        };
+
+        let settled = wait_for_invite_workflow_snapshot_from(
+            &mut lagged,
+            InviteWorkflowTerminal::Search {
+                room_id: "!space:test",
+                query: "alice",
+            },
+            std::time::Duration::from_millis(50),
+        )
+        .await
+        .expect("matching snapshot after lag should settle");
+        assert_eq!(settled.generation, 2);
+
+        let mut stalled = ScriptedInviteWorkflowSource {
+            current: InviteWorkflowVersionedSnapshot {
+                state: initial,
+                generation: 1,
+            },
+            steps: std::collections::VecDeque::new(),
+        };
+        let error = wait_for_invite_workflow_snapshot_from(
+            &mut stalled,
+            InviteWorkflowTerminal::Open {
+                room_id: "!missing:test",
+            },
+            std::time::Duration::from_millis(1),
+        )
+        .await
+        .expect_err("non-matching snapshot should hit the fixed deadline");
+        assert_eq!(error, INVITE_WORKFLOW_CONVERGENCE_ERROR);
+    }
 
     #[test]
     fn room_management_tauri_commands_wait_for_correlated_core_events() {
