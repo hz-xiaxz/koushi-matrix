@@ -38,7 +38,7 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["koushi-desktop"]
+        "schemes": ["com.github.shinaoka.koushi-matrix", "koushi-desktop"]
       }
     }
   },
