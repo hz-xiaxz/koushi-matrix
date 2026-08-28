@@ -168,6 +168,8 @@ describe("App Space Members integration", () => {
     expect(source).not.toContain("spaceMembersLoadInFlightRef");
     expect(source).not.toContain("spaceMembersLoadedRef");
     expect(source).not.toContain("spaceMembersInviteRequestRef");
+    expect(source).not.toContain("spaceMembersCancelRequestRef");
+    expect(source).toContain("spaceMembersCancelFailureEpochRef");
     expect(source).toContain("spaceMembersLoadDemandRef");
     expect(source).toContain("spaceMembersPanelOpenIntentEpochRef");
     const loaderStart = source.indexOf("const ensureSpaceMembersLoaded");
@@ -183,6 +185,13 @@ describe("App Space Members integration", () => {
     expect(effectSource).toContain("snapshot?.state.domain.session.homeserver");
     expect(effectSource).toContain("snapshot?.state.domain.session.user_id");
     expect(effectSource).toContain("snapshot?.state.domain.session.device_id");
+
+    const cancelStart = source.indexOf("async function cancelSpaceInvite(");
+    const cancelCatch = source.indexOf("    } catch {", cancelStart);
+    const cancelSuccessSource = source.slice(cancelStart, cancelCatch);
+    expect(cancelSuccessSource).toContain("spaceNavigationRequestRef.current !== navigationEpoch");
+    expect(cancelSuccessSource).not.toContain("spaceMembersCancelFailureEpochRef.current ===");
+    expect(source.slice(cancelCatch)).toContain("space_invited.some");
   });
 
   test("does not issue a second Space member request while selection loading is in flight", async () => {
@@ -569,6 +578,90 @@ describe("App Space Members integration", () => {
         "Child-only Member"
       );
       expect(screen.queryByRole("list", { name: "Not in Space" })).toBeNull();
+    });
+  });
+
+  test.each(["duplicate-first", "success-first"] as const)(
+    "applies first-admitted cancellation and suppresses duplicate failure (%s)",
+    async (settlementOrder) => {
+      const api = createBrowserFakeApi();
+      const first = deferred<DesktopSnapshot>();
+      const second = deferred<DesktopSnapshot>();
+      const cancelSpaceInvite = vi
+        .spyOn(api, "cancelSpaceInvite")
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise);
+      const resultApi = createBrowserFakeApi();
+      const success = await resultApi.cancelSpaceInvite(
+        "!space-alpha:example.invalid",
+        "@invited:example.invalid",
+        1
+      );
+
+      await renderAppWithApi(api);
+      await openSpaceMembersFromSidebar();
+      const { getAppStoreSnapshot } = await import("./domain/appStore");
+      success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+      const button = screen.getByRole("button", { name: "Cancel invitation" });
+      await act(async () => {
+        fireEvent.click(button);
+        fireEvent.click(button);
+      });
+      await waitFor(() => expect(cancelSpaceInvite).toHaveBeenCalledTimes(2));
+
+      const rejectDuplicate = async () => {
+        second.reject(new Error("duplicate cancellation rejected"));
+        await second.promise.catch(() => undefined);
+      };
+      const resolveAccepted = async () => {
+        first.resolve(success);
+        await first.promise;
+      };
+      await act(async () => {
+        if (settlementOrder === "duplicate-first") {
+          await rejectDuplicate();
+          await resolveAccepted();
+        } else {
+          await resolveAccepted();
+          await rejectDuplicate();
+        }
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByRole("button", { name: "Cancel invitation" })).toBeNull();
+        expect(screen.queryByRole("alert")).toBeNull();
+      });
+    }
+  );
+
+  test("applies a valid cancellation after the same Space panel closes and reopens", async () => {
+    const api = createBrowserFakeApi();
+    const pending = deferred<DesktopSnapshot>();
+    const resultApi = createBrowserFakeApi();
+    const success = await resultApi.cancelSpaceInvite(
+      "!space-alpha:example.invalid",
+      "@invited:example.invalid",
+      1
+    );
+    vi.spyOn(api, "cancelSpaceInvite").mockReturnValueOnce(pending.promise);
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel invitation" }));
+      fireEvent.click(screen.getByRole("button", { name: "Close Space members" }));
+    });
+    await openSpaceMembersFromSidebar();
+    const { getAppStoreSnapshot } = await import("./domain/appStore");
+    success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    await act(async () => {
+      pending.resolve(success);
+      await pending.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Cancel invitation" })).toBeNull();
+      expect(screen.queryByRole("alert")).toBeNull();
     });
   });
 

@@ -1173,7 +1173,9 @@ export function App() {
   // before Rust's Loading projection arrives. The record is bounded and full-account scoped.
   const spaceMembersPanelOpenIntentEpochRef = useRef(0);
   const spaceMembersLoadDemandRef = useRef<SpaceMembersLoadDemand | null>(null);
-  const spaceMembersCancelRequestRef = useRef(0);
+  // Renderer-only latest transport-failure presentation. Rust owns cancellation request
+  // admission/settlement; success is gated by the separate Space navigation epoch.
+  const spaceMembersCancelFailureEpochRef = useRef(0);
   const spaceMembersRoleRequestRef = useRef(0);
   const appTimelineTransport = useMemo<TimelineTransport | null>(() => {
     if (!tauriTimelineTransport) {
@@ -2821,7 +2823,8 @@ export function App() {
     spaceSettingsRequestRef.current += 1;
     spaceSettingsLoadRef.current = null;
     spaceMembersPanelOpenIntentEpochRef.current += 1;
-    spaceMembersCancelRequestRef.current += 1;
+    spaceMembersCancelFailureEpochRef.current += 1;
+    setSpaceMembersCancelFailure(null);
     setPeoplePanelScope(null);
     setSelectedProfileUserId(null);
     setRightPanelMode((mode) =>
@@ -5065,12 +5068,13 @@ export function App() {
       return;
     }
 
-    const requestId = ++spaceMembersCancelRequestRef.current;
+    const navigationEpoch = spaceNavigationRequestRef.current;
+    const failureEpoch = ++spaceMembersCancelFailureEpochRef.current;
     setSpaceMembersCancelFailure(null);
     try {
       const nextSnapshot = await api.cancelSpaceInvite(fence.spaceId, userId, fence.generation);
       if (
-        spaceMembersCancelRequestRef.current !== requestId ||
+        spaceNavigationRequestRef.current !== navigationEpoch ||
         !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
         !spaceMembersSnapshotMatches(nextSnapshot, fence)
       ) {
@@ -5082,6 +5086,9 @@ export function App() {
         nextOperation.space_id === fence.spaceId &&
         nextOperation.user_id === userId &&
         nextOperation.generation === fence.generation;
+      if (!cancellationFailed) {
+        spaceMembersCancelFailureEpochRef.current += 1;
+      }
       setSpaceMembersCancelFailure(cancellationFailed ? fence : null);
       setSnapshot(nextSnapshot);
       appendSpaceMembersDiagnosticLog(
@@ -5093,8 +5100,11 @@ export function App() {
       );
     } catch {
       if (
-        spaceMembersCancelRequestRef.current === requestId &&
-        spaceMembersSnapshotMatches(snapshotRef.current, fence)
+        spaceMembersCancelFailureEpochRef.current === failureEpoch &&
+        spaceMembersSnapshotMatches(snapshotRef.current, fence) &&
+        snapshotRef.current?.state.domain.space_members.space_invited.some(
+          (entry) => entry.user_id === userId
+        )
       ) {
         setSpaceMembersCancelFailure(fence);
         appendSpaceMembersDiagnosticLog("cancel outcome=transport_rejected");

@@ -808,8 +808,13 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   execution has no frontend latest-request epoch: Rust's first-admitted
   `Inviting(request_id, Space, user, generation)` operation owns settlement, and
   App applies only a full-fence matching authoritative snapshot. A rapid
-  duplicate rejection must not suppress the accepted success. Cancel and role
-  epochs remain separate audit families because they also guard local failure UI.
+  duplicate rejection must not suppress the accepted success. Cancellation uses
+  Rust's equivalent first-admitted operation for membership settlement: the
+  renderer captures Space navigation/full fences for success and keeps a
+  separately named epoch only for latest transport-failure presentation. A
+  resolved Rust Failed operation still drives retry UI; non-failed settlement and
+  navigation clear local failure. Role remains the final Space-member mutation
+  epoch audit family.
 - The Space Members panel may own only confirmation-dialog visibility and DOM
   focus. A select remains on the projected current role until a later Rust
   snapshot projects the requested role; failure/retry leaves the authoritative
