@@ -859,7 +859,12 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
 - Selecting a file shows the Rust-owned Upload attachments staging dialog and
   must not invoke `upload_media` until Send. Captions are edited through the
   staging dialog (`TimelinePaneState.staged_uploads[*].caption`), not inferred
-  from the Composer draft.
+  from the Composer draft. Rust exclusively owns staged items, caption DTOs,
+  residency and send content. The bounded main/thread `caption:*` mutation lanes
+  own only mounted-editor intent ordering through the correlated Tauri terminal;
+  their keys include target/item identity and clear/send invalidates them so late
+  results cannot restore removed items. Browser snapshots have no caption revision,
+  so do not delete these lanes without a separately reviewed Rust editor revision.
 - Image upload compression keeps the same split: Rust owns
   `SettingsValues.media.image_upload_compression`, policy
   threshold/target/quality values, original-vs-selected variant metadata,

@@ -4116,6 +4116,9 @@ export function App() {
     }
   }
 
+  // Renderer-owned mounted-editor ordering: Tauri waits for the exact Rust projection, while this
+  // bounded target/item lane preserves input order and suppresses results after item invalidation.
+  // Rust remains the staged-item, caption DTO, residency, preparation and send-content owner.
   async function updateStagedUploadCaption(stagedId: string, caption: string): Promise<void> {
     const roomId = snapshot?.state.ui.timeline.room_id;
     if (!roomId) return;
@@ -4603,6 +4606,8 @@ export function App() {
     );
   }
 
+  // Same renderer-only ordering contract as the main caption lane, with the thread root included
+  // in the key so independent mounted editors never serialize one another.
   async function updateThreadStagedUploadCaption(
     roomId: string,
     rootEventId: string,

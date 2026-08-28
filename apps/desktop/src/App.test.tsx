@@ -2651,6 +2651,25 @@ describe("Timeline item row rendering", () => {
     );
   });
 
+  test("main and thread caption edits retain bounded mounted-editor ordering", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const mainStart = source.indexOf("async function updateStagedUploadCaption(");
+    const mainEnd = source.indexOf("async function selectStagedUploadOutput(", mainStart);
+    const threadStart = source.indexOf("async function updateThreadStagedUploadCaption(");
+    const threadEnd = source.indexOf("async function selectThreadStagedUploadOutput(", threadStart);
+    const mainSource = source.slice(mainStart, mainEnd);
+    const threadSource = source.slice(threadStart, threadEnd);
+
+    expect(mainSource).toContain("applyLatestTextMutationSnapshot(`caption:main:");
+    expect(mainSource).toContain("api.updateStagedUploadCaption(");
+    expect(threadSource).toContain("applyLatestTextMutationSnapshot(`caption:thread:");
+    expect(threadSource).toContain("api.updateStagedUploadCaption(");
+    expect(source.match(/api\.updateStagedUploadCaption\(/g)).toHaveLength(2);
+    expect(source.match(/`caption:main:/g)).toHaveLength(3);
+    expect(source.match(/`caption:thread:/g)).toHaveLength(3);
+    expect(source).toContain("Renderer-owned mounted-editor ordering");
+  });
+
   test("room and Space settings effects retain renderer-local demand ownership", () => {
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
     const roomEffectStart = source.indexOf('rightPanelMode !== "roomInfo"');
