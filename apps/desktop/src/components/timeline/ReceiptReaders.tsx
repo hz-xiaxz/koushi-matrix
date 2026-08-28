@@ -8,7 +8,7 @@ import {
   useFloatingPlacement,
   useHoverFocusPopup
 } from "../floatingLayer";
-import { mediaSourceUrl } from "../../domain/mediaUrl";
+import { mediaSourceUrl } from "../../backend/linkMediaRuntime";
 import type { LiveReadReceipt } from "../../domain/types";
 
 /** Reader popup width; the panel narrows to the pane when it is smaller. */

@@ -4,7 +4,8 @@ import katex from "katex";
 
 import { t } from "../../i18n/messages";
 import { findQueryHighlightRange } from "../searchHighlight";
-import { openExternalHttpUrl, toExternalHttpUrl } from "../../domain/externalLinks";
+import { openExternalHttpUrl } from "../../backend/linkMediaRuntime";
+import { toExternalHttpUrl } from "../../domain/externalLinks";
 import { parseMatrixPermalink, type MatrixPermalinkTarget } from "../../domain/matrixPermalink";
 import type { TimelineItem, TimelineLinkRange } from "../../domain/coreEvents";
 import type { UserProfile } from "../../domain/types";

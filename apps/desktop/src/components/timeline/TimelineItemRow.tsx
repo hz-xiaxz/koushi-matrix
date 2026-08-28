@@ -51,8 +51,8 @@ import type {
   TimelineItem
 } from "../../domain/coreEvents";
 import { timelineItemDomId } from "../../domain/coreEvents";
-import { openExternalHttpUrl, toExternalHttpUrl } from "../../domain/externalLinks";
-import { mediaSourceUrl } from "../../domain/mediaUrl";
+import { openExternalHttpUrl, mediaSourceUrl } from "../../backend/linkMediaRuntime";
+import { toExternalHttpUrl } from "../../domain/externalLinks";
 import type { TimelineForwardDestination } from "../../domain/projectionTypes";
 import type { TimelineDisplayRow } from "../../domain/timelineDisplayProjection";
 import type {

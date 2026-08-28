@@ -26,7 +26,7 @@ import type {
   UserProfile
 } from "../domain/types";
 import { contextMenuItems } from "../domain/contextMenus";
-import { mediaSourceUrl } from "../domain/mediaUrl";
+import { mediaSourceUrl } from "../backend/linkMediaRuntime";
 import {
   renderTimelineMessageText,
   type TimelineRowActionHandlers

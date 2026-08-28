@@ -40,7 +40,7 @@ import type {
 } from "../domain/types";
 import { contextMenuItems } from "../domain/contextMenus";
 import { toExternalHttpUrl } from "../domain/externalLinks";
-import { mediaSourceUrl } from "../domain/mediaUrl";
+import { mediaSourceUrl } from "../backend/linkMediaRuntime";
 import { Tooltip } from "./Tooltip";
 import { ImeTextField } from "./ImeTextControl";
 import { useRecoverableImageSource } from "./avatarImage";

@@ -25,9 +25,10 @@ import {
 } from "@tauri-apps/plugin-dialog";
 
 import { api } from "./backend/appRuntime";
+import { openExternalHttpUrl } from "./backend/linkMediaRuntime";
+import { isTauriRuntime } from "./backend/runtimeEnvironment";
 import {
   CORE_EVENT_NAME,
-  isTauriRuntime,
   tauriTimelineTransport
 } from "./backend/tauriTimelineTransport";
 import {
@@ -208,7 +209,6 @@ import {
 } from "./domain/appStore";
 import { getRecentJsErrors } from "./domain/jsErrorLog";
 import { getTimelineTransportStats } from "./domain/timelineTransportStats";
-import { openExternalHttpUrl } from "./domain/externalLinks";
 
 import {
   composerModeProp,

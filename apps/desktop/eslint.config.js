@@ -14,9 +14,9 @@
 //    grandfathered import lines acknowledged with inline eslint-disable-next-line
 //    no-restricted-imports comments. Any NEW direct @tauri-apps import without a
 //    disable comment will be caught by this rule.
-//    domain/** and test/** are intentionally excluded: convertFileSrc in
-//    domain/mediaUrl.ts, notification helpers in domain/desktopNotification.ts,
-//    and the @tauri-apps/api/mocks in test/** are correct at those layers.
+//    domain/** is separately guarded below; only the deferred notification
+//    adapter and test files may still import @tauri-apps directly. test/** keeps
+//    the official @tauri-apps/api/mocks boundary.
 //
 // 2. No source file may import from ../../src-tauri (path escape into the
 //    Rust adapter layer). TypeScript types from src-tauri are hand-mirrored
@@ -51,6 +51,28 @@ export default tseslint.config(
               group: ["**/src-tauri/**", "../../src-tauri/**", "../src-tauri/**"],
               message:
                 "Do not import from src-tauri. Mirror types in src/domain/types.ts instead.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  // Phase 2B domain guard: platform APIs belong under backend adapters. The
+  // notification family is a separately reviewed follow-up; domain tests may
+  // mock Tauri directly.
+  {
+    files: ["src/domain/**/*.ts"],
+    ignores: ["src/domain/**/*.test.ts", "src/domain/desktopNotification.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@tauri-apps/**"],
+              message:
+                "Domain modules must not import Tauri. Route through an approved src/backend port.",
             },
           ],
         },

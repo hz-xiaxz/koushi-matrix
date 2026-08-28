@@ -88,6 +88,14 @@ The test is RED on the base because `linkMediaRuntime`/ports do not exist. Keep 
 
 - Round 1, `reviewer-flash`: **Not correct-to-merge**. Important findings required a direct `runtimeEnvironment` import decision with no re-export shim, explicit mock updates for AppRuntime and TimelineView tests, and exclusion of domain test files from the new lint rule. Minor findings required stable source-test anchors, the exact App hot-file boundary, and enumerated callers. All are incorporated above.
 
+## Implementation evidence
+
+- RED: `vitest run src/backend/linkMediaRuntime.test.ts` failed before production changes because `backend/linkMediaRuntime` did not exist.
+- Focused link/media, AppRuntime, TimelineView interaction/media, and App source-contract tests: 145 passed.
+- Full Vitest: 92 files / 1466 tests passed.
+- Playwright: 263 tests passed.
+- Typecheck, lint/IME/docs, production build, Tauri/domain dependency guards, SDK-submodule check, secret scan, and `git diff --check` passed.
+
 ## Acceptance
 
 - No direct Tauri import remains in `domain/externalLinks.ts` or a media URL domain module; domain Tauri imports are statically denied except the explicitly deferred notification file.

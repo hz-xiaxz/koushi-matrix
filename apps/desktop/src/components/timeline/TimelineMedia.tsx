@@ -18,7 +18,7 @@ import { onMenuKeyDown } from "../ContextMenuSurface";
 import type { MediaTransferProgress, TimelineItem } from "../../domain/coreEvents";
 import type { TimelineMediaDownloadState } from "../../domain/types";
 import type { TimelineForwardDestination } from "../../domain/projectionTypes";
-import { mediaSourceUrl } from "../../domain/mediaUrl";
+import { mediaSourceUrl } from "../../backend/linkMediaRuntime";
 import type { TimelineTransport } from "./TimelineTransport";
 
 export type TimelineMediaViewerItem = {

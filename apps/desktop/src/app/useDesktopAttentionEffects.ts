@@ -18,7 +18,7 @@ import {
   sendDesktopAttentionNotification
 } from "../domain/desktopNotification";
 import type { TimelineDiagnosticLogEntry } from "../components/TimelineView";
-import { isTauriRuntime } from "../backend/tauriTimelineTransport";
+import { isTauriRuntime } from "../backend/runtimeEnvironment";
 import type { DesktopAttentionSummary } from "../domain/desktopAttention";
 import type { DesktopSnapshot } from "../domain/types";
 
