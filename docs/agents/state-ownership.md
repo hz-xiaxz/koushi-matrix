@@ -22,6 +22,13 @@ key change and unmount. Pending operations, retries/backoff, correlation,
 session cleanup, SDK subscriptions, and background task ownership remain Rust
 actor state.
 
+A non-Tauri renderer consumes the same public Rust boundary: start `CoreRuntime`,
+attach a connection, allocate connection-scoped request IDs, submit typed
+`CoreCommand`s, observe `CoreEvent`/versioned snapshots, drop consumers, then
+await `CoreRuntime::shutdown`. Tauri-only serde DTO mirrors stay in
+`apps/desktop/src-tauri`; do not move them into Core without a concrete shared
+consumer.
+
 ## Session authentication invalidation
 
 Rust distinguishes an authenticated E2EE trust lock from Matrix authentication

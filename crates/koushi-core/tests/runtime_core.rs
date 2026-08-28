@@ -3,13 +3,64 @@
 
 use std::time::Duration;
 
-use koushi_core::command::{CoreCommand, RoomCommand};
+use koushi_core::command::{AppCommand, CoreCommand, RoomCommand};
 use koushi_core::event::CoreEvent;
 use koushi_core::executor;
 use koushi_core::runtime::{CommandSubmitError, CoreRuntime};
-use koushi_state::{AppAction, AuthDiscoveryState, SessionState};
+use koushi_state::{AppAction, AuthDiscoveryState, SessionState, SettingsPatch, ThreadListOrder};
 
 mod support;
+
+#[tokio::test]
+async fn frontend_neutral_consumer_converges_and_shuts_down_without_tauri() {
+    let data_dir = tempfile::tempdir().expect("runtime data dir");
+    let runtime = CoreRuntime::start_with_data_dir(data_dir.path().to_owned());
+    let mut connection = runtime.attach();
+    let initial = connection.versioned_snapshot();
+    let request_id = connection.next_request_id();
+
+    connection
+        .command(CoreCommand::App(AppCommand::UpdateSettings {
+            request_id,
+            patch: SettingsPatch {
+                thread_list_order: Some(ThreadListOrder::RootChronology),
+                ..SettingsPatch::default()
+            },
+        }))
+        .await
+        .expect("submit typed Core command");
+
+    executor::timeout(Duration::from_secs(1), async {
+        loop {
+            match connection.recv_event().await.expect("Core event") {
+                CoreEvent::StateChanged(snapshot)
+                    if snapshot.settings.values.thread_list_order
+                        == ThreadListOrder::RootChronology =>
+                {
+                    break;
+                }
+                _ => continue,
+            }
+        }
+    })
+    .await
+    .expect("typed command should converge through Core event");
+
+    let current = connection.versioned_snapshot();
+    assert!(current.generation > initial.generation);
+    assert_eq!(
+        current.state.settings.values.thread_list_order,
+        ThreadListOrder::RootChronology
+    );
+    let independent_consumer = runtime.attach();
+    assert_eq!(independent_consumer.versioned_snapshot(), current);
+
+    drop(independent_consumer);
+    drop(connection);
+    executor::timeout(Duration::from_secs(1), runtime.shutdown())
+        .await
+        .expect("Core runtime should complete awaited shutdown");
+}
 
 #[tokio::test]
 async fn mismatched_request_id_fails_locally_without_publishing() {
@@ -130,4 +181,10 @@ async fn slow_consumer_observes_lag_and_recovers_via_snapshot() {
         slow.snapshot().session,
         SessionState::Restoring | SessionState::SignedOut
     ));
+
+    drop(slow);
+    drop(pump);
+    executor::timeout(Duration::from_secs(1), runtime.shutdown())
+        .await
+        .expect("lag recovery consumers should release runtime shutdown");
 }
