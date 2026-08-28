@@ -1,6 +1,6 @@
 ---
 name: koushi-release
-description: Prepare, monitor, verify, or troubleshoot a Koushi desktop release. Use when changing the desktop version or operating the macOS and Windows GitHub Release workflow.
+description: Prepare, monitor, verify, or troubleshoot a Koushi desktop release. Use when changing the desktop version or operating the macOS, Windows, and Linux GitHub Release workflow.
 metadata:
   compatibility: Repository skill for Codex, Claude Code, OpenCode, and Pi. Requires git and Node.js/npm; GitHub operations require gh authentication.
 ---

@@ -104,7 +104,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev \
             libwebkit2gtk-4.1-dev libgtk-3-dev \
-            libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
+            libdbus-1-dev
       - name: Submodule sync guard
         run: node scripts/check-sdk-submodule.mjs
       - name: Diagnostic test isolation checker tests
