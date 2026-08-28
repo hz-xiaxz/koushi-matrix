@@ -26,6 +26,15 @@ fn saved_missing_corrupt_and_wrong_account_stay_offline() {
 }
 
 #[test]
+fn empty_crypto_store_from_aborted_attempt_is_distinguished_from_mismatch() {
+    let report = store::run(LoginStoreCase::EmptyCryptoDb);
+    assert_eq!(report.login_requests, 0);
+    assert_eq!(report.keys_upload_requests, 0);
+    assert_eq!(report.keys_query_requests, 0);
+    assert_eq!(report.saved_device, "refused_empty_crypto");
+}
+
+#[test]
 fn fresh_login_and_reopen_use_one_closed_store_client_generation() {
     let report = store::run(LoginStoreCase::FreshLoginThenReopen);
 

@@ -8,6 +8,10 @@ use std::fmt;
 pub enum SavedCryptoStorePreflight {
     PresentMatching,
     Missing,
+    /// The crypto database file exists but holds no account: an earlier login
+    /// attempt created the store and was aborted before authentication. There
+    /// is no identity to clash with, unlike `IdentityMismatch`.
+    Empty,
     OpenFailed,
     IdentityMismatch,
 }
@@ -17,6 +21,7 @@ impl SavedCryptoStorePreflight {
         match self {
             Self::PresentMatching => "present_matching",
             Self::Missing => "missing",
+            Self::Empty => "empty",
             Self::OpenFailed => "open_failed",
             Self::IdentityMismatch => "identity_mismatch",
         }
@@ -78,7 +83,7 @@ pub(crate) async fn load_saved_crypto_store_identity(
         Ok(Some(account)) => account,
         Ok(None) => {
             let _ = close_store(&store).await;
-            return Err(SavedCryptoStorePreflight::IdentityMismatch);
+            return Err(SavedCryptoStorePreflight::Empty);
         }
         Err(_) => {
             let _ = close_store(&store).await;
