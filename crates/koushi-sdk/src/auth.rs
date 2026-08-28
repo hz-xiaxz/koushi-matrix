@@ -510,15 +510,22 @@ pub async fn start_oidc_login_with_store(
         let store_config = store_config.ok_or(PasswordLoginError::SavedCryptoStore(
             crate::SavedCryptoStorePreflight::Missing,
         ))?;
-        Some(
-            crate::login_store::load_saved_crypto_store_identity(
-                store_config,
-                None,
-                Some(device_id),
-            )
-            .await
-            .map_err(PasswordLoginError::SavedCryptoStore)?,
+        match crate::login_store::load_saved_crypto_store_identity(
+            store_config,
+            None,
+            Some(device_id),
         )
+        .await
+        {
+            Ok(identity) => Some(identity),
+            // An aborted earlier attempt on this pending allocation created
+            // the crypto database without ever authenticating. There is no
+            // identity to protect; let this login initialize the store. A
+            // locked-session resume (`reuse_saved_device`) still refuses,
+            // because that session claims an authenticated device.
+            Err(crate::SavedCryptoStorePreflight::Empty) if !reuse_saved_device => None,
+            Err(error) => return Err(PasswordLoginError::SavedCryptoStore(error)),
+        }
     } else {
         None
     };
