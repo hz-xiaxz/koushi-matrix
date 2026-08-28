@@ -46,18 +46,19 @@ describe("latest mutation operation queue", () => {
     let resolveFirst!: (value: string) => void;
     let resolveLatest!: (value: string) => void;
 
-    const first = queue.run("caption", async () => {
+    const key = "caption:main:!room:staged-a";
+    const first = queue.run(key, async () => {
       calls.push("first");
       return new Promise<string>((resolve) => {
         resolveFirst = resolve;
       });
     });
     await Promise.resolve();
-    const middle = queue.run("caption", async () => {
+    const middle = queue.run(key, async () => {
       calls.push("middle");
       return "middle";
     });
-    const latest = queue.run("caption", async () => {
+    const latest = queue.run(key, async () => {
       calls.push("latest");
       return new Promise<string>((resolve) => {
         resolveLatest = resolve;
@@ -101,34 +102,35 @@ describe("latest mutation operation queue", () => {
     const queue = createLatestMutationOperationQueue<string>();
     const calls: string[] = [];
 
-    const caption = queue.run("caption", async () => {
-      calls.push("caption");
-      return "caption";
+    const main = queue.run("caption:main:!room:staged-a", async () => {
+      calls.push("main");
+      return "main";
     });
-    const alias = queue.run("alias", async () => {
-      calls.push("alias");
-      return "alias";
+    const thread = queue.run("caption:thread:!room:$root:staged-a", async () => {
+      calls.push("thread");
+      return "thread";
     });
 
-    await expect(Promise.all([caption, alias])).resolves.toEqual([
-      { kind: "applied", value: "caption" },
-      { kind: "applied", value: "alias" }
+    await expect(Promise.all([main, thread])).resolves.toEqual([
+      { kind: "applied", value: "main" },
+      { kind: "applied", value: "thread" }
     ]);
-    expect(calls).toEqual(["caption", "alias"]);
+    expect(calls).toEqual(["main", "thread"]);
   });
 
   it("invalidates an active operation result", async () => {
     const queue = createLatestMutationOperationQueue<string>();
     let resolveOperation!: (value: string) => void;
+    const key = "caption:thread:!room:$root:staged-a";
     const operation = queue.run(
-      "caption",
+      key,
       () => new Promise<string>((resolve) => {
         resolveOperation = resolve;
       })
     );
     await Promise.resolve();
 
-    queue.invalidate("caption");
+    queue.invalidate(key);
     resolveOperation("stale");
 
     await expect(operation).resolves.toEqual({ kind: "superseded" });
