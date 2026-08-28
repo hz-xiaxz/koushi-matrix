@@ -19,6 +19,8 @@ export interface TimelineTransport {
   acknowledgeProjection?(
     projectionRequestId: RequestId,
     timelineKey: TimelineKey,
+    /** Delivery identity only; DesktopApi/Core command serialization is unchanged. */
+    actorGeneration: number,
     generation: number,
     itemCount: number,
     targetPresent: boolean

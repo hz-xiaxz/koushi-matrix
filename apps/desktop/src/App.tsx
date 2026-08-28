@@ -14,6 +14,10 @@ import { api } from "./backend/appRuntime";
 import { desktopEventPort } from "./backend/desktopEventRuntime";
 import { openExternalHttpUrl } from "./backend/linkMediaRuntime";
 import { isTauriRuntime } from "./backend/runtimeEnvironment";
+import {
+  createTimelineAcknowledgementDelivery,
+  type TimelineAcknowledgementDelivery
+} from "./backend/timelineAcknowledgementDelivery";
 import { windowDialogPort } from "./backend/windowDialogRuntime";
 import { tauriTimelineTransport } from "./backend/tauriTimelineTransport";
 import {
@@ -834,6 +838,35 @@ export function App() {
   if (submissionRegistryRef.current === null) {
     submissionRegistryRef.current = createComposerSubmissionControllerRegistry();
   }
+  const timelineAcknowledgementDeliveryRef =
+    useRef<TimelineAcknowledgementDelivery | null>(null);
+  const getTimelineAcknowledgementDelivery = useCallback(() => {
+    timelineAcknowledgementDeliveryRef.current ??= createTimelineAcknowledgementDelivery({
+      submitProjection: (projectionRequestId, key, generation, itemCount, targetPresent) =>
+        api.acknowledgeTimelineProjection(
+          projectionRequestId,
+          key,
+          generation,
+          itemCount,
+          targetPresent
+        ),
+      submitRepair: (
+        key,
+        actorGeneration,
+        timelineGeneration,
+        repairGeneration,
+        batchId
+      ) =>
+        api.acknowledgeTimelineBatchRendered(
+          key,
+          actorGeneration,
+          timelineGeneration,
+          repairGeneration,
+          batchId
+        )
+    });
+    return timelineAcknowledgementDeliveryRef.current;
+  }, []);
 
   function retireComposerRendererGeneration(): void {
     const mainOverlay = mainComposerOverlayRef.current;
@@ -857,6 +890,7 @@ export function App() {
     const owner = account ? composerDraftAccountOwnerKey(account) : null;
     const ownerChanged = composerDraftLifecycleOwnerRef.current !== owner;
     if (ownerChanged) {
+      timelineAcknowledgementDeliveryRef.current?.reset();
       retireComposerRendererGeneration();
     }
     submissionAccountOwnerRef.current = owner;
@@ -1114,29 +1148,31 @@ export function App() {
     }
     return {
       ...tauriTimelineTransport,
-      async acknowledgeProjection(
+      acknowledgeProjection(
         projectionRequestId,
         key,
+        actorGeneration,
         generation,
         itemCount,
         targetPresent
       ) {
-        await api.acknowledgeTimelineProjection(
+        return getTimelineAcknowledgementDelivery().acknowledgeProjection(
           projectionRequestId,
           key,
+          actorGeneration,
           generation,
           itemCount,
           targetPresent
         );
       },
-      async acknowledgeRenderedBatch(
+      acknowledgeRenderedBatch(
         key,
         actorGeneration,
         timelineGeneration,
         repairGeneration,
         batchId
       ) {
-        await api.acknowledgeTimelineBatchRendered(
+        return getTimelineAcknowledgementDelivery().acknowledgeRenderedBatch(
           key,
           actorGeneration,
           timelineGeneration,
@@ -1507,6 +1543,8 @@ export function App() {
         window.clearTimeout(threadOverlay.debounceHandle);
       }
       composerDraftLifecycleRegistryRef.current?.revokeRendererGeneration();
+      timelineAcknowledgementDeliveryRef.current?.dispose();
+      timelineAcknowledgementDeliveryRef.current = null;
     };
   }, []);
 
@@ -1957,13 +1995,16 @@ export function App() {
           ) {
             // The Core command is idempotent because React may replay updater
             // functions in development. Store application always precedes ACK.
-            void api.acknowledgeTimelineProjection(
-              applied.projection.requestId,
-              applied.projection.key,
-              applied.projection.generation,
-              applied.projection.itemCount,
-              applied.projection.targetPresent
-            );
+            void getTimelineAcknowledgementDelivery()
+              .acknowledgeProjection(
+                applied.projection.requestId,
+                applied.projection.key,
+                applied.projection.actorGeneration,
+                applied.projection.generation,
+                applied.projection.itemCount,
+                applied.projection.targetPresent
+              )
+              .catch(() => undefined);
           }
           next = applied.store;
         }

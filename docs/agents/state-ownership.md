@@ -309,6 +309,17 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   matches a recent programmatic-write signature. The one-shot `timeline.scroll
   stage=room_reentry_restore` diagnostic carries session mode, age bucket,
   anchor-live verdict, and path only.
+- Projection acknowledgement ownership is split at the only truthful boundary:
+  TimelineView owns committed Room DOM evidence; App's canonical timeline store
+  owns Focused/Thread application evidence; the App-lifetime
+  `timelineAcknowledgementDelivery` adapter owns bounded submission only until
+  the Core command queue accepts it; Rust owns every actor/request/generation
+  fence, focused-navigation outcome, repair continuation and timeout after that.
+- The adapter has four closed channels (Room, Thread, Focused, repair), at most
+  seven total attempts per intent, finite exponential delay, same-kind
+  supersession, actor-aware identity, account reset and renderer disposal. View
+  unmount never cancels a captured delivery. Do not reintroduce acknowledgement
+  retries or backoff timers into TimelineView.
 
 ## Live catch-up and gap repair
 

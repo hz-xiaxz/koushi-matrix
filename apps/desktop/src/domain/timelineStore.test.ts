@@ -409,6 +409,7 @@ describe("timeline store — diff application", () => {
       kind: "applied",
       requestId,
       key,
+      actorGeneration: 4,
       generation: 4,
       itemCount: 1,
       targetPresent: true
@@ -448,7 +449,10 @@ describe("timeline store — diff application", () => {
         items: [makeMsg("$target", "replacement")]
       }
     });
-    expect(replacement.projection.kind).toBe("applied");
+    expect(replacement.projection).toMatchObject({
+      kind: "applied",
+      actorGeneration: 5
+    });
     expect(getKeyState(replacement.store, key)?.actorGeneration).toBe(5);
   });
 
@@ -470,6 +474,7 @@ describe("timeline store — diff application", () => {
       kind: "applied",
       requestId,
       key,
+      actorGeneration: 4,
       generation: 4,
       itemCount: 1,
       targetPresent: false
