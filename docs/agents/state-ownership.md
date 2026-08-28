@@ -864,12 +864,15 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   upload staging/gallery maps in React, synthesize a gallery from DOM rows, or
   parse Matrix media events in the webview.
 - Selecting a file shows the Rust-owned Upload attachments staging dialog and
-  must not invoke `upload_media` until Send. Captions are edited through the
-  staging dialog (`TimelinePaneState.staged_uploads[*].caption`), not inferred
-  from the Composer draft. Rust exclusively owns staged items, caption DTOs,
-  residency and send content. The bounded main/thread `caption:*` mutation lanes
-  own only mounted-editor intent ordering through the correlated Tauri terminal;
-  their keys include target/item identity and clear/send invalidates them so late
+  must not invoke `upload_media` until Send. Each staged caption is a nullable
+  `ComposerDocument`, edited through the staging dialog
+  (`TimelinePaneState.staged_uploads[*].caption`), not inferred from the
+  ordinary Composer draft. At the media-send boundary Rust derives the
+  `FormattedMessageDraft` from that document's plain body, formatted body, and
+  mention intent. Rust exclusively owns staged items, caption DTOs, residency,
+  and send content. The bounded main/thread `caption:*` mutation lanes own only
+  mounted-editor intent ordering through the correlated Tauri terminal; their
+  keys include target/item identity and clear/send invalidates them so late
   results cannot restore removed items. Browser snapshots have no caption revision,
   so do not delete these lanes without a separately reviewed Rust editor revision.
 - Image upload compression keeps the same split: Rust owns

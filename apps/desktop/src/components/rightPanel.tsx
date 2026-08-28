@@ -391,8 +391,8 @@ export function ContextualRightPanel({
     roomId: string,
     rootEventId: string,
     stagedId: string,
-    caption: string
-  ) => void;
+    document: ComposerDocument
+  ) => void | Promise<void>;
   threadComposerDraftImeKey?: string;
   /** Localized transient notice for the open thread composer (#450). */
   threadComposerNotice?: string | null;
@@ -927,12 +927,12 @@ export function ContextualRightPanel({
         <UploadStagingDialog
           items={threadStagedUploads}
           onClear={() => onThreadClearUploadStaging(threadRoomId, rootEventId)}
-          onUpdateCaption={(stagedId, caption) =>
+          onUpdateCaption={(stagedId, document) =>
             onThreadUpdateStagedUploadCaption(
               threadRoomId,
               rootEventId,
               stagedId,
-              caption
+              document
             )
           }
           onSendAttachments={() =>
@@ -955,6 +955,14 @@ export function ContextualRightPanel({
           loadPreview={threadPreviewLoader}
           surface="thread"
           resolveComposerKeyAction={onResolveComposerKeyAction}
+          mentionCandidates={threadMentionCandidates}
+          mentionCandidatesLoading={threadMentionCandidatesLoading}
+          onMentionQueryChange={(query) => {
+            if (threadRoomId) onThreadMentionQueryChange(threadRoomId, query);
+          }}
+          mathModeEnabled={snapshot.state.domain.settings.values.composer?.math_mode ?? true}
+          onMathModeChange={(enabled) => onUpdateSettings?.({ composer: { math_mode: enabled } })}
+          roomName={t("panel.thread")}
         />
       ) : null}
       <ThreadComposer

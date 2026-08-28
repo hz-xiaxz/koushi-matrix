@@ -67,6 +67,7 @@ import {
 import {
   copyDocumentRange,
   documentLength,
+  documentsEqual,
   insertMention,
   pasteDocumentText,
   plainBodyFromDocument,
@@ -100,6 +101,7 @@ export const Composer = memo(function Composer({
   onScheduleSend,
   onSend,
   onSendStagedUploads,
+  onTabToSend,
   onDiagnosticLogEntry,
   notice = null
 }: {
@@ -127,6 +129,8 @@ export const Composer = memo(function Composer({
   onMentionQueryChange?: (query: string | null) => void;
   onScheduleSend?: (sendAtMs: number, document: ComposerDocument) => void | Promise<void>;
   onSend: (document: ComposerDocument) => void | Promise<void>;
+  /** Focuses the owning attachment Send button for an unmodified forward Tab. */
+  onTabToSend?: () => void;
   /** #send-key-unification: routed when the send shortcut is pressed while
    *  staged uploads are ready, instead of sending the composer body. */
   onSendStagedUploads?: () => void;
@@ -158,6 +162,7 @@ export const Composer = memo(function Composer({
   }, []);
   const [scheduleValue, setScheduleValue] = useState(() => defaultScheduleDateTimeValue());
   const [localDocument, setLocalDocument] = useState(document);
+  const previousDocumentRef = useRef(document);
   const [localDraftKey, setLocalDraftKey] = useState(draftKey);
   const [documentSelection, setDocumentSelection] = useState<DocumentSelection>(() => {
     const end = documentLength(document);
@@ -214,6 +219,9 @@ export const Composer = memo(function Composer({
   }, []);
 
   useEffect(() => {
+    const previousDocument = previousDocumentRef.current;
+    previousDocumentRef.current = document;
+    if (documentsEqual(previousDocument, document)) return;
     setLocalDocument(document);
     const end = documentLength(document);
     setDocumentSelection({ start: end, end });
@@ -531,6 +539,19 @@ export const Composer = memo(function Composer({
         acceptActiveMention();
         return;
       }
+    }
+    if (
+      event.key === "Tab" &&
+      !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.nativeEvent.isComposing &&
+      onTabToSend
+    ) {
+      event.preventDefault();
+      onTabToSend();
+      return;
     }
     if (!shouldResolveComposerKeyEvent(event)) {
       return;

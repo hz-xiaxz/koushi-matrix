@@ -14,6 +14,7 @@ import type {
   StagedUploadItem,
   UserProfile
 } from "../domain/types";
+import { documentFromText } from "../domain/composerDocument";
 import { ContextualRightPanel } from "./rightPanel";
 
 class MockIntersectionObserver {
@@ -166,9 +167,7 @@ function stagedThreadImage(caption: string): StagedUploadItem {
     mime_type: "image/png",
     byte_count: 128,
     kind: { kind: "image", width: 16, height: 16 },
-    caption: caption
-      ? { plain_body: caption, formatted_body: null, mentions: { targets: [] } }
-      : null,
+    caption: caption ? documentFromText(caption) : null,
     compression_choice: { kind: "original" },
     preparation: {
       kind: "ready",

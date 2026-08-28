@@ -2,10 +2,10 @@ use std::fmt;
 
 use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentSort, ComposerDocument,
-    ComposerDraftRevision, FilesViewScope, FormattedMessageDraft, InviteScopeSelection,
-    JapaneseCatalogProfile, LocalEncryptionHealth, NativeAttentionDispatchId,
-    NativeAttentionSoundOutcome, NativeAttentionState, RoomListFilter, SettingsPatch,
-    StagedUploadCompressionChoice, StagedUploadItem, TimelineScrollAnchor,
+    ComposerDraftRevision, FilesViewScope, InviteScopeSelection, JapaneseCatalogProfile,
+    LocalEncryptionHealth, NativeAttentionDispatchId, NativeAttentionSoundOutcome,
+    NativeAttentionState, RoomListFilter, SettingsPatch, StagedUploadCompressionChoice,
+    StagedUploadItem, TimelineScrollAnchor,
 };
 
 use crate::ids::{RequestId, TimelineBatchId, TimelineGeneration, TimelineKey};
@@ -52,7 +52,7 @@ pub enum AppCommand {
         request_id: RequestId,
         target: koushi_state::ComposerTarget,
         staged_id: String,
-        caption: Option<FormattedMessageDraft>,
+        caption: Option<ComposerDocument>,
     },
     UpdateStagedUploadCompression {
         request_id: RequestId,
@@ -830,10 +830,7 @@ mod tests {
                     width: Some(4),
                     height: Some(2),
                 },
-                caption: Some(build_formatted_message_draft(
-                    "private staged caption",
-                    MentionIntent::default(),
-                )),
+                caption: Some(ComposerDocument::from_plain_text("private staged caption")),
                 compression_choice: StagedUploadCompressionChoice::Original,
                 preparation: Default::default(),
             }],
@@ -842,10 +839,7 @@ mod tests {
             request_id: update_caption_request_id,
             target: target.clone(),
             staged_id: "private-staged-id".to_owned(),
-            caption: Some(build_formatted_message_draft(
-                "private staged caption",
-                MentionIntent::default(),
-            )),
+            caption: Some(ComposerDocument::from_plain_text("private staged caption")),
         };
         let update_compression = AppCommand::UpdateStagedUploadCompression {
             request_id: update_compression_request_id,

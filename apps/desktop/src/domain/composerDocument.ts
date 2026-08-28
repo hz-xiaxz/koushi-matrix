@@ -288,6 +288,6 @@ function mentionIdentity(target: MentionTarget): string {
   }
 }
 
-function documentsEqual(left: ComposerDocument, right: ComposerDocument): boolean {
+export function documentsEqual(left: ComposerDocument, right: ComposerDocument): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }

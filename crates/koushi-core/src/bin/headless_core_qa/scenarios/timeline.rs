@@ -4483,10 +4483,7 @@ fn assert_upload_ux_state_contract(room_id: &str) -> Result<(), String> {
                     mime_type: "text/plain".to_owned(),
                     byte_count: 256,
                     kind: StagedUploadKind::File,
-                    caption: Some(build_formatted_message_draft(
-                        "private staged caption",
-                        MentionIntent::default(),
-                    )),
+                    caption: Some(ComposerDocument::from_plain_text("private staged caption")),
                     compression_choice: StagedUploadCompressionChoice::NotApplicable,
                     preparation: Default::default(),
                 },

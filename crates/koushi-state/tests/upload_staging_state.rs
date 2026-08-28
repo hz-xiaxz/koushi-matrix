@@ -1,9 +1,9 @@
 use koushi_state::{
-    AppAction, AppState, ComposerTarget, FormattedMessageDraft, ImageUploadCompressionMode,
-    MentionIntent, RoomSummary, RoomTags, SessionInfo, SessionState, StagedUploadCompressionChoice,
-    StagedUploadItem, StagedUploadKind, TimelineMediaGalleryItem, TimelineMediaGalleryMedia,
-    TimelineMediaGallerySource, TimelineMediaGalleryThumbnail, TimelineMediaKind, UiEvent,
-    UploadStagingStore, reduce,
+    AppAction, AppState, ComposerDocument, ComposerInline, ComposerTarget,
+    ImageUploadCompressionMode, MentionTarget, RoomSummary, RoomTags, SessionInfo, SessionState,
+    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind, TimelineMediaGalleryItem,
+    TimelineMediaGalleryMedia, TimelineMediaGallerySource, TimelineMediaGalleryThumbnail,
+    TimelineMediaKind, UiEvent, UploadStagingStore, reduce,
 };
 
 fn session_info() -> SessionInfo {
@@ -55,12 +55,23 @@ fn selected_room_state(room_id: &str) -> AppState {
     state
 }
 
-fn caption(body: &str) -> FormattedMessageDraft {
-    FormattedMessageDraft {
-        plain_body: body.to_owned(),
-        formatted_body: None,
-        mentions: MentionIntent::default(),
-    }
+fn caption(body: &str) -> ComposerDocument {
+    ComposerDocument::from_plain_text(body)
+}
+
+fn structured_caption() -> ComposerDocument {
+    ComposerDocument::new(vec![
+        ComposerInline::Text {
+            text: "**hello** ".to_owned(),
+        },
+        ComposerInline::Mention {
+            target: MentionTarget::User {
+                user_id: "@alice:example.invalid".to_owned(),
+                display_label: "Alice".to_owned(),
+            },
+            display_label: "Alice".to_owned(),
+        },
+    ])
 }
 
 fn staged_file(id: &str, room_id: &str, position: u64) -> StagedUploadItem {
@@ -110,6 +121,44 @@ fn gallery_item(event_id: &str, room_id: &str, timestamp_ms: u64) -> TimelineMed
             }),
         },
     }
+}
+
+#[test]
+fn structured_caption_survives_staging_snapshot_and_keeps_mention_identity() {
+    let mut state = selected_room_state("room-a");
+    reduce(
+        &mut state,
+        AppAction::UploadStagingChanged {
+            target: ComposerTarget::Main {
+                room_id: "room-a".to_owned(),
+            },
+            items: vec![staged_file("stage-1", "room-a", 1)],
+        },
+    );
+
+    reduce(
+        &mut state,
+        AppAction::UploadStagingCaptionChanged {
+            target: ComposerTarget::Main {
+                room_id: "room-a".to_owned(),
+            },
+            staged_id: "stage-1".to_owned(),
+            caption: Some(structured_caption()),
+        },
+    );
+
+    let staged = &state.timeline.staged_uploads[0];
+    assert_eq!(staged.caption.as_ref(), Some(&structured_caption()));
+    assert_eq!(
+        staged
+            .caption
+            .as_ref()
+            .unwrap()
+            .mention_intent()
+            .targets
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -204,7 +253,7 @@ fn upload_staging_updates_caption_and_compression_choice() {
 
     let staged = &state.timeline.staged_uploads[0];
     assert_eq!(
-        staged.caption.as_ref().unwrap().plain_body,
+        staged.caption.as_ref().unwrap().plain_body(),
         "updated caption"
     );
     assert_eq!(
@@ -388,7 +437,7 @@ fn stale_target_cannot_change_another_composer_staged_item() {
             .caption
             .as_ref()
             .expect("caption")
-            .plain_body,
+            .plain_body(),
         "private caption"
     );
 }

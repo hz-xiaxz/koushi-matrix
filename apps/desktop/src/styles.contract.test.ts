@@ -162,7 +162,7 @@ describe("styles.css token system", () => {
     expect(dialog).toMatch(/grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/);
     // Bounded to the available vertical space and never overflow-clipped
     // without a scroll owner (the panel itself must not scroll the page).
-    expect(dialog).toMatch(/max-height:\s*min\(58vh,\s*460px\)/);
+    expect(dialog).toMatch(/max-height:\s*min\(80vh,\s*640px\)/);
     expect(dialog).toMatch(/overflow:\s*hidden/);
 
     const list = selectorBlock(".upload-staging-list");

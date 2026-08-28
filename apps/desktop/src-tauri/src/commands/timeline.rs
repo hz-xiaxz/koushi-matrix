@@ -523,6 +523,19 @@ fn normalize_image_upload_compression(
     }
 }
 
+fn media_caption_from_composer_document(
+    document: Option<&ComposerDocument>,
+    formatting_options: ComposerFormattingOptions,
+) -> Option<koushi_state::FormattedMessageDraft> {
+    let document = document?;
+    let plain_body = document.plain_body();
+    (!plain_body.trim().is_empty()).then(|| koushi_state::FormattedMessageDraft {
+        plain_body,
+        formatted_body: document.formatted_body_with_options(formatting_options),
+        mentions: document.mention_intent(),
+    })
+}
+
 fn media_caption_from_composer_body(
     caption: Option<String>,
 ) -> Option<koushi_state::FormattedMessageDraft> {
@@ -2071,7 +2084,10 @@ pub async fn send_prepared_uploads(
                     kind,
                     compression: None,
                     thumbnail: None,
-                    caption: item.caption.clone(),
+                    caption: media_caption_from_composer_document(
+                        item.caption.as_ref(),
+                        snapshot.settings.values.composer.formatting_options(),
+                    ),
                 },
             }))
             .await
@@ -2212,7 +2228,7 @@ fn staged_uploads_for_target<'a>(
 pub async fn update_staged_upload_caption(
     target: koushi_state::ComposerTarget,
     staged_id: String,
-    caption: Option<String>,
+    document: Option<ComposerDocument>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
@@ -2220,25 +2236,9 @@ pub async fn update_staged_upload_caption(
         return current_snapshot(state.inner()).await;
     }
 
-    let expected_caption = caption.as_ref().and_then(|body| {
-        let trimmed = body.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_owned())
-        }
-    });
-    let caption = caption.and_then(|body| {
-        let trimmed = body.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(build_formatted_message_draft(
-                trimmed.to_owned(),
-                MentionIntent::default(),
-            ))
-        }
-    });
+    let document = document
+        .and_then(|document| (!document.plain_body().trim().is_empty()).then_some(document));
+    let expected_document = document.clone();
     let staged_id_for_wait = staged_id.clone();
     let mut event_conn = state.runtime.attach();
     if !composer_target_is_active(&event_conn.snapshot(), &target) {
@@ -2250,7 +2250,7 @@ pub async fn update_staged_upload_caption(
             request_id,
             target: target.clone(),
             staged_id,
-            caption,
+            caption: document,
         }))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
@@ -2262,12 +2262,8 @@ pub async fn update_staged_upload_caption(
                 .unwrap_or_default()
                 .iter()
                 .find(|item| item.staged_id == staged_id_for_wait)
-                .map(|item| {
-                    item.caption
-                        .as_ref()
-                        .map(|caption| caption.plain_body.as_str())
-                })
-                == Some(expected_caption.as_deref())
+                .map(|item| item.caption.as_ref())
+                == Some(expected_document.as_ref())
         },
         "staged upload caption did not update",
     )
@@ -3797,7 +3793,7 @@ mod issue551_moved_tests {
     use super::*;
     use crate::commands::contracts::{fake_request_id, synthetic_session_key};
     use koushi_core::{AccountKey, CoreCommand, PaginationDirection, TimelineCommand};
-    use koushi_state::ComposerDocument;
+    use koushi_state::{ComposerDocument, ComposerInline, MentionTarget};
     fn commands_source() -> String {
         crate::commands::contracts::production_source()
     }
@@ -4151,6 +4147,40 @@ mod issue551_moved_tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn staged_caption_document_converts_at_media_send_boundary() {
+        let document = ComposerDocument::new(vec![
+            ComposerInline::Text {
+                text: "**hello** ".to_owned(),
+            },
+            ComposerInline::Mention {
+                target: MentionTarget::User {
+                    user_id: "@alice:example.invalid".to_owned(),
+                    display_label: "Alice".to_owned(),
+                },
+                display_label: "Alice".to_owned(),
+            },
+        ]);
+        let draft = media_caption_from_composer_document(
+            Some(&document),
+            ComposerFormattingOptions { math_mode: true },
+        )
+        .expect("non-empty caption");
+
+        assert_eq!(draft.plain_body, "**hello** @Alice");
+        let formatted_body = draft.formatted_body.as_deref().unwrap_or_default();
+        assert!(formatted_body.contains("<strong>"));
+        assert!(formatted_body.contains("https://matrix.to/#/%40alice%3Aexample.invalid"));
+        assert_eq!(draft.mentions, document.mention_intent());
+        assert!(
+            media_caption_from_composer_document(
+                Some(&ComposerDocument::from_plain_text("  \n  ")),
+                ComposerFormattingOptions::default()
+            )
+            .is_none()
+        );
     }
 
     #[test]

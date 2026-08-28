@@ -4,8 +4,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { StagedUploadItem } from "../domain/types";
+import type { ComposerDocument, StagedUploadItem } from "../domain/types";
+import type { MentionCandidate } from "../domain/projectionTypes";
+import { documentFromText } from "../domain/composerDocument";
 import { t } from "../i18n/messages";
+import {
+  inlineMentionEditorSelection,
+  setInlineMentionEditorSelection
+} from "./ImeTextControl";
 import {
   CreateEntityDialog,
   InviteTargetsDialog,
@@ -20,7 +26,7 @@ afterEach(() => {
 });
 
 function stagedImage(
-  caption: string,
+  caption: string | ComposerDocument,
   preparation: StagedUploadItem["preparation"],
   stagedId = "staged-1",
   filename = "synthetic.png"
@@ -33,16 +39,35 @@ function stagedImage(
     mime_type: "image/png",
     byte_count: 128,
     kind: { kind: "image", width: 16, height: 16 },
-    caption: caption
-      ? {
-          plain_body: caption,
-          formatted_body: null,
-          mentions: { targets: [] }
-        }
-      : null,
+    caption: typeof caption === "string" ? (caption ? documentFromText(caption) : null) : caption,
     compression_choice: { kind: "original" },
     preparation
   };
+}
+
+function changeEditorText(editor: Element, text: string) {
+  const control = editor as HTMLDivElement;
+  if (control.dataset.composing === "true") {
+    let textNode = control.querySelector<HTMLElement>("[data-composer-text]");
+    if (!textNode) {
+      textNode = document.createElement("span");
+      textNode.dataset.composerText = "";
+      control.append(textNode);
+    }
+    textNode.textContent = text;
+    fireEvent.input(control, { inputType: "insertCompositionText", isComposing: true });
+    return;
+  }
+  setInlineMentionEditorSelection(control, 0, control.textContent?.length ?? 0);
+  fireEvent(
+    control,
+    new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      inputType: "insertText",
+      data: text
+    })
+  );
 }
 
 function dialog(items: StagedUploadItem[], onUpdateCaption = vi.fn()) {
@@ -85,6 +110,23 @@ describe("ResetLocalDataConfirmationDialog", () => {
 });
 
 describe("UploadStagingDialog", () => {
+  it("renders the shared caption editor and emits a structured document from formatting", () => {
+    const onUpdateCaption = vi.fn();
+    render(dialog([stagedImage("caption", { kind: "preparing" })], onUpdateCaption));
+
+    expect(screen.getByRole("button", { name: /bold/i })).toBeTruthy();
+    const caption = screen.getByRole("textbox", {
+      name: "Caption for synthetic.png"
+    });
+    caption.focus();
+    fireEvent.click(screen.getByRole("button", { name: /bold/i }));
+
+    expect(onUpdateCaption).toHaveBeenLastCalledWith(
+      "staged-1",
+      expect.objectContaining({ version: 2, inlines: expect.any(Array) })
+    );
+  });
+
   it("preserves active Japanese composition across stale preparation snapshots", () => {
     const onUpdateCaption = vi.fn();
     const { rerender } = render(
@@ -92,11 +134,11 @@ describe("UploadStagingDialog", () => {
     );
     const caption = screen.getByRole("textbox", {
       name: "Caption for synthetic.png"
-    }) as HTMLInputElement;
+    }) as HTMLDivElement;
 
     fireEvent.compositionStart(caption);
-    fireEvent.change(caption, { target: { value: "日本語変換中" } });
-    caption.setSelectionRange(3, 5);
+    changeEditorText(caption, "日本語変換中");
+    setInlineMentionEditorSelection(caption, 3, 5);
     rerender(
       dialog(
         [
@@ -112,21 +154,25 @@ describe("UploadStagingDialog", () => {
       )
     );
 
-    expect(caption.value).toBe("日本語変換中");
-    expect([caption.selectionStart, caption.selectionEnd]).toEqual([3, 5]);
-    expect(onUpdateCaption).toHaveBeenCalledWith("staged-1", "日本語変換中");
+    expect(caption.textContent).toBe("日本語変換中");
+    expect(inlineMentionEditorSelection(caption)).toMatchObject({ start: 3, end: 5 });
+    fireEvent.compositionEnd(caption);
+    expect(onUpdateCaption).toHaveBeenCalledWith(
+      "staged-1",
+      expect.objectContaining({ version: 2, inlines: [{ kind: "text", text: "日本語変換中" }] })
+    );
   });
 
   it("preserves an ordinary dirty caption until Rust acknowledges it", () => {
     const { rerender } = render(dialog([stagedImage("before", { kind: "preparing" })]));
     const caption = screen.getByRole("textbox", {
       name: "Caption for synthetic.png"
-    }) as HTMLInputElement;
+    }) as HTMLDivElement;
 
-    fireEvent.change(caption, { target: { value: "local caption" } });
+    changeEditorText(caption, "local caption");
     rerender(dialog([stagedImage("before", { kind: "preparing" })]));
 
-    expect(caption.value).toBe("local caption");
+    expect(caption.textContent).toBe("local caption");
   });
 
   it("isolates composition ownership by staged upload identity", () => {
@@ -138,13 +184,13 @@ describe("UploadStagingDialog", () => {
     );
     const first = screen.getByRole("textbox", {
       name: "Caption for first.png"
-    }) as HTMLInputElement;
+    }) as HTMLDivElement;
     const second = screen.getByRole("textbox", {
       name: "Caption for second.png"
-    }) as HTMLInputElement;
+    }) as HTMLDivElement;
 
     fireEvent.compositionStart(first);
-    fireEvent.change(first, { target: { value: "一つ目を変換中" } });
+    changeEditorText(first, "一つ目を変換中");
     rerender(
       dialog([
         stagedImage("first", { kind: "preparing" }, "staged-a", "first.png"),
@@ -152,9 +198,47 @@ describe("UploadStagingDialog", () => {
       ])
     );
 
-    expect(first.value).toBe("一つ目を変換中");
-    expect(second.value).toBe("second from Rust");
+    expect(first.textContent).toBe("一つ目を変換中");
+    expect(second.textContent).toBe("second from Rust");
   });
+
+  it.each(["button", "keyboard"] as const)(
+    "waits for caption update before %s send",
+    async (trigger) => {
+      let resolveUpdate!: () => void;
+      const update = new Promise<void>((resolve) => {
+        resolveUpdate = resolve;
+      });
+      const onUpdateCaption = vi.fn(() => update);
+      const onSendAttachments = vi.fn();
+      const resolveComposerKeyAction = vi.fn(async () => "send" as const);
+      render(
+        <UploadStagingDialog
+          items={[stagedImage("", { kind: "ready", variants: [], selected: { resize: "original", format: "keep" }, pending: null, generation: 0 })]}
+          onClear={vi.fn()}
+          onUpdateCaption={onUpdateCaption}
+          onSelectOutput={vi.fn()}
+          onRetryPreparation={vi.fn()}
+          onUseOriginal={vi.fn()}
+          onSendAttachments={onSendAttachments}
+          loadPreview={vi.fn(async () => [])}
+          resolveComposerKeyAction={resolveComposerKeyAction}
+          surface="main"
+        />
+      );
+      const caption = screen.getByRole("textbox", { name: "Caption for synthetic.png" });
+      changeEditorText(caption, "caption");
+      if (trigger === "button") {
+        fireEvent.click(screen.getByRole("button", { name: "Send attachments" }));
+      } else {
+        fireEvent.keyDown(caption, { key: "Enter", code: "Enter" });
+      }
+      expect(onSendAttachments).not.toHaveBeenCalled();
+
+      resolveUpdate();
+      await waitFor(() => expect(onSendAttachments).toHaveBeenCalledTimes(1));
+    }
+  );
 
   it("resolves caption Enter and sends attachments only for send", async () => {
     const resolveComposerKeyAction = vi.fn(async () => "send" as const);
@@ -182,12 +266,7 @@ describe("UploadStagingDialog", () => {
     await waitFor(() => expect(onSendAttachments).toHaveBeenCalledTimes(1));
     expect(resolveComposerKeyAction).toHaveBeenCalledWith(
       "main",
-      {
-        key: "enter",
-        modifiers: { ctrl: false, meta: false, shift: false, alt: false },
-        is_composing: false,
-        selection: null
-      },
+      expect.objectContaining({ key: "enter", is_composing: false }),
       { autocomplete_open: false, send_enabled: true }
     );
   });
@@ -216,6 +295,87 @@ describe("UploadStagingDialog", () => {
     });
 
     await waitFor(() => expect(resolveComposerKeyAction).toHaveBeenCalledTimes(1));
+    expect(onSendAttachments).not.toHaveBeenCalled();
+  });
+
+  it("accepts a staged mention before forwarding Tab to Send", () => {
+    const onUpdateCaption = vi.fn();
+    const onSendAttachments = vi.fn();
+    const candidate: MentionCandidate = {
+      key: "@alice:example.invalid",
+      label: "Alice",
+      target: {
+        kind: "user",
+        user_id: "@alice:example.invalid",
+        display_label: "Alice"
+      }
+    };
+    render(
+      <UploadStagingDialog
+        items={[stagedImage(documentFromText("@a"), { kind: "ready", variants: [], selected: { resize: "original", format: "keep" }, pending: null, generation: 0 })]}
+        onClear={vi.fn()}
+        onUpdateCaption={onUpdateCaption}
+        onSelectOutput={vi.fn()}
+        onRetryPreparation={vi.fn()}
+        onUseOriginal={vi.fn()}
+        onSendAttachments={onSendAttachments}
+        loadPreview={vi.fn(async () => [])}
+        resolveComposerKeyAction={vi.fn(async () => "noop" as const)}
+        surface="main"
+        mentionCandidates={[candidate]}
+      />
+    );
+
+    const caption = screen.getByRole("textbox", { name: "Caption for synthetic.png" });
+    const send = screen.getByRole("button", { name: "Send attachments" });
+    fireEvent.keyDown(caption, { key: "Tab", code: "Tab" });
+
+    expect(onSendAttachments).not.toHaveBeenCalled();
+    expect(document.activeElement).not.toBe(send);
+    expect(onUpdateCaption).toHaveBeenLastCalledWith(
+      "staged-1",
+      expect.objectContaining({
+        inlines: [
+          {
+            kind: "mention",
+            target: { kind: "user", user_id: "@alice:example.invalid", display_label: "Alice" },
+            display_label: "Alice"
+          },
+          { kind: "text", text: " " }
+        ]
+      })
+    );
+  });
+
+  it("does not intercept composing Tab for the attachment Send button", () => {
+    const onSendAttachments = vi.fn();
+    render(
+      <UploadStagingDialog
+        items={[stagedImage("", { kind: "ready", variants: [], selected: { resize: "original", format: "keep" }, pending: null, generation: 0 })]}
+        onClear={vi.fn()}
+        onUpdateCaption={vi.fn()}
+        onSelectOutput={vi.fn()}
+        onRetryPreparation={vi.fn()}
+        onUseOriginal={vi.fn()}
+        onSendAttachments={onSendAttachments}
+        loadPreview={vi.fn(async () => [])}
+        resolveComposerKeyAction={vi.fn(async () => "noop" as const)}
+        surface="main"
+      />
+    );
+    const caption = screen.getByRole("textbox", { name: "Caption for synthetic.png" });
+    const send = screen.getByRole("button", { name: "Send attachments" });
+    fireEvent.compositionStart(caption);
+    const event = new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true,
+      isComposing: true
+    });
+    caption.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement).not.toBe(send);
     expect(onSendAttachments).not.toHaveBeenCalled();
   });
 
@@ -669,7 +829,7 @@ describe("UploadStagingDialog send action", () => {
     );
   }
 
-  it("owns a distinctly labeled send action for the attachments", () => {
+  it("owns a distinctly labeled send action for the attachments", async () => {
     const onSendAttachments = vi.fn();
     render(sendableDialog([readyItem()], onSendAttachments));
 
@@ -678,7 +838,7 @@ describe("UploadStagingDialog send action", () => {
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
     const send = screen.getByRole("button", { name: "Send attachments" });
     fireEvent.click(send);
-    expect(onSendAttachments).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSendAttachments).toHaveBeenCalledTimes(1));
   });
 
   it("refuses to send while an output is still recompressing", () => {

@@ -22,7 +22,7 @@
   --upload-output-option-gap: 2px;
   --upload-output-group-padding: 3px;
   --upload-output-toolbar-gap: 8px;
-  --upload-preview-viewport-min-size: 120px;
+  --upload-preview-viewport-min-size: 100px;
   --upload-preview-viewport-size: 180px;
   color-scheme: light dark;
 
@@ -5191,7 +5191,7 @@ mark {
   gap: 10px;
   margin: 0 20px 10px;
   padding: 12px;
-  max-height: min(58vh, 460px);
+  max-height: min(80vh, 640px);
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -5267,20 +5267,6 @@ mark {
   gap: 4px;
   color: var(--text-muted);
   font-size: 12px;
-}
-
-.upload-staging-caption input {
-  height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--text);
-  background: var(--surface);
-  outline: none;
-}
-
-.upload-staging-caption input:focus {
-  border-color: var(--brand);
 }
 
 /* The staging panel owns its own send: it dispatches the attachments and never
@@ -5362,7 +5348,7 @@ mark {
   position: relative;
   block-size: clamp(
     var(--upload-preview-viewport-min-size),
-    14vh,
+    10vh,
     var(--upload-preview-viewport-size)
   );
   overflow: auto;

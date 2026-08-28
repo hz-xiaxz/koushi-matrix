@@ -2994,12 +2994,12 @@ mock.setCommandResponse("send_prepared_uploads", ({
         : null;
   return { acceptedRevision, snapshot };
 });
-mock.setCommandResponse("update_staged_upload_caption", ({ target, stagedId, caption }: {
+mock.setCommandResponse("update_staged_upload_caption", ({ target, stagedId, document }: {
   target: ComposerTarget;
   stagedId: string;
-  caption: string | null;
+  document: ComposerDocument | null;
 }) => {
-  const normalized = typeof caption === "string" && caption.trim() ? caption : null;
+  const normalized = document && plainBodyFromDocument(document).trim() ? document : null;
   const items = stagedUploadsForTarget(currentSnapshot, target);
   if (items === null) return currentSnapshot;
   const nextItems = items.map((item) =>
@@ -3007,8 +3007,6 @@ mock.setCommandResponse("update_staged_upload_caption", ({ target, stagedId, cap
       ? {
           ...item,
           caption: normalized
-            ? { plain_body: normalized, formatted_body: null, mentions: { targets: [] } }
-            : null
         }
       : item
   );

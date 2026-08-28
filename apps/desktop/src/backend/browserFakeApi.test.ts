@@ -5,6 +5,7 @@ import { documentFromText, insertMention } from "../domain/composerDocument";
 import { parseComposerDraftRevision as revision } from "../domain/composerDraftRevision";
 import type {
   ComposerTarget,
+  ComposerDocument,
   DesktopSnapshot,
   LiveReadReceipt,
   SecureBackupGateState
@@ -3244,6 +3245,23 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
     await api.selectRoom(roomId);
     return api.stageUploadBytes({ kind: "main", room_id: roomId }, [item(stagedId, bytes)]);
   }
+
+  test("preserves structured staged caption documents and normalizes empty ones", async () => {
+    const api = createBrowserFakeApi();
+    const target = { kind: "main" as const, room_id: roomId };
+    await stageMain(api, "caption-upload");
+    const document: ComposerDocument = documentFromText("**caption**");
+
+    const updated = await api.updateStagedUploadCaption(target, "caption-upload", document);
+    expect(updated.state.ui.timeline.staged_uploads[0]?.caption).toEqual(document);
+
+    const cleared = await api.updateStagedUploadCaption(
+      target,
+      "caption-upload",
+      documentFromText("  \n  ")
+    );
+    expect(cleared.state.ui.timeline.staged_uploads[0]?.caption).toBeNull();
+  });
 
   function firstPreparedVariantId(snapshot: DesktopSnapshot): string {
     const staged = snapshot.state.ui.timeline.staged_uploads[0];

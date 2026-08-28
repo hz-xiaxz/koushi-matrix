@@ -5,7 +5,6 @@ use std::{
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::composer_shortcuts::FormattedMessageDraft;
 use crate::submission::{ComposerSubmissionTarget, ComposerTarget, SubmissionId};
 use crate::{ComposerDocument, ComposerDraftRevision, ComposerDraftRevisionError};
 
@@ -159,7 +158,7 @@ pub struct StagedUploadItem {
     pub mime_type: String,
     pub byte_count: u64,
     pub kind: StagedUploadKind,
-    pub caption: Option<FormattedMessageDraft>,
+    pub caption: Option<ComposerDocument>,
     pub compression_choice: StagedUploadCompressionChoice,
     #[serde(default)]
     pub preparation: StagedUploadPreparation,
@@ -437,7 +436,7 @@ impl UploadStagingStore {
         &mut self,
         target: &ComposerTarget,
         staged_id: &str,
-        caption: Option<FormattedMessageDraft>,
+        caption: Option<ComposerDocument>,
     ) -> Option<StagedUploadItem> {
         let item = self
             .items
