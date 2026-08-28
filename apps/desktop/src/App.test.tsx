@@ -2651,6 +2651,41 @@ describe("Timeline item row rendering", () => {
     );
   });
 
+  test("room and Space settings effects retain renderer-local demand ownership", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const roomEffectStart = source.indexOf('rightPanelMode !== "roomInfo"');
+    const spaceEffectStart = source.indexOf('rightPanelMode !== "spaceInfo"');
+    const nextEffectStart = source.indexOf("\n  useEffect(() => {", spaceEffectStart + 1);
+    const roomEffect = source.slice(roomEffectStart, spaceEffectStart);
+    const spaceEffect = source.slice(spaceEffectStart, nextEffectStart);
+
+    expect(roomEffect).toContain("roomSettingsRequestRef.current !== requestId");
+    expect(roomEffect).toContain("roomSettingsLoadRef.current = null");
+    expect(roomEffect).toContain(".catch(() => {");
+    expect(spaceEffect).toContain("spaceSettingsRequestRef.current !== requestId");
+    expect(spaceEffect).toContain(
+      "const navigationRequestId = spaceNavigationRequestRef.current"
+    );
+    expect(spaceEffect).toContain(
+      "spaceNavigationRequestRef.current !== navigationRequestId"
+    );
+    expect(spaceEffect).toContain("spaceSettingsLoadRef.current = null");
+    expect(spaceEffect).toContain(".catch(() => {");
+
+    const panelModeHelperStart = source.indexOf(
+      "async function setRightPanelModeClosingFocusedContext"
+    );
+    const openSpaceMembersStart = source.indexOf("async function openSpaceMembers");
+    const panelModeHelper = source.slice(panelModeHelperStart, openSpaceMembersStart);
+    const openSpaceMembersEnd = source.indexOf("\n    try {", openSpaceMembersStart);
+    const openSpaceMembersPrelude = source.slice(openSpaceMembersStart, openSpaceMembersEnd);
+    expect(panelModeHelper.match(/spaceSettingsRequestRef\.current \+= 1/g)).toHaveLength(1);
+    expect(openSpaceMembersPrelude).not.toContain("spaceSettingsRequestRef.current += 1");
+    expect(openSpaceMembersPrelude).toContain(
+      'setRightPanelModeClosingFocusedContext(\n      "people"'
+    );
+  });
+
   test("rejected login transport refreshes authoritative gate state without rejecting", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { settleLoginTransport } = await import("./App");
