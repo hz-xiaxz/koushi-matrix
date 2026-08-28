@@ -1,6 +1,6 @@
 # Frontend Semantic Ownership Inventory (#552)
 
-Status: refreshed evidence inventory as of `origin/main` `28a3dfb927d950e8a6724a933cb92e0c51111a01` (includes merged #683 leaf and releases through v0.3.1). This document classifies current owners; it does not itself migrate state or close #552.
+Status: final acceptance inventory refreshed against `origin/main` `ca9dc74529655b0eeba8e7b1babcbfc333d0b8c3` after Phases 0–6 and CI-stability PRs #733/#735. Every listed long-lived owner is now Rust product/resource authority, renderer-specific presentation/intent, a transport projection/cache, an adapter resource, or an intentional bounded test mirror.
 
 Pinned epic contract: [`evidence/issue-552-contract.json`](evidence/issue-552-contract.json), SHA-256 `0371538cb18ab90b399fbd8114ec0678603ef3d24797e3f70d182898910c268f`, from <https://github.com/shinaoka/koushi-matrix/issues/552>.
 
@@ -11,7 +11,7 @@ Pinned epic contract: [`evidence/issue-552-contract.json`](evidence/issue-552-co
 - **Transport/projection cache** — ordered copy of Rust snapshot/events, including gap/stale detection. Keep as a cache; it is not another semantic owner.
 - **Test-backend mirror** — Browser Fake/harness behavior used to test the Rust contract. It is not production authority, but must stay equivalent and bounded.
 
-Decisions: **keep**, **derive/delete**, **migrate leaf**, or **investigate**. A long-lived ref is not a migration target by size alone.
+Final decisions are **keep with renderer/transport reason**, **deleted/migrated**, or **intentional test mirror**. No owner remains merely “investigate.” A long-lived ref is not a migration target by size alone.
 
 ## Inventory
 
@@ -24,7 +24,7 @@ Decisions: **keep**, **derive/delete**, **migrate leaf**, or **investigate**. A 
 | Core `ThreadRootProjectionService` plus Room `TimelineActor::DisplayProjectionState` | Account/Room actor lifetime; dormant records survive bounded-window replacement and clear only from authoritative aggregate/redaction or room/session teardown | **Rust product/display lifecycle.** Core owns hydration, revisions, retained root snapshots, root/latest placement, stable display identity and explicit clear. Rust State mirrors typed transitions. | Display InitialItems/diffs are actor-generation-fenced and share one index domain; the 120-root admission bound includes dormant records; teardown cancels and awaits projection workers. | **Migrated in Phase 1 #708.** TypeScript has no projection map, bounded-window pruning, reply suppression, placeholder synthesis or placement decision; it maps Rust rows and retains renderer-only dividers/DOM behavior. |
 | `TimelineView.tsx` mounted viewport controller (`pendingMeasuredHeightsRef`, anchors, range epochs, observers, frames) | Mounted timeline key; ordered teardown on key change/unmount | **Renderer presentation**. DOM measurement, virtualization, scroll anchors and visible-range facts have no backend owner. | ResizeObserver/frames/timers cancel at one key reset; Rust receives typed viewport facts. | **Keep.** #551 residual audit proves this cohesive DOM owner. |
 | `TimelineView` Room DOM evidence, App Focused/Thread store evidence, and `backend/timelineAcknowledgementDelivery.ts` | Controller lives for the App renderer generation; resets on account/session owner change and disposes on App teardown. View unmount does not cancel accepted evidence delivery. | **Split renderer/transport/Rust boundary.** Renderer owns consumer evidence; the App adapter owns only bounded delivery to Core queue acceptance; Rust actor/request/generation/fence state owns all post-acceptance semantics. | Four closed channels (Room/Thread/Focused/repair), identical-intent coalescing, same-kind supersession, actor-aware identity, seven total attempts with finite backoff, fixed errors, explicit reset/dispose. | **Migrated in Phase 3.** React retry refs/timers are deleted; this renderer-specific transport owner exists because Core cannot retry evidence it never received. |
-| `TimelineView.tsx::pendingKeyRequests`, `keyRequestEpochRef`, `keyRequestToast` | Mounted key/account; reset on timeline-key change and Rust terminal DTO | **Renderer presentation/investigate**, not product admission. Rust owns `DecryptRetryController::admit`, `begin_decrypt_retry`, `handle_request_room_key`, and `TimelineActor.key_request_states`. | Frontend Set suppresses pre-projection duplicate dispatch and handles delayed rejection/toast; Rust already coalesces same event/generation and owns terminal state. | **Keep for now / investigate.** No proven Rust semantic gap; do not migrate merely because it is a Set. |
+| `TimelineView.tsx::pendingKeyRequests`, `keyRequestEpochRef`, `keyRequestToast` | Mounted key/account; reset on timeline-key change and Rust terminal DTO | **Renderer-specific immediate feedback/dispatch suppression**, not product admission. Rust owns `DecryptRetryController::admit`, `begin_decrypt_retry`, `handle_request_room_key`, and `TimelineActor.key_request_states`. | Duplicate click suppression, typed Rust pending/terminal clear, A→B→A rejection fence, keyboard/ARIA-live feedback and private fixed copy are covered. | **Keep, proven renderer-specific.** Rust cannot publish pending before the first command crosses transport; the Set/toast own only that gap and mounted feedback. |
 | `TimelineView.tsx` avatar relevance/request/retry refs, App `requestedMemberAvatarMxcsRef`/`memberAvatarRetryCountsRef`, and `domain/avatarThumbnails.ts` | Mounted virtual/member window/key; clears with key/reset | **Renderer presentation** around a Rust-owned download command/cache. Relevance is DOM-window-specific. | Two-attempt request fence, retry release on typed event/failure, one shared teardown per surface. | **Keep.** #551 audit found no non-overlapping owner API. |
 | `TimelineView.tsx` backfill epochs/evaluation/ref fences | Mounted key; cancels with projection/layout reset | **Renderer presentation** for when geometry warrants asking. Rust owns pagination operation/end state and SDK task. | Prevents repeated DOM-triggered requests until layout/projection settles; no Matrix history semantics synthesized. | **Keep.** Revisit only with a whole viewport-controller redesign. |
 | `latestTextMutationQueueRef` alias lanes (`alias:${userId}`) | Per-user autosave submission/result lifetime | **Renderer-specific bounded owner.** Rust owns durable aliases/Saving/reconciliation/projections; renderer serializes intent before pre-terminal Tauri/browser results. | Deferred first/latest autosave, stale-result suppression, rejected-tail continuation, bounded cleanup and direct-call source guard. | **Reconciled in Phase 5A.** Retain only as explicit transport/result sequencing; not product state. |
@@ -69,17 +69,18 @@ The following are not migration work:
 - Search crawler, directory, room/Space operations and current-session status. App request refs only fence stale renderer promises.
 - Harness cleanup from #657, invite admission from #658, composer-load evidence from #645, KaTeX admission from #668, transient projection/trust-loss reset contracts from #660, and the later Rust-owned read-state, Activity/redaction, Space-role, authentication-invalidation, room-list session-fence, verification, active-session management, and login/store lifecycle changes merged through #702.
 
-## Duplicated semantics requiring evidence before change
+## Final duplicate-semantics reconciliation
 
-1. **Resolved in Phase 1 #708: thread-root projection lifecycle and placement** — Core service/Room actor now own lifetime and placement; State mirrors explicit transitions and TypeScript only caches/renders Rust display items.
-2. **Text mutation ordering reconciled** — Phase 5A retains alias pre-terminal autosave sequencing; Phase 5B retains caption mounted-editor/terminal sequencing because Rust carries no editor revision. Invite/mention query ordering is migrated.
-3. **Projection ACK retry/backoff** — frontend owns reliable-delivery policy while Rust owns actor terminal waiting. DOM evidence must remain frontend; transport retry may move.
-4. **Remaining App promise request refs** — Phases 4.1–4.4 resolve settings, diagnostics, Space-member panel/load/search/invite/cancel/role and navigation intent. Any remaining dialog-bound family requires separate proof.
-5. **Browser Fake transitions** — intentional test mirror, not production duplication. Change only alongside the corresponding Rust contract.
+1. **Thread-root lifecycle/placement:** migrated in Phase 1 #708; Core service/Room actor own lifecycle and placement, State mirrors typed transitions, and TypeScript only caches/renders Rust display items.
+2. **Text mutation ordering:** invite/mention query authority migrated; Phases 5A–5B prove retained alias/caption lanes are bounded renderer transport/editor ordering around Rust-owned product state.
+3. **Projection ACK delivery:** migrated in Phase 3; DOM/store evidence remains renderer-owned, one bounded App adapter owns pre-Core delivery, and Rust owns all post-acceptance actor semantics.
+4. **App request refs:** Phases 4.1–4.4 migrate latest-click semantic inversions and prove every retained settings/diagnostics/Space-member/navigation epoch is renderer view/feedback intent.
+5. **Room-key request refs:** final audit classifies the Set/epoch/toast as mounted immediate feedback and pre-projection duplicate suppression; Rust owns admission/coalescing/terminal state.
+6. **Browser Fake/harness transitions:** intentional bounded test mirrors, never production authorities; change only with their Rust contract.
 
-Room-key `pendingKeyRequests` is excluded from this list until a semantic gap is proven: Rust already owns operation admission/coalescing; the Set is optimistic presentation and dispatch suppression.
+No duplicate production semantic owner remains unresolved.
 
-## Ranked disjoint leaf candidates
+## Completed disjoint leaf record
 
 ### 1. Current Phase 1 result: Rust-owned thread-root projection lifecycle (#708)
 
@@ -96,13 +97,12 @@ Room-key `pendingKeyRequests` is excluded from this list until a semantic gap is
 - **Current result:** merged PR #683 migrated invite/mention query admission to Rust request/generation state plus `appStore`; Phases 5A–5B prove the remaining alias/caption mutation lanes renderer-specific and bounded.
 - **Disjointness:** merged #659 changed room-list reducer admission; #608 authentication invalidation diagnostics/copy; #559 read-state local/server boundaries; and #570 Activity/redaction/thread convergence. None share this query leaf.
 
-### 3. Move projection/repair ACK retry policy to a reliable transport owner
+### 3. Shipped Phase 3: projection/repair ACK delivery owner
 
-- **Value:** a mounted view currently owns backoff/attempt terminal policy for a Rust actor resource.
-- **Boundary:** React still computes committed DOM evidence and sends one typed observation. Tauri/Core owns reliable retry, cancellation and actor-generation settlement.
-- **Risk:** cross-file actor/transport design; larger than candidate 1.
+- **Result:** TimelineView keeps one-shot committed Room DOM evidence and App keeps Focused/Thread store-application evidence. One bounded App-lifetime delivery adapter retries only to Core queue acceptance; Rust owns actor/request/generation settlement and repair timeout.
+- **Proof:** transport rejection/recovery, replacement, unmount, duplicate, reset/disposal and bounded exhaustion tests; TimelineView retry refs/timers removed.
 
-### 4. Retire redundant App request refs per command family
+### 4. Shipped Phases 4.1–4.4: App request families
 
 - **Value:** remove local stale-result fences already represented by Rust request IDs/generation and appStore admission.
 - **Method:** one family per PR, exact delayed-result test, no generic request manager.
@@ -138,20 +138,20 @@ The following contracts are now shipped and remain disjoint evidence, not pendin
 
 The shipped invite/mention query leaf touches none of those owners; Phases 5A–5B document alias/caption lanes as separate bounded renderer transport/editor-result owners.
 
-## #552 acceptance status
+## #552 final acceptance status
 
-| Epic criterion | Phase 0 status and evidence |
+| Epic criterion | Final evidence |
 | --- | --- |
-| Publish evidence-based inventory/classification | **Complete:** refreshed inventory above is pinned to current main and source/merge evidence. |
-| Identify already-correct Rust-owned/projection-only paths | **Complete:** listed above, including `appStore`, `timelineStore`, Core actors, and renderer-only DOM owners. |
-| Identify duplicated Rust/TS semantics | **Complete as inventory; partial as migration:** thread/ACK duplication is removed; Phases 4.1–4.3b classify/bound demand, 4.3c–4.3e remove invite/cancel/role latest-click authority, 4.4 proves navigation epochs renderer-specific, and 5A–5B prove alias/caption sequencing renderer-specific. |
-| Migrate selected high-value leaf owners incrementally | **Partial overall:** query/thread/ACK owners migrated; Phases 4.1–4.3b classify/bound demand; Phases 4.3c–4.3e restore Rust first-admitted invite/cancel/role settlement. Other leaves remain. |
-| One documented semantic owner per migrated subsystem | **Partial overall; complete through Phase 6:** Rust owns submitted navigation, aliases, staged captions, invite workflow/mutations and Core resources; renderer owners are limited to pre-submit/mounted/cross-surface intent, local failure or bounded alias/caption transport/editor results. |
-| Async Rust owners have cancellation/awaited settlement where required | **Partial overall:** #708 projection workers cancel and await on room/session teardown; Phase 3 introduces no Rust task and its renderer adapter synchronously cancels bounded timers on reset/dispose. Later owner phases remain. |
-| Remove corresponding TS semantic state after cutover | **Partial overall:** query keys, thread/ACK state, unbounded Space-member load Map/Set and invite latest-request ref are removed; cancel/role refs are narrowed; navigation and alias/caption sequencing are proven renderer-specific. |
-| Frontend cleanup primarily renderer-local | **Complete for current/shipped paths:** kept frontend owners are classified as presentation, transport cache, adapter resource, or test mirror. |
-| Preserve Tauri command/event compatibility unless separately reviewed | **Complete to date:** inventory and PR #683 changed no Rust/Tauri command, event, DTO, or IPC name; later contract changes remain separately gated. |
-| Focused transition/teardown/projection-equivalence tests | **Partial overall; complete through Phase 6:** deferred tests cover frontend convergence/ordering, and Rust integration covers command/event/versioned-snapshot/lag recovery/consumer teardown/awaited shutdown. |
-| Compatible with Tauri UI and future native Rust renderer | **Complete with Phase 6 evidence:** a public non-Tauri Rust integration test consumes Core start/connection/command/event/versioned snapshot/lag recovery/awaited shutdown; React/Tauri remains supported and GPUI is not part of #552 closure. |
+| Publish evidence-based inventory/classification | **Complete:** final inventory above is pinned to `ca9dc745` and classifies every long-lived site by authority/lifetime/settlement/decision. |
+| Identify already-correct Rust-owned/projection-only paths | **Complete:** `appStore`, `timelineStore`, Core actors, SDK resources, renderer DOM owners and test mirrors are explicit. |
+| Identify duplicated Rust/TS semantics | **Complete:** thread roots, query admission, ACK delivery and Space-member latest-click inversions were migrated; retained request/mutation/key-request lanes have renderer-specific proofs. |
+| Migrate selected high-value leaf owners incrementally | **Complete:** Phases 1–6 shipped one ownership seam per PR across thread roots, adapters, ACK delivery, request families, mutation sequencing and Core consumption. |
+| One documented semantic owner per migrated subsystem | **Complete:** durable Matrix/product/resource authority is Rust; retained frontend owners are mounted intent/feedback, projection caches, adapters or bounded test mirrors. |
+| Async Rust owners have cancellation/awaited settlement where required | **Complete:** #708 workers cancel/await on replacement/teardown; existing actors/tasks retain ordered shutdown; Phase 3 adds no Rust task and its bounded renderer adapter resets/disposes synchronously; Phase 6 proves awaited Core shutdown. |
+| Remove corresponding TS semantic state after cutover | **Complete:** thread lifecycle/placement maps, TimelineView ACK retry refs/timers, invite latest-request ref and unbounded Space-member load maps are removed; cancel/role refs are failure-only. |
+| Frontend cleanup primarily renderer-local | **Complete:** retained state is DOM/layout/focus/dialog/input/view intent, projection/cache, platform adapter or test mirror. |
+| Preserve Tauri command/event compatibility unless separately reviewed | **Complete:** Phases 2–6 preserve command/event/DTO names; convergence waits and neutral ports changed implementation ownership without compatibility shims. |
+| Focused transition/teardown/projection-equivalence tests | **Complete:** deterministic frontend deferred tests, Rust reducer/runtime tests, Playwright DOM evidence, actor teardown and both real-server CI lanes cover each seam. |
+| Compatible with Tauri UI and future native Rust renderer | **Complete:** React/Tauri remains shipping; Phase 6 consumes public Core start/connection/command/event/versioned snapshot/lag recovery/awaited shutdown without Tauri types. |
 
-#552 stays open. The refreshed inventory and one shipped semantic leaf do not satisfy the remaining migration criteria.
+The inventory has no unresolved or merely “investigate” semantic owner. #552 is ready to close after the final audit PR passes exact-head CI and merges.
