@@ -2429,6 +2429,9 @@ export function App() {
     setSnapshot(await api.setDisplayName(displayName));
   }
 
+  // Renderer-owned autosave sequencing only: Tauri returns a pre-terminal snapshot and browser
+  // results share one generation, so this bounded per-user lane preserves input/submission order.
+  // Rust remains the durable alias, Saving/terminal, reconciliation and display-projection owner.
   async function setLocalUserAlias(userId: string, alias: string | null) {
     await applyLatestTextMutationSnapshot(`alias:${userId}`, () => api.setLocalUserAlias(userId, alias));
   }

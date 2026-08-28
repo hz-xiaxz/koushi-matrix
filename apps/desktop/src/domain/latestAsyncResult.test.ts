@@ -74,6 +74,29 @@ describe("latest mutation operation queue", () => {
     await expect(latest).resolves.toEqual({ kind: "applied", value: "new" });
   });
 
+  it("continues with the latest write after an earlier operation rejects", async () => {
+    const queue = createLatestMutationOperationQueue<string>();
+    const calls: string[] = [];
+    let rejectFirst!: (reason?: unknown) => void;
+
+    const first = queue.run("alias", async () => {
+      calls.push("first");
+      return new Promise<string>((_resolve, reject) => {
+        rejectFirst = reject;
+      });
+    });
+    await Promise.resolve();
+    const latest = queue.run("alias", async () => {
+      calls.push("latest");
+      return "latest";
+    });
+
+    rejectFirst(new Error("transport rejected"));
+    await expect(first).rejects.toThrow("transport rejected");
+    await expect(latest).resolves.toEqual({ kind: "applied", value: "latest" });
+    expect(calls).toEqual(["first", "latest"]);
+  });
+
   it("runs independent logical fields concurrently", async () => {
     const queue = createLatestMutationOperationQueue<string>();
     const calls: string[] = [];

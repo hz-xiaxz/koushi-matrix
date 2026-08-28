@@ -206,6 +206,90 @@ describe("App Space Members integration", () => {
     expect(roleSuccessSource).toContain("spaceNavigationIntentEpochRef.current !== navigationEpoch");
     expect(roleSuccessSource).not.toContain("spaceMembersRoleFailureEpochRef.current ===");
     expect(source.slice(roleCatch)).toContain("entry.power_level === expectedPowerLevel");
+
+    const aliasStart = source.indexOf("async function setLocalUserAlias(");
+    const aliasEnd = source.indexOf("async function setRoomNotificationMode(", aliasStart);
+    const aliasSource = source.slice(aliasStart, aliasEnd);
+    expect(aliasSource).toContain("applyLatestTextMutationSnapshot(`alias:${userId}`");
+    expect(aliasSource).toContain("api.setLocalUserAlias(userId, alias)");
+    expect(source.match(/api\.setLocalUserAlias\(/g)).toHaveLength(1);
+    expect(source).toContain("Renderer-owned autosave sequencing only");
+  });
+
+  test("serializes alias autosaves and applies only the latest returned snapshot", async () => {
+    const api = createBrowserFakeApi();
+    const loaded = await api.loadRoomSettings("!room-alpha:example.invalid");
+    const target = loaded.state.domain.room_management.settings?.members.find(
+      (member) => member.user_id !== loaded.state.domain.session.user_id
+    );
+    if (!target) {
+      throw new Error("expected a synthetic room member");
+    }
+    const first = deferred<DesktopSnapshot>();
+    const latest = deferred<DesktopSnapshot>();
+    const setLocalUserAlias = vi
+      .spyOn(api, "setLocalUserAlias")
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(latest.promise);
+    const resultApi = createBrowserFakeApi();
+    await resultApi.loadRoomSettings("!room-alpha:example.invalid");
+    const firstResult = await resultApi.setLocalUserAlias(target.user_id, "First alias");
+    const latestResult = await resultApi.setLocalUserAlias(target.user_id, "Latest alias");
+
+    await renderAppWithApi(api);
+    const peopleButton = screen
+      .getAllByRole("button", { name: "People" })
+      .find((button) => button.classList.contains("icon-button"));
+    expect(peopleButton).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(peopleButton!);
+    });
+    await screen.findByRole("heading", { name: "People", level: 2 });
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: `Open profile for ${target.display_label}` })
+      );
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Set alias" }));
+    });
+    const input = screen.getByRole("textbox", { name: "Alias" });
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "First alias" } });
+    });
+    await waitFor(() => expect(setLocalUserAlias).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "Latest alias" } });
+    });
+    expect(setLocalUserAlias).toHaveBeenCalledTimes(1);
+
+    const { getAppStoreSnapshot } = await import("./domain/appStore");
+    const generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    firstResult.state_generation = generation;
+    latestResult.state_generation = generation;
+    await act(async () => {
+      first.resolve(firstResult);
+      await first.promise;
+    });
+    await waitFor(() => expect(setLocalUserAlias).toHaveBeenCalledTimes(2));
+    expect(setLocalUserAlias.mock.calls[1]).toEqual([target.user_id, "Latest alias"]);
+    expect(
+      getAppStoreSnapshot()?.state.domain.room_management.settings?.members.find(
+        (member) => member.user_id === target.user_id
+      )?.display_label
+    ).toBe(target.display_label);
+
+    await act(async () => {
+      latest.resolve(latestResult);
+      await latest.promise;
+    });
+    await waitFor(() => {
+      expect(
+        getAppStoreSnapshot()?.state.domain.room_management.settings?.members.find(
+          (member) => member.user_id === target.user_id
+        )?.display_label
+      ).toBe("Latest alias");
+    });
   });
 
   test("does not issue a second Space member request while selection loading is in flight", async () => {
