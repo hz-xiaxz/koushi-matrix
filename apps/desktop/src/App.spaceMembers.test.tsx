@@ -447,6 +447,64 @@ describe("App Space Members integration", () => {
     expect(screen.queryByText("Stale prior Space member")).toBeNull();
   });
 
+  test("settles Space invite-search loading when query convergence rejects", async () => {
+    const api = createBrowserFakeApi();
+    vi.spyOn(api, "searchInviteTargets").mockRejectedValueOnce(
+      new Error("synthetic invite convergence timeout")
+    );
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Invite people" }));
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByRole("searchbox", { name: "Name, alias, or Matrix ID" }), {
+        target: { value: "timeout" }
+      });
+    });
+    await waitFor(() => expect(api.searchInviteTargets).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText("Loading activity")).toBeNull());
+    expect(screen.getByRole("searchbox", { name: "Name, alias, or Matrix ID" })).toHaveProperty(
+      "value",
+      "timeout"
+    );
+  });
+
+  test("rejects a mismatched Space invite-search snapshot", async () => {
+    const api = createBrowserFakeApi();
+    const mismatched = await api.getSnapshot();
+    mismatched.state_generation = (mismatched.state_generation ?? 0) + 10;
+    const workflow = mismatched.state.domain.invite_workflow;
+    if (!workflow) {
+      throw new Error("expected synthetic invite workflow");
+    }
+    workflow.query = {
+      ...workflow.query,
+      room_id: "!space-alpha:example.invalid",
+      query: "other",
+      candidates: [],
+      explicit_user_id: null
+    };
+    vi.spyOn(api, "searchInviteTargets").mockResolvedValueOnce(mismatched);
+
+    await renderAppWithApi(api);
+    await openSpaceMembersFromSidebar();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Invite people" }));
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByRole("searchbox", { name: "Name, alias, or Matrix ID" }), {
+        target: { value: "wanted" }
+      });
+    });
+    await waitFor(() => expect(api.searchInviteTargets).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText("Loading activity")).toBeNull());
+
+    const { getAppStoreSnapshot } = await import("./domain/appStore");
+    expect(getAppStoreSnapshot()?.state.domain.invite_workflow?.query.query ?? "").toBe("");
+  });
+
   test("uses the shared inline invite command and moves a child-only user to pending", async () => {
     const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "pending" });
     const inviteUserToSpace = vi.spyOn(api, "inviteUserToSpace");
