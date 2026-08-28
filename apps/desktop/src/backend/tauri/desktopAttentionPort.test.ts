@@ -77,8 +77,11 @@ describe("Tauri desktop attention port", () => {
     expect(sendNotification).not.toHaveBeenCalled();
   });
 
-  test("settles both clear operations and rejects when either fails", async () => {
-    vi.mocked(cancelAll).mockRejectedValue(new Error("cancel failed"));
+  test.each([
+    ["pending cancellation", () => vi.mocked(cancelAll).mockRejectedValue(new Error("failed"))],
+    ["active removal", () => vi.mocked(removeAllActive).mockRejectedValue(new Error("failed"))]
+  ])("settles both clear operations when %s fails", async (_operation, rejectOperation) => {
+    rejectOperation();
     const port = createTauriDesktopAttentionPort();
 
     await expect(port.notifications.clear()).rejects.toThrow("native_notification_clear_failed");
