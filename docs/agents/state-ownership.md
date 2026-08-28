@@ -788,6 +788,18 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   the failed `room_management` snapshot; event delivery can lead the connection
   snapshot by one `StateDelta` generation.
 
+## Room and Space navigation intent
+
+- Rust owns every submitted `SelectRoom`/`SelectSpace` command, request terminal,
+  active-room/Space state and projection. React owns only the earlier view intent:
+  `roomNavigationIntentEpochRef` and `spaceNavigationIntentEpochRef` are captured
+  before async composer draining and prevent an older drain, promise or panel
+  follow-up from applying after a newer click. Rust cannot classify an intent that
+  has not yet crossed the command boundary. Keep the epochs separate because room
+  and Space/Home lifetimes have distinct settings/profile and Space-mutation
+  consumers. Do not rename them back to request refs, delete them, merge them into
+  one generic manager or move renderer composer-drain intent into Rust.
+
 ## Space member roles
 
 - `AppState.space_members` is the authoritative Space-member projection. Rust

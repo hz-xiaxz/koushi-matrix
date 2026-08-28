@@ -2664,10 +2664,10 @@ describe("Timeline item row rendering", () => {
     expect(roomEffect).toContain(".catch(() => {");
     expect(spaceEffect).toContain("spaceSettingsRequestRef.current !== requestId");
     expect(spaceEffect).toContain(
-      "const navigationRequestId = spaceNavigationRequestRef.current"
+      "const navigationRequestId = spaceNavigationIntentEpochRef.current"
     );
     expect(spaceEffect).toContain(
-      "spaceNavigationRequestRef.current !== navigationRequestId"
+      "spaceNavigationIntentEpochRef.current !== navigationRequestId"
     );
     expect(spaceEffect).toContain("spaceSettingsLoadRef.current = null");
     expect(spaceEffect).toContain(".catch(() => {");
