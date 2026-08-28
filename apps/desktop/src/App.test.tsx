@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, test, vi } from "vitest";
 
 import { createBrowserFakeApi } from "./backend/browserFakeApi";
@@ -17,6 +17,35 @@ import type { DesktopSnapshot } from "./domain/types";
 import type { RightPanelMode } from "./domain/rightPanel";
 import { formatScheduledSendTime } from "./app/uiShared";
 import { t } from "./i18n/messages";
+
+function productionTauriImportFiles(
+  directory = new URL("./", import.meta.url),
+  relativeDirectory = ""
+): string[] {
+  const matches: string[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const relativePath = `${relativeDirectory}${entry.name}`;
+    if (entry.isDirectory()) {
+      if (entry.name !== "test") {
+        matches.push(
+          ...productionTauriImportFiles(
+            new URL(`${entry.name}/`, directory),
+            `${relativePath}/`
+          )
+        );
+      }
+      continue;
+    }
+    if (
+      /\.tsx?$/.test(entry.name) &&
+      !entry.name.includes(".test.") &&
+      /from\s+["']@tauri-apps\//.test(readFileSync(new URL(entry.name, directory), "utf8"))
+    ) {
+      matches.push(relativePath);
+    }
+  }
+  return matches.sort();
+}
 
 describe("ContextualRightPanel", () => {
   test("accepted terminal snapshot settles an unknown send before the next draft", async () => {
@@ -221,11 +250,15 @@ describe("ContextualRightPanel", () => {
 
     const tauriImportStatements =
       source.match(/^import\s+[^;]+from\s+["']@tauri-apps\/[^"']+["'];$/gm) ?? [];
-    expect(tauriImportStatements).toEqual([
-      'import { listen } from "@tauri-apps/api/event";'
+    expect(tauriImportStatements).toEqual([]);
+    expect(productionTauriImportFiles()).toEqual([
+      "backend/client.ts",
+      "backend/tauri/desktopAttentionPort.ts",
+      "backend/tauri/desktopEventPort.ts",
+      "backend/tauri/linkMediaPort.ts",
+      "backend/tauri/windowDialogPort.ts",
+      "backend/tauriTimelineTransport.ts"
     ]);
-    expect(tauriImportStatements.join("\n")).not.toContain("@tauri-apps/api/window");
-    expect(tauriImportStatements.join("\n")).not.toContain("@tauri-apps/plugin-dialog");
     expect(appRuntimeSource).not.toMatch(/from\s+["']@tauri-apps\//);
   });
 
@@ -1346,6 +1379,28 @@ describe("ContextualRightPanel", () => {
     expect(roomPane).not.toContain("canPaginateOlderMessages");
   });
 
+  test("App event subscriptions keep renderer-owned setup and teardown", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const listenerStart = source.indexOf("// Tauri production sends complete on the CoreEvent stream");
+    const listenerEnd = source.indexOf("// App-level timeline store", listenerStart);
+    const listenerSource = source.slice(listenerStart, listenerEnd);
+    const stateStart = source.indexOf("desktopEventPort.listenStateChanges");
+    const stateEnd = source.indexOf("  }, []);", stateStart);
+    const stateSource = source.slice(stateStart, stateEnd);
+
+    expect(listenerSource.match(/desktopEventPort\.listenCoreEvents/g)).toHaveLength(2);
+    expect(listenerSource).toContain("desktopEventPort.listenMenuActions");
+    expect(listenerSource.match(/\.then\(\(dispose\)/g)).toHaveLength(3);
+    expect(listenerSource.match(/unlisten\?\.\(\)/g)).toHaveLength(3);
+    expect(listenerSource).toContain("deltaBatcher.dispose()");
+    expect(stateStart).toBeGreaterThanOrEqual(0);
+    expect(stateEnd).toBeGreaterThan(stateStart);
+    expect(stateSource).toContain("stateRefreshTimerRef.current");
+    expect(stateSource).toContain("window.clearTimeout");
+    expect(stateSource).toContain("unlisten?.()");
+    expect(source.slice(stateEnd, stateEnd + 10)).toContain("}, []);");
+  });
+
   test("Tauri timeline ensure waits for the webview CoreEvent listener registration", () => {
     const source = readFileSync(
       new URL("./backend/tauriTimelineTransport.ts", import.meta.url),
@@ -1356,7 +1411,9 @@ describe("ContextualRightPanel", () => {
     const transportBranch = source.slice(transportStart, transportEnd);
 
     expect(source).toContain("let tauriCoreEventListenerReady");
-    expect(transportBranch).toContain("tauriCoreEventListenerReady = listen<CoreEventPayload>");
+    expect(transportBranch).toContain(
+      "tauriCoreEventListenerReady = desktopEventPort.listenCoreEvents"
+    );
     expect(transportBranch).toContain("async ensureSubscribed");
     expect(transportBranch).toContain("await tauriCoreEventListenerReady");
     expect(transportBranch).toContain("ensure_timeline_subscribed");

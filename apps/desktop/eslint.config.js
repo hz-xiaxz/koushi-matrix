@@ -10,10 +10,8 @@
 // 1. src/components/**, src/app/**, and src/App.tsx must not import
 //    @tauri-apps/* directly. The transport boundary is
 //    apps/desktop/src/backend/*. React components/hooks receive neutral ports;
-//    they must not reach Tauri IPC themselves. App.tsx has one deferred event
-//    import acknowledged with an inline eslint-disable-next-line
-//    no-restricted-imports comment. Any NEW direct import without a disable
-//    comment will be caught by this rule. Production domain/** is separately
+//    they must not reach Tauri IPC themselves. App.tsx has no direct Tauri
+//    import. Any NEW direct import is caught by this rule. Production domain/** is separately
 //    guarded below; domain tests and test/** retain only their mock boundaries.
 //
 // 2. No source file may import from ../../src-tauri (path escape into the
@@ -77,14 +75,38 @@ export default tseslint.config(
     },
   },
 
+  // Phase 2B backend guard: concrete Tauri imports are allowed only in the
+  // approved adapters. Tests may mock Tauri directly.
+  {
+    files: ["src/backend/**/*.ts", "src/backend/**/*.tsx"],
+    ignores: [
+      "src/backend/**/*.test.ts",
+      "src/backend/**/*.test.tsx",
+      "src/backend/tauri/**/*.ts",
+      "src/backend/tauri/**/*.tsx",
+      "src/backend/client.ts",
+      "src/backend/tauriTimelineTransport.ts",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@tauri-apps/**"],
+              message:
+                "Backend composition and neutral contracts must not import Tauri. Use an approved backend adapter.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // Rule 1 (components + app hooks + App.tsx): Must not directly import
   // @tauri-apps/*. App tests are covered and must mock neutral ports.
-  // - src/components/** and src/app/** — zero current violations; any new
-  //   import is a bug.
-  // - src/App.tsx — one event import is acknowledged until Phase 2B4.
-  // - src/backend/appRuntime.ts — composition only; concrete platform imports
-  //   belong under src/backend/tauri/.
-  // Any NEW import without a disable comment is caught.
+  // src/components/**, src/app/**, App.tsx, and appRuntime have zero current
+  // violations; any new import is a bug.
   {
     files: [
       "src/components/**/*.ts",
