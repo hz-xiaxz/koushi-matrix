@@ -400,8 +400,12 @@ const MAX_SIDEBAR_WIDTH = 440;
 const DEFAULT_RIGHT_PANEL_WIDTH = 390;
 const MIN_RIGHT_PANEL_WIDTH = 320;
 const MAX_RIGHT_PANEL_WIDTH = 680;
-const COMPACT_RAIL_WIDTH = 56;
-const MIN_TIMELINE_WIDTH_WHILE_RESIZING = 180;
+// Keep these shell thresholds aligned with the matching grid tracks in styles.css.
+const COMPACT_LAYOUT_MAX_WIDTH = 760;
+const INLINE_RIGHT_PANEL_MIN_WIDTH = 1200;
+const WIDE_RAIL_WIDTH = 72;
+const OVERLAY_TIMELINE_MIN_WIDTH = 360;
+const INLINE_TIMELINE_MIN_WIDTH = 420;
 const HOME_SELECTION_KEY = "koushi.homeSelection.v1";
 type HomeSelection =
   | { kind: "activity" }
@@ -469,38 +473,45 @@ function createRoomRequestFromDraft(
   };
 }
 
-function clampSidebarWidth(width: number, viewportWidth = window.innerWidth): number {
-  const responsiveMax =
-    viewportWidth <= 760
-      ? Math.max(
-          MIN_SIDEBAR_WIDTH,
-          Math.min(
-            MAX_SIDEBAR_WIDTH,
-            viewportWidth - COMPACT_RAIL_WIDTH - MIN_TIMELINE_WIDTH_WHILE_RESIZING
-          )
-        )
-      : MAX_SIDEBAR_WIDTH;
-  return Math.min(responsiveMax, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)));
+function clampSidebarWidth(width: number): number {
+  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)));
 }
-function clampRightPanelWidth(
-  width: number,
-  sidebarWidth: number,
-  viewportWidth = window.innerWidth
-): number {
-  const responsiveMax =
-    viewportWidth <= 760
-      ? MIN_RIGHT_PANEL_WIDTH
-      : Math.max(
-          MIN_RIGHT_PANEL_WIDTH,
-          Math.min(
-            MAX_RIGHT_PANEL_WIDTH,
-            viewportWidth -
-              COMPACT_RAIL_WIDTH -
-              sidebarWidth -
-              MIN_TIMELINE_WIDTH_WHILE_RESIZING
-          )
-        );
-  return Math.min(responsiveMax, Math.max(MIN_RIGHT_PANEL_WIDTH, Math.round(width)));
+
+function clampRightPanelWidth(width: number): number {
+  return Math.min(MAX_RIGHT_PANEL_WIDTH, Math.max(MIN_RIGHT_PANEL_WIDTH, Math.round(width)));
+}
+
+// Invariant: fitted shell tracks never exceed the viewport's inline-layout budget.
+function fitShellWidths(
+  preferredSidebarWidth: number,
+  preferredRightPanelWidth: number,
+  viewportWidth: number,
+  rightPanelOpen: boolean
+): { sidebarWidth: number; rightPanelWidth: number } {
+  let sidebarWidth = clampSidebarWidth(preferredSidebarWidth);
+  let rightPanelWidth = clampRightPanelWidth(preferredRightPanelWidth);
+
+  if (viewportWidth <= COMPACT_LAYOUT_MAX_WIDTH) {
+    return { sidebarWidth, rightPanelWidth };
+  }
+  if (viewportWidth < INLINE_RIGHT_PANEL_MIN_WIDTH) {
+    sidebarWidth = Math.min(
+      sidebarWidth,
+      viewportWidth - WIDE_RAIL_WIDTH - OVERLAY_TIMELINE_MIN_WIDTH
+    );
+    return { sidebarWidth, rightPanelWidth };
+  }
+  if (!rightPanelOpen) {
+    return { sidebarWidth, rightPanelWidth };
+  }
+
+  const paneWidthBudget = viewportWidth - WIDE_RAIL_WIDTH - INLINE_TIMELINE_MIN_WIDTH;
+  rightPanelWidth = Math.min(
+    rightPanelWidth,
+    Math.max(MIN_RIGHT_PANEL_WIDTH, paneWidthBudget - sidebarWidth)
+  );
+  sidebarWidth = Math.min(sidebarWidth, paneWidthBudget - rightPanelWidth);
+  return { sidebarWidth, rightPanelWidth };
 }
 type InviteUserDialogState = {
   roomId: string;
@@ -1001,6 +1012,7 @@ export function App() {
   const [peoplePanelScope, setPeoplePanelScope] = useState<PeoplePanelScope | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [rightPanelWidth, setRightPanelWidth] = useState(DEFAULT_RIGHT_PANEL_WIDTH);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [qaSendStatus, setQaSendStatus] = useState<QaSendSmokeStatus>("idle");
   // Issue #450: transient localized notice for recognized-but-unavailable
   // slash commands (e.g. /join, /invite), rendered above the composer that
@@ -1078,6 +1090,7 @@ export function App() {
   }, [displayDensity, viewportSyncReporter]);
   useEffect(() => {
     const reportBrowserResize = () => {
+      setViewportWidth(window.innerWidth);
       void viewportSyncReporter("browser_resize", displayDensity);
     };
     window.addEventListener("resize", reportBrowserResize);
@@ -5655,9 +5668,15 @@ export function App() {
     searchCrawlerHasPendingIndexing(snapshot.state.domain.search_crawler);
   const effectiveRightPanelMode = effectiveRightPanelModeForSnapshot(rightPanelMode, snapshot);
   const rightPanelOpen = effectiveRightPanelMode !== "closed";
+  const fittedShellWidths = fitShellWidths(
+    sidebarWidth,
+    rightPanelWidth,
+    viewportWidth,
+    rightPanelOpen
+  );
   const appGridStyle = {
-    "--sidebar-width": `${sidebarWidth}px`,
-    "--right-panel-width": `${rightPanelWidth}px`
+    "--sidebar-width": `${fittedShellWidths.sidebarWidth}px`,
+    "--right-panel-width": `${fittedShellWidths.rightPanelWidth}px`
   } as CSSProperties;
 
   function diagnosticReportFor(
@@ -5693,7 +5712,7 @@ export function App() {
   function beginSidebarResize(event: PointerEvent<HTMLButtonElement>) {
     event.preventDefault();
     const startX = event.clientX;
-    const startWidth = sidebarWidth;
+    const startWidth = fittedShellWidths.sidebarWidth;
 
     function onPointerMove(moveEvent: globalThis.PointerEvent) {
       setSidebarWidth(clampSidebarWidth(startWidth + moveEvent.clientX - startX));
@@ -5711,12 +5730,10 @@ export function App() {
   function beginRightPanelResize(event: PointerEvent<HTMLButtonElement>) {
     event.preventDefault();
     const startX = event.clientX;
-    const startWidth = rightPanelWidth;
+    const startWidth = fittedShellWidths.rightPanelWidth;
 
     function onPointerMove(moveEvent: globalThis.PointerEvent) {
-      setRightPanelWidth(
-        clampRightPanelWidth(startWidth - (moveEvent.clientX - startX), sidebarWidth)
-      );
+      setRightPanelWidth(clampRightPanelWidth(startWidth - (moveEvent.clientX - startX)));
     }
 
     function onPointerUp() {
