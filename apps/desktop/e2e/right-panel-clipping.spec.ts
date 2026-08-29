@@ -76,6 +76,16 @@ async function openRightPanel(page: Page): Promise<void> {
 }
 
 /** Rendered geometry of the right panel and its close control. */
+async function dragResizer(page: Page, label: string, deltaX: number): Promise<void> {
+  const resizer = page.getByRole("button", { name: label });
+  const box = await resizer.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + 4);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width / 2 + deltaX, box!.y + 4);
+  await page.mouse.up();
+}
+
 async function panelGeometry(page: Page) {
   return page.evaluate(() => {
     const panel = document.querySelector<HTMLElement>(".thread-pane");
@@ -122,6 +132,56 @@ test("the right context panel and its close control stay on-screen in the grid-m
     widestControlRight,
     `a panel control reaches ${widestControlRight}, outside the ${viewportWidth}px viewport`
   ).toBeLessThanOrEqual(viewportWidth + 1);
+});
+
+test("a widened right panel is fitted again when the window narrows", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 800 });
+  await gotoReadyShell(page);
+  await openRightPanel(page);
+
+  const panel = page.locator(".thread-pane");
+  const initialWidth = await panel.evaluate((element) => element.getBoundingClientRect().width);
+  await dragResizer(page, t("workspace.resizeRightPanel"), -260);
+  await expect
+    .poll(() => panel.evaluate((element) => element.getBoundingClientRect().width))
+    .toBeGreaterThan(initialWidth);
+  const preferredWidth = await panel.evaluate((element) => element.getBoundingClientRect().width);
+
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await expect
+    .poll(async () => {
+      const geometry = await panelGeometry(page);
+      return geometry ? geometry.panelRight - geometry.viewportWidth : Number.POSITIVE_INFINITY;
+    })
+    .toBeLessThanOrEqual(1);
+  const geometry = await panelGeometry(page);
+  expect(geometry).not.toBeNull();
+  expect(geometry!.widestControlRight).toBeLessThanOrEqual(geometry!.viewportWidth + 1);
+
+  await page.setViewportSize({ width: 1600, height: 800 });
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await expect
+    .poll(() => panel.evaluate((element) => element.getBoundingClientRect().width))
+    .toBeCloseTo(preferredWidth, 0);
+});
+
+test("widening the sidebar cannot push the right panel off-screen", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await gotoReadyShell(page);
+  await openRightPanel(page);
+
+  const sidebar = page.locator(".sidebar");
+  const initialWidth = await sidebar.evaluate((element) => element.getBoundingClientRect().width);
+  await dragResizer(page, t("workspace.resizeRoomList"), 120);
+  await expect
+    .poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width))
+    .toBeGreaterThan(initialWidth);
+
+  const geometry = await panelGeometry(page);
+  expect(geometry).not.toBeNull();
+  expect(geometry!.panelRight).toBeLessThanOrEqual(geometry!.viewportWidth + 1);
+  expect(geometry!.widestControlRight).toBeLessThanOrEqual(geometry!.viewportWidth + 1);
 });
 
 test("the panel stays on-screen across the whole breakpoint boundary", async ({ page }) => {
