@@ -5356,8 +5356,18 @@ mark {
 /* Show the bounded pan surface before attachment decisions and the compact
    caption editor. Large images retain their prepared pixel dimensions inside
    this viewport so users can inspect them by scrolling in either direction. */
+.upload-preview-shell {
+  position: relative;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
 .upload-preview-viewport {
   position: relative;
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
   block-size: clamp(
     var(--upload-preview-viewport-min-size),
     22dvh,
@@ -5366,6 +5376,48 @@ mark {
   overflow: auto;
   overscroll-behavior: contain;
   border-radius: 7px;
+  background: repeating-conic-gradient(
+      color-mix(in srgb, var(--line) 38%, var(--surface)) 0 25%,
+      var(--surface) 0 50%
+    )
+    0 / 16px 16px;
+}
+
+.upload-preview-mode {
+  position: absolute;
+  z-index: 2;
+  inset-block-start: 6px;
+  inset-inline-end: 6px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-raised) 92%, transparent);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 14%);
+}
+
+.upload-preview-mode-option {
+  min-block-size: 24px;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.upload-preview-mode-option[aria-pressed="true"] {
+  background: var(--brand-weak);
+  color: var(--brand);
+  font-weight: 650;
+}
+
+.upload-preview-mode-option:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
 }
 
 .upload-preview-viewport[data-recompressing="true"] .upload-staging-preview,
@@ -5391,11 +5443,19 @@ mark {
   inline-size: auto;
   min-inline-size: 0;
   block-size: auto;
-  max-inline-size: none;
-  max-block-size: none;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface);
+}
+
+.upload-preview-viewport[data-preview-mode="fit"] .upload-staging-preview {
+  max-inline-size: 100%;
+  max-block-size: 100%;
+}
+
+.upload-preview-viewport[data-preview-mode="actual"] .upload-staging-preview {
+  max-inline-size: none;
+  max-block-size: none;
 }
 
 .upload-staging-preview-placeholder {

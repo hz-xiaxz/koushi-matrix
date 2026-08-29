@@ -115,6 +115,9 @@ export type MessageId =
   | "upload.retryPreparation"
   | "upload.useOriginal"
   | "upload.previewAlt"
+  | "upload.previewMode"
+  | "upload.previewFit"
+  | "upload.previewActualSize"
   | "upload.savings"
   | "upload.sizeChoice"
   | "upload.resizeChoice"
@@ -1431,6 +1434,9 @@ const en: Catalog = {
   "upload.retryPreparation": "Retry preparation",
   "upload.useOriginal": "Use original",
   "upload.previewAlt": "Prepared attachment preview",
+  "upload.previewMode": "Preview size",
+  "upload.previewFit": "Fit",
+  "upload.previewActualSize": "100%",
   "upload.savings": "{percent}% smaller",
   "upload.sizeChoice": "Upload size",
   "upload.resizeChoice": "Resize",
@@ -2662,6 +2668,9 @@ const ja: Catalog = {
   "upload.retryPreparation": "準備を再試行",
   "upload.useOriginal": "オリジナルを使用",
   "upload.previewAlt": "準備済み添付のプレビュー",
+  "upload.previewMode": "プレビュー倍率",
+  "upload.previewFit": "全体",
+  "upload.previewActualSize": "100%",
   "upload.savings": "{percent}% 削減",
   "upload.sizeChoice": "アップロードサイズ",
   "upload.resizeChoice": "リサイズ",

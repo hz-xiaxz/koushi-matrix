@@ -343,6 +343,7 @@ const japaneseIdenticalMessageAllowlist = new Set<MessageId>([
   "upload.resizeHalf",
   "upload.resizeQuarter",
   "upload.resizeEighth",
+  "upload.previewActualSize",
   "upload.formatWebp",
   "upload.formatJpeg",
   "upload.formatPng",
