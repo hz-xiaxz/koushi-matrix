@@ -1468,11 +1468,6 @@ pub(super) fn space_member_invite_cancellation_settled_event_matches(
 }
 
 #[cfg(test)]
-fn commands_source() -> String {
-    crate::commands::contracts::production_source()
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use crate::commands::contracts::fake_request_id;
@@ -1607,92 +1602,7 @@ mod tests {
     }
 
     #[test]
-    fn room_management_tauri_commands_wait_for_correlated_core_events() {
-        let source = commands_source();
-
-        for (fn_name, event_token) in [
-            ("pub async fn load_room_settings", "RoomSettingsLoaded"),
-            ("pub async fn update_room_setting", "RoomSettingUpdated"),
-            ("pub async fn moderate_room_member", "RoomMemberModerated"),
-            (
-                "pub async fn update_room_member_role",
-                "RoomMemberRoleUpdated",
-            ),
-        ] {
-            let fn_offset = source
-                .find(fn_name)
-                .unwrap_or_else(|| panic!("{fn_name} command should exist"));
-            let rest = &source[fn_offset..];
-            let end = rest.find("\n#[tauri::command]").unwrap_or(rest.len());
-            let command_source = &rest[..end];
-
-            assert!(
-                command_source.contains("wait_for_room_operation"),
-                "{fn_name} should wait for the correlated RoomEvent before returning a snapshot"
-            );
-            assert!(
-                command_source.contains(event_token),
-                "{fn_name} should wait for {event_token}"
-            );
-            assert!(
-                command_source.contains("update_qa_window_title_from_state"),
-                "{fn_name} should refresh the QA title after state changes"
-            );
-            assert!(
-                command_source.contains("current_snapshot"),
-                "{fn_name} should return the current snapshot"
-            );
-        }
-    }
-
-    #[test]
     fn load_space_members_and_invite_user_to_space_build_exact_commands_and_wait_for_events() {
-        let source = commands_source();
-        let lib_source = include_str!("../lib.rs");
-
-        for (fn_name, matcher_token) in [
-            (
-                "pub async fn load_space_members",
-                "space_members_loaded_event_matches",
-            ),
-            (
-                "pub async fn invite_user_to_space",
-                "space_member_invite_settled_event_matches",
-            ),
-            (
-                "pub async fn cancel_space_invite",
-                "space_member_invite_cancellation_settled_event_matches",
-            ),
-            (
-                "pub async fn update_space_member_role",
-                "wait_for_space_member_role_update",
-            ),
-        ] {
-            let fn_offset = source
-                .find(fn_name)
-                .unwrap_or_else(|| panic!("{fn_name} command should exist"));
-            let rest = &source[fn_offset..];
-            let end = rest.find("\n#[tauri::command]").unwrap_or(rest.len());
-            let command_source = &rest[..end];
-
-            let waiter = if fn_name == "pub async fn update_space_member_role" {
-                "wait_for_space_member_role_update"
-            } else {
-                "wait_for_room_operation"
-            };
-            assert!(
-                command_source.contains(waiter),
-                "{fn_name} should wait for the correlated RoomEvent"
-            );
-            assert!(
-                command_source.contains(matcher_token),
-                "{fn_name} should wait through {matcher_token}"
-            );
-            assert!(command_source.contains("current_snapshot"));
-        }
-        assert!(lib_source.contains("commands::room::cancel_space_invite"));
-        assert!(lib_source.contains("commands::room::update_space_member_role"));
-
         match super::build_load_space_members_command(
             fake_request_id(301),
             "!space:example.org".to_owned(),

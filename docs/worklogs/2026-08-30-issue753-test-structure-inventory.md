@@ -132,3 +132,50 @@ All rows below had their Rust-source assertion transferred to the named checker 
 | `send_backup_policy.rs:all_session_constructors_leave_the_per_send_backup_fence_disabled` | 12 / disabled backup-fence count | `sdk.sessions.no_per_send_backup_fence` | Removed |
 | `send_backup_policy.rs:library_source_manifest_is_complete_and_unique` | 12 / complete unique source list | `sdk.library_source_manifest` | Removed |
 | `timeline_gap_adapter.rs:committed_room_checkpoint_has_no_legacy_or_room_absent_api` | 12 / forbidden legacy checkpoint API | `sdk.timeline.committed_room_checkpoint_no_legacy_api` | Removed |
+
+## Source-contract mapping: src-tauri
+
+All src-tauri rows were source-only and were removed; the three non-Rust JSON embeddings remain in their behavioral serialization tests. Shared `commands_source`/`production_source` helpers were removed after their last structural consumer moved.
+
+| Old file:test | Structural facts | Checker rule(s) |
+| --- | --- | --- |
+| `commands/activity.rs:open_activity_event_opens_anchored_main_timeline_without_room_resubscribe` | anchored-navigation required/forbidden markers | `desktop.activity.navigation_contract` |
+| `commands/activity.rs:open_activity_event_waits_before_opening_anchored_event_timeline` | close→wait→select→open→anchor order | `desktop.activity.navigation_contract` |
+| `commands/activity.rs:activity_tauri_command_contracts_are_present` | command, builder, registration inventory | `desktop.activity.command_contract` |
+| `commands/contracts.rs:submit_core_command_does_not_hold_connection_mutex_while_awaiting_send` | bounded unlocked submit path | `desktop.commands.submit_core_command_contract` |
+| `commands/contracts.rs:event_wait_loops_resync_on_lag_instead_of_failing_immediately` | lag-tolerant event waiters | `desktop.commands.event_wait_lag_contract` |
+| `commands/contracts.rs:correlated_operation_failures_preserve_core_failure_kind_in_invoke_errors` | typed failure waiter mapping | `desktop.commands.failure_waiter_contract` |
+| `commands/contracts.rs:every_tauri_command_is_registered_in_generate_handler` | exhaustive command registration | `desktop.commands.tauri_command_registration` |
+| `commands/diagnostics.rs:diagnostic_snapshot_command_is_registered_in_generate_handler` | diagnostics registration | `desktop.commands.tauri_command_registration` |
+| `commands/diagnostics.rs:viewport_sync_command_is_registered_in_generate_handler` | viewport registration | `desktop.commands.tauri_command_registration` |
+| `commands/directory.rs:start_direct_message_selects_the_resolved_room_before_returning` | DM started→room projection→selection order | `desktop.directory.start_dm_contract` |
+| `commands/directory.rs:join_directory_room_waits_for_backend_selected_room` | joined-room→selection order and timeout | `desktop.directory.join_room_selection_contract` |
+| `commands/e2ee.rs:e2ee_trust_tauri_command_contracts_are_present` | E2EE commands/builders/registrations | `desktop.e2ee.command_contract` |
+| `commands/local_encryption.rs:credential_health_tauri_command_contract_is_present` | probe command/builder/registration | `desktop.local_encryption.command_contract` |
+| `commands/local_encryption.rs:reset_local_data_tauri_command_contract_is_present` | reset command/wait/registration | `desktop.local_encryption.command_contract` |
+| `commands/navigation.rs:select_room_uses_core_selection_settlement_without_resubscribing_timeline` | Core-owned selection path | `desktop.navigation.command_contract` |
+| `commands/navigation.rs:room_transition_and_backfill_commands_emit_submit_trace_tokens` | private-safe submit traces | `desktop.navigation.command_contract` |
+| `commands/navigation.rs:select_search_result_selects_room_then_enters_anchored_timeline_without_room_resubscribe` | anchored search navigation | `desktop.navigation.command_contract` |
+| `commands/navigation.rs:close_focused_context_command_routes_to_app_close_focused_context` | close-focused command route | `desktop.navigation.command_contract` |
+| `commands/navigation.rs:close_focused_context_command_waits_until_main_timeline_is_live` | close→wait→snapshot order | `desktop.navigation.command_contract` |
+| `commands/navigation.rs:select_space_command_records_private_data_free_transition_trace` | space trace order/fields | `desktop.navigation.space_trace_contract` |
+| `commands/profile.rs:profile_tauri_command_contracts_are_present` | profile commands/builders/registrations | `desktop.profile.command_contract` |
+| `commands/room.rs:room_management_tauri_commands_wait_for_correlated_core_events` | room and space correlated waiters/registrations | `desktop.room.operation_wait_contract`, `desktop.room.space_operation_contract` |
+| `commands/search.rs:search_scope_resolution_preserves_non_all_scope_contract` | room/space scope and no global collapse | `desktop.search.command_contract` |
+| `commands/search.rs:submit_search_returns_after_correlated_search_start_before_result_completion` | request allocation and submit→wait order | `desktop.search.command_contract` |
+| `commands/session.rs:submit_login_request_waits_for_authenticated_session_and_leaves_sync_to_runtime_effects` | login waiter/timeout and no adapter sync start | `desktop.session.login_wait_contract` |
+| `commands/settings.rs:update_settings_tauri_command_contract_is_present` | settings route/registration | `desktop.settings.command_contract` |
+| `commands/settings.rs:rebuild_search_index_tauri_command_contract_is_present` | rebuild route/registration | `desktop.settings.command_contract` |
+| `commands/timeline.rs:acknowledge_timeline_batch_rendered_routes_every_generation_fence` | generation-fenced ACK | `desktop.timeline.generation_ack_contract` |
+| `commands/timeline.rs:composer_key_resolver_command_contract_is_present` | Rust resolver route/registration | `desktop.timeline.command_contract` |
+| `commands/timeline.rs:reaction_tauri_command_contracts_are_present` | reaction trace/registration | `desktop.timeline.signal_contract` |
+| `commands/timeline.rs:read_signal_tauri_commands_emit_latency_trace_tokens` | receipt/fully-read traces | `desktop.timeline.signal_contract` |
+| `commands/timeline.rs:scheduled_send_tauri_command_contracts_are_present` | scheduled-send commands/builders | `desktop.timeline.scheduled_send_contract` |
+| `commands/timeline.rs:send_queue_tauri_command_contracts_are_present` | retry/cancel commands/builders | `desktop.timeline.send_queue_contract` |
+| `commands/timeline.rs:thread_timeline_backwards_pagination_contract_is_present` | thread pagination builder/registration | `desktop.timeline.command_contract` |
+| `core_event_forwarder.rs:lag_resync_forwarder_requests_core_timeline_replay_after_marker` | owned ordered lag replay | `desktop.forwarder.lag_recovery_contract` |
+| `lib.rs:qa_control_pipe_env_is_debug_or_test_only` | direct cfg gate | `desktop.native.qa_control_pipe_cfg` |
+| `lib.rs:macos_close_requested_hides_without_stopping_background_tasks` | hide-not-stop close policy | `desktop.native.window_lifecycle_contract` |
+| `lib.rs:single_instance_reopen_shows_existing_main_window` | single-instance reopen path | `desktop.native.reopen_contract` |
+| `lib.rs:macos_run_event_reopen_shows_existing_main_window` | macOS reopen path | `desktop.native.reopen_contract` |
+| `viewport_sync.rs:native_access_and_recovery_mechanisms_are_isolated` | no resize/DOM dispatch fallback | `desktop.viewport.native_adapter_isolation` |

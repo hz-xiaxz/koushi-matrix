@@ -3794,28 +3794,6 @@ mod issue551_moved_tests {
     use crate::commands::contracts::{fake_request_id, synthetic_session_key};
     use koushi_core::{AccountKey, CoreCommand, PaginationDirection, TimelineCommand};
     use koushi_state::{ComposerDocument, ComposerInline, MentionTarget};
-    fn commands_source() -> String {
-        crate::commands::contracts::production_source()
-    }
-    #[test]
-    fn acknowledge_timeline_batch_rendered_routes_every_generation_fence() {
-        let source = include_str!("navigation.rs");
-        let start = source
-            .find("pub async fn acknowledge_timeline_batch_rendered")
-            .expect("rendered batch acknowledgement command should exist");
-        let command_source = &source[start..];
-
-        for field in [
-            "key: TimelineKey",
-            "actor_generation: u64",
-            "timeline_generation: TimelineGeneration",
-            "repair_generation: u64",
-            "batch_id: TimelineBatchId",
-            "AppCommand::AcknowledgeTimelineBatchRendered",
-        ] {
-            assert!(command_source.contains(field), "missing {field}");
-        }
-    }
 
     #[test]
     fn build_subscribe_focused_timeline_command_routes_to_focused_timeline_kind() {
@@ -3849,33 +3827,6 @@ mod issue551_moved_tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
-    }
-
-    #[test]
-    fn composer_key_resolver_command_contract_is_present() {
-        let commands_source = commands_source();
-        let lib_source = include_str!("../lib.rs");
-        let command_name = "pub async fn resolve_composer_key_action";
-        let route_name = "koushi_state::resolve_composer_key_action";
-        let settings_token = "settings.values.keyboard.composer_send_shortcut";
-        let registration_name = "commands::timeline::resolve_composer_key_action";
-
-        assert!(
-            commands_source.contains(command_name),
-            "Tauri command should expose resolve_composer_key_action"
-        );
-        assert!(
-            commands_source.contains(route_name),
-            "Tauri command should route through the Rust-owned resolver"
-        );
-        assert!(
-            commands_source.contains(settings_token),
-            "resolver should derive the send shortcut from Rust-owned settings"
-        );
-        assert!(
-            lib_source.contains(registration_name),
-            "Tauri command should be registered in generate_handler"
-        );
     }
 
     #[test]
@@ -3916,137 +3867,6 @@ mod issue551_moved_tests {
                 TimelineCommand::LoadLinkPreviews { .. }
             ))
         ));
-    }
-
-    #[test]
-    fn reaction_tauri_command_contracts_are_present() {
-        let commands_source = commands_source();
-        let lib_source = include_str!("../lib.rs");
-        for (command_name, route_name, registration_name, trace_kind) in [
-            (
-                "pub async fn send_reaction",
-                "build_send_reaction_command",
-                "commands::timeline::send_reaction",
-                "send_reaction",
-            ),
-            (
-                "pub async fn redact_reaction",
-                "build_redact_reaction_command",
-                "commands::timeline::redact_reaction",
-                "redact_reaction",
-            ),
-        ] {
-            assert!(
-                commands_source.contains(command_name),
-                "Tauri command should expose {command_name}"
-            );
-            assert!(
-                commands_source.contains(route_name),
-                "Tauri command should route through {route_name}"
-            );
-            assert!(
-                lib_source.contains(registration_name),
-                "Tauri command should register {registration_name}"
-            );
-            assert!(
-                commands_source.contains(&format!(
-                    "trace_tauri_timeline_command(\"submit\", \"{trace_kind}\""
-                )),
-                "Tauri command should trace submit for {trace_kind}"
-            );
-            assert!(
-                commands_source.contains(&format!(
-                    "trace_tauri_timeline_command_elapsed(\n        \"done\",\n        \"{trace_kind}\""
-                )),
-                "Tauri command should trace completion latency for {trace_kind}"
-            );
-        }
-    }
-
-    #[test]
-    fn read_signal_tauri_commands_emit_latency_trace_tokens() {
-        let commands_source = commands_source();
-        for trace_kind in ["send_read_receipt", "set_fully_read"] {
-            assert!(
-                commands_source.contains(&format!(
-                    "trace_tauri_timeline_command(\"submit\", \"{trace_kind}\""
-                )),
-                "read-signal command should trace submit for {trace_kind}"
-            );
-            assert!(
-                commands_source.contains(&format!(
-                    "trace_tauri_timeline_command_elapsed(\n        \"done\",\n        \"{trace_kind}\""
-                )),
-                "read-signal command should trace completion latency for {trace_kind}"
-            );
-        }
-    }
-
-    #[test]
-    fn scheduled_send_tauri_command_contracts_are_present() {
-        let commands_source = commands_source();
-        let lib_source = include_str!("../lib.rs");
-        for (command_name, route_name, registration_name) in [
-            (
-                "pub async fn schedule_send",
-                "build_schedule_send_command",
-                "commands::timeline::schedule_send",
-            ),
-            (
-                "pub async fn cancel_scheduled_send",
-                "build_cancel_scheduled_send_command",
-                "commands::timeline::cancel_scheduled_send",
-            ),
-            (
-                "pub async fn reschedule_scheduled_send",
-                "build_reschedule_scheduled_send_command",
-                "commands::timeline::reschedule_scheduled_send",
-            ),
-        ] {
-            assert!(
-                commands_source.contains(command_name),
-                "Tauri command should expose {command_name}"
-            );
-            assert!(
-                commands_source.contains(route_name),
-                "Tauri command should route through {route_name}"
-            );
-            assert!(
-                lib_source.contains(registration_name),
-                "Tauri command should register {registration_name}"
-            );
-        }
-    }
-
-    #[test]
-    fn send_queue_tauri_command_contracts_are_present() {
-        let commands_source = commands_source();
-        let lib_source = include_str!("../lib.rs");
-        for (command_name, route_name, registration_name) in [
-            (
-                "pub async fn retry_send",
-                "build_retry_send_command",
-                "commands::timeline::retry_send",
-            ),
-            (
-                "pub async fn cancel_send",
-                "build_cancel_send_command",
-                "commands::timeline::cancel_send",
-            ),
-        ] {
-            assert!(
-                commands_source.contains(command_name),
-                "Tauri command should expose {command_name}"
-            );
-            assert!(
-                commands_source.contains(route_name),
-                "Tauri command should route through {route_name}"
-            );
-            assert!(
-                lib_source.contains(registration_name),
-                "Tauri command should register {registration_name}"
-            );
-        }
     }
 
     #[test]
@@ -4180,45 +4000,6 @@ mod issue551_moved_tests {
                 ComposerFormattingOptions::default()
             )
             .is_none()
-        );
-    }
-
-    #[test]
-    fn thread_timeline_backwards_pagination_contract_is_present() {
-        let commands_source = commands_source();
-        let lib_source = include_str!("../lib.rs");
-        let helper_name = "build_paginate_thread_timeline_backwards_command";
-        let command_name = "pub async fn paginate_thread_timeline_backwards";
-        let registration_name = "commands::timeline::paginate_thread_timeline_backwards";
-
-        let helper_offset = commands_source
-            .find(helper_name)
-            .expect("thread pagination builder helper should exist");
-        let helper_source = &commands_source[helper_offset..];
-        let helper_end = helper_source
-            .find("fn build_send_text_command")
-            .expect("thread pagination builder should live before send_text builder");
-        let helper_source = &helper_source[..helper_end];
-
-        assert!(
-            commands_source.contains(command_name),
-            "Tauri command should expose thread pagination"
-        );
-        assert!(
-            lib_source.contains(registration_name),
-            "Tauri command should be registered in generate_handler"
-        );
-        assert!(
-            helper_source.contains("TimelineKind::Thread"),
-            "thread pagination builder should use a thread timeline key"
-        );
-        assert!(
-            helper_source.contains("PaginationDirection::Backward"),
-            "thread pagination builder should request backward pagination"
-        );
-        assert!(
-            helper_source.contains("event_count: TIMELINE_BACKWARDS_PAGE_EVENT_COUNT"),
-            "thread pagination should keep the shared room pagination event count"
         );
     }
 }

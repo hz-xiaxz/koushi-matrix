@@ -1097,41 +1097,6 @@ mod tests {
     /// compile-time gate as the QA login pipe (engineering-rules: Secrets rule
     /// 2). This source-level assertion is the release gate: a release binary
     /// cannot compile the env read at all.
-    #[test]
-    fn qa_control_pipe_env_is_debug_or_test_only() {
-        let source = include_str!("lib.rs");
-        let const_decl = concat!("const QA_CONTROL", "_PIPE_ENV");
-        let from_env = concat!("fn qa_control_pipe", "_path_from_env()");
-        let spawn_reader = concat!("spawn_qa_control", "_pipe_reader");
-
-        // Every place that names, reads, or wires the control pipe must sit
-        // directly under the debug/test cfg gate, so a release binary cannot
-        // even compile the env read (engineering-rules: Secrets rule 2).
-        for token in [const_decl, from_env, spawn_reader] {
-            let offset = source
-                .find(token)
-                .unwrap_or_else(|| panic!("expected `{token}` to exist in lib.rs"));
-            let preceding = &source[..offset];
-            let gate_offset = preceding
-                .rfind("#[cfg(any(debug_assertions, test))]")
-                .unwrap_or_else(|| panic!("`{token}` should be preceded by a debug/test cfg gate"));
-            // The cfg gate must be the immediately-preceding attribute (nothing
-            // but whitespace / single-line attributes between it and the item).
-            let between = &preceding[gate_offset..];
-            assert!(
-                !between.contains("\n\n"),
-                "`{token}` must sit directly under the debug/test cfg gate"
-            );
-        }
-
-        // The env var is read exactly once, inside the gated `from_env` helper.
-        let read_token = concat!("std::env::var(QA_CONTROL", "_PIPE_ENV)");
-        assert_eq!(
-            source.matches(read_token).count(),
-            1,
-            "control pipe env should be read once, only inside the gated from_env helper"
-        );
-    }
 
     #[test]
     fn qa_login_pipe_payload_maps_to_login_request_without_debugging_secret() {
@@ -1208,38 +1173,6 @@ mod tests {
         assert!(!window_event_should_stop_background_tasks(
             &tauri::WindowEvent::Resized(tauri::PhysicalSize::new(1280, 820))
         ));
-
-        let source = include_str!("lib.rs");
-        let destroyed_handler = source
-            .split("if window_event_should_stop_background_tasks(event)")
-            .nth(1)
-            .and_then(|rest| rest.split(".invoke_handler").next())
-            .expect("window destruction handler should exist");
-        assert!(destroyed_handler.contains("submit_core_shutdown"));
-        assert!(source.contains("AppCommand::Shutdown { request_id }"));
-    }
-
-    #[test]
-    fn macos_close_requested_hides_without_stopping_background_tasks() {
-        let source = include_str!("lib.rs");
-        let stop_helper = source
-            .split("fn window_event_should_stop_background_tasks")
-            .nth(1)
-            .and_then(|rest| rest.split("fn ensure_main_window_visible").next())
-            .expect("window event stop helper should exist");
-        assert!(
-            !stop_helper.contains("CloseRequested"),
-            "red close on macOS must hide the window without stopping account/runtime background tasks"
-        );
-
-        let close_handler = source
-            .split(".on_window_event")
-            .nth(1)
-            .and_then(|rest| rest.split("tauri::WindowEvent::CloseRequested").nth(1))
-            .and_then(|rest| rest.split("if window_event_should_persist").next())
-            .expect("CloseRequested handler should be explicit before persistence handling");
-        assert!(close_handler.contains("prevent_close()"));
-        assert!(close_handler.contains(".hide()"));
     }
 
     #[test]
@@ -1256,57 +1189,6 @@ mod tests {
             macos_close_requested_action(None),
             MacosCloseRequestedAction::Hide
         );
-
-        let source = include_str!("lib.rs");
-        let close_handler = source
-            .split(".on_window_event")
-            .nth(1)
-            .and_then(|rest| rest.split("tauri::WindowEvent::CloseRequested").nth(1))
-            .and_then(|rest| rest.split("if window_event_should_persist").next())
-            .expect("CloseRequested handler should be explicit before persistence handling");
-        assert!(close_handler.contains("window.is_fullscreen()"));
-        assert!(close_handler.contains("window.set_fullscreen(false)"));
-        assert!(
-            close_handler
-                .find("window.set_fullscreen(false)")
-                .expect("fullscreen close should exit fullscreen")
-                < close_handler
-                    .find("window.hide()")
-                    .expect("close should hide the window")
-        );
-    }
-
-    #[test]
-    fn single_instance_reopen_shows_existing_main_window() {
-        let source = include_str!("lib.rs");
-        let callback = source
-            .split("tauri_plugin_single_instance::init(")
-            .nth(1)
-            .and_then(|rest| rest.split(".plugin(tauri_plugin_deep_link::init())").next())
-            .expect("single instance plugin callback should be wired before other plugins");
-
-        assert!(
-            callback.contains("ensure_main_window_visible_for_handle"),
-            "reopening Koushi or launching a second instance should show and focus the resident main window"
-        );
-        assert!(callback.contains("desktop.lifecycle"));
-        assert!(callback.contains("reopen_requested"));
-    }
-
-    #[test]
-    fn macos_run_event_reopen_shows_existing_main_window() {
-        let source = include_str!("lib.rs");
-        let run_block = source
-            .split("pub fn run()")
-            .nth(1)
-            .and_then(|rest| rest.split("#[cfg(test)]").next())
-            .expect("run function body should exist");
-
-        assert!(run_block.contains(".build(tauri::generate_context!())"));
-        assert!(run_block.contains("tauri::RunEvent::Reopen"));
-        assert!(run_block.contains("ensure_main_window_visible_for_handle"));
-        assert!(run_block.contains("desktop.lifecycle"));
-        assert!(run_block.contains("reopen_requested"));
     }
 
     #[test]

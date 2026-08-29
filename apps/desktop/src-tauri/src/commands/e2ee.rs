@@ -581,11 +581,6 @@ pub(super) fn build_submit_identity_reset_oauth_command(
 }
 
 #[cfg(test)]
-fn commands_source() -> String {
-    crate::commands::contracts::production_source()
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -742,96 +737,5 @@ mod tests {
             super::build_confirm_session_bootstrap_saved_command(fake_request_id(44), 403),
             CoreCommand::Account(AccountCommand::ConfirmSessionBootstrapSaved { flow_id: 403, .. })
         ));
-    }
-
-    #[test]
-    fn e2ee_trust_tauri_command_contracts_are_present() {
-        let commands_source = commands_source();
-        let lib_source = include_str!("../lib.rs");
-        for (command_name, route_name, registration_name) in [
-            (
-                "pub async fn bootstrap_cross_signing",
-                "build_bootstrap_cross_signing_command",
-                "commands::e2ee::bootstrap_cross_signing",
-            ),
-            (
-                "pub async fn enable_key_backup",
-                "build_enable_key_backup_command",
-                "commands::e2ee::enable_key_backup",
-            ),
-            (
-                "pub async fn export_room_keys",
-                "build_export_room_keys_command",
-                "commands::e2ee::export_room_keys",
-            ),
-            (
-                "pub async fn import_room_keys",
-                "build_import_room_keys_command",
-                "commands::e2ee::import_room_keys",
-            ),
-            (
-                "pub async fn bootstrap_secure_backup",
-                "build_bootstrap_secure_backup_command",
-                "commands::e2ee::bootstrap_secure_backup",
-            ),
-            (
-                "pub async fn reenable_secure_backup",
-                "build_bootstrap_secure_backup_command",
-                "commands::e2ee::reenable_secure_backup",
-            ),
-            (
-                "pub async fn change_secure_backup_passphrase",
-                "build_change_secure_backup_passphrase_command",
-                "commands::e2ee::change_secure_backup_passphrase",
-            ),
-            (
-                "pub async fn accept_verification",
-                "build_accept_verification_command",
-                "commands::e2ee::accept_verification",
-            ),
-            (
-                "pub async fn confirm_sas_verification",
-                "build_confirm_sas_verification_command",
-                "commands::e2ee::confirm_sas_verification",
-            ),
-            (
-                "pub async fn cancel_verification",
-                "build_cancel_verification_command",
-                "commands::e2ee::cancel_verification",
-            ),
-            (
-                "pub async fn reset_identity",
-                "build_reset_identity_command",
-                "commands::e2ee::reset_identity",
-            ),
-            (
-                "pub async fn cancel_identity_reset",
-                "build_cancel_identity_reset_command",
-                "commands::e2ee::cancel_identity_reset",
-            ),
-            (
-                "pub async fn submit_identity_reset_password",
-                "build_submit_identity_reset_password_command",
-                "commands::e2ee::submit_identity_reset_password",
-            ),
-            (
-                "pub async fn submit_identity_reset_oauth",
-                "build_submit_identity_reset_oauth_command",
-                "commands::e2ee::submit_identity_reset_oauth",
-            ),
-        ] {
-            assert!(
-                commands_source.contains(command_name),
-                "Tauri command should expose {command_name}"
-            );
-            assert!(
-                commands_source.contains(route_name),
-                "Tauri command should route through {route_name}"
-            );
-            assert!(
-                lib_source.contains(registration_name),
-                "Tauri command should register {registration_name}"
-            );
-        }
     }
 }

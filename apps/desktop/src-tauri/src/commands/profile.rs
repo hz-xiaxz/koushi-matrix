@@ -255,45 +255,4 @@ pub(super) fn build_download_avatar_thumbnail_command(
 }
 
 #[cfg(test)]
-fn commands_source() -> String {
-    crate::commands::contracts::production_source()
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn profile_tauri_command_contracts_are_present() {
-        let commands_source = super::commands_source();
-        let lib_source = include_str!("../lib.rs");
-        for (command_name, route_name, registration_name) in [
-            (
-                "pub async fn set_display_name",
-                "build_set_display_name_command",
-                "commands::profile::set_display_name",
-            ),
-            (
-                "pub async fn set_local_user_alias",
-                "build_set_local_user_alias_command",
-                "commands::profile::set_local_user_alias",
-            ),
-            (
-                "pub async fn set_avatar",
-                "build_set_avatar_command",
-                "commands::profile::set_avatar",
-            ),
-        ] {
-            assert!(
-                commands_source.contains(command_name),
-                "Tauri command should expose {command_name}"
-            );
-            assert!(
-                commands_source.contains(route_name),
-                "Tauri command should route through {route_name}"
-            );
-            assert!(
-                lib_source.contains(registration_name),
-                "Tauri command should register {registration_name}"
-            );
-        }
-    }
-}
+mod tests {}

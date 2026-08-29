@@ -579,18 +579,6 @@ mod snapshot_tests {
     }
 
     #[test]
-    fn diagnostic_snapshot_command_is_registered_in_generate_handler() {
-        let source = include_str!("../lib.rs");
-        assert!(source.contains("commands::diagnostics::get_diagnostic_snapshot"));
-    }
-
-    #[test]
-    fn viewport_sync_command_is_registered_in_generate_handler() {
-        let source = include_str!("../lib.rs");
-        assert!(source.contains("commands::diagnostics::observe_viewport_sync"));
-    }
-
-    #[test]
     fn diagnostic_snapshot_serialization_excludes_synthetic_private_values() {
         let snapshot = koushi_diagnostics::DiagnosticSnapshot {
             records: vec![koushi_diagnostics::DiagnosticRecord {

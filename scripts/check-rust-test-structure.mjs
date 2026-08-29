@@ -417,6 +417,495 @@ function readRustSource(relativePath) {
   return fs.readFileSync(path.join(repositoryRoot, relativePath), "utf8");
 }
 
+function readTauriSource(relativePath) {
+  return readRustSource(`apps/desktop/src-tauri/src/${relativePath}`);
+}
+
+function productionOnly(source, fileName) {
+  const modules = moduleInventory(source, fileName).inline.slice().sort((left, right) => left.start - right.start);
+  let cursor = 0;
+  let result = "";
+  for (const module of modules) {
+    result += source.slice(cursor, module.start);
+    cursor = module.end;
+  }
+  return result + source.slice(cursor);
+}
+
+function tauriCommandsSource() {
+  return [
+    "commands/account.rs",
+    "commands/activity.rs",
+    "commands/diagnostics.rs",
+    "commands/directory.rs",
+    "commands/e2ee.rs",
+    "commands/live_signals.rs",
+    "commands/local_encryption.rs",
+    "commands/mod.rs",
+    "commands/native_attention.rs",
+    "commands/navigation.rs",
+    "commands/profile.rs",
+    "commands/room.rs",
+    "commands/search.rs",
+    "commands/session.rs",
+    "commands/settings.rs",
+    "commands/timeline.rs",
+    "commands/views.rs"
+  ].map((relativePath) => productionOnly(readTauriSource(relativePath), relativePath)).join("\n");
+}
+
+function sourceSection(source, startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  if (start < 0) return null;
+  const rest = source.slice(start + startMarker.length);
+  const end = endMarker ? rest.indexOf(endMarker) : -1;
+  return end < 0 ? rest : rest.slice(0, end);
+}
+
+function orderedMarkers(rule, source, markers) {
+  const positions = markers.map((marker) => source.indexOf(marker));
+  const failures = [];
+  if (positions.some((position) => position < 0)) {
+    failures.push(sourceContractFailure(rule, "required source marker is missing"));
+  } else if (positions.some((position, index) => index > 0 && positions[index - 1] >= position)) {
+    failures.push(sourceContractFailure(rule, "required source markers are out of order"));
+  }
+  return failures;
+}
+
+function tauriCommandNames(source) {
+  const tokens = lexRust(source);
+  const names = [];
+  for (let index = 0; index + 9 < tokens.length; index += 1) {
+    const values = tokens.slice(index, index + 10).map((token) => token.value);
+    if (values.slice(0, 7).join("") !== "#[tauri::command]" || values[7] !== "pub" || values[8] !== "async" || values[9] !== "fn") continue;
+    const name = tokens[index + 10]?.value;
+    if (tokens[index + 10]?.kind === "identifier") names.push(name);
+  }
+  return names;
+}
+
+export function checkDesktopTauriCommandRegistrationContract() {
+  const rule = "desktop.commands.tauri_command_registration";
+  const source = tauriCommandsSource();
+  const libSource = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const handlerStart = libSource.indexOf("tauri::generate_handler![");
+  const handlerEnd = handlerStart < 0 ? -1 : libSource.indexOf("]", handlerStart);
+  const handler = handlerStart >= 0 && handlerEnd >= 0 ? libSource.slice(handlerStart, handlerEnd) : null;
+  const names = tauriCommandNames(source);
+  const failures = [];
+  if (!handler) failures.push(sourceContractFailure(rule, "generate_handler! is missing or unclosed"));
+  if (names.length === 0) failures.push(sourceContractFailure(rule, "no Tauri commands found"));
+  for (const name of names) {
+    if (!handler?.split("\n").some((line) => line.includes("commands::") && line.includes(`::${name}`))) {
+      failures.push(sourceContractFailure(rule, `Tauri command registration is missing for ${name}`));
+    }
+  }
+  return failures;
+}
+
+export function checkDesktopSubmitCoreCommandContract() {
+  const rule = "desktop.commands.submit_core_command_contract";
+  const source = readTauriSource("commands/mod.rs");
+  const body = rustItemBody(source, "pub(crate) async fn submit_core_command");
+  const failures = [];
+  for (const marker of ["const CORE_COMMAND_SUBMIT_TIMEOUT", "command_handle", "tokio::time::timeout(CORE_COMMAND_SUBMIT_TIMEOUT"]) {
+    if (!source.includes(marker) && !body?.includes(marker)) failures.push(sourceContractFailure(rule, `missing ${marker}`));
+  }
+  if (body?.includes(".lock()\n        .await\n        .command(command)\n        .await") || body?.includes(".lock().await.command(command).await")) {
+    failures.push(sourceContractFailure(rule, "submit_core_command holds the connection mutex while awaiting send"));
+  }
+  return failures;
+}
+
+export function checkDesktopEventWaitLagContract() {
+  const rule = "desktop.commands.event_wait_lag_contract";
+  const source = tauriCommandsSource();
+  const waiters = [
+    "async fn wait_for_invite_workflow_snapshot_from",
+    "async fn wait_for_logged_in_authenticated",
+    "async fn wait_for_auth_changed",
+    "async fn wait_for_focused_context_closed",
+    "async fn wait_for_focused_context",
+    "async fn wait_for_main_timeline_anchor",
+    "async fn wait_for_search_started",
+    "async fn wait_for_search_closed",
+    "async fn wait_for_upload_staging_snapshot",
+    "async fn wait_for_room_created",
+    "async fn wait_for_space_created",
+    "async fn wait_for_room_operation",
+    "async fn wait_for_room_joined",
+    "async fn wait_for_invite_batch_completed",
+    "async fn wait_for_oidc_authorization"
+  ];
+  const failures = [];
+  for (const start of waiters) {
+    const body = rustItemBody(source, start);
+    if (!body) failures.push(sourceContractFailure(rule, `missing wait path ${start}`));
+    else if (body.includes("event stream lagged")) failures.push(sourceContractFailure(rule, `lag is treated as terminal in ${start}`));
+  }
+  return failures;
+}
+
+export function checkDesktopFailureWaiterContract() {
+  const rule = "desktop.commands.failure_waiter_contract";
+  const source = tauriCommandsSource();
+  const waiters = [
+    "async fn wait_for_logged_in_authenticated",
+    "async fn wait_for_focused_context_closed",
+    "async fn wait_for_focused_context",
+    "async fn wait_for_main_timeline_anchor",
+    "async fn wait_for_search_started",
+    "async fn wait_for_search_closed",
+    "async fn wait_for_upload_staging_snapshot",
+    "async fn wait_for_room_created",
+    "async fn wait_for_space_created",
+    "async fn wait_for_room_operation",
+    "async fn wait_for_room_joined",
+    "async fn wait_for_invite_batch_completed",
+    "async fn wait_for_oidc_authorization",
+    "pub async fn list_saved_sessions"
+  ];
+  const failures = [];
+  for (const start of waiters) {
+    const body = rustItemBody(source, start);
+    if (!body) failures.push(sourceContractFailure(rule, `missing failure wait path ${start}`));
+    else if (!body.includes("invoke_error_from_core_failure")) failures.push(sourceContractFailure(rule, `failure kind is not preserved in ${start}`));
+  }
+  return failures;
+}
+
+export function checkDesktopActivityNavigationContract() {
+  const rule = "desktop.activity.navigation_contract";
+  const body = rustItemBody(readTauriSource("commands/navigation.rs"), "async fn open_anchored_timeline");
+  const failures = [];
+  for (const marker of ["CloseFocusedContext", "wait_for_focused_context_closed", "select_room_and_wait", "OpenAnchoredTimeline", "wait_for_main_timeline_anchor"]) {
+    if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `missing ${marker}`));
+  }
+  for (const marker of ["build_subscribe_timeline_command", "EnterAnchoredTimeline", "wait_for_focused_timeline_event", "build_update_navigation_scroll_anchor_command"]) {
+    if (body?.includes(marker)) failures.push(sourceContractFailure(rule, `forbidden ${marker}`));
+  }
+  failures.push(...orderedMarkers(rule, body ?? "", ["CloseFocusedContext", "wait_for_focused_context_closed", "select_room_and_wait", "OpenAnchoredTimeline", "wait_for_main_timeline_anchor"]));
+  return failures;
+}
+
+export function checkDesktopActivityCommandContract() {
+  const rule = "desktop.activity.command_contract";
+  const source = tauriCommandsSource();
+  const libSource = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const failures = [];
+  for (const [command, builder, route] of [
+    ["pub async fn open_activity", "build_open_activity_command", "commands::activity::open_activity"],
+    ["pub async fn close_activity", "build_close_activity_command", "commands::activity::close_activity"],
+    ["pub async fn set_activity_tab", "build_set_activity_tab_command", "commands::activity::set_activity_tab"],
+    ["pub async fn paginate_activity", "build_paginate_activity_command", "commands::activity::paginate_activity"],
+    ["pub async fn mark_activity_read", "build_mark_activity_read_command", "commands::activity::mark_activity_read"],
+    ["pub async fn retry_activity_resolution", "build_retry_activity_resolution_command", "commands::activity::retry_activity_resolution"],
+    ["pub async fn open_files_view", "build_open_files_view_command", "commands::views::open_files_view"],
+    ["pub async fn close_files_view", "build_close_files_view_command", "commands::views::close_files_view"]
+  ]) {
+    if (!source.includes(command) || !source.includes(builder) || !libSource.includes(route)) failures.push(sourceContractFailure(rule, `missing ${command}, ${builder}, or ${route}`));
+  }
+  return failures;
+}
+
+export function checkDesktopLoginWaitContract() {
+  const rule = "desktop.session.login_wait_contract";
+  const source = readTauriSource("commands/session.rs");
+  const helper = rustItemBody(source, "async fn submit_login_and_wait_for_authenticated");
+  const waiter = rustItemBody(source, "async fn wait_for_logged_in_authenticated");
+  const failures = [];
+  if (!helper?.includes("wait_for_logged_in_authenticated")) failures.push(sourceContractFailure(rule, "login helper does not await authenticated state"));
+  if (helper?.includes("build_start_sync_command")) failures.push(sourceContractFailure(rule, "login helper starts sync in the Tauri adapter"));
+  if (!helper?.includes("LOGIN_EVENT_TIMEOUT")) failures.push(sourceContractFailure(rule, "login helper lacks its timeout"));
+  for (const marker of ["AccountEvent::LoggedIn", "OperationFailed", "timeout_at"]) {
+    if (!waiter?.includes(marker)) failures.push(sourceContractFailure(rule, `login waiter lacks ${marker}`));
+  }
+  return failures;
+}
+
+export function checkDesktopE2eeCommandContract() {
+  const rule = "desktop.e2ee.command_contract";
+  const source = tauriCommandsSource();
+  const libSource = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const failures = [];
+  for (const [command, builder, route] of [
+    ["pub async fn bootstrap_cross_signing", "build_bootstrap_cross_signing_command", "commands::e2ee::bootstrap_cross_signing"],
+    ["pub async fn enable_key_backup", "build_enable_key_backup_command", "commands::e2ee::enable_key_backup"],
+    ["pub async fn export_room_keys", "build_export_room_keys_command", "commands::e2ee::export_room_keys"],
+    ["pub async fn import_room_keys", "build_import_room_keys_command", "commands::e2ee::import_room_keys"],
+    ["pub async fn bootstrap_secure_backup", "build_bootstrap_secure_backup_command", "commands::e2ee::bootstrap_secure_backup"],
+    ["pub async fn reenable_secure_backup", "build_bootstrap_secure_backup_command", "commands::e2ee::reenable_secure_backup"],
+    ["pub async fn change_secure_backup_passphrase", "build_change_secure_backup_passphrase_command", "commands::e2ee::change_secure_backup_passphrase"],
+    ["pub async fn accept_verification", "build_accept_verification_command", "commands::e2ee::accept_verification"],
+    ["pub async fn confirm_sas_verification", "build_confirm_sas_verification_command", "commands::e2ee::confirm_sas_verification"],
+    ["pub async fn cancel_verification", "build_cancel_verification_command", "commands::e2ee::cancel_verification"],
+    ["pub async fn reset_identity", "build_reset_identity_command", "commands::e2ee::reset_identity"],
+    ["pub async fn cancel_identity_reset", "build_cancel_identity_reset_command", "commands::e2ee::cancel_identity_reset"],
+    ["pub async fn submit_identity_reset_password", "build_submit_identity_reset_password_command", "commands::e2ee::submit_identity_reset_password"],
+    ["pub async fn submit_identity_reset_oauth", "build_submit_identity_reset_oauth_command", "commands::e2ee::submit_identity_reset_oauth"]
+  ]) {
+    if (!source.includes(command) || !source.includes(builder) || !libSource.includes(route)) failures.push(sourceContractFailure(rule, `missing E2EE command contract for ${command}`));
+  }
+  return failures;
+}
+
+export function checkDesktopLocalEncryptionCommandContract() {
+  const rule = "desktop.local_encryption.command_contract";
+  const source = tauriCommandsSource();
+  const libSource = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const failures = [];
+  for (const [command, builder, route, registration] of [
+    ["pub async fn probe_local_encryption_health", "build_probe_local_encryption_health_command", "AccountCommand::ProbeLocalEncryptionHealth", "commands::local_encryption::probe_local_encryption_health"],
+    ["pub async fn reset_local_data", "build_reset_local_data_command", "AccountCommand::ResetLocalData", "commands::local_encryption::reset_local_data"]
+  ]) {
+    if (!source.includes(command) || !source.includes(builder) || !source.includes(route) || !libSource.includes(registration)) failures.push(sourceContractFailure(rule, `missing local-encryption contract for ${command}`));
+  }
+  if (!rustItemBody(readTauriSource("commands/local_encryption.rs"), "pub async fn reset_local_data")?.includes("wait_for_local_data_reset")) {
+    failures.push(sourceContractFailure(rule, "reset_local_data does not await signed-out projection"));
+  }
+  return failures;
+}
+
+export function checkDesktopProfileCommandContract() {
+  const rule = "desktop.profile.command_contract";
+  const source = tauriCommandsSource();
+  const libSource = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const failures = [];
+  for (const [command, builder, registration] of [["pub async fn set_display_name", "build_set_display_name_command", "commands::profile::set_display_name"], ["pub async fn set_local_user_alias", "build_set_local_user_alias_command", "commands::profile::set_local_user_alias"], ["pub async fn set_avatar", "build_set_avatar_command", "commands::profile::set_avatar"]]) {
+    if (!source.includes(command) || !source.includes(builder) || !libSource.includes(registration)) failures.push(sourceContractFailure(rule, `missing profile contract for ${command}`));
+  }
+  return failures;
+}
+
+export function checkDesktopDirectoryStartDmContract() {
+  const rule = "desktop.directory.start_dm_contract";
+  const body = rustItemBody(readTauriSource("commands/room.rs"), "pub async fn start_direct_message");
+  return orderedMarkers(rule, body ?? "", ["wait_for_direct_message_started", "wait_for_room_in_state", "select_room_and_wait"]);
+}
+
+export function checkDesktopDirectoryJoinRoomContract() {
+  const rule = "desktop.directory.join_room_selection_contract";
+  const body = rustItemBody(readTauriSource("commands/directory.rs"), "pub async fn join_directory_room");
+  const failures = [];
+  for (const marker of ["wait_for_room_joined", "select_room_and_wait", "joined_room_id", "SELECT_ROOM_EVENT_TIMEOUT"]) {
+    if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `join_directory_room lacks ${marker}`));
+  }
+  failures.push(...orderedMarkers(rule, body ?? "", ["wait_for_room_joined", "select_room_and_wait"]));
+  return failures;
+}
+
+export function checkDesktopRoomOperationContract() {
+  const rule = "desktop.room.operation_wait_contract";
+  const source = readTauriSource("commands/room.rs");
+  const failures = [];
+  for (const [command, event] of [["pub async fn load_room_settings", "RoomSettingsLoaded"], ["pub async fn update_room_setting", "RoomSettingUpdated"], ["pub async fn moderate_room_member", "RoomMemberModerated"], ["pub async fn update_room_member_role", "RoomMemberRoleUpdated"]]) {
+    const body = rustItemBody(source, command);
+    for (const marker of ["wait_for_room_operation", event, "update_qa_window_title_from_state", "current_snapshot"]) {
+      if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} lacks ${marker}`));
+    }
+  }
+  return failures;
+}
+
+export function checkDesktopSpaceOperationContract() {
+  const rule = "desktop.room.space_operation_contract";
+  const source = readTauriSource("commands/room.rs");
+  const libSource = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const failures = [];
+  for (const [command, matcher] of [["pub async fn load_space_members", "space_members_loaded_event_matches"], ["pub async fn invite_user_to_space", "space_member_invite_settled_event_matches"], ["pub async fn cancel_space_invite", "space_member_invite_cancellation_settled_event_matches"], ["pub async fn update_space_member_role", "wait_for_space_member_role_update"]]) {
+    const body = rustItemBody(source, command);
+    const waiter = command === "pub async fn update_space_member_role" ? matcher : "wait_for_room_operation";
+    for (const marker of [waiter, matcher, "current_snapshot"]) {
+      if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} lacks ${marker}`));
+    }
+  }
+  for (const registration of ["commands::room::cancel_space_invite", "commands::room::update_space_member_role"]) {
+    if (!libSource.includes(registration)) failures.push(sourceContractFailure(rule, `space operation registration is missing ${registration}`));
+  }
+  return failures;
+}
+
+export function checkDesktopSearchCommandContract() {
+  const rule = "desktop.search.command_contract";
+  const source = readTauriSource("commands/search.rs");
+  const resolver = rustItemBody(source, "fn resolve_search_scope_from_active_room");
+  const command = rustItemBody(source, "pub async fn submit_search");
+  const helper = rustItemBody(source, "pub(crate) async fn submit_search_production_path");
+  const failures = [];
+  for (const marker of ["SearchScope::CurrentSpace", "SearchScope::CurrentRoom"]) if (!resolver?.includes(marker)) failures.push(sourceContractFailure(rule, `search scope resolver lacks ${marker}`));
+  if (resolver?.includes("unwrap_or(SearchScope::AllRooms)")) failures.push(sourceContractFailure(rule, "search scope resolver collapses to allRooms"));
+  for (const marker of ["submit_search_production_path", "current_snapshot"]) if (!command?.includes(marker)) failures.push(sourceContractFailure(rule, `submit_search lacks ${marker}`));
+  failures.push(...orderedMarkers(rule, helper ?? "", ["let mut event_conn = state.runtime.attach()", "let request_id = next_request_id(state).await", "io.submit", "io.wait"]));
+  if (helper?.includes("let request_id = event_conn.next_request_id()")) failures.push(sourceContractFailure(rule, "search path allocates its request id from the transient event connection"));
+  return failures;
+}
+
+export function checkDesktopSettingsCommandContract() {
+  const rule = "desktop.settings.command_contract";
+  const source = tauriCommandsSource();
+  const libSource = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const failures = [];
+  for (const [command, builder, route, registration] of [["pub async fn update_settings", "build_update_settings_command", "AppCommand::UpdateSettings", "commands::settings::update_settings"], ["pub async fn set_room_url_preview_override", "build_set_room_url_preview_override_command", "AppCommand::SetRoomUrlPreviewOverride", "commands::settings::set_room_url_preview_override"], ["pub async fn rebuild_search_index", "build_rebuild_search_index_command", "AppCommand::RebuildSearchIndex", "commands::settings::rebuild_search_index"]]) {
+    if (!source.includes(command) || !source.includes(builder) || !source.includes(route) || !libSource.includes(registration)) failures.push(sourceContractFailure(rule, `missing settings contract for ${command}`));
+  }
+  return failures;
+}
+
+export function checkDesktopNavigationContract() {
+  const rule = "desktop.navigation.command_contract";
+  const source = tauriCommandsSource();
+  const failures = [];
+  const select = rustItemBody(source, "pub async fn select_room");
+  for (const marker of ["state.runtime.attach", "select_room_and_wait", "SELECT_ROOM_EVENT_TIMEOUT"]) if (!select?.includes(marker)) failures.push(sourceContractFailure(rule, `select_room lacks ${marker}`));
+  for (const marker of ["build_select_room_command", "wait_for_selected_room", "build_subscribe_timeline_command", "account_key_from_snapshot"]) if (select?.includes(marker)) failures.push(sourceContractFailure(rule, `select_room contains forbidden ${marker}`));
+  const trace = readTauriSource("commands/timeline.rs");
+  const paginate = rustItemBody(readTauriSource("commands/timeline.rs"), "pub async fn paginate_timeline_backwards");
+  const previews = rustItemBody(readTauriSource("commands/timeline.rs"), "pub async fn load_link_previews");
+  if (!trace.includes("fn trace_tauri_timeline_command") || !trace.includes("desktop.timeline")) failures.push(sourceContractFailure(rule, "timeline trace helper lacks its private source token"));
+  if (select?.includes("trace_tauri_timeline_command(\"submit\", \"select_room\"")) failures.push(sourceContractFailure(rule, "select_room emits duplicate adapter submit telemetry"));
+  if (!paginate?.includes("trace_tauri_timeline_command(\"submit\", \"paginate_backwards\"")) failures.push(sourceContractFailure(rule, "backfill submit trace is missing"));
+  if (!previews?.includes("trace_tauri_timeline_command(\"submit\", \"load_link_previews\"")) failures.push(sourceContractFailure(rule, "link-preview submit trace is missing"));
+  const search = rustItemBody(source, "pub async fn select_search_result");
+  const anchored = rustItemBody(source, "async fn open_anchored_timeline");
+  if (!search?.includes("open_anchored_timeline")) failures.push(sourceContractFailure(rule, "search-result navigation lacks open_anchored_timeline"));
+  for (const marker of ["CloseFocusedContext", "OpenAnchoredTimeline", "select_room_and_wait", "wait_for_main_timeline_anchor", "state.runtime.attach"]) if (!anchored?.includes(marker)) failures.push(sourceContractFailure(rule, `anchored navigation lacks ${marker}`));
+  for (const marker of ["EnterAnchoredTimeline", "wait_for_focused_timeline_event", "build_subscribe_timeline_command"]) if (anchored?.includes(marker)) failures.push(sourceContractFailure(rule, `anchored navigation contains forbidden ${marker}`));
+  failures.push(...orderedMarkers(rule, anchored ?? "", ["select_room_and_wait", "OpenAnchoredTimeline", "wait_for_main_timeline_anchor"]));
+  const close = rustItemBody(source, "pub async fn close_focused_context");
+  for (const marker of ["CloseFocusedContext", "update_qa_window_title_from_state", "current_snapshot"]) if (!close?.includes(marker)) failures.push(sourceContractFailure(rule, `close_focused_context lacks ${marker}`));
+  failures.push(...orderedMarkers(rule, close ?? "", ["CloseFocusedContext", "wait_for_focused_context_closed", "current_snapshot"]));
+  return failures;
+}
+
+export function checkDesktopSpaceTraceContract() {
+  const rule = "desktop.navigation.space_trace_contract";
+  const body = rustItemBody(readTauriSource("commands/navigation.rs"), "pub async fn select_space");
+  const failures = orderedMarkers(rule, body ?? "", ["\"desktop.space.transition\", \"submit\"", "build_select_space_command", "\"snapshot\""]);
+  for (const marker of ["DiagnosticField::request_id", "DiagnosticField::milliseconds", "DiagnosticField::boolean"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `space transition trace lacks ${marker}`));
+  return failures;
+}
+
+export function checkDesktopTimelineGenerationAckContract() {
+  const rule = "desktop.timeline.generation_ack_contract";
+  const body = rustItemBody(readTauriSource("commands/navigation.rs"), "pub async fn acknowledge_timeline_batch_rendered");
+  const failures = [];
+  for (const marker of ["key: TimelineKey", "actor_generation: u64", "timeline_generation: TimelineGeneration", "repair_generation: u64", "batch_id: TimelineBatchId", "AppCommand::AcknowledgeTimelineBatchRendered"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `timeline ACK lacks ${marker}`));
+  return failures;
+}
+
+export function checkDesktopTimelineCommandContract() {
+  const rule = "desktop.timeline.command_contract";
+  const source = readTauriSource("commands/timeline.rs");
+  const libSource = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const body = rustItemBody(source, "pub async fn resolve_composer_key_action");
+  const failures = [];
+  for (const marker of ["koushi_state::resolve_composer_key_action", "settings.values.keyboard.composer_send_shortcut"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `composer resolver command lacks ${marker}`));
+  const threadCommand = rustItemBody(source, "pub async fn paginate_thread_timeline_backwards");
+  const threadBuilder = rustItemBody(source, "build_paginate_thread_timeline_backwards_command");
+  for (const marker of ["TimelineKind::Thread", "PaginationDirection::Backward", "event_count: TIMELINE_BACKWARDS_PAGE_EVENT_COUNT"]) if (!threadBuilder?.includes(marker)) failures.push(sourceContractFailure(rule, `thread pagination builder lacks ${marker}`));
+  if (!threadCommand) failures.push(sourceContractFailure(rule, "thread pagination command is missing"));
+  for (const registration of ["commands::timeline::resolve_composer_key_action", "commands::timeline::paginate_thread_timeline_backwards"]) {
+    if (!libSource.includes(registration)) failures.push(sourceContractFailure(rule, `timeline command registration is missing ${registration}`));
+  }
+  return failures;
+}
+
+export function checkDesktopTimelineSignalContract() {
+  const rule = "desktop.timeline.signal_contract";
+  const source = readTauriSource("commands/timeline.rs") + readTauriSource("commands/live_signals.rs");
+  const libSource = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const failures = [];
+  for (const [command, kind] of [["pub async fn send_reaction", "send_reaction"], ["pub async fn redact_reaction", "redact_reaction"], ["pub async fn send_read_receipt", "send_read_receipt"], ["pub async fn set_fully_read", "set_fully_read"]]) {
+    const body = rustItemBody(source, command);
+    for (const marker of [`trace_tauri_timeline_command(\"submit\", \"${kind}\"`, `trace_tauri_timeline_command_elapsed(\n        \"done\",\n        \"${kind}\"`]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} lacks ${kind} trace`));
+  }
+  for (const registration of ["commands::timeline::send_reaction", "commands::timeline::redact_reaction"]) {
+    if (!libSource.includes(registration)) failures.push(sourceContractFailure(rule, `timeline signal registration is missing ${registration}`));
+  }
+  return failures;
+}
+
+export function checkDesktopScheduledSendCommandContract() {
+  const rule = "desktop.timeline.scheduled_send_contract";
+  const source = readTauriSource("commands/timeline.rs");
+  const libSource = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const failures = [];
+  for (const [command, builder, registration] of [["pub async fn schedule_send", "build_schedule_send_command", "commands::timeline::schedule_send"], ["pub async fn cancel_scheduled_send", "build_cancel_scheduled_send_command", "commands::timeline::cancel_scheduled_send"], ["pub async fn reschedule_scheduled_send", "build_reschedule_scheduled_send_command", "commands::timeline::reschedule_scheduled_send"]]) if (!source.includes(command) || !source.includes(builder) || !libSource.includes(registration)) failures.push(sourceContractFailure(rule, `missing scheduled-send contract for ${command}`));
+  return failures;
+}
+
+export function checkDesktopSendQueueCommandContract() {
+  const rule = "desktop.timeline.send_queue_contract";
+  const source = readTauriSource("commands/timeline.rs");
+  const libSource = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const failures = [];
+  for (const [command, builder, registration] of [["pub async fn retry_send", "build_retry_send_command", "commands::timeline::retry_send"], ["pub async fn cancel_send", "build_cancel_send_command", "commands::timeline::cancel_send"]]) if (!source.includes(command) || !source.includes(builder) || !libSource.includes(registration)) failures.push(sourceContractFailure(rule, `missing send-queue contract for ${command}`));
+  return failures;
+}
+
+export function checkDesktopForwarderLagRecoveryContract() {
+  const rule = "desktop.forwarder.lag_recovery_contract";
+  const forwarder = productionOnly(readTauriSource("core_event_forwarder.rs"), "apps/desktop/src-tauri/src/core_event_forwarder.rs");
+  const root = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const lag = sourceSection(forwarder, "Err(lag)", "Ok(event)") ?? sourceSection(forwarder, "Err(lag)");
+  const failures = [];
+  for (const marker of ["TimelineCommand::ReplaySubscribed", "struct CoreEventForwarderTask"]) if (!forwarder.includes(marker)) failures.push(sourceContractFailure(rule, `forwarder lacks ${marker}`));
+  if (!root.includes("forwarder_task: Some")) failures.push(sourceContractFailure(rule, "lib.rs does not retain the forwarder task"));
+  if (forwarder.includes("Box::leak")) failures.push(sourceContractFailure(rule, "forwarder counter is leaked"));
+  for (const marker of ["event_conn.command_handle()", "event_conn.next_request_id()", "emit_forwarded_webview_events", "submit_timeline_replay_after_forwarder_lag"]) if (!lag?.includes(marker)) failures.push(sourceContractFailure(rule, `lag recovery lacks ${marker}`));
+  if (lag?.includes("async_runtime::spawn")) failures.push(sourceContractFailure(rule, "lag replay is detached"));
+  failures.push(...orderedMarkers(rule, lag ?? "", ["emit_forwarded_webview_events", "submit_timeline_replay_after_forwarder_lag"]));
+  return failures;
+}
+
+export function checkDesktopQaControlPipeContract() {
+  const rule = "desktop.native.qa_control_pipe_cfg";
+  const source = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const failures = [];
+  for (const token of ["const QA_CONTROL_PIPE_ENV", "fn qa_control_pipe_path_from_env()", "spawn_qa_control_pipe_reader"]) {
+    const offset = source.indexOf(token);
+    const gate = source.lastIndexOf("#[cfg(any(debug_assertions, test))]", offset);
+    if (offset < 0 || gate < 0 || source.slice(gate, offset).includes("\n\n")) failures.push(sourceContractFailure(rule, `control-pipe item is not directly debug/test gated`));
+  }
+  if (source.split("std::env::var(QA_CONTROL_PIPE_ENV)").length - 1 !== 1) failures.push(sourceContractFailure(rule, "control-pipe env is read more than once"));
+  return failures;
+}
+
+export function checkDesktopNativeWindowLifecycleContract() {
+  const rule = "desktop.native.window_lifecycle_contract";
+  const source = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const failures = [];
+  const destroyed = sourceSection(source, "if window_event_should_stop_background_tasks(event)", ".invoke_handler");
+  for (const marker of ["submit_core_shutdown", "AppCommand::Shutdown { request_id }"]) if (!destroyed?.includes(marker) && !source.includes(marker)) failures.push(sourceContractFailure(rule, `window destruction path lacks ${marker}`));
+  const helper = rustItemBody(source, "fn window_event_should_stop_background_tasks");
+  if (helper?.includes("CloseRequested")) failures.push(sourceContractFailure(rule, "close request stops background tasks"));
+  const close = sourceSection(source, "tauri::WindowEvent::CloseRequested", "if window_event_should_persist");
+  for (const marker of ["prevent_close()", ".hide()", "window.is_fullscreen()", "window.set_fullscreen(false)"]) if (!close?.includes(marker)) failures.push(sourceContractFailure(rule, `close handler lacks ${marker}`));
+  failures.push(...orderedMarkers(rule, close ?? "", ["window.set_fullscreen(false)", "window.hide()"]));
+  return failures;
+}
+
+export function checkDesktopNativeReopenContract() {
+  const rule = "desktop.native.reopen_contract";
+  const source = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
+  const callback = sourceSection(source, "tauri_plugin_single_instance::init(", ".plugin(tauri_plugin_deep_link::init())");
+  const run = sourceSection(source, "pub fn run()", "#[cfg(test)]");
+  const failures = [];
+  for (const marker of ["ensure_main_window_visible_for_handle", "desktop.lifecycle", "reopen_requested"]) if (!callback?.includes(marker)) failures.push(sourceContractFailure(rule, `single-instance callback lacks ${marker}`));
+  for (const marker of [".build(tauri::generate_context!())", "tauri::RunEvent::Reopen", "ensure_main_window_visible_for_handle", "desktop.lifecycle", "reopen_requested"]) if (!run?.includes(marker)) failures.push(sourceContractFailure(rule, `run reopen path lacks ${marker}`));
+  return failures;
+}
+
+export function checkDesktopViewportAdapterIsolationContract() {
+  const rule = "desktop.viewport.native_adapter_isolation";
+  const source = productionOnly(readTauriSource("viewport_sync.rs"), "apps/desktop/src-tauri/src/viewport_sync.rs");
+  const failures = [];
+  if (!source.includes("synchronize_now")) failures.push(sourceContractFailure(rule, "native adapter lacks synchronize_now"));
+  for (const marker of ["set_size", "dispatchEvent"]) if (source.includes(marker)) failures.push(sourceContractFailure(rule, `native adapter contains forbidden ${marker}`));
+  return failures;
+}
+
 function rustItemBody(source, marker) {
   const start = source.indexOf(marker);
   if (start < 0) return null;
@@ -798,7 +1287,35 @@ export function runSourceContractRules() {
     checkSdkSlidingSyncInviteProbeContract(),
     checkSdkSessionBackupFence(),
     checkSdkLibrarySourceManifest(),
-    checkSdkCommittedRoomCheckpointHasNoLegacyApi()
+    checkSdkCommittedRoomCheckpointHasNoLegacyApi(),
+    checkDesktopTauriCommandRegistrationContract(),
+    checkDesktopSubmitCoreCommandContract(),
+    checkDesktopEventWaitLagContract(),
+    checkDesktopFailureWaiterContract(),
+    checkDesktopActivityNavigationContract(),
+    checkDesktopActivityCommandContract(),
+    checkDesktopLoginWaitContract(),
+    checkDesktopE2eeCommandContract(),
+    checkDesktopLocalEncryptionCommandContract(),
+    checkDesktopProfileCommandContract(),
+    checkDesktopDirectoryStartDmContract(),
+    checkDesktopDirectoryJoinRoomContract(),
+    checkDesktopRoomOperationContract(),
+    checkDesktopSpaceOperationContract(),
+    checkDesktopSearchCommandContract(),
+    checkDesktopSettingsCommandContract(),
+    checkDesktopNavigationContract(),
+    checkDesktopSpaceTraceContract(),
+    checkDesktopTimelineGenerationAckContract(),
+    checkDesktopTimelineCommandContract(),
+    checkDesktopTimelineSignalContract(),
+    checkDesktopScheduledSendCommandContract(),
+    checkDesktopSendQueueCommandContract(),
+    checkDesktopForwarderLagRecoveryContract(),
+    checkDesktopQaControlPipeContract(),
+    checkDesktopNativeWindowLifecycleContract(),
+    checkDesktopNativeReopenContract(),
+    checkDesktopViewportAdapterIsolationContract()
   ].flat();
 }
 

@@ -8,11 +8,14 @@ import { test } from "node:test";
 
 import {
   analyzeRustSource,
+  checkDesktopTauriCommandRegistrationContract,
+  checkDesktopNativeWindowLifecycleContract,
   checkSdkRoomReadMarkerContract,
   checkStateFocusedContextReducerContract,
   findIncludeStrInvocations,
   findInlineTestModules,
-  formatViolation
+  formatViolation,
+  runSourceContractRules
 } from "./check-rust-test-structure.mjs";
 
 function moduleSource(bodyLines) {
@@ -92,9 +95,32 @@ test("resolves literal and CARGO_MANIFEST_DIR concat include targets", () => {
   assert.equal(includes.every(({ exists }) => exists), true);
 });
 
-test("runs representative migrated state and SDK source-contract rules", () => {
+test("runs representative migrated state, SDK, and src-tauri source-contract rules", () => {
   assert.deepEqual(checkStateFocusedContextReducerContract(), []);
   assert.deepEqual(checkSdkRoomReadMarkerContract(), []);
+  assert.deepEqual(checkDesktopTauriCommandRegistrationContract(), []);
+  assert.deepEqual(checkDesktopNativeWindowLifecycleContract(), []);
+});
+
+test("all desktop source-contract rules pass", () => {
+  assert.deepEqual(
+    runSourceContractRules().filter(({ rule }) => rule?.startsWith("desktop.")),
+    []
+  );
+});
+
+test("src-tauri source-contract failures stay closed-token and private-data-free", () => {
+  const message = formatViolation({
+    kind: "source-contract",
+    rule: "desktop.native.window_lifecycle_contract",
+    message: "missing required lifecycle marker"
+  });
+
+  assert.equal(
+    message,
+    "desktop.native.window_lifecycle_contract: missing required lifecycle marker"
+  );
+  assert.doesNotMatch(message, /SECRET|@|!|synthetic-room|private-path/);
 });
 
 test("formats source-contract failures without source contents", () => {

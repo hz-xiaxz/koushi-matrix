@@ -436,66 +436,6 @@ mod tests {
             ForwarderLagDisposition::ResyncAndStop
         );
     }
-    #[test]
-    fn lag_resync_forwarder_requests_core_timeline_replay_after_marker() {
-        let forwarder_source = include_str!("core_event_forwarder.rs");
-        let root_source = include_str!("lib.rs");
-        let production_source = forwarder_source
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .expect("production source should precede tests");
-        let forwarder_source = production_source
-            .split("fn spawn_core_event_forwarder")
-            .nth(1)
-            .expect("core event forwarder should exist")
-            .split("fn forwarded_webview_events_for_core_event")
-            .next()
-            .expect("forwarded event helper should follow forwarder");
-        let lag_branch = forwarder_source
-            .split("Err(lag)")
-            .nth(1)
-            .expect("forwarder should handle EventStreamLag");
-
-        assert!(
-            production_source.contains("TimelineCommand::ReplaySubscribed"),
-            "forwarder lag recovery must ask core to replay InitialItems for subscribed timelines"
-        );
-        assert!(
-            production_source.contains("struct CoreEventForwarderTask")
-                && root_source.contains("forwarder_task: Some"),
-            "the managed state must own the forwarder task"
-        );
-        assert!(
-            !production_source.contains("Box::leak"),
-            "the forwarder counter must not be leaked"
-        );
-        assert!(
-            !lag_branch.contains("async_runtime::spawn"),
-            "positive-lag replay must be awaited inline rather than detached"
-        );
-        assert!(
-            lag_branch.contains("event_conn.command_handle()")
-                && lag_branch.contains("event_conn.next_request_id()"),
-            "lag recovery should clone a command handle and allocate a request id from the event connection"
-        );
-        let marker_offset = lag_branch
-            .find("emit_forwarded_webview_events")
-            .expect("lag branch should emit state + ResyncMarker");
-        let replay_offset = lag_branch
-            .find("submit_timeline_replay_after_forwarder_lag")
-            .expect("lag branch should submit the replay command");
-        assert!(
-            marker_offset < replay_offset,
-            "ResyncMarker must be emitted before replay is requested so fresh InitialItems are not cleared"
-        );
-        let stop_offset = lag_branch
-            .find("ForwarderLagDisposition::ResyncAndStop")
-            .expect("zero lag must select the defensive stop disposition");
-        assert!(
-            marker_offset < stop_offset,
-            "zero-lag state + marker emission must precede the defensive loop exit"
-        );
-    }
     /// Wire-format contract test: pins the serialized JSON shapes the React
     /// layer types against (apps/desktop/src/domain/coreEvents.ts). Serde
     /// enums are externally tagged: struct variants serialize as
