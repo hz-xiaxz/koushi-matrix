@@ -14,7 +14,7 @@ use crate::failure::CoreFailure;
 use crate::ids::RequestId;
 use crate::store::account_key_from_info;
 
-use super::actor::{AccountActor, AccountMessage, current_epoch_ms, trace_account_request};
+use super::actor::{AccountActor, AccountMessage, trace_account_request};
 use super::session_lifecycle::{RESTORE_FAILED_MESSAGE, RestoreOutcome};
 
 fn sliding_sync_capability_result(
@@ -24,7 +24,7 @@ fn sliding_sync_capability_result(
         koushi_sdk::SlidingSyncDiscoveryResult::Supported { .. } => {
             SlidingSyncCapabilityResult::Supported {
                 evidence: SlidingSyncPositiveEvidence {
-                    observed_at_ms: current_epoch_ms(),
+                    observed_at_ms: crate::time::current_epoch_ms(),
                 },
             }
         }

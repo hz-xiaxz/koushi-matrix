@@ -25,7 +25,7 @@ use crate::failure::CoreFailure;
 use crate::ids::{AccountKey, RequestId};
 use crate::store::account_key_from_info;
 
-use super::actor::{AccountActor, AccountMessage, current_epoch_ms};
+use super::actor::{AccountActor, AccountMessage};
 use super::recovery_backup::{
     classify_e2ee_trust_error, record_recovery_verification_event, recovery_verification_event,
 };
@@ -785,7 +785,7 @@ impl AccountActor {
             self.handle_current_device_trust(generation, trust).await;
             return;
         }
-        let checked_at_ms = current_epoch_ms();
+        let checked_at_ms = crate::time::current_epoch_ms();
         let Some(action) = current_session_status_completion_action(
             self.current_session_status_request,
             self.trust_generation,

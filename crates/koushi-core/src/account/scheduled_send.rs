@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use crate::failure::{CoreFailure, TimelineFailureKind};
 use crate::ids::RequestId;
 use crate::runtime::ForwardedComposerDraftPermit;
-use crate::timeline::build_room_message_content_from_composer_body;
+use crate::timeline::composer::build_room_message_content_from_composer_body;
 
 use super::actor::AccountActor;
 
@@ -410,7 +410,7 @@ impl AccountActor {
             DelayParameters::Timeout {
                 timeout: crate::scheduled_send::server_delay_timeout(
                     send_at_ms,
-                    crate::scheduled_send::current_epoch_ms(),
+                    crate::time::current_epoch_ms(),
                 ),
             },
             &content,
@@ -807,7 +807,7 @@ mod tests {
                     room_id: "!scheduled-owner:localhost".to_owned(),
                     thread_root_event_id: None,
                     body: "synthetic stale scheduled body".to_owned(),
-                    send_at_ms: crate::scheduled_send::current_epoch_ms().saturating_add(60_000),
+                    send_at_ms: crate::time::current_epoch_ms().saturating_add(60_000),
                     draft_revision: 4.into(),
                     composer_permit: forwarded_permit,
                 })

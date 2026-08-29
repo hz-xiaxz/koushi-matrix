@@ -6,7 +6,7 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::Instant,
 };
 
 #[cfg(feature = "test-hooks")]
@@ -919,13 +919,6 @@ pub struct AccountActor {
     /// were already enqueued before the abort are detected and silently dropped
     /// instead of being accepted into the new (or absent) session's state.
     pub(super) avatar_session_generation: u64,
-}
-
-pub(super) fn current_epoch_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
-        .unwrap_or_default()
 }
 
 impl AccountActor {

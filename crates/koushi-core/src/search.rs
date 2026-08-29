@@ -46,7 +46,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::MatrixClientSession;
@@ -81,18 +81,6 @@ const SEARCH_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(2);
 /// startup window. Crawler timing is Rust-owned (not a user setting). The
 /// maintainer confirmed a ~1 minute delay is fully acceptable (#123).
 const CRAWLER_STARTUP_DELAY: std::time::Duration = std::time::Duration::from_secs(60);
-
-fn state_search_scope(scope: &SearchScope) -> koushi_state::SearchScope {
-    match scope {
-        SearchScope::AllRooms => koushi_state::SearchScope::AllRooms,
-        SearchScope::CurrentRoom { room_id } => koushi_state::SearchScope::CurrentRoom {
-            room_id: room_id.clone(),
-        },
-        SearchScope::CurrentSpace { space_id } => koushi_state::SearchScope::CurrentSpace {
-            space_id: space_id.clone(),
-        },
-    }
-}
 
 fn search_scope_trace_label(scope: &SearchScope) -> &'static str {
     match scope {
@@ -185,13 +173,6 @@ fn search_verify_diagnostic_event(
             "scan_ms",
             stats.scan_elapsed_ms,
         ))
-}
-
-fn current_epoch_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
-        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -1003,7 +984,7 @@ impl SearchActor {
             .send(vec![AppAction::SearchSucceeded {
                 request_id: request_id.sequence,
                 query: query.to_owned(),
-                scope: state_search_scope(scope),
+                scope: scope.to_state(),
                 results,
             }])
             .await;
@@ -1168,7 +1149,7 @@ impl SearchActor {
                 .send(vec![AppAction::HistoryCrawlStarted {
                     request_id,
                     room_id: queued.room_id.clone(),
-                    timestamp_ms: current_epoch_ms(),
+                    timestamp_ms: crate::time::current_epoch_ms(),
                 }])
                 .await;
         }
@@ -1255,7 +1236,7 @@ impl SearchActor {
                         room_id: checkpoint.room_id.clone(),
                         processed: checkpoint.processed,
                         indexed: checkpoint.indexed,
-                        timestamp_ms: current_epoch_ms(),
+                        timestamp_ms: crate::time::current_epoch_ms(),
                     }])
                     .await;
                 if completed {
@@ -1265,7 +1246,7 @@ impl SearchActor {
                         .send(vec![AppAction::HistoryCrawlCompleted {
                             room_id: checkpoint.room_id.clone(),
                             indexed: checkpoint.indexed,
-                            timestamp_ms: current_epoch_ms(),
+                            timestamp_ms: crate::time::current_epoch_ms(),
                         }])
                         .await;
                     self.emit(CoreEvent::Search(SearchEvent::HistoryCrawlCompleted {
@@ -1291,7 +1272,7 @@ impl SearchActor {
                     .send(vec![AppAction::HistoryCrawlFailed {
                         room_id: checkpoint.room_id,
                         kind,
-                        timestamp_ms: current_epoch_ms(),
+                        timestamp_ms: crate::time::current_epoch_ms(),
                     }])
                     .await;
             }

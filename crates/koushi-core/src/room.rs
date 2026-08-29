@@ -21,11 +21,6 @@ pub use actor::{
 };
 pub use normalization::assign_dm_space_ids;
 
-#[cfg(feature = "test-hooks")]
-#[allow(unused_imports)] // Preserve the baseline crate-internal flat path.
-pub(crate) use encryption_debug::EncryptionDebugTestControl;
 pub(crate) use operations::RoomOperationKind;
 #[cfg(feature = "test-hooks")]
 pub(crate) use operations::RoomOperationTestControl;
-#[allow(unused_imports)] // Preserve the baseline crate-internal flat path.
-pub(crate) use operations::classify_room_error;

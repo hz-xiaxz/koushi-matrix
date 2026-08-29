@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-08-27.
+Last amended: 2026-08-30.
 
 The evidence-based classification of remaining frontend-owned resources and
 semantic migration candidates is maintained in
@@ -154,7 +154,10 @@ Crate responsibilities:
   eligibility, CJK collation/normalization, IME send-vs-commit behavior, or
   whether key-backup restore is complete.
 - `koushi-sdk` — low-level SDK adapter (login, restore, recovery,
-  sync, room, timeline, search primitives). No app state, no QA orchestration.
+  sync, room, timeline, search primitives). It may include feature-gated,
+  direct-adapter smoke binaries and private-data-free smoke reports for
+  adapter integration. No app state, actor lifecycle, or authoritative app QA
+  orchestration; those remain in `koushi-core` and `koushi-state`.
   Password and OIDC/MAS sessions both stay SDK-owned here: OAuth dynamic client
   registration, PKCE authorization-code construction, callback completion,
   refresh-token handling, token revocation on logout, and tagged session
@@ -181,8 +184,6 @@ Crate responsibilities:
   event requests, and for the local fallback timer that routes due Local-handle
   items back through the normal outbound send queue; the GUI never owns
   delayed-send timers or Matrix delayed-event API calls.
-- `koushi-backend` — fixture/demo data only. Never on a production
-  Matrix path.
 - `koushi-key` — OS credential store, key derivation (HKDF from the
   local unlock secret), zeroizing secret wrappers.
 - `koushi-search` — candidate verification, document store, index
@@ -274,12 +275,12 @@ An in-process actor system in `koushi-core`:
   fail-closed partial projection, incomplete lazy-loaded membership triggers
   one SDK refresh, and base-room membership updates invalidate and recompute
   every demanded main/thread target for that room.
-  On the sliding-sync backend it consumes the one `RoomListService` owned by
-  the running `SyncService`; constructing additional ad-hoc
-  `RoomListService` instances is prohibited — they are not driven by the
-  sync loop, race it, and return entries without the `required_state`
-  (e.g. `m.room.create` for space classification) the live service
-  requests. Its live entries adapter uses a non-left filter, but a bounded
+  On the single Element X-compatible Simplified Sliding Sync engine it
+  consumes the one `RoomListService` owned by the running `SyncService`;
+  constructing additional ad-hoc `RoomListService` instances is prohibited —
+  they are not driven by the sync loop, race it, and return entries without the
+  `required_state` (e.g. `m.room.create` for space classification) the live
+  service requests. Its live entries adapter uses a non-left filter, but a bounded
   adapter diff is not the sole liveness signal: an invite can commit outside
   the visible entries head without changing that head. The same observer
   therefore consumes the base client's already-committed room-update broadcast
@@ -293,11 +294,11 @@ An in-process actor system in `koushi-core`:
   from `SidebarModel`. React must not derive favourite, low-priority, unread,
   or mention membership from local UI state. Room-list bootstrap readiness is
   separate from `SyncState::Running`: the actor retains the last usable
-  snapshot while a current backend is unproven/loading, holds an unproven
+  snapshot while the current engine is unproven/loading, holds an unproven
   empty SyncService Reset, accepts an authoritative zero only after the current
-  backend generation proves connectivity, and ignores delayed projections from
-  retired observers. Legacy first-response proof and SyncService-to-legacy
-  fallback use the same generation-fenced contract.
+  engine generation proves connectivity, and ignores delayed projections from
+  retired observers. First-response proof and engine replacement use the same
+  generation-fenced contract.
 - `TimelineManager` (per account session) — timeline actor routing, the
   session-resident Sliding Sync room-subscription set, and the session-scoped
   outbound-send lifecycle. It is the only Koushi caller that mutates the live
@@ -687,8 +688,8 @@ diffs from older generations.
 These rules are normative for all core runtime code. They exist because
 matrix-rust-sdk is designed around cloneable handles and observable streams
 (`Timeline::subscribe()` returning `Vector` + batched `VectorDiff` stream,
-`SyncService` state observable when MSC4186 is available, send-queue update
-stream), and the runtime must relay that model, not fight it.
+`SyncService` state observable, send-queue update stream), and the runtime must
+relay that model, not fight it.
 
 1. **Actors relay the SDK; they do not reimplement it.** An actor owns SDK
    handles and subscriptions, converts observable updates into `CoreEvent`s,
@@ -798,40 +799,19 @@ stream), and the runtime must relay that model, not fight it.
    Timeline actor cancel/start/begin operations use a distinct control lane;
    invalidated generations make late acknowledgements and completions inert,
    and every acknowledgement wait uses one absolute deadline.
-10. **Sync uses behavior-probed SDK services, not ad hoc polling.** Advertising
-   an MSC4186 version is necessary but not sufficient: before starting either
-   authoritative sync owner, Core issues one bounded, authenticated MSC4186
-   request for a fixed zero-timeline invited-room list. Only a response that
-   includes the requested list selects `SyncService`/`RoomListService`.
-   Omission of that list, a malformed/error response, or expiry of the one
-   end-to-end two-second deadline fails closed to the explicit `LegacySync`
-   backend using SDK `/sync` primitives. The disposable authenticated probe
-   receives no refresh token, so automatic refresh is impossible/disabled, and
-   request retries are disabled; its single end-to-end two-second deadline
-   covers disposable-client setup plus one transport request. The response
-   cursor and room payload are discarded, so the preflight never becomes
-   another sync owner. Behavioral coverage proves success, omission,
-   malformed/error, and timeout, plus that `M_UNKNOWN_TOKEN` causes zero
-   refresh calls, no authoritative session-change/token mutation, and
-   fail-closed `LegacySync` selection.
-   Do not replace this contract probe with homeserver-name/version
-   fingerprinting. Both backends preserve the same `CoreCommand`/`CoreEvent`
-   contract, and the selected backend plus a coarse private-data-free reason is
-   emitted so QA can assert the decision.
-   `sync_once`-style one-shot polling remains a QA/debug tool, not the product
-   continuous-sync path. Because legacy `/sync` works against any homeserver,
-   a debug/test-only override (compile-time gated out of release builds)
-   forces the `LegacySync` backend so local QA exercises that path even when
-   the contract probe succeeds. Conduit currently advertises MSC4186 but omits
-   the requested invited-room list and therefore selects `LegacySync`
-   automatically; the local Tuwunel/Synapse profiles return the list and select
-   `SyncService`. Note that `RoomListService` is built on sliding sync:
-   on the `LegacySync` backend, `RoomActor` must normalize the room list from
-   legacy sync state (`Client::rooms()` plus sync updates) instead. Because the
-   local QA matrix includes homeservers without MSC4186, this legacy room-list
-   path is a fully implemented, QA-gated product path, not a stub. Invite
-   projection is part of the same contract: both sync backends must produce
-   `AppState.invites` from SDK invited rooms, not from React-local state.
+10. **Sync uses one Element X-compatible Simplified Sliding Sync engine.**
+   `SyncService` is the sole authoritative sync owner and owns the single
+   `RoomListService` used by `RoomActor`; no backend selection, forced mode, or
+   fallback sync path is part of the product. Session admission may check the
+   homeserver's advertised Simplified Sliding Sync support and fail closed when
+   it is unsupported; this compatibility check starts no sync owner and never
+   selects an alternative backend. Room-list and invite projections come from
+   the sole service and the SDK's committed room state, while
+   `CoreCommand`/`CoreEvent` and snapshot contracts remain unchanged. A one-shot
+   sync operation remains a QA/debug tool only, not the product continuous-sync
+   path. Room-list bootstrap readiness and replacement are generation-fenced,
+   and invite projection remains Rust-owned in `AppState.invites` rather than
+   React-local state.
 11. **Backpressure is defined, not accidental.** The event channel policy is
     explicit: versioned state snapshots are latest-wins (watch semantics),
     runtime state changes emit at most one `StateDelta` per batch, and
@@ -1315,9 +1295,9 @@ architectural invariants:
   but its filter-scoped `next_batch` never replaces the persisted global room
   cursor. A fresh store therefore remains tokenless; a restored account keeps
   its previous canonical cursor across restricted sync, process shutdown,
-  account switching, and SQLite reopen. Normal LegacySync may reuse that
-  canonical cursor directly, with no parallel in-memory taint ledger or repair
-  baseline. Server-family labels, empty local room lists, retries, and longer
+  account switching, and SQLite reopen. The normal Simplified Sliding Sync
+  owner reuses that canonical cursor directly, with no parallel in-memory taint
+  ledger or repair baseline. Server-family labels, empty local room lists, retries, and longer
   waits are not cursor-provenance evidence.
   Headless E2EE QA that needs a device-readiness barrier performs a read-only,
   `qa-bin`-only user-key refresh and requires the exact device to be present
@@ -1345,9 +1325,9 @@ architectural invariants:
   two-device SAS verification, cross-signing bootstrap, passphrase-backed
   key-backup enable, encrypted seed-room backup upload, wrong-secret restore
   failure, successful joined-room restore on the second device, and identity
-  reset on disposable local homeservers through the behavior-probed core leg
-  before GUI wiring. That leg may select either backend from the invite-list
-  preflight; E2EE correctness must not depend on the server label. No design doc
+  reset through the sole Simplified Sliding Sync core leg on disposable local
+  Tuwunel and Synapse before GUI wiring. E2EE correctness must not depend on the
+  server label. No design doc
   may claim exhaustive backup-wide restore
   until the exact supported restore scope is proven or split into an explicit
   follow-up.
@@ -1483,8 +1463,9 @@ is an aggregated relation with no standalone row. This intent reveals at most
 one cached chunk per request, has a small actor-generation batch ceiling, and
 stops on unchanged topology or zero progress. It never invents a gap row or
 causes unrelated historical gaps to become ordinary automatic work.
-Legacy sync supplies both retained per-room commit observations and a retained
-global response-commit fence published after event-cache topology mutation.
+Simplified Sliding Sync supplies both retained per-room commit observations and
+a retained global response-commit fence published after event-cache topology
+mutation.
 When the current response contains an active room, room-entry repair may admit
 only that response's exact opaque gap. When the global fence proves that an
 active room was omitted from the incremental response, Core may authoritatively
@@ -1536,15 +1517,12 @@ primary correctness gate.
 
 1. **Unit tests** — network-free: routing, redaction, unauthenticated command
    rejection, state transitions with fake ports, normalization, reducer.
-2. **Local homeserver QA** — disposable Conduit/Tuwunel servers, synthetic
+2. **Local homeserver QA** — disposable Tuwunel/Synapse servers, synthetic
    users, a core QA binary speaking `CoreCommand`/`CoreEvent` (never direct
    SDK wrapper calls). Covers login, sync, room/space create, invite receipt,
    invite accept/decline, DM start, bidirectional messaging, room list, logout
-   cleanup, and stdout/stderr redaction. It records and asserts the selected
-   sync backend
-   (`SyncService` or `LegacySync`) so server capability gaps are visible,
-   and runs an additional forced-`LegacySync` leg (debug/test-only backend
-   override) so both sync backends stay covered locally.
+   cleanup, and stdout/stderr redaction through the sole Simplified Sliding Sync
+   engine.
 3. **Real homeserver QA** — required before GUI-level confidence claims:
    HTTPS login, recovery, encrypted store restore, sync lifecycle, room list,
    timeline, send, search smoke, logout, account switch.
@@ -1573,7 +1551,7 @@ primary correctness gate.
 
 **Implementation workflow: headless-first, local-server-first.** New Matrix
 behavior lands in `koushi-core`, is exercised through
-`CoreCommand`/`CoreEvent` against disposable local Conduit/Tuwunel homeservers
+`CoreCommand`/`CoreEvent` against disposable local Tuwunel/Synapse homeservers
 (and real homeserver QA where that gate applies), and only then is wired through
 Tauri into React. Matrix behavior must not be introduced first in GUI or Tauri
 code and back-filled into core later.
@@ -1602,9 +1580,3 @@ and keeps the same QA hierarchy.
 - **Phase 15+:** finish desktop interaction completeness, E2EE trust
   implementation and GUI, performance/soak, distribution hardening,
   platform credential-store evidence, signing/notarization, and release.
-# Current sync contract (Issue #412)
-
-The desktop runtime has one required sync engine: Element X-compatible
-Simplified Sliding Sync. Legacy `/sync`, backend probing/forcing, and fallback
-selection are removed. The older backend discussion later in this document is
-historical context and is not an implementation or QA contract.

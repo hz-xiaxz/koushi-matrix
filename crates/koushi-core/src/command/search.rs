@@ -51,6 +51,20 @@ pub enum SearchScope {
     CurrentSpace { space_id: String },
 }
 
+impl SearchScope {
+    pub(crate) fn to_state(&self) -> koushi_state::SearchScope {
+        match self {
+            Self::AllRooms => koushi_state::SearchScope::AllRooms,
+            Self::CurrentRoom { room_id } => koushi_state::SearchScope::CurrentRoom {
+                room_id: room_id.clone(),
+            },
+            Self::CurrentSpace { space_id } => koushi_state::SearchScope::CurrentSpace {
+                space_id: space_id.clone(),
+            },
+        }
+    }
+}
+
 fn search_room_filter_debug(filter: &SearchRoomFilter) -> (&'static str, usize) {
     match filter {
         SearchRoomFilter::AllRooms => ("all_rooms", 0),
