@@ -136,6 +136,37 @@ describe("UploadStagingDialog", () => {
     expect(screen.getByRole("textbox", { name: "Caption for synthetic.png" })).toBeTruthy();
   });
 
+  it("defaults previews to fit and switches actual-size inspection back to the top left", () => {
+    render(
+      dialog([
+        stagedImage("", {
+          kind: "ready",
+          variants: [],
+          selected: { resize: "original", format: "keep" },
+          pending: null,
+          generation: 0
+        })
+      ])
+    );
+    const viewport = document.querySelector<HTMLElement>(".upload-preview-viewport");
+    expect(viewport).not.toBeNull();
+    expect(viewport!.dataset.previewMode).toBe("fit");
+
+    const group = screen.getByRole("group", { name: "Preview size" });
+    const fit = within(group).getByRole("button", { name: "Fit" });
+    const actual = within(group).getByRole("button", { name: "100%" });
+    expect(fit.getAttribute("aria-pressed")).toBe("true");
+    expect(actual.getAttribute("aria-pressed")).toBe("false");
+
+    viewport!.scrollLeft = 30;
+    viewport!.scrollTop = 40;
+    fireEvent.click(actual);
+    expect(viewport!.dataset.previewMode).toBe("actual");
+    expect(viewport!.scrollLeft).toBe(0);
+    expect(viewport!.scrollTop).toBe(0);
+    expect(actual.getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("renders the shared caption editor and emits a structured document from formatting", () => {
     const onUpdateCaption = vi.fn();
     render(dialog([stagedImage("caption", { kind: "preparing" })], onUpdateCaption));

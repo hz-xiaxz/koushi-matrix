@@ -177,6 +177,20 @@ describe("styles.css token system", () => {
     // this viewport do not move when the user inspects a large image.
     expect(preview).toMatch(/overflow:\s*auto/);
     expect(preview).toMatch(/overscroll-behavior:\s*contain/);
+    expect(preview).toMatch(/inline-size:\s*100%/);
+    expect(preview).toMatch(/min-inline-size:\s*0/);
+
+    const fittedPreview = selectorBlock(
+      '.upload-preview-viewport[data-preview-mode="fit"] .upload-staging-preview'
+    );
+    expect(fittedPreview).toMatch(/max-inline-size:\s*100%/);
+    expect(fittedPreview).toMatch(/max-block-size:\s*100%/);
+
+    const actualPreview = selectorBlock(
+      '.upload-preview-viewport[data-preview-mode="actual"] .upload-staging-preview'
+    );
+    expect(actualPreview).toMatch(/max-inline-size:\s*none/);
+    expect(actualPreview).toMatch(/max-block-size:\s*none/);
 
     const compactCaptionEditor = selectorBlock(
       ".upload-staging-caption .composer-inline-editor"
@@ -194,8 +208,6 @@ describe("styles.css token system", () => {
     // would upscale resized variants and make them look unchanged but blurrier.
     expect(previewImage).toMatch(/min-inline-size:\s*0/);
     expect(previewImage).not.toMatch(/min-inline-size:\s*100%/);
-    expect(previewImage).toMatch(/max-inline-size:\s*none/);
-    expect(previewImage).toMatch(/max-block-size:\s*none/);
   });
 
   test("selected room row uses a logical brand start bar", () => {

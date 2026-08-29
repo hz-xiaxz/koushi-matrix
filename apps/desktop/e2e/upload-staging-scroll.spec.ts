@@ -177,9 +177,26 @@ test("main composer keeps upload controls visible while only the preview pans", 
   const previewLocator = dialog.locator(".upload-preview-viewport");
   const previewImage = previewLocator.locator(".upload-staging-preview");
   await expect(previewImage).toBeVisible();
+  await expect(dialog.getByRole("button", { name: t("upload.previewFit") })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
   await previewImage.evaluate((image) => {
     image.style.inlineSize = "1200px";
   });
+  await expect
+    .poll(async () => previewLocator.evaluate((preview) => preview.scrollWidth))
+    .toBe(await previewLocator.evaluate((preview) => preview.clientWidth));
+  await dialog.getByRole("button", { name: t("upload.previewActualSize") }).click();
+  await expect(previewLocator).toHaveAttribute("data-preview-mode", "actual");
+  // React may reconcile a test-only inline style during the mode update; set
+  // the synthetic oversized dimensions again after the real user action.
+  await previewImage.evaluate((image) => {
+    image.style.inlineSize = "1200px";
+  });
+  await expect
+    .poll(async () => previewLocator.evaluate((preview) => preview.scrollWidth))
+    .toBeGreaterThan(await previewLocator.evaluate((preview) => preview.clientWidth));
   await previewLocator.hover();
   await page.mouse.wheel(160, 160);
   await expect

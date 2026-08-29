@@ -1184,6 +1184,8 @@ function formatPreparedDimensions(width: number | null, height: number | null): 
     : formatUploadDimensions({ width, height });
 }
 
+type UploadPreviewMode = "fit" | "actual";
+
 function PreparedUploadPreview({
   item,
   loadPreview
@@ -1192,7 +1194,9 @@ function PreparedUploadPreview({
   loadPreview: (stagedId: string, variantId: string) => Promise<number[]>;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewMode, setPreviewMode] = useState<UploadPreviewMode>("fit");
   const activePreviewUrlRef = useRef<string | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   // The preview follows the Rust-owned selection: find the prepared output for
   // the selected pair. While a pair is `pending` there is none yet, so the
   // previously loaded preview stays on screen.
@@ -1260,21 +1264,54 @@ function PreparedUploadPreview({
     };
   }, []);
 
+  const selectPreviewMode = (mode: UploadPreviewMode) => {
+    setPreviewMode(mode);
+    // Each inspection mode starts from a predictable top-left origin. This is
+    // local presentation state; prepared output selection remains Rust-owned.
+    const viewport = viewportRef.current;
+    if (viewport) {
+      viewport.scrollLeft = 0;
+      viewport.scrollTop = 0;
+    }
+  };
+
   // One fixed-height viewport that never collapses: recompression dims the
   // current preview instead of unmounting it.
   return (
-    <div
-      className="upload-preview-viewport"
-      data-recompressing={recompressing ? "true" : undefined}
-    >
-      {previewUrl ? (
-        <img className="upload-staging-preview" src={previewUrl} alt={t("upload.previewAlt")} />
-      ) : (
-        <div className="upload-staging-preview-placeholder" aria-label={t("upload.previewAlt")} />
-      )}
-      {recompressing ? (
-        <span className="upload-preview-progress" role="presentation" />
-      ) : null}
+    <div className="upload-preview-shell">
+      <div
+        ref={viewportRef}
+        className="upload-preview-viewport"
+        data-preview-mode={previewMode}
+        data-recompressing={recompressing ? "true" : undefined}
+      >
+        {previewUrl ? (
+          <img className="upload-staging-preview" src={previewUrl} alt={t("upload.previewAlt")} />
+        ) : (
+          <div className="upload-staging-preview-placeholder" aria-label={t("upload.previewAlt")} />
+        )}
+        {recompressing ? (
+          <span className="upload-preview-progress" role="presentation" />
+        ) : null}
+      </div>
+      <div className="upload-preview-mode" role="group" aria-label={t("upload.previewMode")}>
+        <button
+          type="button"
+          className="upload-preview-mode-option"
+          aria-pressed={previewMode === "fit"}
+          onClick={() => selectPreviewMode("fit")}
+        >
+          {t("upload.previewFit")}
+        </button>
+        <button
+          type="button"
+          className="upload-preview-mode-option"
+          aria-pressed={previewMode === "actual"}
+          onClick={() => selectPreviewMode("actual")}
+        >
+          {t("upload.previewActualSize")}
+        </button>
+      </div>
     </div>
   );
 }
