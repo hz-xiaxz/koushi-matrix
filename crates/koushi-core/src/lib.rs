@@ -86,7 +86,8 @@ pub use ids::{
 pub use koushi_state::MediaTransferProgress;
 pub use runtime::{
     COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandHandle, CoreConnection, CoreRuntime,
-    EVENT_QUEUE_CAPACITY, EventStreamLag, SelectRoomError,
+    EVENT_QUEUE_CAPACITY, EventStreamLag, OutcomeCorrelation, RequestOutcome, RequestOutcomeError,
+    RequestOutcomeExpectation, RoomOperationKind, SelectRoomError,
 };
 pub use sliding_sync_diagnostics::{
     DiagnosticAgeBucket, SlidingSyncDiagnostics, SlidingSyncDiagnosticsSnapshot,

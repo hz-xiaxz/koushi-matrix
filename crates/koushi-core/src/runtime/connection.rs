@@ -4,8 +4,10 @@ use crate::composer_draft_lifecycle::{
     ComposerDraftCommandPermit, ComposerDraftLeaseFailure, ComposerDraftLeaseId,
     ComposerDraftLeaseRegistry, ComposerDraftScope, ComposerRendererGeneration,
 };
+#[cfg(test)]
+use crate::event::IntentOutcome;
 use crate::event::{
-    AppStateSnapshot, CoreEvent, IntentNoOpReason, IntentOutcome, VersionedAppStateSnapshot,
+    AppStateSnapshot, CoreEvent, IntentNoOpReason, VersionedAppStateSnapshot,
     project_room_event_display_labels, project_timeline_event_display_labels,
 };
 use crate::ids::{RequestId, RuntimeConnectionId};
@@ -71,8 +73,8 @@ pub struct CoreConnection {
     connection_id: RuntimeConnectionId,
     command_tx: mpsc::Sender<CoreCommandEnvelope>,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
-    event_rx: broadcast::Receiver<CoreEvent>,
-    snapshot_rx: watch::Receiver<VersionedAppStateSnapshot>,
+    pub(super) event_rx: broadcast::Receiver<CoreEvent>,
+    pub(super) snapshot_rx: watch::Receiver<VersionedAppStateSnapshot>,
     next_sequence: AtomicU64,
 }
 
@@ -212,7 +214,52 @@ impl CoreCommandHandle {
     }
 }
 
+#[cfg(any(test, feature = "test-hooks"))]
+#[doc(hidden)]
+pub struct CoreConnectionTestControl {
+    event_tx: broadcast::Sender<CoreEvent>,
+    snapshot_tx: watch::Sender<VersionedAppStateSnapshot>,
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+impl CoreConnectionTestControl {
+    #[doc(hidden)]
+    pub fn send_event(&self, event: CoreEvent) {
+        let _ = self.event_tx.send(event);
+    }
+
+    #[doc(hidden)]
+    pub fn send_snapshot(&self, snapshot: VersionedAppStateSnapshot) {
+        let _ = self.snapshot_tx.send(snapshot);
+    }
+}
+
 impl CoreConnection {
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[doc(hidden)]
+    pub fn new_for_testing(event_capacity: usize) -> (Self, CoreConnectionTestControl) {
+        let (command_tx, _command_rx) = mpsc::channel(1);
+        let (event_tx, event_rx) = broadcast::channel(event_capacity);
+        let (snapshot_tx, snapshot_rx) = watch::channel(VersionedAppStateSnapshot {
+            generation: 0,
+            state: koushi_state::AppState::default(),
+        });
+        (
+            Self {
+                connection_id: RuntimeConnectionId(41),
+                command_tx,
+                composer_draft_leases: Arc::new(ComposerDraftLeaseRegistry::new()),
+                event_rx,
+                snapshot_rx,
+                next_sequence: AtomicU64::new(1),
+            },
+            CoreConnectionTestControl {
+                event_tx,
+                snapshot_tx,
+            },
+        )
+    }
+
     pub fn connection_id(&self) -> RuntimeConnectionId {
         self.connection_id
     }
@@ -306,7 +353,7 @@ impl CoreConnection {
         }
     }
 
-    fn project_event_for_consumer(&self, mut event: CoreEvent) -> CoreEvent {
+    pub(super) fn project_event_for_consumer(&self, mut event: CoreEvent) -> CoreEvent {
         match &mut event {
             CoreEvent::Timeline(timeline_event) => {
                 let snapshot = self.snapshot_rx.borrow().state.clone();
@@ -355,19 +402,15 @@ impl CoreConnection {
     }
 
     /// Select `room_id` and wait until the latest versioned watch snapshot names
-    /// it as the active room.
-    ///
-    /// Lifecycle events only classify progress or a matching failure. The
-    /// returned snapshot is the exact watch value that satisfied the predicate,
-    /// including its publication generation. Broadcast lag is recovered by
-    /// rechecking that latest value; `timeout` is one absolute deadline for the
-    /// wait, not a per-event allowance.
+    /// it as the active room. The typed outcome service owns the event/snapshot
+    /// settlement; this method preserves the historical error surface.
     pub async fn select_room_and_wait(
         &mut self,
         room_id: String,
         timeout: Duration,
     ) -> Result<VersionedAppStateSnapshot, SelectRoomError> {
         let deadline = tokio::time::Instant::now() + timeout;
+        let baseline_generation = self.versioned_snapshot().generation;
         let request_id = self.next_request_id();
         tokio::time::timeout_at(
             deadline,
@@ -379,68 +422,40 @@ impl CoreConnection {
         .await
         .map_err(|_| SelectRoomError::Timeout)?
         .map_err(SelectRoomError::CommandSubmit)?;
-        loop {
-            let current = self.versioned_snapshot();
-            if current.state.navigation.active_room_id.as_deref() == Some(room_id.as_str()) {
-                return Ok(current);
+
+        match self
+            .wait_for_request_outcome(
+                super::request_outcome::OutcomeCorrelation::Request(request_id),
+                super::request_outcome::RequestOutcomeExpectation::RoomSelected {
+                    request_id,
+                    room_id,
+                    account_key: None,
+                    allow_initial: true,
+                },
+                baseline_generation,
+                deadline,
+            )
+            .await
+        {
+            Ok(super::request_outcome::RequestOutcome::RoomSelected { snapshot }) => Ok(snapshot),
+            Ok(_) => Err(SelectRoomError::Timeout),
+            Err(super::request_outcome::RequestOutcomeError::OperationFailed { failure }) => {
+                Err(SelectRoomError::OperationFailed(failure))
             }
-
-            let event = match tokio::time::timeout_at(deadline, self.event_rx.recv()).await {
-                Ok(Ok(event)) => self.project_event_for_consumer(event),
-                Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
-                Ok(Err(broadcast::error::RecvError::Closed)) => {
-                    let current = self.versioned_snapshot();
-                    return if current.state.navigation.active_room_id.as_deref()
-                        == Some(room_id.as_str())
-                    {
-                        Ok(current)
-                    } else {
-                        Err(SelectRoomError::EventStreamClosed)
-                    };
-                }
-                Err(_) => {
-                    let current = self.versioned_snapshot();
-                    return if current.state.navigation.active_room_id.as_deref()
-                        == Some(room_id.as_str())
-                    {
-                        Ok(current)
-                    } else {
-                        Err(SelectRoomError::Timeout)
-                    };
-                }
-            };
-
-            let current = self.versioned_snapshot();
-            if current.state.navigation.active_room_id.as_deref() == Some(room_id.as_str()) {
-                return Ok(current);
+            Err(super::request_outcome::RequestOutcomeError::FailedNoOp { reason }) => {
+                Err(match reason {
+                    IntentNoOpReason::SessionNotReady => SelectRoomError::SessionNotReady,
+                    IntentNoOpReason::RoomNotInState => SelectRoomError::RoomNotInState,
+                    reason => SelectRoomError::FailedNoOp(reason),
+                })
             }
-
-            match event {
-                CoreEvent::OperationFailed {
-                    request_id: failed_request_id,
-                    failure,
-                } if failed_request_id == request_id => {
-                    return Err(SelectRoomError::OperationFailed(failure));
-                }
-                CoreEvent::IntentLifecycle {
-                    request_id: lifecycle_request_id,
-                    outcome: IntentOutcome::FailedNoOp(reason),
-                    ..
-                } if lifecycle_request_id == request_id => {
-                    return Err(match reason {
-                        IntentNoOpReason::SessionNotReady => SelectRoomError::SessionNotReady,
-                        IntentNoOpReason::RoomNotInState => SelectRoomError::RoomNotInState,
-                        reason => SelectRoomError::FailedNoOp(reason),
-                    });
-                }
-                // Committed and benign no-op outcomes are progress only. The
-                // watch snapshot remains the authoritative success transport.
-                CoreEvent::IntentLifecycle {
-                    request_id: lifecycle_request_id,
-                    outcome: IntentOutcome::Committed | IntentOutcome::BenignNoOp(_),
-                    ..
-                } if lifecycle_request_id == request_id => {}
-                _ => {}
+            Err(super::request_outcome::RequestOutcomeError::Disconnected) => {
+                Err(SelectRoomError::EventStreamClosed)
+            }
+            Err(super::request_outcome::RequestOutcomeError::TimedOut)
+            | Err(super::request_outcome::RequestOutcomeError::Lagged)
+            | Err(super::request_outcome::RequestOutcomeError::InvalidOutcome) => {
+                Err(SelectRoomError::Timeout)
             }
         }
     }

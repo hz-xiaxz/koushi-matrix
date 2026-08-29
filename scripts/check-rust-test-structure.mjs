@@ -1577,7 +1577,7 @@ export function checkCoreRuntimeConnectionCommandHandle() {
   const rule = "core.runtime.connection_command_handle";
   const source = coreSource("runtime/connection.rs");
   const handle = rustItemBody(source, "impl CoreCommandHandle");
-  const connection = rustItemBody(source, "impl CoreConnection");
+  const connection = rustItemBody(source, "impl CoreConnection {");
   const commandHandle = rustItemBody(connection ?? "", "pub fn command_handle");
   const command = rustItemBody(connection ?? "", "pub async fn command");
   const failures = [];

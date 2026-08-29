@@ -213,6 +213,26 @@ versioned-snapshot convergence, recovers a lagged consumer from the latest
 snapshot, and awaits ordered shutdown without importing Tauri. Serialized
 `FrontendDesktopSnapshot` mirrors remain adapter-only in `apps/desktop/src-tauri`.
 
+### Core request outcomes (Phase A, issue #755)
+
+`koushi-core` owns request settlement through the closed, non-serde
+`runtime::request_outcome` service. `CoreConnection::wait_for_request_outcome`
+uses the connection's event stream as a wake source and its versioned watch
+snapshot as authority: it checks the initial snapshot, applies the expectation's
+exact request/account/target/submission guards, uses one absolute deadline, and
+performs one final snapshot check after timeout, closure, or lag. A waiter may
+use a separate attached event connection; a `RequestId` is globally unique on
+the shared stream and is never compared with the waiting connection ID.
+Submission correlations require both the originating request and
+`SubmissionId`. Lag is either recoverable or terminal according to the closed
+expectation variant, and `Lagged`, `Disconnected`, `TimedOut`, operation
+failure, and typed no-op outcomes remain distinct. `select_room_and_wait` is a
+compatibility wrapper over this service.
+
+This is Phase A runtime infrastructure only: it adds no `AppState`,
+`AppAction`, reducer, or reducer transition. Tauri waiters and their product
+loops are intentionally not migrated until the later phases of issue #755.
+
 ## Platform Portability
 
 The desktop app is the only shipping target today, but a browser-hosted build

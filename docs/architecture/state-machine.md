@@ -40,6 +40,20 @@ reset/reconnect, or explicit command-response projections only. A delta
 generation gap forces a full-snapshot reset whose `state_generation` restores
 ordering before later deltas apply.
 
+### Core request outcomes (Phase A, issue #755)
+
+The Core request-outcome service is runtime settlement infrastructure, not a
+reducer state machine. `CoreConnection::wait_for_request_outcome` consumes
+closed typed expectations, treats events as wake/payload signals, and accepts
+only exact request, account, timeline/target, and (where applicable)
+submission correlations against the authoritative versioned snapshot. It uses
+one absolute deadline and one final snapshot check after timeout, disconnect,
+or lag; expectation-specific lag policy distinguishes recoverable lag from
+terminal `Lagged`. `select_room_and_wait` delegates to this service without
+changing its behavior. No `AppState`, `AppAction`, reducer transition, or
+Tauri waiter migration is part of Phase A; later issue #755 phases consume the
+service from adapters.
+
 Reducer guard phrase: "Ready session" means exactly `SessionState::Ready(_)`:
 the SDK has authoritatively reported that the current device is verified.
 Authenticated provisional, awaiting-verification, verifying, and rejecting

@@ -13,6 +13,7 @@ mod connection;
 mod navigation;
 mod profile_display_diagnostics;
 mod reducer_support;
+pub mod request_outcome;
 mod scheduled_send;
 
 pub use composer::{COMPOSER_DRAFT_PERSIST_DEBOUNCE, ForwardedComposerDraftPermit};
@@ -32,8 +33,14 @@ use navigation::{
 };
 use scheduled_send::scheduled_send_id;
 
+#[cfg(any(test, feature = "test-hooks"))]
+pub use connection::CoreConnectionTestControl;
 pub use connection::{
     CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag, SelectRoomError,
+};
+pub use request_outcome::{
+    OutcomeCorrelation, RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation,
+    RoomOperationKind,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::future;
