@@ -109,6 +109,27 @@ test("all desktop source-contract rules pass", () => {
   );
 });
 
+test("registers the complete account source-contract rule set", () => {
+  assert.deepEqual(
+    runSourceContractRules().filter(({ rule }) => rule?.startsWith("core.account.")),
+    []
+  );
+});
+
+test("account source-contract failures stay closed-token and private-data-free", () => {
+  const message = formatViolation({
+    kind: "source-contract",
+    rule: "core.account.restore_trace",
+    message: "missing required restore marker"
+  });
+
+  assert.equal(
+    message,
+    "core.account.restore_trace: missing required restore marker"
+  );
+  assert.doesNotMatch(message, /SECRET|@|!|synthetic-room|private-path/);
+});
+
 test("src-tauri source-contract failures stay closed-token and private-data-free", () => {
   const message = formatViolation({
     kind: "source-contract",

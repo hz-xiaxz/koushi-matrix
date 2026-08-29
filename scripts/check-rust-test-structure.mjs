@@ -1259,8 +1259,477 @@ export function checkSdkCommittedRoomCheckpointHasNoLegacyApi() {
   return failures;
 }
 
+function readAccountSource(relativePath) {
+  return readRustSource(`crates/koushi-core/src/account/${relativePath}`);
+}
+
+function accountProductionSource(relativePath) {
+  const fileName = `crates/koushi-core/src/account/${relativePath}`;
+  return productionOnly(readRustSource(fileName), fileName);
+}
+
+function accountItemBody(relativePath, marker) {
+  return rustItemBody(accountProductionSource(relativePath), marker);
+}
+
+function accountSection(relativePath, startMarker, endMarker) {
+  return sourceSection(accountProductionSource(relativePath), startMarker, endMarker);
+}
+
+export function checkCoreAccountSessionReplacementTeardown() {
+  const rule = "core.account.session_replacement_teardown";
+  const install = accountItemBody("session_lifecycle.rs", "async fn install_provisional_session");
+  const teardown = accountItemBody("runtime_children.rs", "async fn stop_current_session_runtime");
+  const failures = [];
+  if (!install?.includes("stop_current_session_runtime().await")) failures.push(sourceContractFailure(rule, "provisional session installation lacks runtime teardown"));
+  if (!teardown?.includes("stop_active_session_account_management_discovery")) failures.push(sourceContractFailure(rule, "runtime teardown lacks account-management discovery cancellation"));
+  return failures;
+}
+
+export function checkCoreAccountReliableReducerDelivery() {
+  const rule = "core.account.reliable_reducer_delivery";
+  const sources = [
+    "account_management.rs", "actor.rs", "local_data_cleanup.rs", "profile.rs",
+    "recovery_backup.rs", "routing.rs", "runtime_children.rs", "scheduled_send.rs",
+    "session_lifecycle.rs", "sliding_sync.rs", "trust_gate.rs", "verification.rs"
+  ].map(accountProductionSource);
+  const failures = [];
+  const sendActions = accountItemBody("actor.rs", "async fn send_actions");
+  if (!sendActions?.includes("self.action_tx.send(actions).await")) failures.push(sourceContractFailure(rule, "send_actions does not await reliable action delivery"));
+  if (sources.some((source) => source.includes("self.reduce("))) failures.push(sourceContractFailure(rule, "AccountActor command-result actions use the lossy reduce helper"));
+  if (sources.some((source) => source.includes("action_tx.try_send(actions)"))) failures.push(sourceContractFailure(rule, "AccountActor actions use drop-on-full try_send"));
+  return failures;
+}
+
+export function checkCoreAccountLoginHydrationOrder() {
+  const rule = "core.account.login_hydration_order";
+  const login = accountItemBody("session_lifecycle.rs", "async fn handle_login_password");
+  const promotion = accountItemBody("trust_gate.rs", "async fn handle_trust_projection_applied");
+  const failures = [];
+  const loggedIn = login?.indexOf("AccountEvent::LoggedIn") ?? -1;
+  if (loggedIn < 0) failures.push(sourceContractFailure(rule, "login handler does not emit LoggedIn"));
+  for (const marker of [
+    "own_profile_action_from_session(&session_arc).await",
+    "local_user_aliases_action_from_session(&session_arc).await",
+    "ignored_user_ids_action_from_session(&session_arc).await"
+  ]) {
+    const position = login?.indexOf(marker) ?? -1;
+    if (position >= 0 && position <= loggedIn) failures.push(sourceContractFailure(rule, `optional hydration precedes LoggedIn: ${marker}`));
+  }
+  if (login?.includes("spawn_account_hydration")) failures.push(sourceContractFailure(rule, "login handler spawns account hydration"));
+  if (!promotion?.includes("spawn_account_hydration")) failures.push(sourceContractFailure(rule, "trust promotion does not spawn account hydration"));
+  return failures;
+}
+
+export function checkCoreAccountHydrationGenerationFence() {
+  const rule = "core.account.hydration_generation_fence";
+  const actor = accountProductionSource("actor.rs");
+  const profile = accountProductionSource("profile.rs");
+  const failures = [];
+  if (!actor.includes("AccountHydrationLoaded {")) failures.push(sourceContractFailure(rule, "account hydration does not return through the actor mailbox"));
+  if (!profile.includes("generation != self.account_hydration_generation")) failures.push(sourceContractFailure(rule, "account hydration lacks its generation fence"));
+  if (!profile.includes("fn invalidate_account_hydration(&mut self)")) failures.push(sourceContractFailure(rule, "account hydration invalidation helper is missing"));
+  return failures;
+}
+
+export function checkCoreAccountAliasFailureReconciliation() {
+  const rule = "core.account.alias_failure_reconciliation";
+  const body = accountItemBody("profile.rs", "async fn handle_set_local_user_alias");
+  const failures = [];
+  if (!body?.includes("local_user_aliases_action_from_session(session).await")) failures.push(sourceContractFailure(rule, "alias failure does not reload authoritative aliases"));
+  for (const marker of ["AppAction::LocalUserAliasUpdateFailed", "AppAction::LocalUserAliasesLoaded"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `alias failure reconciliation lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreAccountSecureBackupMonitorOwner() {
+  const rule = "core.account.secure_backup_monitor_owner";
+  const recovery = accountProductionSource("recovery_backup.rs");
+  const actor = accountProductionSource("actor.rs");
+  const scheduler = accountItemBody("recovery_backup.rs", "fn schedule_secure_backup_monitor");
+  const retire = accountItemBody("recovery_backup.rs", "fn retire_secure_backup_monitor");
+  const inspection = accountItemBody("recovery_backup.rs", "fn start_secure_backup_inspection");
+  const failures = [];
+  for (const [source, marker] of [[recovery, "const SECURE_BACKUP_MONITOR_INTERVAL: Duration = Duration::from_secs(60);"], [actor, "secure_backup_monitor_task: Option<crate::executor::JoinHandle<()>>"], [retire, "secure_backup_monitor_task.take()"], [scheduler, "SECURE_BACKUP_MONITOR_INTERVAL"], [scheduler, "monitor_serial"], [inspection, "retire_secure_backup_monitor()"]]) if (!source?.includes(marker)) failures.push(sourceContractFailure(rule, `secure-backup monitor is missing ${marker}`));
+  return failures;
+}
+
+export function checkCoreAccountE2eeTypedFailureClassification() {
+  const rule = "core.account.e2ee_typed_failure_classification";
+  const recovery = accountProductionSource("recovery_backup.rs");
+  const failures = [];
+  for (const marker of ["async fn handle_export_room_keys", "async fn handle_import_room_keys", "async fn handle_bootstrap_secure_backup", "async fn handle_change_secure_backup_passphrase"]) {
+    const body = accountItemBody("recovery_backup.rs", marker);
+    if (!body?.includes("classify_e2ee_trust_error(&error)")) failures.push(sourceContractFailure(rule, `${marker} does not preserve typed failure classification`));
+    if (body?.includes("Err(_)")) failures.push(sourceContractFailure(rule, `${marker} erases typed errors before classification`));
+  }
+  if (!recovery.includes("InvalidPassphrase")) failures.push(sourceContractFailure(rule, "recovery source lacks InvalidPassphrase classification"));
+  return failures;
+}
+
+export function checkCoreAccountRecoveryKeyHydrationOrder() {
+  const rule = "core.account.recovery_key_hydration_order";
+  const submit = accountItemBody("recovery_backup.rs", "async fn handle_submit_recovery");
+  const complete = accountItemBody("recovery_backup.rs", "async fn complete_recovery_after_verified");
+  const failures = [];
+  if (!submit?.includes("koushi_sdk::recover_e2ee")) failures.push(sourceContractFailure(rule, "recovery submission does not recover the secret"));
+  const request = complete?.indexOf("AppAction::RestoreKeyBackupRequested") ?? -1;
+  const restore = complete?.indexOf("koushi_sdk::download_joined_room_keys_from_backup") ?? -1;
+  if (request < 0 || restore < 0 || request >= restore) failures.push(sourceContractFailure(rule, "joined-room key hydration does not follow restore-state projection"));
+  return failures;
+}
+
+export function checkCoreAccountCrawlerNotificationLatestWins() {
+  const rule = "core.account.crawler_notification_latest_wins";
+  const actor = accountProductionSource("actor.rs");
+  const notification = actor.split("AccountMessage::NotifySearchCrawlerRoomsAvailable")[1]?.split("AccountMessage::CurrentDeviceTrustChanged")[0];
+  const failures = [];
+  if (!notification?.includes("self.pending_crawler_notification = Some")) failures.push(sourceContractFailure(rule, "crawler notification is not retained latest-wins"));
+  if (!notification?.includes("self.flush_pending_crawler_notification();")) failures.push(sourceContractFailure(rule, "crawler notification is not flushed without blocking"));
+  if (notification?.includes("notify_rooms_available(room_ids, settings).await")) failures.push(sourceContractFailure(rule, "crawler notification awaits background capacity"));
+  return failures;
+}
+
+export function checkCoreAccountSyncStopRouting() {
+  const rule = "core.account.sync_stop_routing";
+  const body = accountItemBody("routing.rs", "async fn route_sync_command");
+  const failures = [];
+  const gate = body?.indexOf("!matches!(command, SyncCommand::Stop { .. })") ?? -1;
+  const spawn = body?.indexOf("self.spawn_sync_actor(session.clone()).await") ?? -1;
+  const noActor = body?.indexOf("action=no_sync_actor") ?? -1;
+  if (gate < 0 || spawn < 0 || noActor < 0 || !(gate < spawn && spawn < noActor)) failures.push(sourceContractFailure(rule, "Sync Stop routing does not separate the missing-actor path"));
+  return failures;
+}
+
+export function checkCoreAccountManualSyncOnceGuard() {
+  const rule = "core.account.manual_sync_once_guard";
+  const body = accountItemBody("routing.rs", "async fn route_sync_command");
+  const failures = [];
+  const guard = body?.indexOf("is_manual_sync_once(") ?? -1;
+  const spawn = body?.indexOf("self.spawn_sync_actor(") ?? -1;
+  const send = body?.indexOf("handle.send(SyncMessage::Command(command))") ?? -1;
+  if (guard < 0 || spawn < 0 || send < 0 || !(guard < spawn && guard < send)) failures.push(sourceContractFailure(rule, "manual SyncOnce guard does not precede actor routing"));
+  const guarded = guard >= 0 && spawn >= 0 ? body.slice(guard, spawn) : "";
+  for (const marker of ["CoreFailure::SyncFailed", "SyncFailureKind::Internal", "return;"]) if (!guarded.includes(marker)) failures.push(sourceContractFailure(rule, `manual SyncOnce rejection lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreAccountSessionEstablishedHandoff() {
+  const rule = "core.account.session_established_handoff";
+  const body = accountItemBody("runtime_children.rs", "async fn spawn_sync_actor");
+  const failures = [];
+  const handoff = body?.indexOf(".send(RoomMessage::SessionEstablished") ?? -1;
+  if (handoff < 0 || !body?.slice(handoff).includes(".await")) failures.push(sourceContractFailure(rule, "RoomActor session handoff is not reliably awaited"));
+  if (body?.includes("room_actor.try_send(RoomMessage::SessionEstablished")) failures.push(sourceContractFailure(rule, "RoomActor session handoff uses try_send"));
+  return failures;
+}
+
+export function checkCoreAccountSecureBackupContentBarrier() {
+  const rule = "core.account.secure_backup_content_barrier";
+  const cases = [
+    ["routing.rs", "async fn route_timeline_command_with_permit_and_formatting_options"],
+    ["scheduled_send.rs", "async fn handle_schedule_server_delayed_send"],
+    ["scheduled_send.rs", "async fn handle_dispatch_local_scheduled_send"],
+    ["scheduled_send.rs", "async fn handle_reschedule_server_delayed_send"]
+  ];
+  const failures = [];
+  for (const [file, marker] of cases) if (!accountItemBody(file, marker)?.includes("admit_secure_backup_user_content")) failures.push(sourceContractFailure(rule, `${marker} lacks the secure-backup barrier`));
+  const reschedule = accountItemBody("scheduled_send.rs", "async fn handle_reschedule_server_delayed_send");
+  const barrier = reschedule?.indexOf("admit_secure_backup_user_content") ?? -1;
+  const cancel = reschedule?.indexOf("UpdateAction::Cancel") ?? -1;
+  if (barrier < 0 || cancel < 0 || barrier >= cancel) failures.push(sourceContractFailure(rule, "reschedule cancels before secure-backup admission"));
+  return failures;
+}
+
+export function checkCoreAccountLocalScheduledSendNoBackupFence() {
+  const rule = "core.account.local_scheduled_send_no_backup_fence";
+  const body = accountItemBody("scheduled_send.rs", "async fn handle_dispatch_local_scheduled_send");
+  return body?.includes(".require_backed_up_session()")
+    ? [sourceContractFailure(rule, "local scheduled send has a per-session backup durability fence")]
+    : [];
+}
+
+export function checkCoreAccountExplicitLogoutTeardown() {
+  const rule = "core.account.explicit_logout_teardown";
+  const logout = accountItemBody("session_lifecycle.rs", "pub(super) async fn handle_logout");
+  const continuation = accountItemBody("session_lifecycle.rs", "match pending.continuation");
+  const failures = [];
+  if (!logout?.includes("perform_logout(request_id, true, false)")) failures.push(sourceContractFailure(rule, "explicit logout does not select non-preserving teardown"));
+  for (const marker of ["preserve_persistence", "forget_last_session_pointer_if_matches(key_id)", "clear_account_persistence(key_id)", "session_persistence_deleted"]) if (!continuation?.includes(marker)) failures.push(sourceContractFailure(rule, `logout continuation lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreAccountRestoreEventCacheStatus() {
+  const rule = "core.account.restore_event_cache_status";
+  const restore = accountItemBody("session_lifecycle.rs", "async fn restore_into_store");
+  const helper = accountItemBody("actor.rs", "fn emit_event_cache_status(");
+  const prepare = accountItemBody("session_lifecycle.rs", "async fn prepare_store_backed_session");
+  const compact = (value) => value?.replace(/\s/gu, "") ?? "";
+  const body = compact(restore);
+  const helperBody = compact(helper);
+  const prepareBody = compact(prepare);
+  const failures = [];
+  const storeConfig = body.indexOf("self.store.existing_account_store_config(key_id)");
+  const restoreCall = body.indexOf("koushi_sdk::restore_session_with_verified_store");
+  const encryptedStore = body.indexOf("letencrypted_store=store_config.store_config.encrypted_at_rest_configured();");
+  const prepareCall = body.indexOf("self.prepare_store_backed_session(&session,encrypted_store).await");
+  const returnOk = body.lastIndexOf("Ok(session)");
+  if ([storeConfig, restoreCall, encryptedStore, prepareCall, returnOk].some((position) => position < 0) || !(storeConfig < restoreCall && storeConfig < encryptedStore && restoreCall < prepareCall && encryptedStore < prepareCall && prepareCall < returnOk)) failures.push(sourceContractFailure(rule, "store-backed restore ordering is incomplete"));
+  for (const marker of ["koushi_sdk::enable_event_cache(session).await", "self.emit_event_cache_status(encrypted_store,&event_cache_result);"]) if (!prepareBody.includes(marker)) failures.push(sourceContractFailure(rule, `store-backed preparation lacks ${marker}`));
+  for (const marker of ["EventCacheSubscribeStatus::Enabled,None", "EventCacheSubscribeStatus::AlreadyEnabled,None", "EventCacheSubscribeStatus::SubscribeFailed,Some(EventCacheFailureReasonClass::SubscribeFailed),"]) if (!helperBody.includes(marker)) failures.push(sourceContractFailure(rule, `event-cache diagnostic lacks ${marker}`));
+  if ((prepareBody.match(/self\.emit_event_cache_status\(encrypted_store,&event_cache_result\);/gu) ?? []).length !== 1) failures.push(sourceContractFailure(rule, "event-cache status is not emitted exactly once"));
+  for (const marker of ["enable_event_cache(&session).await.map_err", "enable_event_cache(&session).await?", "encrypted_store:true", "cache_path().is_some()"]) if (body.includes(marker) || helperBody.includes(marker)) failures.push(sourceContractFailure(rule, `restore event-cache path contains forbidden ${marker}`));
+  return failures;
+}
+
+export function checkCoreAccountHomeserverChangeLoginAbort() {
+  const rule = "core.account.homeserver_change_login_abort";
+  const logout = accountItemBody("session_lifecycle.rs", "async fn perform_logout");
+  const abort = accountItemBody("session_lifecycle.rs", "async fn abort_login");
+  const failures = [];
+  if (!logout?.includes("self.abort_login(login_session, &key_id, false, server_logout)")) failures.push(sourceContractFailure(rule, "logout does not pass server_logout to login abort"));
+  for (const marker of ["if server_logout", "koushi_sdk::logout"]) if (!abort?.includes(marker)) failures.push(sourceContractFailure(rule, `login abort lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreAccountAuthenticationQuarantine() {
+  const rule = "core.account.authentication_quarantine";
+  const password = accountItemBody("session_lifecycle.rs", "async fn handle_login_password");
+  const restore = accountItemBody("session_lifecycle.rs", "async fn restore_account");
+  const continuation = accountItemBody("sliding_sync.rs", "async fn continue_sliding_sync_admission");
+  const completion = accountItemBody("sliding_sync.rs", "async fn finish_sliding_sync_capability_discovery");
+  const failures = [];
+  const before = password?.split("AppAction::LoginSucceeded")[0] ?? "";
+  for (const marker of ["begin_sliding_sync_capability_discovery"]) if (!before.includes(marker)) failures.push(sourceContractFailure(rule, `password login lacks ${marker}`));
+  for (const marker of ["persist_session(", "spawn_sync_actor(", "install_provisional_session"]) if (before.includes(marker)) failures.push(sourceContractFailure(rule, `password login performs premature ${marker}`));
+  const beforeRestore = restore?.split("AppAction::RestoreSessionSucceeded")[0] ?? "";
+  if (!beforeRestore.includes("begin_sliding_sync_capability_discovery")) failures.push(sourceContractFailure(rule, "restore lacks capability discovery"));
+  for (const marker of ["spawn_sync_actor(", "install_provisional_session"]) if (beforeRestore.includes(marker)) failures.push(sourceContractFailure(rule, `restore performs premature ${marker}`));
+  if (!continuation?.includes("install_provisional_session")) failures.push(sourceContractFailure(rule, "sliding-sync admission does not install the provisional session"));
+  if (completion?.includes("self.continue_sliding_sync_admission(")) failures.push(sourceContractFailure(rule, "capability completion bypasses reducer continuation"));
+  return failures;
+}
+
+export function checkCoreAccountRestoreTrace() {
+  const rule = "core.account.restore_trace";
+  const restoreLast = accountItemBody("session_lifecycle.rs", "async fn handle_restore_last_session");
+  const restore = accountItemBody("session_lifecycle.rs", "async fn restore_account");
+  const continuation = accountItemBody("sliding_sync.rs", "async fn continue_sliding_sync_admission");
+  const actor = accountProductionSource("actor.rs");
+  const failures = [];
+  for (const marker of ["trace_account_request(\"restore_last_session\", request_id, \"load_pointer\")", "executor::spawn_blocking", "trace_account_request(\"restore_last_session\", request_id, \"pointer_found\")"]) if (!restoreLast?.includes(marker)) failures.push(sourceContractFailure(rule, `startup restore lacks ${marker}`));
+  if (!restore?.includes("trace_account_request(\"restore_account\", request_id, \"load_session\")")) failures.push(sourceContractFailure(rule, "restore lacks load-session trace"));
+  for (const marker of ["trace_account_request(", "\"restore_account\"", "core_request_id", "\"store_restore_ok\"", "install_provisional_session"]) if (!continuation?.includes(marker)) failures.push(sourceContractFailure(rule, `restore continuation lacks ${marker}`));
+  if (restore?.includes("sync_actor_spawned")) failures.push(sourceContractFailure(rule, "restore reports sync actor spawn"));
+  if (!actor.includes("DiagnosticField::request_id")) failures.push(sourceContractFailure(rule, "account diagnostics lack request correlation"));
+  for (const source of [restoreLast, restore, continuation]) if (source?.includes("account_name()")) failures.push(sourceContractFailure(rule, "restore diagnostics expose an account identifier"));
+  return failures;
+}
+
+export function checkCoreAccountRestoreDiagnostics() {
+  const rule = "core.account.restore_diagnostics";
+  const restore = accountItemBody("session_lifecycle.rs", "async fn restore_into_store");
+  const recovery = accountItemBody("recovery_backup.rs", "async fn handle_recovery_finished");
+  const promotion = accountItemBody("trust_gate.rs", "async fn promote_recovered_session_runtime");
+  const failures = [];
+  for (const marker of ["\"store_config_ready\"", "\"sdk_restore_begin\"", "\"sdk_restore_ok\""]) if (!restore?.includes(marker)) failures.push(sourceContractFailure(rule, `restore diagnostics lack ${marker}`));
+  if (!recovery?.includes("\"post_recovery_trust_read\"")) failures.push(sourceContractFailure(rule, "recovery diagnostics lack post-recovery trust read"));
+  for (const marker of ["\"persisted\"", "\"promoted\"", "current_device_trust_token"]) if (!promotion?.includes(marker)) failures.push(sourceContractFailure(rule, `recovery promotion diagnostics lack ${marker}`));
+  return failures;
+}
+
+export function checkCoreAccountPasswordStoreFirst() {
+  const rule = "core.account.password_store_first";
+  const login = accountItemBody("session_lifecycle.rs", "async fn handle_login_password");
+  const failures = [];
+  for (const marker of ["Homeserver::parse", "existing_account_store_config", "pending_login_owner()", "login_with_password_with_new_device", "login_with_password_with_store_and_device"]) if (!login?.includes(marker)) failures.push(sourceContractFailure(rule, `password login lacks ${marker}`));
+  for (const marker of ["login_with_existing_device", "fallback_to_fresh_device"]) if (login?.includes(marker)) failures.push(sourceContractFailure(rule, `password login contains forbidden ${marker}`));
+  return failures;
+}
+
+export function checkCoreAccountSessionChangeObserver() {
+  const rule = "core.account.session_change_observer";
+  const start = accountItemBody("session_lifecycle.rs", "fn start_session_change_observer");
+  const run = accountItemBody("session_lifecycle.rs", "async fn run_session_change_observation");
+  const handler = accountItemBody("session_lifecycle.rs", "async fn handle_session_invalidated");
+  const failures = [];
+  for (const [body, marker] of [[start, "subscribe_to_session_changes()"], [run, "matrix_sdk::SessionChange::UnknownToken(data)"], [run, "soft_logout: data.soft_logout"], [handler, "AppAction::SessionAuthenticationInvalidated"], [handler, "self.stop_current_session_runtime().await"]]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `session-change observer lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreAccountSoftLogoutReauth() {
+  const rule = "core.account.soft_logout_reauth";
+  const reauth = accountItemBody("session_lifecycle.rs", "async fn handle_soft_logout_reauth");
+  const logout = accountItemBody("session_lifecycle.rs", "async fn perform_logout");
+  const failures = [];
+  const positions = ["drop(self.session.take())", "preflight_saved_crypto_store", "login_with_password_with_store_and_device"].map((marker) => reauth?.indexOf(marker) ?? -1);
+  if (positions.some((position) => position < 0) || !(positions[0] < positions[1] && positions[1] < positions[2])) failures.push(sourceContractFailure(rule, "reauth does not retire, preflight, and replace in order"));
+  for (const marker of ["locked_session_record = Some", "prepare_store_backed_session(&login_session, true)"]) if (!reauth?.includes(marker)) failures.push(sourceContractFailure(rule, `reauth lacks ${marker}`));
+  for (const marker of ["locked_session_record.take()", "AppAction::LogoutFinished"]) if (!logout?.includes(marker)) failures.push(sourceContractFailure(rule, `logout lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreAccountCredentialStoreBlocking() {
+  const rule = "core.account.credential_store_blocking";
+  const cases = [
+    ["session_lifecycle.rs", "async fn persist_session"],
+    ["session_lifecycle.rs", "async fn clear_account_persistence"],
+    ["session_lifecycle.rs", "async fn lookup_session_key_id"],
+    ["session_lifecycle.rs", "async fn handle_query_saved_sessions"],
+    ["local_data_cleanup.rs", "async fn handle_probe_local_encryption_health"]
+  ];
+  const failures = [];
+  for (const [file, marker] of cases) if (!accountItemBody(file, marker)?.includes("executor::spawn_blocking")) failures.push(sourceContractFailure(rule, `${marker} does not use the blocking port`));
+  return failures;
+}
+
+export function checkCoreAccountSecureBackupLatch() {
+  const rule = "core.account.secure_backup_latch";
+  const inspection = accountItemBody("recovery_backup.rs", "fn start_secure_backup_inspection");
+  const stateChange = accountItemBody("recovery_backup.rs", "async fn handle_secure_backup_state_changed");
+  const teardown = accountItemBody("runtime_children.rs", "async fn stop_current_session_runtime");
+  const completion = accountItemBody("recovery_backup.rs", "async fn finish_secure_backup_inspection");
+  const failures = [];
+  if (inspection?.includes("set_secure_backup_send_admitted(false)")) failures.push(sourceContractFailure(rule, "periodic backup inspection closes established admission"));
+  for (const [body, marker] of [[stateChange, "set_secure_backup_send_admitted(false)"], [teardown, "set_secure_backup_send_admitted(false)"], [completion, "set_secure_backup_send_admitted(admitted)"]]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `backup latch lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreAccountSessionStatusRefreshTeardown() {
+  const rule = "core.account.session_status_refresh_teardown";
+  const body = accountItemBody("runtime_children.rs", "async fn stop_current_session_runtime");
+  return body?.includes("cancel_current_session_status_refresh().await") ? [] : [sourceContractFailure(rule, "runtime teardown does not cancel session-status refresh")];
+}
+
+export function checkCoreAccountProvisionalSyncRetry() {
+  const rule = "core.account.provisional_sync_retry";
+  const owner = accountSection("trust_gate.rs", "fn start_provisional_encryption_sync", "pub(super) async fn stop_provisional_encryption_sync");
+  const failures = [];
+  const branch = owner?.indexOf("if !first_response_seen.load(Ordering::Acquire)") ?? -1;
+  const sleep = owner?.indexOf("executor::sleep(Duration::from_millis(250)).await;") ?? -1;
+  const continueAt = sleep >= 0 ? owner.indexOf("continue;", sleep) : -1;
+  const failed = continueAt >= 0 ? owner.indexOf("AccountMessage::ProvisionalEncryptionSyncFailed", continueAt) : -1;
+  if (branch < 0 || sleep < 0 || continueAt < 0 || failed < 0 || !(branch < sleep && sleep < continueAt && continueAt < failed)) failures.push(sourceContractFailure(rule, "provisional sync retry does not remain under its owner before terminal failure"));
+  return failures;
+}
+
+export function checkCoreAccountProvisionalSyncFirstResponse() {
+  const rule = "core.account.provisional_sync_first_response";
+  const owner = accountSection("trust_gate.rs", "fn start_provisional_encryption_sync", "pub(super) async fn stop_provisional_encryption_sync");
+  const send = owner?.indexOf("callback_tx.send(message).await.is_ok()") ?? -1;
+  const publish = owner?.indexOf("callback_first_response_seen.store(true, Ordering::Release)") ?? -1;
+  return send >= 0 && publish >= 0 && send < publish ? [] : [sourceContractFailure(rule, "provisional first-response publication precedes actor delivery")];
+}
+
+export function checkCoreAccountAdmissionTimeoutTeardown() {
+  const rule = "core.account.admission_timeout_teardown";
+  const body = accountItemBody("session_lifecycle.rs", "pub(super) async fn stop_provisional_runtime");
+  return body?.includes("cancel_verification_method_discovery_admission_timeout()") ? [] : [sourceContractFailure(rule, "provisional runtime teardown does not cancel admission timeout")];
+}
+
+export function checkCoreAccountProvisionalEncryptionSyncService() {
+  const rule = "core.account.provisional_encryption_sync_service";
+  const body = accountItemBody("trust_gate.rs", "fn start_provisional_encryption_sync");
+  const failures = [];
+  if (!body?.includes("provisional_encryption_sync_loop")) failures.push(sourceContractFailure(rule, "provisional verification lacks EncryptionSyncService loop"));
+  if (body?.includes("restricted_verification_sync_once_with_token")) failures.push(sourceContractFailure(rule, "provisional verification constructs classic sync"));
+  return failures;
+}
+
+export function checkCoreAccountQaDeviceKeyRefresh() {
+  const rule = "core.account.qa_device_key_refresh";
+  const helper = accountItemBody("trust_gate.rs", "async fn refresh_device_keys_and_assert_known");
+  const query = helper?.indexOf("request_user_identity(&user_id)") ?? -1;
+  const device = helper?.indexOf("get_device(&user_id, &device_id)") ?? -1;
+  const failures = [];
+  if (query < 0 || device < 0 || query >= device) failures.push(sourceContractFailure(rule, "QA device refresh does not query before exact-device assertion"));
+  if (device < 0 || !helper?.slice(device).includes(".ok_or(())?")) failures.push(sourceContractFailure(rule, "QA device refresh does not require the exact device"));
+  return failures;
+}
+
+export function checkCoreAccountVerificationDiscoveryCompletion() {
+  const rule = "core.account.verification_discovery_completion";
+  const actor = accountProductionSource("actor.rs");
+  const completion = actor.split("AccountMessage::VerificationMethodsDiscovered")[1]?.split("AccountMessage::RecoveryFinished")[0];
+  const failures = [];
+  if (completion?.includes("owned.task.await")) failures.push(sourceContractFailure(rule, "verification discovery completion awaits its sender task"));
+  if (!completion?.includes("success_projected")) failures.push(sourceContractFailure(rule, "verification discovery completion lacks success projection diagnostic"));
+  return failures;
+}
+
+export function checkCoreAccountSasAdoption() {
+  const rule = "core.account.sas_adoption";
+  const body = accountItemBody("verification.rs", "async fn store_sas_verification(");
+  const failures = [];
+  const classify = body?.indexOf("resolve_sas_adoption(") ?? -1;
+  const earlyReturn = body?.indexOf("return;") ?? -1;
+  if (classify < 0 || earlyReturn < 0 || classify >= earlyReturn) failures.push(sourceContractFailure(rule, "SAS adoption classifies after its early return"));
+  if (!body?.includes("koushi_sdk::cancel_sas_verification(&handle)")) failures.push(sourceContractFailure(rule, "conflicting SAS handle is not cancelled"));
+  for (const marker of ["self.stop_sas_verification_observer().await", "self.sas_verification = Some", "self.start_sas_timeout(", "self.observe_sas_verification(", "koushi_sdk::accept_sas_verification("]) {
+    const position = body?.indexOf(marker) ?? -1;
+    if (position < 0 || position <= earlyReturn) failures.push(sourceContractFailure(rule, `SAS adoption guard does not precede ${marker}`));
+  }
+  return failures;
+}
+
+export function checkCoreAccountIncomingVerificationAdmission() {
+  const rule = "core.account.incoming_verification_admission";
+  const body = accountItemBody("verification.rs", "async fn handle_incoming_verification_request");
+  const failures = [];
+  const positions = ["own_user_active: self.own_user_verification.is_some()", "match decision", "koushi_sdk::cancel_verification_request(&handle).await", "self.verification_request = Some", "self.observe_verification_request("].map((marker) => body?.indexOf(marker) ?? -1);
+  if (positions.some((position) => position < 0) || positions[0] >= positions[1] || positions[2] >= positions[3] || positions[2] >= positions[4]) failures.push(sourceContractFailure(rule, "incoming verification admission ordering is incomplete"));
+  return failures;
+}
+
+export function checkCoreAccountIdentityResetAuthLifecycle() {
+  const rule = "core.account.identity_reset_auth_lifecycle";
+  const fields = accountItemBody("actor.rs", "pub struct AccountActor {");
+  const route = accountItemBody("actor.rs", "async fn handle_command");
+  const cancel = accountItemBody("verification.rs", "async fn handle_cancel_identity_reset");
+  const required = accountItemBody("recovery_backup.rs", "IdentityResetOutcome::AuthRequired(handle)");
+  const timeout = accountItemBody("verification.rs", "async fn handle_identity_reset_auth_timeout");
+  const cleanup = accountItemBody("verification.rs", "async fn cancel_identity_reset_handle");
+  const failures = [];
+  for (const [body, marker] of [[fields, "identity_reset_timeout_task"], [route, "AccountCommand::CancelIdentityReset"], [cancel, "AppAction::ResetIdentityCancelled"], [required, "spawn_identity_reset_auth_timeout"], [timeout, "AppAction::ResetIdentityTimedOut"], [cleanup, "identity_reset_timeout_task"]]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `identity-reset lifecycle lacks ${marker}`));
+  return failures;
+}
+
 export function runSourceContractRules() {
   return [
+    checkCoreAccountSessionReplacementTeardown(),
+    checkCoreAccountReliableReducerDelivery(),
+    checkCoreAccountLoginHydrationOrder(),
+    checkCoreAccountHydrationGenerationFence(),
+    checkCoreAccountAliasFailureReconciliation(),
+    checkCoreAccountSecureBackupMonitorOwner(),
+    checkCoreAccountE2eeTypedFailureClassification(),
+    checkCoreAccountRecoveryKeyHydrationOrder(),
+    checkCoreAccountCrawlerNotificationLatestWins(),
+    checkCoreAccountSyncStopRouting(),
+    checkCoreAccountManualSyncOnceGuard(),
+    checkCoreAccountSessionEstablishedHandoff(),
+    checkCoreAccountSecureBackupContentBarrier(),
+    checkCoreAccountLocalScheduledSendNoBackupFence(),
+    checkCoreAccountExplicitLogoutTeardown(),
+    checkCoreAccountRestoreEventCacheStatus(),
+    checkCoreAccountHomeserverChangeLoginAbort(),
+    checkCoreAccountAuthenticationQuarantine(),
+    checkCoreAccountRestoreTrace(),
+    checkCoreAccountRestoreDiagnostics(),
+    checkCoreAccountPasswordStoreFirst(),
+    checkCoreAccountSessionChangeObserver(),
+    checkCoreAccountSoftLogoutReauth(),
+    checkCoreAccountCredentialStoreBlocking(),
+    checkCoreAccountSecureBackupLatch(),
+    checkCoreAccountSessionStatusRefreshTeardown(),
+    checkCoreAccountProvisionalSyncRetry(),
+    checkCoreAccountProvisionalSyncFirstResponse(),
+    checkCoreAccountAdmissionTimeoutTeardown(),
+    checkCoreAccountProvisionalEncryptionSyncService(),
+    checkCoreAccountQaDeviceKeyRefresh(),
+    checkCoreAccountVerificationDiscoveryCompletion(),
+    checkCoreAccountSasAdoption(),
+    checkCoreAccountIncomingVerificationAdmission(),
+    checkCoreAccountIdentityResetAuthLifecycle(),
     checkStateFocusedContextReducerContract(),
     checkStateHasNoLegacySyncModeVocabulary(),
     checkSdkPasswordSmokeRuntimeSafety(),

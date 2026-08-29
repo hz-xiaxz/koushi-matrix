@@ -684,26 +684,6 @@ mod tests {
         assert_no_logout_finished(&mut action_rx);
     }
 
-    #[test]
-    fn session_established_handoff_to_room_actor_is_reliable() {
-        let spawn_body = crate::account::test_source::item_body(
-            include_str!("runtime_children.rs"),
-            "async fn spawn_sync_actor",
-        );
-        let session_handoff = spawn_body
-            .find(".send(RoomMessage::SessionEstablished")
-            .expect("RoomActor session handoff should use reliable send");
-
-        assert!(
-            !spawn_body.contains("room_actor.try_send(RoomMessage::SessionEstablished"),
-            "SessionEstablished must not be delivered through drop-on-full try_send"
-        );
-        assert!(
-            spawn_body[session_handoff..].contains(".await"),
-            "SessionEstablished handoff must await reliable delivery before dependent actors start"
-        );
-    }
-
     #[tokio::test]
     async fn read_persistence_worker_saves_latest_snapshot_and_joins_after_channel_close() {
         use crate::read_state::{ReadStateEngine, ReadStateKey, ReadTarget, ReadWaiterId};

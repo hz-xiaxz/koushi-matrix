@@ -505,61 +505,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn secure_backup_barrier_covers_normal_and_scheduled_user_content_routes() {
-        for (source, start) in [
-            (
-                include_str!("routing.rs"),
-                "async fn route_timeline_command_with_permit_and_formatting_options",
-            ),
-            (
-                include_str!("scheduled_send.rs"),
-                "async fn handle_schedule_server_delayed_send",
-            ),
-            (
-                include_str!("scheduled_send.rs"),
-                "async fn handle_dispatch_local_scheduled_send",
-            ),
-            (
-                include_str!("scheduled_send.rs"),
-                "async fn handle_reschedule_server_delayed_send",
-            ),
-        ] {
-            let route = crate::account::test_source::item_body(source, start);
-            assert!(
-                route.contains("admit_secure_backup_user_content"),
-                "{start} must use the authoritative AccountActor barrier"
-            );
-        }
-
-        let reschedule = crate::account::test_source::item_body(
-            include_str!("scheduled_send.rs"),
-            "async fn handle_reschedule_server_delayed_send",
-        );
-        let barrier = reschedule
-            .find("admit_secure_backup_user_content")
-            .expect("reschedule barrier");
-        let cancellation = reschedule
-            .find("UpdateAction::Cancel")
-            .expect("delayed-event cancellation");
-        assert!(
-            barrier < cancellation,
-            "a rejected reschedule must leave the existing delayed event intact"
-        );
-    }
-
-    #[test]
-    fn local_scheduled_room_send_does_not_use_per_session_backup_durability_fence() {
-        let handler = crate::account::test_source::item_body(
-            include_str!("scheduled_send.rs"),
-            "async fn handle_dispatch_local_scheduled_send",
-        );
-        assert!(
-            !handler.contains(".require_backed_up_session()"),
-            "direct Room::send must let Secure Backup upload follow asynchronously"
-        );
-    }
-
     #[tokio::test]
     async fn scheduled_acceptance_retains_exact_permit_until_reducer_delivery() {
         let account = SessionKeyId {

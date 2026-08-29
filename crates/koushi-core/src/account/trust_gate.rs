@@ -1347,45 +1347,6 @@ mod tests {
     }
 
     #[test]
-    fn secure_backup_queue_latch_follows_authoritative_gate_lifecycle() {
-        let inspection_start = crate::account::test_source::item_body(
-            include_str!("recovery_backup.rs"),
-            "fn start_secure_backup_inspection",
-        );
-        assert!(
-            !inspection_start.contains("set_secure_backup_send_admitted(false)"),
-            "a periodic health inspection must preserve established admission"
-        );
-
-        let state_change = crate::account::test_source::item_body(
-            include_str!("recovery_backup.rs"),
-            "async fn handle_secure_backup_state_changed",
-        );
-        assert!(
-            state_change.contains("set_secure_backup_send_admitted(false)"),
-            "loss of local backup or recovery readiness must close admission"
-        );
-
-        let teardown = crate::account::test_source::item_body(
-            include_str!("runtime_children.rs"),
-            "async fn stop_current_session_runtime",
-        );
-        assert!(
-            teardown.contains("set_secure_backup_send_admitted(false)"),
-            "runtime teardown must close admission"
-        );
-
-        let completion = crate::account::test_source::item_body(
-            include_str!("recovery_backup.rs"),
-            "async fn finish_secure_backup_inspection",
-        );
-        assert!(
-            completion.contains("set_secure_backup_send_admitted(admitted)"),
-            "the generation-fenced completion must project operational backup authority"
-        );
-    }
-
-    #[test]
     fn session_status_completion_requires_request_and_session_generation_fences() {
         let info = session_status_info();
         for (active_request, active_generation, promoted) in
@@ -1521,18 +1482,6 @@ mod tests {
     }
 
     #[test]
-    fn session_status_refresh_task_is_cancelled_with_the_session_runtime() {
-        let shutdown = crate::account::test_source::item_body(
-            include_str!("runtime_children.rs"),
-            "async fn stop_current_session_runtime",
-        );
-        assert!(
-            shutdown.contains("cancel_current_session_status_refresh().await"),
-            "logout, switch, and shutdown must abort the actor-owned refresh task"
-        );
-    }
-
-    #[test]
     fn method_discovery_rejects_stale_generation_serial_and_missing_session() {
         assert!(method_discovery_is_current(4, 4, 9, 9, true));
         assert!(!method_discovery_is_current(3, 4, 9, 9, true));
@@ -1630,67 +1579,6 @@ mod tests {
     fn provisional_encryption_sync_attempt_starts_only_without_an_active_owner() {
         assert!(begin_provisional_encryption_sync_cursor_attempt(false));
         assert!(!begin_provisional_encryption_sync_cursor_attempt(true));
-    }
-
-    #[test]
-    fn provisional_pre_first_response_failure_retries_under_the_same_owner() {
-        let source = include_str!("trust_gate.rs");
-        let owner = source
-            .split("fn start_provisional_encryption_sync")
-            .nth(1)
-            .expect("provisional owner")
-            .split("pub(super) async fn stop_provisional_encryption_sync")
-            .next()
-            .expect("provisional owner body");
-        let branch_start = owner
-            .find("if !first_response_seen.load(Ordering::Acquire)")
-            .expect("pre-first-response failure branch");
-        let retry_sleep = owner[branch_start..]
-            .find("executor::sleep(Duration::from_millis(250)).await;")
-            .map(|offset| branch_start + offset)
-            .expect("bounded retry backoff");
-        let retry_continue = owner[retry_sleep..]
-            .find("continue;")
-            .map(|offset| retry_sleep + offset)
-            .expect("retry continues under the same owner");
-        let post_first_failure = owner[retry_continue..]
-            .find("AccountMessage::ProvisionalEncryptionSyncFailed")
-            .map(|offset| retry_continue + offset)
-            .expect("post-first-response failure branch");
-        assert!(branch_start < retry_sleep);
-        assert!(retry_sleep < retry_continue);
-        assert!(retry_continue < post_first_failure);
-    }
-
-    #[test]
-    fn provisional_first_response_is_published_only_after_actor_delivery() {
-        let source = include_str!("trust_gate.rs");
-        let owner = source
-            .split("fn start_provisional_encryption_sync")
-            .nth(1)
-            .expect("provisional owner")
-            .split("pub(super) async fn stop_provisional_encryption_sync")
-            .next()
-            .expect("provisional owner body");
-        let send = owner
-            .find("callback_tx.send(message).await.is_ok()")
-            .expect("actor delivery");
-        let publish = owner
-            .find("callback_first_response_seen.store(true, Ordering::Release)")
-            .expect("first-response publication");
-        assert!(
-            send < publish,
-            "a cancelled mailbox send must leave the first-response deadline armed"
-        );
-    }
-
-    #[test]
-    fn admission_timeout_is_cancelled_with_the_provisional_runtime() {
-        let shutdown = crate::account::test_source::item_body(
-            include_str!("session_lifecycle.rs"),
-            "pub(super) async fn stop_provisional_runtime",
-        );
-        assert!(shutdown.contains("cancel_verification_method_discovery_admission_timeout()"));
     }
 
     #[test]
@@ -2344,41 +2232,6 @@ mod tests {
         assert!(trust_projection_ack_matches(&pending, 7, 42, true, false));
     }
 
-    #[test]
-    fn provisional_verification_uses_encryption_sync_service() {
-        let provisional_owner = crate::account::test_source::item_body(
-            include_str!("trust_gate.rs"),
-            "fn start_provisional_encryption_sync",
-        );
-
-        assert!(
-            provisional_owner.contains("provisional_encryption_sync_loop"),
-            "provisional verification must use EncryptionSyncService"
-        );
-        assert!(
-            !provisional_owner.contains("restricted_verification_sync_once_with_token"),
-            "provisional verification must never construct classic /sync"
-        );
-    }
-
-    #[cfg(feature = "qa-bin")]
-    #[test]
-    fn qa_device_key_refresh_queries_before_asserting_the_exact_device() {
-        let helper = crate::account::test_source::item_body(
-            include_str!("trust_gate.rs"),
-            "async fn refresh_device_keys_and_assert_known",
-        );
-        let query = helper
-            .find("request_user_identity(&user_id)")
-            .expect("QA checkpoint must perform an explicit /keys/query");
-        let exact_device = helper
-            .find("get_device(&user_id, &device_id)")
-            .expect("QA checkpoint must require the exact device after refresh");
-
-        assert!(query < exact_device);
-        assert!(helper[exact_device..].contains(".ok_or(())?"));
-    }
-
     #[cfg(feature = "qa-bin")]
     #[tokio::test]
     async fn qa_device_key_refresh_accepts_identityless_exact_device_and_rejects_missing_device() {
@@ -2413,27 +2266,6 @@ mod tests {
             )
             .await,
             Err(())
-        );
-    }
-
-    #[test]
-    fn verification_method_discovery_completion_projects_without_awaiting_sender_task() {
-        let actor_source = include_str!("actor.rs");
-        let completion_arm = actor_source
-            .split("AccountMessage::VerificationMethodsDiscovered")
-            .nth(1)
-            .expect("verification method discovery completion arm")
-            .split("AccountMessage::RecoveryFinished")
-            .next()
-            .expect("recovery completion arm follows method discovery");
-
-        assert!(
-            !completion_arm.contains("owned.task.await"),
-            "the completion arm is handling a message sent by the discovery task; awaiting that task before projection can leave the gate stuck in DiscoveringMethods"
-        );
-        assert!(
-            completion_arm.contains("success_projected"),
-            "successful discovery projection must be diagnosable after completion_received"
         );
     }
 

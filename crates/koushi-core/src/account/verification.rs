@@ -1880,45 +1880,6 @@ mod tests {
     }
 
     #[test]
-    fn sas_handle_adoption_is_classified_before_any_active_flow_side_effect() {
-        let body = crate::account::test_source::item_body(
-            include_str!("verification.rs"),
-            "async fn store_sas_verification(",
-        );
-
-        let classify = body
-            .find("resolve_sas_adoption(")
-            .expect("SAS handle adoption must classify the incoming flow");
-        let early_return = body
-            .find("return;")
-            .expect("replayed or conflicting active SAS flows must exit before adoption");
-        assert!(
-            classify < early_return,
-            "the adoption decision must be made before its no-op return"
-        );
-        assert!(
-            body.contains("koushi_sdk::cancel_sas_verification(&handle)"),
-            "a distinct conflicting SAS handle must be explicitly rejected"
-        );
-
-        for side_effect in [
-            "self.stop_sas_verification_observer().await",
-            "self.sas_verification = Some",
-            "self.start_sas_timeout(",
-            "self.observe_sas_verification(",
-            "koushi_sdk::accept_sas_verification(",
-        ] {
-            let side_effect = body
-                .find(side_effect)
-                .unwrap_or_else(|| panic!("missing expected adoption side effect: {side_effect}"));
-            assert!(
-                early_return < side_effect,
-                "SAS adoption guard must precede side effect: {side_effect}"
-            );
-        }
-    }
-
-    #[test]
     fn sas_adoption_decision_adopts_once_and_rejects_replay_or_conflict() {
         assert_eq!(classify_sas_adoption(None, 41), SasAdoptionDecision::Adopt);
         assert_eq!(
@@ -2067,43 +2028,6 @@ mod tests {
             ),
             IncomingVerificationRequestDecision::Conflict,
             "an own-user verification owns the shared continuation/observer slots",
-        );
-    }
-
-    #[test]
-    fn incoming_actor_admission_checks_own_user_before_replacing_runtime() {
-        let body = crate::account::test_source::item_body(
-            include_str!("verification.rs"),
-            "async fn handle_incoming_verification_request",
-        );
-
-        let own_user_state = body
-            .find("own_user_active: self.own_user_verification.is_some()")
-            .expect("actor admission must include active own-user verification state");
-        let decision_match = body
-            .find("match decision")
-            .expect("incoming admission decision");
-        let cancel = body
-            .find("koushi_sdk::cancel_verification_request(&handle).await")
-            .expect("conflicting incoming request cancellation");
-        let adopt_handle = body
-            .find("self.verification_request = Some")
-            .expect("incoming request handle adoption");
-        let replace_observer = body
-            .find("self.observe_verification_request(")
-            .expect("incoming request observer adoption");
-
-        assert!(
-            own_user_state < decision_match,
-            "own-user activity must feed admission"
-        );
-        assert!(
-            cancel < adopt_handle,
-            "conflict cancellation must precede handle adoption"
-        );
-        assert!(
-            cancel < replace_observer,
-            "conflict cancellation must precede observer adoption"
         );
     }
 
@@ -2685,58 +2609,5 @@ mod tests {
             }
             other => panic!("expected OperationFailed(SessionRequired), got {other:?}"),
         }
-    }
-
-    #[test]
-    fn identity_reset_auth_wait_has_cancel_and_timeout_exits() {
-        let actor_fields = crate::account::test_source::item_body(
-            include_str!("actor.rs"),
-            "pub struct AccountActor {",
-        );
-        let command_route = crate::account::test_source::item_body(
-            include_str!("actor.rs"),
-            "async fn handle_command",
-        );
-        let cancel_handler = crate::account::test_source::item_body(
-            include_str!("verification.rs"),
-            "async fn handle_cancel_identity_reset",
-        );
-        let auth_required_branch = crate::account::test_source::item_body(
-            include_str!("recovery_backup.rs"),
-            "IdentityResetOutcome::AuthRequired(handle)",
-        );
-        let timeout_handler = crate::account::test_source::item_body(
-            include_str!("verification.rs"),
-            "async fn handle_identity_reset_auth_timeout",
-        );
-        let cleanup = crate::account::test_source::item_body(
-            include_str!("verification.rs"),
-            "async fn cancel_identity_reset_handle",
-        );
-
-        assert!(
-            actor_fields.contains("identity_reset_timeout_task"),
-            "AccountActor must retain a timeout task for the pending identity-reset UIA wait"
-        );
-        assert!(
-            command_route.contains("AccountCommand::CancelIdentityReset"),
-            "identity reset must expose a user-invocable cancel command"
-        );
-        assert!(
-            cancel_handler.contains("AppAction::ResetIdentityCancelled"),
-            "cancel command must settle reducer state through a typed cancel action"
-        );
-        assert!(
-            auth_required_branch.contains("spawn_identity_reset_auth_timeout"),
-            "auth-required identity reset waits must schedule a bounded timeout"
-        );
-        assert!(
-            timeout_handler.contains("AppAction::ResetIdentityTimedOut"),
-            "timeout must settle reducer state through a typed timeout action"
-        );
-        assert!(
-            cleanup.contains("identity_reset_timeout_task"),
-            "identity reset cleanup must abort the timeout task together with the SDK handle"
-        );
     }
 }

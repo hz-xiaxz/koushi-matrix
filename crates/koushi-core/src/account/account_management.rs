@@ -525,20 +525,6 @@ mod tests {
         let _ = handle.send(AccountMessage::Shutdown).await;
     }
 
-    #[test]
-    fn session_replacement_uses_the_teardown_that_aborts_discovery() {
-        let install = crate::account::test_source::item_body(
-            include_str!("session_lifecycle.rs"),
-            "async fn install_provisional_session",
-        );
-        let teardown = crate::account::test_source::item_body(
-            include_str!("runtime_children.rs"),
-            "async fn stop_current_session_runtime",
-        );
-        assert!(install.contains("stop_current_session_runtime().await"));
-        assert!(teardown.contains("stop_active_session_account_management_discovery"));
-    }
-
     #[tokio::test]
     async fn shutdown_aborts_active_account_management_discovery() {
         let (handle, _action_rx, release) = promoted_actor_with_blocked_discovery().await;

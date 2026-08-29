@@ -2571,49 +2571,4 @@ mod tests {
                 .any(|field| field.key == "action")
         );
     }
-
-    #[test]
-    fn account_actor_reducer_actions_use_reliable_delivery() {
-        let production_sources = [
-            include_str!("account_management.rs"),
-            include_str!("actor.rs"),
-            include_str!("local_data_cleanup.rs"),
-            include_str!("profile.rs"),
-            include_str!("recovery_backup.rs"),
-            include_str!("routing.rs"),
-            include_str!("runtime_children.rs"),
-            include_str!("scheduled_send.rs"),
-            include_str!("session_lifecycle.rs"),
-            include_str!("sliding_sync.rs"),
-            include_str!("trust_gate.rs"),
-            include_str!("verification.rs"),
-        ];
-        let production_source = |source: &'static str| {
-            source
-                .split("\n#[cfg(test)]\nmod tests {")
-                .next()
-                .unwrap_or(source)
-        };
-        let send_actions_body = crate::account::test_source::item_body(
-            include_str!("actor.rs"),
-            "async fn send_actions",
-        );
-
-        assert!(
-            send_actions_body.contains("self.action_tx.send(actions).await"),
-            "AccountActor reducer actions must await reliable delivery"
-        );
-        assert!(
-            production_sources
-                .iter()
-                .all(|source| !production_source(source).contains("self.reduce(")),
-            "AccountActor command-result reducer actions must not use the lossy reduce helper"
-        );
-        assert!(
-            production_sources.iter().all(|source| {
-                !production_source(source).contains("action_tx.try_send(actions)")
-            }),
-            "AccountActor reducer actions must not be dropped through try_send"
-        );
-    }
 }

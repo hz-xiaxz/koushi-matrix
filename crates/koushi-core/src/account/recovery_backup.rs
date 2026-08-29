@@ -1657,38 +1657,6 @@ mod tests {
     }
 
     #[test]
-    fn secure_backup_monitor_has_one_sixty_second_timer_owner() {
-        let recovery_source = include_str!("recovery_backup.rs");
-        let actor_source = include_str!("actor.rs");
-        assert!(
-            recovery_source.contains(
-                "const SECURE_BACKUP_MONITOR_INTERVAL: Duration = Duration::from_secs(60);"
-            )
-        );
-        assert!(
-            actor_source
-                .contains("secure_backup_monitor_task: Option<crate::executor::JoinHandle<()>>")
-        );
-        let scheduler = crate::account::test_source::item_body(
-            include_str!("recovery_backup.rs"),
-            "fn schedule_secure_backup_monitor",
-        );
-        let retire = crate::account::test_source::item_body(
-            include_str!("recovery_backup.rs"),
-            "fn retire_secure_backup_monitor",
-        );
-        assert!(retire.contains("secure_backup_monitor_task.take()"));
-        assert!(scheduler.contains("SECURE_BACKUP_MONITOR_INTERVAL"));
-        assert!(scheduler.contains("monitor_serial"));
-
-        let inspection_start = crate::account::test_source::item_body(
-            include_str!("recovery_backup.rs"),
-            "fn start_secure_backup_inspection",
-        );
-        assert!(inspection_start.contains("retire_secure_backup_monitor()"));
-    }
-
-    #[test]
     fn secure_backup_monitor_rejects_stale_generation_serial_and_locked_session_wakeups() {
         assert!(secure_backup_monitor_wakeup_is_current(7, 11, true, 7, 11));
         assert!(!secure_backup_monitor_wakeup_is_current(7, 11, true, 6, 11));
@@ -2156,47 +2124,6 @@ mod tests {
     }
 
     #[test]
-    fn e2ee_key_management_failures_use_typed_classification() {
-        let recovery_source = include_str!("recovery_backup.rs");
-        let export_handler = crate::account::test_source::item_body(
-            include_str!("recovery_backup.rs"),
-            "async fn handle_export_room_keys",
-        );
-        let import_handler = crate::account::test_source::item_body(
-            include_str!("recovery_backup.rs"),
-            "async fn handle_import_room_keys",
-        );
-        let setup_handler = crate::account::test_source::item_body(
-            include_str!("recovery_backup.rs"),
-            "async fn handle_bootstrap_secure_backup",
-        );
-        let passphrase_handler = crate::account::test_source::item_body(
-            include_str!("recovery_backup.rs"),
-            "async fn handle_change_secure_backup_passphrase",
-        );
-
-        for handler in [
-            export_handler,
-            import_handler,
-            setup_handler,
-            passphrase_handler,
-        ] {
-            assert!(
-                handler.contains("classify_e2ee_trust_error(&error)"),
-                "E2EE key-management failures must preserve coarse typed failure kinds"
-            );
-            assert!(
-                !handler.contains("Err(_)"),
-                "E2EE key-management handlers must not erase typed errors before classification"
-            );
-        }
-        assert!(
-            recovery_source.contains("InvalidPassphrase"),
-            "trust failure kinds must distinguish invalid room-key/backup passphrases"
-        );
-    }
-
-    #[test]
     fn e2ee_trust_sdk_results_project_actions_and_typed_events() {
         let request_id = test_request_id();
         let account_key = AccountKey("@alice:example.test".to_owned());
@@ -2317,33 +2244,6 @@ mod tests {
                 })
             ]
         ));
-    }
-
-    #[test]
-    fn submit_recovery_hydrates_joined_room_keys_after_secret_recovery() {
-        let submit = crate::account::test_source::item_body(
-            include_str!("recovery_backup.rs"),
-            "async fn handle_submit_recovery",
-        );
-        let complete = crate::account::test_source::item_body(
-            include_str!("recovery_backup.rs"),
-            "async fn complete_recovery_after_verified",
-        );
-
-        let recover_offset = submit
-            .find("koushi_sdk::recover_e2ee")
-            .expect("submit recovery should recover the secret first");
-        let restore_request_offset = submit.len()
-            + complete
-                .find("AppAction::RestoreKeyBackupRequested")
-                .expect("submit recovery should project key backup restore state");
-        let restore_offset = submit.len()
-            + complete
-                .find("koushi_sdk::download_joined_room_keys_from_backup")
-                .expect("submit recovery should hydrate joined room keys from backup");
-
-        assert!(recover_offset < restore_request_offset);
-        assert!(restore_request_offset < restore_offset);
     }
 
     #[test]

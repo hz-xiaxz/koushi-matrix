@@ -179,3 +179,58 @@ All src-tauri rows were source-only and were removed; the three non-Rust JSON em
 | `lib.rs:single_instance_reopen_shows_existing_main_window` | single-instance reopen path | `desktop.native.reopen_contract` |
 | `lib.rs:macos_run_event_reopen_shows_existing_main_window` | macOS reopen path | `desktop.native.reopen_contract` |
 | `viewport_sync.rs:native_access_and_recovery_mechanisms_are_isolated` | no resize/DOM dispatch fallback | `desktop.viewport.native_adapter_isolation` |
+
+## Complete account source-contract mapping
+
+This is the complete account-module ledger for the migration. The eight rows
+from the earlier account slice are repeated here so every account file is
+covered in one table. Include counts are the old `include_str!` invocations;
+all mapped assertions are now owned by the named checker rule. `Removed` means
+source-only test deletion. No mixed tests occurred in this slice, so no
+behavioral or compile assertion was removed. No additional vacuous self-match
+was found in the account mappings.
+
+| Account file:test | Source includes | Checker rule | Disposition |
+| --- | ---: | --- | --- |
+| `account_work.rs:(none)` | 0 | — | No source contract |
+| `account_management.rs:session_replacement_uses_the_teardown_that_aborts_discovery` | 2 | `core.account.session_replacement_teardown` | Removed (prior slice) |
+| `actor.rs:account_actor_reducer_actions_use_reliable_delivery` | 13 | `core.account.reliable_reducer_delivery` | Removed (prior slice) |
+| `local_data_cleanup.rs:(none)` | 0 | — | No source contract |
+| `profile.rs:login_success_is_not_blocked_by_optional_account_hydration` | 2 | `core.account.login_hydration_order` | Removed (prior slice) |
+| `profile.rs:async_account_hydration_is_generation_gated` | 2 | `core.account.hydration_generation_fence` | Removed (prior slice) |
+| `profile.rs:local_user_alias_failure_reconciles_authoritative_aliases` | 1 | `core.account.alias_failure_reconciliation` | Removed (prior slice) |
+| `recovery_backup.rs:secure_backup_monitor_has_one_sixty_second_timer_owner` | 5 | `core.account.secure_backup_monitor_owner` | Removed (prior slice) |
+| `recovery_backup.rs:e2ee_key_management_failures_use_typed_classification` | 5 | `core.account.e2ee_typed_failure_classification` | Removed (prior slice) |
+| `recovery_backup.rs:submit_recovery_hydrates_joined_room_keys_after_secret_recovery` | 2 | `core.account.recovery_key_hydration_order` | Removed (prior slice) |
+| `routing.rs:search_crawler_room_notifications_are_latest_wins_and_nonblocking` | 1 | `core.account.crawler_notification_latest_wins` | Removed |
+| `routing.rs:sync_stop_command_must_not_spawn_missing_sync_actor` | 1 | `core.account.sync_stop_routing` | Removed |
+| `routing.rs:manual_sync_once_rejection_precedes_sync_actor_spawn_and_send` | 1 | `core.account.manual_sync_once_guard` | Removed |
+| `runtime_children.rs:session_established_handoff_to_room_actor_is_reliable` | 1 | `core.account.session_established_handoff` | Removed |
+| `scheduled_send.rs:secure_backup_barrier_covers_normal_and_scheduled_user_content_routes` | 5 | `core.account.secure_backup_content_barrier` | Removed |
+| `scheduled_send.rs:local_scheduled_room_send_does_not_use_per_session_backup_durability_fence` | 1 | `core.account.local_scheduled_send_no_backup_fence` | Removed |
+| `session_lifecycle.rs:explicit_logout_selects_the_non_preserving_teardown_path` | 2 | `core.account.explicit_logout_teardown` | Removed |
+| `session_lifecycle.rs:restore_into_store_emits_event_cache_status_without_failing_restore` | 3 | `core.account.restore_event_cache_status` | Removed |
+| `session_lifecycle.rs:changing_homeserver_does_not_logout_pending_login_on_the_old_server` | 2 | `core.account.homeserver_change_login_abort` | Removed |
+| `session_lifecycle.rs:authentication_completion_installs_quarantine_before_ready_side_effects` | 4 | `core.account.authentication_quarantine` | Removed |
+| `session_lifecycle.rs:restore_trace_covers_startup_restore_boundaries_without_private_ids` | 4 | `core.account.restore_trace` | Removed |
+| `session_lifecycle.rs:verification_restore_diagnostics_separate_trust_timing_from_persistence` | 3 | `core.account.restore_diagnostics` | Removed |
+| `session_lifecycle.rs:password_login_is_persistent_store_first_without_saved_fallback` | 1 | `core.account.password_store_first` | Removed |
+| `session_lifecycle.rs:session_change_observer_routes_unknown_token_to_session_lock` | 3 | `core.account.session_change_observer` | Removed |
+| `session_lifecycle.rs:soft_logout_reauth_keeps_locked_session_until_password_login_succeeds` | 2 | `core.account.soft_logout_reauth` | Removed |
+| `session_lifecycle.rs:account_actor_credential_store_hot_paths_use_blocking_port` | 5 | `core.account.credential_store_blocking` | Removed |
+| `sliding_sync.rs:(none)` | 0 | — | No source contract |
+| `trust_gate.rs:secure_backup_queue_latch_follows_authoritative_gate_lifecycle` | 4 | `core.account.secure_backup_latch` | Removed |
+| `trust_gate.rs:session_status_refresh_task_is_cancelled_with_the_session_runtime` | 1 | `core.account.session_status_refresh_teardown` | Removed |
+| `trust_gate.rs:provisional_pre_first_response_failure_retries_under_the_same_owner` | 1 | `core.account.provisional_sync_retry` | Removed |
+| `trust_gate.rs:provisional_first_response_is_published_only_after_actor_delivery` | 1 | `core.account.provisional_sync_first_response` | Removed |
+| `trust_gate.rs:admission_timeout_is_cancelled_with_the_provisional_runtime` | 1 | `core.account.admission_timeout_teardown` | Removed |
+| `trust_gate.rs:provisional_verification_uses_encryption_sync_service` | 1 | `core.account.provisional_encryption_sync_service` | Removed |
+| `trust_gate.rs:qa_device_key_refresh_queries_before_asserting_the_exact_device` | 1 | `core.account.qa_device_key_refresh` | Removed |
+| `trust_gate.rs:verification_method_discovery_completion_projects_without_awaiting_sender_task` | 1 | `core.account.verification_discovery_completion` | Removed |
+| `verification.rs:sas_handle_adoption_is_classified_before_any_active_flow_side_effect` | 1 | `core.account.sas_adoption` | Removed |
+| `verification.rs:incoming_actor_admission_checks_own_user_before_replacing_runtime` | 1 | `core.account.incoming_verification_admission` | Removed |
+| `verification.rs:identity_reset_auth_wait_has_cancel_and_timeout_exits` | 6 | `core.account.identity_reset_auth_lifecycle` | Removed |
+
+Slice result: 58 account-scoped Rust-source includes removed from 27
+source-only tests. Mixed tests retained: 0. Account-scoped Rust-source includes
+remaining: 0. `runSourceContractRules`: 0 violations.
