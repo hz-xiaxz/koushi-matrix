@@ -1,6 +1,6 @@
 # Issue #750 canon and low-risk architecture cleanup
 
-Status: implemented and locally verified; exact-final-tree review and hosted PR gates pending.
+Status: implemented, locally verified, and approved by exact-final-tree review; hosted PR gates pending.
 
 ## Outcome
 
@@ -75,7 +75,7 @@ Local homeserver or native GUI behavior is not changed; those lanes may be satis
 - Final-diff reviewer round 2: `reviewer-flash`, `VERDICT: CORRECT-TO-MERGE`; all round-1 findings resolved.
 - Final integration/self-review: `gpt-5.6-sol` found and fixed stale CI comments and distinguished the still-live fail-closed Simplified Sliding Sync compatibility admission check from removed backend selection/fallback. No product route, wire contract, or frontend behavior changed.
 - Final-diff reviewer round 3: `reviewer-flash`, `VERDICT: CORRECT-TO-MERGE`; the only minor finding was a stale capability-shutdown forward reference, corrected to name the live `settle_sliding_sync_revalidation` path.
-- Final-diff reviewer round 4: pending on the exact review-record tree.
+- Final-diff reviewer round 4: `reviewer-flash`, `VERDICT: CORRECT-TO-MERGE`; the round-3 shutdown-path correction matches the live reducer → runtime → AccountActor → ordered session-runtime shutdown chain, with no blocking findings.
 
 ## Implementation evidence
 
