@@ -821,6 +821,7 @@ fn project_display_items(
 
     let mut root_at_index = HashMap::<usize, TimelineItem>::new();
     let mut suppressed = HashSet::new();
+    let mut scheduled_roots = HashSet::new();
     for slot in slots {
         let event_id = match &slot.item.id {
             TimelineItemId::Event { event_id } => event_id.as_str(),
@@ -857,6 +858,7 @@ fn project_display_items(
             };
         let item = root_display_item(root, &slot.item, activity_event_id, display_timestamp_ms);
         root_at_index.insert(display_index, item);
+        scheduled_roots.insert(event_id.to_owned());
         if display_index != slot.canonical_index {
             suppressed.insert(slot.canonical_index);
         }
@@ -865,6 +867,36 @@ fn project_display_items(
         {
             suppressed.insert(*activity_index);
         }
+    }
+
+    // Root lifecycle is owned by `context.thread_roots`, not by the bounded
+    // canonical window. Under LatestReply ordering the activity can remain in
+    // the window after the root event has been trimmed out. Materialize the
+    // retained root at that activity position before suppressing the reply.
+    for root in &context.thread_roots {
+        let root_id = root.root_event_id.as_str();
+        if scheduled_roots.contains(root_id)
+            || context.thread_root_order != TimelineThreadRootOrder::LatestReply
+        {
+            continue;
+        }
+        let Some((activity_index, _)) = activity_slots.get(root_id) else {
+            continue;
+        };
+        let item = root.item.as_ref().map_or_else(
+            || root_placeholder_item(root),
+            |item| {
+                root_display_item(
+                    root,
+                    item,
+                    root.activity_event_id.clone(),
+                    root.activity_timestamp_ms.or(item.timestamp_ms),
+                )
+            },
+        );
+        root_at_index.insert(*activity_index, item);
+        suppressed.insert(*activity_index);
+        scheduled_roots.insert(root.root_event_id.clone());
     }
 
     let mut projected = Vec::new();
@@ -888,11 +920,7 @@ fn project_display_items(
     }
     for root in &context.thread_roots {
         let root_id = root.root_event_id.as_str();
-        if activity_slots.contains_key(root_id)
-            || slots.iter().any(|slot| {
-                matches!(&slot.item.id, TimelineItemId::Event { event_id } if event_id == root_id)
-            })
-        {
+        if scheduled_roots.contains(root_id) {
             continue;
         }
         let Some(item) = root.item.as_ref() else {
@@ -2469,7 +2497,6 @@ mod tests {
                 TimelineThreadRootOrder::LatestReply,
                 vec![root_data.clone()],
             );
-            let mut root_seen = false;
             for batch in batches {
                 project_sdk_batch(&mut canonical, &mut state, &batch, &context);
                 let present = state.display_items().iter().any(|item| {
@@ -2478,12 +2505,10 @@ mod tests {
                         .is_some_and(|metadata| metadata.row_id == "thread-root:$root:test")
                 });
                 assert!(
-                    !root_seen || present,
-                    "an admitted root must not oscillate out"
+                    present,
+                    "a retained root must be present in every projection"
                 );
-                root_seen |= present;
             }
-            assert!(root_seen);
             final_rows.push(
                 state
                     .display_items()
@@ -2494,6 +2519,74 @@ mod tests {
         }
         assert!(final_rows.windows(2).all(|pair| pair[0] == pair[1]));
         assert_eq!(final_rows[0], ["thread-root:$root:test"]);
+    }
+
+    #[test]
+    fn latest_reply_keeps_retained_root_visible_after_root_leaves_window() {
+        let key = room_key();
+        let root = timeline_item("$root:test", Some("root"), "@a:test", false);
+        let mut reply = timeline_item("$reply:test", Some("reply"), "@b:test", false);
+        reply.thread_root = Some("$root:test".to_owned());
+        reply.timestamp_ms = Some(400);
+        let context = DisplayProjectionContext::for_timeline(
+            &key.kind,
+            &TimelineViewportObservation::default(),
+            false,
+        )
+        .with_thread_roots(
+            TimelineThreadRootOrder::LatestReply,
+            vec![crate::threads_list::ThreadRootDisplayData {
+                root_event_id: "$root:test".to_owned(),
+                activity_event_id: "$reply:test".to_owned(),
+                activity_timestamp_ms: Some(400),
+                item: Some(root.clone()),
+                aggregate: crate::threads_list::AuthoritativeThreadAggregate {
+                    reply_count: 1,
+                    latest_event_id: Some("$reply:test".to_owned()),
+                    latest_sender: Some("@b:test".to_owned()),
+                    latest_sender_label: Some("B".to_owned()),
+                    latest_body_preview: Some("reply".to_owned()),
+                    latest_timestamp_ms: Some(400),
+                },
+                pending: false,
+                failure_kind: None,
+            }],
+        );
+        let mut canonical = vec![root, reply];
+        let mut state = DisplayProjectionState::from_canonical_window(&canonical, 0..2);
+        state.reproject(&context);
+        assert_eq!(
+            state
+                .display_items()
+                .iter()
+                .map(super::timeline_item_render_id)
+                .collect::<Vec<_>>(),
+            ["thread-root:$root:test"]
+        );
+
+        project_sdk_batch(
+            &mut canonical,
+            &mut state,
+            &[TimelineDiff::Remove { index: 0 }],
+            &context,
+        );
+        assert_eq!(
+            state
+                .display_items()
+                .iter()
+                .map(super::timeline_item_render_id)
+                .collect::<Vec<_>>(),
+            ["thread-root:$root:test"]
+        );
+        let projected_root = &state.display_items()[0];
+        assert_eq!(timeline_item_event_id(projected_root), Some("$root:test"));
+        assert_eq!(
+            projected_root
+                .display_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.activity_event_id.as_deref()),
+            Some("$reply:test")
+        );
     }
 
     #[test]
