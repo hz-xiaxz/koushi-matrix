@@ -128,30 +128,3 @@ fn app_state_wire_has_no_redundant_sync_mode() {
 
     assert!(value.get("sync_mode").is_none());
 }
-
-#[test]
-fn production_state_has_no_legacy_sync_mode_vocabulary() {
-    let sources = [
-        include_str!("../src/state/sync.rs"),
-        include_str!("../src/state/mod.rs"),
-        include_str!("../src/action.rs"),
-        include_str!("../src/effect.rs"),
-        include_str!("../src/reducer/sync.rs"),
-        include_str!("../src/reducer/mod.rs"),
-    ]
-    .join("\n");
-
-    for forbidden in [
-        "SyncMode",
-        "SyncModeFailureKind",
-        "SyncModeChanged",
-        "sync_mode",
-        "LegacySync",
-        "Transitioning",
-    ] {
-        assert!(
-            !sources.contains(forbidden),
-            "production state still contains forbidden sync vocabulary: {forbidden}"
-        );
-    }
-}

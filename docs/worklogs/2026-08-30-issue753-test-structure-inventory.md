@@ -97,3 +97,38 @@ The four allowed non-Rust invocations are state-machine.md, windows-overlay.json
 - `crates/koushi-sdk/src/room_projection.rs:687` — `space_member_projection_tests`, 273 lines
 - `crates/koushi-sdk/src/sync.rs:385` — `tests`, 486 lines
 - `crates/koushi-state/src/reducer/mod.rs:2507` — `tests`, 1606 lines
+
+## Source-contract mapping: koushi-state and koushi-sdk
+
+All rows below had their Rust-source assertion transferred to the named checker rule. “Removed” means the old test was source-only; “retained” means its behavioral/compile-time portion keeps the original Rust test identity.
+
+| Old file:test | Include/assertion facts | Checker rule | Disposition |
+| --- | ---: | --- | --- |
+| `focused_context_state.rs:reducer_source_mentions_the_focused_context_state_machine` | 2 / focused reducer markers | `state.focused_context_reducer_contract` | Removed |
+| `sync_state.rs:production_state_has_no_legacy_sync_mode_vocabulary` | 6 / forbidden vocabulary | `state.no_legacy_sync_mode_vocabulary` | Removed |
+| `password-login-smoke.rs:store_backed_restore_does_not_escape_its_runtime` | 1 / forbidden blocking restore | `sdk.password_smoke_runtime_safety` | Removed |
+| `password-login-smoke.rs:store_backed_session_drop_enters_runtime_context` | 1 / runtime-enter and session-take markers | `sdk.password_smoke_runtime_safety` | Removed |
+| `client_session.rs:matrix_client_store_config_uses_the_required_key_for_sqlite_builder` | 1 / keyed bounded SQLite builder | `sdk.client_store_config_contract` | Retained |
+| `client_session.rs:desktop_client_builder_defaults_enable_threads_share_history_and_readiness` | 1 / desktop builder defaults | `sdk.desktop_client_builder_defaults` | Removed |
+| `client_session.rs:client_builder_defaults_download_backup_keys_after_decryption_failures` | 1 / backup download default | `sdk.backup_download_default` | Removed |
+| `e2ee.rs:recovery_key_path_uses_sdk_signature_publication_only` | 1 / required and forbidden recovery paths | `sdk.recovery.uses_sdk_signature_publication` | Removed |
+| `e2ee.rs:recovery_sdk_records_standard_signature_round_trip_diagnostics` | 2 / vendored SDK diagnostics and privacy | `sdk.recovery.signature_round_trip_contract` | Removed |
+| `room_operations.rs:mark_room_as_read_sends_read_marker_with_private_receipt` | 1 / marker/private receipt path | `sdk.room_read_marker_contract` | Removed |
+| `room_operations.rs:cancel_space_invite_validates_invite_membership_before_kicking` | 1 / ordered invite cancellation path | `sdk.space_invite_cancellation_contract` | Retained |
+| `room_operations.rs:room_tag_operations_use_sdk_tag_methods` | 1 / SDK room-tag calls | `sdk.room_tag_methods` | Removed |
+| `room_operations.rs:pin_operations_use_sdk_pinned_event_methods` | 1 / SDK pin/unpin calls | `sdk.pinned_event_methods` | Removed |
+| `room_operations.rs:room_management_wrappers_use_settings_privacy_and_moderation_apis` | 1 / management call inventory | `sdk.room_management_methods` | Retained; the old `.user_can_invite(own_user_id)` check was vacuous because it matched only its own assertion, so the retained DTO permission assertion is the stronger replacement |
+| `room_projection.rs:joined_room_list_prefers_async_direct_dm_detection` | 1 / direct detection/fallback | `sdk.room_projection.async_direct_detection` | Removed |
+| `room_projection.rs:joined_room_list_snapshot_avoids_full_member_scans` | 1 / bounded room-list projection | `sdk.room_projection.no_full_member_scan` | Removed |
+| `room_projection.rs:joined_room_list_dm_resolution_uses_account_data_cached_and_heroes_candidates` | 1 / bounded DM candidates | `sdk.room_projection.dm_resolution_candidates` | Removed |
+| `room_projection.rs:space_member_ids_are_no_sync_and_space_only` | 1 / no-sync joined membership | `sdk.room_projection.space_member_ids_no_sync` | Removed |
+| `room_projection.rs:joined_only_helpers_do_not_use_active_membership` | 1 / joined/invited membership split | `sdk.room_projection.joined_only_membership` | Removed |
+| `room_projection.rs:space_lookup_failures_are_not_coerced_to_empty_observations` | 1 / error propagation | `sdk.room_projection.space_lookup_failures_propagate` | Removed |
+| `room_projection.rs:failed_space_member_counts_are_reported_as_unavailable` | 1 / unavailable-count diagnostics | `sdk.room_projection.failed_counts_unavailable` | Removed |
+| `room_projection.rs:matrix_room_member_summaries_still_scans_full_members` | 1 / full member-summary path | `sdk.room_projection.member_summaries_full_members` | Removed |
+| `room_projection.rs:live_direct_account_data_loader_is_local_only` | 1 / local account-data path | `sdk.room_projection.direct_account_data_local_only` | Removed |
+| `room_projection.rs:direct_account_data_dm_detection_fetches_server_when_store_misses` | 1 / server fallback path | `sdk.room_projection.direct_account_data_server_fallback` | Removed |
+| `sync.rs:sliding_sync_invite_probe_contract_is_typed_bounded_and_discards_cursor` | 1 / timeout/request ordering and forbidden owners | `sdk.sync.sliding_sync_invite_probe_contract` | Removed |
+| `send_backup_policy.rs:all_session_constructors_leave_the_per_send_backup_fence_disabled` | 12 / disabled backup-fence count | `sdk.sessions.no_per_send_backup_fence` | Removed |
+| `send_backup_policy.rs:library_source_manifest_is_complete_and_unique` | 12 / complete unique source list | `sdk.library_source_manifest` | Removed |
+| `timeline_gap_adapter.rs:committed_room_checkpoint_has_no_legacy_or_room_absent_api` | 12 / forbidden legacy checkpoint API | `sdk.timeline.committed_room_checkpoint_no_legacy_api` | Removed |

@@ -1,5 +1,3 @@
-mod support;
-
 use koushi_sdk::{
     MatrixCommittedRoomTimelineCheckpoint, MatrixLiveTailRefreshCancellation,
     MatrixLiveTailRefreshDiagnostics, MatrixLiveTailRefreshOutcome, MatrixLiveTailRefreshResult,
@@ -137,27 +135,6 @@ fn committed_room_checkpoint_contract_is_backend_neutral_and_closed() {
         matches_gap,
         same_response,
     );
-}
-
-#[test]
-fn committed_room_checkpoint_has_no_legacy_or_room_absent_api() {
-    let sources = support::library_production_sources();
-    for forbidden in [
-        "MatrixCommittedRoomTimelineBackend",
-        "MatrixCommittedRoomTimelineOrigin",
-        "MatrixCommittedRoomUpdatesResponse",
-        "from_committed_observation",
-        "from_legacy_gap_for_testing",
-        "from_legacy_room_absent",
-        "is_room_absent",
-    ] {
-        assert!(
-            sources
-                .iter()
-                .all(|(_, source)| !source.contains(forbidden)),
-            "legacy API remains: {forbidden}"
-        );
-    }
 }
 
 #[test]

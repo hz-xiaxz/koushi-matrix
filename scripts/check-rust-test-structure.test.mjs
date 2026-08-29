@@ -8,6 +8,8 @@ import { test } from "node:test";
 
 import {
   analyzeRustSource,
+  checkSdkRoomReadMarkerContract,
+  checkStateFocusedContextReducerContract,
   findIncludeStrInvocations,
   findInlineTestModules,
   formatViolation
@@ -88,6 +90,25 @@ test("resolves literal and CARGO_MANIFEST_DIR concat include targets", () => {
     "crates/fixture/src/lib.rs"
   ]);
   assert.equal(includes.every(({ exists }) => exists), true);
+});
+
+test("runs representative migrated state and SDK source-contract rules", () => {
+  assert.deepEqual(checkStateFocusedContextReducerContract(), []);
+  assert.deepEqual(checkSdkRoomReadMarkerContract(), []);
+});
+
+test("formats source-contract failures without source contents", () => {
+  const message = formatViolation({
+    kind: "source-contract",
+    rule: "sdk.room_read_marker_contract",
+    message: "mark_room_as_read is missing private_read_receipt"
+  });
+
+  assert.equal(
+    message,
+    "sdk.room_read_marker_contract: mark_room_as_read is missing private_read_receipt"
+  );
+  assert.doesNotMatch(message, /SECRET|@|!/);
 });
 
 test("allows exactly the four current non-Rust artifacts and keeps source diagnostics private", () => {

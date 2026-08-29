@@ -3432,93 +3432,6 @@ mod tests {
         assert!(!debug.contains("42"), "{debug}");
     }
     #[test]
-    fn joined_room_list_prefers_async_direct_dm_detection() {
-        let source = include_str!("room_projection.rs");
-        let projection_body =
-            crate::test_source::item_body(source, "async fn matrix_room_list_snapshot_from_rooms");
-
-        assert!(
-            projection_body.contains("room.is_direct().await"),
-            "joined room projection should read m.direct via async Room::is_direct"
-        );
-        assert!(
-            projection_body.contains("unwrap_or_else(|_| room.is_dm())"),
-            "joined room projection should fall back to cached is_dm when direct lookup fails"
-        );
-    }
-    #[test]
-    fn joined_room_list_snapshot_avoids_full_member_scans() {
-        let source = include_str!("room_projection.rs");
-        let projection_body =
-            crate::test_source::item_body(source, "async fn matrix_room_list_snapshot_from_rooms");
-
-        assert!(projection_body.contains("room.joined_members_count()"));
-        assert!(projection_body.contains("matrix_space_member_user_ids_no_sync(&room).await"));
-        assert!(!projection_body.contains("collect_active_member_profiles"));
-        assert!(
-            !projection_body.contains("room.members(matrix_sdk::RoomMemberships::ACTIVE)"),
-            "room-list projection must not load the full active member list"
-        );
-        assert!(
-            !projection_body.contains("joined_user_ids"),
-            "room-list projection should not derive joined members from joined_user_ids"
-        );
-    }
-    #[test]
-    fn joined_room_list_dm_resolution_uses_account_data_cached_and_heroes_candidates() {
-        let source = include_str!("room_projection.rs");
-        let helper_body =
-            crate::test_source::item_body(source, "async fn matrix_room_list_dm_user_ids");
-
-        assert!(
-            helper_body.contains("direct_targets_by_room.get(&room_id)"),
-            "DM resolution should prefer direct account-data targets first"
-        );
-        assert!(
-            helper_body.contains(".direct_targets()"),
-            "DM resolution should fall back to cached SDK direct targets"
-        );
-        assert!(
-            helper_body.contains("room.heroes()"),
-            "DM resolution should use heroes when the room is already considered a DM"
-        );
-        assert!(
-            helper_body.contains("get_member_no_sync"),
-            "DM resolution should only probe candidate members without syncing the full list"
-        );
-        assert!(
-            helper_body.contains("dm_user_ids.push(candidate_user_id_string.clone())"),
-            "DM resolution should preserve valid direct/cached/hero IDs even when a local member profile is absent"
-        );
-        assert!(
-            !helper_body.contains("room.members(matrix_sdk::RoomMemberships::ACTIVE)"),
-            "DM resolution helper must not hide a full active-member scan behind the hot path"
-        );
-        assert!(
-            !helper_body.contains("room.members_no_sync(matrix_sdk::RoomMemberships::ACTIVE)"),
-            "DM resolution helper must not enumerate every active member even without syncing"
-        );
-    }
-    #[test]
-    fn space_member_ids_are_no_sync_and_space_only() {
-        let source = include_str!("room_projection.rs");
-        let helper_body =
-            crate::test_source::item_body(source, "async fn matrix_space_member_user_ids_no_sync");
-
-        assert!(
-            helper_body.contains("members_no_sync(matrix_sdk::RoomMemberships::JOIN)"),
-            "space membership may read only already-synced local state"
-        );
-        assert!(
-            !helper_body.contains("RoomMemberships::ACTIVE"),
-            "space membership helper must not flatten joined and invited users"
-        );
-        assert!(
-            !helper_body.contains("room.members(matrix_sdk::RoomMemberships::JOIN)"),
-            "space membership helper must not sync/fetch the full member list"
-        );
-    }
-    #[test]
     fn space_member_facts_separate_join_invite_and_child_only() {
         let facts = classify_space_member_ids(
             ["joined", "both"],
@@ -3538,58 +3451,6 @@ mod tests {
             facts.child_room_ids.get("child-only"),
             Some(&vec!["child-a".to_owned(), "child-b".to_owned()])
         );
-    }
-    #[test]
-    fn joined_only_helpers_do_not_use_active_membership() {
-        let source = include_str!("room_projection.rs");
-        let body =
-            crate::test_source::item_body(source, "async fn matrix_space_members_projection");
-        assert!(!body.contains("RoomMemberships::ACTIVE"));
-        assert!(body.contains("members_no_sync(matrix_sdk::RoomMemberships::JOIN)"));
-        assert!(body.contains("members_no_sync(matrix_sdk::RoomMemberships::INVITE)"));
-    }
-    #[test]
-    fn space_lookup_failures_are_not_coerced_to_empty_observations() {
-        let source = include_str!("room_projection.rs");
-        let body =
-            crate::test_source::item_body(source, "pub async fn matrix_space_members_projection");
-        let joined_lookup = body
-            .split("let space_joined_members = match")
-            .nth(1)
-            .expect("Space JOIN lookup exists")
-            .split("let space_invited_members")
-            .next()
-            .expect("Space INVITE lookup follows JOIN lookup");
-        let invited_lookup = body
-            .split("let space_invited_members = match")
-            .nth(1)
-            .expect("Space INVITE lookup exists")
-            .split("let mut space_joined_by_user")
-            .next()
-            .expect("Space member classification follows Space lookups");
-
-        for lookup in [joined_lookup, invited_lookup] {
-            assert!(
-                lookup.contains("Err(error)"),
-                "Space lookup errors must retain their structured error"
-            );
-            assert!(
-                lookup.contains("return Err(MatrixRoomOperationError::from_sdk_error(error))"),
-                "Space lookup errors must abort the projection instead of becoming empty input"
-            );
-        }
-    }
-    #[test]
-    fn failed_space_member_counts_are_reported_as_unavailable() {
-        let source = include_str!("room_projection.rs");
-        let body = crate::test_source::item_body(source, "fn space_members_scope_diagnostic_event");
-
-        assert!(body.contains("space_join_lookup_outcome"));
-        assert!(body.contains("space_invite_lookup_outcome"));
-        assert!(body.contains("counts_unavailable"));
-        assert!(body.contains("space_joined_lookup.observed_count()"));
-        assert!(body.contains("space_invited_lookup.observed_count()"));
-        assert!(body.contains("if let Some(count)"));
     }
     #[test]
     fn space_members_scope_diagnostic_is_private_data_free() {
@@ -3676,17 +3537,6 @@ mod tests {
         }
     }
     #[test]
-    fn matrix_room_member_summaries_still_scans_full_members() {
-        let source = include_str!("room_projection.rs");
-        let helper_body =
-            crate::test_source::item_body(source, "async fn matrix_room_member_summaries");
-
-        assert!(
-            helper_body.contains("room.members(matrix_sdk::RoomMemberships::ACTIVE)"),
-            "member summaries should still be allowed to load the full active member list"
-        );
-    }
-    #[test]
     fn direct_account_data_targets_are_indexed_by_room() {
         use matrix_sdk::ruma::{
             OwnedRoomId, OwnedUserId,
@@ -3743,16 +3593,6 @@ mod tests {
             )]),
         );
     }
-    #[test]
-    fn live_direct_account_data_loader_is_local_only() {
-        let source = include_str!("room_projection.rs");
-        let body = crate::test_source::item_body(
-            source,
-            "pub async fn cached_direct_account_data_targets_by_room",
-        );
-        assert!(body.contains("account_data::<DirectEventContent>()"));
-        assert!(!body.contains("fetch_account_data_static"));
-    }
     #[tokio::test]
     async fn explicit_empty_direct_map_overrides_cached_room_direct_targets() {
         use matrix_sdk::test_utils::mocks::MatrixMockServer;
@@ -3790,17 +3630,6 @@ mod tests {
 
         assert_eq!(snapshot.rooms.len(), 1);
         assert!(!snapshot.rooms[0].is_dm);
-    }
-    #[test]
-    fn direct_account_data_dm_detection_fetches_server_when_store_misses() {
-        let source = include_str!("room_projection.rs");
-        let helper_body = crate::test_source::item_body(
-            source,
-            "async fn matrix_direct_account_data_targets_by_room",
-        );
-
-        assert!(helper_body.contains("account_data::<DirectEventContent>()"));
-        assert!(helper_body.contains("fetch_account_data_static::<DirectEventContent>()"));
     }
     #[test]
     fn room_list_room_from_counts_carries_notification_metadata() {

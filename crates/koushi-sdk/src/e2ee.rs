@@ -7160,50 +7160,6 @@ mod tests {
     use super::has_stale_authoritative_device_signature;
 
     #[test]
-    fn recovery_key_path_uses_sdk_signature_publication_only() {
-        let source = include_str!("e2ee.rs");
-        let recovery_body = crate::test_source::item_body(source, "pub async fn recover_e2ee");
-
-        assert!(
-            !recovery_body.contains("prepare_current_device_registration"),
-            "recovery must never republish identity keys for an existing device ID"
-        );
-        assert!(
-            !recovery_body.contains("force_upload_device_keys"),
-            "recovery must not replace device identity keys out of band"
-        );
-        assert!(recovery_body.contains("recover_and_fix_backup"));
-        assert!(!recovery_body.contains(".recover(request.secret.expose_secret())"));
-        assert!(
-            !recovery_body.contains("republish_current_device_keys_after_recovery"),
-            "SDK recovery already publishes the cross-signature through /keys/signatures/upload"
-        );
-        assert!(
-            !recovery_body.contains("post_recovery_device_republish"),
-            "recovery must not mutate device keys after SDK signature publication"
-        );
-        assert!(
-            recovery_body.contains("get_own_device"),
-            "recovery key proof must inspect current device signing state"
-        );
-        assert!(
-            recovery_body.contains("post_recovery_own_device_inspected"),
-            "recovery must diagnose the SDK-refreshed own-device projection"
-        );
-        assert!(
-            recovery_body.contains("inspect_current_device_signature_state"),
-            "recovery must compare authoritative device signatures with the local projection"
-        );
-        assert!(
-            recovery_body.contains("is_cross_signed_by_owner"),
-            "recovery must require the SDK-refreshed owner cross-signature"
-        );
-        assert!(
-            recovery_body.contains("record_recovery_verification_event"),
-            "recovery key proof must emit stderr diagnostics before UI diagnostics are available"
-        );
-    }
-    #[test]
     fn recovery_detects_a_stale_authoritative_device_signature() {
         use matrix_sdk::encryption::recovery::RecoveryDeviceSignatureInspection;
 
@@ -7222,48 +7178,6 @@ mod tests {
             ..stale
         };
         assert!(!has_stale_authoritative_device_signature(&repaired));
-    }
-    #[test]
-    fn recovery_sdk_records_standard_signature_round_trip_diagnostics() {
-        let devices_source = include_str!(
-            "../../../vendor/matrix-rust-sdk/crates/matrix-sdk/src/encryption/identities/devices.rs"
-        );
-        let secret_store_source = include_str!(
-            "../../../vendor/matrix-rust-sdk/crates/matrix-sdk/src/encryption/secret_storage/secret_store.rs"
-        );
-
-        assert!(
-            devices_source.contains("verify_with_diagnostics"),
-            "the exact signed device target must be retained across the standard upload"
-        );
-        assert!(
-            secret_store_source.contains("standard_signature_round_trip_finished"),
-            "the standard recovery path must compare its upload target with the refreshed device"
-        );
-        assert!(
-            secret_store_source.contains("preupload_self_signing_signature_valid"),
-            "diagnostics must distinguish invalid local signing from server-side mutation"
-        );
-        assert!(
-            secret_store_source.contains("signed_content_matches_refreshed"),
-            "diagnostics must compare the canonical signed content before and after upload"
-        );
-        assert!(
-            secret_store_source.contains("self_signing_key_id_matches_refreshed"),
-            "diagnostics must distinguish a stale self-signing key generation"
-        );
-        assert!(
-            secret_store_source.contains("preupload_signature_matches_refreshed"),
-            "diagnostics must distinguish server-side signature replacement"
-        );
-        assert!(
-            secret_store_source.contains("preupload_signature_valid_with_refreshed_key"),
-            "diagnostics must cross-check the upload with the authoritative key generation"
-        );
-        assert!(
-            !secret_store_source.contains("preupload_signature_value"),
-            "diagnostics must never expose raw signatures"
-        );
     }
     #[test]
     fn recovery_diagnostics_classify_signature_upload_failures_inside_secret_storage() {

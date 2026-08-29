@@ -413,6 +413,395 @@ export function findIncludeStrInvocations(source, filePath, options = {}) {
   return includes;
 }
 
+function readRustSource(relativePath) {
+  return fs.readFileSync(path.join(repositoryRoot, relativePath), "utf8");
+}
+
+function rustItemBody(source, marker) {
+  const start = source.indexOf(marker);
+  if (start < 0) return null;
+  const tokens = lexRust(source);
+  const pairs = delimiterPairs(tokens);
+  const open = tokens.findIndex((token) => token.start >= start && token.kind === "punctuation" && token.value === "{");
+  if (open < 0) return null;
+  const close = pairs.openToClose.get(open);
+  return close === undefined ? null : source.slice(start, tokens[close].end);
+}
+
+function sourceContractFailure(rule, message) {
+  return { kind: "source-contract", rule, message };
+}
+
+export function checkStateFocusedContextReducerContract() {
+  const rule = "state.focused_context_reducer_contract";
+  const source = readRustSource("crates/koushi-state/src/reducer/mod.rs") + readRustSource("crates/koushi-state/src/reducer/thread.rs");
+  const failures = [];
+  for (const fragment of ["OpenFocusedContext", "FocusedContextSubscribed", "CloseFocusedContext", "OpenFocusedTimeline"]) {
+    if (!source.includes(fragment)) failures.push(sourceContractFailure(rule, `missing focused-context reducer marker ${fragment}`));
+  }
+  return failures;
+}
+
+export function checkStateHasNoLegacySyncModeVocabulary() {
+  const rule = "state.no_legacy_sync_mode_vocabulary";
+  const source = [
+    "crates/koushi-state/src/state/sync.rs",
+    "crates/koushi-state/src/state/mod.rs",
+    "crates/koushi-state/src/action.rs",
+    "crates/koushi-state/src/effect.rs",
+    "crates/koushi-state/src/reducer/sync.rs",
+    "crates/koushi-state/src/reducer/mod.rs"
+  ].map(readRustSource).join("\n");
+  const failures = [];
+  for (const fragment of ["SyncMode", "SyncModeFailureKind", "SyncModeChanged", "sync_mode", "LegacySync", "Transitioning"]) {
+    if (source.includes(fragment)) failures.push(sourceContractFailure(rule, `forbidden sync vocabulary remains: ${fragment}`));
+  }
+  return failures;
+}
+
+export function checkSdkPasswordSmokeRuntimeSafety() {
+  const rule = "sdk.password_smoke_runtime_safety";
+  const source = readRustSource("crates/koushi-sdk/src/bin/password-login-smoke.rs");
+  const failures = [];
+  if (source.includes("fn restore_session_with_store_blocking(")) failures.push(sourceContractFailure(rule, "store-backed restore uses a blocking helper"));
+  if (!source.includes("runtime.enter()")) failures.push(sourceContractFailure(rule, "store-backed session drop does not enter its runtime"));
+  if (!source.includes("session.take()")) failures.push(sourceContractFailure(rule, "store-backed session drop does not take the session"));
+  return failures;
+}
+
+export function checkSdkClientStoreConfigContract() {
+  const rule = "sdk.client_store_config_contract";
+  const source = readRustSource("crates/koushi-sdk/src/client_session.rs");
+  const config = rustItemBody(source, "impl MatrixClientStoreConfig");
+  const apply = rustItemBody(source, "fn apply_to_builder");
+  const failures = [];
+  if (!config?.includes("fn apply_to_builder")) failures.push(sourceContractFailure(rule, "MatrixClientStoreConfig must keep apply_to_builder"));
+  if (!apply?.includes(".key(Some(self.key.expose_key()))")) failures.push(sourceContractFailure(rule, "apply_to_builder must pass the required store key"));
+  if (!apply?.includes(".pool_max_size(DESKTOP_SQLITE_STORE_POOL_MAX_SIZE)")) failures.push(sourceContractFailure(rule, "apply_to_builder must cap the SDK SQLite pool"));
+  return failures;
+}
+
+export function checkSdkDesktopClientBuilderDefaults() {
+  const rule = "sdk.desktop_client_builder_defaults";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/client_session.rs"), "fn desktop_client_builder_defaults");
+  const failures = [];
+  for (const fragment of ["with_threading_support", "ThreadingSupport::Enabled", "with_subscriptions: true", "with_enable_share_history_on_invite(true)", "with_encryption_sync_readiness(true)"]) {
+    if (!body?.includes(fragment)) failures.push(sourceContractFailure(rule, `desktop builder default is missing ${fragment}`));
+  }
+  return failures;
+}
+
+export function checkSdkBackupDownloadDefault() {
+  const rule = "sdk.backup_download_default";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/client_session.rs"), "fn desktop_client_builder_defaults");
+  const failures = [];
+  for (const fragment of ["with_encryption_settings", "BackupDownloadStrategy::AfterDecryptionFailure"]) {
+    if (!body?.includes(fragment)) failures.push(sourceContractFailure(rule, `desktop builder default is missing ${fragment}`));
+  }
+  return failures;
+}
+
+export function checkSdkRecoveryUsesSdkSignaturePublication() {
+  const rule = "sdk.recovery.uses_sdk_signature_publication";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/e2ee.rs"), "pub async fn recover_e2ee");
+  const failures = [];
+  for (const fragment of ["prepare_current_device_registration", "force_upload_device_keys", ".recover(request.secret.expose_secret())", "republish_current_device_keys_after_recovery", "post_recovery_device_republish"]) {
+    if (body?.includes(fragment)) failures.push(sourceContractFailure(rule, `recovery contains forbidden out-of-band publication ${fragment}`));
+  }
+  for (const fragment of ["recover_and_fix_backup", "get_own_device", "post_recovery_own_device_inspected", "inspect_current_device_signature_state", "is_cross_signed_by_owner", "record_recovery_verification_event"]) {
+    if (!body?.includes(fragment)) failures.push(sourceContractFailure(rule, `recovery is missing ${fragment}`));
+  }
+  return failures;
+}
+
+export function checkSdkRecoverySignatureRoundTripContract() {
+  const rule = "sdk.recovery.signature_round_trip_contract";
+  const devices = readRustSource("vendor/matrix-rust-sdk/crates/matrix-sdk/src/encryption/identities/devices.rs");
+  const secretStore = readRustSource("vendor/matrix-rust-sdk/crates/matrix-sdk/src/encryption/secret_storage/secret_store.rs");
+  const failures = [];
+  if (!devices.includes("verify_with_diagnostics")) failures.push(sourceContractFailure(rule, "the SDK device target lacks diagnostic verification"));
+  for (const fragment of ["standard_signature_round_trip_finished", "preupload_self_signing_signature_valid", "signed_content_matches_refreshed", "self_signing_key_id_matches_refreshed", "preupload_signature_matches_refreshed", "preupload_signature_valid_with_refreshed_key"]) {
+    if (!secretStore.includes(fragment)) failures.push(sourceContractFailure(rule, `secret-storage recovery diagnostics are missing ${fragment}`));
+  }
+  if (secretStore.includes("preupload_signature_value")) failures.push(sourceContractFailure(rule, "secret-storage diagnostics expose a raw signature value"));
+  return failures;
+}
+
+export function checkSdkRoomReadMarkerContract() {
+  const rule = "sdk.room_read_marker_contract";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/room_operations.rs"), "pub async fn mark_room_as_read");
+  const failures = [];
+  for (const fragment of ["send_multiple_receipts", "fully_read_marker", "private_read_receipt"]) {
+    if (!body?.includes(fragment)) failures.push(sourceContractFailure(rule, `mark_room_as_read is missing ${fragment}`));
+  }
+  if (body?.includes("send_single_receipt(ReceiptType::FullyRead")) failures.push(sourceContractFailure(rule, "mark_room_as_read sends a standalone fully-read receipt"));
+  return failures;
+}
+
+export function checkSdkSpaceInviteCancellationContract() {
+  const rule = "sdk.space_invite_cancellation_contract";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/room_operations.rs"), "pub async fn cancel_space_invite");
+  const failures = [];
+  const markers = [
+    "members_no_sync(matrix_sdk::RoomMemberships::INVITE)",
+    "MatrixSpaceInviteCancellationOutcome::NotInvited",
+    ".kick_user(",
+    "MatrixSpaceInviteCancellationOutcome::Cancelled"
+  ];
+  const positions = markers.map((marker) => body?.indexOf(marker) ?? -1);
+  if (positions.some((position) => position < 0)) failures.push(sourceContractFailure(rule, "invite cancellation is missing its membership, no-op, kick, or success marker"));
+  if (positions[0] >= 0 && positions[1] >= 0 && positions[0] >= positions[1]) failures.push(sourceContractFailure(rule, "invite membership is checked after the no-op outcome"));
+  if (positions[1] >= 0 && positions[2] >= 0 && positions[1] >= positions[2]) failures.push(sourceContractFailure(rule, "invite cancellation kicks before the no-op outcome"));
+  return failures;
+}
+
+export function checkSdkRoomTagMethods() {
+  const rule = "sdk.room_tag_methods";
+  const source = readRustSource("crates/koushi-sdk/src/room_operations.rs");
+  const failures = [];
+  for (const fragment of ["set_is_favourite(true", "set_is_favourite(false", "set_is_low_priority(true", "set_is_low_priority(false"]) {
+    if (!source.includes(fragment)) failures.push(sourceContractFailure(rule, `room tag operation is missing ${fragment}`));
+  }
+  return failures;
+}
+
+export function checkSdkPinnedEventMethods() {
+  const rule = "sdk.pinned_event_methods";
+  const source = readRustSource("crates/koushi-sdk/src/room_operations.rs");
+  const pin = rustItemBody(source, "pub async fn pin_event");
+  const unpin = rustItemBody(source, "pub async fn unpin_event");
+  const failures = [];
+  if (!pin?.includes(".pin_event(&event_id)")) failures.push(sourceContractFailure(rule, "pin_event does not call the SDK pin method"));
+  if (!unpin?.includes(".unpin_event(&event_id)")) failures.push(sourceContractFailure(rule, "unpin_event does not call the SDK unpin method"));
+  return failures;
+}
+
+export function checkSdkRoomManagementMethods() {
+  const rule = "sdk.room_management_methods";
+  const source = readRustSource("crates/koushi-sdk/src/room_operations.rs");
+  const failures = [];
+  for (const fragment of [".set_name(", ".set_room_topic(", ".set_avatar_url(", ".remove_avatar(", ".privacy_settings()", ".update_join_rule(", ".update_room_history_visibility(", ".kick_user(", ".ban_user(", ".unban_user(", ".update_power_levels("]) {
+    if (!source.includes(fragment)) failures.push(sourceContractFailure(rule, `room management is missing ${fragment}`));
+  }
+  return failures;
+}
+
+export function checkSdkJoinedRoomListDirectDetection() {
+  const rule = "sdk.room_projection.async_direct_detection";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/room_projection.rs"), "async fn matrix_room_list_snapshot_from_rooms");
+  const failures = [];
+  for (const fragment of ["room.is_direct().await", "unwrap_or_else(|_| room.is_dm())"]) {
+    if (!body?.includes(fragment)) failures.push(sourceContractFailure(rule, `joined room projection is missing ${fragment}`));
+  }
+  return failures;
+}
+
+export function checkSdkJoinedRoomListAvoidsFullMemberScans() {
+  const rule = "sdk.room_projection.no_full_member_scan";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/room_projection.rs"), "async fn matrix_room_list_snapshot_from_rooms");
+  const failures = [];
+  for (const fragment of ["room.joined_members_count()", "matrix_space_member_user_ids_no_sync(&room).await"]) {
+    if (!body?.includes(fragment)) failures.push(sourceContractFailure(rule, `room-list projection is missing ${fragment}`));
+  }
+  for (const fragment of ["collect_active_member_profiles", "room.members(matrix_sdk::RoomMemberships::ACTIVE)", "joined_user_ids"]) {
+    if (body?.includes(fragment)) failures.push(sourceContractFailure(rule, `room-list projection contains forbidden full-member path ${fragment}`));
+  }
+  return failures;
+}
+
+export function checkSdkDmResolutionCandidates() {
+  const rule = "sdk.room_projection.dm_resolution_candidates";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/room_projection.rs"), "async fn matrix_room_list_dm_user_ids");
+  const failures = [];
+  for (const fragment of ["direct_targets_by_room.get(&room_id)", ".direct_targets()", "room.heroes()", "get_member_no_sync", "dm_user_ids.push(candidate_user_id_string.clone())"]) {
+    if (!body?.includes(fragment)) failures.push(sourceContractFailure(rule, `DM resolution is missing ${fragment}`));
+  }
+  for (const fragment of ["room.members(matrix_sdk::RoomMemberships::ACTIVE)", "room.members_no_sync(matrix_sdk::RoomMemberships::ACTIVE)"]) {
+    if (body?.includes(fragment)) failures.push(sourceContractFailure(rule, `DM resolution contains forbidden full-member path ${fragment}`));
+  }
+  return failures;
+}
+
+export function checkSdkSpaceMemberIdsNoSync() {
+  const rule = "sdk.room_projection.space_member_ids_no_sync";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/room_projection.rs"), "async fn matrix_space_member_user_ids_no_sync");
+  const failures = [];
+  if (!body?.includes("members_no_sync(matrix_sdk::RoomMemberships::JOIN)")) failures.push(sourceContractFailure(rule, "space membership does not use the joined no-sync view"));
+  if (body?.includes("RoomMemberships::ACTIVE")) failures.push(sourceContractFailure(rule, "space membership uses the active membership view"));
+  if (body?.includes("room.members(matrix_sdk::RoomMemberships::JOIN)")) failures.push(sourceContractFailure(rule, "space membership fetches the joined member list"));
+  return failures;
+}
+
+export function checkSdkJoinedOnlySpaceMemberProjection() {
+  const rule = "sdk.room_projection.joined_only_membership";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/room_projection.rs"), "async fn matrix_space_members_projection");
+  const failures = [];
+  if (body?.includes("RoomMemberships::ACTIVE")) failures.push(sourceContractFailure(rule, "space member projection uses the active membership view"));
+  for (const fragment of ["members_no_sync(matrix_sdk::RoomMemberships::JOIN)", "members_no_sync(matrix_sdk::RoomMemberships::INVITE"]) {
+    if (!body?.includes(fragment)) failures.push(sourceContractFailure(rule, `space member projection is missing ${fragment}`));
+  }
+  return failures;
+}
+
+export function checkSdkSpaceLookupFailuresPropagate() {
+  const rule = "sdk.room_projection.space_lookup_failures_propagate";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/room_projection.rs"), "pub async fn matrix_space_members_projection");
+  const failures = [];
+  const joined = body?.split("let space_joined_members = match")[1]?.split("let space_invited_members")[0];
+  const invited = body?.split("let space_invited_members = match")[1]?.split("let mut space_joined_by_user")[0];
+  for (const lookup of [joined, invited]) {
+    if (!lookup?.includes("Err(error)")) failures.push(sourceContractFailure(rule, "space lookup does not retain its structured error"));
+    if (!lookup?.includes("return Err(MatrixRoomOperationError::from_sdk_error(error))")) failures.push(sourceContractFailure(rule, "space lookup does not abort on error"));
+  }
+  return failures;
+}
+
+export function checkSdkFailedSpaceMemberCountsUnavailable() {
+  const rule = "sdk.room_projection.failed_counts_unavailable";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/room_projection.rs"), "fn space_members_scope_diagnostic_event");
+  const failures = [];
+  for (const fragment of ["space_join_lookup_outcome", "space_invite_lookup_outcome", "counts_unavailable", "space_joined_lookup.observed_count()", "space_invited_lookup.observed_count()", "if let Some(count)"]) {
+    if (!body?.includes(fragment)) failures.push(sourceContractFailure(rule, `space-member diagnostic is missing ${fragment}`));
+  }
+  return failures;
+}
+
+export function checkSdkRoomMemberSummariesUseFullMembers() {
+  const rule = "sdk.room_projection.member_summaries_full_members";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/room_projection.rs"), "async fn matrix_room_member_summaries");
+  return body?.includes("room.members(matrix_sdk::RoomMemberships::ACTIVE)")
+    ? []
+    : [sourceContractFailure(rule, "member summaries no longer load the full active member list")];
+}
+
+export function checkSdkDirectAccountDataLoaderIsLocalOnly() {
+  const rule = "sdk.room_projection.direct_account_data_local_only";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/room_projection.rs"), "pub async fn cached_direct_account_data_targets_by_room");
+  const failures = [];
+  if (!body?.includes("account_data::<DirectEventContent>()")) failures.push(sourceContractFailure(rule, "direct account-data loader lacks its local account-data read"));
+  if (body?.includes("fetch_account_data_static")) failures.push(sourceContractFailure(rule, "direct account-data loader fetches account data from the server"));
+  return failures;
+}
+
+export function checkSdkDirectAccountDataServerFallback() {
+  const rule = "sdk.room_projection.direct_account_data_server_fallback";
+  const body = rustItemBody(readRustSource("crates/koushi-sdk/src/room_projection.rs"), "async fn matrix_direct_account_data_targets_by_room");
+  const failures = [];
+  for (const fragment of ["account_data::<DirectEventContent>()", "fetch_account_data_static::<DirectEventContent>()"]) {
+    if (!body?.includes(fragment)) failures.push(sourceContractFailure(rule, `direct account-data resolution is missing ${fragment}`));
+  }
+  return failures;
+}
+
+export function checkSdkSlidingSyncInviteProbeContract() {
+  const rule = "sdk.sync.sliding_sync_invite_probe_contract";
+  const source = readRustSource("crates/koushi-sdk/src/sync.rs");
+  const start = source.indexOf("pub async fn probe_sliding_sync_invite_list_support");
+  const end = source.indexOf("pub fn sync_once_blocking", start);
+  const implementation = start >= 0 && end >= 0 ? source.slice(start, end) : null;
+  const helper = implementation?.indexOf("async fn build_sliding_sync_invite_probe_client");
+  const body = helper === undefined || helper < 0 ? implementation : implementation?.slice(0, helper);
+  const failures = [];
+  const ordered = [
+    "tokio::time::timeout(SYNC_INVITE_PROBE_TIMEOUT, async {",
+    "build_sliding_sync_invite_probe_client(session).await",
+    "send_sliding_sync_invite_list_probe(&probe).await"
+  ].map((fragment) => body?.indexOf(fragment) ?? -1);
+  if (ordered.some((position) => position < 0)) failures.push(sourceContractFailure(rule, "invite probe is missing its timeout, client, or request marker"));
+  if (ordered.every((position) => position >= 0) && !(ordered[0] < ordered[1] && ordered[1] < ordered[2])) failures.push(sourceContractFailure(rule, "invite probe timeout does not enclose client setup and request"));
+  for (const fragment of [".send(request)", "with_request_config", "SYNC_INVITE_PROBE_TIMEOUT", "disable_retry()"]) {
+    if (!implementation?.includes(fragment)) failures.push(sourceContractFailure(rule, `invite probe is missing ${fragment}`));
+  }
+  for (const fragment of [".sliding_sync(", "RoomListService::"]) {
+    if (implementation?.includes(fragment)) failures.push(sourceContractFailure(rule, `invite probe contains forbidden live-sync construction ${fragment}`));
+  }
+  return failures;
+}
+
+const sdkLibrarySourcePaths = [
+  "src/auth.rs",
+  "src/client_session.rs",
+  "src/e2ee.rs",
+  "src/lib.rs",
+  "src/profile.rs",
+  "src/qa_reports.rs",
+  "src/room_operations.rs",
+  "src/room_projection.rs",
+  "src/search.rs",
+  "src/sliding_sync_discovery.rs",
+  "src/sync.rs",
+  "src/timeline.rs"
+];
+
+export function checkSdkSessionBackupFence() {
+  const rule = "sdk.sessions.no_per_send_backup_fence";
+  const sources = sdkLibrarySourcePaths.map((relativePath) => readRustSource(`crates/koushi-sdk/${relativePath}`));
+  const falseCount = sources.reduce((count, source) => count + source.split("require_secure_backup_for_encrypted_sends(false)").length - 1, 0);
+  const failures = [];
+  if (falseCount !== 3) failures.push(sourceContractFailure(rule, `expected three disabled per-send backup fences, found ${falseCount}`));
+  if (sources.some((source) => source.includes("require_secure_backup_for_encrypted_sends(true)"))) failures.push(sourceContractFailure(rule, "a session constructor enables the per-send backup fence"));
+  return failures;
+}
+
+export function checkSdkLibrarySourceManifest() {
+  const rule = "sdk.library_source_manifest";
+  const paths = sdkLibrarySourcePaths.slice();
+  const unique = [...new Set(paths)].sort();
+  const failures = [];
+  if (unique.length !== paths.length) failures.push(sourceContractFailure(rule, "SDK library source manifest contains duplicate paths"));
+  if (JSON.stringify(unique) !== JSON.stringify(paths.slice().sort())) failures.push(sourceContractFailure(rule, "SDK library source manifest is not sorted completely"));
+  for (const relativePath of paths) {
+    try {
+      fs.readFileSync(path.join(repositoryRoot, "crates/koushi-sdk", relativePath), "utf8");
+    } catch {
+      failures.push(sourceContractFailure(rule, `SDK library source manifest target is missing: ${relativePath}`));
+    }
+  }
+  return failures;
+}
+
+export function checkSdkCommittedRoomCheckpointHasNoLegacyApi() {
+  const rule = "sdk.timeline.committed_room_checkpoint_no_legacy_api";
+  const source = sdkLibrarySourcePaths.map((relativePath) => readRustSource(`crates/koushi-sdk/${relativePath}`)).join("\n");
+  const failures = [];
+  for (const fragment of ["MatrixCommittedRoomTimelineBackend", "MatrixCommittedRoomTimelineOrigin", "MatrixCommittedRoomUpdatesResponse", "from_committed_observation", "from_legacy_gap_for_testing", "from_legacy_room_absent", "is_room_absent"]) {
+    if (source.includes(fragment)) failures.push(sourceContractFailure(rule, `legacy room checkpoint API remains: ${fragment}`));
+  }
+  return failures;
+}
+
+export function runSourceContractRules() {
+  return [
+    checkStateFocusedContextReducerContract(),
+    checkStateHasNoLegacySyncModeVocabulary(),
+    checkSdkPasswordSmokeRuntimeSafety(),
+    checkSdkClientStoreConfigContract(),
+    checkSdkDesktopClientBuilderDefaults(),
+    checkSdkBackupDownloadDefault(),
+    checkSdkRecoveryUsesSdkSignaturePublication(),
+    checkSdkRecoverySignatureRoundTripContract(),
+    checkSdkRoomReadMarkerContract(),
+    checkSdkSpaceInviteCancellationContract(),
+    checkSdkRoomTagMethods(),
+    checkSdkPinnedEventMethods(),
+    checkSdkRoomManagementMethods(),
+    checkSdkJoinedRoomListDirectDetection(),
+    checkSdkJoinedRoomListAvoidsFullMemberScans(),
+    checkSdkDmResolutionCandidates(),
+    checkSdkSpaceMemberIdsNoSync(),
+    checkSdkJoinedOnlySpaceMemberProjection(),
+    checkSdkSpaceLookupFailuresPropagate(),
+    checkSdkFailedSpaceMemberCountsUnavailable(),
+    checkSdkRoomMemberSummariesUseFullMembers(),
+    checkSdkDirectAccountDataLoaderIsLocalOnly(),
+    checkSdkDirectAccountDataServerFallback(),
+    checkSdkSlidingSyncInviteProbeContract(),
+    checkSdkSessionBackupFence(),
+    checkSdkLibrarySourceManifest(),
+    checkSdkCommittedRoomCheckpointHasNoLegacyApi()
+  ].flat();
+}
+
 export function analyzeRustSource(source, options = {}) {
   const root = path.resolve(options.repositoryRoot ?? repositoryRoot);
   const fileName = displayPath(normalizeFilePath(options.filePath ?? "fixture.rs", root), root);
@@ -483,6 +872,7 @@ export function formatViolation(violation) {
   if (violation.kind === "rust-source-include") return `${violation.file}:${violation.line}:include_str! targets Rust source ${violation.target}`;
   if (violation.kind === "unexpected-include") return `${violation.file}:${violation.line}:include_str! targets unapproved artifact ${violation.target}`;
   if (violation.kind === "unresolved-include") return `${violation.file}:${violation.line}:include_str! target could not be resolved`;
+  if (violation.kind === "source-contract") return `${violation.rule}: ${violation.message}`;
   return "Rust test structure violation";
 }
 
@@ -519,6 +909,7 @@ export function inventoryReport(result) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const inventory = process.argv.includes("--inventory");
   const result = scanRepository();
+  result.violations.push(...runSourceContractRules());
   if (inventory) {
     process.stdout.write(inventoryReport(result));
   } else if (result.violations.length > 0) {

@@ -375,25 +375,4 @@ mod tests {
             Some(root.path().join("sdk-cache").as_path())
         );
     }
-
-    #[test]
-    fn store_backed_restore_does_not_escape_its_runtime() {
-        let source = include_str!("password-login-smoke.rs");
-        let anti_pattern = ["fn ", "restore_session_with_store_blocking", "("].concat();
-
-        assert!(
-            !source.contains(&anti_pattern),
-            "store-backed SDK sessions must not be returned from a helper that drops its Tokio runtime"
-        );
-    }
-
-    #[test]
-    fn store_backed_session_drop_enters_runtime_context() {
-        let source = include_str!("password-login-smoke.rs");
-        let enter_runtime = ["runtime", ".enter()"].concat();
-        let take_session = ["session", ".take()"].concat();
-
-        assert!(source.contains(&enter_runtime));
-        assert!(source.contains(&take_session));
-    }
 }

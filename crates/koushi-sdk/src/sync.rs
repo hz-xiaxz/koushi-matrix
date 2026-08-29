@@ -425,39 +425,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn sliding_sync_invite_probe_contract_is_typed_bounded_and_discards_cursor() {
-        let source = include_str!("sync.rs");
-        let implementation = source
-            .split("pub async fn probe_sliding_sync_invite_list_support")
-            .nth(1)
-            .and_then(|rest| rest.split("pub fn sync_once_blocking").next())
-            .expect("typed invite-list support probe should precede sync entry points");
-        let body = implementation
-            .split("async fn build_sliding_sync_invite_probe_client")
-            .next()
-            .expect("typed invite-list support probe should precede its helpers");
-
-        let timeout = body
-            .find("tokio::time::timeout(SYNC_INVITE_PROBE_TIMEOUT, async {")
-            .expect("the public probe must start one outer end-to-end timeout");
-        let build = body
-            .find("build_sliding_sync_invite_probe_client(session).await")
-            .expect("the public probe must build its disposable client");
-        let send = body
-            .find("send_sliding_sync_invite_list_probe(&probe).await")
-            .expect("the public probe must send its disposable request");
-        assert!(
-            timeout < build && build < send,
-            "the one outer timeout must enclose disposable-client setup and its request"
-        );
-        assert!(implementation.contains(".send(request)"));
-        assert!(implementation.contains("with_request_config"));
-        assert!(implementation.contains("SYNC_INVITE_PROBE_TIMEOUT"));
-        assert!(implementation.contains("disable_retry()"));
-        assert!(!implementation.contains(".sliding_sync("));
-        assert!(!implementation.contains("RoomListService::"));
-    }
     #[derive(Clone, Copy)]
     enum InviteProbeTestResponse {
         Json(&'static [u8]),
