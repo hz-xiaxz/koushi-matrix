@@ -6,7 +6,7 @@ glue. Vendored upstream code must keep its original license and copyright
 notices; local changes to vendored code must remain easy to upstream or
 revert.
 
-Last amended: 2026-08-30.
+Last amended: 2026-08-31.
 
 ## Read Order And Authority
 
@@ -495,12 +495,22 @@ consistent.
   `#[cfg(test)] mod tests` block in a source file.
 - **Pure unit tests may stay inline.** Small tests for a single pure helper,
   parser, or private algorithm may remain in the source file under
-  `#[cfg(test)] mod tests`. When a unit test file grows beyond one screen or
-  begins to assert cross-module projection, move it to `tests/`.
-- **Do not add new tests to existing monolithic test files such as
-  `crates/koushi-core/src/tests.rs`.** Add a new `tests/<feature>.rs`
-  file instead. Existing monolithic files may be split opportunistically when
-  they are touched for a new feature.
+  `#[cfg(test)] mod tests`. A directly attached inline `cfg(test)` module is a
+  large inline test module when it spans at least 200 physical lines, counting
+  its attached attributes, declaration, body, and closing brace under the
+  repository scanner's lexical definition; this is a hard ceiling, not
+  permission for a 199-line integration-style test to remain inline. Private
+  tests beyond one screen, tests that assert across modules, and all
+  integration-style or public behavior tests move to sibling modules or the
+  crate's `tests/` directory even when they are below that ceiling.
+- **Source-structure assertions have one owner.** Assertions that read Rust
+  source to require or forbid structure belong to the repository Rust test
+  structure checker, not to Rust behavioral tests. Behavioral tests must drive
+  callable behavior and assert its outcome; they must not inspect source text.
+- **Do not add new tests to existing monolithic test files.** Add a new
+  `tests/<feature>.rs` file instead. Current crate integration tests, including
+  `crates/koushi-core/tests/`, are the placement example; existing monolithic
+  files may be split opportunistically when they are touched for a new feature.
 - **Test fixtures and fakes belong near their consumer.** A fake used by a
   single feature's tests lives in that feature's test module. Shared fakes live
   in `src/test_support.rs` or `tests/support/` and must be append-friendly.
