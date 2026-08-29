@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use super::ComposerDraftIoProbe;
 use super::{
     COMPOSER_DRAFTS_FILE_MAGIC, COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, StoreActor,
-    atomic_replace_file, decode_composer_draft_payload_json, encode_composer_draft_payload_json,
+    decode_composer_draft_payload_json, encode_composer_draft_payload_json,
 };
 use chacha20poly1305::{
     ChaCha20Poly1305, Key, KeyInit, Nonce,
@@ -757,9 +757,6 @@ impl StoreActor {
                 Err(_) => return Err(CoreFailure::StoreUnavailable),
             }
         }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|_| CoreFailure::StoreUnavailable)?;
-        }
         let payload =
             encrypt_composer_drafts_payload(&self.load_or_create_unlock_secret(key_id)?, drafts)?;
         #[cfg(test)]
@@ -768,7 +765,8 @@ impl StoreActor {
             .swap(false, std::sync::atomic::Ordering::AcqRel);
         #[cfg(not(test))]
         let fail_before_persist = false;
-        atomic_replace_file(&path, &payload, fail_before_persist)
+        crate::file::atomic_replace_file(&path, &payload, fail_before_persist)
+            .map_err(|_| CoreFailure::StoreUnavailable)
     }
 
     #[cfg(test)]
@@ -1033,6 +1031,30 @@ mod store_tests {
             actor.load_composer_drafts(&key_id),
             Err(CoreFailure::StoreUnavailable)
         ));
+    }
+
+    #[test]
+    fn composer_draft_store_creates_missing_parent() {
+        let data_dir = tempdir().expect("tempdir");
+        let cred_dir = tempdir().expect("tempdir");
+        let key_id = make_key_id();
+        let actor = file_store_actor(&data_dir, &cred_dir);
+        let mut drafts = ComposerDraftStore::default();
+        drafts
+            .apply_room_draft(
+                "!room:test.example.com".to_owned(),
+                "synthetic draft".to_owned(),
+                1.into(),
+            )
+            .expect("seed draft");
+        let path = actor.account_composer_drafts_file(&key_id);
+        assert!(!path.parent().expect("draft parent").exists());
+
+        actor
+            .save_composer_drafts(&key_id, &persisted_composer_drafts(&drafts))
+            .expect("save encrypted drafts");
+
+        assert!(path.is_file());
     }
 
     #[test]

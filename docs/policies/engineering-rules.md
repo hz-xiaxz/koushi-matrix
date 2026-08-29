@@ -7,7 +7,7 @@ build gates. AGENTS.md remains the operational how-to (permissions, install
 caveats, recovery steps); durable rules discovered there are promoted to
 REPOSITORY_RULES.md or this document.
 
-Last amended: 2026-08-26.
+Last amended: 2026-08-30.
 
 ## Design Simplicity
 
@@ -519,19 +519,20 @@ Rules:
    nearest the live edge). An unchanged candidate is idle; a changed candidate
    remains queued across active work and projection/render ACK fences.
    Candidate-driven automatic repair keeps a zero cached-chunk budget.
-   Room-entry live-edge repair is a separate bounded intent. On SyncService and
-   legacy sync it must wait for committed backend provenance. When the current
-   response contains the room, repair may select only the opaque persisted gap
-   introduced by that response; an explicit no-update/no-gap closes the intent.
-   Legacy event-cache publication also supplies a global response-commit fence
-   after all room topology mutation. Only when that fence proves an active room
-   was omitted from the incremental response may repair inspect authoritative
-   persisted topology and select its newest gap as one bounded live-edge chain.
+   Room-entry live-edge repair is a separate bounded intent. On Simplified
+   Sliding Sync it must wait for committed service-response provenance. When the
+   current response contains the room, repair may select only the opaque
+   persisted gap introduced by that response; an explicit no-update/no-gap
+   closes the intent. Event-cache publication also supplies a global
+   response-commit fence after all room topology mutation. Only when that fence
+   proves an active room was omitted from the incremental response may repair
+   inspect authoritative persisted topology and select its newest gap as one
+   bounded live-edge chain.
    It must not acquire repair ownership while provenance is pending, reuse a
    baseline observation for an empty response, infer omission from a timeout or
    pre-commit broadcast, or select any older persisted gap. Routing must match
-   backend instance epoch, room key, actor generation, and backend-local
-   response or subscription generation. Timeline build, initial projection,
+   service instance epoch, room key, actor generation, and response or
+   subscription generation. Timeline build, initial projection,
    and ACK remain non-blocking while provenance is pending. A stale descriptor
    permits one authoritative re-inspection, then closes and clears that
    checkpoint so a later committed response can be admitted, but never permits
@@ -815,25 +816,7 @@ Rules:
    observer. The auxiliary signal must not create a second network/sync owner,
    and high-frequency unrelated updates must be proven not to trigger full-view
    normalization.
-18. A protocol version advertisement is not proof that the operation semantics
-   needed by the product are complete. Probe the narrow authenticated behavior
-   before creating its authoritative owner. The disposable authenticated probe
-   receives no refresh token, so automatic refresh is impossible/disabled, and
-   request retries are disabled; its single end-to-end two-second deadline
-   covers disposable-client setup plus one transport request. Treat omitted
-   required response structure, typed/malformed failure, and deadline expiry as unsupported;
-   discard any cursor or product payload returned by the preflight. Capability
-   checks must not fingerprint server families or become a second polling/sync
-   owner. A non-authoritative authenticated probe must isolate session-change
-   delivery, access-token-expiry state, token refresh, rotating refresh
-   credentials, and persistent stores from the authoritative client. Supply no
-   refresh token to a disposable probe client. Probe failure is a
-   backend-selection fact and must not itself cause a product
-   authentication-state transition. Cover success, omission, malformed/error,
-   and timeout, plus behavioral proof that `M_UNKNOWN_TOKEN` causes zero refresh
-   calls, no authoritative session-change/token mutation, and fail-closed
-   `LegacySync` selection.
-19. Foreground room navigation must not wait behind ordinary actor mailboxes or
+18. Foreground room navigation must not wait behind ordinary actor mailboxes or
    network/filesystem side effects. Reducer commit emits the exactly-once
    intent terminal; projection admission uses an owner-stable latest-value slot
    ordered by an internal monotonic generation and a bounded wake. The manager
@@ -1024,7 +1007,7 @@ PTY handling, prompt line order) is documented in `AGENTS.md`.
 
 0. New Matrix behavior is implemented and verified headless-first: it lands
    in `koushi-core`, is exercised via `CoreCommand`/`CoreEvent`
-   against local Conduit/Tuwunel homeserver QA, and only then is wired into
+   against local Tuwunel/Synapse homeserver QA, and only then is wired into
    Tauri/React. GUI-first Matrix behavior is prohibited.
 1. The checked-out `vendor/matrix-rust-sdk` submodule is the authoritative
    Matrix Rust SDK source for this workspace. All root workspace Matrix SDK
@@ -1049,8 +1032,8 @@ PTY handling, prompt line order) is documented in `AGENTS.md`.
    tracking upstream. Every SDK gitlink bump must keep the guarded submodule
    checkout in sync and update the root `Cargo.lock` when dependency resolution
    changes.
-2. Local homeserver toolchain caveats (Conduit/Tuwunel install flags such as
-   `RUMA_UNSTABLE_EXHAUSTIVE_TYPES=1`, macOS `--no-default-features`) are
+2. Local Tuwunel toolchain caveats (install flags such as
+   `RUMA_UNSTABLE_EXHAUSTIVE_TYPES=1` and macOS `--no-default-features`) are
    tracked in `AGENTS.md` and the QA scripts, not hand-run.
 3. Required local gates before merge: crate tests (`koushi-state`,
    `-auth`, `-core`), frontend tests + typecheck, and
@@ -1060,9 +1043,7 @@ PTY handling, prompt line order) is documented in `AGENTS.md`.
    It is also required before GUI-level confidence claims and after changes
    that affect login, recovery, sync, encrypted restore, search, room cleanup,
    or logout.
-5. Production Tauri paths must not execute fixture-backend behavior;
-   `koushi-backend` is dev/demo only.
-6. Core crates stay platform-portable (a future browser/wasm target must not
+5. Core crates stay platform-portable (a future browser/wasm target must not
    be precluded): no Tauri/OS/filesystem types in `CoreCommand`/`CoreEvent`/
    `AppStateSnapshot`; task spawn and timers via executor abstractions, not
    direct `tokio::spawn`/`tokio::time` in actor logic; `keyring`, paths, and
@@ -1070,7 +1051,7 @@ PTY handling, prompt line order) is documented in `AGENTS.md`.
    `koushi-state` and `koushi-search` must compile for
    `wasm32-unknown-unknown`. See Platform Portability in
    `docs/architecture/overview.md`.
-7. Japanese/CJK product semantics remain Rust-owned and platform-portable.
+6. Japanese/CJK product semantics remain Rust-owned and platform-portable.
    Catalog completeness is tested in `apps/desktop/src/i18n`, but CJK
    normalization, display sort keys, search query variants, and highlight
    offsets live in `koushi-state`, `koushi-search`, and

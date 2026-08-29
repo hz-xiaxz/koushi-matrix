@@ -6,7 +6,7 @@ glue. Vendored upstream code must keep its original license and copyright
 notices; local changes to vendored code must remain easy to upstream or
 revert.
 
-Last amended: 2026-08-26.
+Last amended: 2026-08-30.
 
 ## Read Order And Authority
 
@@ -172,13 +172,12 @@ conflict is being resolved.
   `apps/desktop/src-tauri/src/commands/mod.rs` enforces this; keep it green
   when adding or renaming commands.
 - `koushi-sdk` is the low-level Matrix SDK adapter crate. It owns
-  SDK-facing primitives only; app state, actor lifecycle, QA orchestration,
-  and product opinions stay in `koushi-core` and
-  `koushi-state`.
+  SDK-facing primitives only and may include feature-gated, direct-adapter
+  smoke binaries and private-data-free smoke reports for adapter integration;
+  product state, actor lifecycle, authoritative app QA orchestration, and
+  product opinions stay in `koushi-core` and `koushi-state`.
 - UI code must not import SDK types. SDK data is mapped to app-owned Rust DTOs
   before it crosses the command/event/snapshot boundary.
-- `koushi-backend` is fixture/demo only. Production Tauri paths must
-  not execute fixture-backend behavior.
 
 ## State-Machine Discipline
 

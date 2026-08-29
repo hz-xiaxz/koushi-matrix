@@ -4,7 +4,6 @@ members = [
     "crates/koushi-search",
     "crates/koushi-key",
     "crates/koushi-sdk",
-    "crates/koushi-backend",
     "crates/koushi-core",
     "crates/koushi-diagnostics",
     "crates/koushi-media",

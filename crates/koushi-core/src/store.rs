@@ -956,32 +956,6 @@ impl StoreActor {
     }
 }
 
-fn atomic_replace_file(
-    path: &std::path::Path,
-    payload: &[u8],
-    fail_before_persist: bool,
-) -> Result<(), CoreFailure> {
-    use std::io::Write as _;
-
-    let parent = path.parent().ok_or(CoreFailure::StoreUnavailable)?;
-    let mut temporary =
-        tempfile::NamedTempFile::new_in(parent).map_err(|_| CoreFailure::StoreUnavailable)?;
-    temporary
-        .write_all(payload)
-        .map_err(|_| CoreFailure::StoreUnavailable)?;
-    temporary
-        .as_file()
-        .sync_all()
-        .map_err(|_| CoreFailure::StoreUnavailable)?;
-    if fail_before_persist {
-        return Err(CoreFailure::StoreUnavailable);
-    }
-    temporary
-        .persist(path)
-        .map(|_| ())
-        .map_err(|_| CoreFailure::StoreUnavailable)
-}
-
 /// Convert a `SessionInfo` (from koushi-state) into a `SessionKeyId`
 /// (from koushi-key). This is the canonical mapping used everywhere
 /// in the codebase.

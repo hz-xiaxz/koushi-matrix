@@ -2,7 +2,6 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::time::Duration;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use koushi_state::ScheduledSendCapability;
 use matrix_sdk::ruma::api::FeatureFlag;
@@ -35,15 +34,9 @@ pub(crate) fn server_delay_timeout(send_at_ms: u64, now_ms: u64) -> Duration {
     Duration::from_millis(send_at_ms.saturating_sub(now_ms))
 }
 
-pub(crate) fn current_epoch_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or_default()
-}
-
 pub(crate) fn local_scheduled_send_retry_at_ms() -> u64 {
-    current_epoch_ms().saturating_add(LOCAL_SCHEDULED_SEND_RETRY_DELAY.as_millis() as u64)
+    crate::time::current_epoch_ms()
+        .saturating_add(LOCAL_SCHEDULED_SEND_RETRY_DELAY.as_millis() as u64)
 }
 
 pub(crate) fn scheduled_send_transaction_id(scheduled_id: &str) -> String {

@@ -149,21 +149,6 @@ fn classify_ignored_user_list_error(
     }
 }
 
-fn classify_report_error(
-    error: &koushi_sdk::MatrixReportError,
-) -> crate::failure::ReportFailureKind {
-    use crate::failure::ReportFailureKind;
-    use koushi_sdk::MatrixReportFailureKind;
-    match error.failure_kind() {
-        MatrixReportFailureKind::Forbidden => ReportFailureKind::Forbidden,
-        MatrixReportFailureKind::Network => ReportFailureKind::Network,
-        MatrixReportFailureKind::InvalidUserId => ReportFailureKind::InvalidUserId,
-        MatrixReportFailureKind::InvalidRoomId => ReportFailureKind::InvalidRoomId,
-        MatrixReportFailureKind::InvalidEventId => ReportFailureKind::InvalidEventId,
-        MatrixReportFailureKind::Sdk => ReportFailureKind::Sdk,
-    }
-}
-
 impl AccountActor {
     pub(super) async fn handle_set_presence(&self, request_id: RequestId, presence: PresenceKind) {
         let Some(session) = &self.session else {
@@ -697,7 +682,7 @@ impl AccountActor {
                 self.emit_failure(
                     request_id,
                     CoreFailure::ReportOperationFailed {
-                        kind: classify_report_error(&error),
+                        kind: crate::report::classify_report_error(&error),
                     },
                 );
             }

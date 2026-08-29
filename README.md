@@ -33,7 +33,7 @@ Gatekeeper before publication. Verify the adjacent `.sha256` file when testing
 any downloaded installer. Koushi v0.1.0 was the final release to include an
 Intel Mac build; subsequent macOS releases support Apple Silicon only.
 
-Current status: pre-login desktop shell. The repository has pure Rust state/search/key crates, a no-network fake backend, a Tauri v2 + React app shell, and a static Slack-like reference shell.
+Current status: pre-login desktop shell. The repository has pure Rust state/search/key crates, a Tauri v2 + React app shell, and a static Slack-like reference shell.
 
 ## License
 
@@ -65,7 +65,6 @@ Before claiming a real-account or GUI gate is green, check
 cargo test -p koushi-state
 cargo test -p koushi-search
 cargo test -p koushi-key
-cargo test -p koushi-backend
 ```
 
 For the desktop app:

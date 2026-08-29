@@ -209,21 +209,6 @@ pub(crate) fn classify_room_error(error: &MatrixRoomOperationError) -> RoomFailu
     }
 }
 
-fn classify_report_error(
-    error: &koushi_sdk::MatrixReportError,
-) -> crate::failure::ReportFailureKind {
-    use crate::failure::ReportFailureKind;
-    use koushi_sdk::MatrixReportFailureKind;
-    match error.failure_kind() {
-        MatrixReportFailureKind::Forbidden => ReportFailureKind::Forbidden,
-        MatrixReportFailureKind::Network => ReportFailureKind::Network,
-        MatrixReportFailureKind::InvalidUserId => ReportFailureKind::InvalidUserId,
-        MatrixReportFailureKind::InvalidRoomId => ReportFailureKind::InvalidRoomId,
-        MatrixReportFailureKind::InvalidEventId => ReportFailureKind::InvalidEventId,
-        MatrixReportFailureKind::Sdk => ReportFailureKind::Sdk,
-    }
-}
-
 fn trace_room_operation(kind: &'static str, stage: &'static str, request_id: RequestId) {
     record(
         DiagnosticEvent::new(DiagnosticLevel::Debug, "core.room", stage)
@@ -1171,7 +1156,7 @@ impl RoomActor {
                 self.emit_failure(
                     request_id,
                     CoreFailure::ReportOperationFailed {
-                        kind: classify_report_error(&error),
+                        kind: crate::report::classify_report_error(&error),
                     },
                 );
             }
@@ -1200,7 +1185,7 @@ impl RoomActor {
                 self.emit_failure(
                     request_id,
                     CoreFailure::ReportOperationFailed {
-                        kind: classify_report_error(&error),
+                        kind: crate::report::classify_report_error(&error),
                     },
                 );
             }

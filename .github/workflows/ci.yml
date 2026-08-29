@@ -113,7 +113,7 @@ jobs:
       - name: Diagnostic test isolation guard
         run: node scripts/check-diagnostic-test-isolation.mjs
       - name: Workspace tests
-        run: cargo test --workspace --exclude koushi-backend --exclude sidebar-composition --exclude key-management
+        run: cargo test --workspace --exclude sidebar-composition --exclude key-management
       - name: Tauri DTO + IPC contract tests
         run: cargo test -p koushi-desktop
       - name: wasm build check (state + search)

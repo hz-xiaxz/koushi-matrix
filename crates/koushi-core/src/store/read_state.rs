@@ -1,4 +1,4 @@
-use super::{COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, StoreActor, atomic_replace_file};
+use super::{COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, StoreActor};
 use chacha20poly1305::{
     ChaCha20Poly1305, Key, KeyInit, Nonce,
     aead::{Aead, OsRng, rand_core::RngCore},
@@ -90,7 +90,8 @@ impl StoreActor {
         if payload.len() > READ_STATE_OUTBOX_MAX_BYTES {
             return Err(CoreFailure::StoreUnavailable);
         }
-        atomic_replace_file(&path, &payload, false)?;
+        crate::file::atomic_replace_file(&path, &payload, false)
+            .map_err(|_| CoreFailure::StoreUnavailable)?;
         remove_read_state_file(&legacy_path)
     }
 
@@ -310,8 +311,9 @@ mod tests {
         let directory = tempdir().expect("tempdir");
         let path = directory.path().join("outbox.enc");
 
-        atomic_replace_file(&path, b"first", false).expect("first atomic write");
-        atomic_replace_file(&path, b"second", false).expect("replacement atomic write");
+        crate::file::atomic_replace_file(&path, b"first", false).expect("first atomic write");
+        crate::file::atomic_replace_file(&path, b"second", false)
+            .expect("replacement atomic write");
 
         assert_eq!(std::fs::read(path).expect("read replacement"), b"second");
     }

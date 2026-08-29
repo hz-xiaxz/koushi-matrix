@@ -1,8 +1,4 @@
-use std::{
-    fmt, fs,
-    io::Write as _,
-    path::{Path, PathBuf},
-};
+use std::{fmt, fs, path::PathBuf};
 
 use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce,
@@ -345,7 +341,8 @@ impl CredentialVaultFile {
         fail_before_persist: bool,
     ) -> Result<(), CredentialVaultError> {
         let payload = encrypt_payload(master_key, data, CREDENTIAL_VAULT_VERSION)?;
-        atomic_replace_file(&self.path, &payload, fail_before_persist)
+        crate::file::atomic_replace_file(&self.path, &payload, fail_before_persist)
+            .map_err(|_| CredentialVaultError::Unavailable)
     }
 
     #[cfg(any(test, feature = "test-hooks"))]
@@ -356,7 +353,8 @@ impl CredentialVaultFile {
         version: u8,
     ) -> Result<(), CredentialVaultError> {
         let payload = encrypt_payload(master_key, data, version)?;
-        atomic_replace_file(&self.path, &payload, false)
+        crate::file::atomic_replace_file(&self.path, &payload, false)
+            .map_err(|_| CredentialVaultError::Unavailable)
     }
 }
 
@@ -442,34 +440,6 @@ fn zeroize_replaced_string(value: &mut Option<String>) {
     }
 }
 
-fn atomic_replace_file(
-    path: &Path,
-    payload: &[u8],
-    fail_before_persist: bool,
-) -> Result<(), CredentialVaultError> {
-    let parent = path.parent().ok_or(CredentialVaultError::Unavailable)?;
-    fs::create_dir_all(parent).map_err(|_| CredentialVaultError::Unavailable)?;
-    let mut temporary =
-        tempfile::NamedTempFile::new_in(parent).map_err(|_| CredentialVaultError::Unavailable)?;
-    temporary
-        .write_all(payload)
-        .map_err(|_| CredentialVaultError::Unavailable)?;
-    temporary
-        .as_file()
-        .sync_all()
-        .map_err(|_| CredentialVaultError::Unavailable)?;
-    if fail_before_persist {
-        return Err(CredentialVaultError::Unavailable);
-    }
-    temporary
-        .persist(path)
-        .map_err(|_| CredentialVaultError::Unavailable)?;
-    if let Ok(directory) = fs::File::open(parent) {
-        let _ = directory.sync_all();
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -529,6 +499,19 @@ mod tests {
             restored.local_unlock_secret(&bob),
             Some(bob_unlock.as_str())
         );
+    }
+
+    #[test]
+    fn credential_vault_file_creates_missing_parent() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("nested").join("credentials.v1.enc");
+        let file = CredentialVaultFile::new(path.clone());
+        let key = CredentialVaultMasterKey::generate();
+
+        file.store(&key, &CredentialVaultData::default())
+            .expect("store vault");
+
+        assert!(path.is_file());
     }
 
     #[test]

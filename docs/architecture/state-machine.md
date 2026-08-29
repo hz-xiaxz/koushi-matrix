@@ -475,40 +475,6 @@ CSRF state are command/event artifacts only: they may be returned to the WebView
 so it can open the provider and correlate the callback, but they never enter
 `AppState`, normal `Debug`, QA title tokens, or persisted settings.
 
-## Sync Mode
-
-`AppState.sync_mode` is a Rust-owned projection of the active Matrix sync
-backend. It is independent of `AppState.sync` (the connection lifecycle) and is
-set by `SyncModeChanged { mode }`. React renders the mode snapshot and must not
-infer the backend from sync lifecycle state.
-
-```mermaid
-stateDiagram-v2
-    [*] --> Unsupported
-    Unsupported --> Legacy: SyncModeChanged(Legacy)
-    Unsupported --> Simplified: SyncModeChanged(Simplified)
-    Unsupported --> Transitioning: SyncModeChanged(Transitioning)
-    Unsupported --> Failed: SyncModeChanged(Failed)
-    Legacy --> Simplified: SyncModeChanged(Simplified)
-    Legacy --> Transitioning: SyncModeChanged(Transitioning)
-    Legacy --> Failed: SyncModeChanged(Failed)
-    Simplified --> Legacy: SyncModeChanged(Legacy)
-    Simplified --> Transitioning: SyncModeChanged(Transitioning)
-    Simplified --> Failed: SyncModeChanged(Failed)
-    Transitioning --> Simplified: SyncModeChanged(Simplified)
-    Transitioning --> Legacy: SyncModeChanged(Legacy)
-    Transitioning --> Failed: SyncModeChanged(Failed)
-    Failed --> Legacy: SyncModeChanged(Legacy) [recovery]
-    Failed --> Simplified: SyncModeChanged(Simplified) [recovery]
-    Failed --> Transitioning: SyncModeChanged(Transitioning)
-```
-
-- `SyncMode` is `Unsupported`, `Legacy`, `Simplified`, `Transitioning`, or
-  `Failed { failure_kind }`. It is not guarded by a Ready session; it updates
-  whenever the runtime/backend signals a change.
-- Duplicate deliveries (`state.sync_mode == mode`) are ignored.
-- Mode changes emit `UiEvent::SyncModeChanged`.
-
 ## Room List Filter
 
 The visible room list is a Rust-owned projection (`AppState.room_list`). React
@@ -518,9 +484,9 @@ membership, section order, or activity sort.
 ### Room-list bootstrap readiness
 
 Room-list membership has a separate Rust-owned readiness contract from the sync
-lifecycle. A backend can report that its service task is running before it has
-proved connectivity or delivered a complete room snapshot, so `SyncState::Running`
-is not evidence that an empty room list is authoritative.
+lifecycle. The service can report that its task is running before it has proved
+connectivity or delivered a complete room snapshot, so `SyncState::Running` is
+not evidence that an empty room list is authoritative.
 
 ```mermaid
 stateDiagram-v2
@@ -536,9 +502,8 @@ stateDiagram-v2
 ```
 
 - `RoomListReadiness` carries `Uninitialized`, `Loading`, `Ready`, or `Failed`,
-  plus a coarse `RoomListSource` (`Cache`, `SyncService`, or `Legacy`) and a
-  monotonically increasing backend generation. It contains no Matrix IDs or
-  raw SDK errors.
+  plus a coarse `RoomListSource` (`Cache` or `Live`) and a monotonically
+  increasing service generation. It contains no Matrix IDs or raw SDK errors.
 - Bootstrap start changes readiness to `Loading` and retains the last usable
   room/space/invite snapshot. A current-generation provisional observation
   merges observed Spaces and rooms by stable ID, refreshing or appending them
@@ -550,10 +515,10 @@ stateDiagram-v2
   retained snapshot. A current-generation failure changes readiness to `Failed`
   while retaining the last usable snapshot for recovery.
 - Provisional, authoritative, and failure actions from an older generation are
-  ignored. This fences a retired SyncService observer when the runtime falls
-  back to legacy sync or starts a replacement backend.
+  ignored. This fences a retired SyncService observer when the runtime starts a
+  replacement service generation.
 - `RoomListUpdated` remains the compatibility path for already-authoritative
-  room operations and tests; backend bootstrap projection uses the guarded
+  room operations and tests; service bootstrap projection uses the guarded
   readiness actions above. Both entry and snapshot paths reject all non-Ready
   sessions before mutation, explicitly covering `SignedOut`, `Locked`, and
   `SwitchingAccount`; whole-state regression tests require unchanged state and
@@ -828,20 +793,6 @@ stateDiagram-v2
 - `InviteListUpdated { invites }` is accepted only when the session is Ready.
   It replaces the whole invite snapshot and emits `RoomListChanged`; duplicate
   or stale SDK deliveries must be folded into the next Rust-owned snapshot.
-- Backend selection proves the invite-list contract before either continuous
-  owner starts. An authenticated, cursorless MSC4186 request asks for one fixed
-  zero-timeline invited-room list. Presence of that exact list selects
-  `SyncService`; omission, typed/malformed failure, or expiry of the single
-  end-to-end two-second deadline selects `LegacySync`. The disposable
-  authenticated probe receives no refresh token, so automatic refresh is
-  impossible/disabled, and request retries are disabled; its single end-to-end
-  two-second deadline covers disposable-client setup plus one transport request.
-  Probe cursors and room payloads are discarded, and the preflight never creates
-  a second sync owner. Behavioral coverage proves success, omission,
-  malformed/error, and timeout, plus that `M_UNKNOWN_TOKEN` causes zero refresh
-  calls, no authoritative session-change/token mutation, and fail-closed
-  `LegacySync` selection. Server-family or version-string fingerprints are not
-  capability evidence.
 - `InvitePreview` carries room id for command correlation plus display name,
   optional topic, optional inviter display name, and `is_dm`. GUI code must
   treat those fields as render data, not as a local membership state machine.
@@ -851,8 +802,8 @@ stateDiagram-v2
   through the SDK and emits `RoomEvent::DirectMessageStarted`. These commands
   carry normal request ids; GUI pending/settle feedback must come from Rust
   events/snapshots.
-- `RoomActor` owns projection for both sync backends. On the SyncService path,
-  the single live `RoomListService` entries adapter uses the non-left filter so
+- `RoomActor` owns projection from the single live `SyncService` and its
+  `RoomListService`. The entries adapter uses the non-left filter so
   visible invited-room diffs wake projection. A bounded entries head is not a
   complete change feed: an invite may commit outside that head without emitting
   an entries diff. The same observer also listens to the base client's
@@ -876,9 +827,9 @@ stateDiagram-v2
   result from the returned Rust snapshot or subsequent state event. The browser
   headless IPC-contract test covers `accept_invite`, `invite_user`, and
   `start_direct_message`; the Linux virtual-display lane covers real WebView
-  invite acceptance and DM start against a disposable local homeserver with the
-  legacy sync backend forced for smoke determinism. SyncService invite
-  projection remains covered by the Phase A core `invites_dm` local QA.
+  invite acceptance and DM start against disposable local Tuwunel. Simplified
+  Sliding Sync invite projection remains covered by the Phase A core `invites_dm`
+  local QA on Tuwunel and Synapse.
 
 ### Invite Workflow Admission
 
@@ -1644,17 +1595,16 @@ stateDiagram-v2
 - Every inspection/repair start advances a room-local generation. Late SDK
   outcomes apply only when account, timeline actor, and room-local generations
   still match.
-- On either SyncService or legacy sync, room-entry `LiveEdge` work does not
-  acquire the gap scheduler until the SDK has committed that backend's current
-  response to the room event cache. Timeline construction, `InitialItems`, and
-  projection acknowledgement remain available while waiting. The retained
-  committed-room observation is replayed when the response beats actor
-  registration. Manager routing fences the backend instance epoch, room key,
-  actor generation, and backend-local response/subscription generation, so a
-  queued observation from a replaced backend cannot match a reused local
-  generation.
+- On Simplified Sliding Sync, room-entry `LiveEdge` work does not acquire the
+  gap scheduler until the SDK has committed the current service response to the
+  room event cache. Timeline construction, `InitialItems`, and projection
+  acknowledgement remain available while waiting. The retained committed-room
+  observation is replayed when the response beats actor registration. Manager
+  routing fences the service instance epoch, room key, actor generation, and
+  response/subscription generation, so a queued observation from a replaced
+  service cannot match a reused local generation.
 - Each SDK room update carries the process-local response sequence assigned
-  before publication. Legacy promotion records the first successful response
+  before publication. Service admission records the first successful response
   sequence and rejects committed observations from any earlier response;
   per-room commit sequences are delivered at most once from that boundary.
 - A checkpoint carrying a committed sync gap selects only that opaque SDK gap.
@@ -3441,8 +3391,9 @@ stateDiagram-v2
   handlers still commit, but the filter-scoped `next_batch` is never written as
   the global room cursor. A fresh store remains tokenless, while a restored
   canonical cursor survives restricted sync, actor/runtime teardown, account
-  switching, and SQLite reopen. Normal LegacySync reuses that canonical cursor
-  directly; there is no separate cursor-taint state machine or repair baseline.
+  switching, and SQLite reopen. The normal Simplified Sliding Sync owner reuses
+  that canonical cursor directly; there is no separate cursor-taint state
+  machine or repair baseline.
 - Identity reset is a typed Rust-owned state machine
   (`Idle`, `Resetting`, `AwaitingAuth`, `Failed`), not a nullable pending flag.
   `AwaitingAuth` carries only a request id and coarse auth type
@@ -3525,18 +3476,13 @@ stateDiagram-v2
   trust state with the matching reducer failure action. `OperationFailed`
   alone is a transport error signal; it is not a state-machine transition.
 - The local core QA `e2ee_trust` scenario is the Phase A proof for this
-  contract on disposable homeservers. It exercises Rust-owned cross-signing
-  bootstrap, encrypted seed-room backup upload, passphrase-backed key-backup
-  enable, wrong-secret restore failure, successful passphrase restore on a
-  second same-user device, two-device SAS verification, and identity reset
-  before any GUI controls are considered complete. Run it on the probed
-  SyncService core leg:
-  `npm --prefix apps/desktop run qa:headless-local -- --server=conduit --scenario=e2ee_trust --core --core-backend=probed --timeout-ms=240000`.
-  The runner registers separate synthetic users for the SDK lane and each core
-  backend leg so the E2EE proof's account/device graph stays isolated.
-- The fixture/demo backend reports E2EE trust effects as unavailable until the
-  `AccountActor` SDK implementation lands. It must not silently discard those
-  effects.
+  contract on disposable Tuwunel and Synapse homeservers. It exercises
+  Rust-owned cross-signing bootstrap, encrypted seed-room backup upload,
+  passphrase-backed key-backup enable, wrong-secret restore failure, successful
+  passphrase restore on a second same-user device, two-device SAS verification,
+  and identity reset before any GUI controls are considered complete. The
+  runner keeps each synthetic account/device graph isolated and exercises the
+  sole Simplified Sliding Sync engine.
 
 ## Local Encryption Health
 
@@ -4228,9 +4174,3 @@ stateDiagram-v2
 - Avatar MXC URIs, thumbnail state, and user-room avatar associations are
   account-scoped sensitive metadata. Debug, logs, tests, QA tokens, fixtures,
   and issue evidence must redact real values.
-# Current sync contract (Issue #412)
-
-Session admission requires Element X-compatible Simplified Sliding Sync.
-Legacy `/sync`, backend-selection states, and fallback transitions are not
-valid state-machine states. Older diagrams and dated migration notes below are
-historical context only.

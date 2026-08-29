@@ -1,4 +1,4 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use koushi_state::{
     AppAction, AppState, ScheduledSendItem, ScheduledSendStore, SessionState, reduce,
@@ -17,13 +17,6 @@ pub(super) enum DeferredScheduledSendPersist {
         key_id: koushi_key::SessionKeyId,
         scheduled_sends: ScheduledSendStore,
     },
-}
-
-fn current_epoch_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or_default()
 }
 
 pub(super) fn scheduled_send_id() -> String {
@@ -71,7 +64,7 @@ impl super::AppActor {
             return None;
         }
         let next_send_at_ms = self.state.scheduled_sends.next_local_send_at_ms()?;
-        let now_ms = current_epoch_ms();
+        let now_ms = crate::time::current_epoch_ms();
         Some(Duration::from_millis(
             next_send_at_ms.saturating_sub(now_ms),
         ))
@@ -84,7 +77,7 @@ impl super::AppActor {
         let Some(item) = self
             .state
             .scheduled_sends
-            .next_local_due(current_epoch_ms())
+            .next_local_due(crate::time::current_epoch_ms())
         else {
             return false;
         };

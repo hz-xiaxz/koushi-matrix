@@ -442,7 +442,10 @@ fn is_oidc_callback_url(url: &str) -> bool {
     let Some(rest) = url.strip_prefix(OIDC_CALLBACK_SCHEME_PREFIX) else {
         return false;
     };
-    match rest.trim_start_matches('/').strip_prefix(OIDC_CALLBACK_PATH) {
+    match rest
+        .trim_start_matches('/')
+        .strip_prefix(OIDC_CALLBACK_PATH)
+    {
         Some("") => true,
         Some(tail) => tail.starts_with('?') || tail.starts_with('#'),
         None => false,

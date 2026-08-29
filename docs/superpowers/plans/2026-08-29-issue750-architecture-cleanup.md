@@ -1,6 +1,6 @@
 # Issue #750 canon and low-risk architecture cleanup
 
-Status: design approved for implementation by different-model review round 4.
+Status: implemented with focused verification; final-diff review and full PR gates pending.
 
 ## Outcome
 
@@ -70,9 +70,19 @@ Local homeserver or native GUI behavior is not changed; those lanes may be satis
 - Pre-implementation reviewer round 3: `reviewer-flash`, `VERDICT: FINDINGS`. Required correction: delete the obsolete normative Sync Mode/backend-selection diagram and fix its trailing historical pointer; scope the backend grep audit around the intentional negative Tauri assertion.
 - Pre-implementation reviewer round 4: `reviewer-flash`, `VERDICT: CORRECT-TO-IMPLEMENT`. Minor implementation reminder: remove the retired Conduit/backend QA command at the current `state-machine.md` line 3534 under the already-approved QA prose scope.
 - Pre-implementation verdict: **approved**.
-- Implementer: `luna-implementer`, only after a correct-to-merge design verdict.
+- Implementer: `luna-implementer` after the round-4 approval; two bounded Luna slices produced the implementation draft, and the main agent completed integration after their timeout checkpoints.
 - Final-diff reviewer: pending (`reviewer-flash`).
 - Final integration/self-review: pending (`gpt-5.6-sol`).
+
+## Implementation evidence
+
+- `cargo check -p koushi-core`: passed.
+- `cargo test -p koushi-core --lib`: 1085 passed, 8 ignored.
+- Focused credential-vault atomic tests: 6 passed; composer missing-parent and fail-before-persist tests: passed.
+- `cargo test -p koushi-sdk`: passed.
+- `cargo check -p koushi-sdk --features smoke --bins`: passed.
+- `cargo metadata --no-deps`: passed with no `koushi-backend` workspace member.
+- Full repository/PR gate evidence remains pending after final-diff review.
 
 ## Acceptance
 

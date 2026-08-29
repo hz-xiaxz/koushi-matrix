@@ -31,22 +31,6 @@ fn composer_timeline_command_targets_active_session(
         .is_none_or(|(_, expected_account)| active_session_key == Some(expected_account))
 }
 
-fn state_search_scope(scope: &crate::command::SearchScope) -> koushi_state::SearchScope {
-    match scope {
-        crate::command::SearchScope::AllRooms => koushi_state::SearchScope::AllRooms,
-        crate::command::SearchScope::CurrentRoom { room_id } => {
-            koushi_state::SearchScope::CurrentRoom {
-                room_id: room_id.clone(),
-            }
-        }
-        crate::command::SearchScope::CurrentSpace { space_id } => {
-            koushi_state::SearchScope::CurrentSpace {
-                space_id: space_id.clone(),
-            }
-        }
-    }
-}
-
 #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
 fn is_manual_sync_once(command: &SyncCommand) -> bool {
     matches!(command, SyncCommand::SyncOnce { .. })
@@ -422,7 +406,7 @@ impl AccountActor {
             .send(vec![AppAction::SearchFailed {
                 request_id: request_id.sequence,
                 query: query.to_owned(),
-                scope: state_search_scope(scope),
+                scope: scope.to_state(),
                 message: message.to_owned(),
             }])
             .await;

@@ -1860,7 +1860,7 @@ impl AppActor {
                     // notice to the right pane (no frontend correlation
                     // needed).
                     if let Err(kind) =
-                        crate::timeline::validate_composer_body_for_timeline_send(&body)
+                        crate::timeline::composer::validate_composer_body_for_timeline_send(&body)
                     {
                         if kind == TimelineFailureKind::UnsupportedSlashCommand
                             && let Some(key) =
@@ -1991,7 +1991,7 @@ impl AppActor {
                     // keyed to the item's room — visible without the thread
                     // being open.
                     if let Err(kind) =
-                        crate::timeline::validate_composer_body_for_timeline_send(&body)
+                        crate::timeline::composer::validate_composer_body_for_timeline_send(&body)
                     {
                         let notice_key =
                             composer_draft_session_key(&self.state).and_then(|account| {

@@ -48,7 +48,7 @@
 //! Message bodies appear in `TimelineItem.body` (visible UI state per canon)
 
 mod actor;
-mod composer;
+pub(crate) mod composer;
 mod diagnostics;
 mod display_projection;
 mod gap_repair;
@@ -69,22 +69,7 @@ mod thread_projection;
 
 pub(crate) use diagnostics::record_thread_summary_reconciliation;
 
-#[cfg(test)]
-#[allow(unused_imports)] // Preserve the baseline cfg-test flat path.
-pub(crate) use composer::build_room_message_content_from_composer_document;
-#[allow(unused_imports)] // Preserve the baseline crate-internal flat paths.
-pub(crate) use composer::{
-    build_room_message_content_from_composer_body,
-    build_room_message_content_from_composer_body_with_options,
-    validate_composer_body_for_timeline_send,
-};
 pub use item_projection::sdk_item_to_timeline_item;
-#[allow(unused_imports)] // Preserve the baseline crate-internal flat paths.
-pub(crate) use item_projection::{
-    reaction_groups_from_sdk, timeline_item_can_edit, timeline_item_can_react,
-    timeline_item_can_redact, validate_cancel_send, validate_redact_reaction, validate_retry_send,
-    validate_send_reaction,
-};
 pub(crate) use manager::TimelineMessage;
 pub use manager::{TIMELINE_DIFF_QUEUE_CAPACITY, TimelineManagerActor, TimelineManagerHandle};
 pub use navigation::TimelineProjectionAcknowledgement;
