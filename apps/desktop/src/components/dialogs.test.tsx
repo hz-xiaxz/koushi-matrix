@@ -123,10 +123,13 @@ describe("UploadStagingDialog", () => {
       ])
     );
     const item = document.querySelector(".upload-staging-item");
+    const list = document.querySelector(".upload-staging-list");
     const preview = item?.querySelector(".upload-preview-viewport");
     const toolbar = item?.querySelector(".upload-output-toolbar");
     const caption = item?.querySelector(".upload-staging-caption");
 
+    expect(list?.classList.contains("is-single")).toBe(true);
+    expect(item?.classList.contains("has-preview")).toBe(true);
     expect(preview).not.toBeNull();
     expect(toolbar).not.toBeNull();
     expect(caption).not.toBeNull();

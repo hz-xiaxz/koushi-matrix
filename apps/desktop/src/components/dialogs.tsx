@@ -949,9 +949,16 @@ export function UploadStagingDialog({
           <X size={ICON_SIZE.small} />
         </button>
       </div>
-      <div className="upload-staging-list">
+      <div className={`upload-staging-list${items.length === 1 ? " is-single" : ""}`}>
         {items.map((item, index) => (
-          <article className="upload-staging-item" key={item.staged_id}>
+          <article
+            className={`upload-staging-item${
+              item.kind.kind === "image" && item.preparation.kind === "ready"
+                ? " has-preview"
+                : ""
+            }`}
+            key={item.staged_id}
+          >
             <div className="upload-staging-file">
               {item.kind.kind === "image" ? (
                 <ImageIcon size={ICON_SIZE.control} aria-hidden="true" />

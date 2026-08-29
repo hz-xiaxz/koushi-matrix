@@ -172,6 +172,27 @@ describe("styles.css token system", () => {
     expect(list).toMatch(/overflow-y:\s*auto/);
     expect(list).toMatch(/overscroll-behavior:\s*contain/);
 
+    const singleList = selectorBlock(".upload-staging-list.is-single");
+    // A single attachment keeps its editor fixed; any vertical pressure is
+    // absorbed by the bounded image preview instead of scrolling the caption.
+    expect(singleList).toMatch(/overflow-y:\s*hidden/);
+
+    const singlePreviewItem = selectorBlock(
+      ".upload-staging-list.is-single .upload-staging-item.has-preview"
+    );
+    expect(singlePreviewItem).toMatch(
+      /grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto\s+auto/
+    );
+    expect(singlePreviewItem).toMatch(/min-block-size:\s*0/);
+
+    const singlePreview = selectorBlock(
+      ".upload-staging-list.is-single .upload-staging-item.has-preview .upload-preview-viewport"
+    );
+    expect(singlePreview).toMatch(/block-size:\s*100%/);
+    expect(singlePreview).toMatch(
+      /min-block-size:\s*var\(--upload-preview-viewport-min-size\)/
+    );
+
     const preview = selectorBlock(".upload-preview-viewport");
     // A prepared image pans inside its own bounded surface; controls outside
     // this viewport do not move when the user inspects a large image.
