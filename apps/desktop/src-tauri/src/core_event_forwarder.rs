@@ -255,11 +255,13 @@ fn serialize_core_event(event: &CoreEvent) -> Option<serde_json::Value> {
         CoreEvent::IntentLifecycle {
             request_id,
             outcome,
+            published_generation,
         } => {
             serde_json::json!({
                 "kind": "IntentLifecycle",
                 "request_id": request_id,
                 "outcome": outcome,
+                "published_generation": published_generation,
             })
         }
     })
@@ -2051,12 +2053,14 @@ mod tests {
             "intentLifecycleCommitted": serialize_core_event(&CoreEvent::IntentLifecycle {
                 request_id,
                 outcome: IntentOutcome::Committed,
+                published_generation: 9,
             })
             .expect("serialize intent lifecycle committed"),
             "intentLifecycleFailedNoOpRoomNotInState": serialize_core_event(
                 &CoreEvent::IntentLifecycle {
                     request_id,
                     outcome: IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState),
+                    published_generation: 9,
                 },
             )
             .expect("serialize intent lifecycle failed noop room not in state"),

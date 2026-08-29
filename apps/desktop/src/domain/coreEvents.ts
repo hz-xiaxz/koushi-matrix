@@ -1262,6 +1262,7 @@ export type CoreEventPayload =
       kind: "IntentLifecycle";
       request_id: RequestId;
       outcome: IntentOutcome;
+      published_generation: number;
     }
   /** Emitted by the Tauri adapter when EventStreamLag is detected. */
   | { kind: "ResyncMarker" };

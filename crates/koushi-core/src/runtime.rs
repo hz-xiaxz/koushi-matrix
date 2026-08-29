@@ -41,7 +41,8 @@ use std::path::PathBuf;
 #[cfg(any(test, feature = "test-hooks"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, atomic::AtomicU64};
-use std::time::{Duration, Instant};
+#[cfg(test)]
+use std::time::Duration;
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
@@ -888,7 +889,7 @@ impl AppActor {
                 command = self.command_rx.recv() => {
                     let Some(command) = command else { break };
                     let loop_started = std::time::Instant::now();
-                    let before_state = self.state.clone();
+                    let _clone_probe = self.state.clone();
                     let clone_ms = loop_started.elapsed().as_millis();
                     let mut state_changed = match command_disposition(command) {
                         CommandDisposition::Handle(command) => self.handle_command(command).await,
@@ -913,7 +914,11 @@ impl AppActor {
                         }
                     }
                     if state_changed {
-                        self.publish_state_delta(&before_state);
+                        // A command arm may have published an intent commit point
+                        // already. Diff only from the latest published watch value so
+                        // coalescing cannot duplicate that delta or skip later commands.
+                        let published_state = self.snapshot_tx.borrow().state.clone();
+                        self.publish_state_delta(&published_state);
                     }
                     app_loop_trace("command", handled, clone_ms, loop_started.elapsed());
                     if shutdown {
@@ -930,6 +935,7 @@ impl AppActor {
                     let clone_ms = loop_started.elapsed().as_millis();
                     let mut state_changed = false;
                     let mut pending_select_settlements = Vec::new();
+                    let mut post_projection_work = Vec::new();
                     for action in actions {
                         let Some(action) = normalize_activity_resolution_action(&self.state, action)
                         else {
@@ -1220,40 +1226,49 @@ impl AppActor {
                                 navigation_projection_cause = select_request_id;
                             }
                         }
-                        self.handle_post_projection_effects(
-                            &post_projection_effects,
-                            navigation_projection_generation,
-                            navigation_projection_cause,
-                            crate::timeline::NavigationProjectionCleanup {
-                                cancel_pagination:
-                                    cancel_replaced_room_timeline_pagination,
-                                cancel_link_previews:
-                                    cancel_replaced_room_timeline_link_previews,
-                            },
-                        )
-                        .await;
-                        self.apply_deferred_reducer_side_effects(
-                            deferred_reducer_side_effects,
-                        )
-                        .await;
-                        if let Some(identity) = composer_acceptance {
-                            self.pending_composer_acceptances
-                                .retain(|_, pending| pending.identity != identity);
-                        }
+                        // Stage 1 keeps only synchronous state derivation before publish.
+                        // Every transport, cleanup, persistence, and UI effect from this
+                        // action is queued uniformly for the post-commit stage below.
                         if let Some(activity_update) = self
                             .activity_projection
                             .update_action_for_open_state(&self.state)
                         {
-                            let _activity_effects =
-                                self.reduce_app_action(activity_update).await;
+                            let (activity_effects, activity_deferred) =
+                                self.reduce_app_action_state(activity_update);
+                            post_projection_work.push((
+                                activity_effects,
+                                None,
+                                None,
+                                crate::timeline::NavigationProjectionCleanup::default(),
+                                activity_deferred,
+                                None,
+                            ));
                         }
-                        self.handle_ui_event_effects(&post_projection_effects).await;
+                        post_projection_work.push((
+                            post_projection_effects,
+                            navigation_projection_generation,
+                            navigation_projection_cause,
+                            crate::timeline::NavigationProjectionCleanup {
+                                cancel_pagination: cancel_replaced_room_timeline_pagination,
+                                cancel_link_previews: cancel_replaced_room_timeline_link_previews,
+                            },
+                            deferred_reducer_side_effects,
+                            composer_acceptance,
+                        ));
+                        // These loads can reduce state required for a coherent published
+                        // snapshot, so they remain in the synchronous derivation stage.
                         self.load_room_preferences_for_current_session().await;
                         self.load_navigation_for_current_session().await;
                         self.load_composer_drafts_for_current_session().await;
                         self.load_scheduled_sends_for_current_session().await;
                         state_changed = true;
                     }
+                    let published_generation = if state_changed {
+                        self.publish_state_delta(&before_state)
+                            .unwrap_or(self.state_generation)
+                    } else {
+                        self.state_generation
+                    };
                     let final_active_room_id = self.state.navigation.active_room_id.clone();
                     for (
                         request_id,
@@ -1297,10 +1312,48 @@ impl AppActor {
                                 intent_outcome_token(&outcome),
                             )),
                         );
-                        self.emit(CoreEvent::IntentLifecycle { request_id, outcome });
+                        self.emit(CoreEvent::IntentLifecycle {
+                            request_id,
+                            outcome,
+                            published_generation,
+                        });
                     }
-                    if state_changed {
-                        self.publish_state_delta(&before_state);
+
+                    // Only after publication and every terminal has been emitted may
+                    // cleanup, persistence, and other post-commit effects run.
+                    for (
+                        effects,
+                        navigation_projection_generation,
+                        navigation_projection_cause,
+                        navigation_cleanup,
+                        deferred_reducer_side_effects,
+                        composer_acceptance,
+                    ) in post_projection_work
+                    {
+                        let before_post_projection = self.state.clone();
+                        self.handle_post_projection_effects(
+                            &effects,
+                            navigation_projection_generation,
+                            navigation_projection_cause,
+                            navigation_cleanup,
+                        )
+                        .await;
+                        self.apply_deferred_reducer_side_effects(
+                            deferred_reducer_side_effects,
+                        )
+                        .await;
+                        if let Some(identity) = composer_acceptance {
+                            self.pending_composer_acceptances
+                                .retain(|_, pending| pending.identity != identity);
+                        }
+                        self.handle_ui_event_effects(&effects).await;
+                        self.load_room_preferences_for_current_session().await;
+                        self.load_navigation_for_current_session().await;
+                        self.load_composer_drafts_for_current_session().await;
+                        self.load_scheduled_sends_for_current_session().await;
+                        if self.state != before_post_projection {
+                            self.publish_state_delta(&before_post_projection);
+                        }
                     }
                     app_loop_trace("action", action_batch, clone_ms, loop_started.elapsed());
                 }
@@ -2168,7 +2221,26 @@ impl AppActor {
                         let focused_key = (!target_found)
                             .then(|| self.current_focused_context_timeline_key())
                             .flatten();
-                        let effects = self.reduce_app_action(action).await;
+                        // Include any earlier coalesced command mutations that have
+                        // not yet reached the watch snapshot in this commit point.
+                        let before_state = self.snapshot_tx.borrow().state.clone();
+                        let (effects, deferred_reducer_side_effects) =
+                            self.reduce_app_action_state(action);
+                        let published_generation = self
+                            .publish_state_delta(&before_state)
+                            .unwrap_or(self.state_generation);
+                        let lifecycle_outcome = focused_navigation_outcome_after_reduce(
+                            &self.state,
+                            &navigation,
+                            target_found,
+                        );
+                        self.emit(CoreEvent::IntentLifecycle {
+                            request_id: projection_request_id,
+                            outcome: lifecycle_outcome,
+                            published_generation,
+                        });
+                        self.apply_deferred_reducer_side_effects(deferred_reducer_side_effects)
+                            .await;
                         if let Some(key) = focused_key {
                             self.send_timeline_command_or_fail(
                                 projection_request_id,
@@ -2181,15 +2253,6 @@ impl AppActor {
                         }
                         self.handle_app_effects(projection_request_id, effects)
                             .await;
-                        let lifecycle_outcome = focused_navigation_outcome_after_reduce(
-                            &self.state,
-                            &navigation,
-                            target_found,
-                        );
-                        self.emit(CoreEvent::IntentLifecycle {
-                            request_id: projection_request_id,
-                            outcome: lifecycle_outcome,
-                        });
                     }
                     true
                 }
@@ -3990,11 +4053,8 @@ impl AppActor {
         let _ = self.event_tx.send(event);
     }
 
-    fn publish_state_delta(&mut self, before_state: &AppState) {
-        let Some(delta) = build_state_delta(self.state_generation + 1, before_state, &self.state)
-        else {
-            return;
-        };
+    fn publish_state_delta(&mut self, before_state: &AppState) -> Option<u64> {
+        let delta = build_state_delta(self.state_generation + 1, before_state, &self.state)?;
         self.state_generation = delta.generation;
         let _ = self.snapshot_tx.send(VersionedAppStateSnapshot {
             generation: self.state_generation,
@@ -4005,6 +4065,7 @@ impl AppActor {
         // full snapshots. The Tauri webview adapter ignores this event on the
         // normal state path and applies StateDelta instead.
         self.emit(CoreEvent::StateChanged(self.state.clone()));
+        Some(self.state_generation)
     }
 }
 
@@ -5782,9 +5843,9 @@ mod tests {
             .split("actions = self.action_rx.recv()")
             .nth(1)
             .expect("action_rx arm should exist")
-            .split("if state_changed")
+            .split("app_loop_trace(\"action\"")
             .next()
-            .expect("action_rx arm should include post-reduce effect handling");
+            .expect("action_rx arm should include post-commit effect handling");
 
         let cancel_offset = action_rx_arm
             .find("cancel_replaced_room_timeline_pagination")
@@ -5810,9 +5871,9 @@ mod tests {
             .split("actions = self.action_rx.recv()")
             .nth(1)
             .expect("action_rx arm should exist")
-            .split("if state_changed")
+            .split("app_loop_trace(\"action\"")
             .next()
-            .expect("action_rx arm should include post-reduce effect handling");
+            .expect("action_rx arm should include post-commit effect handling");
 
         let cancel_offset = action_rx_arm
             .find("cancel_replaced_room_timeline_link_previews")
@@ -5924,54 +5985,40 @@ mod tests {
             .await
             .expect("inject committed room selection");
 
-        let terminal = executor::timeout(Duration::from_millis(100), event_rx.recv())
-            .await
-            .expect("committed terminal must not wait for cleanup transport")
-            .expect("event stream remains open");
+        let terminal = executor::timeout(Duration::from_secs(1), async {
+            let published = event_rx.recv().await.expect("event stream remains open");
+            assert!(matches!(&published, CoreEvent::StateDelta(delta) if delta.generation == 1));
+            loop {
+                match event_rx.recv().await.expect("event stream remains open") {
+                    event @ CoreEvent::IntentLifecycle { .. } => break event,
+                    CoreEvent::StateChanged(_) => {}
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("publication and terminal must not wait for cleanup transport");
         assert!(matches!(
             terminal,
             CoreEvent::IntentLifecycle {
                 request_id: observed,
                 outcome: IntentOutcome::Committed,
+                published_generation: 1,
             } if observed == request_id
         ));
-        executor::timeout(Duration::from_millis(100), snapshot_rx.changed())
-            .await
-            .expect("the committed selection must finish reducing")
-            .expect("snapshot channel remains open");
+        assert!(matches!(
+            event_rx.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
         assert_eq!(
             snapshot_rx
-                .borrow()
+                .borrow_and_update()
                 .state
                 .navigation
                 .active_room_id
                 .as_deref(),
             Some(next_room)
         );
-        let terminal_deadline = Instant::now() + Duration::from_millis(20);
-        while let Ok(Ok(event)) = executor::timeout(
-            terminal_deadline.saturating_duration_since(Instant::now()),
-            event_rx.recv(),
-        )
-        .await
-        {
-            assert!(
-                !matches!(
-                    event,
-                    CoreEvent::IntentLifecycle {
-                        request_id: observed,
-                        ..
-                    } | CoreEvent::OperationFailed {
-                        request_id: observed,
-                        ..
-                    } if observed == request_id
-                ),
-                "cleanup admission must not emit a second correlated terminal"
-            );
-            if Instant::now() >= terminal_deadline {
-                break;
-            }
-        }
         let mut retained_rx = navigation_projection.subscribe();
         let retained = retained_rx
             .borrow_and_update()
@@ -6045,6 +6092,10 @@ mod tests {
             connection_id: RuntimeConnectionId(92),
             sequence: 2,
         };
+        let already_active_request = RequestId {
+            connection_id: RuntimeConnectionId(92),
+            sequence: 3,
+        };
         let mut pending_select = HashMap::new();
         pending_select.insert(
             first_room.to_owned(),
@@ -6052,7 +6103,7 @@ mod tests {
         );
         pending_select.insert(
             second_room.to_owned(),
-            std::collections::VecDeque::from([second_request]),
+            std::collections::VecDeque::from([second_request, already_active_request]),
         );
         let composer_draft_leases = Arc::new(ComposerDraftLeaseRegistry::new());
         let composer_draft_lease_changes = composer_draft_leases.subscribe();
@@ -6141,10 +6192,64 @@ mod tests {
                 .as_deref(),
             Some(second_room)
         );
+        assert_eq!(snapshot_rx.borrow().generation, 1);
+
+        action_tx
+            .send(vec![AppAction::SelectRoom {
+                room_id: second_room.to_owned(),
+            }])
+            .await
+            .expect("inject already-active selection");
+        let no_op = executor::timeout(Duration::from_secs(1), event_rx.recv())
+            .await
+            .expect("already-active intent must settle")
+            .expect("event stream remains open");
+        assert!(matches!(
+            no_op,
+            CoreEvent::IntentLifecycle {
+                request_id,
+                outcome: IntentOutcome::BenignNoOp(IntentNoOpReason::AlreadyActive),
+                published_generation: 1,
+            } if request_id == already_active_request
+        ));
+        assert_eq!(
+            snapshot_rx.borrow().generation,
+            1,
+            "a no-op settlement must not fabricate a new StateDelta"
+        );
 
         actor_task.abort();
         drop(command_tx);
         drop(action_tx);
+    }
+
+    #[test]
+    fn focused_ack_and_command_coalescer_share_the_latest_published_baseline() {
+        let source = include_str!("runtime.rs");
+        let command_loop = source
+            .split("command = self.command_rx.recv()")
+            .nth(1)
+            .expect("command loop")
+            .split("actions = self.action_rx.recv()")
+            .next()
+            .expect("action loop follows command loop");
+        let focused_ack = source
+            .split("AppCommand::AcknowledgeTimelineProjection")
+            .nth(1)
+            .expect("focused projection acknowledgement arm")
+            .split("AppCommand::OpenTimelineAtTimestamp")
+            .next()
+            .expect("timestamp command follows focused acknowledgement");
+        let baseline = "self.snapshot_tx.borrow().state.clone()";
+
+        assert!(
+            command_loop.contains(baseline),
+            "the command coalescer must publish only unpublished state"
+        );
+        assert!(
+            focused_ack.contains(baseline),
+            "a self-publishing ack must include earlier unpublished coalesced commands"
+        );
     }
 
     #[test]

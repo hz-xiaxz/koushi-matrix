@@ -555,12 +555,14 @@ async fn wait_for_main_timeline_anchor(
             Ok(CoreEvent::IntentLifecycle {
                 request_id: settled_request_id,
                 outcome: IntentOutcome::Committed,
+                ..
             }) if settled_request_id == request_id => {
                 settlement = Some(MainTimelineSettlement::Anchor);
             }
             Ok(CoreEvent::IntentLifecycle {
                 request_id: settled_request_id,
                 outcome: IntentOutcome::BenignNoOp(IntentNoOpReason::TimelineTargetMissing),
+                ..
             }) if settled_request_id == request_id => {
                 if allow_live_fallback {
                     settlement = Some(MainTimelineSettlement::LiveFallback);
@@ -571,6 +573,7 @@ async fn wait_for_main_timeline_anchor(
             Ok(CoreEvent::IntentLifecycle {
                 request_id: settled_request_id,
                 outcome: IntentOutcome::FailedNoOp(_),
+                ..
             }) if settled_request_id == request_id => {
                 return Err("main timeline anchor open failed".to_owned());
             }

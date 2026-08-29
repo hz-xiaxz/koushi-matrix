@@ -415,6 +415,7 @@ impl CoreConnection {
                 CoreEvent::IntentLifecycle {
                     request_id: lifecycle_request_id,
                     outcome: IntentOutcome::FailedNoOp(reason),
+                    ..
                 } if lifecycle_request_id == request_id => {
                     return Err(match reason {
                         IntentNoOpReason::SessionNotReady => SelectRoomError::SessionNotReady,
@@ -427,6 +428,7 @@ impl CoreConnection {
                 CoreEvent::IntentLifecycle {
                     request_id: lifecycle_request_id,
                     outcome: IntentOutcome::Committed | IntentOutcome::BenignNoOp(_),
+                    ..
                 } if lifecycle_request_id == request_id => {}
                 _ => {}
             }
@@ -501,6 +503,7 @@ mod tests {
             .send(CoreEvent::IntentLifecycle {
                 request_id,
                 outcome: IntentOutcome::Committed,
+                published_generation: 17,
             })
             .expect("committed lifecycle");
         assert!(
@@ -589,6 +592,7 @@ mod tests {
             .send(CoreEvent::IntentLifecycle {
                 request_id,
                 outcome: IntentOutcome::FailedNoOp(IntentNoOpReason::Superseded),
+                published_generation: 0,
             })
             .expect("matching superseded lifecycle");
         assert_eq!(
@@ -625,6 +629,7 @@ mod tests {
             .send(CoreEvent::IntentLifecycle {
                 request_id: unrelated_request_id,
                 outcome: IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState),
+                published_generation: 0,
             })
             .expect("unrelated lifecycle");
         assert!(waiter.as_mut().now_or_never().is_none());

@@ -34,6 +34,7 @@ async fn recv_intent_lifecycle_for(
             Ok(Ok(CoreEvent::IntentLifecycle {
                 request_id: rid,
                 outcome,
+                ..
             })) if rid == request_id => {
                 return Some(outcome);
             }
@@ -64,6 +65,7 @@ async fn recv_intent_lifecycle_within(
             Ok(Ok(CoreEvent::IntentLifecycle {
                 request_id: rid,
                 outcome,
+                ..
             })) if rid == request_id => {
                 return Some(outcome);
             }
@@ -489,6 +491,7 @@ async fn two_concurrent_select_room_for_same_room_both_receive_terminal_outcome(
             Ok(Ok(CoreEvent::IntentLifecycle {
                 request_id,
                 outcome,
+                ..
             })) => {
                 outcomes.insert(request_id, outcome);
                 if outcomes.contains_key(&request_id_a) && outcomes.contains_key(&request_id_b) {
