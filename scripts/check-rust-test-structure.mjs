@@ -921,6 +921,57 @@ function sourceContractFailure(rule, message) {
   return { kind: "source-contract", rule, message };
 }
 
+// Issue #753 source-contract migration ledger.  Counts are structural
+// assertions only; mixed tests retain their behavioral assertions in Rust.
+// Old fully-qualified test identity | old assertions | replacement rule(s) | replacement assertions
+// koushi_core::runtime::tests::role_command_reduces_pending_before_one_account_route | 2 | core.runtime.role_command_pending_route | 2
+// koushi_core::runtime::tests::activity_mark_read_routes_persistent_room_mark_read_commands | 3 | core.runtime.activity_mark_read_route | 3
+// koushi_core::runtime::tests::open_thread_command_must_execute_thread_timeline_effects | 2 | core.runtime.thread_effect_execution | 2
+// koushi_core::runtime::tests::runtime_must_execute_start_sync_effects_from_session_reducer | 2 | core.runtime.start_sync_effect_execution | 2
+// koushi_core::runtime::tests::runtime_must_execute_session_cleanup_effects_from_session_reducer | 2 | core.runtime.session_cleanup_effect_execution | 2
+// koushi_core::runtime::tests::runtime_routes_current_device_trust_rechecks_in_both_effect_lanes | 1 | core.runtime.trust_recheck_effect_execution | 1
+// koushi_core::runtime::tests::runtime_routes_current_session_status_in_both_effect_lanes | 1 | core.runtime.session_status_effect_execution | 1
+// koushi_core::runtime::tests::app_actor_persistence_uses_blocking_store_port | 3 | core.runtime.persistence_blocking_port | 3
+// koushi_core::runtime::tests::runtime_must_execute_subscribe_timeline_effects_from_navigation_reducers | 2 | core.runtime.subscribe_timeline_effect | 2
+// koushi_core::runtime::tests::runtime_room_selection_replays_existing_room_timeline_for_empty_renderer_store | 3 | core.runtime.navigation_replay | 3
+// koushi_core::runtime::tests::closed_account_actor_timeline_route_is_not_reported_as_queue_overflow | 2 | core.runtime.closed_timeline_route | 2
+// koushi_core::runtime::tests::actor_projection_start_sync_effects_must_not_be_discarded | 1 | core.runtime.actor_start_sync_effect | 1
+// koushi_core::runtime::tests::runtime_sync_trace_covers_start_sync_effect_boundaries | 2 | core.runtime.sync_trace | 2
+// koushi_core::runtime::tests::opening_a_replacement_thread_unsubscribes_the_previous_thread_before_subscribe | 1 | core.runtime.thread_replacement | 1
+// koushi_core::runtime::tests::opening_a_replacement_focused_context_unsubscribes_previous_focused_before_subscribe | 1 | core.runtime.focused_replacement | 1
+// koushi_core::runtime::tests::opening_focused_context_repairs_target_event_cache_before_subscribe | 1 | core.runtime.focused_cache_repair | 1
+// koushi_core::runtime::tests::selecting_a_replacement_room_cancels_previous_room_pagination_before_subscribe | 2 | core.runtime.room_switch_pagination | 2
+// koushi_core::runtime::tests::selecting_a_replacement_room_cancels_previous_room_link_previews_before_subscribe | 2 | core.runtime.room_switch_link_previews | 2
+// koushi_core::runtime::tests::focused_ack_and_command_coalescer_share_the_latest_published_baseline | 2 | core.runtime.coalescer_baseline | 2
+// koushi_core::runtime::tests::timestamp_jump_uses_local_activity_projection_before_homeserver_fallback | 2 | core.runtime.timestamp_activity_projection | 2
+// koushi_core::runtime::connection::tests::core_connection_command_handle_clones_submit_path | 4 | core.runtime.connection_command_handle | 8
+// koushi_core::executor::tests::executor_exposes_blocking_task_port | 2 | core.runtime.executor_blocking_port | 2
+// koushi_core::renderable_thumbnail::tests::avatar_and_preview_thumbnail_helpers_do_not_use_legacy_plaintext_paths | 8 | core.runtime.thumbnail_paths | 8
+// koushi_core::search::tests::search_query_failures_are_classified_from_sdk_error | 3 | core.search.query_failure_classification | 3
+// koushi_core::search::tests::search_actor_handles_new_queries_before_crawl_and_sdk_completions | 8 | core.search.query_priority | 8
+// koushi_core::search::tests::empty_query_is_not_special_cased_in_runtime | 4 | core.search.empty_query_ownership | 4
+// koushi_core::search::tests::search_actor_crawler_uses_element_style_round_robin_checkpoints | 3 | core.search.crawler_round_robin | 3
+// koushi_core::search::tests::search_actor_prunes_crawler_queue_when_joined_rooms_change | 2 | core.search.crawler_pruning | 2
+// koushi_core::search::tests::search_actor_history_crawler_uses_account_wide_account_work | 2 | core.search.crawler_account_work | 2
+// koushi_core::search::tests::search_actor_room_availability_notifications_have_nonblocking_entrypoint | 3 | core.search.availability_nonblocking | 3
+// koushi_core::search::tests::search_crawler_lifecycle_projects_actor_owned_stop_settles | 4 | core.search.crawler_lifecycle | 4
+// koushi_core::search::tests::preempted_crawl_page_is_requeued | 2 | core.search.preempted_page_requeue | 2
+// koushi_core::search::tests::automatic_crawl_starts_are_delayed_at_startup | 3 | core.search.startup_delay | 3
+// koushi_core::search_crawler::tests::history_crawler_page_runner_fetches_only_one_messages_page | 2 | core.search.page_single_fetch | 2
+// koushi_core::search_crawler::tests::history_crawler_page_runner_acquires_the_search_crawl_work_kind | 1 | core.search.page_work_kind | 1
+// koushi_core::search_crawler::tests::crawler_page_emits_startup_trace | 1 | core.search.page_startup_trace | 1
+// koushi_core::search_crawler::tests::crawler_page_yields_to_timeline_via_cancellation | 3 | core.search.page_cancellation | 3
+// koushi_core::send_diagnostics::tests::distinguishes_http_timeouts_without_exposing_transport_details | 1 | core.runtime.send_http_timeout | 1 (mixed; behavioral assertions retained)
+// koushi_core::sync::tests::sync_service_has_one_all_rooms_owner | 7 | core.sync.single_all_rooms_owner | 7
+// koushi_core::sync::tests::running_state_is_not_the_committed_response_handoff | 2 | core.sync.committed_response_handoff | 2
+// koushi_core::sync::tests::latest_observed_commit_is_forwarded_to_timeline_before_range_readiness | 4 | core.sync.timeline_commit_before_readiness | 4
+// koushi_core::sync::tests::terminated_sync_owner_is_restarted_instead_of_settled_failed | 3 | core.sync.terminated_owner_restart | 3
+// koushi_core::threads_list::tests::aggregate_refresh_has_production_manager_start_and_finish_callers | 5 | core.threads.aggregate_refresh_callers | 5
+// koushi_core::threads_list::tests::thread_root_projection_source_never_uses_room_pagination_or_anchor_materialization | 1 | core.threads.root_projection_no_pagination | 3
+// koushi_core::threads_list::tests::open_subscription_loads_initial_page_before_emitting_opened | 1 | core.threads.open_subscription_initial_page | 1
+// koushi_core::threads_list::tests::paginate_updates_are_correlated_to_paginate_request_id | 4 | core.threads.pagination_request_correlation | 4
+// koushi_core::threads_list::tests::thread_list_relays_are_reliable_and_paginate_errors_fail | 8 | core.threads.reliable_relays | 9
+
 export function checkStateFocusedContextReducerContract() {
   const rule = "state.focused_context_reducer_contract";
   const source = readRustSource("crates/koushi-state/src/reducer/mod.rs") + readRustSource("crates/koushi-state/src/reducer/thread.rs");
@@ -1274,6 +1325,492 @@ function accountItemBody(relativePath, marker) {
 
 function accountSection(relativePath, startMarker, endMarker) {
   return sourceSection(accountProductionSource(relativePath), startMarker, endMarker);
+}
+
+function coreSource(relativePath) {
+  const fileName = `crates/koushi-core/src/${relativePath}`;
+  return productionOnly(readRustSource(fileName), fileName);
+}
+
+function coreItemBody(relativePath, marker) {
+  return rustItemBody(coreSource(relativePath), marker);
+}
+
+export function checkCoreRuntimeRoleCommandPendingRoute() {
+  const rule = "core.runtime.role_command_pending_route";
+  const source = coreSource("runtime.rs");
+  const branch = sourceSection(source, "crate::command::RoomCommand::UpdateSpaceMemberRole {\n                        request_id", "CoreCommand::Timeline(timeline_command)");
+  const routeMarker = ".account_actor\n                    .send";
+  const pending = branch?.indexOf("SpaceMemberRoleUpdateRequested") ?? -1;
+  const route = branch?.indexOf(routeMarker) ?? -1;
+  const failures = [];
+  if (pending < 0 || route < 0 || pending >= route) failures.push(sourceContractFailure(rule, "role command does not project pending state before account routing"));
+  if ((branch?.split(routeMarker).length ?? 1) - 1 !== 1) failures.push(sourceContractFailure(rule, "role command does not have exactly one account route"));
+  return failures;
+}
+
+export function checkCoreRuntimeActivityMarkReadRoute() {
+  const rule = "core.runtime.activity_mark_read_route";
+  const branch = sourceSection(coreSource("runtime.rs"), "AppCommand::MarkActivityRead", "AppCommand::OpenFilesView");
+  const failures = [];
+  for (const marker of ["RoomCommand::MarkRoomAsRead", "next_internal_request_id", "FullyReadMarkerUpdated"]) if (!branch?.includes(marker)) failures.push(sourceContractFailure(rule, `activity mark-read route lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreRuntimeThreadEffectExecution() {
+  const rule = "core.runtime.thread_effect_execution";
+  const branch = sourceSection(coreSource("runtime.rs"), "AppCommand::OpenThread", "AppCommand::CloseThread");
+  const failures = [];
+  if (branch?.includes("let _ = effects;")) failures.push(sourceContractFailure(rule, "OpenThread discards reducer effects"));
+  if (!branch?.includes("handle_app_effects") && !branch?.includes("TimelineCommand::Subscribe")) failures.push(sourceContractFailure(rule, "OpenThread does not execute its timeline effect"));
+  return failures;
+}
+
+export function checkCoreRuntimeStartSyncEffectExecution() {
+  const rule = "core.runtime.start_sync_effect_execution";
+  const body = coreItemBody("runtime.rs", "async fn handle_app_effects");
+  const failures = [];
+  for (const marker of ["AppEffect::StartSync", "SyncCommand::Start"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `StartSync effect route lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreRuntimeSessionCleanupEffectExecution() {
+  const rule = "core.runtime.session_cleanup_effect_execution";
+  const source = coreSource("runtime.rs");
+  const command = sourceSection(source, "async fn handle_app_effects", "async fn handle_post_projection_effects");
+  const actor = sourceSection(source, "async fn handle_post_projection_effects", "async fn handle_ui_event_effects");
+  const failures = [];
+  for (const helper of [command, actor]) {
+    for (const marker of ["AppEffect::StopSync", "SyncCommand::Stop"]) if (!helper?.includes(marker)) failures.push(sourceContractFailure(rule, `session cleanup route lacks ${marker}`));
+  }
+  return failures;
+}
+
+export function checkCoreRuntimeTrustRecheckEffectExecution() {
+  const rule = "core.runtime.trust_recheck_effect_execution";
+  const source = coreSource("runtime.rs");
+  const command = sourceSection(source, "async fn handle_app_effects", "async fn handle_post_projection_effects");
+  const actor = sourceSection(source, "async fn handle_post_projection_effects", "async fn handle_ui_event_effects");
+  const failures = [];
+  for (const helper of [command, actor]) {
+    const recheck = helper?.split("AppEffect::CheckCurrentDeviceTrust").at(1)?.split("AppEffect::").at(0);
+    if (!recheck?.includes("AccountMessage::CheckCurrentDeviceTrust")) failures.push(sourceContractFailure(rule, "trust recheck effect does not reach AccountActor"));
+  }
+  return failures;
+}
+
+export function checkCoreRuntimeSessionStatusEffectExecution() {
+  const rule = "core.runtime.session_status_effect_execution";
+  const source = coreSource("runtime.rs");
+  const command = sourceSection(source, "async fn handle_app_effects", "async fn handle_post_projection_effects");
+  const actor = sourceSection(source, "async fn handle_post_projection_effects", "async fn handle_ui_event_effects");
+  const failures = [];
+  for (const helper of [command, actor]) {
+    const refresh = helper?.split("AppEffect::RefreshCurrentSessionStatus").at(1)?.split("AppEffect::").at(0);
+    if (!refresh?.includes("AccountMessage::RefreshCurrentSessionStatus")) failures.push(sourceContractFailure(rule, "session-status refresh does not reach AccountActor"));
+  }
+  return failures;
+}
+
+export function checkCoreRuntimePersistenceBlockingPort() {
+  const rule = "core.runtime.persistence_blocking_port";
+  const runtime = coreSource("runtime.rs");
+  const scheduled = coreSource("runtime/scheduled_send.rs");
+  const navigation = coreSource("runtime/navigation.rs");
+  const composer = coreSource("runtime/composer.rs");
+  const sections = [
+    sourceSection(scheduled, "async fn load_scheduled_sends_for_current_session", "async fn persist_scheduled_sends"),
+    sourceSection(scheduled, "async fn persist_scheduled_sends", "fn scheduled_send_delay"),
+    sourceSection(runtime, "async fn persist_room_preferences", "fn next_internal_request_id"),
+    sourceSection(navigation, "async fn load_navigation_for_current_session", "async fn persist_navigation"),
+    sourceSection(navigation, "async fn persist_navigation", "fn current_focused_context_timeline_key"),
+    sourceSection(composer, "async fn flush_pending_composer_drafts", "fn composer_draft_session_key"),
+    sourceSection(runtime, "AppEffect::PersistSettings", "AppEffect::PersistRoomPreferences")
+  ];
+  return sections.flatMap((section) => section?.includes("executor::spawn_blocking") ? [] : [sourceContractFailure(rule, "AppActor persistence is not offloaded through the blocking executor port")]);
+}
+
+export function checkCoreRuntimeSubscribeTimelineEffect() {
+  const rule = "core.runtime.subscribe_timeline_effect";
+  const body = coreItemBody("runtime.rs", "async fn handle_app_effects");
+  const failures = [];
+  for (const marker of ["AppEffect::SubscribeTimeline", "TimelineKind::Room"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `SubscribeTimeline route lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreRuntimeNavigationReplay() {
+  const rule = "core.runtime.navigation_replay";
+  const body = coreItemBody("runtime.rs", "async fn handle_post_projection_effects");
+  const failures = [];
+  for (const marker of ["NavigationProjectionIntent", "admit_navigation_projection", "replay_existing: true"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `navigation replay route lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreRuntimeClosedTimelineRoute() {
+  const rule = "core.runtime.closed_timeline_route";
+  const body = sourceSection(coreSource("runtime.rs"), "async fn send_timeline_command_or_fail", "fn default_data_dir_from_home");
+  const failures = [];
+  if (!body?.includes("CoreFailure::ShutdownFailed")) failures.push(sourceContractFailure(rule, "closed account route lacks shutdown failure"));
+  if (body?.includes("TimelineFailureKind::QueueOverflow")) failures.push(sourceContractFailure(rule, "closed account route reports queue overflow"));
+  return failures;
+}
+
+export function checkCoreRuntimeActorStartSyncEffect() {
+  const rule = "core.runtime.actor_start_sync_effect";
+  const body = sourceSection(coreSource("runtime.rs"), "actions = self.action_rx.recv()", "command = self.command_rx.recv()");
+  return body?.includes("handle_post_projection_effects") ? [] : [sourceContractFailure(rule, "actor projection actions do not execute post-projection effects")];
+}
+
+export function checkCoreRuntimeSyncTrace() {
+  const rule = "core.runtime.sync_trace";
+  const source = coreSource("runtime.rs");
+  const command = sourceSection(source, "async fn handle_app_effects", "async fn handle_post_projection_effects")?.replace(/\s/gu, "") ?? "";
+  const actor = sourceSection(source, "async fn handle_post_projection_effects", "async fn handle_ui_event_effects")?.replace(/\s/gu, "") ?? "";
+  const failures = [];
+  for (const [body, marker] of [[command, 'trace_runtime_sync!("effect_start_sync",[DiagnosticField::token("source","command_effect")'], [actor, 'trace_runtime_sync!("effect_start_sync",[DiagnosticField::token("source","actor_projection")']]) if (!body.includes(marker)) failures.push(sourceContractFailure(rule, "StartSync effect boundary lacks its source trace"));
+  return failures;
+}
+
+export function checkCoreRuntimeThreadReplacement() {
+  const rule = "core.runtime.thread_replacement";
+  const branch = sourceSection(coreSource("runtime.rs"), "AppCommand::OpenThread", "AppCommand::CloseThread");
+  const replacement = branch?.indexOf("unsubscribe_replaced_thread_timeline") ?? -1;
+  const effects = branch?.indexOf("handle_app_effects") ?? -1;
+  return replacement >= 0 && effects >= 0 && replacement < effects ? [] : [sourceContractFailure(rule, "thread replacement is not unsubscribed before the new subscription effect")];
+}
+
+export function checkCoreRuntimeFocusedReplacement() {
+  const rule = "core.runtime.focused_replacement";
+  const branch = sourceSection(coreSource("runtime.rs"), "AppCommand::OpenFocusedContext", "AppCommand::CloseFocusedContext");
+  const replacement = branch?.indexOf("unsubscribe_replaced_focused_context_timeline") ?? -1;
+  const effects = branch?.indexOf("handle_app_effects") ?? -1;
+  return replacement >= 0 && effects >= 0 && replacement < effects ? [] : [sourceContractFailure(rule, "focused replacement is not unsubscribed before the new subscription effect")];
+}
+
+export function checkCoreRuntimeFocusedCacheRepair() {
+  const rule = "core.runtime.focused_cache_repair";
+  const branch = sourceSection(coreSource("runtime.rs"), "AppCommand::OpenFocusedContext", "AppCommand::CloseFocusedContext");
+  const repair = branch?.indexOf("ensure_room_event_cached") ?? -1;
+  const effects = branch?.indexOf("handle_app_effects") ?? -1;
+  return repair >= 0 && effects >= 0 && repair < effects ? [] : [sourceContractFailure(rule, "focused target cache repair does not precede subscription effects")];
+}
+
+export function checkCoreRuntimeRoomSwitchPagination() {
+  const rule = "core.runtime.room_switch_pagination";
+  const source = coreSource("runtime.rs");
+  const arm = sourceSection(source, "actions = self.action_rx.recv()", "app_loop_trace(\"action\"");
+  const cancel = arm?.indexOf("cancel_replaced_room_timeline_pagination") ?? -1;
+  const effects = arm?.indexOf("handle_post_projection_effects") ?? -1;
+  const failures = [];
+  if (cancel < 0 || effects < 0 || cancel >= effects) failures.push(sourceContractFailure(rule, "room-switch pagination cancellation does not precede replacement effects"));
+  return failures;
+}
+
+export function checkCoreRuntimeRoomSwitchLinkPreviews() {
+  const rule = "core.runtime.room_switch_link_previews";
+  const source = coreSource("runtime.rs");
+  const arm = sourceSection(source, "actions = self.action_rx.recv()", "app_loop_trace(\"action\"");
+  const cancel = arm?.indexOf("cancel_replaced_room_timeline_link_previews") ?? -1;
+  const effects = arm?.indexOf("handle_post_projection_effects") ?? -1;
+  const failures = [];
+  if (cancel < 0 || effects < 0 || cancel >= effects) failures.push(sourceContractFailure(rule, "room-switch link-preview cancellation does not precede replacement effects"));
+  return failures;
+}
+
+export function checkCoreRuntimeConnectionCommandHandle() {
+  const rule = "core.runtime.connection_command_handle";
+  const source = coreSource("runtime/connection.rs");
+  const handle = rustItemBody(source, "impl CoreCommandHandle");
+  const connection = rustItemBody(source, "impl CoreConnection");
+  const commandHandle = rustItemBody(connection ?? "", "pub fn command_handle");
+  const command = rustItemBody(connection ?? "", "pub async fn command");
+  const failures = [];
+  if (!source.includes("#[derive(Clone)]\npub struct CoreCommandHandle")) failures.push(sourceContractFailure(rule, "command handle is not cloneable"));
+  for (const marker of ["self.command_tx", ".send(CoreCommandEnvelope", "command,", "composer_permit", ".await"]) if (!handle?.includes(marker)) failures.push(sourceContractFailure(rule, `command handle lacks ${marker}`));
+  if (!commandHandle?.includes("command_tx: self.command_tx.clone()")) failures.push(sourceContractFailure(rule, "connection clones more than the command sender"));
+  if (!command?.includes("self.command_handle().command(command).await")) failures.push(sourceContractFailure(rule, "connection command does not delegate through the handle"));
+  return failures;
+}
+
+export function checkCoreRuntimeCoalescerBaseline() {
+  const rule = "core.runtime.coalescer_baseline";
+  const source = coreSource("runtime.rs");
+  const command = sourceSection(source, "command = self.command_rx.recv()", "actions = self.action_rx.recv()");
+  const ack = sourceSection(source, "AppCommand::AcknowledgeTimelineProjection", "AppCommand::OpenTimelineAtTimestamp");
+  const failures = [];
+  for (const section of [command, ack]) if (!section?.includes("self.snapshot_tx.borrow().state.clone()")) failures.push(sourceContractFailure(rule, "coalescer path does not publish the latest unpublished baseline"));
+  return failures;
+}
+
+export function checkCoreRuntimeTimestampActivityProjection() {
+  const rule = "core.runtime.timestamp_activity_projection";
+  const arm = sourceSection(coreSource("runtime.rs"), "AppCommand::OpenTimelineAtTimestamp", "AppCommand::CloseFocusedContext");
+  const local = arm?.indexOf("activity_projection") ?? -1;
+  const fallback = arm?.indexOf("AccountMessage::OpenTimelineAtTimestamp") ?? -1;
+  const failures = [];
+  if (local < 0 || fallback < 0 || local >= fallback) failures.push(sourceContractFailure(rule, "timestamp navigation does not prefer local activity before homeserver fallback"));
+  if (!arm?.includes("AppAction::OpenFocusedContext")) failures.push(sourceContractFailure(rule, "local timestamp resolution does not open focused context through the reducer"));
+  return failures;
+}
+
+export function checkCoreRuntimeExecutorBlockingPort() {
+  const rule = "core.runtime.executor_blocking_port";
+  const source = coreSource("executor.rs");
+  const failures = [];
+  for (const marker of ["pub fn spawn_blocking", "tokio::task::spawn_blocking"]) if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `executor blocking port lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreRuntimeSendHttpTimeout() {
+  const rule = "core.runtime.send_http_timeout";
+  const source = coreSource("send_diagnostics.rs");
+  return source.includes("matrix_sdk::HttpError::Cached(error) => http_error_is_timeout(error)") ? [] : [sourceContractFailure(rule, "send diagnostics do not classify cached HTTP timeout errors")];
+}
+
+export function checkCoreRuntimeThumbnailPaths() {
+  const rule = "core.runtime.thumbnail_paths";
+  const account = coreItemBody("account/profile.rs", "async fn download_avatar_thumbnail");
+  const preview = coreItemBody("link_preview.rs", "async fn download_preview_image");
+  const failures = [];
+  for (const [body, required, forbidden] of [[account, ["get_media_content", "true,"], ["avatar_thumbnails", "file://"]], [preview, ["get_media_content", "false,"], ["link_preview_thumbnails", "file://"]]]) {
+    for (const marker of required) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `thumbnail helper lacks ${marker}`));
+    for (const marker of forbidden) if (body?.includes(marker)) failures.push(sourceContractFailure(rule, `thumbnail helper contains forbidden ${marker}`));
+  }
+  return failures;
+}
+
+export function checkCoreSearchQueryFailureClassification() {
+  const rule = "core.search.query_failure_classification";
+  const source = coreSource("search.rs");
+  const query = sourceSection(source, "async fn handle_query", "async fn handle_index_message");
+  const failures = [];
+  if (!source.includes("fn classify_matrix_search_error")) failures.push(sourceContractFailure(rule, "search failure classifier is missing"));
+  if (!query?.includes("classify_matrix_search_error(&error)")) failures.push(sourceContractFailure(rule, "query failures bypass SDK error classification"));
+  if (query?.includes("kind: SearchFailureKind::IndexUnavailable")) failures.push(sourceContractFailure(rule, "query failures hardcode IndexUnavailable"));
+  return failures;
+}
+
+export function checkCoreSearchQueryPriority() {
+  const rule = "core.search.query_priority";
+  const source = coreSource("search.rs");
+  const run = coreItemBody("search.rs", "async fn run");
+  const failures = [];
+  if (!run?.includes("biased;")) failures.push(sourceContractFailure(rule, "search actor loop is not biased toward actor messages"));
+  const actor = run?.indexOf("msg = self.msg_rx.recv()") ?? -1;
+  for (const marker of ["crawl_result = async", "sdk_result = async"]) {
+    const position = run?.indexOf(marker) ?? -1;
+    if (actor < 0 || position < 0 || actor >= position) failures.push(sourceContractFailure(rule, `actor messages do not precede ${marker}`));
+  }
+  const query = coreItemBody("search.rs", "async fn handle_query");
+  for (const marker of ["self.active_sdk_search.take()", "abort_and_await_task(task).await", "record_stale_sdk_drop"]) if (!query?.includes(marker)) failures.push(sourceContractFailure(rule, `query replacement lacks ${marker}`));
+  const result = coreItemBody("search.rs", "async fn handle_sdk_query_result");
+  for (const marker of ["result.generation != self.active_query_generation", "record_stale_sdk_drop"]) if (!result?.includes(marker)) failures.push(sourceContractFailure(rule, `SDK result fencing lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreSearchEmptyQueryOwnership() {
+  const rule = "core.search.empty_query_ownership";
+  const runtime = coreSource("runtime.rs");
+  const search = coreSource("search.rs");
+  const failures = [];
+  for (const marker of ["is_empty_query", "results: Vec::new()"]) if (runtime.includes(marker)) failures.push(sourceContractFailure(rule, `runtime owns forbidden empty-query marker ${marker}`));
+  for (const marker of ["query.trim().is_empty()", "CoreEvent::Search(SearchEvent::Results"]) if (!search.includes(marker)) failures.push(sourceContractFailure(rule, `search actor lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreSearchCrawlerRoundRobin() {
+  const rule = "core.search.crawler_round_robin";
+  const source = coreSource("search.rs");
+  const failures = [];
+  for (const marker of ["VecDeque<HistoryCrawlCheckpoint>", "start_next_history_crawl_page", "push_back(next_checkpoint)"]) if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `crawler round-robin path lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreSearchCrawlerPruning() {
+  const rule = "core.search.crawler_pruning";
+  const source = coreSource("search.rs");
+  const failures = [];
+  for (const marker of ["retain_history_crawl_rooms", "abort_active_history_crawl_if_retired"]) if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `crawler pruning path lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreSearchCrawlerAccountWork() {
+  const rule = "core.search.crawler_account_work";
+  const source = coreSource("search.rs");
+  const starter = sourceSection(source, "fn start_next_history_crawl_page", "async fn handle_history_crawl_page_result");
+  const failures = [];
+  if (!source.includes("AccountWorkScheduler")) failures.push(sourceContractFailure(rule, "SearchActor lacks shared account work scheduler"));
+  if (!starter?.includes("account_work.clone()")) failures.push(sourceContractFailure(rule, "crawler page starter does not pass shared account work"));
+  return failures;
+}
+
+export function checkCoreSearchAvailabilityNonblocking() {
+  const rule = "core.search.availability_nonblocking";
+  const body = coreItemBody("search.rs", "impl SearchActorHandle");
+  const failures = [];
+  for (const marker of ["pub fn try_notify_rooms_available", ".try_send(SearchActorMessage::RoomsAvailable"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `room availability path lacks ${marker}`));
+  if (body?.includes("TrySendError::Closed(_)) => Ok(())")) failures.push(sourceContractFailure(rule, "closed room availability delivery is reported as success"));
+  return failures;
+}
+
+export function checkCoreSearchCrawlerLifecycle() {
+  const rule = "core.search.crawler_lifecycle";
+  const source = coreSource("search.rs");
+  const start = coreItemBody("search.rs", "async fn handle_start_history_crawl");
+  const stop = coreItemBody("search.rs", "async fn handle_stop_history_crawl");
+  const available = coreItemBody("search.rs", "async fn handle_rooms_available");
+  const retain = sourceSection(source, "fn retain_history_crawl_rooms", "fn abort_active_history_crawl_if_retired");
+  const failures = [];
+  if (!start?.includes("settings.speed == SearchCrawlerSpeed::Paused") || !start?.includes("self.emit_history_crawl_stopped(room_id).await")) failures.push(sourceContractFailure(rule, "paused manual crawl start does not settle stopped state"));
+  if (!stop?.includes("self.emit_history_crawl_stopped(room_id).await")) failures.push(sourceContractFailure(rule, "manual crawl stop does not settle stopped state"));
+  if (!available?.includes("self.stop_all_history_crawls().await") || !available?.includes("self.emit_history_crawl_stopped(room_id).await")) failures.push(sourceContractFailure(rule, "room availability pruning does not settle stopped state"));
+  if (!retain?.includes("-> Vec<String>")) failures.push(sourceContractFailure(rule, "crawler pruning does not return retired room ids"));
+  return failures;
+}
+
+export function checkCoreSearchPreemptedPageRequeue() {
+  const rule = "core.search.preempted_page_requeue";
+  const body = coreItemBody("search.rs", "fn handle_history_crawl_page_result");
+  const failures = [];
+  for (const marker of ["HistoryCrawlPageResult::Preempted", "push_front"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `preempted page handling lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreSearchStartupDelay() {
+  const rule = "core.search.startup_delay";
+  const source = coreSource("search.rs");
+  const starter = coreItemBody("search.rs", "fn start_next_history_crawl_page");
+  const failures = [];
+  if (!source.includes("CRAWLER_STARTUP_DELAY")) failures.push(sourceContractFailure(rule, "crawler startup-delay constant is missing"));
+  for (const marker of ["crawl_delay_elapsed", "manual"]) if (!starter?.includes(marker)) failures.push(sourceContractFailure(rule, `crawler startup-delay gate lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreSearchPageSingleFetch() {
+  const rule = "core.search.page_single_fetch";
+  const body = coreItemBody("search_crawler.rs", "async fn run_history_crawl_page");
+  const failures = [];
+  if (!body?.includes("result = room.messages(options)")) failures.push(sourceContractFailure(rule, "crawler page does not fetch one messages page"));
+  if (body?.includes("loop {")) failures.push(sourceContractFailure(rule, "crawler page loops through room history"));
+  return failures;
+}
+
+export function checkCoreSearchPageWorkKind() {
+  const rule = "core.search.page_work_kind";
+  const body = coreItemBody("search_crawler.rs", "async fn run_history_crawl_page");
+  const acquire = body?.indexOf("AccountWorkKind::SearchCrawl") ?? -1;
+  const messages = body?.indexOf("result = room.messages(options)") ?? -1;
+  return acquire >= 0 && messages >= 0 && acquire < messages ? [] : [sourceContractFailure(rule, "crawler page acquires search-crawl work after room.messages")];
+}
+
+export function checkCoreSearchPageStartupTrace() {
+  const rule = "core.search.page_startup_trace";
+  return coreSource("search_crawler.rs").includes("StartupPhase::CrawlerPage") ? [] : [sourceContractFailure(rule, "crawler page does not emit startup trace" )];
+}
+
+export function checkCoreSearchPageCancellation() {
+  const rule = "core.search.page_cancellation";
+  const source = coreSource("search_crawler.rs");
+  const failures = [];
+  for (const marker of ["permit.cancelled()", "HistoryCrawlPageResult::Preempted", "trace_crawler_preempted"]) if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `crawler cancellation path lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreSyncSingleAllRoomsOwner() {
+  const rule = "core.sync.single_all_rooms_owner";
+  const source = coreSource("sync.rs");
+  const failures = [];
+  if ((source.match(/SyncService::builder/gu) ?? []).length !== 1) failures.push(sourceContractFailure(rule, "sync service has more than one all-rooms builder"));
+  for (const marker of ["committed_all_rooms_response", "room_list_service: Arc<", "room_list_service,"]) if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `single sync owner lacks ${marker}`));
+  for (const marker of ["KOUSHI_QA_FORCE_SYNC_BACKEND", "probe_backend", "run_legacy_sync_loop"]) if (source.includes(marker)) failures.push(sourceContractFailure(rule, `legacy sync marker remains: ${marker}`));
+  return failures;
+}
+
+export function checkCoreSyncCommittedResponseHandoff() {
+  const rule = "core.sync.committed_response_handoff";
+  const observer = coreItemBody("sync.rs", "async fn observe_sync_service");
+  const committed = observer?.indexOf("Signal::Committed(committed)") ?? -1;
+  const handoff = observer?.indexOf("reconcile_committed_room_list") ?? -1;
+  const failures = [];
+  if (committed < 0 || handoff < 0 || handoff <= committed) failures.push(sourceContractFailure(rule, "committed response is not handed to RoomActor after observation"));
+  if (observer?.includes("if !committed.range_fully_loaded()")) failures.push(sourceContractFailure(rule, "range readiness gates committed response handoff"));
+  return failures;
+}
+
+export function checkCoreSyncTimelineCommitBeforeReadiness() {
+  const rule = "core.sync.timeline_commit_before_readiness";
+  const observer = coreItemBody("sync.rs", "async fn observe_sync_service");
+  const committed = observer?.indexOf("Signal::Committed(committed)") ?? -1;
+  const forwarding = observer?.indexOf("forward_latest_timeline_response_commit(") ?? -1;
+  const handoff = forwarding >= 0 ? observer.slice(forwarding) : "";
+  const failures = [];
+  if (committed < 0 || forwarding < 0 || forwarding <= committed) failures.push(sourceContractFailure(rule, "timeline commit is not forwarded after committed response"));
+  for (const marker of ["run_generation", "committed.sequence()"]) if (!handoff.includes(marker)) failures.push(sourceContractFailure(rule, `timeline commit handoff lacks ${marker}`));
+  if (handoff.includes("backend")) failures.push(sourceContractFailure(rule, "timeline commit handoff exposes backend selection"));
+  return failures;
+}
+
+export function checkCoreSyncTerminatedOwnerRestart() {
+  const rule = "core.sync.terminated_owner_restart";
+  const observer = coreItemBody("sync.rs", "async fn observe_sync_service");
+  const terminated = observer?.split("State::Terminated =>").at(1)?.split("_ => {}").at(0);
+  const failures = [];
+  for (const marker of ["ReplacementRecoveryProof::new", "sync_service.start().await"]) if (!terminated?.includes(marker)) failures.push(sourceContractFailure(rule, `terminated owner recovery lacks ${marker}`));
+  if (terminated?.includes("SyncTaskOutcome::Failed")) failures.push(sourceContractFailure(rule, "terminated owner settles as failed instead of restarting"));
+  return failures;
+}
+
+export function checkCoreThreadsAggregateRefreshCallers() {
+  const rule = "core.threads.aggregate_refresh_callers";
+  const manager = coreSource("timeline/manager.rs");
+  const projection = coreSource("timeline/thread_projection.rs");
+  const commit = sourceSection(projection, "async fn commit_prepared_thread_root_hydration_for_generation(", "fn thread_root_projection_action_from_record");
+  const failures = [];
+  for (const marker of ["StartAggregateRefresh", "AggregateRefreshFinished", "handle_aggregate_refresh"]) if (!manager.includes(marker)) failures.push(sourceContractFailure(rule, `thread manager lacks ${marker}`));
+  for (const marker of ["schedule_aggregate_refresh", "StartAggregateRefresh"]) if (!commit?.includes(marker)) failures.push(sourceContractFailure(rule, `thread projection commit lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreThreadsRootProjectionNoPagination() {
+  const rule = "core.threads.root_projection_no_pagination";
+  const source = sourceSection(coreSource("threads_list.rs"), "pub struct ThreadRootProjectionService");
+  const failures = [];
+  for (const marker of ["paginate_backwards", "PaginateBackward", "RestoreTimelineAnchor"]) if (source?.includes(marker)) failures.push(sourceContractFailure(rule, `root projection contains forbidden ${marker}`));
+  return failures;
+}
+
+export function checkCoreThreadsOpenSubscriptionInitialPage() {
+  const rule = "core.threads.open_subscription_initial_page";
+  const body = sourceSection(coreSource("threads_list.rs"), "async fn open_subscription", "async fn emit_opened");
+  const paginate = body?.indexOf("service.paginate().await") ?? -1;
+  const emit = body?.indexOf("self.emit_opened") ?? -1;
+  return paginate >= 0 && emit >= 0 && paginate < emit ? [] : [sourceContractFailure(rule, "thread subscription emits opened before its initial page")];
+}
+
+export function checkCoreThreadsPaginationRequestCorrelation() {
+  const rule = "core.threads.pagination_request_correlation";
+  const source = coreSource("threads_list.rs");
+  const paginate = sourceSection(source, "async fn paginate(&self, request_id: RequestId)", "fn project_item");
+  const updates = sourceSection(source, "Some((_, _state)) = pagination_rx.recv()", "else => break");
+  const failures = [];
+  if (!paginate?.includes("send(request_id)")) failures.push(sourceContractFailure(rule, "pagination does not send its fresh request id"));
+  if (paginate?.includes("let _ = request_id")) failures.push(sourceContractFailure(rule, "pagination discards its fresh request id"));
+  if (!updates?.includes("current_request_id.sequence")) failures.push(sourceContractFailure(rule, "pagination updates do not use current request id"));
+  if (updates?.includes("request_id: request_id.sequence")) failures.push(sourceContractFailure(rule, "pagination updates use the opening request id"));
+  return failures;
+}
+
+export function checkCoreThreadsReliableRelays() {
+  const rule = "core.threads.reliable_relays";
+  const source = coreSource("threads_list.rs");
+  const open = sourceSection(source, "async fn open_subscription", "async fn emit_opened");
+  const paginate = sourceSection(source, "async fn paginate(&self, request_id: RequestId)", "fn project_item");
+  const failures = [];
+  if (open?.includes("try_send")) failures.push(sourceContractFailure(rule, "thread-list relay uses lossy try_send"));
+  for (const marker of ["items_tx.send(room_id.clone()).await", "pagination_tx.send((room_id.clone(), state)).await", "AppAction::ThreadsListFailed", "failed_pagination_request_id"]) if (!open?.includes(marker)) failures.push(sourceContractFailure(rule, `thread-list relay lacks ${marker}`));
+  for (const marker of ["classify_thread_list_error(&error)", "pagination_failure_tx"]) if (!paginate?.includes(marker)) failures.push(sourceContractFailure(rule, `pagination failure relay lacks ${marker}`));
+  for (const marker of ["self.emit_failed(&scope, request_id, OperationFailureKind::Invalid)", "self.emit_failed(&scope, request_id, OperationFailureKind::NotFound)"]) if (!open?.includes(marker)) failures.push(sourceContractFailure(rule, `open failure relay lacks ${marker}`));
+  return failures;
 }
 
 export function checkCoreAccountSessionReplacementTeardown() {
@@ -1730,6 +2267,53 @@ export function runSourceContractRules() {
     checkCoreAccountSasAdoption(),
     checkCoreAccountIncomingVerificationAdmission(),
     checkCoreAccountIdentityResetAuthLifecycle(),
+    checkCoreRuntimeRoleCommandPendingRoute(),
+    checkCoreRuntimeActivityMarkReadRoute(),
+    checkCoreRuntimeThreadEffectExecution(),
+    checkCoreRuntimeStartSyncEffectExecution(),
+    checkCoreRuntimeSessionCleanupEffectExecution(),
+    checkCoreRuntimeTrustRecheckEffectExecution(),
+    checkCoreRuntimeSessionStatusEffectExecution(),
+    checkCoreRuntimePersistenceBlockingPort(),
+    checkCoreRuntimeSubscribeTimelineEffect(),
+    checkCoreRuntimeNavigationReplay(),
+    checkCoreRuntimeClosedTimelineRoute(),
+    checkCoreRuntimeActorStartSyncEffect(),
+    checkCoreRuntimeSyncTrace(),
+    checkCoreRuntimeThreadReplacement(),
+    checkCoreRuntimeFocusedReplacement(),
+    checkCoreRuntimeFocusedCacheRepair(),
+    checkCoreRuntimeRoomSwitchPagination(),
+    checkCoreRuntimeRoomSwitchLinkPreviews(),
+    checkCoreRuntimeConnectionCommandHandle(),
+    checkCoreRuntimeCoalescerBaseline(),
+    checkCoreRuntimeTimestampActivityProjection(),
+    checkCoreRuntimeExecutorBlockingPort(),
+    checkCoreRuntimeSendHttpTimeout(),
+    checkCoreRuntimeThumbnailPaths(),
+    checkCoreSearchQueryFailureClassification(),
+    checkCoreSearchQueryPriority(),
+    checkCoreSearchEmptyQueryOwnership(),
+    checkCoreSearchCrawlerRoundRobin(),
+    checkCoreSearchCrawlerPruning(),
+    checkCoreSearchCrawlerAccountWork(),
+    checkCoreSearchAvailabilityNonblocking(),
+    checkCoreSearchCrawlerLifecycle(),
+    checkCoreSearchPreemptedPageRequeue(),
+    checkCoreSearchStartupDelay(),
+    checkCoreSearchPageSingleFetch(),
+    checkCoreSearchPageWorkKind(),
+    checkCoreSearchPageStartupTrace(),
+    checkCoreSearchPageCancellation(),
+    checkCoreSyncSingleAllRoomsOwner(),
+    checkCoreSyncCommittedResponseHandoff(),
+    checkCoreSyncTimelineCommitBeforeReadiness(),
+    checkCoreSyncTerminatedOwnerRestart(),
+    checkCoreThreadsAggregateRefreshCallers(),
+    checkCoreThreadsRootProjectionNoPagination(),
+    checkCoreThreadsOpenSubscriptionInitialPage(),
+    checkCoreThreadsPaginationRequestCorrelation(),
+    checkCoreThreadsReliableRelays(),
     checkStateFocusedContextReducerContract(),
     checkStateHasNoLegacySyncModeVocabulary(),
     checkSdkPasswordSmokeRuntimeSafety(),

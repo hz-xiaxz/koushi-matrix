@@ -51,23 +51,3 @@ pub async fn timeout_at<F: Future>(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TimeoutElapsed;
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn executor_exposes_blocking_task_port() {
-        let source = include_str!("executor.rs");
-        let public_api = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("test module should follow public executor API");
-        assert!(
-            public_api.contains("pub fn spawn_blocking"),
-            "blocking OS/filesystem/keyring work must go through the executor port"
-        );
-        assert!(
-            public_api.contains("tokio::task::spawn_blocking"),
-            "native executor backend must route blocking work to tokio's blocking pool"
-        );
-    }
-}

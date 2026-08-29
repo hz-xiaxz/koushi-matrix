@@ -652,59 +652,6 @@ mod tests {
     }
 
     #[test]
-    fn history_crawler_page_runner_fetches_only_one_messages_page() {
-        let source = include_str!("search_crawler.rs");
-        let page_runner = source
-            .split(concat!("async fn run", "_history", "_crawl", "_page"))
-            .nth(1)
-            .and_then(|tail| {
-                tail.split(concat!("fn crawl", "_batch", "_and", "_delay"))
-                    .next()
-            })
-            .expect("bounded page runner should exist");
-
-        // The page fetch is inside a tokio::select! branch; the macro awaits
-        // the future implicitly so the literal `.await` does not appear here.
-        assert!(
-            page_runner.contains(concat!(
-                "result", " = ", "room", ".", "messages", "(", "options", ")"
-            )),
-            "page runner must fetch exactly one /messages page (inside tokio::select!)"
-        );
-        assert!(
-            !page_runner.contains("loop {"),
-            "page runner must not loop through an entire room history"
-        );
-    }
-
-    #[test]
-    fn history_crawler_page_runner_acquires_the_search_crawl_work_kind() {
-        let source = include_str!("search_crawler.rs");
-        let page_runner = source
-            .split(concat!("async fn run", "_history", "_crawl", "_page"))
-            .nth(1)
-            .and_then(|tail| {
-                tail.split(concat!("fn crawl", "_batch", "_and", "_delay"))
-                    .next()
-            })
-            .expect("bounded page runner should exist");
-        let acquire_offset = page_runner
-            .find("AccountWorkKind::SearchCrawl")
-            .expect("crawler page runner must acquire the named search-crawl work kind");
-        // The page fetch is inside a tokio::select! branch; match the select form.
-        let messages_offset = page_runner
-            .find(concat!(
-                "result", " = ", "room", ".", "messages", "(", "options", ")"
-            ))
-            .expect("page runner must fetch one /messages page (inside tokio::select!)");
-
-        assert!(
-            acquire_offset < messages_offset,
-            "crawler page runner must acquire its scheduler permit before room.messages"
-        );
-    }
-
-    #[test]
     fn crawler_respects_include_media_captions_setting() {
         let json = r#"{
             "event_id": "$e3:test",
@@ -891,36 +838,6 @@ mod tests {
         assert!(
             done.load(Ordering::Relaxed),
             "task must have signalled completion after drain unblocked it"
-        );
-    }
-
-    #[test]
-    fn crawler_page_emits_startup_trace() {
-        let source = include_str!("search_crawler.rs");
-        // Search production code only; excluding the test module prevents the
-        // assertion string below from satisfying itself.
-        let production = source.split("\nmod tests").next().unwrap_or(source);
-        assert!(
-            production.contains("StartupPhase::CrawlerPage"),
-            "crawler page fetch must be timed so background /messages work is visible in startup traces"
-        );
-    }
-
-    #[test]
-    fn crawler_page_yields_to_timeline_via_cancellation() {
-        let source = include_str!("search_crawler.rs");
-        let production = source.split("\nmod tests").next().unwrap_or(source);
-        assert!(
-            production.contains("permit.cancelled()"),
-            "crawler page must race room.messages() against the gate's cancellation signal"
-        );
-        assert!(
-            production.contains("HistoryCrawlPageResult::Preempted"),
-            "a cancelled crawler page must return Preempted so the checkpoint is re-queued"
-        );
-        assert!(
-            production.contains("trace_crawler_preempted"),
-            "preemption must be observable via startup_trace"
         );
     }
 }

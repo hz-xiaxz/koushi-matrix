@@ -234,3 +234,64 @@ was found in the account mappings.
 Slice result: 58 account-scoped Rust-source includes removed from 27
 source-only tests. Mixed tests retained: 0. Account-scoped Rust-source includes
 remaining: 0. `runSourceContractRules`: 0 violations.
+
+## Source-contract mapping: koushi-core runtime/search/sync/thread slices (#753 continuation)
+
+The scoped diff contains 46 deleted source-only `#[test]` identities. Rule
+names are the existing `runSourceContractRules` contracts; no Rust/checker code
+is changed by this continuation.
+
+| Old file:test | Include/assertion facts summary | Checker rule | Disposition |
+| --- | --- | --- | --- |
+| `runtime.rs:role_command_reduces_pending_before_one_account_route` | 1 include / pending-before-single-account-route and exactly-one route | `core.runtime.role_command_pending_route` | Removed |
+| `runtime.rs:activity_mark_read_routes_persistent_room_mark_read_commands` | 1 include / persistent mark-read, internal request, marker update | `core.runtime.activity_mark_read_route` | Removed |
+| `runtime.rs:open_thread_command_must_execute_thread_timeline_effects` | 1 include / OpenThread effect is executed, not discarded | `core.runtime.thread_effect_execution` | Removed |
+| `runtime.rs:runtime_must_execute_start_sync_effects_from_session_reducer` | 1 include / StartSync routes to SyncCommand::Start | `core.runtime.start_sync_effect_execution` | Removed |
+| `runtime.rs:runtime_must_execute_session_cleanup_effects_from_session_reducer` | 1 include / StopSync routes to SyncCommand::Stop in both lanes | `core.runtime.session_cleanup_effect_execution` | Removed |
+| `runtime.rs:runtime_routes_current_device_trust_rechecks_in_both_effect_lanes` | 1 include / trust recheck reaches AccountActor in both lanes | `core.runtime.trust_recheck_effect_execution` | Removed |
+| `runtime.rs:runtime_routes_current_session_status_in_both_effect_lanes` | 1 include / session-status route in both effect lanes | `core.runtime.session_status_effect_execution` | Removed |
+| `runtime.rs:app_actor_persistence_uses_blocking_store_port` | 4 includes / all persistence paths use executor blocking port | `core.runtime.persistence_blocking_port` | Removed |
+| `runtime.rs:runtime_must_execute_subscribe_timeline_effects_from_navigation_reducers` | 1 include / SubscribeTimeline room effect is executed | `core.runtime.subscribe_timeline_effect` | Removed |
+| `runtime.rs:runtime_room_selection_replays_existing_room_timeline_for_empty_renderer_store` | 1 include / selected room replays existing timeline | `core.runtime.navigation_replay` | Removed |
+| `runtime.rs:closed_account_actor_timeline_route_is_not_reported_as_queue_overflow` | 1 include / closed route preserves non-overflow failure | `core.runtime.closed_timeline_route` | Removed |
+| `runtime.rs:actor_projection_start_sync_effects_must_not_be_discarded` | 1 include / projected StartSync is handled | `core.runtime.actor_start_sync_effect` | Removed |
+| `runtime.rs:runtime_sync_trace_covers_start_sync_effect_boundaries` | 1 include / StartSync trace covers both effect boundaries | `core.runtime.sync_trace` | Removed |
+| `runtime.rs:opening_a_replacement_thread_unsubscribes_the_previous_thread_before_subscribe` | 1 include / replacement unsubscribe precedes subscribe | `core.runtime.thread_replacement` | Removed |
+| `runtime.rs:opening_a_replacement_focused_context_unsubscribes_previous_focused_before_subscribe` | 1 include / focused replacement unsubscribe precedes subscribe | `core.runtime.focused_replacement` | Removed |
+| `runtime.rs:opening_focused_context_repairs_target_event_cache_before_subscribe` | 1 include / target cache repair precedes focused subscribe | `core.runtime.focused_cache_repair` | Removed |
+| `runtime.rs:selecting_a_replacement_room_cancels_previous_room_pagination_before_subscribe` | 1 include / old-room pagination cancellation precedes subscribe | `core.runtime.room_switch_pagination` | Removed |
+| `runtime.rs:selecting_a_replacement_room_cancels_previous_room_link_previews_before_subscribe` | 1 include / old-room link-preview cancellation precedes subscribe | `core.runtime.room_switch_link_previews` | Removed |
+| `runtime.rs:focused_ack_and_command_coalescer_share_the_latest_published_baseline` | 1 include / coalescer and focused ACK use published baseline | `core.runtime.coalescer_baseline` | Removed |
+| `runtime.rs:timestamp_jump_uses_local_activity_projection_before_homeserver_fallback` | 1 include / local activity resolution precedes server fallback | `core.runtime.timestamp_activity_projection` | Removed |
+| `runtime/connection.rs:core_connection_command_handle_clones_submit_path` | 1 include / cloned bounded command submit path and delegation | `core.runtime.connection_command_handle` | Removed |
+| `executor.rs:executor_exposes_blocking_task_port` | 1 include / public blocking port maps to Tokio blocking pool | `core.runtime.executor_blocking_port` | Removed |
+| `renderable_thumbnail.rs:avatar_and_preview_thumbnail_helpers_do_not_use_legacy_plaintext_paths` | 2 includes / encrypted media fetch; no legacy path or file URL | `core.runtime.thumbnail_paths` | Removed |
+| `search.rs:search_query_failures_are_classified_from_sdk_error` | 1 include / query handler classifies SDK failure | `core.search.query_failure_classification` | Removed |
+| `search.rs:search_actor_handles_new_queries_before_crawl_and_sdk_completions` | 1 include / biased query priority and stale-task cancellation | `core.search.query_priority` | Removed |
+| `search.rs:empty_query_is_not_special_cased_in_runtime` | 2 includes / empty-query ownership remains in search actor | `core.search.empty_query_ownership` | Removed |
+| `search.rs:search_actor_crawler_uses_element_style_round_robin_checkpoints` | 1 include / queued checkpoints, one page, unfinished requeue | `core.search.crawler_round_robin` | Removed |
+| `search.rs:search_actor_prunes_crawler_queue_when_joined_rooms_change` | 1 include / queue prune and retired in-flight abort | `core.search.crawler_pruning` | Removed |
+| `search.rs:search_actor_history_crawler_uses_account_wide_account_work` | 1 include / shared account-wide crawl scheduler | `core.search.crawler_account_work` | Removed |
+| `search.rs:search_actor_room_availability_notifications_have_nonblocking_entrypoint` | 1 include / latest-wins nonblocking notification, closed delivery not success | `core.search.availability_nonblocking` | Removed |
+| `search.rs:search_crawler_lifecycle_projects_actor_owned_stop_settles` | 1 include / start/stop/prune settle actor-owned crawler state | `core.search.crawler_lifecycle` | Removed |
+| `search.rs:preempted_crawl_page_is_requeued` | 1 include / Preempted page requeues checkpoint at front | `core.search.preempted_page_requeue` | Removed |
+| `search.rs:automatic_crawl_starts_are_delayed_at_startup` | 1 include / startup delay gates automatic, not manual, starts | `core.search.startup_delay` | Removed |
+| `search_crawler.rs:history_crawler_page_runner_fetches_only_one_messages_page` | 1 include / exactly one messages page, no history loop | `core.search.page_single_fetch` | Removed |
+| `search_crawler.rs:history_crawler_page_runner_acquires_the_search_crawl_work_kind` | 1 include / scheduler permit precedes page fetch | `core.search.page_work_kind` | Removed |
+| `search_crawler.rs:crawler_page_emits_startup_trace` | 1 include / crawler page has startup trace phase | `core.search.page_startup_trace` | Removed |
+| `search_crawler.rs:crawler_page_yields_to_timeline_via_cancellation` | 1 include / cancellation yields Preempted and traces it | `core.search.page_cancellation` | Removed |
+| `sync.rs:sync_service_has_one_all_rooms_owner` | 1 include / one SyncService all-rooms owner; no legacy backend paths | `core.sync.single_all_rooms_owner` | Removed |
+| `sync.rs:running_state_is_not_the_committed_response_handoff` | 1 include / committed response handoff is explicit and range-independent | `core.sync.committed_response_handoff` | Removed |
+| `sync.rs:latest_observed_commit_is_forwarded_to_timeline_before_range_readiness` | 1 include / commit forwards timeline before readiness | `core.sync.timeline_commit_before_readiness` | Removed |
+| `sync.rs:terminated_sync_owner_is_restarted_instead_of_settled_failed` | 1 include / terminated owner replacement restarts service | `core.sync.terminated_owner_restart` | Removed |
+| `threads_list.rs:aggregate_refresh_has_production_manager_start_and_finish_callers` | 2 includes / manager start/finish callers and projection scheduling | `core.threads.aggregate_refresh_callers` | Removed |
+| `threads_list.rs:thread_root_projection_source_never_uses_room_pagination_or_anchor_materialization` | 1 include / root projection forbids pagination and anchor materialization | `core.threads.root_projection_no_pagination` | Removed |
+| `threads_list.rs:open_subscription_loads_initial_page_before_emitting_opened` | 1 include / initial page precedes Opened | `core.threads.open_subscription_initial_page` | Removed |
+| `threads_list.rs:paginate_updates_are_correlated_to_paginate_request_id` | 1 include / pagination update uses current request ID | `core.threads.pagination_request_correlation` | Removed |
+| `threads_list.rs:thread_list_relays_are_reliable_and_paginate_errors_fail` | 1 include / reliable relays and explicit classified pagination failure | `core.threads.reliable_relays` | Removed |
+
+**Verification counts:** deleted `#[test]` identities in the scoped diff: 46;
+rows for deleted identities: 46; missing rows: 0; extra rows: 0. The retained
+`send_diagnostics.rs:distinguishes_http_timeouts_without_exposing_transport_details`
+test had only its source assertion removed and is intentionally not a mapping
+row. No Rust or checker source was edited.

@@ -10,12 +10,18 @@ import {
   analyzeRustSource,
   checkDesktopTauriCommandRegistrationContract,
   checkDesktopNativeWindowLifecycleContract,
+  checkCoreRuntimePersistenceBlockingPort,
+  checkCoreSearchQueryFailureClassification,
+  checkCoreSearchPageCancellation,
+  checkCoreSyncSingleAllRoomsOwner,
+  checkCoreThreadsReliableRelays,
   checkSdkRoomReadMarkerContract,
   checkStateFocusedContextReducerContract,
   findIncludeStrInvocations,
   findInlineTestModules,
   formatViolation,
-  runSourceContractRules
+  runSourceContractRules,
+  scanRepository
 } from "./check-rust-test-structure.mjs";
 
 function moduleSource(bodyLines) {
@@ -100,6 +106,33 @@ test("runs representative migrated state, SDK, and src-tauri source-contract rul
   assert.deepEqual(checkSdkRoomReadMarkerContract(), []);
   assert.deepEqual(checkDesktopTauriCommandRegistrationContract(), []);
   assert.deepEqual(checkDesktopNativeWindowLifecycleContract(), []);
+});
+
+test("runs representative migrated core source-contract rules", () => {
+  for (const check of [
+    checkCoreRuntimePersistenceBlockingPort,
+    checkCoreSearchQueryFailureClassification,
+    checkCoreSearchPageCancellation,
+    checkCoreSyncSingleAllRoomsOwner,
+    checkCoreThreadsReliableRelays
+  ]) assert.deepEqual(check(), []);
+});
+
+test("scoped core sources contain no Rust-source include embeddings", () => {
+  const scoped = scanRepository().rustSourceIncludes.filter(({ file }) =>
+    file === "crates/koushi-core/src/runtime.rs" ||
+    file.startsWith("crates/koushi-core/src/runtime/") ||
+    [
+      "crates/koushi-core/src/search.rs",
+      "crates/koushi-core/src/search_crawler.rs",
+      "crates/koushi-core/src/sync.rs",
+      "crates/koushi-core/src/threads_list.rs",
+      "crates/koushi-core/src/executor.rs",
+      "crates/koushi-core/src/send_diagnostics.rs",
+      "crates/koushi-core/src/renderable_thumbnail.rs"
+    ].includes(file)
+  );
+  assert.deepEqual(scoped, []);
 });
 
 test("all desktop source-contract rules pass", () => {

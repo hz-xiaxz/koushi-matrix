@@ -1696,67 +1696,6 @@ pub mod tests {
     use super::*;
 
     #[test]
-    fn sync_service_has_one_all_rooms_owner() {
-        let sync_source = include_str!("sync.rs");
-        let production = sync_source
-            .split("#[cfg(test)]\npub mod tests")
-            .next()
-            .expect("production sync source");
-
-        assert_eq!(production.matches("SyncService::builder").count(), 1);
-        assert!(production.contains("committed_all_rooms_response"));
-        assert!(!production.contains("KOUSHI_QA_FORCE_SYNC_BACKEND"));
-        assert!(!production.contains("probe_backend"));
-        assert!(!production.contains("run_legacy_sync_loop"));
-        assert!(production.contains("room_list_service: Arc<"));
-        assert!(production.contains("room_list_service,"));
-    }
-
-    #[test]
-    fn running_state_is_not_the_committed_response_handoff() {
-        let source = include_str!("sync.rs");
-        let observer = source
-            .split("async fn observe_sync_service")
-            .nth(1)
-            .expect("observer body")
-            .split("\n#[cfg(test)]")
-            .next()
-            .expect("observer production body");
-        let committed = observer
-            .find("Signal::Committed(committed)")
-            .expect("committed response branch");
-        let handoff = observer
-            .find("reconcile_committed_room_list")
-            .expect("RoomActor reconciliation handoff");
-        assert!(handoff > committed);
-        assert!(!observer.contains("if !committed.range_fully_loaded()"));
-    }
-
-    #[test]
-    fn latest_observed_commit_is_forwarded_to_timeline_before_range_readiness() {
-        let source = include_str!("sync.rs");
-        let observer = source
-            .split("async fn observe_sync_service")
-            .nth(1)
-            .expect("observer body")
-            .split("\n#[cfg(test)]")
-            .next()
-            .expect("observer production body");
-        let committed = observer
-            .find("Signal::Committed(committed)")
-            .expect("committed response branch");
-        let forwarding = observer
-            .find("forward_latest_timeline_response_commit(")
-            .expect("global timeline commit handoff");
-
-        assert!(forwarding > committed);
-        let handoff = &observer[forwarding..];
-        assert!(handoff.contains("run_generation"));
-        assert!(handoff.contains("committed.sequence()"));
-        assert!(!handoff.contains("backend"));
-    }
-
-    #[test]
     fn any_new_positioned_commit_is_startup_handoff_evidence() {
         assert!(committed_response_is_handoff_evidence(true, 1, 0));
         assert!(committed_response_is_handoff_evidence(true, 2, 1));
@@ -1865,28 +1804,6 @@ pub mod tests {
         tokio::task::yield_now().await;
         stop.request();
         assert!(!task.await.expect("backoff task"));
-    }
-
-    #[test]
-    fn terminated_sync_owner_is_restarted_instead_of_settled_failed() {
-        let source = include_str!("sync.rs");
-        let observer = source
-            .split("async fn observe_sync_service")
-            .nth(1)
-            .expect("observer body")
-            .split("\n#[cfg(test)]")
-            .next()
-            .expect("observer production body");
-        let terminated = observer
-            .split("State::Terminated =>")
-            .nth(1)
-            .expect("terminated branch")
-            .split("_ => {}")
-            .next()
-            .expect("terminated branch body");
-        assert!(terminated.contains("ReplacementRecoveryProof::new"));
-        assert!(terminated.contains("sync_service.start().await"));
-        assert!(!terminated.contains("SyncTaskOutcome::Failed"));
     }
 
     #[test]

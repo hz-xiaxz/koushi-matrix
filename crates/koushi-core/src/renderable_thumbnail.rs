@@ -588,39 +588,4 @@ mod tests {
             b"download"
         );
     }
-
-    #[test]
-    fn avatar_and_preview_thumbnail_helpers_do_not_use_legacy_plaintext_paths() {
-        let account_source = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/account/profile.rs"
-        ));
-        let account_body = account_source
-            .split("async fn download_avatar_thumbnail")
-            .nth(1)
-            .expect("avatar helper");
-        let account_body = account_body
-            .split("fn classify_profile_error")
-            .next()
-            .expect("avatar helper body");
-        assert!(account_body.contains("get_media_content"));
-        assert!(account_body.contains("true,"));
-        assert!(!account_body.contains("avatar_thumbnails"));
-        assert!(!account_body.contains("file://"));
-
-        let link_preview_source =
-            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/link_preview.rs"));
-        let link_preview_body = link_preview_source
-            .split("async fn download_preview_image")
-            .nth(1)
-            .expect("preview helper");
-        let link_preview_body = link_preview_body
-            .split("#[cfg(test)]")
-            .next()
-            .expect("preview helper body");
-        assert!(link_preview_body.contains("get_media_content"));
-        assert!(link_preview_body.contains("false,"));
-        assert!(!link_preview_body.contains("link_preview_thumbnails"));
-        assert!(!link_preview_body.contains("file://"));
-    }
 }

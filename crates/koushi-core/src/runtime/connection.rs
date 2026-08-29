@@ -728,58 +728,6 @@ mod tests {
         assert!(composer_draft_leases.protected_targets(&account).is_empty());
     }
 
-    #[test]
-    fn core_connection_command_handle_clones_submit_path() {
-        let source = include_str!("connection.rs");
-        let production_source = source
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .expect("runtime production source should precede tests");
-        let handle_impl = production_source
-            .split("impl CoreCommandHandle")
-            .nth(1)
-            .expect("CoreConnection should expose a lightweight command handle");
-        let connection_impl = production_source
-            .split("impl CoreConnection")
-            .nth(1)
-            .expect("CoreConnection impl should exist");
-        let command_handle_fn = connection_impl
-            .split("pub fn command_handle")
-            .nth(1)
-            .expect("CoreConnection should clone a command handle for submitters")
-            .split("pub fn next_request_id")
-            .next()
-            .expect("command_handle should precede request-id allocation");
-        let command_fn = connection_impl
-            .split("pub async fn command")
-            .nth(1)
-            .expect("CoreConnection command helper should exist")
-            .split("pub async fn recv_event")
-            .next()
-            .expect("command helper should precede event receiving");
-
-        assert!(
-            production_source.contains("#[derive(Clone)]\npub struct CoreCommandHandle"),
-            "the command submit path must be cloneable without cloning event/snapshot receivers"
-        );
-        assert!(
-            handle_impl.contains("self.command_tx")
-                && handle_impl.contains(".send(CoreCommandEnvelope")
-                && handle_impl.contains("command,")
-                && handle_impl.contains("composer_permit")
-                && handle_impl.contains(".await"),
-            "the command handle must own the bounded send await"
-        );
-        assert!(
-            command_handle_fn.contains("command_tx: self.command_tx.clone()"),
-            "CoreConnection::command_handle must clone only the bounded sender"
-        );
-        assert!(
-            command_fn.contains("self.command_handle().command(command).await"),
-            "CoreConnection::command should delegate through the same submit handle"
-        );
-    }
-
     #[tokio::test]
     async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_policy() {
         let (command_tx, _command_rx) = mpsc::channel(1);
