@@ -1,6 +1,6 @@
 # Issue #753 Rust test-structure cleanup
 
-Status: implemented, locally verified, and approved by different-model final-diff review; exact review-record check and hosted PR gates pending.
+Status: implemented, locally verified, and approved by exact-tree different-model review; hosted PR gates pending.
 
 ## Outcome
 
@@ -110,7 +110,7 @@ No production-state changes, compatibility shims, TODO placeholders, ignored tes
 - Final-diff reviewer round 1: `deepseek-brainstormer`, `VERDICT: FINDINGS`. Required fixes completed: SDK source manifest now derives and checks all non-test `lib.rs` modules including `login_store.rs`; origin/main and HEAD both prove exactly three disabled per-send backup fences; cfg parsing requires identifier `test`; retained mixed send-diagnostic mapping is recorded consistently.
 - Final-diff reviewer round 2: `deepseek-brainstormer`, `VERDICT: CORRECT-TO-MERGE`; all round-1 findings resolved and no additional blocker found.
 - Final integration/self-review: `gpt-5.6-sol`, complete. Rechecked strict inventories, mapping coverage, behavioral identity diffs, module resolution, root-module paths, full gates, and production-scope diff. One unrelated Vitest timing failure reproduced green in isolation and the full 1535-test rerun passed without product/test changes.
-- Exact review-record tree confirmation: pending (`deepseek-brainstormer`).
+- Exact review-record tree confirmation: `deepseek-brainstormer`, `VERDICT: CORRECT-TO-MERGE`; checker CI/package assertions and the round-2/self-review/local-gate record match the submitted tree.
 
 ## Implementation evidence
 
