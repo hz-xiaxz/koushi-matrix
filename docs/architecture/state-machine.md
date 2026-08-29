@@ -3,12 +3,13 @@
 Status: maintained reference for the reducer state machines. The
 `reduce(AppState, AppAction)` reducer described here is the live UI
 state-transition mechanism — production wires `CoreEvent -> AppAction ->
-reduce(AppState)` (see [overview.md](./overview.md)). The `AppEffect`
-fixture/demo backend contract mentioned below is historical (dev/demo only).
+reduce(AppState)` (see [overview.md](./overview.md)). `AppEffect` values that
+matter in production are executed by the runtime or represented by an explicit
+Core command/actor path; tests may interpret effects through local fixtures.
 The state-transition diagrams in this document are normative and must track the
 reducer; see [Maintenance Contract](#maintenance-contract).
 
-Date: 2026-08-27
+Date: 2026-08-30
 
 ## Contract
 
@@ -18,16 +19,16 @@ The app state machine is a pure Rust reducer:
 reduce(&mut AppState, AppAction) -> Vec<AppEffect>
 ```
 
-`AppAction` is either user intent from React or a completed SDK/backend operation.
-`AppEffect` is a request for the reducer-backed fixture/demo backend contract
-used by older shell layers and tests. The reducer does not call Matrix SDK,
-Tauri, filesystem, keyring, or network APIs. Current production runtime work
-uses `CoreCommand` / `CoreEvent` in `docs/architecture/overview.md`.
+`AppAction` is either user intent from React or a completed SDK/runtime
+operation. `AppEffect` is a pure request interpreted by the owning runtime or by
+local test fixtures. The reducer does not call Matrix SDK, Tauri, filesystem,
+keyring, or network APIs. Current production runtime work uses `CoreCommand` /
+`CoreEvent` in `docs/architecture/overview.md`.
 
 Actions that touch room, timeline, thread, search, or composer state are accepted
 only for a *Ready session* (defined below), except the invite-workflow Open action
 which may project recovery disclosure in the four explicitly listed recovery
-states. Late backend signals after logout or lock are ignored.
+states. Late runtime signals after logout or lock are ignored.
 
 Reducer state remains Rust-owned even when the desktop WebView caches it for
 selector subscriptions. The frontend projection store may retain unchanged
