@@ -1,0 +1,68 @@
+name: Issue 738 flake probe
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      attempts:
+        description: "Attempts per named probe (1-10)"
+        required: false
+        default: "10"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Timing-sensitive probe (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target-ci
+      CARGO_PROFILE_TEST_DEBUG: "1"
+      PROBE_SHA: ${{ github.sha }}
+      PROBE_ATTEMPTS: ${{ inputs.attempts || '10' }}
+    steps:
+      - name: Check out the one probed SHA
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@191af2e1955bbe165f9bbacff2d2438002dff4d4 # 1.96.0
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+        with:
+          shared-key: issue-738-flake-probe
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --prefix apps/desktop
+      - name: Verify flake probe contracts
+        run: node --test scripts/summarize-flake-probe.test.mjs
+      - name: Warm Rust test binaries outside measured attempts
+        timeout-minutes: 30
+        run: cargo test -p koushi-core --lib --no-run
+      - name: Run retry-free attempt probe
+        run: |
+          node scripts/flake-probe.mjs \
+            --sha "$PROBE_SHA" \
+            --attempts "$PROBE_ATTEMPTS" \
+            --output-dir artifacts/issue-738-flake-probe
+      - name: Upload attempt results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: issue-738-flake-probe-${{ github.sha }}
+          path: artifacts/issue-738-flake-probe/
+          if-no-files-found: error
+          retention-days: 14
