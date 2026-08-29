@@ -1,6 +1,6 @@
 # Issue #753 Rust test-structure cleanup
 
-Status: implemented and locally verified; final-diff review and hosted PR gates pending.
+Status: implemented, locally verified, and approved by different-model final-diff review; exact review-record check and hosted PR gates pending.
 
 ## Outcome
 
@@ -108,8 +108,9 @@ No production-state changes, compatibility shims, TODO placeholders, ignored tes
 - Pre-implementation verdict: **approved**.
 - Implementer: `luna-implementer` after approval in bounded sequential slices, with main-agent integration at timeout checkpoints.
 - Final-diff reviewer round 1: `deepseek-brainstormer`, `VERDICT: FINDINGS`. Required fixes completed: SDK source manifest now derives and checks all non-test `lib.rs` modules including `login_store.rs`; origin/main and HEAD both prove exactly three disabled per-send backup fences; cfg parsing requires identifier `test`; retained mixed send-diagnostic mapping is recorded consistently.
-- Final-diff reviewer round 2: pending (`deepseek-brainstormer`; `reviewer-flash` unavailable at provider).
-- Final integration/self-review: pending (`gpt-5.6-sol`).
+- Final-diff reviewer round 2: `deepseek-brainstormer`, `VERDICT: CORRECT-TO-MERGE`; all round-1 findings resolved and no additional blocker found.
+- Final integration/self-review: `gpt-5.6-sol`, complete. Rechecked strict inventories, mapping coverage, behavioral identity diffs, module resolution, root-module paths, full gates, and production-scope diff. One unrelated Vitest timing failure reproduced green in isolation and the full 1535-test rerun passed without product/test changes.
+- Exact review-record tree confirmation: pending (`deepseek-brainstormer`).
 
 ## Implementation evidence
 
@@ -120,7 +121,10 @@ No production-state changes, compatibility shims, TODO placeholders, ignored tes
 - `cargo test --workspace --exclude sidebar-composition --exclude key-management`: passed.
 - `cargo test -p koushi-core --features qa-bin --bin headless-core-qa`: 88 passed.
 - Rust-source checker tests, strict checker, rustfmt, and diff checks: passed.
-- Full frontend/Playwright/wasm/dependency/platform/homeserver PR gates remain pending after final-diff review.
+- Frontend typecheck/build/lint/boundary/secret gates passed; Vitest 1535 passed on rerun; Playwright 265 passed.
+- npm lock/full/runtime high-severity audits: zero vulnerabilities.
+- Tauri tests, wasm state/search check, diagnostic isolation, build-structure, agent-docs, SDK submodule, cargo-deny, and cargo-machete passed.
+- Hosted macOS/Windows and Tuwunel/Synapse invitation checks remain pending on the exact PR head.
 
 ## Acceptance
 
