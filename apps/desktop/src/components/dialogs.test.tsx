@@ -110,6 +110,32 @@ describe("ResetLocalDataConfirmationDialog", () => {
 });
 
 describe("UploadStagingDialog", () => {
+  it("shows a prepared image before output controls and the compact caption editor", () => {
+    render(
+      dialog([
+        stagedImage("", {
+          kind: "ready",
+          variants: [],
+          selected: { resize: "original", format: "keep" },
+          pending: null,
+          generation: 0
+        })
+      ])
+    );
+    const item = document.querySelector(".upload-staging-item");
+    const preview = item?.querySelector(".upload-preview-viewport");
+    const toolbar = item?.querySelector(".upload-output-toolbar");
+    const caption = item?.querySelector(".upload-staging-caption");
+
+    expect(preview).not.toBeNull();
+    expect(toolbar).not.toBeNull();
+    expect(caption).not.toBeNull();
+    expect(preview!.compareDocumentPosition(toolbar!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(toolbar!.compareDocumentPosition(caption!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(within(item as HTMLElement).queryByText("Caption for synthetic.png")).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Caption for synthetic.png" })).toBeTruthy();
+  });
+
   it("renders the shared caption editor and emits a structured document from formatting", () => {
     const onUpdateCaption = vi.fn();
     render(dialog([stagedImage("caption", { kind: "preparing" })], onUpdateCaption));

@@ -178,6 +178,17 @@ describe("styles.css token system", () => {
     expect(preview).toMatch(/overflow:\s*auto/);
     expect(preview).toMatch(/overscroll-behavior:\s*contain/);
 
+    const compactCaptionEditor = selectorBlock(
+      ".upload-staging-caption .composer-inline-editor"
+    );
+    expect(compactCaptionEditor).toMatch(/min-block-size:\s*48px/);
+    expect(compactCaptionEditor).toMatch(/max-block-size:\s*112px/);
+
+    const compactCaptionToolbar = selectorBlock(
+      ".upload-staging-caption .composer-tools"
+    );
+    expect(compactCaptionToolbar).toMatch(/height:\s*30px/);
+
     const previewImage = selectorBlock(".upload-staging-preview");
     // Prepared output dimensions must remain visible: forcing a 100% minimum
     // would upscale resized variants and make them look unchanged but blurrier.

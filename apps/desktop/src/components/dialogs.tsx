@@ -965,42 +965,9 @@ export function UploadStagingDialog({
                 {formatUploadBytes(item.byte_count)}
               </span>
             </div>
-            <div className="upload-staging-caption">
-              <span>{t("upload.captionForFile", { filename: item.filename })}</span>
-              <Composer
-                editorOnly
-                surface={surface}
-                composerMode={{ kind: "plain" }}
-                isSending={false}
-                stagedUploadsReady={sendable}
-                mathModeEnabled={mathModeEnabled}
-                mentionCandidates={mentionCandidates}
-                mentionCandidatesLoading={mentionCandidatesLoading}
-                resolveComposerKeyAction={resolveComposerKeyAction}
-                document={item.caption ?? documentFromText("")}
-                draftKey={item.staged_id}
-                ariaLabel={t("upload.captionForFile", { filename: item.filename })}
-                roomName={roomName}
-                onCancelReply={() => undefined}
-                onDocumentChange={(document) => {
-                  const update = Promise.resolve(onUpdateCaption(item.staged_id, document));
-                  pendingCaptionUpdatesRef.current.add(update);
-                  void update.then(
-                    () => pendingCaptionUpdatesRef.current.delete(update),
-                    () => pendingCaptionUpdatesRef.current.delete(update)
-                  );
-                }}
-                onMathModeChange={onMathModeChange}
-                onMentionQueryChange={onMentionQueryChange}
-                onSend={sendAttachments}
-                onSendStagedUploads={sendable ? sendAttachments : undefined}
-                onTabToSend={
-                  index === items.length - 1 && sendable
-                    ? () => sendButtonRef.current?.focus()
-                    : undefined
-                }
-              />
-            </div>
+            {item.kind.kind === "image" && item.preparation.kind === "ready" ? (
+              <PreparedUploadPreview item={item} loadPreview={loadPreview} />
+            ) : null}
             {item.preparation.kind === "preparing" ? (
               <p className="upload-staging-status">{t("upload.preparing")}</p>
             ) : item.preparation.kind === "failed" ? (
@@ -1024,9 +991,42 @@ export function UploadStagingDialog({
                 onSelectOutput={onSelectOutput}
               />
             ) : null}
-            {item.kind.kind === "image" && item.preparation.kind === "ready" ? (
-              <PreparedUploadPreview item={item} loadPreview={loadPreview} />
-            ) : null}
+            <div className="upload-staging-caption">
+              <Composer
+                editorOnly
+                surface={surface}
+                composerMode={{ kind: "plain" }}
+                isSending={false}
+                stagedUploadsReady={sendable}
+                mathModeEnabled={mathModeEnabled}
+                mentionCandidates={mentionCandidates}
+                mentionCandidatesLoading={mentionCandidatesLoading}
+                resolveComposerKeyAction={resolveComposerKeyAction}
+                document={item.caption ?? documentFromText("")}
+                draftKey={item.staged_id}
+                ariaLabel={t("upload.captionForFile", { filename: item.filename })}
+                placeholder={t("upload.captionForFile", { filename: item.filename })}
+                roomName={roomName}
+                onCancelReply={() => undefined}
+                onDocumentChange={(document) => {
+                  const update = Promise.resolve(onUpdateCaption(item.staged_id, document));
+                  pendingCaptionUpdatesRef.current.add(update);
+                  void update.then(
+                    () => pendingCaptionUpdatesRef.current.delete(update),
+                    () => pendingCaptionUpdatesRef.current.delete(update)
+                  );
+                }}
+                onMathModeChange={onMathModeChange}
+                onMentionQueryChange={onMentionQueryChange}
+                onSend={sendAttachments}
+                onSendStagedUploads={sendable ? sendAttachments : undefined}
+                onTabToSend={
+                  index === items.length - 1 && sendable
+                    ? () => sendButtonRef.current?.focus()
+                    : undefined
+                }
+              />
+            </div>
           </article>
         ))}
       </div>

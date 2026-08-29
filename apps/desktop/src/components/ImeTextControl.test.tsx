@@ -216,6 +216,43 @@ describe("trailing newline rendering (#471)", () => {
   });
 });
 
+  it("keeps the caret when a same-key parent acknowledges equal editor content", () => {
+    const ref = createRef<ImeInlineMentionEditorHandle>();
+    let latest: ComposerDocument = { version: 2, inlines: [] };
+    const onDocumentChange = vi.fn((next: ComposerDocument) => {
+      latest = next;
+    });
+    const renderEditor = (document: ComposerDocument) => (
+      <ImeInlineMentionEditor
+        aria-label={EDITOR_LABEL}
+        ref={ref}
+        document={document}
+        syncKey="message-a"
+        onDocumentChange={onDocumentChange}
+      />
+    );
+    const { rerender } = render(renderEditor(latest));
+    const control = screen.getByRole("textbox", { name: EDITOR_LABEL });
+
+    control.focus();
+    setSelection(control, 0);
+    beforeInput(control, "insertText", "a");
+    rerender(renderEditor(latest));
+    expect(control.textContent).toBe("a");
+    expect(ref.current?.selection()).toEqual({ start: 1, end: 1 });
+
+    // Tauri/Rust acknowledgement deserializes an equal document into a fresh
+    // object. Replacing the contentEditable children for that no-op update
+    // drops WebKit's caret to the beginning.
+    rerender(renderEditor(structuredClone(latest)));
+    expect(ref.current?.selection()).toEqual({ start: 1, end: 1 });
+
+    beforeInput(control, "insertText", "b");
+    rerender(renderEditor(latest));
+    expect(control.textContent).toBe("ab");
+    expect(ref.current?.selection()).toEqual({ start: 2, end: 2 });
+  });
+
   it.each([
     ["text", (props: { value: string; syncKey: string }) => (
       <ImeTextField aria-label={fieldLabel} {...props} />

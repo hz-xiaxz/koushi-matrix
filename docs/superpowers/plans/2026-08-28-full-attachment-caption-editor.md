@@ -3,6 +3,24 @@
 Date: 2026-08-28
 Status: Implemented
 
+## 2026-08-29 compact preview and caret follow-up
+
+The shared editor initially inherited the main composer's 82px input and 36px
+toolbar, while upload staging placed the image preview after the caption and
+output controls. The follow-up presents each prepared image immediately after
+its compact file row, followed by output controls and a 48–112px caption editor.
+The redundant visible `Caption for <filename>` row becomes the editor
+placeholder while its full accessible label remains unchanged.
+
+Caption commands acknowledge each edit immediately, unlike the main composer's
+debounced local overlay. Those equal-content acknowledgements deserialize a
+fresh `ComposerDocument`; the shared contentEditable must therefore compare
+semantic document content before replacing its children. A same-key equal
+acknowledgement performs no DOM write, and a genuinely different document
+preserves and clamps the focused selection across the required rebuild. The
+contract is shared by main, thread, and caption editors rather than repaired in
+the upload dialog.
+
 ## Goal
 
 Replace the upload-staging caption's plain single-line input with the same shared editor used by the main/thread composer: multiline IME-safe editing, formatting toolbar, emoji, structured mentions, math formatting mode, and the Rust-resolved send shortcut. Keep the staging dialog's existing attachment preparation controls and Send button; attaching more files, replies, and scheduled send do not apply inside a caption editor.
