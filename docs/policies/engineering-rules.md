@@ -816,7 +816,14 @@ Rules:
    observer. The auxiliary signal must not create a second network/sync owner,
    and high-frequency unrelated updates must be proven not to trigger full-view
    normalization.
-18. Foreground room navigation must not wait behind ordinary actor mailboxes or
+18. The single Simplified Sliding Sync engine may have one fail-closed
+   compatibility admission check for advertised server support. That check is
+   session admission, not backend selection: it starts no sync or room-list
+   owner, never chooses an alternative engine, and cannot weaken the one-engine
+   runtime contract. Stored positive evidence may support the documented
+   offline-restore/revalidation state machine; an explicit unsupported result
+   remains blocking.
+19. Foreground room navigation must not wait behind ordinary actor mailboxes or
    network/filesystem side effects. Reducer commit emits the exactly-once
    intent terminal; projection admission uses an owner-stable latest-value slot
    ordered by an internal monotonic generation and a bounded wake. The manager

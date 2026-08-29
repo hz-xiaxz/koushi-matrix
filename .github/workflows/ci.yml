@@ -154,9 +154,8 @@ jobs:
         run: cargo check -p koushi-desktop
 
   core-invites:
-    # PR1 forces the debug-only SyncService selector because the obsolete
-    # invite-only probe misclassifies these supported fixtures. PR2 removes
-    # both the probe and this temporary selector after these all_rooms proofs.
+    # Prove invitation projection through the sole Simplified Sliding Sync
+    # engine on both supported disposable local homeservers.
     name: Core invitations (${{ matrix.server }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -211,7 +210,7 @@ jobs:
       - name: Verify Docker is available for Synapse
         if: matrix.server == 'synapse'
         run: docker version
-      - name: Positive forced-SyncService invitation scenario
+      - name: Simplified Sliding Sync invitation scenario
         run: |
           node scripts/desktop-headless-local-qa.mjs --run \
             --server=${{ matrix.server }} --core --scenario=invites_dm \

@@ -801,14 +801,17 @@ relay that model, not fight it.
    and every acknowledgement wait uses one absolute deadline.
 10. **Sync uses one Element X-compatible Simplified Sliding Sync engine.**
    `SyncService` is the sole authoritative sync owner and owns the single
-   `RoomListService` used by `RoomActor`; no capability probe, backend
-   selection, forced mode, or fallback sync path is part of the product.
-   Room-list and invite projections come from that service and the SDK's
-   committed room state, while `CoreCommand`/`CoreEvent` and snapshot contracts
-   remain unchanged. A one-shot sync operation remains a QA/debug tool only,
-   not the product continuous-sync path. Room-list bootstrap readiness and
-   replacement are generation-fenced, and invite projection remains Rust-owned
-   in `AppState.invites` rather than React-local state.
+   `RoomListService` used by `RoomActor`; no backend selection, forced mode, or
+   fallback sync path is part of the product. Session admission may check the
+   homeserver's advertised Simplified Sliding Sync support and fail closed when
+   it is unsupported; this compatibility check starts no sync owner and never
+   selects an alternative backend. Room-list and invite projections come from
+   the sole service and the SDK's committed room state, while
+   `CoreCommand`/`CoreEvent` and snapshot contracts remain unchanged. A one-shot
+   sync operation remains a QA/debug tool only, not the product continuous-sync
+   path. Room-list bootstrap readiness and replacement are generation-fenced,
+   and invite projection remains Rust-owned in `AppState.invites` rather than
+   React-local state.
 11. **Backpressure is defined, not accidental.** The event channel policy is
     explicit: versioned state snapshots are latest-wins (watch semantics),
     runtime state changes emit at most one `StateDelta` per batch, and
@@ -1322,9 +1325,9 @@ architectural invariants:
   two-device SAS verification, cross-signing bootstrap, passphrase-backed
   key-backup enable, encrypted seed-room backup upload, wrong-secret restore
   failure, successful joined-room restore on the second device, and identity
-  reset on disposable local homeservers through the behavior-probed core leg
-  before GUI wiring. That leg may select either backend from the invite-list
-  preflight; E2EE correctness must not depend on the server label. No design doc
+  reset through the sole Simplified Sliding Sync core leg on disposable local
+  Tuwunel and Synapse before GUI wiring. E2EE correctness must not depend on the
+  server label. No design doc
   may claim exhaustive backup-wide restore
   until the exact supported restore scope is proven or split into an explicit
   follow-up.

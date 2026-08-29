@@ -1,6 +1,6 @@
 # Issue #750 canon and low-risk architecture cleanup
 
-Status: implemented with focused verification; final-diff review and full PR gates pending.
+Status: implemented and locally verified; exact-final-tree review and hosted PR gates pending.
 
 ## Outcome
 
@@ -72,8 +72,9 @@ Local homeserver or native GUI behavior is not changed; those lanes may be satis
 - Pre-implementation verdict: **approved**.
 - Implementer: `luna-implementer` after the round-4 approval; two bounded Luna slices produced the implementation draft, and the main agent completed integration after their timeout checkpoints.
 - Final-diff reviewer round 1: `reviewer-flash`, `VERDICT: CORRECT-TO-MERGE` with three minor findings. Follow-up integration removed the third Core SearchScope mapper and its source-text test, aligned the QA-only epoch conversion with clamped semantics, and removed redundant read-state parent creation; directory sync remains best-effort exactly as in the stronger original credential-vault implementation.
-- Final-diff reviewer round 2: pending (`reviewer-flash`) on the corrected exact tree.
-- Final integration/self-review: pending (`gpt-5.6-sol`).
+- Final-diff reviewer round 2: `reviewer-flash`, `VERDICT: CORRECT-TO-MERGE`; all round-1 findings resolved.
+- Final integration/self-review: `gpt-5.6-sol` found and fixed stale CI comments and distinguished the still-live fail-closed Simplified Sliding Sync compatibility admission check from removed backend selection/fallback. No product route, wire contract, or frontend behavior changed.
+- Final-diff reviewer round 3: pending on the exact final documentation/review-record tree.
 
 ## Implementation evidence
 
@@ -83,7 +84,14 @@ Local homeserver or native GUI behavior is not changed; those lanes may be satis
 - `cargo test -p koushi-sdk`: passed.
 - `cargo check -p koushi-sdk --features smoke --bins`: passed.
 - `cargo metadata --no-deps`: passed with no `koushi-backend` workspace member.
-- Full repository/PR gate evidence remains pending after final-diff review.
+- `cargo test --workspace --exclude sidebar-composition --exclude key-management`: passed on the corrected tree.
+- `cargo test -p koushi-desktop`: 171 passed, 1 ignored; integration tests 5 passed.
+- `cargo check --target wasm32-unknown-unknown -p koushi-state -p koushi-search`: passed.
+- Core QA binary tests: 135 passed.
+- Frontend typecheck/build/lint/boundary/secret gates: passed; Vitest 1535 passed; Playwright 265 passed.
+- npm lock/full/runtime high-severity audits: zero vulnerabilities.
+- `cargo deny check`, `cargo machete`, diagnostic isolation, build-structure, agent-docs, SDK submodule, rustfmt, and diff checks: passed.
+- Hosted macOS/Windows and Tuwunel/Synapse invitation checks remain pending on the exact PR head.
 
 ## Acceptance
 
