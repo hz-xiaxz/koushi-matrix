@@ -256,8 +256,8 @@ stateDiagram-v2
   leaves the current Ready/Reconnecting or Locked state unchanged and marks
   revalidation pending. Only an explicit `Unsupported` result enters
   `CapabilityBlocked` and emits the sync-stop effect; actor-level ordered child
-  shutdown is wired by the shared admission gate in the next implementation
-  task.
+  shutdown is executed by `settle_sliding_sync_revalidation` through the shared
+  session-runtime shutdown path.
 - A successful check emits an engine-neutral continuation effect; the later
   authenticated-session installation remains responsible for entering the
   provisional trust gate. The reducer never performs network discovery.

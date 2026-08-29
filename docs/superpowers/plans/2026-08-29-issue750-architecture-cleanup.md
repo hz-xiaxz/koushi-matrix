@@ -74,7 +74,8 @@ Local homeserver or native GUI behavior is not changed; those lanes may be satis
 - Final-diff reviewer round 1: `reviewer-flash`, `VERDICT: CORRECT-TO-MERGE` with three minor findings. Follow-up integration removed the third Core SearchScope mapper and its source-text test, aligned the QA-only epoch conversion with clamped semantics, and removed redundant read-state parent creation; directory sync remains best-effort exactly as in the stronger original credential-vault implementation.
 - Final-diff reviewer round 2: `reviewer-flash`, `VERDICT: CORRECT-TO-MERGE`; all round-1 findings resolved.
 - Final integration/self-review: `gpt-5.6-sol` found and fixed stale CI comments and distinguished the still-live fail-closed Simplified Sliding Sync compatibility admission check from removed backend selection/fallback. No product route, wire contract, or frontend behavior changed.
-- Final-diff reviewer round 3: pending on the exact final documentation/review-record tree.
+- Final-diff reviewer round 3: `reviewer-flash`, `VERDICT: CORRECT-TO-MERGE`; the only minor finding was a stale capability-shutdown forward reference, corrected to name the live `settle_sliding_sync_revalidation` path.
+- Final-diff reviewer round 4: pending on the exact review-record tree.
 
 ## Implementation evidence
 
