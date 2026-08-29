@@ -265,9 +265,8 @@ async fn lag_policy_can_continue_or_finish_as_terminal_lag() {
         tokio::time::Instant::now() + Duration::from_secs(1),
     );
     tokio::pin!(operation);
-    for sequence in 0..3 {
+    for _ in 0..3 {
         control.send_event(CoreEvent::StateChanged(AppState::default()));
-        assert!(sequence < 2 || sequence == 2);
     }
     assert!(operation.as_mut().now_or_never().is_none());
     control.send_event(CoreEvent::Room(RoomEvent::RoomJoined {

@@ -1,6 +1,6 @@
 # Issue #755 Phase A checkpoint
 
-Status: Phase A1 implemented and locally verified; different-model integration checkpoint pending.
+Status: Phase A1 implemented, locally verified, and approved to continue by different-model integration checkpoint.
 
 ## Scope
 
@@ -37,5 +37,8 @@ transition or AppState/AppAction change.
 
 ## Integration checkpoint
 
-- Reviewer: pending (`deepseek-brainstormer`, read-only).
+- Reviewer: `deepseek-brainstormer` (read-only), `VERDICT: CORRECT-TO-CONTINUE`.
 - This is an additional same-design slice checkpoint, not a restarted pre-implementation gate.
+- A2 must implement and RED-test every currently declared expectation before its adapter waiter is migrated; unimplemented variants may not ship silently.
+- A2 must use operation-specific room guards (`RoomForgotten` settles on authoritative absence; leave uses its actual projected terminal) rather than the generic known-room predicate.
+- A2 also tightens authenticated session state, submission account/target guards, exact account keys for adapter calls, and search correlation. The vacuous lag-loop assertion found in review was removed immediately.
