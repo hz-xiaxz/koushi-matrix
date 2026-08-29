@@ -870,7 +870,7 @@ fn scheduled_qa_epoch_ms(offset: Duration) -> u64 {
         .checked_add(offset)
         .unwrap_or_else(SystemTime::now)
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
         .unwrap_or_default()
 }
 

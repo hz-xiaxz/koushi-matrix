@@ -80,9 +80,6 @@ impl StoreActor {
             remove_read_state_file(&legacy_path)?;
             return Ok(());
         }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|_| CoreFailure::StoreUnavailable)?;
-        }
         let payload = encrypt_read_state_outbox_v2_payload(
             &self.load_or_create_unlock_secret(key_id)?,
             snapshot,

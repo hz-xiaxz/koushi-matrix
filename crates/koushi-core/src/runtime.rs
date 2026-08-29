@@ -3233,7 +3233,7 @@ impl AppActor {
                             .reduce_app_action(AppAction::SearchSubmitted {
                                 request_id: request_id.sequence,
                                 query: query.clone(),
-                                scope: map_core_search_scope_to_state(scope.clone()),
+                                scope: scope.to_state(),
                             })
                             .await;
                         self.handle_app_effects(request_id, effects).await;
@@ -4210,14 +4210,6 @@ fn effects_open_thread_timeline(effects: &[AppEffect]) -> bool {
         .any(|effect| matches!(effect, AppEffect::OpenThreadTimeline { .. }))
 }
 
-fn map_core_search_scope_to_state(scope: SearchScope) -> AppSearchScope {
-    match scope {
-        SearchScope::AllRooms => AppSearchScope::AllRooms,
-        SearchScope::CurrentRoom { room_id } => AppSearchScope::CurrentRoom { room_id },
-        SearchScope::CurrentSpace { space_id } => AppSearchScope::CurrentSpace { space_id },
-    }
-}
-
 fn account_command_projected_action(command: &AccountCommand) -> Option<AppAction> {
     match command {
         AccountCommand::DiscoverLogin { homeserver, .. }
@@ -4977,34 +4969,19 @@ mod tests {
 
     #[test]
     fn search_scope_round_trips_non_all_scope_kinds() {
-        let source = include_str!("runtime.rs");
-        let to_state = source
-            .split("fn map_core_search_scope_to_state")
-            .nth(1)
-            .expect("core-to-state search scope mapper should exist")
-            .split("fn account_command_projected_action")
-            .next()
-            .expect("account command projector should follow search scope mapper");
-        let to_core = source
-            .split("fn map_state_search_scope_to_core")
-            .nth(1)
-            .expect("state-to-core search scope mapper should exist")
-            .split("fn default_data_dir_from_home")
-            .next()
-            .expect("data-dir helper should follow search scope mapper");
+        let scopes = [
+            SearchScope::AllRooms,
+            SearchScope::CurrentRoom {
+                room_id: "!room:example.invalid".to_owned(),
+            },
+            SearchScope::CurrentSpace {
+                space_id: "!space:example.invalid".to_owned(),
+            },
+        ];
 
-        assert!(
-            to_state.contains("SearchScope::CurrentRoom")
-                && to_state.contains("SearchScope::CurrentSpace")
-                && to_state.contains("SearchScope::AllRooms"),
-            "core search scopes must preserve Room/DM, current-space, and all-rooms kinds in AppState"
-        );
-        assert!(
-            to_core.contains("AppSearchScope::CurrentRoom")
-                && to_core.contains("AppSearchScope::CurrentSpace")
-                && to_core.contains("AppSearchScope::AllRooms"),
-            "submitted AppState search scopes must round-trip through core without collapsing to global"
-        );
+        for scope in scopes {
+            assert_eq!(map_state_search_scope_to_core(scope.to_state()), scope);
+        }
     }
 
     #[test]

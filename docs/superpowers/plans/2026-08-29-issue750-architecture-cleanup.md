@@ -71,7 +71,8 @@ Local homeserver or native GUI behavior is not changed; those lanes may be satis
 - Pre-implementation reviewer round 4: `reviewer-flash`, `VERDICT: CORRECT-TO-IMPLEMENT`. Minor implementation reminder: remove the retired Conduit/backend QA command at the current `state-machine.md` line 3534 under the already-approved QA prose scope.
 - Pre-implementation verdict: **approved**.
 - Implementer: `luna-implementer` after the round-4 approval; two bounded Luna slices produced the implementation draft, and the main agent completed integration after their timeout checkpoints.
-- Final-diff reviewer: pending (`reviewer-flash`).
+- Final-diff reviewer round 1: `reviewer-flash`, `VERDICT: CORRECT-TO-MERGE` with three minor findings. Follow-up integration removed the third Core SearchScope mapper and its source-text test, aligned the QA-only epoch conversion with clamped semantics, and removed redundant read-state parent creation; directory sync remains best-effort exactly as in the stronger original credential-vault implementation.
+- Final-diff reviewer round 2: pending (`reviewer-flash`) on the corrected exact tree.
 - Final integration/self-review: pending (`gpt-5.6-sol`).
 
 ## Implementation evidence
