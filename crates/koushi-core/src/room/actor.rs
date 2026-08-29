@@ -1345,45 +1345,6 @@ mod tests {
     }
 
     #[test]
-    fn room_actor_command_loop_never_awaits_room_list_refresh() {
-        let source = include_str!("actor.rs");
-        let production_source = crate::room::test_source::item_body(source, "async fn run");
-
-        assert!(
-            !production_source.contains("refresh_room_list().await"),
-            "RoomActor command handling must not await room-list normalization; it can block user-visible operations under large room lists"
-        );
-    }
-
-    #[test]
-    fn sync_started_requires_one_live_room_list_service() {
-        let source = include_str!("actor.rs");
-        let variant = source
-            .split("SyncStarted {")
-            .nth(1)
-            .expect("SyncStarted variant")
-            .split("ReconcileCommittedRange")
-            .next()
-            .expect("SyncStarted fields");
-        assert!(variant.contains("Arc<matrix_sdk_ui::room_list_service::RoomListService>"));
-        assert!(!variant.contains("Option<"));
-
-        let sync_started_body = source
-            .split("RoomMessage::SyncStarted")
-            .nth(1)
-            .expect("SyncStarted match arm")
-            .split("RoomMessage::ReconcileCommittedRange")
-            .next()
-            .expect("SyncStarted body");
-        assert!(
-            !sync_started_body.contains("self.clear_known_rooms();"),
-            "backend handoff must retain the actor-known cached rooms until the new generation settles"
-        );
-        assert!(sync_started_body.contains("self.start_live_observation("));
-        assert!(!sync_started_body.contains("match room_list_service"));
-    }
-
-    #[test]
     fn room_event_carries_request_id() {
         let request_id = make_request_id(10);
         let event = RoomEvent::RoomCreated {

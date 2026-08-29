@@ -971,6 +971,24 @@ function sourceContractFailure(rule, message) {
 // koushi_core::threads_list::tests::open_subscription_loads_initial_page_before_emitting_opened | 1 | core.threads.open_subscription_initial_page | 1
 // koushi_core::threads_list::tests::paginate_updates_are_correlated_to_paginate_request_id | 4 | core.threads.pagination_request_correlation | 4
 // koushi_core::threads_list::tests::thread_list_relays_are_reliable_and_paginate_errors_fail | 8 | core.threads.reliable_relays | 9
+// koushi_core::room::actor::tests::room_actor_command_loop_never_awaits_room_list_refresh | 1 | core.room.actor_command_loop | 1
+// koushi_core::room::actor::tests::sync_started_requires_one_live_room_list_service | 5 | core.room.sync_started_owner | 5
+// koushi_core::room::directory::tests::directory_join_selects_room_before_room_joined_event_is_emitted | 1 | core.room.directory_join_order | 1
+// koushi_core::room::list_observer::tests::live_direct_observer_subscribes_before_cached_account_data_read | 1 | core.room.live_direct_subscription_order | 1
+// koushi_core::room::list_observer::tests::room_list_runtime_has_no_legacy_or_base_client_projection_path | 1 (5 predicates) | core.room.list_no_legacy_projection | 5
+// koushi_core::room::list_observer::tests::room_list_observation_relays_parent_only_space_links_before_projection | 2 | core.room.list_relay_order | 2
+// koushi_core::room::list_observer::tests::room_list_projection_updates_known_book_before_reliable_delivery | 2 | core.room.list_known_book_delivery | 2
+// koushi_core::room::mentions::tests::existing_membership_change_message_routes_to_space_refresh | 1 | core.room.mention_membership_refresh | 1
+// koushi_core::room::operations::tests::mark_room_as_read_success_updates_fully_read_marker_before_clearing_counts | 3 | core.room.mark_read_order | 3
+// koushi_core::room::operations::tests::room_tag_success_path_does_not_refresh_from_stale_sdk_snapshot | 2 | core.room.tag_no_stale_refresh | 2
+// koushi_core::room::operations::tests::create_room_links_parent_space_child_with_created_room_id_before_completion_event | 2 | core.room.create_links_before_completion | 2
+// koushi_core::room::operations::tests::missing_space_child_repairs_are_actor_owned_and_retryable | 3 | core.room.missing_space_child_repair | 3
+// koushi_core::room::pins::tests::pin_success_settles_pending_before_pinned_projection_reload | 4 | core.room.pin_settlement_order | 4
+// koushi_core::room::pins::tests::pin_and_unpin_commands_require_actor_known_room_guard_before_sdk_call | 2 | core.room.pin_command_guard | 2
+// koushi_core::room::space_members::tests::space_member_load_failure_does_not_construct_an_empty_projection | 2 | core.room.space_member_failure_projection | 2
+// koushi_core::room::space_members::tests::background_space_member_lookup_failure_preserves_state_and_only_records_diagnostic | 3 | core.room.space_member_background_failure | 3
+// koushi_core::room::space_members::tests::cancel_space_invite_reconciles_a_fresh_projection_before_settling | 3 | core.room.space_invite_cancellation_order | 3
+// koushi_core::store::credential_backend::tests::file_credential_store_is_available_to_release_qa_binary_only | 2 | core.store.file_credential_cfg | 2 (vacuous self-matches in both old assertions)
 
 export function checkStateFocusedContextReducerContract() {
   const rule = "state.focused_context_reducer_contract";
@@ -1576,6 +1594,187 @@ export function checkCoreRuntimeThumbnailPaths() {
     for (const marker of required) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `thumbnail helper lacks ${marker}`));
     for (const marker of forbidden) if (body?.includes(marker)) failures.push(sourceContractFailure(rule, `thumbnail helper contains forbidden ${marker}`));
   }
+  return failures;
+}
+
+export function checkCoreRoomActorCommandLoop() {
+  const rule = "core.room.actor_command_loop";
+  const body = coreItemBody("room/actor.rs", "async fn run");
+  return body?.includes("refresh_room_list().await")
+    ? [sourceContractFailure(rule, "RoomActor command handling awaits room-list normalization")]
+    : body
+      ? []
+      : [sourceContractFailure(rule, "RoomActor command loop is missing")];
+}
+
+export function checkCoreRoomSyncStartedOwner() {
+  const rule = "core.room.sync_started_owner";
+  const source = coreSource("room/actor.rs");
+  const variant = sourceSection(source, "SyncStarted {", "ReconcileCommittedRange");
+  const syncStarted = sourceSection(source, "RoomMessage::SyncStarted", "RoomMessage::ReconcileCommittedRange");
+  const failures = [];
+  for (const marker of ["Arc<matrix_sdk_ui::room_list_service::RoomListService>"]) if (!variant?.includes(marker)) failures.push(sourceContractFailure(rule, `SyncStarted variant lacks ${marker}`));
+  if (variant?.includes("Option<")) failures.push(sourceContractFailure(rule, "SyncStarted variant makes its room-list service optional"));
+  for (const marker of ["self.clear_known_rooms();", "match room_list_service"]) if (syncStarted?.includes(marker)) failures.push(sourceContractFailure(rule, `SyncStarted body contains forbidden ${marker}`));
+  if (!syncStarted?.includes("self.start_live_observation(")) failures.push(sourceContractFailure(rule, "SyncStarted body does not start live observation"));
+  return failures;
+}
+
+export function checkCoreRoomDirectoryJoinOrder() {
+  const rule = "core.room.directory_join_order";
+  const body = coreItemBody("room/directory.rs", "async fn handle_join_directory_room");
+  return orderedMarkers(rule, body ?? "", ["AppAction::DirectoryJoinSucceeded", "RoomEvent::RoomJoined"]);
+}
+
+export function checkCoreRoomLiveDirectSubscriptionOrder() {
+  const rule = "core.room.live_direct_subscription_order";
+  const body = coreItemBody("room/list_observer.rs", "async fn run_live_room_list_observation(");
+  return orderedMarkers(rule, body ?? "", ["observe_events::<DirectEvent, ()>", "cached_direct_account_data_targets_by_room"]);
+}
+
+export function checkCoreRoomListNoLegacyProjection() {
+  const rule = "core.room.list_no_legacy_projection";
+  const source = coreSource("room/list_observer.rs");
+  const failures = [];
+  for (const marker of ["run_legacy_room_list_observation", "start_legacy_observation", "refresh_room_list_from_joined_rooms", ".joined_rooms()", ".invited_rooms()"])
+    if (source.includes(marker)) failures.push(sourceContractFailure(rule, `RoomActor contains forbidden room-list path ${marker}`));
+  return failures;
+}
+
+export function checkCoreRoomListRelayOrder() {
+  const rule = "core.room.list_relay_order";
+  const body = coreItemBody("room/list_observer.rs", "async fn normalize_and_project_entries");
+  const failures = orderedMarkers(rule, body ?? "", ["relay_missing_space_child_links", "project_room_list_snapshot"]);
+  if (body?.includes("koushi_sdk::set_space_child")) failures.push(sourceContractFailure(rule, "room-list observer performs the space-child write directly"));
+  return failures;
+}
+
+export function checkCoreRoomListKnownBookDelivery() {
+  const rule = "core.room.list_known_book_delivery";
+  const body = coreItemBody("room/list_observer.rs", "async fn project_room_list_snapshot");
+  const failures = orderedMarkers(rule, body ?? "", ["replace_known_room_ids", ".send(vec!["]);
+  if (body?.includes("try_send(vec![")) failures.push(sourceContractFailure(rule, "room-list projection uses lossy action delivery"));
+  return failures;
+}
+
+export function checkCoreRoomMentionMembershipRefresh() {
+  const rule = "core.room.mention_membership_refresh";
+  const body = coreItemBody("room/mentions.rs", "async fn handle_mention_membership_changed");
+  return body?.includes("handle_space_membership_changed")
+    ? []
+    : [sourceContractFailure(rule, "mention membership changes do not refresh demanded Space members")];
+}
+
+export function checkCoreRoomMarkReadOrder() {
+  const rule = "core.room.mark_read_order";
+  const body = coreItemBody("room/operations.rs", "async fn handle_mark_room_as_read");
+  const success = body?.split("Ok(()) => {").at(1)?.split("Err(error) => {").at(0);
+  const failures = [];
+  for (const marker of ["AppAction::FullyReadMarkerUpdated", "AppAction::RoomMarkedAsReadSucceeded"]) if (!success?.includes(marker)) failures.push(sourceContractFailure(rule, `mark-read success arm lacks ${marker}`));
+  const marker = success?.indexOf("FullyReadMarkerUpdated") ?? -1;
+  const cleared = success?.indexOf("RoomMarkedAsReadSucceeded") ?? -1;
+  if (marker < 0 || cleared < 0 || marker >= cleared) failures.push(sourceContractFailure(rule, "mark-read clears counts before updating the fully-read marker"));
+  return failures;
+}
+
+export function checkCoreRoomTagNoStaleRefresh() {
+  const rule = "core.room.tag_no_stale_refresh";
+  const failures = [];
+  for (const marker of ["async fn handle_set_tag", "async fn handle_remove_tag"]) {
+    const body = coreItemBody("room/operations.rs", marker);
+    if (!body) failures.push(sourceContractFailure(rule, `missing ${marker}`));
+    else if (body.includes("refresh_room_list().await")) failures.push(sourceContractFailure(rule, `${marker} refreshes from a stale room-list snapshot`));
+  }
+  return failures;
+}
+
+export function checkCoreRoomCreateLinksBeforeCompletion() {
+  const rule = "core.room.create_links_before_completion";
+  const body = coreItemBody("room/operations.rs", "async fn handle_create_room");
+  const failures = orderedMarkers(rule, body ?? "", ["link_created_room_to_parent_space", "RoomEvent::RoomCreated"]);
+  const linkHelper = coreItemBody("room/operations.rs", "async fn link_created_room_to_parent_space");
+  if (linkHelper?.includes("emit_failure")) failures.push(sourceContractFailure(rule, "best-effort parent-space linking emits a room-creation failure"));
+  return failures;
+}
+
+export function checkCoreRoomMissingSpaceChildRepair() {
+  const rule = "core.room.missing_space_child_repair";
+  const actor = coreItemBody("room/operations.rs", "async fn handle_missing_space_child_links");
+  const relay = coreItemBody("room/list_observer.rs", "async fn relay_missing_space_child_links");
+  const failures = [];
+  if (!relay?.includes("RoomMessage::MissingSpaceChildLinks")) failures.push(sourceContractFailure(rule, "room-list observation does not relay missing links"));
+  if (!actor?.includes("classify_room_error(&error)")) failures.push(sourceContractFailure(rule, "space-child repair failures are not classified"));
+  const call = actor?.indexOf("koushi_sdk::set_space_child") ?? -1;
+  const recorded = actor?.indexOf("attempts.insert(key)") ?? -1;
+  if (call < 0 || recorded < 0 || call >= recorded) failures.push(sourceContractFailure(rule, "space-child repair records its dedupe key before the write succeeds"));
+  return failures;
+}
+
+export function checkCoreRoomPinSettlementOrder() {
+  const rule = "core.room.pin_settlement_order";
+  const pin = coreItemBody("room/pins.rs", "async fn handle_pin_event");
+  const unpin = coreItemBody("room/pins.rs", "async fn handle_unpin_event");
+  const projection = coreItemBody("room/pins.rs", "async fn project_pinned_events_after_success");
+  const failures = [];
+  for (const [body, completion] of [[pin, "self.reduce_reliable(vec![AppAction::PinEventCompleted"], [unpin, "self.reduce_reliable(vec![AppAction::UnpinEventCompleted"]]) {
+    const settled = body?.indexOf(completion) ?? -1;
+    const reload = body?.indexOf("project_pinned_events_after_success") ?? -1;
+    if (settled < 0 || reload < 0 || settled >= reload) failures.push(sourceContractFailure(rule, "pin completion is not reduced before pinned projection reload"));
+  }
+  for (const marker of ["AppAction::PinEventCompleted", "AppAction::UnpinEventCompleted"]) if (projection?.includes(marker)) failures.push(sourceContractFailure(rule, `pinned projection emits ${marker}`));
+  return failures;
+}
+
+export function checkCoreRoomPinCommandGuard() {
+  const rule = "core.room.pin_command_guard";
+  const failures = [];
+  for (const [fileMarker, sdkMarker] of [["async fn handle_pin_event", "koushi_sdk::pin_event"], ["async fn handle_unpin_event", "koushi_sdk::unpin_event"]]) {
+    const body = coreItemBody("room/pins.rs", fileMarker);
+    const guard = body?.indexOf("ensure_known_room_for_message_interaction") ?? -1;
+    const sdk = body?.indexOf(sdkMarker) ?? -1;
+    if (guard < 0 || sdk < 0 || guard >= sdk) failures.push(sourceContractFailure(rule, `${fileMarker} calls the SDK before the known-room guard`));
+  }
+  return failures;
+}
+
+export function checkCoreRoomSpaceMemberFailureProjection() {
+  const rule = "core.room.space_member_failure_projection";
+  const body = coreItemBody("room/space_members.rs", "async fn handle_load_space_members");
+  const failure = body?.split("Err(error) =>").at(1)?.split("self.reduce_reliable").at(0);
+  const failures = [];
+  if (failure?.includes("SpaceMembersProjection {")) failures.push(sourceContractFailure(rule, "failed Space lookup fabricates an empty projection"));
+  if (!failure?.includes("record_core_space_members_load_failure")) failures.push(sourceContractFailure(rule, "failed Space lookup loses unavailable-count diagnostics"));
+  return failures;
+}
+
+export function checkCoreRoomSpaceMemberBackgroundFailure() {
+  const rule = "core.room.space_member_background_failure";
+  const body = coreItemBody("room/space_members.rs", "async fn handle_space_members_projection_refreshed");
+  const failure = body?.split("Err(_error) =>").at(1);
+  const failures = [];
+  if (!failure?.includes("record_core_space_members_load_failure")) failures.push(sourceContractFailure(rule, "background Space lookup failure lacks diagnostics"));
+  for (const marker of ["SpaceMembersBackgroundProjectionReconciled", "SpaceMembersLoadFailed"]) if (failure?.includes(marker)) failures.push(sourceContractFailure(rule, `background lookup failure emits forbidden ${marker}`));
+  return failures;
+}
+
+export function checkCoreRoomSpaceInviteCancellationOrder() {
+  const rule = "core.room.space_invite_cancellation_order";
+  const body = coreItemBody("room/space_members.rs", "async fn handle_cancel_space_invite");
+  const failures = orderedMarkers(rule, body ?? "", ["koushi_sdk::cancel_space_invite", "reconcile_space_invite_cancellation", "SpaceMemberInviteCancellationSettled"]);
+  const reconciliation = coreItemBody("room/space_members.rs", "async fn reconcile_space_invite_cancellation");
+  if (!reconciliation?.includes("koushi_sdk::matrix_space_members_projection")) failures.push(sourceContractFailure(rule, "invite cancellation reconciliation does not request a fresh Space projection"));
+  return failures;
+}
+
+export function checkCoreStoreFileCredentialCfg() {
+  const rule = "core.store.file_credential_cfg";
+  const source = coreSource("store/credential_backend.rs");
+  const failures = [];
+  for (const marker of [
+    'cfg(any(debug_assertions, test, feature = "qa-bin"))',
+    "// --- File-based credential store (debug/test/qa-bin only) ---"
+  ])
+    if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `file credential backend lacks ${marker}`));
   return failures;
 }
 
@@ -2291,6 +2490,24 @@ export function runSourceContractRules() {
     checkCoreRuntimeExecutorBlockingPort(),
     checkCoreRuntimeSendHttpTimeout(),
     checkCoreRuntimeThumbnailPaths(),
+    checkCoreRoomActorCommandLoop(),
+    checkCoreRoomSyncStartedOwner(),
+    checkCoreRoomDirectoryJoinOrder(),
+    checkCoreRoomLiveDirectSubscriptionOrder(),
+    checkCoreRoomListNoLegacyProjection(),
+    checkCoreRoomListRelayOrder(),
+    checkCoreRoomListKnownBookDelivery(),
+    checkCoreRoomMentionMembershipRefresh(),
+    checkCoreRoomMarkReadOrder(),
+    checkCoreRoomTagNoStaleRefresh(),
+    checkCoreRoomCreateLinksBeforeCompletion(),
+    checkCoreRoomMissingSpaceChildRepair(),
+    checkCoreRoomPinSettlementOrder(),
+    checkCoreRoomPinCommandGuard(),
+    checkCoreRoomSpaceMemberFailureProjection(),
+    checkCoreRoomSpaceMemberBackgroundFailure(),
+    checkCoreRoomSpaceInviteCancellationOrder(),
+    checkCoreStoreFileCredentialCfg(),
     checkCoreSearchQueryFailureClassification(),
     checkCoreSearchQueryPriority(),
     checkCoreSearchEmptyQueryOwnership(),

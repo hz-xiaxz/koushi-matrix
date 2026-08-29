@@ -2571,18 +2571,6 @@ mod tests {
     }
 
     #[test]
-    fn live_direct_observer_subscribes_before_cached_account_data_read() {
-        let source = include_str!("list_observer.rs");
-        let body =
-            crate::room::test_source::item_body(source, "async fn run_live_room_list_observation(");
-        let subscribe = body.find("observe_events::<DirectEvent, ()>").unwrap();
-        let cached_read = body
-            .find("cached_direct_account_data_targets_by_room")
-            .unwrap();
-        assert!(subscribe < cached_read);
-    }
-
-    #[test]
     fn direct_account_data_initial_reason_tokens_are_bounded() {
         use koushi_sdk::MatrixCachedDirectAccountData;
 
@@ -2887,71 +2875,6 @@ mod tests {
                 .expect("known rooms")
                 .contains("!room:example.test"),
             "authoritative validators must fail closed before reducer delivery"
-        );
-    }
-
-    #[test]
-    fn room_list_runtime_has_no_legacy_or_base_client_projection_path() {
-        let source = include_str!("list_observer.rs");
-        let production = source
-            .split(
-                "#[cfg(test)]
-mod tests",
-            )
-            .next()
-            .expect("production room source");
-
-        assert!(
-            !production.contains("run_legacy_room_list_observation")
-                && !production.contains("start_legacy_observation")
-                && !production.contains("refresh_room_list_from_joined_rooms")
-                && !production.contains(".joined_rooms()")
-                && !production.contains(".invited_rooms()"),
-            "RoomActor must project rooms and invites only from its live RoomListService"
-        );
-    }
-
-    #[test]
-    fn room_list_observation_relays_parent_only_space_links_before_projection() {
-        let source = include_str!("list_observer.rs");
-        let live_body =
-            crate::room::test_source::item_body(source, "async fn normalize_and_project_entries");
-
-        let relay = live_body
-            .find("relay_missing_space_child_links")
-            .expect("room-list snapshots should relay missing m.space.child state");
-        let projection = live_body
-            .find("project_room_list_snapshot")
-            .expect("room-list snapshot projection");
-        assert!(
-            relay < projection,
-            "observation should relay missing links before projection without owning the mutation policy"
-        );
-        assert!(
-            !live_body.contains("koushi_sdk::set_space_child"),
-            "room-list observers must not perform server writes directly"
-        );
-    }
-
-    #[test]
-    fn room_list_projection_updates_known_book_before_reliable_delivery() {
-        let source = include_str!("list_observer.rs");
-        let projection_body =
-            crate::room::test_source::item_body(source, "async fn project_room_list_snapshot");
-        let send = projection_body
-            .find(".send(vec![")
-            .expect("room-list projection must use reliable action delivery");
-        let known = projection_body
-            .find("replace_known_room_ids")
-            .expect("room-list projection should update the actor known-room book");
-
-        assert!(
-            !projection_body.contains("try_send(vec!["),
-            "room-list projection must not drop reducer snapshots under action-channel pressure"
-        );
-        assert!(
-            known < send,
-            "authoritative known-room book must advance before reducer delivery so validators fail closed"
         );
     }
 }

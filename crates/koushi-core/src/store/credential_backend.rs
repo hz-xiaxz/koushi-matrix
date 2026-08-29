@@ -1127,18 +1127,6 @@ mod tests {
             .expect("account credentials delete");
     }
     #[test]
-    fn file_credential_store_is_available_to_release_qa_binary_only() {
-        let source = include_str!("credential_backend.rs");
-        assert!(
-            source.contains("cfg(any(debug_assertions, test, feature = \"qa-bin\"))"),
-            "release headless QA builds need the file credential backend, while production release builds omit qa-bin"
-        );
-        assert!(
-            source.contains("file credential store active (debug/test/qa-bin only)"),
-            "diagnostic should make the qa-bin-only release escape hatch explicit"
-        );
-    }
-    #[test]
     fn store_actor_probe_maps_credential_backend_health_without_raw_errors() {
         let data_dir = tempdir().expect("tempdir");
         let backend = koushi_key::InMemoryCredentialBackend::default();

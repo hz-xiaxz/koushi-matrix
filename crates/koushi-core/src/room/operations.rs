@@ -1298,34 +1298,6 @@ mod tests {
         assert_eq!(classify_room_error(&error), RoomFailureKind::Sdk);
     }
 
-    #[test]
-    fn mark_room_as_read_success_updates_fully_read_marker_before_clearing_counts() {
-        let source = include_str!("operations.rs");
-        let handler =
-            crate::room::test_source::item_body(source, "async fn handle_mark_room_as_read");
-        let success_arm = handler
-            .split("Ok(()) => {")
-            .nth(1)
-            .expect("mark read success arm should exist")
-            .split("Err(error) => {")
-            .next()
-            .expect("mark read error arm should follow success arm");
-
-        assert!(
-            success_arm.contains("AppAction::FullyReadMarkerUpdated"),
-            "mark-room-as-read success must update local fully-read state so stale room-list snapshots cannot resurrect unread counts"
-        );
-        assert!(
-            success_arm.contains("AppAction::RoomMarkedAsReadSucceeded"),
-            "mark-room-as-read success must still clear room summary unread counts"
-        );
-        assert!(
-            success_arm.find("FullyReadMarkerUpdated")
-                < success_arm.find("RoomMarkedAsReadSucceeded"),
-            "fully-read marker should be reduced before unread counts are cleared"
-        );
-    }
-
     #[tokio::test]
     async fn create_room_without_session_emits_session_required() {
         let (action_tx, _action_rx) = mpsc::channel(16);
@@ -1509,77 +1481,5 @@ mod tests {
             }
             other => panic!("expected OperationFailed, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn room_tag_success_path_does_not_refresh_from_stale_sdk_snapshot() {
-        let source = include_str!("operations.rs");
-        let set_tag_body = crate::room::test_source::item_body(source, "async fn handle_set_tag");
-        let remove_tag_body =
-            crate::room::test_source::item_body(source, "async fn handle_remove_tag");
-
-        assert!(!set_tag_body.contains("refresh_room_list().await"));
-        assert!(!remove_tag_body.contains("refresh_room_list().await"));
-    }
-
-    #[test]
-    fn create_room_links_parent_space_child_with_created_room_id_before_completion_event() {
-        let source = include_str!("operations.rs");
-        let create_body =
-            crate::room::test_source::item_body(source, "async fn handle_create_room");
-
-        let link = create_body
-            .find("link_created_room_to_parent_space")
-            .expect("create room should link parent space with the newly created room id");
-        let completion_event = create_body
-            .find("RoomEvent::RoomCreated")
-            .expect("create room completion event");
-
-        assert!(
-            link < completion_event,
-            "m.space.child must be sent using the SDK-created room id before Tauri observes RoomCreated"
-        );
-
-        let link_helper = crate::room::test_source::item_body(
-            source,
-            "async fn link_created_room_to_parent_space",
-        );
-        assert!(
-            !link_helper.contains("emit_failure"),
-            "linking a created room into a parent space is best-effort; the room already exists, so it must not turn RoomCreated into a Tauri-visible failure"
-        );
-    }
-
-    #[test]
-    fn missing_space_child_repairs_are_actor_owned_and_retryable() {
-        let source = include_str!("operations.rs");
-        let actor_body = crate::room::test_source::item_body(
-            source,
-            "async fn handle_missing_space_child_links",
-        );
-
-        let observer_source = include_str!("list_observer.rs");
-        let relay_body = crate::room::test_source::item_body(
-            observer_source,
-            "async fn relay_missing_space_child_links",
-        );
-        assert!(
-            relay_body.contains("RoomMessage::MissingSpaceChildLinks"),
-            "observation must relay missing links to the RoomActor mailbox"
-        );
-        assert!(
-            actor_body.contains("classify_room_error(&error)"),
-            "RoomActor-owned repair failures must be classified"
-        );
-        let success = actor_body
-            .find("attempts.insert(key)")
-            .expect("successful repair should record the dedupe key");
-        let call = actor_body
-            .find("koushi_sdk::set_space_child")
-            .expect("RoomActor should perform the repair write");
-        assert!(
-            call < success,
-            "dedupe key must be recorded only after set_space_child succeeds so transient failures remain retryable"
-        );
     }
 }

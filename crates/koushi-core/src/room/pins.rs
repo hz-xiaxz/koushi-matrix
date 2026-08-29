@@ -375,36 +375,6 @@ mod tests {
     }
 
     #[test]
-    fn pin_success_settles_pending_before_pinned_projection_reload() {
-        let source = include_str!("pins.rs");
-        let pin_body = crate::room::test_source::item_body(source, "async fn handle_pin_event");
-        let unpin_body = crate::room::test_source::item_body(source, "async fn handle_unpin_event");
-        let projection_body = crate::room::test_source::item_body(
-            source,
-            "async fn project_pinned_events_after_success",
-        );
-
-        let pin_completion = pin_body
-            .find("self.reduce_reliable(vec![AppAction::PinEventCompleted")
-            .expect("pin completion action");
-        let pin_reload = pin_body
-            .find("project_pinned_events_after_success")
-            .expect("pin projection reload");
-        assert!(pin_completion < pin_reload);
-
-        let unpin_completion = unpin_body
-            .find("self.reduce_reliable(vec![AppAction::UnpinEventCompleted")
-            .expect("unpin completion action");
-        let unpin_reload = unpin_body
-            .find("project_pinned_events_after_success")
-            .expect("unpin projection reload");
-        assert!(unpin_completion < unpin_reload);
-
-        assert!(!projection_body.contains("AppAction::PinEventCompleted"));
-        assert!(!projection_body.contains("AppAction::UnpinEventCompleted"));
-    }
-
-    #[test]
     fn pinned_raw_projection_preserves_event_order_metadata_and_thread_relation() {
         let event = pinned_event_from_raw(
             "$fallback:example.invalid".to_owned(),
@@ -430,28 +400,5 @@ mod tests {
             Some("$root:example.invalid")
         );
         assert_eq!(event.state, PinnedEventState::Ready);
-    }
-
-    #[test]
-    fn pin_and_unpin_commands_require_actor_known_room_guard_before_sdk_call() {
-        let source = include_str!("pins.rs");
-        let pin_body = crate::room::test_source::item_body(source, "async fn handle_pin_event");
-        let unpin_body = crate::room::test_source::item_body(source, "async fn handle_unpin_event");
-
-        let pin_guard = pin_body
-            .find("ensure_known_room_for_message_interaction")
-            .expect("pin known-room guard");
-        let pin_sdk = pin_body
-            .find("koushi_sdk::pin_event")
-            .expect("pin sdk call");
-        assert!(pin_guard < pin_sdk);
-
-        let unpin_guard = unpin_body
-            .find("ensure_known_room_for_message_interaction")
-            .expect("unpin known-room guard");
-        let unpin_sdk = unpin_body
-            .find("koushi_sdk::unpin_event")
-            .expect("unpin sdk call");
-        assert!(unpin_guard < unpin_sdk);
     }
 }

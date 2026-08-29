@@ -1267,68 +1267,6 @@ mod tests {
     }
 
     #[test]
-    fn space_member_load_failure_does_not_construct_an_empty_projection() {
-        let source = include_str!("space_members.rs");
-        let failure_path =
-            crate::room::test_source::item_body(source, "async fn handle_load_space_members")
-                .split("Err(error) =>")
-                .nth(1)
-                .expect("Space load error branch exists")
-                .split("self.reduce_reliable")
-                .next()
-                .expect("Space load failure must reduce a structured failure action");
-
-        assert!(
-            !failure_path.contains("SpaceMembersProjection {"),
-            "a failed Space lookup must not be represented by an empty projection"
-        );
-        assert!(
-            failure_path.contains("record_core_space_members_load_failure"),
-            "core failure diagnostics must preserve unavailable-count semantics"
-        );
-    }
-
-    #[test]
-    fn background_space_member_lookup_failure_preserves_state_and_only_records_diagnostic() {
-        let source = include_str!("space_members.rs");
-        let failure_path = crate::room::test_source::item_body(
-            source,
-            "async fn handle_space_members_projection_refreshed",
-        )
-        .split("Err(_error) =>")
-        .nth(1)
-        .expect("background lookup failure branch exists");
-
-        assert!(failure_path.contains("record_core_space_members_load_failure"));
-        assert!(!failure_path.contains("SpaceMembersBackgroundProjectionReconciled"));
-        assert!(!failure_path.contains("SpaceMembersLoadFailed"));
-    }
-
-    #[test]
-    fn cancel_space_invite_reconciles_a_fresh_projection_before_settling() {
-        let source = include_str!("space_members.rs");
-        let handler =
-            crate::room::test_source::item_body(source, "async fn handle_cancel_space_invite");
-        let sdk_call = handler
-            .find("koushi_sdk::cancel_space_invite")
-            .expect("core must call the SDK cancellation helper");
-        let reconcile = handler
-            .find("reconcile_space_invite_cancellation")
-            .expect("core must request a fresh Space projection");
-        let settlement = handler
-            .find("SpaceMemberInviteCancellationSettled")
-            .expect("core must settle the cancellation action");
-        assert!(sdk_call < reconcile);
-        assert!(reconcile < settlement);
-
-        let reconciliation = crate::room::test_source::item_body(
-            source,
-            "async fn reconcile_space_invite_cancellation",
-        );
-        assert!(reconciliation.contains("koushi_sdk::matrix_space_members_projection"));
-    }
-
-    #[test]
     fn failed_space_member_diagnostics_do_not_fabricate_member_counts() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let before = koushi_diagnostics::test_support::detail_snapshot()

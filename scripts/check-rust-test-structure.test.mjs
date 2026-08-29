@@ -11,6 +11,24 @@ import {
   checkDesktopTauriCommandRegistrationContract,
   checkDesktopNativeWindowLifecycleContract,
   checkCoreRuntimePersistenceBlockingPort,
+  checkCoreRoomActorCommandLoop,
+  checkCoreRoomDirectoryJoinOrder,
+  checkCoreRoomListKnownBookDelivery,
+  checkCoreRoomListNoLegacyProjection,
+  checkCoreRoomListRelayOrder,
+  checkCoreRoomLiveDirectSubscriptionOrder,
+  checkCoreRoomMarkReadOrder,
+  checkCoreRoomMentionMembershipRefresh,
+  checkCoreRoomMissingSpaceChildRepair,
+  checkCoreRoomPinCommandGuard,
+  checkCoreRoomPinSettlementOrder,
+  checkCoreRoomSpaceInviteCancellationOrder,
+  checkCoreRoomSpaceMemberFailureProjection,
+  checkCoreRoomSpaceMemberBackgroundFailure,
+  checkCoreRoomSyncStartedOwner,
+  checkCoreRoomTagNoStaleRefresh,
+  checkCoreRoomCreateLinksBeforeCompletion,
+  checkCoreStoreFileCredentialCfg,
   checkCoreSearchQueryFailureClassification,
   checkCoreSearchPageCancellation,
   checkCoreSyncSingleAllRoomsOwner,
@@ -133,6 +151,40 @@ test("scoped core sources contain no Rust-source include embeddings", () => {
     ].includes(file)
   );
   assert.deepEqual(scoped, []);
+});
+
+test("room and credential source contracts have direct checker rules and no embeddings", () => {
+  const scopedFiles = [
+    "crates/koushi-core/src/store/credential_backend.rs",
+    ...scanRepository().files
+      .filter((file) => file.startsWith("crates/koushi-core/src/room/"))
+  ];
+  const includes = scanRepository().rustSourceIncludes.filter(({ file }) =>
+    scopedFiles.includes(file)
+  );
+  assert.deepEqual(includes, []);
+
+  const checks = [
+    checkCoreRoomActorCommandLoop,
+    checkCoreRoomSyncStartedOwner,
+    checkCoreRoomDirectoryJoinOrder,
+    checkCoreRoomLiveDirectSubscriptionOrder,
+    checkCoreRoomListNoLegacyProjection,
+    checkCoreRoomListRelayOrder,
+    checkCoreRoomListKnownBookDelivery,
+    checkCoreRoomMentionMembershipRefresh,
+    checkCoreRoomMarkReadOrder,
+    checkCoreRoomTagNoStaleRefresh,
+    checkCoreRoomCreateLinksBeforeCompletion,
+    checkCoreRoomMissingSpaceChildRepair,
+    checkCoreRoomPinSettlementOrder,
+    checkCoreRoomPinCommandGuard,
+    checkCoreRoomSpaceMemberFailureProjection,
+    checkCoreRoomSpaceMemberBackgroundFailure,
+    checkCoreRoomSpaceInviteCancellationOrder,
+    checkCoreStoreFileCredentialCfg
+  ];
+  assert.deepEqual(checks.flatMap((check) => check()), []);
 });
 
 test("all desktop source-contract rules pass", () => {

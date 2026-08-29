@@ -295,3 +295,32 @@ rows for deleted identities: 46; missing rows: 0; extra rows: 0. The retained
 `send_diagnostics.rs:distinguishes_http_timeouts_without_exposing_transport_details`
 test had only its source assertion removed and is intentionally not a mapping
 row. No Rust or checker source was edited.
+
+## Source-contract mapping: koushi-core room/store slice (#753 continuation)
+
+All rows below are deleted source-only tests from the current scoped diff. Rule
+names are the existing `core.room` / `core.store` checker contracts.
+
+| Old fully-qualified test identity | Source includes | Checker rule | Disposition |
+| --- | ---: | --- | --- |
+| `koushi_core::room::actor::tests::room_actor_command_loop_never_awaits_room_list_refresh` | 1 | `core.room.actor_command_loop` | Removed |
+| `koushi_core::room::actor::tests::sync_started_requires_one_live_room_list_service` | 1 | `core.room.sync_started_owner` | Removed |
+| `koushi_core::room::directory::tests::directory_join_selects_room_before_room_joined_event_is_emitted` | 1 | `core.room.directory_join_order` | Removed |
+| `koushi_core::room::list_observer::tests::live_direct_observer_subscribes_before_cached_account_data_read` | 1 | `core.room.live_direct_subscription_order` | Removed |
+| `koushi_core::room::list_observer::tests::room_list_runtime_has_no_legacy_or_base_client_projection_path` | 1 | `core.room.list_no_legacy_projection` | Removed |
+| `koushi_core::room::list_observer::tests::room_list_observation_relays_parent_only_space_links_before_projection` | 1 | `core.room.list_relay_order` | Removed |
+| `koushi_core::room::list_observer::tests::room_list_projection_updates_known_book_before_reliable_delivery` | 1 | `core.room.list_known_book_delivery` | Removed |
+| `koushi_core::room::mentions::tests::existing_membership_change_message_routes_to_space_refresh` | 1 | `core.room.mention_membership_refresh` | Removed |
+| `koushi_core::room::operations::tests::mark_room_as_read_success_updates_fully_read_marker_before_clearing_counts` | 1 | `core.room.mark_read_order` | Removed |
+| `koushi_core::room::operations::tests::room_tag_success_path_does_not_refresh_from_stale_sdk_snapshot` | 2 | `core.room.tag_no_stale_refresh` | Removed |
+| `koushi_core::room::operations::tests::create_room_links_parent_space_child_with_created_room_id_before_completion_event` | 2 | `core.room.create_links_before_completion` | Removed |
+| `koushi_core::room::operations::tests::missing_space_child_repairs_are_actor_owned_and_retryable` | 2 | `core.room.missing_space_child_repair` | Removed |
+| `koushi_core::room::pins::tests::pin_success_settles_pending_before_pinned_projection_reload` | 1 | `core.room.pin_settlement_order` | Removed |
+| `koushi_core::room::pins::tests::pin_and_unpin_commands_require_actor_known_room_guard_before_sdk_call` | 1 | `core.room.pin_command_guard` | Removed |
+| `koushi_core::room::space_members::tests::space_member_load_failure_does_not_construct_an_empty_projection` | 1 | `core.room.space_member_failure_projection` | Removed |
+| `koushi_core::room::space_members::tests::background_space_member_lookup_failure_preserves_state_and_only_records_diagnostic` | 1 | `core.room.space_member_background_failure` | Removed |
+| `koushi_core::room::space_members::tests::cancel_space_invite_reconciles_a_fresh_projection_before_settling` | 1 | `core.room.space_invite_cancellation_order` | Removed |
+| `koushi_core::store::credential_backend::tests::file_credential_store_is_available_to_release_qa_binary_only` | 1 | `core.store.file_credential_cfg` | Removed |
+
+**Verification counts:** deleted identities in the current scoped diff: 18;
+mapping rows: 18; missing: 0; extra: 0. No Rust or checker source was edited.

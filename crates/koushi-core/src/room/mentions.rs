@@ -406,19 +406,4 @@ impl RoomActor {
 }
 
 #[cfg(test)]
-mod tests {
-
-    #[test]
-    fn existing_membership_change_message_routes_to_space_refresh() {
-        let source = include_str!("mentions.rs");
-        let handler = crate::room::test_source::item_body(
-            source,
-            "async fn handle_mention_membership_changed",
-        );
-
-        assert!(
-            handler.contains("handle_space_membership_changed"),
-            "the existing MentionMembershipChanged message must refresh demanded Space members"
-        );
-    }
-}
+mod tests {}
