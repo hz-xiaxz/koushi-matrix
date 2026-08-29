@@ -3918,7 +3918,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (inventory) {
     process.stdout.write(inventoryReport(result));
   } else {
-    const strictViolations = result.violations.filter(({ kind }) => kind !== "inline-module");
+    const strictViolations = result.violations;
     if (strictViolations.length > 0) {
       console.error("Rust test structure violations:");
       for (const violation of strictViolations) console.error(`- ${formatViolation(violation)}`);

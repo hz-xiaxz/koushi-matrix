@@ -464,3 +464,103 @@ missing=0, extra=0, vacuous=0, mixed=0. The behavioral identities
 `runtime_timeline::production_inventory_covers_code_after_cfg_test_modules`
 and `send_queue_fast::fast_send_queue_authoritative_projection_requires_one_exact_event_and_no_transaction`
 remain unchanged.
+
+## Large inline module extraction
+
+The post-source-contract inventory contained 72 modules still at or above the 200-line ceiling. A one-shot `/tmp` migration generated `/tmp/issue753-extraction-ledger.tsv`: all 72 sibling bodies initially matched the removed body after one uniform dedent. Before compilation, one moved media test changed only its relative `include_bytes!` fixture path to a manifest-rooted equivalent; the other 71 bodies retained byte-equal dedent proofs. The two crate-root `lib/tests.rs` outputs were moved to Rust's natural `src/tests.rs` path without content changes. The six baseline modules not listed below fell under 200 lines solely because their source-only assertions moved to the checker; strict enforcement confirms they no longer exceed the ceiling.
+
+| Source module | Test module | Old lines | Sibling path | Proof |
+| --- | --- | ---: | --- | --- |
+| `apps/desktop/src-tauri/src/commands/native_attention.rs` | `tests` | 295 | `apps/desktop/src-tauri/src/commands/native_attention/tests.rs` | `dedented-body-byte-equal` |
+| `apps/desktop/src-tauri/src/commands/room.rs` | `tests` | 305 | `apps/desktop/src-tauri/src/commands/room/tests.rs` | `dedented-body-byte-equal` |
+| `apps/desktop/src-tauri/src/commands/timeline.rs` | `submission_settlement_tests` | 410 | `apps/desktop/src-tauri/src/commands/timeline/submission_settlement_tests.rs` | `dedented-body-byte-equal` |
+| `apps/desktop/src-tauri/src/commands/timeline.rs` | `issue551_moved_tests` | 215 | `apps/desktop/src-tauri/src/commands/timeline/issue551_moved_tests.rs` | `dedented-body-byte-equal` |
+| `apps/desktop/src-tauri/src/core_event_forwarder.rs` | `tests` | 1872 | `apps/desktop/src-tauri/src/core_event_forwarder/tests.rs` | `dedented-body-byte-equal` |
+| `apps/desktop/src-tauri/src/dto.rs` | `tests` | 1623 | `apps/desktop/src-tauri/src/dto/tests.rs` | `dedented-body-byte-equal` |
+| `apps/desktop/src-tauri/src/lib.rs` | `tests` | 338 | `apps/desktop/src-tauri/src/tests.rs` | `dedented-body-byte-equal` |
+| `apps/desktop/src-tauri/src/window_state.rs` | `tests` | 434 | `apps/desktop/src-tauri/src/window_state/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/account_work.rs` | `tests` | 303 | `crates/koushi-core/src/account_work/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/account/account_management.rs` | `tests` | 207 | `crates/koushi-core/src/account/account_management/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/account/local_data_cleanup.rs` | `tests` | 562 | `crates/koushi-core/src/account/local_data_cleanup/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/account/recovery_backup.rs` | `tests` | 740 | `crates/koushi-core/src/account/recovery_backup/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/account/runtime_children.rs` | `tests` | 243 | `crates/koushi-core/src/account/runtime_children/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/account/scheduled_send.rs` | `tests` | 448 | `crates/koushi-core/src/account/scheduled_send/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/account/session_lifecycle.rs` | `tests` | 2207 | `crates/koushi-core/src/account/session_lifecycle/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/account/sliding_sync.rs` | `tests` | 324 | `crates/koushi-core/src/account/sliding_sync/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/account/trust_gate.rs` | `tests` | 1109 | `crates/koushi-core/src/account/trust_gate/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/account/verification.rs` | `tests` | 803 | `crates/koushi-core/src/account/verification/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/command/app.rs` | `tests` | 394 | `crates/koushi-core/src/command/app/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/command/room.rs` | `tests` | 215 | `crates/koushi-core/src/command/room/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/command/timeline.rs` | `tests` | 267 | `crates/koushi-core/src/command/timeline/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/event/timeline.rs` | `tests` | 1017 | `crates/koushi-core/src/event/timeline/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/link_preview.rs` | `tests` | 412 | `crates/koushi-core/src/link_preview/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/live_tail_freshness.rs` | `tests` | 330 | `crates/koushi-core/src/live_tail_freshness/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/media_preparation.rs` | `tests` | 502 | `crates/koushi-core/src/media_preparation/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/mention_candidates.rs` | `tests` | 480 | `crates/koushi-core/src/mention_candidates/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/read_state.rs` | `tests` | 717 | `crates/koushi-core/src/read_state/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/renderable_thumbnail.rs` | `tests` | 218 | `crates/koushi-core/src/renderable_thumbnail/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/room/actor.rs` | `tests` | 285 | `crates/koushi-core/src/room/actor/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/room/encryption_debug.rs` | `tests` | 275 | `crates/koushi-core/src/room/encryption_debug/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/room/list_observer.rs` | `tests` | 1048 | `crates/koushi-core/src/room/list_observer/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/room/normalization.rs` | `tests` | 546 | `crates/koushi-core/src/room/normalization/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/room/operations.rs` | `tests` | 257 | `crates/koushi-core/src/room/operations/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/room/space_members.rs` | `tests` | 356 | `crates/koushi-core/src/room/space_members/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/runtime.rs` | `tests` | 2200 | `crates/koushi-core/src/runtime/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/runtime/activity.rs` | `tests` | 757 | `crates/koushi-core/src/runtime/activity/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/runtime/connection.rs` | `tests` | 524 | `crates/koushi-core/src/runtime/connection/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/runtime/navigation.rs` | `tests` | 296 | `crates/koushi-core/src/runtime/navigation/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/runtime/reducer_support.rs` | `tests` | 274 | `crates/koushi-core/src/runtime/reducer_support/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/search_crawler.rs` | `tests` | 378 | `crates/koushi-core/src/search_crawler/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/search.rs` | `tests` | 588 | `crates/koushi-core/src/search/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/store/composer_drafts.rs` | `tests` | 307 | `crates/koushi-core/src/store/composer_drafts/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/store/composer_drafts.rs` | `store_tests` | 462 | `crates/koushi-core/src/store/composer_drafts/store_tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/store/credential_backend.rs` | `tests` | 660 | `crates/koushi-core/src/store/credential_backend/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/store/navigation.rs` | `tests` | 233 | `crates/koushi-core/src/store/navigation/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/store/read_state.rs` | `tests` | 382 | `crates/koushi-core/src/store/read_state/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/sync.rs` | `tests` | 296 | `crates/koushi-core/src/sync/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/threads_list.rs` | `tests` | 1285 | `crates/koushi-core/src/threads_list/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/timeline/actor.rs` | `tests` | 280 | `crates/koushi-core/src/timeline/actor/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/timeline/composer.rs` | `tests` | 335 | `crates/koushi-core/src/timeline/composer/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/timeline/diagnostics.rs` | `tests` | 995 | `crates/koushi-core/src/timeline/diagnostics/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/timeline/display_projection.rs` | `tests` | 1284 | `crates/koushi-core/src/timeline/display_projection/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/timeline/gap_repair.rs` | `tests` | 2336 | `crates/koushi-core/src/timeline/gap_repair/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/timeline/item_projection.rs` | `tests` | 1268 | `crates/koushi-core/src/timeline/item_projection/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/timeline/navigation.rs` | `tests` | 2669 | `crates/koushi-core/src/timeline/navigation/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/timeline/outbound_send.rs` | `tests` | 2740 | `crates/koushi-core/src/timeline/outbound_send/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/timeline/read_state.rs` | `tests` | 2863 | `crates/koushi-core/src/timeline/read_state/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/timeline/relay.rs` | `tests` | 634 | `crates/koushi-core/src/timeline/relay/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/timeline/residency.rs` | `tests` | 300 | `crates/koushi-core/src/timeline/residency/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/timeline/room_key_recovery.rs` | `tests` | 1150 | `crates/koushi-core/src/timeline/room_key_recovery/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-core/src/timeline/thread_projection.rs` | `tests` | 1618 | `crates/koushi-core/src/timeline/thread_projection/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-diagnostics/src/lib.rs` | `tests` | 388 | `crates/koushi-diagnostics/src/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-sdk/src/e2ee.rs` | `device_cleanup_tests` | 236 | `crates/koushi-sdk/src/e2ee/device_cleanup_tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-sdk/src/e2ee.rs` | `secure_backup_inspection_tests` | 285 | `crates/koushi-sdk/src/e2ee/secure_backup_inspection_tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-sdk/src/e2ee.rs` | `e2ee_trust_tests` | 821 | `crates/koushi-sdk/src/e2ee/e2ee_trust_tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-sdk/src/e2ee.rs` | `current_session_status_tests` | 316 | `crates/koushi-sdk/src/e2ee/current_session_status_tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-sdk/src/e2ee.rs` | `initial_share_diagnostics_tests` | 309 | `crates/koushi-sdk/src/e2ee/initial_share_diagnostics_tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-sdk/src/room_operations.rs` | `tests` | 497 | `crates/koushi-sdk/src/room_operations/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-sdk/src/room_projection.rs` | `space_member_projection_tests` | 273 | `crates/koushi-sdk/src/room_projection/space_member_projection_tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-sdk/src/room_projection.rs` | `tests` | 678 | `crates/koushi-sdk/src/room_projection/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-sdk/src/sync.rs` | `tests` | 453 | `crates/koushi-sdk/src/sync/tests.rs` | `dedented-body-byte-equal` |
+| `crates/koushi-state/src/reducer/mod.rs` | `tests` | 1606 | `crates/koushi-state/src/reducer/tests.rs` | `dedented-body-byte-equal` |
+
+Baseline modules no longer requiring extraction after source-contract removal:
+- `apps/desktop/src-tauri/src/commands/diagnostics.rs` — `snapshot_tests`
+- `apps/desktop/src-tauri/src/commands/e2ee.rs` — `tests`
+- `apps/desktop/src-tauri/src/commands/navigation.rs` — `tests`
+- `crates/koushi-core/src/account/routing.rs` — `tests`
+- `crates/koushi-core/src/timeline/manager.rs` — `tests`
+- `crates/koushi-core/src/timeline/media.rs` — `tests`
+
+Extraction summary: moved modules = 72; new sibling files = 72; exact dedent proofs = 71; approved fixture-path-only normalization = 1; strict inline modules >=200 after extraction = 0.
+
+## Final collection audit
+
+- Workspace baseline: 2564 test identities.
+- Workspace after migration/extraction: 2341 identities.
+- Removed: 223 source-only identities, all present in the mapping sections above.
+- Added/renamed behavioral identities: 0.
+- Core QA baseline: 135 identities; final: 88.
+- Core QA removed: 47 source-only identities, all mapped; added/renamed behavioral identities: 0.
+- Strict checker: zero Rust-source `include_str!`, exactly four approved non-Rust embeds, zero inline cfg-test modules at or above 200 lines, and zero source-rule failures.
+- Full workspace tests and the Core QA binary tests pass after extraction.
