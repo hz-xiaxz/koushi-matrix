@@ -117,9 +117,14 @@ impl super::navigation::SelectEventSource for ScriptedSelectSource {
                 + '_,
         >,
     > {
-        Box::pin(std::future::ready(self.events.pop_front().unwrap_or_else(
-            || Err(koushi_core::EventStreamLag { skipped: 0 }),
-        )))
+        let event = self
+            .events
+            .pop_front()
+            .unwrap_or_else(|| Err(koushi_core::EventStreamLag { skipped: 0 }));
+        if let Ok(CoreEvent::StateChanged(snapshot)) = &event {
+            self.snapshot = snapshot.clone();
+        }
+        Box::pin(std::future::ready(event))
     }
 }
 
@@ -2540,7 +2545,8 @@ fn env_unset_real_search_and_select_producers_are_private_data_free() {
     let select_fields = records
         .iter()
         .filter(|record| {
-            record["event"]["source"] == "desktop.select" && record["event"]["stage"] == "ok_intent"
+            record["event"]["source"] == "desktop.select"
+                && record["event"]["stage"] == "progress_intent"
         })
         .map(|record| record["event"]["fields"].as_array().expect("select fields"))
         .collect::<Vec<_>>();
@@ -2643,12 +2649,17 @@ fn env_unset_real_search_and_select_producers_child() {
             IntentOutcome::Committed,
             IntentOutcome::BenignNoOp(IntentNoOpReason::AlreadyActive),
         ] {
+            let mut selected = AppState::default();
+            selected.navigation.active_room_id = Some("synthetic-room-id".to_owned());
             let mut source = ScriptedSelectSource {
                 snapshot: AppState::default(),
-                events: VecDeque::from([Ok(CoreEvent::IntentLifecycle {
-                    request_id,
-                    outcome,
-                })]),
+                events: VecDeque::from([
+                    Ok(CoreEvent::IntentLifecycle {
+                        request_id,
+                        outcome,
+                    }),
+                    Ok(CoreEvent::StateChanged(selected)),
+                ]),
             };
             super::navigation::wait_for_selected_room(
                 &mut source,

@@ -62,7 +62,7 @@ pub async fn join_directory_room(
         .map_err(|e| format!("command submit failed: {e}"))?;
     let joined_room_id =
         wait_for_room_joined(&mut event_conn, request_id, ROOM_OPERATION_EVENT_TIMEOUT).await?;
-    super::navigation::wait_for_selected_room(
+    let selected_snapshot = super::navigation::wait_for_selected_room(
         &mut event_conn,
         request_id,
         &joined_room_id,
@@ -70,7 +70,10 @@ pub async fn join_directory_room(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        selected_snapshot.state,
+        selected_snapshot.generation,
+    ))
 }
 
 #[tauri::command]

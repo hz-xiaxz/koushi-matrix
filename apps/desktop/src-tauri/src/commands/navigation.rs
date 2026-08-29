@@ -92,7 +92,7 @@ pub async fn select_room(
         .command(build_select_room_command(request_id, room_id))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_selected_room(
+    let selected_snapshot = wait_for_selected_room(
         &mut event_conn,
         request_id,
         &selected_room_id,
@@ -125,7 +125,10 @@ pub async fn select_room(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        selected_snapshot.state,
+        selected_snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -190,7 +193,7 @@ async fn open_anchored_timeline(
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_selected_room(
+    let _selected_snapshot = wait_for_selected_room(
         &mut event_conn,
         select_request_id,
         &selected_room_id,
@@ -208,7 +211,7 @@ async fn open_anchored_timeline(
         }))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_main_timeline_anchor(
+    let anchored_snapshot = wait_for_main_timeline_anchor(
         &mut event_conn,
         open_request_id,
         &room_id,
@@ -219,7 +222,10 @@ async fn open_anchored_timeline(
     .await?;
 
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        anchored_snapshot.state,
+        anchored_snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -433,6 +439,14 @@ fn record_select_intent_trace(
 
 pub(super) trait SelectEventSource {
     fn snapshot(&self) -> koushi_state::AppState;
+
+    fn versioned_snapshot(&self) -> koushi_core::event::VersionedAppStateSnapshot {
+        koushi_core::event::VersionedAppStateSnapshot {
+            generation: 0,
+            state: self.snapshot(),
+        }
+    }
+
     fn recv_event(
         &mut self,
     ) -> Pin<Box<dyn Future<Output = Result<CoreEvent, EventStreamLag>> + Send + '_>>;
@@ -441,6 +455,10 @@ pub(super) trait SelectEventSource {
 impl SelectEventSource for CoreConnection {
     fn snapshot(&self) -> koushi_state::AppState {
         CoreConnection::snapshot(self)
+    }
+
+    fn versioned_snapshot(&self) -> koushi_core::event::VersionedAppStateSnapshot {
+        CoreConnection::versioned_snapshot(self)
     }
 
     fn recv_event(
@@ -599,27 +617,22 @@ async fn wait_for_main_timeline_anchor(
     event_id: &str,
     allow_live_fallback: bool,
     timeout: std::time::Duration,
-) -> Result<(), String> {
+) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
     let deadline = tokio::time::Instant::now() + timeout;
     let mut settlement = None;
 
     loop {
-        let current = event_conn.snapshot();
-        if snapshot_matches_main_timeline_settlement(&current, room_id, event_id, settlement) {
-            return Ok(());
+        let current = event_conn.versioned_snapshot();
+        if snapshot_matches_main_timeline_settlement(&current.state, room_id, event_id, settlement)
+        {
+            return Ok(current);
         }
 
         let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
             .await
             .map_err(|_| "main timeline anchor did not open".to_owned())?;
         match event {
-            Ok(CoreEvent::StateChanged(snapshot)) => {
-                if snapshot_matches_main_timeline_settlement(
-                    &snapshot, room_id, event_id, settlement,
-                ) {
-                    return Ok(());
-                }
-            }
+            Ok(CoreEvent::StateChanged(_)) => {}
             Ok(CoreEvent::IntentLifecycle {
                 request_id: settled_request_id,
                 outcome: IntentOutcome::Committed,
@@ -653,11 +666,14 @@ async fn wait_for_main_timeline_anchor(
             }
             Ok(_) => {}
             Err(_) => {
-                let current = event_conn.snapshot();
+                let current = event_conn.versioned_snapshot();
                 if snapshot_matches_main_timeline_settlement(
-                    &current, room_id, event_id, settlement,
+                    &current.state,
+                    room_id,
+                    event_id,
+                    settlement,
                 ) {
-                    return Ok(());
+                    return Ok(current);
                 }
             }
         }
@@ -669,14 +685,15 @@ pub(super) async fn wait_for_selected_room<S: SelectEventSource + ?Sized>(
     select_request_id: RequestId,
     selected_room_id: &str,
     timeout: std::time::Duration,
-) -> Result<(), String> {
+) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
     let deadline = tokio::time::Instant::now() + timeout;
     let mut events: u32 = 0;
     let mut state_changed: u32 = 0;
     let mut state_delta: u32 = 0;
 
     loop {
-        if snapshot_has_active_room(&event_conn.snapshot(), selected_room_id) {
+        let current = event_conn.versioned_snapshot();
+        if snapshot_has_active_room(&current.state, selected_room_id) {
             record_select_trace(
                 "ok_watch",
                 "ok_watch",
@@ -685,14 +702,25 @@ pub(super) async fn wait_for_selected_room<S: SelectEventSource + ?Sized>(
                 state_delta,
                 "selected",
             );
-            return Ok(());
+            return Ok(current);
         }
 
         let event = match tokio::time::timeout_at(deadline, event_conn.recv_event()).await {
             Ok(event) => event,
             Err(_) => {
-                let active =
-                    select_active_room_trace_label(&event_conn.snapshot(), selected_room_id);
+                let current = event_conn.versioned_snapshot();
+                if snapshot_has_active_room(&current.state, selected_room_id) {
+                    record_select_trace(
+                        "ok_after_timeout",
+                        "ok_after_timeout",
+                        events,
+                        state_changed,
+                        state_delta,
+                        "selected",
+                    );
+                    return Ok(current);
+                }
+                let active = select_active_room_trace_label(&current.state, selected_room_id);
                 record_select_trace(
                     "timeout",
                     "timeout",
@@ -706,9 +734,10 @@ pub(super) async fn wait_for_selected_room<S: SelectEventSource + ?Sized>(
         };
         events += 1;
         match event {
-            Ok(CoreEvent::StateChanged(snapshot)) => {
+            Ok(CoreEvent::StateChanged(_)) => {
                 state_changed += 1;
-                if snapshot_has_active_room(&snapshot, selected_room_id) {
+                let current = event_conn.versioned_snapshot();
+                if snapshot_has_active_room(&current.state, selected_room_id) {
                     record_select_trace(
                         "ok_statechanged",
                         "ok_statechanged",
@@ -717,7 +746,7 @@ pub(super) async fn wait_for_selected_room<S: SelectEventSource + ?Sized>(
                         state_delta,
                         "selected",
                     );
-                    return Ok(());
+                    return Ok(current);
                 }
             }
             Ok(CoreEvent::StateDelta(_)) => {
@@ -749,13 +778,12 @@ pub(super) async fn wait_for_selected_room<S: SelectEventSource + ?Sized>(
                 match outcome {
                     IntentOutcome::Committed | IntentOutcome::BenignNoOp(_) => {
                         record_select_intent_trace(
-                            "ok_intent",
+                            "progress_intent",
                             &outcome,
                             events,
                             state_changed,
                             state_delta,
                         );
-                        return Ok(());
                     }
                     IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState) => {
                         record_select_trace(
@@ -780,17 +808,16 @@ pub(super) async fn wait_for_selected_room<S: SelectEventSource + ?Sized>(
                         return Err("session not ready".to_owned());
                     }
                     IntentOutcome::FailedNoOp(IntentNoOpReason::AlreadyActive) => {
-                        // AlreadyActive is benign; this arm is unreachable per
-                        // the classification logic but handle it defensively.
+                        // Defensive legacy classification: success still requires
+                        // the authoritative snapshot predicate checked by the loop.
                         record_select_trace(
-                            "ok_already_active",
+                            "progress_already_active",
                             "already_active",
                             events,
                             state_changed,
                             state_delta,
-                            "selected",
+                            "unknown",
                         );
-                        return Ok(());
                     }
                     IntentOutcome::FailedNoOp(IntentNoOpReason::TimelineTargetMissing) => {
                         record_select_trace(
@@ -806,18 +833,19 @@ pub(super) async fn wait_for_selected_room<S: SelectEventSource + ?Sized>(
                 }
             }
             Ok(_) => {}
-            Err(_) if snapshot_has_active_room(&event_conn.snapshot(), selected_room_id) => {
-                record_select_trace(
-                    "ok_after_lag",
-                    "ok_after_lag",
-                    events,
-                    state_changed,
-                    state_delta,
-                    "selected",
-                );
-                return Ok(());
-            }
             Err(_) => {
+                let current = event_conn.versioned_snapshot();
+                if snapshot_has_active_room(&current.state, selected_room_id) {
+                    record_select_trace(
+                        "ok_after_lag",
+                        "ok_after_lag",
+                        events,
+                        state_changed,
+                        state_delta,
+                        "selected",
+                    );
+                    return Ok(current);
+                }
                 record_select_trace("lag", "lag", events, state_changed, state_delta, "unknown");
                 continue;
             }
@@ -1266,6 +1294,37 @@ mod tests {
         assert!(helper_source.contains("CoreEvent::StateChanged"));
         assert!(helper_source.contains(concat!("Operation", "Failed")));
         assert!(helper_source.contains(concat!("snapshot_has_active", "_room")));
+    }
+
+    #[tokio::test]
+    async fn committed_selection_waits_for_requested_snapshot_publication() {
+        let request_id = fake_request_id(52);
+        let requested_room_id = "synthetic-requested-room";
+        let mut requested = koushi_state::AppState::default();
+        requested.navigation.active_room_id = Some(requested_room_id.to_owned());
+        let mut source = crate::commands::contracts::ScriptedSelectSource {
+            snapshot: koushi_state::AppState::default(),
+            events: std::collections::VecDeque::from([
+                Ok(CoreEvent::IntentLifecycle {
+                    request_id,
+                    outcome: IntentOutcome::Committed,
+                }),
+                Ok(CoreEvent::StateChanged(requested)),
+            ]),
+        };
+
+        wait_for_selected_room(
+            &mut source,
+            request_id,
+            requested_room_id,
+            std::time::Duration::from_millis(50),
+        )
+        .await
+        .expect("requested room should settle after publication");
+        assert!(
+            source.events.is_empty(),
+            "matching Committed must not settle while the snapshot still names the old room"
+        );
     }
 
     #[test]

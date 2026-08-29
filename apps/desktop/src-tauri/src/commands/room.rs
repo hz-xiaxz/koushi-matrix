@@ -944,7 +944,7 @@ pub async fn start_direct_message(
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    super::navigation::wait_for_selected_room(
+    let selected_snapshot = super::navigation::wait_for_selected_room(
         &mut event_conn,
         select_request_id,
         &room_id,
@@ -952,7 +952,10 @@ pub async fn start_direct_message(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        selected_snapshot.state,
+        selected_snapshot.generation,
+    ))
 }
 
 #[tauri::command]
