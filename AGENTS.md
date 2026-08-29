@@ -52,7 +52,9 @@ Two rules from that tree are load-bearing often enough to state here:
 
 - **Verify first.** Build the reproducible headless check (体制) BEFORE the fix
   and let the same check turn green as the proof: 体制 → 修正, never the reverse.
-  Manual or visual GUI inspection is a confirmation, never the gate.
+  Manual or visual GUI inspection is a confirmation, never the gate. Bound every
+  investigative command to 120 seconds; only documented full gates may use a
+  longer explicit deadline. On timeout, stop and triage instead of waiting.
 - **Rust owns product state.** React only renders Rust DTOs and dispatches typed
   commands; it never owns or repairs Matrix semantics. Avoid unnecessary SDK
   extensions: prefer an equivalent existing Element X approach and SDK path.
