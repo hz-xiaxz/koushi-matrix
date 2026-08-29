@@ -37,7 +37,9 @@ import {
   checkCoreTimelinePaginationScheduler,
   checkCoreTimelineSendSupervision,
   checkCoreTimelineThreadReadReceipts,
+  checkSdkLibrarySourceManifest,
   checkSdkRoomReadMarkerContract,
+  checkSdkSessionBackupFence,
   checkStateFocusedContextReducerContract,
   findIncludeStrInvocations,
   findInlineTestModules,
@@ -74,6 +76,16 @@ test("rejects an inline module at the 200 physical-line ceiling", () => {
   assert.equal(at[0].physicalLines, 200);
   assert.equal(below[0].overThreshold, false);
   assert.equal(at[0].overThreshold, true);
+});
+
+test("does not confuse a feature named test with cfg(test)", () => {
+  const analysis = analyzeRustSource(
+    '#[cfg(feature = "test")]\nmod feature_gate { const VALUE: usize = 1; }\n',
+    { filePath: "fixture.rs" }
+  );
+
+  assert.equal(analysis.inlineTestModules.length, 0);
+  assert.equal(analysis.violations.length, 0);
 });
 
 test("accepts external and path module declarations", () => {
@@ -125,7 +137,9 @@ test("resolves literal and CARGO_MANIFEST_DIR concat include targets", () => {
 
 test("runs representative migrated state, SDK, and src-tauri source-contract rules", () => {
   assert.deepEqual(checkStateFocusedContextReducerContract(), []);
+  assert.deepEqual(checkSdkLibrarySourceManifest(), []);
   assert.deepEqual(checkSdkRoomReadMarkerContract(), []);
+  assert.deepEqual(checkSdkSessionBackupFence(), []);
   assert.deepEqual(checkDesktopTauriCommandRegistrationContract(), []);
   assert.deepEqual(checkDesktopNativeWindowLifecycleContract(), []);
 });

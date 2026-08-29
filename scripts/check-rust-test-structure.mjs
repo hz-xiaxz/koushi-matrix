@@ -232,7 +232,7 @@ function cfgAttribute(tokens, hashIndex, pairs) {
     const token = expression[index];
     if (token.value === "not" && expression[index + 1]?.value === "(") {
       negated = true;
-    } else if (token.value === "test" && !negated) {
+    } else if (token.kind === "identifier" && token.value === "test" && !negated) {
       hasTest = true;
     }
     if (token.value === ")") negated = false;
@@ -1291,6 +1291,7 @@ const sdkLibrarySourcePaths = [
   "src/client_session.rs",
   "src/e2ee.rs",
   "src/lib.rs",
+  "src/login_store.rs",
   "src/profile.rs",
   "src/qa_reports.rs",
   "src/room_operations.rs",
@@ -1303,12 +1304,35 @@ const sdkLibrarySourcePaths = [
 
 export function checkSdkSessionBackupFence() {
   const rule = "sdk.sessions.no_per_send_backup_fence";
+  // origin/main and this branch both have exactly three production constructors
+  // setting the fence false (auth.rs twice, client_session.rs once). Older plan
+  // prose said four, but the migrated executable baseline asserted three.
   const sources = sdkLibrarySourcePaths.map((relativePath) => readRustSource(`crates/koushi-sdk/${relativePath}`));
   const falseCount = sources.reduce((count, source) => count + source.split("require_secure_backup_for_encrypted_sends(false)").length - 1, 0);
   const failures = [];
   if (falseCount !== 3) failures.push(sourceContractFailure(rule, `expected three disabled per-send backup fences, found ${falseCount}`));
   if (sources.some((source) => source.includes("require_secure_backup_for_encrypted_sends(true)"))) failures.push(sourceContractFailure(rule, "a session constructor enables the per-send backup fence"));
   return failures;
+}
+
+function declaredSdkLibrarySourcePaths() {
+  const source = readRustSource("crates/koushi-sdk/src/lib.rs");
+  const tokens = lexRust(source);
+  const pairs = delimiterPairs(tokens);
+  const depths = braceDepths(tokens);
+  const paths = ["src/lib.rs"];
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (depths[index] !== 0 || tokens[index].value !== "mod" || tokens[index + 1]?.kind !== "identifier") continue;
+    if (attachedAttributes(tokens, index, pairs).some(({ hasTest }) => hasTest)) continue;
+    if (tokens[index + 2]?.value !== ";") continue;
+    const name = tokens[index + 1].value;
+    const flat = `src/${name}.rs`;
+    const nested = `src/${name}/mod.rs`;
+    if (fs.existsSync(path.join(repositoryRoot, "crates/koushi-sdk", flat))) paths.push(flat);
+    else if (fs.existsSync(path.join(repositoryRoot, "crates/koushi-sdk", nested))) paths.push(nested);
+    else paths.push(`<missing:${name}>`);
+  }
+  return paths.sort();
 }
 
 export function checkSdkLibrarySourceManifest() {
@@ -1318,6 +1342,10 @@ export function checkSdkLibrarySourceManifest() {
   const failures = [];
   if (unique.length !== paths.length) failures.push(sourceContractFailure(rule, "SDK library source manifest contains duplicate paths"));
   if (JSON.stringify(unique) !== JSON.stringify(paths.slice().sort())) failures.push(sourceContractFailure(rule, "SDK library source manifest is not sorted completely"));
+  const declared = declaredSdkLibrarySourcePaths();
+  if (JSON.stringify(paths) !== JSON.stringify(declared)) {
+    failures.push(sourceContractFailure(rule, `SDK library source manifest differs from lib.rs declarations: expected ${declared.length} files, found ${paths.length}`));
+  }
   for (const relativePath of paths) {
     try {
       fs.readFileSync(path.join(repositoryRoot, "crates/koushi-sdk", relativePath), "utf8");

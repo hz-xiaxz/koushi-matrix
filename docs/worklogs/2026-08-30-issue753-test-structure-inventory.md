@@ -129,7 +129,7 @@ All rows below had their Rust-source assertion transferred to the named checker 
 | `room_projection.rs:live_direct_account_data_loader_is_local_only` | 1 / local account-data path | `sdk.room_projection.direct_account_data_local_only` | Removed |
 | `room_projection.rs:direct_account_data_dm_detection_fetches_server_when_store_misses` | 1 / server fallback path | `sdk.room_projection.direct_account_data_server_fallback` | Removed |
 | `sync.rs:sliding_sync_invite_probe_contract_is_typed_bounded_and_discards_cursor` | 1 / timeout/request ordering and forbidden owners | `sdk.sync.sliding_sync_invite_probe_contract` | Removed |
-| `send_backup_policy.rs:all_session_constructors_leave_the_per_send_backup_fence_disabled` | 12 / disabled backup-fence count | `sdk.sessions.no_per_send_backup_fence` | Removed |
+| `send_backup_policy.rs:all_session_constructors_leave_the_per_send_backup_fence_disabled` | 12-source scan / exactly 3 `false`, 0 `true` | `sdk.sessions.no_per_send_backup_fence` | Removed; origin/main and this branch both contain the same 3 production calls (auth twice, client_session once); older plan prose saying 4 was stale |
 | `send_backup_policy.rs:library_source_manifest_is_complete_and_unique` | 12 / complete unique source list | `sdk.library_source_manifest` | Removed |
 | `timeline_gap_adapter.rs:committed_room_checkpoint_has_no_legacy_or_room_absent_api` | 12 / forbidden legacy checkpoint API | `sdk.timeline.committed_room_checkpoint_no_legacy_api` | Removed |
 
@@ -289,12 +289,11 @@ is changed by this continuation.
 | `threads_list.rs:open_subscription_loads_initial_page_before_emitting_opened` | 1 include / initial page precedes Opened | `core.threads.open_subscription_initial_page` | Removed |
 | `threads_list.rs:paginate_updates_are_correlated_to_paginate_request_id` | 1 include / pagination update uses current request ID | `core.threads.pagination_request_correlation` | Removed |
 | `threads_list.rs:thread_list_relays_are_reliable_and_paginate_errors_fail` | 1 include / reliable relays and explicit classified pagination failure | `core.threads.reliable_relays` | Removed |
+| `send_diagnostics.rs:distinguishes_http_timeouts_without_exposing_transport_details` | 1 include / reqwest timeout classifier source marker | `core.runtime.send_http_timeout` | Retained mixed test; behavioral timeout assertions unchanged |
 
 **Verification counts:** deleted `#[test]` identities in the scoped diff: 46;
-rows for deleted identities: 46; missing rows: 0; extra rows: 0. The retained
-`send_diagnostics.rs:distinguishes_http_timeouts_without_exposing_transport_details`
-test had only its source assertion removed and is intentionally not a mapping
-row. No Rust or checker source was edited.
+source-contract mapping rows: 47 (46 removed + 1 retained mixed); missing rows:
+0; extra rows: 0. No production behavior or behavioral identity changed.
 
 ## Source-contract mapping: koushi-core room/store slice (#753 continuation)
 

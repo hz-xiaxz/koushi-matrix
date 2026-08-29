@@ -107,7 +107,8 @@ No production-state changes, compatibility shims, TODO placeholders, ignored tes
 - Pre-implementation reviewer round 2: `deepseek-brainstormer`, `VERDICT: CORRECT-TO-IMPLEMENT`. Non-blocking reminders incorporated: inventory totals are provisional until checker parsing; canon reconciles the 200-line ceiling with stricter placement rules; lexer fixtures cover raw/byte strings and lifetimes; `concat!(env!(...))` is detected; extraction is top-level-only.
 - Pre-implementation verdict: **approved**.
 - Implementer: `luna-implementer` after approval in bounded sequential slices, with main-agent integration at timeout checkpoints.
-- Final-diff reviewer: pending (`deepseek-brainstormer`; `reviewer-flash` was unavailable at the provider).
+- Final-diff reviewer round 1: `deepseek-brainstormer`, `VERDICT: FINDINGS`. Required fixes completed: SDK source manifest now derives and checks all non-test `lib.rs` modules including `login_store.rs`; origin/main and HEAD both prove exactly three disabled per-send backup fences; cfg parsing requires identifier `test`; retained mixed send-diagnostic mapping is recorded consistently.
+- Final-diff reviewer round 2: pending (`deepseek-brainstormer`; `reviewer-flash` unavailable at provider).
 - Final integration/self-review: pending (`gpt-5.6-sol`).
 
 ## Implementation evidence
