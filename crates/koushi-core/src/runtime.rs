@@ -32,7 +32,9 @@ use navigation::{
 };
 use scheduled_send::scheduled_send_id;
 
-pub use connection::{CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag};
+pub use connection::{
+    CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag, SelectRoomError,
+};
 use std::collections::{BTreeSet, HashMap};
 use std::future;
 use std::path::PathBuf;
@@ -927,6 +929,7 @@ impl AppActor {
                     let before_state = self.state.clone();
                     let clone_ms = loop_started.elapsed().as_millis();
                     let mut state_changed = false;
+                    let mut pending_select_settlements = Vec::new();
                     for action in actions {
                         let Some(action) = normalize_activity_resolution_action(&self.state, action)
                         else {
@@ -1161,8 +1164,27 @@ impl AppActor {
                                 .field(DiagnosticField::count("transition_id", transition_id)),
                             );
                         }
-                        // After reduce: determine outcome and emit IntentLifecycle
-                        // for correlated pending SelectRoom intents.
+                        // Capture the correlated request now, but settle its outcome after
+                        // the whole action batch has reduced. This keeps telemetry before
+                        // publication while ensuring a superseded intermediate room is not
+                        // reported as committed.
+                        let select_request_id = select_intent_pre.as_ref().and_then(
+                            |(room_id, ..)| {
+                                let request_id = self
+                                    .pending_select
+                                    .get_mut(room_id)
+                                    .and_then(|q| q.pop_front());
+                                if self
+                                    .pending_select
+                                    .get(room_id)
+                                    .map(|q| q.is_empty())
+                                    .unwrap_or(false)
+                                {
+                                    self.pending_select.remove(room_id);
+                                }
+                                request_id
+                            },
+                        );
                         if let Some((room_id, session_ready, found, already, rooms_len)) =
                             select_intent_pre
                         {
@@ -1172,20 +1194,6 @@ impl AppActor {
                                 .active_room_id
                                 .as_deref()
                                 == Some(room_id.as_str());
-                            let outcome = if !session_ready {
-                                IntentOutcome::FailedNoOp(IntentNoOpReason::SessionNotReady)
-                            } else if !found {
-                                IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState)
-                            } else if already {
-                                IntentOutcome::BenignNoOp(IntentNoOpReason::AlreadyActive)
-                            } else if committed {
-                                IntentOutcome::Committed
-                            } else {
-                                // Room was present, session ready, but reduce
-                                // did not commit — classify as FailedNoOp to
-                                // prevent a silent timeout (defensive case).
-                                IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState)
-                            };
                             record(
                                 DiagnosticEvent::new(
                                     DiagnosticLevel::Debug,
@@ -1197,39 +1205,19 @@ impl AppActor {
                                 .field(DiagnosticField::count("rooms", rooms_len as u64))
                                 .field(DiagnosticField::boolean("committed", committed)),
                             );
-                            let request_id_to_emit = self
-                                .pending_select
-                                .get_mut(&room_id)
-                                .and_then(|q| q.pop_front());
-                            if self
-                                .pending_select
-                                .get(&room_id)
-                                .map(|q| q.is_empty())
-                                .unwrap_or(false)
-                            {
-                                self.pending_select.remove(&room_id);
-                            }
-                            if let Some(request_id) = request_id_to_emit {
-                                record(
-                                    DiagnosticEvent::new(
-                                        DiagnosticLevel::Debug,
-                                        "core.intent",
-                                        "lifecycle",
-                                    )
-                                    .field(DiagnosticField::request_id(
-                                        "request_id",
-                                        request_id.connection_id.0,
-                                        request_id.sequence,
-                                    ))
-                                    .field(DiagnosticField::token(
-                                        "outcome",
-                                        intent_outcome_token(&outcome),
-                                    )),
-                                );
-                                self.emit(CoreEvent::IntentLifecycle { request_id, outcome });
+                            if let Some(request_id) = select_request_id {
+                                pending_select_settlements.push((
+                                    request_id,
+                                    room_id,
+                                    session_ready,
+                                    found,
+                                    already,
+                                    rooms_len,
+                                    committed,
+                                ));
                             }
                             if committed {
-                                navigation_projection_cause = request_id_to_emit;
+                                navigation_projection_cause = select_request_id;
                             }
                         }
                         self.handle_post_projection_effects(
@@ -1265,6 +1253,51 @@ impl AppActor {
                         self.load_composer_drafts_for_current_session().await;
                         self.load_scheduled_sends_for_current_session().await;
                         state_changed = true;
+                    }
+                    let final_active_room_id = self.state.navigation.active_room_id.clone();
+                    for (
+                        request_id,
+                        room_id,
+                        session_ready,
+                        found,
+                        already,
+                        rooms_len,
+                        reduced_committed,
+                    ) in pending_select_settlements
+                    {
+                        let outcome = if !session_ready {
+                            IntentOutcome::FailedNoOp(IntentNoOpReason::SessionNotReady)
+                        } else if !found {
+                            IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState)
+                        } else if (already || reduced_committed)
+                            && final_active_room_id.as_deref() != Some(room_id.as_str())
+                        {
+                            IntentOutcome::FailedNoOp(IntentNoOpReason::Superseded)
+                        } else if already {
+                            IntentOutcome::BenignNoOp(IntentNoOpReason::AlreadyActive)
+                        } else if reduced_committed {
+                            IntentOutcome::Committed
+                        } else {
+                            IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState)
+                        };
+                        record(
+                            DiagnosticEvent::new(
+                                DiagnosticLevel::Debug,
+                                "core.intent",
+                                "lifecycle",
+                            )
+                            .field(DiagnosticField::request_id(
+                                "request_id",
+                                request_id.connection_id.0,
+                                request_id.sequence,
+                            ))
+                            .field(DiagnosticField::count("rooms", rooms_len as u64))
+                            .field(DiagnosticField::token(
+                                "outcome",
+                                intent_outcome_token(&outcome),
+                            )),
+                        );
+                        self.emit(CoreEvent::IntentLifecycle { request_id, outcome });
                     }
                     if state_changed {
                         self.publish_state_delta(&before_state);
@@ -5963,6 +5996,155 @@ mod tests {
             saturated_account_rx.try_recv().is_ok(),
             "ordinary mailbox remained saturated throughout the selection"
         );
+    }
+
+    #[tokio::test]
+    async fn same_batch_select_room_settles_only_final_selection() {
+        let data_dir = tempfile::tempdir().expect("runtime data directory");
+        let (account_tx, _account_rx) = mpsc::channel(16);
+        let (navigation_projection, navigation_projection_rx) =
+            crate::timeline::NavigationProjectionIngress::channel();
+        drop(navigation_projection_rx);
+        let account_actor =
+            AccountActorHandle::for_app_actor_test(account_tx, navigation_projection.clone());
+
+        let session = SessionInfo {
+            homeserver: "https://example.invalid".to_owned(),
+            user_id: "@synthetic:example.invalid".to_owned(),
+            device_id: "SYNTHETIC".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        };
+        let session_key = session_key_id_from_info(&session);
+        let first_room = "!first:example.invalid";
+        let second_room = "!second:example.invalid";
+        let mut state = AppState {
+            session: SessionState::Ready(session),
+            rooms: vec![
+                unread_diagnostic_room(first_room),
+                unread_diagnostic_room(second_room),
+            ],
+            ..AppState::default()
+        };
+        // Exercise the defensive case where the first selection was already
+        // active at reduce time but is replaced before this batch publishes.
+        state.navigation.active_room_id = Some(first_room.to_owned());
+
+        let (command_tx, command_rx) = mpsc::channel(1);
+        let (action_tx, action_rx) = mpsc::channel(1);
+        let (_composer_draft_test_tx, composer_draft_test_rx) = mpsc::channel(1);
+        let (event_tx, mut event_rx) = broadcast::channel(16);
+        let (snapshot_tx, mut snapshot_rx) = watch::channel(VersionedAppStateSnapshot {
+            generation: 0,
+            state: state.clone(),
+        });
+        let first_request = RequestId {
+            connection_id: RuntimeConnectionId(92),
+            sequence: 1,
+        };
+        let second_request = RequestId {
+            connection_id: RuntimeConnectionId(92),
+            sequence: 2,
+        };
+        let mut pending_select = HashMap::new();
+        pending_select.insert(
+            first_room.to_owned(),
+            std::collections::VecDeque::from([first_request]),
+        );
+        pending_select.insert(
+            second_room.to_owned(),
+            std::collections::VecDeque::from([second_request]),
+        );
+        let composer_draft_leases = Arc::new(ComposerDraftLeaseRegistry::new());
+        let composer_draft_lease_changes = composer_draft_leases.subscribe();
+        let (composer_draft_rejected_tx, composer_draft_rejected_rx) = mpsc::unbounded_channel();
+        let actor = AppActor {
+            command_rx,
+            action_rx,
+            composer_draft_test_rx,
+            event_tx,
+            snapshot_tx,
+            state,
+            settings_store: SettingsStore::new(data_dir.path()),
+            composer_draft_store_actor: StoreActor::new(data_dir.path().to_owned()),
+            composer_draft_load_status: ComposerDraftLoadStatus::Loaded(session_key.clone()),
+            navigation_loaded_for: Some(session_key.clone()),
+            navigation_persistence_status: NavigationPersistenceStatus::Loaded(session_key.clone()),
+            scheduled_sends_loaded_for: Some(session_key.clone()),
+            room_preferences_loaded_for: Some(session_key),
+            state_generation: 0,
+            pending_composer_draft_persist: None,
+            composer_draft_leases,
+            composer_draft_lease_changes,
+            composer_draft_rejected_tx,
+            composer_draft_rejected_rx,
+            pending_composer_acceptances: HashMap::new(),
+            account_actor,
+            activity_projection: ActivityProjection::default(),
+            activity_resolution_generation: 0,
+            next_internal_request_sequence: 1,
+            navigation_projection_generation: 0,
+            pending_select,
+            pending_focused_navigation: None,
+            pending_date_navigation_request_id: None,
+        };
+        let actor_task = executor::spawn(actor.run());
+
+        action_tx
+            .send(vec![
+                AppAction::SelectRoom {
+                    room_id: first_room.to_owned(),
+                },
+                AppAction::SelectRoom {
+                    room_id: second_room.to_owned(),
+                },
+            ])
+            .await
+            .expect("inject same-batch room selections");
+
+        let outcomes = executor::timeout(Duration::from_secs(1), async {
+            let mut outcomes = Vec::new();
+            while outcomes.len() < 2 {
+                if let CoreEvent::IntentLifecycle {
+                    request_id,
+                    outcome,
+                    ..
+                } = event_rx.recv().await.expect("event stream remains open")
+                {
+                    outcomes.push((request_id, outcome));
+                }
+            }
+            outcomes
+        })
+        .await
+        .expect("both selections must settle");
+        assert_eq!(
+            outcomes,
+            vec![
+                (
+                    first_request,
+                    IntentOutcome::FailedNoOp(IntentNoOpReason::Superseded),
+                ),
+                (second_request, IntentOutcome::Committed),
+            ]
+        );
+
+        snapshot_rx
+            .changed()
+            .await
+            .expect("snapshot channel remains open");
+        assert_eq!(
+            snapshot_rx
+                .borrow()
+                .state
+                .navigation
+                .active_room_id
+                .as_deref(),
+            Some(second_room)
+        );
+
+        actor_task.abort();
+        drop(command_tx);
+        drop(action_tx);
     }
 
     #[test]

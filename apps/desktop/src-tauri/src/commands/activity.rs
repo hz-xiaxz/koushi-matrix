@@ -148,7 +148,7 @@ mod tests {
         let command_source = &rest[..end];
 
         assert!(
-            command_source.contains("build_select_room_command"),
+            command_source.contains("select_room_and_wait"),
             "activity event navigation should select the destination room"
         );
         assert!(
@@ -195,11 +195,8 @@ mod tests {
                 "activity event navigation must wait until focused context/main anchor is closed",
             );
         let select_offset = command_source
-            .find("build_select_room_command")
-            .expect("activity event navigation should select the destination room");
-        let wait_select_offset = command_source
-            .find("wait_for_selected_room")
-            .expect("activity event navigation should wait for the selected room state");
+            .find("select_room_and_wait")
+            .expect("activity event navigation should use Core-owned room settlement");
         let open_offset = command_source
             .find(open_token)
             .expect("activity event navigation should open the focused event timeline");
@@ -211,8 +208,7 @@ mod tests {
         assert!(
             close_offset < wait_close_offset
                 && wait_close_offset < select_offset
-                && select_offset < wait_select_offset
-                && wait_select_offset < open_offset
+                && select_offset < open_offset
                 && open_offset < wait_anchor_offset,
             "activity event navigation must clear the previous owner, select the room, start one Core-owned focused navigation, then wait for its acknowledged anchor"
         );

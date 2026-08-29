@@ -1,4 +1,6 @@
-use super::navigation::{SELECT_ROOM_EVENT_TIMEOUT, SelectEventSource};
+use super::navigation::{
+    SELECT_ROOM_EVENT_TIMEOUT, SelectEventSource, invoke_error_from_select_room_error,
+};
 use super::room::{ROOM_OPERATION_EVENT_TIMEOUT, snapshot_contains_room};
 use super::*;
 #[tauri::command]
@@ -62,13 +64,10 @@ pub async fn join_directory_room(
         .map_err(|e| format!("command submit failed: {e}"))?;
     let joined_room_id =
         wait_for_room_joined(&mut event_conn, request_id, ROOM_OPERATION_EVENT_TIMEOUT).await?;
-    let selected_snapshot = super::navigation::wait_for_selected_room(
-        &mut event_conn,
-        request_id,
-        &joined_room_id,
-        SELECT_ROOM_EVENT_TIMEOUT,
-    )
-    .await?;
+    let selected_snapshot = event_conn
+        .select_room_and_wait(joined_room_id.clone(), SELECT_ROOM_EVENT_TIMEOUT)
+        .await
+        .map_err(invoke_error_from_select_room_error)?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(FrontendDesktopSnapshot::from_versioned(
         selected_snapshot.state,
@@ -692,13 +691,10 @@ mod tests {
             .find("wait_for_room_in_state")
             .expect("waits for the room-list projection");
         let select = body
-            .find("build_select_room_command")
-            .expect("selects the resolved room");
-        let selected = body
-            .find("wait_for_selected_room")
-            .expect("waits for the selection to settle");
+            .find("select_room_and_wait")
+            .expect("uses Core-owned settlement for the resolved room");
         assert!(
-            started < in_state && in_state < select && select < selected,
+            started < in_state && in_state < select,
             "DM start must resolve the room, wait for its projection, then select it"
         );
     }
@@ -719,8 +715,8 @@ mod tests {
             .find("wait_for_room_joined")
             .expect("directory join should wait for RoomJoined");
         let selected_offset = join_source
-            .find("wait_for_selected_room")
-            .expect("directory join should wait for selected-room state");
+            .find("select_room_and_wait")
+            .expect("directory join should use Core-owned selected-room settlement");
 
         assert!(
             joined_offset < selected_offset,

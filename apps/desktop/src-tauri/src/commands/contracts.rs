@@ -8,9 +8,9 @@ use koushi_core::{
     AccountCommand, AppCommand, CoreCommand, CoreConnection, CoreEvent, CreateRoomOptions,
     CreateRoomParentSpace, CreateRoomVisibility, ImageUploadCompressionPolicy,
     ImageUploadCompressionState, ImageUploadDimensions, ImageUploadVariantInfo,
-    ImageUploadVariantKind, IntentNoOpReason, IntentOutcome, MediaDownloadSelection,
-    PaginationDirection, RequestId, RoomCommand, SearchCommand, SearchScope, SyncCommand,
-    TimelineCommand, TimelineKey, UploadMediaKind, UploadMediaThumbnail,
+    ImageUploadVariantKind, MediaDownloadSelection, PaginationDirection, RequestId, RoomCommand,
+    SearchCommand, SearchScope, SyncCommand, TimelineCommand, TimelineKey, UploadMediaKind,
+    UploadMediaThumbnail,
 };
 use koushi_state::{ActivityMarkReadTarget, ActivityTab, ImageUploadCompressionMode};
 use koushi_state::{
@@ -189,11 +189,7 @@ fn event_wait_loops_resync_on_lag_instead_of_failing_immediately() {
         ),
         (
             "async fn wait_for_main_timeline_anchor",
-            "async fn wait_for_selected_room",
-        ),
-        (
-            "async fn wait_for_selected_room",
-            "fn snapshot_has_active_room",
+            "pub(super) fn build_select_space_command",
         ),
         (
             "async fn wait_for_search_started",
@@ -201,7 +197,7 @@ fn event_wait_loops_resync_on_lag_instead_of_failing_immediately() {
         ),
         (
             "async fn wait_for_search_closed",
-            "fn select_active_room_trace_label",
+            "pub(super) fn build_submit_search_command",
         ),
         (
             "async fn wait_for_upload_staging_snapshot",
@@ -263,7 +259,7 @@ fn correlated_operation_failures_preserve_core_failure_kind_in_invoke_errors() {
         ),
         (
             "async fn wait_for_main_timeline_anchor",
-            "async fn wait_for_selected_room",
+            "pub(super) fn build_select_space_command",
         ),
         (
             "async fn wait_for_search_started",
@@ -271,7 +267,7 @@ fn correlated_operation_failures_preserve_core_failure_kind_in_invoke_errors() {
         ),
         (
             "async fn wait_for_search_closed",
-            "fn select_active_room_trace_label",
+            "pub(super) fn build_submit_search_command",
         ),
         (
             "async fn wait_for_upload_staging_snapshot",
@@ -2542,50 +2538,12 @@ fn env_unset_real_search_and_select_producers_are_private_data_free() {
     );
     assert_eq!(field(search_fields, "request_id")["kind"], "request_id");
 
-    let select_fields = records
-        .iter()
-        .filter(|record| {
-            record["event"]["source"] == "desktop.select"
-                && record["event"]["stage"] == "progress_intent"
-        })
-        .map(|record| record["event"]["fields"].as_array().expect("select fields"))
-        .collect::<Vec<_>>();
-    assert_eq!(select_fields.len(), 2);
-    for fields in &select_fields {
-        assert_eq!(
-            field(fields, "events"),
-            serde_json::json!({"kind":"count","value":1})
-        );
-        assert_eq!(
-            field(fields, "state_changed"),
-            serde_json::json!({"kind":"count","value":0})
-        );
-        assert_eq!(
-            field(fields, "state_delta"),
-            serde_json::json!({"kind":"count","value":0})
-        );
-        assert_eq!(
-            field(fields, "active"),
-            serde_json::json!({"kind":"token","value":"selected"})
-        );
-    }
-    let outcome_active = select_fields
-        .iter()
-        .map(|fields| {
-            (
-                field(fields, "outcome").clone(),
-                field(fields, "active").clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    assert!(outcome_active.contains(&(
-        serde_json::json!({"kind":"token","value":"committed"}),
-        serde_json::json!({"kind":"token","value":"selected"}),
-    )));
-    assert!(outcome_active.contains(&(
-        serde_json::json!({"kind":"token","value":"already_active"}),
-        serde_json::json!({"kind":"token","value":"selected"}),
-    )));
+    assert!(
+        records
+            .iter()
+            .all(|record| record["event"]["source"] != "desktop.select"),
+        "Tauri must not duplicate Core-owned room-selection settlement telemetry"
+    );
     let serialized_snapshot =
         serde_json::to_string(&snapshot).expect("parsed diagnostic snapshot should serialize");
     for private_value in [
@@ -2640,36 +2598,6 @@ fn env_unset_real_search_and_select_producers_child() {
         )
         .await
         .expect("production search path should reach searching state");
-
-        let request_id = RequestId {
-            connection_id: koushi_core::RuntimeConnectionId(101),
-            sequence: 9,
-        };
-        for outcome in [
-            IntentOutcome::Committed,
-            IntentOutcome::BenignNoOp(IntentNoOpReason::AlreadyActive),
-        ] {
-            let mut selected = AppState::default();
-            selected.navigation.active_room_id = Some("synthetic-room-id".to_owned());
-            let mut source = ScriptedSelectSource {
-                snapshot: AppState::default(),
-                events: VecDeque::from([
-                    Ok(CoreEvent::IntentLifecycle {
-                        request_id,
-                        outcome,
-                    }),
-                    Ok(CoreEvent::StateChanged(selected)),
-                ]),
-            };
-            super::navigation::wait_for_selected_room(
-                &mut source,
-                request_id,
-                "synthetic-room-id",
-                std::time::Duration::from_millis(10),
-            )
-            .await
-            .expect("scripted intent event should select the room");
-        }
     });
 
     let serialized = serde_json::to_string(&koushi_diagnostics::snapshot())

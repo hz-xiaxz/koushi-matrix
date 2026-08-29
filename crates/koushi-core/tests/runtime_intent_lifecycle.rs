@@ -202,6 +202,89 @@ async fn select_room_present_emits_committed() {
     );
 }
 
+#[tokio::test]
+async fn select_room_and_wait_returns_the_authoritative_published_snapshot() {
+    let runtime = CoreRuntime::start();
+    let mut conn = runtime.attach();
+    let room_a = "!wait-room-a:example.test";
+    let room_b = "!wait-room-b:example.test";
+
+    runtime
+        .inject_actions(restore_ready_actions![AppAction::RoomListUpdated {
+            spaces: vec![],
+            rooms: vec![room_summary(room_a), room_summary(room_b)],
+        }])
+        .await;
+    let ready = wait_for_state(&mut conn, |state| {
+        matches!(state.session, SessionState::Ready(_)) && state.navigation.active_room_id.is_some()
+    })
+    .await;
+    let target = [room_a, room_b]
+        .into_iter()
+        .find(|room_id| Some(*room_id) != ready.navigation.active_room_id.as_deref())
+        .expect("a non-active room should exist");
+    let before_generation = conn.versioned_snapshot().generation;
+
+    let settled = conn
+        .select_room_and_wait(target.to_owned(), Duration::from_secs(1))
+        .await
+        .expect("selection should settle on the published snapshot");
+
+    assert_eq!(
+        settled.state.navigation.active_room_id.as_deref(),
+        Some(target)
+    );
+    assert!(settled.generation > before_generation);
+}
+
+#[tokio::test]
+async fn select_room_and_wait_accepts_the_already_active_snapshot_without_new_generation() {
+    let runtime = CoreRuntime::start();
+    let mut conn = runtime.attach();
+    let room_id = "!already-active-wait-room:example.test";
+    runtime
+        .inject_actions(restore_ready_actions![AppAction::RoomListUpdated {
+            spaces: vec![],
+            rooms: vec![room_summary(room_id)],
+        }])
+        .await;
+    let ready = wait_for_state(&mut conn, |state| {
+        matches!(state.session, SessionState::Ready(_))
+            && state.navigation.active_room_id.as_deref() == Some(room_id)
+    })
+    .await;
+    let before_generation = conn.versioned_snapshot().generation;
+
+    let settled = conn
+        .select_room_and_wait(room_id.to_owned(), Duration::from_secs(1))
+        .await
+        .expect("already active room should settle from authoritative state");
+
+    assert_eq!(settled.state, ready);
+    assert_eq!(settled.generation, before_generation);
+}
+
+#[tokio::test]
+async fn select_room_and_wait_returns_typed_missing_room_failure() {
+    let runtime = CoreRuntime::start();
+    let mut conn = runtime.attach();
+    runtime.inject_actions(restore_ready_actions![]).await;
+    wait_for_state(&mut conn, |state| {
+        matches!(state.session, SessionState::Ready(_))
+    })
+    .await;
+
+    let error = conn
+        .select_room_and_wait(
+            "!missing-wait-room:example.test".to_owned(),
+            Duration::from_secs(1),
+        )
+        .await
+        .expect_err("missing room must not settle successfully");
+
+    assert_eq!(error, koushi_core::runtime::SelectRoomError::RoomNotInState);
+}
+
 #[test]
 fn select_room_routing_is_reliable_and_correlated() {
     let runtime_source = include_str!("../src/runtime.rs");

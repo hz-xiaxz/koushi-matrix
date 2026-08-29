@@ -81,6 +81,8 @@ pub enum IntentNoOpReason {
     /// The focused projection settled without the requested event, so the
     /// navigation safely returned to the room's live timeline.
     TimelineTargetMissing,
+    /// A later SelectRoom in the same action batch replaced this selection.
+    Superseded,
 }
 
 /// Terminal outcome of a user-intent command (§4.7 Slice 1 telemetry-lane

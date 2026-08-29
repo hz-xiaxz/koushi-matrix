@@ -1,17 +1,20 @@
 use super::{CoreCommandEnvelope, CoreRuntime};
-use crate::command::CoreCommand;
+use crate::command::{CoreCommand, RoomCommand};
 use crate::composer_draft_lifecycle::{
     ComposerDraftCommandPermit, ComposerDraftLeaseFailure, ComposerDraftLeaseId,
     ComposerDraftLeaseRegistry, ComposerDraftScope, ComposerRendererGeneration,
 };
 use crate::event::{
-    AppStateSnapshot, CoreEvent, VersionedAppStateSnapshot, project_room_event_display_labels,
-    project_timeline_event_display_labels,
+    AppStateSnapshot, CoreEvent, IntentNoOpReason, IntentOutcome, VersionedAppStateSnapshot,
+    project_room_event_display_labels, project_timeline_event_display_labels,
 };
 use crate::ids::{RequestId, RuntimeConnectionId};
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
@@ -27,6 +30,30 @@ pub enum CommandSubmitError {
     ComposerLeaseNotRequired,
     #[error("composer draft lease admission failed")]
     ComposerLease(ComposerDraftLeaseFailure),
+}
+
+/// Typed terminal failures returned by [`CoreConnection::select_room_and_wait`].
+///
+/// A matching `Committed` or benign no-op lifecycle event is only progress;
+/// selection succeeds once the requested room is visible in the latest versioned
+/// watch snapshot. Other requests and lagged broadcast events are ignored or
+/// recovered from that snapshot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum SelectRoomError {
+    #[error("room selection command could not be submitted: {0}")]
+    CommandSubmit(#[source] CommandSubmitError),
+    #[error("room selection requires a ready session")]
+    SessionNotReady,
+    #[error("room is not present in the current state")]
+    RoomNotInState,
+    #[error("room selection failed without a state change: {0:?}")]
+    FailedNoOp(IntentNoOpReason),
+    #[error("room selection operation failed: {0:?}")]
+    OperationFailed(crate::failure::CoreFailure),
+    #[error("core event stream closed")]
+    EventStreamClosed,
+    #[error("room selection timed out")]
+    Timeout,
 }
 
 /// Surfaced when a consumer fell behind the bounded event queue. The
@@ -316,6 +343,95 @@ impl CoreConnection {
     pub fn versioned_snapshot(&self) -> VersionedAppStateSnapshot {
         self.snapshot_rx.borrow().clone()
     }
+
+    /// Select `room_id` and wait until the latest versioned watch snapshot names
+    /// it as the active room.
+    ///
+    /// Lifecycle events only classify progress or a matching failure. The
+    /// returned snapshot is the exact watch value that satisfied the predicate,
+    /// including its publication generation. Broadcast lag is recovered by
+    /// rechecking that latest value; `timeout` is one absolute deadline for the
+    /// wait, not a per-event allowance.
+    pub async fn select_room_and_wait(
+        &mut self,
+        room_id: String,
+        timeout: Duration,
+    ) -> Result<VersionedAppStateSnapshot, SelectRoomError> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        let request_id = self.next_request_id();
+        tokio::time::timeout_at(
+            deadline,
+            self.command(CoreCommand::Room(RoomCommand::SelectRoom {
+                request_id,
+                room_id: room_id.clone(),
+            })),
+        )
+        .await
+        .map_err(|_| SelectRoomError::Timeout)?
+        .map_err(SelectRoomError::CommandSubmit)?;
+        loop {
+            let current = self.versioned_snapshot();
+            if current.state.navigation.active_room_id.as_deref() == Some(room_id.as_str()) {
+                return Ok(current);
+            }
+
+            let event = match tokio::time::timeout_at(deadline, self.event_rx.recv()).await {
+                Ok(Ok(event)) => self.project_event_for_consumer(event),
+                Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+                Ok(Err(broadcast::error::RecvError::Closed)) => {
+                    let current = self.versioned_snapshot();
+                    return if current.state.navigation.active_room_id.as_deref()
+                        == Some(room_id.as_str())
+                    {
+                        Ok(current)
+                    } else {
+                        Err(SelectRoomError::EventStreamClosed)
+                    };
+                }
+                Err(_) => {
+                    let current = self.versioned_snapshot();
+                    return if current.state.navigation.active_room_id.as_deref()
+                        == Some(room_id.as_str())
+                    {
+                        Ok(current)
+                    } else {
+                        Err(SelectRoomError::Timeout)
+                    };
+                }
+            };
+
+            let current = self.versioned_snapshot();
+            if current.state.navigation.active_room_id.as_deref() == Some(room_id.as_str()) {
+                return Ok(current);
+            }
+
+            match event {
+                CoreEvent::OperationFailed {
+                    request_id: failed_request_id,
+                    failure,
+                } if failed_request_id == request_id => {
+                    return Err(SelectRoomError::OperationFailed(failure));
+                }
+                CoreEvent::IntentLifecycle {
+                    request_id: lifecycle_request_id,
+                    outcome: IntentOutcome::FailedNoOp(reason),
+                } if lifecycle_request_id == request_id => {
+                    return Err(match reason {
+                        IntentNoOpReason::SessionNotReady => SelectRoomError::SessionNotReady,
+                        IntentNoOpReason::RoomNotInState => SelectRoomError::RoomNotInState,
+                        reason => SelectRoomError::FailedNoOp(reason),
+                    });
+                }
+                // Committed and benign no-op outcomes are progress only. The
+                // watch snapshot remains the authoritative success transport.
+                CoreEvent::IntentLifecycle {
+                    request_id: lifecycle_request_id,
+                    outcome: IntentOutcome::Committed | IntentOutcome::BenignNoOp(_),
+                } if lifecycle_request_id == request_id => {}
+                _ => {}
+            }
+        }
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -324,11 +440,236 @@ mod tests {
         ThreadSummaryDto, TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId,
     };
     use crate::ids::{AccountKey, TimelineKey, TimelineKind};
+    use futures_util::FutureExt;
     use koushi_state::{
         AppAction, AppState, ComposerTarget, LocalUserAliasUpdateState, OwnProfile, ProfileState,
         SessionInfo, UserProfile, reduce,
     };
     use std::collections::{BTreeMap, BTreeSet};
+
+    fn scripted_connection(
+        event_capacity: usize,
+    ) -> (
+        CoreConnection,
+        mpsc::Receiver<CoreCommandEnvelope>,
+        broadcast::Sender<CoreEvent>,
+        watch::Sender<VersionedAppStateSnapshot>,
+    ) {
+        let connection_id = RuntimeConnectionId(41);
+        let (command_tx, command_rx) = mpsc::channel(4);
+        let (event_tx, event_rx) = broadcast::channel(event_capacity);
+        let (snapshot_tx, snapshot_rx) = watch::channel(VersionedAppStateSnapshot {
+            generation: 0,
+            state: AppState::default(),
+        });
+        (
+            CoreConnection {
+                connection_id,
+                command_tx,
+                composer_draft_leases: Arc::new(ComposerDraftLeaseRegistry::new()),
+                event_rx,
+                snapshot_rx,
+                next_sequence: AtomicU64::new(1),
+            },
+            command_rx,
+            event_tx,
+            snapshot_tx,
+        )
+    }
+
+    fn selected_snapshot(room_id: &str, generation: u64) -> VersionedAppStateSnapshot {
+        let mut state = AppState::default();
+        state.navigation.active_room_id = Some(room_id.to_owned());
+        VersionedAppStateSnapshot { generation, state }
+    }
+
+    #[tokio::test]
+    async fn committed_lifecycle_waits_for_the_matching_published_snapshot() {
+        let room_id = "!committed-before-watch:example.test";
+        let (mut connection, mut command_rx, event_tx, snapshot_tx) = scripted_connection(4);
+        let mut waiter =
+            Box::pin(connection.select_room_and_wait(room_id.to_owned(), Duration::from_secs(1)));
+        assert!(waiter.as_mut().now_or_never().is_none());
+        let request_id = command_rx
+            .recv()
+            .await
+            .expect("select command")
+            .command
+            .request_id();
+
+        event_tx
+            .send(CoreEvent::IntentLifecycle {
+                request_id,
+                outcome: IntentOutcome::Committed,
+            })
+            .expect("committed lifecycle");
+        assert!(
+            waiter.as_mut().now_or_never().is_none(),
+            "telemetry must not settle selection before watch publication"
+        );
+
+        let published = selected_snapshot(room_id, 17);
+        snapshot_tx
+            .send(published.clone())
+            .expect("publish selected snapshot");
+        event_tx
+            .send(CoreEvent::StateChanged(published.state.clone()))
+            .expect("publish state event");
+        assert_eq!(waiter.await.expect("settled selection"), published);
+    }
+
+    #[tokio::test]
+    async fn select_room_waiter_recovers_lag_from_latest_watch_snapshot() {
+        let room_id = "!lagged-watch:example.test";
+        let (mut connection, mut command_rx, event_tx, snapshot_tx) = scripted_connection(1);
+        let mut waiter =
+            Box::pin(connection.select_room_and_wait(room_id.to_owned(), Duration::from_secs(1)));
+        assert!(waiter.as_mut().now_or_never().is_none());
+        let _command = command_rx.recv().await.expect("select command");
+
+        event_tx
+            .send(CoreEvent::StateChanged(AppState::default()))
+            .expect("first event");
+        event_tx
+            .send(CoreEvent::StateChanged(AppState::default()))
+            .expect("overflowing event");
+        let published = selected_snapshot(room_id, 23);
+        snapshot_tx
+            .send(published.clone())
+            .expect("publish selected snapshot");
+
+        assert_eq!(waiter.await.expect("lag recovery settlement"), published);
+    }
+
+    #[tokio::test]
+    async fn matching_operation_failure_returns_the_typed_core_failure() {
+        let (mut connection, mut command_rx, event_tx, _snapshot_tx) = scripted_connection(1);
+        let mut waiter = Box::pin(connection.select_room_and_wait(
+            "!matching-operation-failure:example.test".to_owned(),
+            Duration::from_secs(1),
+        ));
+        assert!(waiter.as_mut().now_or_never().is_none());
+        let request_id = command_rx
+            .recv()
+            .await
+            .expect("select command")
+            .command
+            .request_id();
+
+        event_tx
+            .send(CoreEvent::OperationFailed {
+                request_id,
+                failure: crate::failure::CoreFailure::SessionRequired,
+            })
+            .expect("matching failure");
+        assert_eq!(
+            waiter.await,
+            Err(SelectRoomError::OperationFailed(
+                crate::failure::CoreFailure::SessionRequired
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn matching_superseded_lifecycle_returns_the_typed_noop() {
+        let (mut connection, mut command_rx, event_tx, _snapshot_tx) = scripted_connection(1);
+        let mut waiter = Box::pin(connection.select_room_and_wait(
+            "!matching-superseded:example.test".to_owned(),
+            Duration::from_secs(1),
+        ));
+        assert!(waiter.as_mut().now_or_never().is_none());
+        let request_id = command_rx
+            .recv()
+            .await
+            .expect("select command")
+            .command
+            .request_id();
+
+        event_tx
+            .send(CoreEvent::IntentLifecycle {
+                request_id,
+                outcome: IntentOutcome::FailedNoOp(IntentNoOpReason::Superseded),
+            })
+            .expect("matching superseded lifecycle");
+        assert_eq!(
+            waiter.await,
+            Err(SelectRoomError::FailedNoOp(IntentNoOpReason::Superseded))
+        );
+    }
+
+    #[tokio::test]
+    async fn unrelated_request_failures_do_not_settle_room_selection() {
+        let room_id = "!unrelated-request:example.test";
+        let (mut connection, mut command_rx, event_tx, snapshot_tx) = scripted_connection(4);
+        let mut waiter =
+            Box::pin(connection.select_room_and_wait(room_id.to_owned(), Duration::from_secs(1)));
+        assert!(waiter.as_mut().now_or_never().is_none());
+        let request_id = command_rx
+            .recv()
+            .await
+            .expect("select command")
+            .command
+            .request_id();
+        let unrelated_request_id = RequestId {
+            connection_id: request_id.connection_id,
+            sequence: request_id.sequence + 1,
+        };
+
+        event_tx
+            .send(CoreEvent::OperationFailed {
+                request_id: unrelated_request_id,
+                failure: crate::failure::CoreFailure::SessionRequired,
+            })
+            .expect("unrelated failure");
+        event_tx
+            .send(CoreEvent::IntentLifecycle {
+                request_id: unrelated_request_id,
+                outcome: IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState),
+            })
+            .expect("unrelated lifecycle");
+        assert!(waiter.as_mut().now_or_never().is_none());
+
+        let published = selected_snapshot(room_id, 29);
+        snapshot_tx
+            .send(published.clone())
+            .expect("publish selected snapshot");
+        event_tx
+            .send(CoreEvent::StateChanged(published.state.clone()))
+            .expect("publish state event");
+        assert_eq!(waiter.await.expect("settled selection"), published);
+    }
+
+    #[tokio::test]
+    async fn closed_event_stream_returns_a_final_matching_snapshot() {
+        let room_id = "!closed-after-publish:example.test";
+        let (mut connection, mut command_rx, event_tx, snapshot_tx) = scripted_connection(1);
+        let mut waiter =
+            Box::pin(connection.select_room_and_wait(room_id.to_owned(), Duration::from_secs(1)));
+        assert!(waiter.as_mut().now_or_never().is_none());
+        let _command = command_rx.recv().await.expect("select command");
+        let published = selected_snapshot(room_id, 31);
+        snapshot_tx
+            .send(published.clone())
+            .expect("publish final selected snapshot");
+
+        drop(event_tx);
+        assert_eq!(waiter.await.expect("final watch settlement"), published);
+    }
+
+    #[tokio::test]
+    async fn closed_event_stream_returns_a_typed_selection_error() {
+        let (mut connection, mut command_rx, event_tx, _snapshot_tx) = scripted_connection(1);
+        let mut waiter = Box::pin(connection.select_room_and_wait(
+            "!closed-stream:example.test".to_owned(),
+            Duration::from_secs(1),
+        ));
+        assert!(waiter.as_mut().now_or_never().is_none());
+        let _command = command_rx.recv().await.expect("select command");
+
+        drop(event_tx);
+        assert_eq!(waiter.await, Err(SelectRoomError::EventStreamClosed));
+    }
+
     #[test]
     fn standalone_composer_command_permit_outlives_activation_lease() {
         let composer_draft_leases = Arc::new(ComposerDraftLeaseRegistry::new());
