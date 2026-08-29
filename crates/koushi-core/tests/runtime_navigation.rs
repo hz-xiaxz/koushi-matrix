@@ -44,6 +44,29 @@ async fn navigation_selection_persists_when_runtime_restarts() {
                 && state.navigation.active_room_id.as_deref() == Some("!room-a:example.test")
         })
         .await;
+        // Causally wait for the post-commit navigation persist before exercising
+        // a memory-clearing verification-gate transition.
+        runtime
+            .inject_composer_drafts_and_wait_for_testing(
+                connection.snapshot().composer_drafts.clone(),
+            )
+            .await;
+        runtime
+            .inject_actions(vec![
+                AppAction::SessionLocked,
+                AppAction::AuthoritativeDeviceTrustChanged {
+                    generation: 1,
+                    transition_id: 1,
+                    trust: koushi_state::CurrentDeviceTrustState::Verified,
+                },
+            ])
+            .await;
+        wait_for_state(&mut connection, |state| {
+            matches!(state.session, SessionState::Ready(_))
+                && state.navigation.active_space_id.as_deref() == Some("!space-a:example.test")
+                && state.navigation.active_room_id.as_deref() == Some("!room-a:example.test")
+        })
+        .await;
         // Selection state is published before post-commit persistence. Ordered
         // shutdown is the causal barrier that proves persistence completed.
         drop(connection);

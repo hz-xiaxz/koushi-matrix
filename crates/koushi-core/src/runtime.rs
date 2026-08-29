@@ -869,7 +869,7 @@ impl AppActor {
                 } => {
                     let before_state = self.state.clone();
                     if self.dispatch_due_scheduled_send().await {
-                        self.publish_state_delta(&before_state);
+                        self.publish_state_change(&before_state);
                     }
                 }
                 lease_change = self.composer_draft_lease_changes.changed() => {
@@ -881,7 +881,7 @@ impl AppActor {
                         .reconcile_composer_draft_lifecycle_after_permit_change()
                         .await
                     {
-                        self.publish_state_delta(&before_state);
+                        self.publish_state_change(&before_state);
                     }
                 }
                 rejected_request_id = self.composer_draft_rejected_rx.recv() => {
@@ -922,7 +922,7 @@ impl AppActor {
                         // already. Diff only from the latest published watch value so
                         // coalescing cannot duplicate that delta or skip later commands.
                         let published_state = self.snapshot_tx.borrow().state.clone();
-                        self.publish_state_delta(&published_state);
+                        self.publish_state_change(&published_state);
                     }
                     app_loop_trace("command", handled, clone_ms, loop_started.elapsed());
                     if shutdown {
@@ -953,12 +953,28 @@ impl AppActor {
                         else {
                             continue;
                         };
-                        // Navigation must be loaded before any actor projection
-                        // can persist a derived room-list order. In particular,
-                        // a Sliding Sync snapshot may arrive in the same action
-                        // batch as session readiness.
-                        if !matches!(&action, AppAction::NavigationLoaded { .. }) {
+                        // Load each session-owned view before later projections can
+                        // mutate it, unless an earlier action in this batch captured a
+                        // persistence fence that must be applied first post-commit.
+                        let navigation_load_fenced = post_projection_work.iter().any(
+                            |(_, _, _, _, deferred, _)| deferred.has_navigation_persist(),
+                        );
+                        let composer_load_fenced = post_projection_work.iter().any(
+                            |(_, _, _, _, deferred, _)| deferred.has_composer_draft_persist(),
+                        );
+                        let scheduled_load_fenced = post_projection_work.iter().any(
+                            |(_, _, _, _, deferred, _)| deferred.has_scheduled_send_persist(),
+                        );
+                        if !navigation_load_fenced
+                            && !matches!(&action, AppAction::NavigationLoaded { .. })
+                        {
                             self.load_navigation_for_current_session().await;
+                        }
+                        if !composer_load_fenced {
+                            self.load_composer_drafts_for_current_session().await;
+                        }
+                        if !scheduled_load_fenced {
+                            self.load_scheduled_sends_for_current_session().await;
                         }
                         let action = guard_activity_resolution_completion(&self.state, action);
                         let composer_acceptance =
@@ -1277,8 +1293,7 @@ impl AppActor {
                         state_changed = true;
                     }
                     let published_generation = if state_changed {
-                        self.publish_state_delta(&before_state)
-                            .unwrap_or(self.state_generation)
+                        self.publish_state_change(&before_state)
                     } else {
                         self.state_generation
                     };
@@ -1361,7 +1376,7 @@ impl AppActor {
                         }
                         self.handle_ui_event_effects(&effects).await;
                         if self.state != before_post_projection {
-                            self.publish_state_delta(&before_post_projection);
+                            self.publish_state_change(&before_post_projection);
                         }
                     }
                     // Apply every captured persistence effect before loading the
@@ -1372,12 +1387,8 @@ impl AppActor {
                     self.load_navigation_for_current_session().await;
                     self.load_composer_drafts_for_current_session().await;
                     self.load_scheduled_sends_for_current_session().await;
-                    if self.state != before_post_commit_loads
-                        && self
-                            .publish_state_delta(&before_post_commit_loads)
-                            .is_none()
-                    {
-                        self.publish_snapshot_refresh_without_delta();
+                    if self.state != before_post_commit_loads {
+                        self.publish_state_change(&before_post_commit_loads);
                     }
                     #[cfg(any(test, feature = "test-hooks"))]
                     for completion in composer_draft_test_completions {
@@ -4083,6 +4094,16 @@ impl AppActor {
     fn emit(&self, event: CoreEvent) {
         // A send error only means no consumer is currently attached.
         let _ = self.event_tx.send(event);
+    }
+
+    fn publish_state_change(&mut self, before_state: &AppState) -> u64 {
+        if let Some(generation) = self.publish_state_delta(before_state) {
+            return generation;
+        }
+        if &self.state != before_state {
+            self.publish_snapshot_refresh_without_delta();
+        }
+        self.state_generation
     }
 
     /// Refresh internal snapshot-only state without inventing a StateDelta
