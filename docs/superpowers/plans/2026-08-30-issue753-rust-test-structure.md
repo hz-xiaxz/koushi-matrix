@@ -1,6 +1,6 @@
 # Issue #753 Rust test-structure cleanup
 
-Status: design approved for implementation by different-model review round 2.
+Status: implemented and locally verified; final-diff review and hosted PR gates pending.
 
 ## Outcome
 
@@ -106,9 +106,20 @@ No production-state changes, compatibility shims, TODO placeholders, ignored tes
 - Pre-implementation reviewer round 1: `deepseek-brainstormer` (different model family from Luna), `VERDICT: FINDINGS`. Blockers fixed in this revision: structural assertions now migrate into and are removed in favor of the single checker; no test-only allowlist remains; inventory corrected; canon amendment added; all 77 large modules proven private/internal; migration equivalence and Rust-CI wiring specified.
 - Pre-implementation reviewer round 2: `deepseek-brainstormer`, `VERDICT: CORRECT-TO-IMPLEMENT`. Non-blocking reminders incorporated: inventory totals are provisional until checker parsing; canon reconciles the 200-line ceiling with stricter placement rules; lexer fixtures cover raw/byte strings and lifetimes; `concat!(env!(...))` is detected; extraction is top-level-only.
 - Pre-implementation verdict: **approved**.
-- Implementer: `luna-implementer` after approval, in bounded sequential slices.
-- Final-diff reviewer: pending (`reviewer-flash`).
+- Implementer: `luna-implementer` after approval in bounded sequential slices, with main-agent integration at timeout checkpoints.
+- Final-diff reviewer: pending (`deepseek-brainstormer`; `reviewer-flash` was unavailable at the provider).
 - Final integration/self-review: pending (`gpt-5.6-sol`).
+
+## Implementation evidence
+
+- Source-contract migration: 361 Rust-source `include_str!` invocations → 0; exactly four reviewed non-Rust embeddings remain.
+- Checker: 240 named direct rule functions, zero rule failures; parser/rule tests pass; strict command passes.
+- Behavioral identity audit: workspace 2564 → 2341 with exactly 223 mapped source-only removals and zero added/renamed behavioral identities; Core QA 135 → 88 with exactly 47 mapped source-only removals and zero additions.
+- Inline extraction: post-migration 72 modules moved to 72 sibling files; 71 exact dedent proofs plus one fixture-path-only normalization; strict modules >=200 lines: 0.
+- `cargo test --workspace --exclude sidebar-composition --exclude key-management`: passed.
+- `cargo test -p koushi-core --features qa-bin --bin headless-core-qa`: 88 passed.
+- Rust-source checker tests, strict checker, rustfmt, and diff checks: passed.
+- Full frontend/Playwright/wasm/dependency/platform/homeserver PR gates remain pending after final-diff review.
 
 ## Acceptance
 
