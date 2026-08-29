@@ -1809,6 +1809,76 @@ async fn same_account_unlock_flushes_preserved_composer_save_before_reload() {
 }
 
 #[tokio::test]
+async fn same_batch_logout_discards_an_earlier_queued_composer_save() {
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let credential_dir = tempfile::tempdir().expect("credential dir");
+    let room_id = "same-batch-logout-room";
+    seed_composer_payload(
+        data_dir.path(),
+        credential_dir.path(),
+        room_id,
+        "persisted body",
+    )
+    .await;
+
+    let runtime = CoreRuntime::start_with_data_dir_and_file_credentials(
+        data_dir.path().to_path_buf(),
+        credential_dir.path().to_path_buf(),
+    );
+    let mut conn = runtime.attach();
+    runtime
+        .inject_actions(restore_ready_actions![
+            AppAction::RoomListUpdated {
+                spaces: vec![],
+                rooms: vec![room_summary(room_id)],
+            },
+            AppAction::SelectRoom {
+                room_id: room_id.to_owned(),
+            },
+            AppAction::TimelineSubscribed {
+                room_id: room_id.to_owned(),
+            },
+        ])
+        .await;
+    wait_for_state_event(&mut conn, |state| {
+        matches!(state.session, SessionState::Ready(_))
+            && state.timeline.composer.draft == "persisted body"
+    })
+    .await;
+
+    let mut barrier = runtime.install_composer_draft_io_barrier_for_testing();
+    runtime
+        .inject_actions(vec![
+            AppAction::ComposerDraftChangedAtRevision {
+                room_id: room_id.to_owned(),
+                document: "must not persist".into(),
+                revision: 2.into(),
+            },
+            AppAction::LogoutRequested,
+            AppAction::LogoutFinished,
+        ])
+        .await;
+    wait_for_state_event(&mut conn, |state| {
+        matches!(state.session, SessionState::SignedOut)
+    })
+    .await;
+    drop(conn);
+
+    let shutdown_won = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::select! {
+            _ = barrier.wait_for_save_started() => false,
+            _ = runtime.shutdown() => true,
+        }
+    })
+    .await
+    .expect("logout shutdown must settle without a queued draft save");
+    assert!(
+        shutdown_won,
+        "same-batch destructive logout must cancel the earlier captured draft save"
+    );
+}
+
+#[tokio::test]
 async fn ignored_stale_reset_completion_does_not_cancel_pending_composer_save() {
     let data_dir = tempfile::tempdir().expect("data dir");
     let credential_dir = tempfile::tempdir().expect("credential dir");

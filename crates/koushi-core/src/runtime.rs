@@ -553,6 +553,7 @@ impl CoreRuntime {
             settings_store,
             composer_draft_store_actor,
             composer_draft_load_status: ComposerDraftLoadStatus::Unloaded,
+            composer_draft_reload_required: false,
             navigation_loaded_for: None,
             navigation_persistence_status: NavigationPersistenceStatus::Unloaded,
             scheduled_sends_loaded_for: None,
@@ -766,6 +767,9 @@ struct AppActor {
     settings_store: SettingsStore,
     composer_draft_store_actor: StoreActor,
     composer_draft_load_status: ComposerDraftLoadStatus,
+    /// A lock/unlock can retain the same account key but still requires a
+    /// fresh draft load after any captured pre-transition save is flushed.
+    composer_draft_reload_required: bool,
     navigation_loaded_for: Option<koushi_key::SessionKeyId>,
     navigation_persistence_status: NavigationPersistenceStatus,
     scheduled_sends_loaded_for: Option<koushi_key::SessionKeyId>,
@@ -935,7 +939,14 @@ impl AppActor {
                     let clone_ms = loop_started.elapsed().as_millis();
                     let mut state_changed = false;
                     let mut pending_select_settlements = Vec::new();
-                    let mut post_projection_work = Vec::new();
+                    let mut post_projection_work: Vec<(
+                        Vec<AppEffect>,
+                        Option<u64>,
+                        Option<RequestId>,
+                        crate::timeline::NavigationProjectionCleanup,
+                        reducer_support::DeferredReducerSideEffects,
+                        Option<ComposerAcceptanceIdentity>,
+                    )> = Vec::new();
                     for action in actions {
                         let Some(action) = normalize_activity_resolution_action(&self.state, action)
                         else {
@@ -1049,6 +1060,13 @@ impl AppActor {
                         let action_for_navigation_cleanup = action.clone();
                         let (post_projection_effects, deferred_reducer_side_effects) =
                             self.reduce_app_action_state(action);
+                        if deferred_reducer_side_effects.discards_composer_drafts() {
+                            // A destructive transition in this same reducer batch
+                            // supersedes draft saves captured by earlier actions.
+                            for (_, _, _, _, queued_deferred, _) in &mut post_projection_work {
+                                queued_deferred.cancel_composer_draft_persist();
+                            }
+                        }
                         let active_room_changed = active_room_before_reduce
                             != self.state.navigation.active_room_id;
                         let replacement_room_for_cleanup = navigation_replacement_room_for_cleanup(
@@ -1255,12 +1273,6 @@ impl AppActor {
                             deferred_reducer_side_effects,
                             composer_acceptance,
                         ));
-                        // These loads can reduce state required for a coherent published
-                        // snapshot, so they remain in the synchronous derivation stage.
-                        self.load_room_preferences_for_current_session().await;
-                        self.load_navigation_for_current_session().await;
-                        self.load_composer_drafts_for_current_session().await;
-                        self.load_scheduled_sends_for_current_session().await;
                         state_changed = true;
                     }
                     let published_generation = if state_changed {
@@ -1347,13 +1359,24 @@ impl AppActor {
                                 .retain(|_, pending| pending.identity != identity);
                         }
                         self.handle_ui_event_effects(&effects).await;
-                        self.load_room_preferences_for_current_session().await;
-                        self.load_navigation_for_current_session().await;
-                        self.load_composer_drafts_for_current_session().await;
-                        self.load_scheduled_sends_for_current_session().await;
                         if self.state != before_post_projection {
                             self.publish_state_delta(&before_post_projection);
                         }
+                    }
+                    // Apply every captured persistence effect before loading the
+                    // final session's views. In particular, an old-account draft
+                    // save must not be overtaken by the new-account load.
+                    let before_post_commit_loads = self.state.clone();
+                    self.load_room_preferences_for_current_session().await;
+                    self.load_navigation_for_current_session().await;
+                    self.load_composer_drafts_for_current_session().await;
+                    self.load_scheduled_sends_for_current_session().await;
+                    if self.state != before_post_commit_loads
+                        && self
+                            .publish_state_delta(&before_post_commit_loads)
+                            .is_none()
+                    {
+                        self.publish_snapshot_refresh_without_delta();
                     }
                     app_loop_trace("action", action_batch, clone_ms, loop_started.elapsed());
                 }
@@ -4053,6 +4076,17 @@ impl AppActor {
         let _ = self.event_tx.send(event);
     }
 
+    /// Refresh internal snapshot-only state without inventing a StateDelta
+    /// generation. Composer drafts and scheduled-send persistence are excluded
+    /// from the WebView delta contract but remain observable to Core consumers.
+    fn publish_snapshot_refresh_without_delta(&self) {
+        let _ = self.snapshot_tx.send(VersionedAppStateSnapshot {
+            generation: self.state_generation,
+            state: self.state.clone(),
+        });
+        self.emit(CoreEvent::StateChanged(self.state.clone()));
+    }
+
     fn publish_state_delta(&mut self, before_state: &AppState) -> Option<u64> {
         let delta = build_state_delta(self.state_generation + 1, before_state, &self.state)?;
         self.state_generation = delta.generation;
@@ -5956,6 +5990,7 @@ mod tests {
             settings_store: SettingsStore::new(data_dir.path()),
             composer_draft_store_actor: StoreActor::new(data_dir.path().to_owned()),
             composer_draft_load_status: ComposerDraftLoadStatus::Loaded(session_key.clone()),
+            composer_draft_reload_required: false,
             navigation_loaded_for: Some(session_key.clone()),
             navigation_persistence_status: NavigationPersistenceStatus::Loaded(session_key.clone()),
             scheduled_sends_loaded_for: Some(session_key.clone()),
@@ -6118,6 +6153,7 @@ mod tests {
             settings_store: SettingsStore::new(data_dir.path()),
             composer_draft_store_actor: StoreActor::new(data_dir.path().to_owned()),
             composer_draft_load_status: ComposerDraftLoadStatus::Loaded(session_key.clone()),
+            composer_draft_reload_required: false,
             navigation_loaded_for: Some(session_key.clone()),
             navigation_persistence_status: NavigationPersistenceStatus::Loaded(session_key.clone()),
             scheduled_sends_loaded_for: Some(session_key.clone()),

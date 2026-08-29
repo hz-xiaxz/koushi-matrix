@@ -49,7 +49,18 @@ pub(super) struct DeferredReducerSideEffects {
     cancel_activity_resolution: bool,
     navigation: Option<(koushi_key::SessionKeyId, NavigationState, bool)>,
     composer_drafts: Option<(koushi_key::SessionKeyId, ComposerDraftStore)>,
+    composer_drafts_discarded: bool,
     scheduled_sends: Option<DeferredScheduledSendPersist>,
+}
+
+impl DeferredReducerSideEffects {
+    pub(super) fn discards_composer_drafts(&self) -> bool {
+        self.composer_drafts_discarded
+    }
+
+    pub(super) fn cancel_composer_draft_persist(&mut self) {
+        self.composer_drafts = None;
+    }
 }
 
 impl super::AppActor {
@@ -80,6 +91,9 @@ impl super::AppActor {
         let previous_scheduled_session = scheduled_send_session_key(&self.state);
         let previous_scheduled_sends = self.state.scheduled_sends.clone();
         let effects = reduce_with_unread_diagnostics(&mut self.state, action);
+        if composer_draft_session_key(&self.state) != previous_session {
+            self.composer_draft_reload_required = true;
+        }
         if previous_navigation.space_order != self.state.navigation.space_order
             || explicit_navigation_preference_mutation
         {
@@ -122,10 +136,10 @@ impl super::AppActor {
                     )),
             );
         }
-        if destructive_state_before
+        let destructive_state_changed = destructive_state_before
             .as_ref()
-            .is_some_and(|before| before != &self.state)
-        {
+            .is_some_and(|before| before != &self.state);
+        if destructive_state_changed {
             self.pending_composer_draft_persist.take();
         }
         let current_composer_targets = active_composer_targets(&self.state);
@@ -137,6 +151,7 @@ impl super::AppActor {
         let mut deferred = DeferredReducerSideEffects {
             cancel_activity_resolution: activity_was_open
                 && matches!(self.state.activity, ActivityState::Closed { .. }),
+            composer_drafts_discarded: destructive_state_changed,
             ..DeferredReducerSideEffects::default()
         };
         if previous_navigation != self.state.navigation {

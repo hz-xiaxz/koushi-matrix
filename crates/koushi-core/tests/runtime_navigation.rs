@@ -44,6 +44,10 @@ async fn navigation_selection_persists_when_runtime_restarts() {
                 && state.navigation.active_room_id.as_deref() == Some("!room-a:example.test")
         })
         .await;
+        // Selection state is published before post-commit persistence. Ordered
+        // shutdown is the causal barrier that proves persistence completed.
+        drop(connection);
+        runtime.shutdown().await;
     }
 
     let restarted = CoreRuntime::start_with_data_dir_and_file_credentials(
