@@ -344,6 +344,16 @@ impl CoreConnection {
         self.snapshot_rx.borrow().clone()
     }
 
+    /// Causal snapshot-change barrier for deterministic runtime tests.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[doc(hidden)]
+    pub async fn next_versioned_snapshot_for_testing(
+        &mut self,
+    ) -> Option<VersionedAppStateSnapshot> {
+        self.snapshot_rx.changed().await.ok()?;
+        Some(self.snapshot_rx.borrow_and_update().clone())
+    }
+
     /// Select `room_id` and wait until the latest versioned watch snapshot names
     /// it as the active room.
     ///

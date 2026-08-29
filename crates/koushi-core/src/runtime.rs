@@ -932,7 +932,8 @@ impl AppActor {
                 actions = self.action_rx.recv() => {
                     let Some(actions) = actions else { break };
                     #[cfg(any(test, feature = "test-hooks"))]
-                    self.apply_pending_composer_draft_test_mutations().await;
+                    let composer_draft_test_completions =
+                        self.apply_pending_composer_draft_test_mutations().await;
                     let loop_started = std::time::Instant::now();
                     let action_batch = actions.len() as u32;
                     let before_state = self.state.clone();
@@ -1378,6 +1379,10 @@ impl AppActor {
                     {
                         self.publish_snapshot_refresh_without_delta();
                     }
+                    #[cfg(any(test, feature = "test-hooks"))]
+                    for completion in composer_draft_test_completions {
+                        let _ = completion.send(self.state.clone());
+                    }
                     app_loop_trace("action", action_batch, clone_ms, loop_started.elapsed());
                 }
             }
@@ -1388,7 +1393,10 @@ impl AppActor {
     }
 
     #[cfg(any(test, feature = "test-hooks"))]
-    async fn apply_pending_composer_draft_test_mutations(&mut self) {
+    async fn apply_pending_composer_draft_test_mutations(
+        &mut self,
+    ) -> Vec<oneshot::Sender<AppState>> {
+        let mut completions = Vec::new();
         while let Ok(mutation) = self.composer_draft_test_rx.try_recv() {
             self.flush_pending_composer_drafts().await;
             let before_state = self.state.clone();
@@ -1408,8 +1416,9 @@ impl AppActor {
                 self.publish_state_delta(&before_reconcile);
             }
             self.flush_pending_composer_drafts().await;
-            let _ = mutation.completion.send(self.state.clone());
+            completions.push(mutation.completion);
         }
+        completions
     }
 
     async fn load_room_preferences_for_current_session(&mut self) {
@@ -4566,16 +4575,17 @@ mod tests {
         connection: &mut CoreConnection,
         predicate: impl Fn(&AppState) -> bool,
     ) -> AppState {
-        tokio::time::timeout(Duration::from_secs(1), async {
+        // Content/events are the causal barrier; this timeout is only a deadlock watchdog.
+        tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let snapshot = connection.snapshot();
                 if predicate(&snapshot) {
                     return snapshot;
                 }
-                let _ = connection
-                    .recv_event()
+                connection
+                    .next_versioned_snapshot_for_testing()
                     .await
-                    .expect("runtime event stream should remain open");
+                    .expect("runtime snapshot stream should remain open");
             }
         })
         .await
@@ -4616,6 +4626,32 @@ mod tests {
         wait_for_runtime_snapshot(&mut connection, |snapshot| {
             snapshot.space_members.selected_space_id.as_deref() == Some(space_id)
                 && snapshot.space_members.generation == generation
+                && matches!(
+                    snapshot.space_members.operation,
+                    koushi_state::SpaceMembersOperationState::Idle
+                )
+        })
+        .await;
+        // Phase C publishes state before post-commit work. Queue an existing
+        // test-hook mutation behind the fixture batch and await its completion
+        // before deliberately closing the AccountActor transport.
+        runtime
+            .inject_composer_drafts_and_wait_for_testing(
+                connection.snapshot().composer_drafts.clone(),
+            )
+            .await;
+        // Re-apply the explicit fixture navigation after the real persisted-load
+        // stage so command admission observes the intended selected Space.
+        runtime
+            .inject_actions(vec![AppAction::NavigationLoaded {
+                navigation: NavigationState {
+                    active_space_id: Some(space_id.to_owned()),
+                    ..NavigationState::default()
+                },
+            }])
+            .await;
+        wait_for_runtime_snapshot(&mut connection, |snapshot| {
+            snapshot.space_members.selected_space_id.as_deref() == Some(space_id)
                 && matches!(
                     snapshot.space_members.operation,
                     koushi_state::SpaceMembersOperationState::Idle
