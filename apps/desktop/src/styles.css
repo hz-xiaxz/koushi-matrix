@@ -21,9 +21,9 @@
   --upload-output-option-size: 26px;
   --upload-output-option-gap: 2px;
   --upload-output-group-padding: 3px;
-  --upload-output-toolbar-gap: 8px;
-  --upload-preview-viewport-min-size: 100px;
-  --upload-preview-viewport-size: 180px;
+  --upload-output-toolbar-gap: 6px;
+  --upload-preview-viewport-min-size: 140px;
+  --upload-preview-viewport-size: 240px;
   color-scheme: light dark;
 
   --font-system-ui:
@@ -5188,9 +5188,9 @@ mark {
      action or the composer out of the window. */
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 8px;
   margin: 0 20px 10px;
-  padding: 12px;
+  padding: 10px;
   max-height: min(80vh, 640px);
   overflow: hidden;
   border: 1px solid var(--line);
@@ -5204,7 +5204,7 @@ mark {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
 }
 
 .upload-staging-header h2,
@@ -5228,8 +5228,8 @@ mark {
 
 .upload-staging-item {
   display: grid;
-  gap: 8px;
-  padding: 10px;
+  gap: 6px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-hover);
@@ -5264,9 +5264,21 @@ mark {
 
 .upload-staging-caption {
   display: grid;
-  gap: 4px;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.upload-staging-caption .composer-tools {
+  --icon-button-size: 26px;
+
+  height: 30px;
+  padding-inline: 6px;
+}
+
+.upload-staging-caption .composer-inline-editor {
+  min-block-size: 48px;
+  max-block-size: 112px;
+  padding: 8px 10px;
 }
 
 /* The staging panel owns its own send: it dispatches the attachments and never
@@ -5341,14 +5353,14 @@ mark {
   font-size: 11px;
 }
 
-/* Keep attachment decisions visible above a bounded pan surface. Large images
-   retain their prepared pixel dimensions inside this viewport so users can
-   inspect them by scrolling in either direction without moving the controls. */
+/* Show the bounded pan surface before attachment decisions and the compact
+   caption editor. Large images retain their prepared pixel dimensions inside
+   this viewport so users can inspect them by scrolling in either direction. */
 .upload-preview-viewport {
   position: relative;
   block-size: clamp(
     var(--upload-preview-viewport-min-size),
-    10vh,
+    22dvh,
     var(--upload-preview-viewport-size)
   );
   overflow: auto;

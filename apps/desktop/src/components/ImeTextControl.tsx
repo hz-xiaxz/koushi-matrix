@@ -307,6 +307,7 @@ export const ImeInlineMentionEditor = forwardRef<
     const composingRef = useRef(false);
     const pendingSelectionRef = useRef<DocumentSelection | null>(null);
     const renderedKeyRef = useRef<string | null>(null);
+    const renderedDocumentRef = useRef<ComposerDocument | null>(null);
     const submitFence = useContext(ImeSubmitFenceContext);
 
     if (historyKeyRef.current !== syncKey) {
@@ -328,17 +329,35 @@ export const ImeInlineMentionEditor = forwardRef<
       const control = controlRef.current;
       if (!control) return;
       const keyChanged = renderedKeyRef.current !== syncKey;
+      const documentChanged =
+        renderedDocumentRef.current === null ||
+        !documentsEqual(renderedDocumentRef.current, document);
       if (keyChanged) {
         composingRef.current = false;
         delete control.dataset.composing;
       }
-      if (keyChanged || !composingRef.current) {
+      const selectionBeforeRender =
+        !keyChanged &&
+        documentChanged &&
+        pendingSelectionRef.current === null &&
+        control.ownerDocument.activeElement === control
+          ? documentSelectionFromDom(control)
+          : null;
+      if ((keyChanged || documentChanged) && !composingRef.current) {
         renderEditorDocument(control, document);
         renderedKeyRef.current = syncKey;
+        renderedDocumentRef.current = document;
       }
+      const documentEnd = documentLength(document);
+      const preservedSelection = selectionBeforeRender
+        ? {
+            start: Math.min(selectionBeforeRender.start, documentEnd),
+            end: Math.min(selectionBeforeRender.end, documentEnd)
+          }
+        : null;
       const selection = keyChanged
-        ? { start: documentLength(document), end: documentLength(document) }
-        : pendingSelectionRef.current;
+        ? { start: documentEnd, end: documentEnd }
+        : (pendingSelectionRef.current ?? preservedSelection);
       if (!selection || composingRef.current) return;
       pendingSelectionRef.current = null;
       restoreDocumentSelection(control, selection);

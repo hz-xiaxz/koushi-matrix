@@ -2,8 +2,8 @@
  * Headless geometry regression: the Upload attachments staging panel must
  * stay inside the application viewport at short window heights, with the
  * dialog header and Send attachments action visible. At ordinary sizes the
- * controls precede a two-axis image viewport; at extreme sizes the staging
- * list remains a fallback scroll owner (#515).
+ * image viewport precedes compact output and caption controls; at extreme
+ * sizes the staging list remains a fallback scroll owner (#515).
  *
  * Before the fix the staging dialog had no viewport-bounded max-height and no
  * internal scroll region, so with a tall portrait image the caption field,
@@ -127,20 +127,31 @@ test("main composer keeps upload controls visible while only the preview pans", 
   const controlAndPreviewGeometry = await dialog.evaluate((element) => {
     const toolbar = element.querySelector<HTMLElement>(".upload-output-toolbar");
     const preview = element.querySelector<HTMLElement>(".upload-preview-viewport");
-    if (!toolbar || !preview) return null;
+    const caption = element.querySelector<HTMLElement>(".upload-staging-caption");
+    const captionEditor = caption?.querySelector<HTMLElement>(".composer-inline-editor");
+    if (!toolbar || !preview || !caption || !captionEditor) return null;
     const toolbarBox = toolbar.getBoundingClientRect();
     const previewBox = preview.getBoundingClientRect();
+    const captionBox = caption.getBoundingClientRect();
+    const captionEditorBox = captionEditor.getBoundingClientRect();
     return {
+      previewBottom: previewBox.bottom,
+      toolbarTop: toolbarBox.top,
       toolbarBottom: toolbarBox.bottom,
-      previewTop: previewBox.top,
+      captionTop: captionBox.top,
+      captionEditorHeight: captionEditorBox.height,
       previewOverflowX: getComputedStyle(preview).overflowX,
       previewOverflowY: getComputedStyle(preview).overflowY
     };
   });
   expect(controlAndPreviewGeometry).not.toBeNull();
-  expect(controlAndPreviewGeometry!.toolbarBottom).toBeLessThanOrEqual(
-    controlAndPreviewGeometry!.previewTop
+  expect(controlAndPreviewGeometry!.previewBottom).toBeLessThanOrEqual(
+    controlAndPreviewGeometry!.toolbarTop
   );
+  expect(controlAndPreviewGeometry!.toolbarBottom).toBeLessThanOrEqual(
+    controlAndPreviewGeometry!.captionTop
+  );
+  expect(controlAndPreviewGeometry!.captionEditorHeight).toBeLessThanOrEqual(48);
   expect(controlAndPreviewGeometry!.previewOverflowX).toBe("auto");
   expect(controlAndPreviewGeometry!.previewOverflowY).toBe("auto");
 
@@ -220,8 +231,9 @@ test("thread composer staging panel stays bounded and scrolls at a short viewpor
     dialog.getByRole("button", { name: t("upload.sendAttachments") })
   ).toBeVisible();
 
-  const listLocator = contextPanel.locator(".upload-staging-list");
-  await listLocator.hover();
+  // Wheel outside the nested preview so the staging list, rather than the
+  // preview's two-axis pan surface, owns this fallback scroll gesture.
+  await contextPanel.locator(".upload-staging-file").hover();
   for (let index = 0; index < 4; index += 1) {
     await page.mouse.wheel(0, 120);
   }
