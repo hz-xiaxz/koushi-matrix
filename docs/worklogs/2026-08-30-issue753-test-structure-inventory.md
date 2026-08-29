@@ -385,3 +385,82 @@ The current scoped diff deletes 52 timeline source-only `#[test]` identities. Th
 | `koushi_core::timeline::thread_projection::tests::recovery_and_manager_owned_receipt_success_preserve_attention_ordering` | `core.timeline.receipt_attention_ordering` | Removed |
 
 **Verification counts:** deleted `#[test]` identities: 52; mapping rows: 52; missing rows: 0; extra rows: 0. The existing rule `core.timeline.thread_root_hydration` has no corresponding deleted identity in the current diff (unmatched existing rule: 1); it is not counted as a mapping row. No mixed tests were found: all 52 deleted identities were source-only, so no behavioral assertion required restoration. Vacuous self-matches: 0. No Rust or checker source was edited.
+
+## Final source-contract slice: headless QA contracts and integration tests
+
+The current diff deletes 46 source-only tests from `headless_core_qa::contracts`,
+one source-only `login_store_contracts` test that depended on the removed source
+helpers, and 10 source-only integration tests. `Missing: 0; extra: 0; vacuous: 0;
+mixed: 0`. The 46 QA mappings are listed as exact identity → existing rule →
+facts (all dispositions: **Removed**):
+
+| Old identity | Existing rule | Facts |
+| --- | --- | --- |
+| `headless_core_qa::contracts::active_reconnect_uses_encryption_gate_before_timeline_work` | `core.qa.reconnect_encryption_gate` | encryption gate precedes timeline work |
+| `headless_core_qa::contracts::invite_timeout_uses_private_safe_observer_diagnostic_summary` | `core.qa.private_safe_invite_timeout` | invite timeout omits room identity |
+| `headless_core_qa::contracts::production_qa_never_overlaps_actor_owned_sync_with_manual_sync_once` | `core.qa.no_manual_sync_once` | no manual SyncOnce |
+| `headless_core_qa::contracts::owner_driven_e2ee_body_waiter_keeps_the_extended_deadline` | `core.qa.e2ee_waiter_deadline` | fixed E2EE waiter deadline |
+| `headless_core_qa::contracts::unverified_peer_refreshes_device_keys_before_behavioral_checkpoints` | `core.qa.multi_device_order` | refresh precedes send/checkpoints |
+| `headless_core_qa::contracts::e2ee_key_delivery_preestablishes_invite_before_optional_b_login` | `core.qa.invite_before_optional_login` | invite precedes optional login |
+| `headless_core_qa::contracts::headless_qa_binary_initializes_rust_log_tracing` | `core.qa.tracing_and_device_labels` | tracing and private-safe labels |
+| `headless_core_qa::contracts::e2ee_strict_qa_keeps_actor_owned_sync_running_for_multi_device_send` | `core.qa.secondary_runtime_isolation` | actor-owned sync/isolation |
+| `headless_core_qa::contracts::e2ee_strict_qa_uses_typed_causal_checks_after_recipient_device_verification` | `core.qa.strict_waiters` | typed causal waiters |
+| `headless_core_qa::contracts::same_user_secondary_device_runtimes_isolate_saved_credentials` | `core.qa.secondary_runtime_isolation` | isolated saved credentials |
+| `headless_core_qa::contracts::e2ee_device_verification_labels_distinguish_recipient_second_device` | `core.qa.tracing_and_device_labels` | recipient device labels |
+| `headless_core_qa::contracts::focused_send_queue_bootstrap_logs_out_before_ordered_shutdown` | `core.qa.send_queue_secret_and_cleanup` | logout before shutdown |
+| `headless_core_qa::contracts::shared_primary_login_always_completes_the_new_identity_gate` | `core.qa.login_gate_lifecycle` | shared identity gate |
+| `headless_core_qa::contracts::new_identity_gate_settles_its_bootstrap_confirmation_before_returning` | `core.qa.login_gate_lifecycle` | confirmation settles before return |
+| `headless_core_qa::contracts::login_wait_timeout_names_the_session_phase` | `core.qa.login_gate_lifecycle` | phase-bearing login timeout |
+| `headless_core_qa::contracts::scenarios_that_must_not_bootstrap_return_before_the_shared_login` | `core.qa.login_gate_lifecycle` | non-bootstrap shared login |
+| `headless_core_qa::contracts::run_async_centrally_owns_one_normal_secondary_login` | `core.qa.secondary_lifecycle` | one secondary owner |
+| `headless_core_qa::contracts::invites_dm_and_directory_borrow_b_without_owning_its_lifecycle` | `core.qa.secondary_lifecycle` | stages borrow owner |
+| `headless_core_qa::contracts::room_space_reuses_and_consumes_the_central_secondary_owner` | `core.qa.secondary_lifecycle` | room/space reuse |
+| `headless_core_qa::contracts::normal_secondary_cleanup_paths_use_one_ordered_runtime_shutdown` | `core.qa.secondary_lifecycle` | ordered cleanup |
+| `headless_core_qa::contracts::standalone_send_queue_login_requires_primary_recovery_secret` | `core.qa.send_queue_route` | primary recovery secret |
+| `headless_core_qa::contracts::participant_login_gate_policy_distinguishes_bootstrap_from_recovery` | `core.qa.send_queue_route` | bootstrap/recovery distinction |
+| `headless_core_qa::contracts::strict_e2ee_guard_extracts_each_complete_waiter_body` | `core.qa.strict_waiters` | complete waiter bodies |
+| `headless_core_qa::contracts::strict_e2ee_guard_detects_a_rolling_timeout_in_every_inventory_body` | `core.qa.strict_waiters` | no rolling timeout |
+| `headless_core_qa::contracts::strict_e2ee_event_waiters_do_not_restart_timeouts_per_event` | `core.qa.strict_waiters` | one deadline per waiter |
+| `headless_core_qa::contracts::active_room_thread_refresh_uses_the_exact_causal_waiter` | `core.qa.backup_causal_waiters` | exact thread waiter |
+| `headless_core_qa::contracts::e2ee_trust_stage_does_not_overlap_normal_sync_with_manual_sync_once` | `core.qa.no_manual_sync_once` | no SyncOnce overlap |
+| `headless_core_qa::contracts::device_cleanup_scenario_has_a_dedicated_remote_first_proof` | `core.qa.device_cleanup` | remote-first proof |
+| `headless_core_qa::contracts::encrypted_backup_seed_uses_live_room_discovery_and_exact_causal_waiter` | `core.qa.backup_causal_waiters` | live discovery/waiter |
+| `headless_core_qa::contracts::second_device_encrypted_room_resubscribe_uses_exact_causal_waiter` | `core.qa.backup_causal_waiters` | second-device waiter |
+| `headless_core_qa::contracts::generic_secondary_timeline_subscribe_uses_exact_causal_waiter` | `core.qa.backup_causal_waiters` | secondary waiter |
+| `headless_core_qa::contracts::timeline_stress_uses_event_waiters_not_manual_sync_once` | `core.qa.timeline_stress`, `core.qa.no_manual_sync_once` | event waiters/no SyncOnce |
+| `headless_core_qa::contracts::login_wait_uses_dedicated_timeout_for_loaded_local_homeservers` | `core.qa.timeout_and_directory_order` | dedicated timeout |
+| `headless_core_qa::contracts::all_directory_stage_runs_before_room_space_operations` | `core.qa.timeout_and_directory_order` | directory ordering |
+| `headless_core_qa::contracts::send_queue_fifo_wait_uses_dedicated_reconnect_timeout` | `core.qa.timeout_and_directory_order` | FIFO timeout |
+| `headless_core_qa::contracts::send_queue_unsubscribes_timeline_before_runtime_shutdown` | `core.qa.send_queue_secret_and_cleanup` | unsubscribe/shutdown ordering |
+| `headless_core_qa::contracts::same_data_dir_reopen_paths_use_ordered_runtime_shutdown` | `core.qa.runtime_reopen_order` | reopen ordering |
+| `headless_core_qa::contracts::timeline_stress_backfill_only_advances_current_paginate_request` | `core.qa.timeline_stress` | stale pagination fence |
+| `headless_core_qa::contracts::timeline_stress_replay_existing_is_read_only` | `core.qa.timeline_stress` | read-only replay |
+| `headless_core_qa::contracts::e2ee_trust_stage_prints_joined_room_restore_scope_token` | `core.qa.restore_scope_and_privacy` | joined-room restore scope |
+| `headless_core_qa::contracts::e2ee_trust_stage_reports_second_device_decrypt_token` | `core.qa.restore_scope_and_privacy` | second-device decrypt token |
+| `headless_core_qa::contracts::e2ee_trust_stage_reports_multi_user_multi_device_decrypt_token` | `core.qa.restore_scope_and_privacy` | multi-device decrypt token |
+| `headless_core_qa::contracts::e2ee_trust_stage_makes_identity_reset_explicitly_opt_in` | `core.qa.restore_scope_and_privacy` | explicit identity reset |
+| `headless_core_qa::contracts::core_qa_stdout_does_not_format_matrix_identifiers` | `core.qa.restore_scope_and_privacy` | identifier-free stdout |
+| `headless_core_qa::contracts::provisional_self_verification_keeps_primary_normal_sync_running` | `core.qa.provisional_verification` | primary sync retained |
+| `headless_core_qa::contracts::unused_manual_second_device_verification_cascade_is_absent` | `core.qa.no_obsolete_verification_cascade` | obsolete cascade absent |
+| `headless_core_qa::login_store_contracts::e2ee_login_store_is_a_behavioral_dedicated_route` | `core.qa.login_gate_lifecycle` | source-only route/identity assertions depended on removed helpers |
+
+Integration deletions (all **Removed**, no mixed identities):
+
+| Old identity | Existing rule | Facts / includes |
+| --- | --- | --- |
+| `runtime_intent_lifecycle::select_room_routing_is_reliable_and_correlated` | `core.integration.select_room_routing` | correlation, awaited route, no lossy send / 2 |
+| `runtime_room_list_sync::production_runtime_requires_committed_all_rooms_readiness` | `core.integration.room_list_readiness` | committed readiness, one service, no legacy/probe / 1 |
+| `runtime_room_list_sync::production_core_has_no_legacy_or_mode_transition_vocabulary` | `core.integration.no_legacy_mode_vocabulary` | seven forbidden vocabulary predicates / 4 |
+| `runtime_timeline::production_timeline_has_no_classic_sync_or_legacy_checkpoint_path` | `core.integration.timeline_no_legacy_checkpoint` | four forbidden timeline tokens / 1 |
+| `send_queue_fast::fast_send_queue_lane_hard_bounds_generic_lifecycle_phases` | `core.qa.fast_send_queue_lifecycle` | timeout and lifecycle phase bounds / 1 |
+| `send_queue_fast::send_queue_stage_uses_exact_causal_waiter_for_both_subscriptions` | `core.qa.send_queue_causal_waiter` | both subscriptions use waiter / 1 |
+| `send_queue_fast::headless_send_queue_diagnostic_contract_counts_forwarded_and_completed_room_sends` | `core.qa.send_queue_diagnostic_counters` | classifier/counter fences / 1 |
+| `send_queue_fast::headless_send_queue_diagnostic_contract_wraps_fifo_failure_with_proxy_deltas` | `core.qa.send_queue_proxy_deltas` | retry baselines/deltas / 1 |
+| `send_queue_fast::headless_send_queue_diagnostic_contract_arms_before_private_safe_not_sent_failure` | `core.qa.send_queue_private_safe_failure` | private-safe retry diagnostics / 1 |
+| `send_queue_fast::fast_send_queue_restored_completion_cannot_finish_from_send_completed_alone` | `core.integration.fast_send_queue_completion` | projection before completion / 1 |
+
+Final slice totals: 57 deleted source-only tests and 14 Rust-source includes;
+missing=0, extra=0, vacuous=0, mixed=0. The behavioral identities
+`runtime_timeline::production_inventory_covers_code_after_cfg_test_modules`
+and `send_queue_fast::fast_send_queue_authoritative_projection_requires_one_exact_event_and_no_transaction`
+remain unchanged.

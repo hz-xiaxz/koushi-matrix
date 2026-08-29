@@ -39,12 +39,6 @@ fn assert_no_classic_sync_or_legacy_checkpoint_path(source: &str) {
 }
 
 #[test]
-fn production_timeline_has_no_classic_sync_or_legacy_checkpoint_path() {
-    let source = include_str!("../src/timeline.rs");
-    assert_no_classic_sync_or_legacy_checkpoint_path(source);
-}
-
-#[test]
 fn production_inventory_covers_code_after_cfg_test_modules() {
     let synthetic = r#"
 fn before_tests() {}

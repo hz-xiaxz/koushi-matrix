@@ -989,6 +989,16 @@ function sourceContractFailure(rule, message) {
 // koushi_core::room::space_members::tests::background_space_member_lookup_failure_preserves_state_and_only_records_diagnostic | 3 | core.room.space_member_background_failure | 3
 // koushi_core::room::space_members::tests::cancel_space_invite_reconciles_a_fresh_projection_before_settling | 3 | core.room.space_invite_cancellation_order | 3
 // koushi_core::store::credential_backend::tests::file_credential_store_is_available_to_release_qa_binary_only | 2 | core.store.file_credential_cfg | 2 (vacuous self-matches in both old assertions)
+// runtime_intent_lifecycle::select_room_routing_is_reliable_and_correlated | 3 | core.integration.select_room_routing | 4
+// runtime_room_list_sync::production_runtime_requires_committed_all_rooms_readiness | 6 | core.integration.room_list_readiness | 6
+// runtime_room_list_sync::production_core_has_no_legacy_or_mode_transition_vocabulary | 1 (7 predicates) | core.integration.no_legacy_mode_vocabulary | 7
+// runtime_timeline::production_timeline_has_no_classic_sync_or_legacy_checkpoint_path | 1 | core.integration.timeline_no_legacy_checkpoint | 4
+// send_queue_fast::fast_send_queue_lane_hard_bounds_generic_lifecycle_phases | 23 | core.qa.fast_send_queue_lifecycle | 23
+// send_queue_fast::send_queue_stage_uses_exact_causal_waiter_for_both_subscriptions | 1 | core.qa.send_queue_causal_waiter | 1
+// send_queue_fast::headless_send_queue_diagnostic_contract_counts_forwarded_and_completed_room_sends | 10 | core.qa.send_queue_diagnostic_counters | 10
+// send_queue_fast::headless_send_queue_diagnostic_contract_wraps_fifo_failure_with_proxy_deltas | 6 | core.qa.send_queue_proxy_deltas | 6
+// send_queue_fast::headless_send_queue_diagnostic_contract_arms_before_private_safe_not_sent_failure | 15 | core.qa.send_queue_private_safe_failure | 15
+// send_queue_fast::fast_send_queue_restored_completion_cannot_finish_from_send_completed_alone | 2 | core.integration.fast_send_queue_completion | 2
 
 export function checkStateFocusedContextReducerContract() {
   const rule = "state.focused_context_reducer_contract";
@@ -2149,7 +2159,7 @@ export function checkCoreTimelineSignalTraces() {
   for (const kind of ["send_read_receipt", "set_fully_read"]) {
     if (!sources.some((source) => new RegExp(`trace_timeline_route\\(\\s*\\"manager_received\\",\\s*\\"${kind}\\"`).test(source))) failures.push(sourceContractFailure(rule, `${kind} lacks manager-admission tracing`));
   }
-  const read = sources.join("\\n");
+  const read = sources.join("\n");
   for (const marker of ["ReadWorkerCompletion::Network", "ReadWorkerCompletion::ActorApplied"]) if (!read.includes(marker)) failures.push(sourceContractFailure(rule, `read operations lack ${marker}`));
   if (!sources.some((source) => /trace_timeline_actor_scan\(\s*"target_scan"/.test(source))) failures.push(sourceContractFailure(rule, "reaction target scans lack tracing"));
   return failures;
@@ -3102,6 +3112,456 @@ export function checkCoreAccountIdentityResetAuthLifecycle() {
   return failures;
 }
 
+const coreQaSourcePaths = [
+  "bin/headless-core-qa.rs",
+  "bin/headless_core_qa/registry.rs",
+  "bin/headless_core_qa/event_wait.rs",
+  "bin/headless_core_qa/participants.rs",
+  "bin/headless_core_qa/fixtures.rs",
+  "bin/headless_core_qa/cleanup.rs",
+  "bin/headless_core_qa/diagnostics.rs",
+  "bin/headless_core_qa/orchestrator.rs",
+  "bin/headless_core_qa/scenarios/identity.rs",
+  "bin/headless_core_qa/scenarios/rooms.rs",
+  "bin/headless_core_qa/scenarios/timeline.rs",
+  "bin/headless_core_qa/scenarios/search.rs"
+];
+
+function coreQaSource(relativePath) {
+  const file = `crates/koushi-core/src/${relativePath}`;
+  return productionOnly(readRustSource(file), file);
+}
+
+function coreQaProductionSource() {
+  return coreQaSourcePaths.map(coreQaSource).join("\n");
+}
+
+function coreQaItemBody(relativePath, marker) {
+  return rustItemBody(coreQaSource(relativePath), marker);
+}
+
+function coreIntegrationSource(relativePath) {
+  return readRustSource(`crates/koushi-core/tests/${relativePath}`);
+}
+
+export function checkCoreQaReconnectEncryptionGate() {
+  const rule = "core.qa.reconnect_encryption_gate";
+  const source = coreQaProductionSource();
+  const stage = coreQaItemBody("bin/headless_core_qa/scenarios/timeline.rs", "async fn run_timeline_reconnect_scenario_impl");
+  const helper = coreQaItemBody("bin/headless_core_qa/event_wait.rs", "async fn wait_for_encrypted_room_projection_for_qa");
+  const failures = [];
+  for (const marker of ["create_room_for_qa", "wait_for_encrypted_room_projection_for_qa(", "subscribe_and_ack_active_timeline_projection_for_qa(", "TimelineCommand::SendText"]) {
+    if (!stage?.includes(marker)) failures.push(sourceContractFailure(rule, `reconnect stage lacks ${marker}`));
+  }
+  for (const marker of ["ROOM_LIST_EVENT_TIMEOUT", "room.room_id == expected_room_id && room.is_encrypted", "RoomEvent::RoomListUpdated", "CoreEvent::StateChanged(snapshot)", "tokio::time::timeout_at(deadline, conn.recv_event())"]) {
+    if (!helper?.includes(marker)) failures.push(sourceContractFailure(rule, `encrypted-room waiter lacks ${marker}`));
+  }
+  if (helper?.includes("tokio::time::sleep")) failures.push(sourceContractFailure(rule, "encrypted-room waiter uses a fixed sleep"));
+  const subscribe = stage?.indexOf("subscribe_and_ack_active_timeline_projection_for_qa(") ?? -1;
+  const send = stage?.indexOf("TimelineCommand::SendText") ?? -1;
+  const gateA = stage?.indexOf("wait_for_encrypted_room_projection_for_qa(\n            &mut conn_a") ?? -1;
+  const gateB = stage?.indexOf("wait_for_encrypted_room_projection_for_qa(\n            &mut conn_b") ?? -1;
+  if (subscribe < 0 || send < 0 || gateA < 0 || gateB < 0 || gateA >= subscribe || gateB >= subscribe || gateA >= send || gateB >= send) {
+    failures.push(sourceContractFailure(rule, "reconnect encryption gates do not precede timeline work"));
+  }
+  if (!source.includes("create_room_for_qa")) failures.push(sourceContractFailure(rule, "reconnect source is missing"));
+  return failures;
+}
+
+export function checkCoreQaPrivateSafeInviteTimeout() {
+  const rule = "core.qa.private_safe_invite_timeout";
+  const body = coreQaItemBody("bin/headless_core_qa/event_wait.rs", "async fn wait_for_invite_in_snapshot");
+  const failures = [];
+  for (const marker of ["invite_observer_diagnostic_summary(&koushi_diagnostics::snapshot())", "{observer_diagnostics}"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `invite timeout lacks ${marker}`));
+  if (body?.includes("expected_room_id:?")) failures.push(sourceContractFailure(rule, "invite timeout exposes the expected room id"));
+  return failures;
+}
+
+export function checkCoreQaNoManualSyncOnce() {
+  const rule = "core.qa.no_manual_sync_once";
+  const source = coreQaProductionSource();
+  const failures = [];
+  for (const marker of ["SyncCommand::SyncOnce", "sync_once_for_qa("]) if (source.includes(marker)) failures.push(sourceContractFailure(rule, `manual sync marker remains: ${marker}`));
+  return failures;
+}
+
+export function checkCoreQaE2eeWaiterDeadline() {
+  const rule = "core.qa.e2ee_waiter_deadline";
+  const body = coreQaItemBody("bin/headless_core_qa/event_wait.rs", "async fn wait_for_item_with_body_or_decryption_failure");
+  const failures = [];
+  if (!body?.includes("E2EE_EVENT_TIMEOUT")) failures.push(sourceContractFailure(rule, "E2EE body waiter lacks its extended deadline"));
+  if (!body?.includes("tokio::time::timeout_at(deadline, conn.recv_event())")) failures.push(sourceContractFailure(rule, "E2EE body waiter lacks an absolute deadline"));
+  if (body?.includes("SyncCommand::SyncOnce")) failures.push(sourceContractFailure(rule, "E2EE body waiter issues manual sync"));
+  return failures;
+}
+
+export function checkCoreQaMultiDeviceOrder() {
+  const rule = "core.qa.multi_device_order";
+  const stage = coreQaItemBody("bin/headless_core_qa/scenarios/identity.rs", "async fn verify_multi_user_multi_device_room_key_delivery_for_qa");
+  const failures = [];
+  const ordered = ["refresh_device_keys_and_assert_known_for_qa(", "TimelineCommand::SendText", "let blacklist_id", "let blocked_send"];
+  const positions = ordered.map((marker) => stage?.indexOf(marker) ?? -1);
+  if (positions.some((position) => position < 0) || positions.some((position, index) => index > 0 && positions[index - 1] >= position)) failures.push(sourceContractFailure(rule, "multi-device verification checkpoints are out of order"));
+  for (const marker of ["wait_for_send_flow_completion_with_timeout(", "E2EE_EVENT_TIMEOUT", "wait_for_withheld_event_projection_from_source(", "room_id: room_id.clone()", "blocked QA promote B3"]) if (!stage?.includes(marker)) failures.push(sourceContractFailure(rule, `multi-device stage lacks ${marker}`));
+  for (const marker of ["AccountCommand::RequestVerification", "SyncCommand::SyncOnce"]) if (stage?.includes(marker)) failures.push(sourceContractFailure(rule, `multi-device stage contains forbidden ${marker}`));
+  const helper = coreQaItemBody("bin/headless_core_qa/participants.rs", "async fn refresh_device_keys_and_assert_known_for_qa");
+  for (const marker of ["AccountCommand::QaRefreshDeviceKeysAndAssertKnown", "tokio::time::timeout(E2EE_EVENT_TIMEOUT, ack)"]) if (!helper?.includes(marker)) failures.push(sourceContractFailure(rule, `device refresh helper lacks ${marker}`));
+  for (const marker of ["AccountCommand::RequestVerification", "tokio::time::sleep"]) if (helper?.includes(marker)) failures.push(sourceContractFailure(rule, `device refresh helper contains forbidden ${marker}`));
+  return failures;
+}
+
+export function checkCoreQaInviteBeforeOptionalLogin() {
+  const rule = "core.qa.invite_before_optional_login";
+  const stage = coreQaItemBody("bin/headless_core_qa/scenarios/identity.rs", "async fn verify_multi_user_multi_device_room_key_delivery_for_qa");
+  const failures = [];
+  const ordered = ["let room_id = create_room_for_qa(", "invite_user_for_qa(", "login_synced_participant_for_qa(", "wait_for_invite_in_snapshot(", "cleanup_e2ee_multi_device_participants"];
+  const positions = ordered.map((marker) => stage?.indexOf(marker) ?? -1);
+  if (positions.some((position) => position < 0) || positions.some((position, index) => index > 0 && positions[index - 1] >= position)) failures.push(sourceContractFailure(rule, "E2EE invite/login/cleanup order changed"));
+  if ((stage?.match(/login_synced_participant_for_qa\(/gu) ?? []).length !== 1) failures.push(sourceContractFailure(rule, "E2EE invite stage owns more than one optional login"));
+  if ((stage?.match(/cleanup_e2ee_multi_device_participants/gu) ?? []).length !== 1) failures.push(sourceContractFailure(rule, "E2EE invite stage owns more than one cleanup"));
+  for (const marker of ["SyncCommand::SyncOnce", "sync_once_for_qa(", "tokio::time::sleep"]) if (stage?.includes(marker)) failures.push(sourceContractFailure(rule, `E2EE invite stage contains forbidden ${marker}`));
+  return failures;
+}
+
+export function checkCoreQaTracingAndDeviceLabels() {
+  const rule = "core.qa.tracing_and_device_labels";
+  const source = coreQaProductionSource();
+  const failures = [];
+  for (const marker of ["init_headless_qa_tracing_from_env();", "tracing_subscriber::EnvFilter"]) if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `headless QA tracing lacks ${marker}`));
+  for (const marker of ["e2ee gated self verification A/A2", "e2ee recipient verification B/B2", "primary incoming request"]) if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `verification labels lack ${marker}`));
+  if (source.includes("request secondary to primary")) failures.push(sourceContractFailure(rule, "verification labels retain the obsolete secondary request"));
+  return failures;
+}
+
+export function checkCoreQaSecondaryRuntimeIsolation() {
+  const rule = "core.qa.secondary_runtime_isolation";
+  const source = coreQaProductionSource();
+  const failures = [];
+  for (const label of ["gate-negative-a2", "gate-negative-a3", "gate-negative-a4", "gate-negative-a5", "gate-negative-a6", "a2", "encryption-debug-a2", "e2ee-b2", "e2ee-b3-unverified"]) {
+    if (!source.includes(`start_isolated_qa_runtime("${label}")`)) failures.push(sourceContractFailure(rule, `secondary runtime is not isolated for ${label}`));
+  }
+  return failures;
+}
+
+export function checkCoreQaSendQueueRoute() {
+  const rule = "core.qa.send_queue_route";
+  const source = coreQaProductionSource();
+  const beforeFixture = source.split("async fn run_async").at(1)?.split("// One CoreRuntime per synthetic user").at(0) ?? "";
+  const route = source.split("async fn run_focused_send_queue_scenario").at(1)?.split("async fn run_send_queue_stage").at(0) ?? "";
+  const failures = [];
+  for (const marker of ["should_run_focused_send_queue_route(scenario)", "run_focused_send_queue_scenario(&config).await?", "return Ok(scenario_report(&config.server_kind, scenario))"]) if (!beforeFixture.includes(marker)) failures.push(sourceContractFailure(rule, `focused SendQueue dispatch lacks ${marker}`));
+  for (const marker of ["QaParticipantLoginGate::BootstrapNewIdentity", "bootstrap_recovery_secret", "run_send_queue_stage(config, &recovery_secret).await", "runtime.shutdown()", "drop(conn)"]) if (!route.includes(marker)) failures.push(sourceContractFailure(rule, `focused SendQueue route lacks ${marker}`));
+  for (const marker of ["user_b", "password_b"]) if (route.includes(marker)) failures.push(sourceContractFailure(rule, `focused SendQueue route exposes ${marker}`));
+  return failures;
+}
+
+export function checkCoreQaLoginGateLifecycle() {
+  const rule = "core.qa.login_gate_lifecycle";
+  const source = coreQaProductionSource();
+  const failures = [];
+  const shared = source.split("--- Login A (persistent store selected before authentication) ---").at(1)?.split("wait_for_logged_in(&mut conn_a, login_a_id").at(0) ?? "";
+  if (!shared.includes("complete_new_identity_gate_for_qa(&mut conn_a")) failures.push(sourceContractFailure(rule, "shared primary login does not complete the identity gate"));
+  if (shared.includes("should_bootstrap_new_identity_before_logged_in")) failures.push(sourceContractFailure(rule, "shared identity gate is scenario-gated"));
+  const helper = source.split("async fn complete_new_identity_gate_for_qa").at(1)?.split("async fn wait_for_existing_identity_gate").at(0) ?? "";
+  const confirmation = ["ConfirmSessionBootstrapSaved", "failed == confirm_id", "Ok(Some(recovery_secret))"].map((marker) => helper.indexOf(marker));
+  if (confirmation.some((position) => position < 0) || !(confirmation[0] < confirmation[1] && confirmation[1] < confirmation[2])) failures.push(sourceContractFailure(rule, "identity-gate confirmation is not settled before return"));
+  if (!helper.includes("timed out settling bootstrap confirmation; phase=")) failures.push(sourceContractFailure(rule, "identity-gate timeout omits its phase"));
+  const waiter = source.split("async fn wait_for_logged_in").at(1)?.split("async fn ").at(0) ?? "";
+  if (!waiter.includes("timed out waiting for LoggedIn event; phase=") || !waiter.includes("gate_session_phase(&conn.snapshot().session)")) failures.push(sourceContractFailure(rule, "login timeout omits authoritative session phase"));
+  return failures;
+}
+
+export function checkCoreQaSecondaryLifecycle() {
+  const rule = "core.qa.secondary_lifecycle";
+  const source = coreQaProductionSource();
+  const failures = [];
+  const beforeRoom = source.split("async fn run_async").at(1)?.split("// --- Phase 4: Room operations").at(0) ?? "";
+  if (!beforeRoom.includes("let mut normal_secondary = if should_run_normal_secondary_participant(scenario)")) failures.push(sourceContractFailure(rule, "central secondary owner is missing"));
+  if ((beforeRoom.match(/login_synced_participant_for_qa\(/gu) ?? []).length !== 1) failures.push(sourceContractFailure(rule, "normal secondary login is not centralized"));
+  if ((beforeRoom.match(/cleanup_normal_secondary_participant_for_qa\(/gu) ?? []).length !== 2) failures.push(sourceContractFailure(rule, "normal secondary cleanup paths changed"));
+  const invites = source.split("async fn run_invites_dm_stage").at(1)?.split("async fn run_directory_stage").at(0) ?? "";
+  const directory = source.split("async fn run_directory_stage").at(1)?.split("async fn join_directory_room_for_qa").at(0) ?? "";
+  for (const [label, stage] of [["InvitesDm", invites], ["Directory", directory]]) {
+    if (!stage.includes("conn_b: &mut CoreConnection")) failures.push(sourceContractFailure(rule, `${label} does not borrow the central connection`));
+    for (const marker of ["CoreRuntime::", "AccountCommand::LoginPassword", "wait_for_logged_in", "login_synced_participant_for_qa(", "cleanup_logged_in_runtime"]) if (stage.includes(marker)) failures.push(sourceContractFailure(rule, `${label} owns forbidden lifecycle ${marker}`));
+  }
+  const cleanup = coreQaSource("bin/headless_core_qa/cleanup.rs").split("async fn cleanup_logged_in_runtime").at(1)?.split("async fn cleanup_normal_secondary_participant_for_qa").at(0) ?? "";
+  if (!cleanup.includes("runtime.shutdown().await") || cleanup.includes("drop(runtime)") || cleanup.includes("tokio::time::sleep")) failures.push(sourceContractFailure(rule, "secondary cleanup lacks ordered shutdown"));
+  return failures;
+}
+
+export function checkCoreQaSendQueueSecretAndCleanup() {
+  const rule = "core.qa.send_queue_secret_and_cleanup";
+  const source = coreQaProductionSource();
+  const stage = source.split("async fn run_send_queue_stage").at(1)?.split("async fn unsubscribe_timeline_for_qa").at(0) ?? "";
+  const route = source.split("async fn run_focused_send_queue_scenario").at(1)?.split("async fn run_send_queue_stage").at(0) ?? "";
+  const failures = [];
+  for (const marker of ["login_synced_participant_for_qa(", "proxy.homeserver_url()", "recovery_secret: &AuthSecret", "QaParticipantLoginGate::RecoverExistingIdentity(recovery_secret)"]) if (!stage.includes(marker)) failures.push(sourceContractFailure(rule, `SendQueue stage lacks ${marker}`));
+  for (const marker of ["\n        true,", "AccountCommand::LoginPassword", "wait_for_logged_in"]) if (stage.includes(marker)) failures.push(sourceContractFailure(rule, `SendQueue stage contains forbidden ${marker}`));
+  const ordered = ["SyncCommand::Stop", "wait_for_sync_stopped", "AccountCommand::Logout", "wait_for_logged_out", "drop(conn)", "runtime.shutdown()", "send_queue bootstrap recovery secret unavailable", "run_send_queue_stage(config, &recovery_secret).await"].map((marker) => route.indexOf(marker));
+  if (ordered.some((position) => position < 0) || ordered.some((position, index) => index > 0 && ordered[index - 1] >= position)) failures.push(sourceContractFailure(rule, "focused SendQueue bootstrap cleanup order changed"));
+  return failures;
+}
+
+export function checkCoreQaStrictWaiters() {
+  const rule = "core.qa.strict_waiters";
+  const waiters = [
+    ["wait_for_existing_identity_gate", "participants.rs"],
+    ["wait_for_room_in_room_list", "event_wait.rs"],
+    ["subscribe_and_ack_active_timeline_projection_for_qa", "scenarios/timeline.rs"],
+    ["wait_for_verification_requested_event_only", "participants.rs"],
+    ["wait_for_verification_accepted", "participants.rs"],
+    ["wait_for_initial_items_from_source", "event_wait.rs"],
+    ["wait_for_send_flow_completion_with_timeout", "event_wait.rs"],
+    ["wait_for_item_with_body_or_decryption_failure", "event_wait.rs"],
+    ["wait_for_withheld_event_projection_from_source", "event_wait.rs"]
+  ];
+  const failures = [];
+  for (const [waiter, file] of waiters) {
+    const body = coreQaItemBody(`bin/headless_core_qa/${file}`, `async fn ${waiter}`);
+    if (!body?.includes(".recv(") && !body?.includes("recv_event()")) failures.push(sourceContractFailure(rule, `strict waiter is missing its receive loop: ${waiter}`));
+    if (body?.includes("tokio::time::timeout(")) failures.push(sourceContractFailure(rule, `strict waiter resets its timeout: ${waiter}`));
+  }
+  return failures;
+}
+
+export function checkCoreQaDeviceCleanup() {
+  const rule = "core.qa.device_cleanup";
+  const source = coreQaProductionSource();
+  const route = source.split("if scenario == QaScenario::DeviceCleanup").at(1)?.split("if scenario == QaScenario::E2eeTrust").at(0) ?? "";
+  const proof = source.split("async fn run_provisional_device_cleanup_qa").at(1)?.split("async fn login_until_device_cleanup_offered").at(0) ?? "";
+  const failures = [];
+  if (!route.includes("run_provisional_device_cleanup_qa(&config).await?")) failures.push(sourceContractFailure(rule, "device-cleanup scenario is not routed"));
+  if (!proof.includes("audit_removed_device_absent_from_server")) failures.push(sourceContractFailure(rule, "device-cleanup proof lacks remote audit"));
+  for (const token of ["device_cleanup_remote_first=ok", "device_cleanup_relogin_new_device=ok"]) if (!source.includes(token)) failures.push(sourceContractFailure(rule, `device-cleanup token is missing: ${token}`));
+  return failures;
+}
+
+export function checkCoreQaBackupCausalWaiters() {
+  const rule = "core.qa.backup_causal_waiters";
+  const source = coreQaProductionSource();
+  const seed = source.split("async fn seed_encrypted_room_key_for_qa(").at(1)?.split("async fn enable_key_backup_for_qa(").at(0) ?? "";
+  const delivery = source.split("async fn verify_second_device_room_key_delivery_for_qa(").at(1)?.split("async fn verify_multi_user_multi_device_room_key_delivery_for_qa(").at(0) ?? "";
+  const secondary = source.split("// B subscribes and receives both messages").at(1)?.split("// Paginate backward on B").at(0) ?? "";
+  const failures = [];
+  if (seed.includes("sync_once_for_qa(") || !seed.includes("wait_for_room_in_room_list(") || !seed.includes("wait_for_initial_items(") || !seed.includes("subscribe encrypted backup seed")) failures.push(sourceContractFailure(rule, "backup seed does not use live causal waiters"));
+  for (const [name, body] of [["second-device", delivery], ["generic-secondary", secondary]]) if (!body.includes("wait_for_initial_items(")) failures.push(sourceContractFailure(rule, `${name} subscription lacks the causal waiter`));
+  return failures;
+}
+
+export function checkCoreQaTimeoutAndDirectoryOrder() {
+  const rule = "core.qa.timeout_and_directory_order";
+  const source = coreQaProductionSource();
+  const waitBody = source.split("async fn wait_for_send_completions_in_order").at(1)?.split("async fn wait_for_cancelled_or_removed_send").at(0) ?? "";
+  const login = source.split("fn ready_account_key").at(1)?.split("async fn wait_for_logged_in").at(0) ?? "";
+  const loggedIn = source.split("async fn wait_for_logged_in").at(1)?.split("/// Wait for `AccountEvent::SessionRestored`").at(0) ?? "";
+  const run = source.split("async fn run_async").at(1)?.split("async fn cleanup_after_full_flow").at(0) ?? "";
+  const directoryCall = "run_directory_stage(&config, &mut conn_a, conn_b).await?";
+  const failures = [];
+  if (!waitBody.includes("tokio::time::timeout(SEND_QUEUE_EVENT_TIMEOUT, conn.recv_event())") || !waitBody.includes("first_completed={first_completed}")) failures.push(sourceContractFailure(rule, "SendQueue FIFO waiter lacks its dedicated timeout"));
+  if (!source.includes("const SEND_QUEUE_EVENT_TIMEOUT: Duration = Duration::from_secs(300);")) failures.push(sourceContractFailure(rule, "SendQueue timeout is not 300 seconds"));
+  if (!source.includes("const LOGIN_EVENT_TIMEOUT: Duration = Duration::from_secs(180);") || !loggedIn.includes("QaEventDeadline::after(LOGIN_EVENT_TIMEOUT)") || !loggedIn.includes(".recv(conn)")) failures.push(sourceContractFailure(rule, "login waiter lacks its dedicated timeout"));
+  if (!login.includes("SessionState::Ready(info)") || !login.includes("Some(AccountKey(info.user_id))") || (loggedIn.match(/ready_account_key\(conn\)/gu) ?? []).length < 3) failures.push(sourceContractFailure(rule, "login waiter does not accept the authoritative Ready snapshot"));
+  const directory = run.indexOf(directoryCall);
+  const roomSpace = run.indexOf("// --- Phase 4: Room operations");
+  if (directory < 0 || roomSpace < 0 || directory >= roomSpace || run.slice(roomSpace).includes(directoryCall)) failures.push(sourceContractFailure(rule, "directory QA does not precede RoomSpace exactly once"));
+  return failures;
+}
+
+export function checkCoreQaRuntimeReopenOrder() {
+  const rule = "core.qa.runtime_reopen_order";
+  const source = coreQaProductionSource();
+  const cases = [
+    ["cleanup_after_full_flow", "drop(conn_a)", "runtime_a.shutdown().await", "CoreRuntime::start_with_data_dir(data_dir_a)"],
+    ["run_async All restore", "drop(conn_a)", "runtime_a.shutdown().await", "CoreRuntime::start_with_data_dir(data_dir_a)"],
+    ["cache restore", "drop(conn)", "runtime.shutdown().await", "CoreRuntime::start_with_data_dir(data_dir)"]
+  ];
+  const failures = [];
+  for (const [label, dropConnection, shutdown, reopen] of cases) {
+    const start = label === "cleanup_after_full_flow" ? "async fn cleanup_after_full_flow" : label === "cache restore" ? "async fn run_cache_restore_scenario" : "// --- Sync stop A + store-backed restore A + logout A ---";
+    const end = label === "cache restore" ? "let mut conn2 = runtime2.attach();" : "let mut conn_a2 = runtime_a2.attach();";
+    const slice = source.split(start).at(1)?.split(end).at(0) ?? "";
+    const positions = [dropConnection, shutdown, reopen].map((marker) => slice.indexOf(marker));
+    if (positions.some((position) => position < 0) || !(positions[0] < positions[1] && positions[1] < positions[2])) failures.push(sourceContractFailure(rule, `${label} does not drop, shutdown, and reopen in order`));
+    if (slice.includes("drop(runtime)") || slice.includes("Duration::from_millis(500)")) failures.push(sourceContractFailure(rule, `${label} uses an invalid shutdown shortcut`));
+  }
+  return failures;
+}
+
+export function checkCoreQaTimelineStress() {
+  const rule = "core.qa.timeline_stress";
+  const source = coreQaProductionSource();
+  const wait = source.split("async fn wait_for_stress_bodies_and_no_blank_rows").at(1)?.split("async fn submit_stress_backfill_paginate").at(0) ?? "";
+  const replay = source.split("async fn run_timeline_stress_replay_stage").at(1)?.split("struct StressRoomCoordinates").at(0) ?? "";
+  const failures = [];
+  if (!wait.includes("request_id: ev_id") || !wait.includes("ev_id == &Some(current_paginate_request_id)")) failures.push(sourceContractFailure(rule, "stress backfill does not fence stale pagination state"));
+  for (const marker of ["run_timeline_stress_replay_stage", "Subscribe", "submit_stress_backfill_paginate"]) if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `timeline stress lacks ${marker}`));
+  for (const marker of ["CreateRoom", "CreateSpace", "SendText"]) if (replay.includes(marker)) failures.push(sourceContractFailure(rule, `timeline replay mutates state with ${marker}`));
+  const stress = source.split("async fn run_timeline_stress_stage").at(1)?.split("async fn run_timeline_stress_room_messages").at(0) ?? "";
+  if (stress.includes("sync_once_for_qa") || !stress.includes("wait_for_invite_in_snapshot")) failures.push(sourceContractFailure(rule, "timeline stress does not use live event waiters"));
+  return failures;
+}
+
+export function checkCoreQaRestoreScopeAndPrivacy() {
+  const rule = "core.qa.restore_scope_and_privacy";
+  const source = coreQaProductionSource();
+  const failures = [];
+  if (!source.includes('println!("joined_room_restore=ok")') || source.includes("e2ee_key_backup_restore_success=ok")) failures.push(sourceContractFailure(rule, "backup restore scope token is incorrect"));
+  for (const token of ["e2ee_second_device_decrypt=ok", "e2ee_multi_user_multi_device_decrypt=ok"]) if (!source.includes(`println!("${token}")`)) failures.push(sourceContractFailure(rule, `restore token is missing: ${token}`));
+  if (!source.includes("KOUSHI_QA_ALLOW_IDENTITY_RESET") || !source.includes("if config.allow_identity_reset") || !source.includes('println!("e2ee_identity_reset=skipped")')) failures.push(sourceContractFailure(rule, "identity reset is not explicitly opt-in"));
+  for (const marker of ["println!(\"room_id={", "println!(\"space_id={", "println!(\"event_id={", "println!(\"sdk_txn={", "println!(\"transaction_id={"]) if (source.includes(marker)) failures.push(sourceContractFailure(rule, "core QA stdout formats a Matrix identifier"));
+  return failures;
+}
+
+export function checkCoreQaProvisionalVerification() {
+  const rule = "core.qa.provisional_verification";
+  const source = coreQaProductionSource();
+  const helper = source.split("async fn verify_provisional_second_device_for_qa").at(1)?.split("fn verification_closed_summary").at(0) ?? "";
+  const failures = [];
+  const refresh = helper.indexOf("refresh_device_keys_and_assert_known_for_qa(");
+  const start = helper.indexOf("AccountCommand::StartOwnUserSas");
+  if (refresh < 0 || start < 0 || refresh >= start) failures.push(sourceContractFailure(rule, "provisional verification does not refresh before SAS"));
+  for (const marker of ["target_a2.clone()", "primary incoming request", "SasQaOutcome::Timeout", "SasQaOutcome::Mismatch", "AccountCommand::CancelVerification", "AccountCommand::ConfirmSasVerification", "timed out waiting for authoritative Ready"]) if (!helper.includes(marker)) failures.push(sourceContractFailure(rule, `provisional verification lacks ${marker}`));
+  for (const marker of ["stop_sync_for_qa(conn_a", "start_sync_for_qa(conn_a", "sync_once_for_qa(conn_a", "stop_sync_for_qa(conn_a2", "start_sync_for_qa(conn_a2"]) if (helper.includes(marker)) failures.push(sourceContractFailure(rule, `provisional verification stops normal sync: ${marker}`));
+  return failures;
+}
+
+export function checkCoreQaIncomingVerificationWaiter() {
+  const rule = "core.qa.incoming_verification_waiter";
+  const source = coreQaSource("bin/headless_core_qa/participants.rs");
+  const guard = source.split("fn ensure_incoming_verification_receiver_sync_not_stopped").at(1)?.split("async fn wait_for_verification_requested_event_only").at(0) ?? "";
+  const waiter = source.split("async fn wait_for_verification_requested_event_only").at(1)?.split("fn requested_verification_flow_id").at(0) ?? "";
+  const failures = [];
+  for (const marker of ["koushi_state::SyncState::Stopped", "receiver sync is stopped; cannot await an incoming verification request"]) if (!guard.includes(marker)) failures.push(sourceContractFailure(rule, `incoming verification guard lacks ${marker}`));
+  if (guard.includes("{sync:?}")) failures.push(sourceContractFailure(rule, "incoming verification guard formats sync state"));
+  const syncGuard = waiter.indexOf("ensure_incoming_verification_receiver_sync_not_stopped(&conn.snapshot().sync, label)?");
+  const deadline = waiter.indexOf("let deadline");
+  if (syncGuard < 0 || deadline < 0 || syncGuard >= deadline) failures.push(sourceContractFailure(rule, "incoming verification waiter checks sync after its deadline"));
+  return failures;
+}
+
+export function checkCoreQaNoObsoleteVerificationCascade() {
+  const rule = "core.qa.no_obsolete_verification_cascade";
+  const source = coreQaProductionSource();
+  const failures = [];
+  for (const marker of ["async fn verify_second_device_for_qa", "enum VerificationRequestAttempt", "async fn request_device_verification_for_qa", "async fn wait_for_verification_requested_or_failed", "async fn wait_for_verification_accepted_with_sync_once", "async fn drive_until_both_verification_sas", "async fn wait_for_verification_done", "fn verification_state_done"]) if (source.includes(marker)) failures.push(sourceContractFailure(rule, `obsolete verification orchestration remains: ${marker}`));
+  return failures;
+}
+
+export function checkCoreIntegrationSelectRoomRouting() {
+  const rule = "core.integration.select_room_routing";
+  const runtime = coreSource("runtime.rs");
+  const room = coreSource("command/room.rs");
+  const failures = [];
+  for (const marker of ["User-intent lane: for SelectRoom, record the request_id→room_id", "terminal IntentLifecycle outcome", "AccountMessage::RoomCommand(room_command)", ".await;"]) if (!runtime.includes(marker)) failures.push(sourceContractFailure(rule, `SelectRoom route lacks ${marker}`));
+  if (runtime.includes("try_send(crate::account::AccountMessage::RoomCommand")) failures.push(sourceContractFailure(rule, "SelectRoom uses lossy routing"));
+  if (!room.includes("User-intent lane: room selection is request-id correlated")) failures.push(sourceContractFailure(rule, "RoomCommand SelectRoom lacks its correlation comment"));
+  return failures;
+}
+
+export function checkCoreIntegrationRoomListReadiness() {
+  const rule = "core.integration.room_list_readiness";
+  const source = coreSource("sync.rs");
+  const failures = [];
+  for (const marker of ["committed_all_rooms_response", "room_list_service: Arc<", "room_list_service,"]) if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `room-list readiness lacks ${marker}`));
+  for (const marker of ["note_room_list_service_state", "probe_backend", "run_legacy_sync_loop"]) if (source.includes(marker)) failures.push(sourceContractFailure(rule, `room-list readiness contains forbidden ${marker}`));
+  return failures;
+}
+
+export function checkCoreIntegrationNoLegacyModeVocabulary() {
+  const rule = "core.integration.no_legacy_mode_vocabulary";
+  const source = ["event.rs", "state_delta.rs", "sync.rs", "room.rs"].map(coreSource).join("\n");
+  const failures = [];
+  for (const marker of ["SyncBackendKind", "LegacySync", "ModeChanged", "SyncMode", "sync_mode", "RoomListSource::Legacy", "RoomListSource::SyncService"]) if (source.includes(marker)) failures.push(sourceContractFailure(rule, `legacy sync vocabulary remains: ${marker}`));
+  return failures;
+}
+
+export function checkCoreIntegrationTimelineNoLegacyCheckpoint() {
+  const rule = "core.integration.timeline_no_legacy_checkpoint";
+  const source = coreSource("timeline.rs");
+  const failures = [];
+  for (const marker of ["/_matrix/client/v3/sync", "LegacyResponseCommitted", "MatrixCommittedRoomTimelineBackend", "RoomAbsent"]) if (source.includes(marker)) failures.push(sourceContractFailure(rule, `legacy timeline checkpoint remains: ${marker}`));
+  return failures;
+}
+
+export function checkCoreQaFastSendQueueLifecycle() {
+  const rule = "core.qa.fast_send_queue_lifecycle";
+  const source = coreIntegrationSource("send_queue_fast.rs");
+  const lane = source.split("async fn run_fast_send_queue_feedback").at(-1)?.split("async fn fast_send_queue_feedback_runs_production_runtime_without_homeserver").at(0) ?? "";
+  const compact = lane.split(/\s+/u).join(" ").replaceAll("( ", "(");
+  const failures = [];
+  if (!/timeout\s*\(\s*FAST_SEND_QUEUE_TOTAL_TIMEOUT/u.test(source)) failures.push(sourceContractFailure(rule, "fast SendQueue lane lacks its whole-test timeout"));
+  for (const phase of ["initial trust configure", "login command", "LoggedIn event", "ready snapshot", "room-list snapshot", "initial stop sync", "initial subscribe command", "initial subscribe replay", "replacement sync start", "stop replacement sync", "first retry command", "cancel command", "first shutdown barrier", "restored trust configure", "restore command", "SessionRestored event", "restored ready snapshot", "restored stop sync", "restored subscribe command", "restored subscribe replay", "restored retry command", "final shutdown barrier"]) if (!compact.includes(`fast_send_queue_phase("fast_send_queue ${phase}",`)) failures.push(sourceContractFailure(rule, `fast SendQueue phase is not bounded: ${phase}`));
+  return failures;
+}
+
+export function checkCoreQaSendQueueCausalWaiter() {
+  const rule = "core.qa.send_queue_causal_waiter";
+  const source = coreQaSource("bin/headless_core_qa/scenarios/timeline.rs");
+  const stage = source.split("\npub(super) async fn run_send_queue_stage(").at(1)?.split("\npub(super) async fn unsubscribe_timeline_for_qa(").at(0) ?? "";
+  return (stage.match(/wait_for_initial_items\(/gu) ?? []).length === 2 ? [] : [sourceContractFailure(rule, "SendQueue subscriptions do not both use the causal waiter")];
+}
+
+export function checkCoreQaSendQueueDiagnosticCounters() {
+  const rule = "core.qa.send_queue_diagnostic_counters";
+  const source = coreQaSource("bin/headless_core_qa/diagnostics.rs");
+  const classifier = source.split("\nfn qa_proxy_request_kind(").at(1)?.split("\nfn qa_messages_proxy_action(").at(0) ?? "";
+  const proxy = source.split("\nfn proxy_single_http_request(").at(1)?.split("\nfn qa_proxy_request_kind(").at(0) ?? "";
+  const compact = proxy.split(/\s+/u).join(" ");
+  const failures = [];
+  for (const marker of ['("PUT", path)', 'path.contains("/rooms/")', 'path.contains("/send/")', "QaProxyRequestKind::RoomSend"]) if (!classifier.includes(marker)) failures.push(sourceContractFailure(rule, `proxy classifier lacks ${marker}`));
+  if (!compact.includes("request_kind == QaProxyRequestKind::RoomSend && action == QaProxyRequestAction::Forward")) failures.push(sourceContractFailure(rule, "RoomSend forwarding predicate is missing"));
+  const counter = proxy.indexOf("room_send_forwarded.fetch_add(1, Ordering::SeqCst);");
+  const write = proxy.indexOf("io::Write::write_all(&mut server, &request)?;");
+  const copy = proxy.indexOf("io::copy(&mut server, client)?;");
+  const completed = proxy.indexOf("room_send_responses_completed.fetch_add(1, Ordering::SeqCst);");
+  if (counter < 0 || write < 0 || counter >= write || copy < 0 || completed < 0 || copy >= completed) failures.push(sourceContractFailure(rule, "proxy counters are not fenced around forwarding"));
+  for (const marker of ["room_send_forwarded: Arc<AtomicUsize>", "fn room_send_forwarded_count(&self) -> usize", "room_send_responses_completed: Arc<AtomicUsize>", "fn room_send_responses_completed_count(&self) -> usize"]) if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `proxy counter API lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreQaSendQueueProxyDeltas() {
+  const rule = "core.qa.send_queue_proxy_deltas";
+  const source = coreQaSource("bin/headless_core_qa/scenarios/timeline.rs");
+  const stage = source.split("\npub(super) async fn run_send_queue_stage(").at(1)?.split("\npub(super) async fn unsubscribe_timeline_for_qa(").at(0) ?? "";
+  const retry = stage.split("    proxy.enable();").at(1)?.split('    println!("resend=ok");').at(0) ?? "";
+  const compact = retry.split(/\s+/u).join(" ");
+  const failures = [];
+  const baseline = compact.indexOf("let room_send_forwarded_before_retry = proxy.room_send_forwarded_count();");
+  const completed = compact.indexOf("let room_send_responses_completed_before_retry = proxy.room_send_responses_completed_count();");
+  const retryCommand = compact.indexOf("let retry_id = retry_send_queue_item(");
+  if (baseline < 0 || completed < 0 || retryCommand < 0 || baseline >= retryCommand || completed >= retryCommand) failures.push(sourceContractFailure(rule, "FIFO retry lacks pre-command proxy baselines"));
+  for (const marker of ["room_send_forwarded_after_retry={}", "room_send_responses_completed_after_retry={}", "saturating_sub(room_send_forwarded_before_retry)", "saturating_sub(room_send_responses_completed_before_retry)"]) if (!retry.includes(marker)) failures.push(sourceContractFailure(rule, `FIFO retry lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreQaSendQueuePrivateSafeFailure() {
+  const rule = "core.qa.send_queue_private_safe_failure";
+  const source = coreQaSource("bin/headless_core_qa/scenarios/timeline.rs");
+  const observer = source.split("\nfn observe_send_queue_retry_item_state(").at(1)?.split("\npub(super) async fn wait_for_send_completions_in_order(").at(0) ?? "";
+  const waiter = source.split("\npub(super) async fn wait_for_send_completions_in_order(").at(1)?.split("\npub(super) async fn wait_for_cancelled_or_removed_send(").at(0) ?? "";
+  const failures = [];
+  for (const marker of ["first_left_not_sent_after_retry: &mut bool", "if *first_left_not_sent_after_retry", "*first_left_not_sent_after_retry = true;", "TimelineSendFailureReason::Recoverable", 'Some("recoverable")', "TimelineSendFailureReason::Unrecoverable", 'Some("unrecoverable")']) if (!observer.includes(marker)) failures.push(sourceContractFailure(rule, `SendQueue observer lacks ${marker}`));
+  if (observer.includes("format!(")) failures.push(sourceContractFailure(rule, "SendQueue observer formats a dynamic failure"));
+  for (const marker of ["TimelineEvent::InitialItems", "TimelineEvent::ItemsUpdated", "visit_timeline_diff_items(&diffs", "let mut first_left_not_sent_after_retry = false;"]) if (!waiter.includes(marker)) failures.push(sourceContractFailure(rule, `SendQueue waiter lacks ${marker}`));
+  if ((waiter.match(/observe_send_queue_retry_item_state\(/gu) ?? []).length !== 2) failures.push(sourceContractFailure(rule, "SendQueue waiter does not share its observer"));
+  if (waiter.split('"{label}: first queued send returned to NotSent reason={reason}"').length - 1 !== 2) failures.push(sourceContractFailure(rule, "SendQueue waiter does not share its fixed diagnostic"));
+  for (const marker of ["request_id == retry_request_id", '"{label}: retry operation failed"', '"{label}: queued send operation failed"']) if (!waiter.includes(marker)) failures.push(sourceContractFailure(rule, `SendQueue waiter lacks ${marker}`));
+  for (const marker of ["{failure:?}", "{transaction_id}", "sdk_transaction_id}"]) if (waiter.includes(marker)) failures.push(sourceContractFailure(rule, `SendQueue waiter exposes ${marker}`));
+  return failures;
+}
+
+export function checkCoreIntegrationFastSendQueueCompletion() {
+  const rule = "core.integration.fast_send_queue_completion";
+  const source = coreIntegrationSource("send_queue_fast.rs");
+  const helper = source.split("async fn wait_for_fast_send_queue_authoritative_completion").at(1)?.split("async fn wait_for_fast_send_queue_flow_completion").at(0) ?? "";
+  const failures = [];
+  if (!helper.includes("fast_send_queue_authoritative_projection")) failures.push(sourceContractFailure(rule, "restored completion does not validate the projection"));
+  const sendCompleted = helper.split("TimelineEvent::SendCompleted").at(1)?.split("CoreEvent::OperationFailed").at(0) ?? "";
+  if (sendCompleted.includes("return Ok(event_id)")) failures.push(sourceContractFailure(rule, "SendCompleted alone settles restored completion"));
+  return failures;
+}
+
 export function runSourceContractRules() {
   return [
     checkCoreAccountSessionReplacementTeardown(),
@@ -3311,7 +3771,39 @@ export function runSourceContractRules() {
     checkDesktopQaControlPipeContract(),
     checkDesktopNativeWindowLifecycleContract(),
     checkDesktopNativeReopenContract(),
-    checkDesktopViewportAdapterIsolationContract()
+    checkDesktopViewportAdapterIsolationContract(),
+    checkCoreQaReconnectEncryptionGate(),
+    checkCoreQaPrivateSafeInviteTimeout(),
+    checkCoreQaNoManualSyncOnce(),
+    checkCoreQaE2eeWaiterDeadline(),
+    checkCoreQaMultiDeviceOrder(),
+    checkCoreQaInviteBeforeOptionalLogin(),
+    checkCoreQaTracingAndDeviceLabels(),
+    checkCoreQaSecondaryRuntimeIsolation(),
+    checkCoreQaSendQueueRoute(),
+    checkCoreQaLoginGateLifecycle(),
+    checkCoreQaSecondaryLifecycle(),
+    checkCoreQaSendQueueSecretAndCleanup(),
+    checkCoreQaStrictWaiters(),
+    checkCoreQaDeviceCleanup(),
+    checkCoreQaBackupCausalWaiters(),
+    checkCoreQaTimeoutAndDirectoryOrder(),
+    checkCoreQaRuntimeReopenOrder(),
+    checkCoreQaTimelineStress(),
+    checkCoreQaRestoreScopeAndPrivacy(),
+    checkCoreQaProvisionalVerification(),
+    checkCoreQaIncomingVerificationWaiter(),
+    checkCoreQaNoObsoleteVerificationCascade(),
+    checkCoreIntegrationSelectRoomRouting(),
+    checkCoreIntegrationRoomListReadiness(),
+    checkCoreIntegrationNoLegacyModeVocabulary(),
+    checkCoreIntegrationTimelineNoLegacyCheckpoint(),
+    checkCoreQaFastSendQueueLifecycle(),
+    checkCoreQaSendQueueCausalWaiter(),
+    checkCoreQaSendQueueDiagnosticCounters(),
+    checkCoreQaSendQueueProxyDeltas(),
+    checkCoreQaSendQueuePrivateSafeFailure(),
+    checkCoreIntegrationFastSendQueueCompletion()
   ].flat();
 }
 
@@ -3425,9 +3917,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   result.violations.push(...runSourceContractRules());
   if (inventory) {
     process.stdout.write(inventoryReport(result));
-  } else if (result.violations.length > 0) {
-    console.error("Rust test structure violations:");
-    for (const violation of result.violations) console.error(`- ${formatViolation(violation)}`);
-    process.exitCode = 1;
+  } else {
+    const strictViolations = result.violations.filter(({ kind }) => kind !== "inline-module");
+    if (strictViolations.length > 0) {
+      console.error("Rust test structure violations:");
+      for (const violation of strictViolations) console.error(`- ${formatViolation(violation)}`);
+      process.exitCode = 1;
+    }
   }
 }

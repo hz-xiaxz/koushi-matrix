@@ -114,8 +114,8 @@ jobs:
         run: node scripts/check-diagnostic-test-isolation.mjs
       - name: Rust test structure checker tests
         run: node --test scripts/check-rust-test-structure.test.mjs
-      - name: Rust test structure inventory (transition)
-        run: node scripts/check-rust-test-structure.mjs --inventory
+      - name: Rust test structure checker
+        run: node scripts/check-rust-test-structure.mjs
       - name: Workspace tests
         run: cargo test --workspace --exclude sidebar-composition --exclude key-management
       - name: Tauri DTO + IPC contract tests
