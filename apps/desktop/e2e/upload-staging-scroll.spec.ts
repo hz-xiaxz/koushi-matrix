@@ -159,11 +159,11 @@ test("main composer keeps upload controls visible while only the preview pans", 
   expect(geometry).not.toBeNull();
   expectStagingBounded(geometry!, "main staging");
 
-  // The list remains a fallback scroll owner for multi-file or exceptionally
-  // short layouts, but an ordinary single-image panel fits without moving it.
+  // At an ordinary height, the single attachment list is not a scroll owner:
+  // the caption and output controls stay fixed while only the preview pans.
   expect(geometry!.list).not.toBeNull();
   const list = geometry!.list!;
-  expect(list.overflow).toBe("auto");
+  expect(list.overflow).toBe("hidden");
   expect(list.scrollHeight).toBe(list.height);
 
   // Header and Send attachments stay visible while inspecting the preview.

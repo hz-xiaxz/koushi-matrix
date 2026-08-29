@@ -5226,6 +5226,10 @@ mark {
   overscroll-behavior: contain;
 }
 
+/* For the common one-file flow, keep output choices and the caption editor
+   stationary. The prepared preview becomes the flexible row and owns any
+   inspection scrolling, so editing controls never disappear below a list
+   scrollbar. Multi-file staging retains the scrollable card list above. */
 .upload-staging-item {
   display: grid;
   gap: 6px;
@@ -5456,6 +5460,26 @@ mark {
 .upload-preview-viewport[data-preview-mode="actual"] .upload-staging-preview {
   max-inline-size: none;
   max-block-size: none;
+}
+
+@media (min-height: 760px) {
+  .upload-staging-list.is-single {
+    overflow-y: hidden;
+  }
+
+  .upload-staging-list.is-single .upload-staging-item.has-preview {
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    min-block-size: 0;
+  }
+
+  .upload-staging-list.is-single .upload-staging-item.has-preview .upload-preview-shell {
+    min-block-size: 0;
+  }
+
+  .upload-staging-list.is-single .upload-staging-item.has-preview .upload-preview-viewport {
+    block-size: 100%;
+    min-block-size: var(--upload-preview-viewport-min-size);
+  }
 }
 
 .upload-staging-preview-placeholder {
