@@ -2226,26 +2226,6 @@ mod tests {
     }
 
     #[test]
-    fn room_key_reshare_handler_does_not_hold_the_manager_on_sdk_work() {
-        let source = include_str!("room_key_recovery.rs");
-        let handler = source
-            .split("fn handle_room_key_reshare(\n")
-            .nth(1)
-            .expect("room-key reshare handler")
-            .split("fn take_room_key_reshare_worker")
-            .next()
-            .expect("room-key reshare handler boundary");
-        assert!(
-            !handler.contains(".await") && !handler.contains("force_reshare_room_key"),
-            "the stable manager handler must only validate and launch owned work"
-        );
-        assert!(
-            source.contains("RoomKeyReshareCompleted"),
-            "reshare SDK results must return through a private completion message"
-        );
-    }
-
-    #[test]
     fn decrypt_retry_diagnostics_are_fixed_token_and_private_data_free() {
         let _diagnostic_lock = koushi_diagnostics::test_support::lock();
         let operation = 48_217;

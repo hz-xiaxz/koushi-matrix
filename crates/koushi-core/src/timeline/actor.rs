@@ -2943,26 +2943,4 @@ mod tests {
             Some(TimelineActorMessage::OwnReadReceiptChanged)
         ));
     }
-
-    #[test]
-    fn room_unsubscribe_clears_projection_service_before_dropping_the_actor() {
-        let source = include_str!("manager.rs");
-        let unsubscribe = source
-            .split("TimelineCommand::Unsubscribe { request_id, key } => {")
-            .nth(1)
-            .expect("unsubscribe manager arm")
-            .split("TimelineCommand::Paginate")
-            .next()
-            .expect("paginate should follow unsubscribe");
-        let clear_index = unsubscribe
-            .find("self.clear_thread_root_projections_for_room(&key).await")
-            .expect("Room unsubscribe must clear projection lifecycle state");
-        let remove_index = unsubscribe
-            .find("self.timelines.remove(&key)")
-            .expect("unsubscribe must still drop its Room actor");
-        assert!(
-            clear_index < remove_index,
-            "abort/cleanup must precede actor drop so late worker completion cannot publish stale state"
-        );
-    }
 }

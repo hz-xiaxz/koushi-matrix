@@ -33,6 +33,10 @@ import {
   checkCoreSearchPageCancellation,
   checkCoreSyncSingleAllRoomsOwner,
   checkCoreThreadsReliableRelays,
+  checkCoreTimelineUnsubscribeCleanupOrder,
+  checkCoreTimelinePaginationScheduler,
+  checkCoreTimelineSendSupervision,
+  checkCoreTimelineThreadReadReceipts,
   checkSdkRoomReadMarkerContract,
   checkStateFocusedContextReducerContract,
   findIncludeStrInvocations,
@@ -136,6 +140,29 @@ test("runs representative migrated core source-contract rules", () => {
   ]) assert.deepEqual(check(), []);
 });
 
+test("runs representative migrated timeline source-contract rules", () => {
+  for (const check of [
+    checkCoreTimelineUnsubscribeCleanupOrder,
+    checkCoreTimelinePaginationScheduler,
+    checkCoreTimelineSendSupervision,
+    checkCoreTimelineThreadReadReceipts
+  ]) assert.deepEqual(check(), []);
+});
+
+test("timeline source-contract failures stay closed-token and private-data-free", () => {
+  const message = formatViolation({
+    kind: "source-contract",
+    rule: "core.timeline.send_queue_supervision",
+    message: "missing manager terminal marker"
+  });
+
+  assert.equal(
+    message,
+    "core.timeline.send_queue_supervision: missing manager terminal marker"
+  );
+  assert.doesNotMatch(message, /SECRET|@|!|synthetic-room|private-path/);
+});
+
 test("scoped core sources contain no Rust-source include embeddings", () => {
   const scoped = scanRepository().rustSourceIncludes.filter(({ file }) =>
     file === "crates/koushi-core/src/runtime.rs" ||
@@ -151,6 +178,13 @@ test("scoped core sources contain no Rust-source include embeddings", () => {
     ].includes(file)
   );
   assert.deepEqual(scoped, []);
+});
+
+test("timeline sources contain no Rust-source include embeddings", () => {
+  const includes = scanRepository().rustSourceIncludes.filter(({ file }) =>
+    file.startsWith("crates/koushi-core/src/timeline/")
+  );
+  assert.deepEqual(includes, []);
 });
 
 test("room and credential source contracts have direct checker rules and no embeddings", () => {

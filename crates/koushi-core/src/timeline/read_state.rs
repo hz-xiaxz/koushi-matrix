@@ -2247,62 +2247,6 @@ mod tests {
     };
 
     #[test]
-    fn set_fully_read_success_uses_private_read_receipt_before_clearing_room_unread_summary() {
-        let source = include_str!("read_state.rs");
-        let network = source
-            .split("async fn perform_read_network_operation")
-            .nth(1)
-            .expect("manager read network worker should exist")
-            .split("async fn run_send_enqueue_future")
-            .next()
-            .expect("send worker should follow read worker");
-        let actor_success = source
-            .split("async fn handle_read_success")
-            .nth(1)
-            .expect("actor read success handler should exist")
-            .split("async fn handle_own_read_receipt_changed")
-            .next()
-            .expect("own receipt handler should follow actor success");
-        let manager_settlement = source
-            .split("async fn settle_read_operation")
-            .nth(1)
-            .expect("manager settlement should exist")
-            .split("async fn route_to_actor_or_fail")
-            .next()
-            .expect("actor route should follow read settlement");
-
-        assert!(
-            network.contains("send_multiple_receipts"),
-            "set_fully_read must use SDK read-marker batching so the marker and read receipt share one source of truth"
-        );
-        assert!(
-            network.contains("room.send_multiple_receipts"),
-            "manager worker must force the room read-marker API; stale server unread counts still need a fresh private receipt"
-        );
-        assert!(
-            network.contains("fully_read_marker"),
-            "set_fully_read must continue to update the fully-read marker"
-        );
-        assert!(
-            network.contains("private_read_receipt"),
-            "set_fully_read must include a private read receipt so SDK/server unread counts advance without publishing public receipts"
-        );
-        assert!(
-            !network.contains("send_single_receipt(ReceiptType::FullyRead"),
-            "fully-read alone must not be used as the persistent unread-count source of truth"
-        );
-        assert!(
-            actor_success.contains("AppAction::FullyReadMarkerUpdated")
-                && actor_success.contains("emit_action_reliable"),
-            "actor control success must reliably update the fully-read marker before ACK"
-        );
-        assert!(
-            manager_settlement.contains("AppAction::RoomMarkedAsReadSucceeded"),
-            "ACKed fully-read success must clear RoomSummary unread counts so sidebar and Activity/Unread agree"
-        );
-    }
-
-    #[test]
     fn private_read_receipt_target_advances_to_hidden_edit_notification() {
         let target = private_read_receipt_event_id_for_fully_read(FullyReadReceiptContext {
             visible_event_id: "$visible:test",
@@ -2362,31 +2306,6 @@ mod tests {
         });
 
         assert_eq!(target, "$latest-thread:test");
-    }
-
-    #[test]
-    fn send_read_receipt_uses_threaded_receipt_for_thread_timelines() {
-        let source = include_str!("read_state.rs");
-        let worker = source
-            .split("async fn perform_read_network_operation")
-            .nth(1)
-            .expect("manager read worker should exist")
-            .split("async fn run_send_enqueue_future")
-            .next()
-            .expect("send worker should follow read worker");
-
-        assert!(
-            worker.contains("ReadStateKey::ThreadRead"),
-            "thread timeline receipts must remain a distinct manager-owned operation"
-        );
-        assert!(
-            worker.contains("ReceiptThread::Thread"),
-            "thread timeline read receipts must use ReceiptThread::Thread(root)"
-        );
-        assert!(
-            worker.contains("send_single_receipt"),
-            "threaded read receipts must use the SDK single-receipt endpoint that accepts a thread"
-        );
     }
 
     fn restored_read_snapshot(key: ReadStateKey, event_id: &str) -> ReadPersistenceSnapshot {
@@ -4541,56 +4460,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn manager_read_completion_lane_precedes_ordinary_mailbox() {
-        let manager_run = item_body(include_str!("manager.rs"), "async fn run(mut self)");
-        let read_completion = manager_run
-            .find("completion = self.read_workers.tasks.next()")
-            .expect("manager read completion lane");
-        let ordinary_mailbox = manager_run
-            .find("msg = self.msg_rx.recv()")
-            .expect("manager ordinary mailbox");
-        assert!(
-            read_completion < ordinary_mailbox,
-            "biased manager select must poll read completions before ordinary commands"
-        );
-    }
-
-    #[test]
-    fn replaying_thread_initial_items_preserves_semantic_attention_tracker() {
-        let replay_helper = item_body(
-            include_str!("navigation.rs"),
-            "fn handle_replay_initial_items",
-        );
-        assert!(
-            replay_helper.contains("ThreadAttentionObservation::Replay")
-                && !replay_helper.contains("ThreadAttentionTracker::default()"),
-            "thread replay must absorb history without resetting stable-ID deduplication or unread attention"
-        );
-    }
-
-    #[test]
-    fn timeline_builder_does_not_track_state_event_read_receipts() {
-        let source = include_str!("relay.rs");
-        let production = source.split("\nmod tests").next().unwrap_or(source);
-        let builder_source = production
-            .split("fn koushi_timeline_builder")
-            .nth(1)
-            .expect("timeline builder should exist")
-            .split("struct PreparedRelayRecovery")
-            .next()
-            .expect("relay recovery structs should follow timeline builder");
-
-        assert!(
-            builder_source.contains("TimelineReadReceiptTracking::MessageLikeEvents"),
-            "timeline read receipts should only track message-like events; state-event tracking exercises SDK event-cache ordering paths that are not needed by Koushi rows"
-        );
-        assert!(
-            !builder_source.contains("TimelineReadReceiptTracking::AllEvents"),
-            "do not restore AllEvents for the product timeline builder"
-        );
-    }
-
     #[tokio::test]
     async fn koushi_timeline_builder_projects_sdk_read_receipts() {
         use matrix_sdk::assert_next_with_timeout;
@@ -5180,73 +5049,6 @@ mod tests {
         assert!(
             action_rx.try_recv().is_err(),
             "a stale actor generation must not publish the receipt batch"
-        );
-    }
-
-    #[test]
-    fn production_receipt_diff_path_uses_fenced_ordered_observation_delivery() {
-        let diff_handler = item_body(include_str!("relay.rs"), "async fn handle_diff_batch");
-        let delivery = item_body(
-            include_str!("item_projection.rs"),
-            "async fn emit_receipt_observation_actions",
-        );
-        assert!(
-            diff_handler.contains("emit_live_receipt_observation_actions"),
-            "receipt diffs must use the production profile-observation delivery path"
-        );
-        assert!(
-            delivery.contains("send_generation_fenced"),
-            "receipt profile actions must use the actor-generation fence"
-        );
-        assert!(
-            !diff_handler.contains("try_send(vec![action])"),
-            "receipt action batches must not be dropped through try_send"
-        );
-    }
-
-    #[test]
-    fn initial_receipts_use_the_ordered_local_profile_observation_batch() {
-        let source = include_str!("actor.rs");
-        let startup = source
-            .split("let initial_receipts = live_event_receipts_from_sdk_items")
-            .nth(1)
-            .expect("initial receipt projection exists")
-            .split("let thread_attention = ThreadAttentionTracker::hydrate")
-            .next()
-            .expect("initial receipt publication precedes thread attention hydration");
-
-        assert!(
-            startup.contains("emit_receipt_observation_actions"),
-            "initial receipts must use local profile observation and generation fencing"
-        );
-        assert!(
-            !startup.contains("LiveRoomReceiptsUpdated {"),
-            "initial receipts must not bypass the ordered profile/receipt batch"
-        );
-        assert!(
-            !startup.contains("try_send(actions)"),
-            "initial receipt publication must be reliable"
-        );
-    }
-
-    #[test]
-    fn authoritative_recovery_receipts_use_the_same_ordered_observation_batch() {
-        let source = include_str!("relay.rs");
-        let recovery = source
-                .split("async fn handle_relay_overflow")
-                .nth(1)
-                .expect("authoritative recovery handler exists")
-                .split("// ---------------------------------------------------------------------------\n// Relay task")
-                .next()
-                .expect("authoritative recovery handler boundary exists");
-
-        assert!(
-            recovery.contains("emit_receipt_observation_actions"),
-            "authoritative recovery must use local profile observation and generation fencing"
-        );
-        assert!(
-            !recovery.contains("if let Some(action) = receipts_action"),
-            "authoritative recovery must not publish an unobserved receipt action directly"
         );
     }
 }

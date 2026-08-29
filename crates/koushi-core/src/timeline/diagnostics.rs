@@ -3089,59 +3089,6 @@ mod tests {
     }
 
     #[test]
-    fn timeline_subscribe_and_paginate_emit_startup_trace() {
-        let build = item_body(
-            include_str!("manager.rs"),
-            "async fn build_timeline_actor_handle",
-        );
-        let spawn = item_body(include_str!("actor.rs"), "async fn spawn(");
-        let paginate = item_body(include_str!("navigation.rs"), "async fn paginate_once_for");
-        assert!(
-            build.contains("StartupPhase::TimelineBuild"),
-            "the SDK TimelineBuilder::build phase must be timed"
-        );
-        assert!(
-            spawn.contains("StartupPhase::TimelineSubscribe"),
-            "the timeline.subscribe() phase must be timed with an item bucket"
-        );
-        assert!(
-            paginate.contains("trace_paginate"),
-            "pagination must emit a startup_trace paginate token"
-        );
-    }
-
-    #[test]
-    fn timeline_route_and_paginate_emit_ordered_trace_tokens() {
-        let source = include_str!("diagnostics.rs");
-        let production = source.split("\nmod tests").next().unwrap_or(source);
-        assert!(
-            production.contains("fn trace_timeline_route"),
-            "timeline manager routing must have a private-data-free trace helper"
-        );
-        assert!(
-            production.contains("fn trace_timeline_paginate"),
-            "timeline pagination must have a private-data-free trace helper"
-        );
-        assert!(
-            production.contains("\"core.timeline\""),
-            "timeline traces must use the structured core.timeline source"
-        );
-        for token in [
-            "\"manager_received\"",
-            "\"actor_paginate_start\"",
-            "\"gate_acquired\"",
-            "\"sdk_finish\"",
-            "DiagnosticField::request_id",
-            "DiagnosticField::token(\"timeline\"",
-        ] {
-            assert!(
-                production.contains(token),
-                "missing timeline trace token {token}"
-            );
-        }
-    }
-
-    #[test]
     fn manager_coordinator_fails_new_registration_on_exact_correlation_collision() {
         let key = room_key();
         let coordinator = SharedSendCompletionCoordinator::default();

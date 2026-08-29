@@ -2095,25 +2095,4 @@ mod tests {
         drop(actor_tx);
         drop(actor_rx);
     }
-
-    #[test]
-    fn timeline_subscribe_spawns_always_on_origin_observer() {
-        let spawn = item_body(include_str!("actor.rs"), "async fn spawn(");
-        let origin_token = item_body(
-            include_str!("diagnostics.rs"),
-            "fn event_cache_origin_trace_token",
-        );
-        assert!(
-            spawn.contains("startup_trace::trace_origin"),
-            "origin observer must always record structured startup provenance"
-        );
-        assert!(
-            spawn.contains("event_cache()"),
-            "origin observer must subscribe the SDK room event cache"
-        );
-        assert!(
-            origin_token.contains("EventsOrigin"),
-            "origin observer must read the SDK EventsOrigin (cache/network/sync)"
-        );
-    }
 }

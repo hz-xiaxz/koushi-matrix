@@ -3728,52 +3728,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_gap_repair_failures_resume_queued_candidate_inspection() {
-        let source = include_str!("gap_repair.rs");
-        let handler = item_body(source, "async fn handle_timeline_gap_repair_finished");
-        let helper = item_body(source, "async fn emit_gap_repair_failure_and_resume");
-        assert!(
-            handler
-                .matches("emit_gap_repair_failure_and_resume")
-                .count()
-                >= 3,
-            "SDK failure, failed outcome, and batch exhaustion must all release queued work"
-        );
-        assert!(
-            helper.contains("start_pending_timeline_gap_inspection().await"),
-            "the common terminal helper must restart a candidate-change inspection queued during repair"
-        );
-        let resume_offset = helper
-            .find("start_pending_timeline_gap_inspection().await")
-            .expect("terminal repair failure must release queued scheduler work");
-        let wake_offset = helper
-            .find("emit_gap_repair_released_if_idle")
-            .expect("an idle scheduler must wake a UI request rejected during gap repair");
-        assert!(
-            resume_offset < wake_offset,
-            "the retry wake must be emitted only after queued scheduler work has had a chance to restart"
-        );
-    }
-
-    #[test]
-    fn terminal_gap_inspection_paths_resume_queued_work_before_release_wake() {
-        let handler = item_body(
-            include_str!("gap_repair.rs"),
-            "async fn handle_timeline_gap_inspection_finished",
-        );
-        let resume_offset = handler
-            .rfind("start_pending_timeline_gap_inspection().await")
-            .expect("inspection completion must restart candidate work queued during inspection");
-        let wake_offset = handler
-            .rfind("emit_gap_repair_released_if_idle")
-            .expect("inspection completion must wake UI retries when the scheduler becomes idle");
-        assert!(
-            resume_offset < wake_offset,
-            "inspection completion must restart queued work before deciding that the scheduler is released"
-        );
-    }
-
-    #[test]
     fn candidate_wake_queued_during_repair_is_available_after_terminal_release() {
         let projected = vec![
             (0, projected_gap_position(7, 0, 3)),
@@ -3859,48 +3813,6 @@ mod tests {
             .cached_chunk_limit,
             0,
             "live-tail snapshots must not load cached chunks"
-        );
-    }
-
-    #[test]
-    fn gap_repair_takes_a_scheduler_permit_around_one_bounded_batch() {
-        let source = include_str!("gap_repair.rs");
-        // Split on an assembled literal so this test's own source cannot match
-        // the anchor ahead of the production function.
-        let repair_source = source
-            .split(concat!("async fn start", "_timeline", "_gap", "_repair"))
-            .nth(1)
-            .and_then(|section| {
-                section
-                    .split(concat!(
-                        "async fn handle",
-                        "_timeline",
-                        "_gap",
-                        "_repair",
-                        "_finished"
-                    ))
-                    .next()
-            })
-            .expect("gap repair starter should exist");
-        let acquire_offset = repair_source
-            .find("account_work.acquire(work_kind)")
-            .expect("gap repair must take a permit for its work kind");
-        let repair_offset = repair_source
-            .find("repair_room_timeline_gap(")
-            .expect("gap repair must still call the SDK repair");
-        let yield_offset = repair_source
-            .find("permit.record_yield(1,")
-            .expect("gap repair must report the bounded batch it yielded after");
-        assert!(
-            acquire_offset < repair_offset && repair_offset < yield_offset,
-            "gap repair must acquire, run one bounded batch, then yield"
-        );
-        let settlement_offset = repair_source
-            .find("wait_for_gap_repair_projection_with_timeout")
-            .expect("gap repair must still wait for projection settlement");
-        assert!(
-            yield_offset < settlement_offset,
-            "the permit must be released before local projection settlement"
         );
     }
 

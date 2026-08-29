@@ -2361,29 +2361,6 @@ mod tests {
     }
 
     #[test]
-    fn room_live_timeline_focus_includes_threaded_events() {
-        let build = item_body(
-            include_str!("manager.rs"),
-            "async fn build_timeline_actor_handle",
-        );
-        let focus_source = build
-            .split("let focus = match &key.kind")
-            .nth(1)
-            .expect("subscribe focus match should exist");
-        let room_focus = focus_source
-            .split("TimelineKind::Room")
-            .nth(1)
-            .expect("room timeline focus arm should exist")
-            .split("TimelineKind::Thread")
-            .next()
-            .expect("thread timeline focus arm should follow room arm");
-        assert!(
-            room_focus.contains("hide_threaded_events: false"),
-            "room live timelines must keep threaded replies in canonical SDK items so the display projection can represent them"
-        );
-    }
-
-    #[test]
     fn old_root_reply_reaches_bounded_room_projection_hydration_without_pagination() {
         let mut reply = timeline_item(
             "$latest-reply:test",
@@ -2399,46 +2376,6 @@ mod tests {
         assert_eq!(activity.root_event_id, "$old-root:test");
         assert_eq!(activity.activity_event_id, "$latest-reply:test");
         assert_eq!(activity.activity_timestamp_ms, Some(1_700_000_100_000));
-
-        let source = include_str!("thread_projection.rs");
-        let production = source
-            .split("\nmod tests")
-            .next()
-            .expect("production source before tests");
-        let hydration = production
-            .split("fn maybe_hydrate_missing_thread_roots")
-            .nth(1)
-            .expect("Room root hydration detection must exist")
-            .split("async fn handle_ignored_users_updated")
-            .next()
-            .expect("root hydration handler boundary");
-        assert!(
-            hydration.contains("missing_activities")
-                && hydration.contains("commit_prepared_thread_root_hydration_for_generation"),
-            "an absent root must request one manager-owned bounded fetch"
-        );
-        let commit = production
-            .split("async fn commit_prepared_thread_root_hydration_for_generation")
-            .nth(1)
-            .expect("generation-scoped hydration commit must exist")
-            .split("fn thread_root_projection_action_from_record")
-            .next()
-            .expect("hydration commit boundary");
-        assert!(
-            commit.contains("reserve_owned().await")
-                && commit.contains("ThreadRootProjectionDecision::StartFetch")
-                && commit.contains("schedule_aggregate_refresh")
-                && commit.contains("TimelineMessage::StartAggregateRefresh")
-                && commit.contains("actor_generation")
-                && !commit.contains("TimelineMessage::StartThreadRootProjectionFetch")
-                && !commit.contains("try_send"),
-            "projection state and tagged aggregate refreshes must commit reliably for one actor generation"
-        );
-        assert!(
-            !hydration.contains("paginate_backwards(")
-                && !hydration.contains("handle_restore_timeline_anchor("),
-            "root hydration must not initiate Room pagination or anchor materialization"
-        );
     }
 
     #[tokio::test]
@@ -2893,31 +2830,6 @@ mod tests {
         assert_eq!(
             reactions[0].my_reaction_event_id.as_deref(),
             Some("$reaction-b:test")
-        );
-    }
-
-    #[test]
-    fn sdk_projection_reads_thread_contract_accessors() {
-        let source = include_str!("item_projection.rs");
-        let projection_source = source
-            .split("pub fn sdk_item_to_timeline_item")
-            .nth(1)
-            .expect("sdk projection function should exist")
-            .split("pub(crate) fn timeline_item_can_react")
-            .next()
-            .expect("projection helper should follow sdk projection");
-        let compact_projection_source: String = projection_source
-            .chars()
-            .filter(|ch| !ch.is_whitespace())
-            .collect();
-
-        assert!(
-            compact_projection_source.contains("content().thread_root()"),
-            "timeline item projection must read SDK thread_root"
-        );
-        assert!(
-            compact_projection_source.contains("content().thread_summary()"),
-            "timeline item projection must read SDK thread_summary"
         );
     }
 
@@ -3504,58 +3416,6 @@ mod tests {
                 highlight_count: 0,
                 live_event_marker_count: 1,
             })
-        );
-    }
-
-    #[test]
-    fn recovery_and_manager_owned_receipt_success_preserve_attention_ordering() {
-        let recovery = item_body(include_str!("relay.rs"), "async fn handle_relay_overflow");
-        assert!(
-            recovery.contains("if let Some(action) = self.thread_attention.reconcile")
-                && recovery.contains("self.emit_action_reliable(action).await"),
-            "recovery-driven attention changes must reach the reducer"
-        );
-        let startup = item_body(include_str!("actor.rs"), "async fn spawn(");
-        let subscribe = startup
-            .find("subscribe_own_user_read_receipts_changed")
-            .expect("receipt changes must be subscribed");
-        let query = startup
-            .find("latest_user_read_receipt_timeline_event_id")
-            .expect("initial receipt must be queried");
-        assert!(
-            subscribe < query,
-            "subscribe-before-query closes the startup receipt race"
-        );
-        let manager_completion = item_body(
-            include_str!("read_state.rs"),
-            "async fn handle_read_worker_completion",
-        );
-        assert!(
-            manager_completion.contains("self.spawn_read_actor_apply(operation.clone())")
-                && !manager_completion.contains("LiveSignalsEvent::ReadReceiptSent"),
-            "threaded network success must wait for actor control-lane application before terminal success"
-        );
-        let actor_apply = item_body(
-            include_str!("read_state.rs"),
-            "async fn handle_read_success",
-        );
-        let acknowledge = actor_apply
-            .find("thread_attention.acknowledge")
-            .expect("threaded read success must acknowledge the tracker");
-        let reliable_action = actor_apply
-            .find("emit_action_reliable(action).await")
-            .expect("thread attention acknowledgement must reach the reducer reliably");
-        assert!(
-            acknowledge < reliable_action,
-            "thread attention must update before the actor acknowledges read success"
-        );
-        let settlement = item_body(
-            include_str!("read_state.rs"),
-            "async fn settle_read_waiters",
-        );
-        assert!(
-            settlement.contains("LiveSignalsEvent::ReadReceiptSent"),
-            "only manager settlement may emit the existing read-receipt success event"
         );
     }
 

@@ -324,3 +324,64 @@ names are the existing `core.room` / `core.store` checker contracts.
 
 **Verification counts:** deleted identities in the current scoped diff: 18;
 mapping rows: 18; missing: 0; extra: 0. No Rust or checker source was edited.
+
+## Complete source-contract mapping: koushi-core timeline slice (#753 continuation)
+
+The current scoped diff deletes 52 timeline source-only `#[test]` identities. The 53 existing `core.timeline` rule constants are listed below; the one rule without a deleted identity is explicitly reported rather than fabricated into a mapping.
+
+| Old fully-qualified test identity | Checker rule | Disposition |
+| --- | --- | --- |
+| `koushi_core::timeline::actor::tests::room_unsubscribe_clears_projection_service_before_dropping_the_actor` | `core.timeline.unsubscribe_cleanup_order` | Removed |
+| `koushi_core::timeline::diagnostics::tests::timeline_subscribe_and_paginate_emit_startup_trace` | `core.timeline.startup_trace` | Removed |
+| `koushi_core::timeline::diagnostics::tests::timeline_route_and_paginate_emit_ordered_trace_tokens` | `core.timeline.trace_tokens` | Removed |
+| `koushi_core::timeline::gap_repair::tests::terminal_gap_repair_failures_resume_queued_candidate_inspection` | `core.timeline.gap_repair_failure_resume` | Removed |
+| `koushi_core::timeline::gap_repair::tests::terminal_gap_inspection_paths_resume_queued_work_before_release_wake` | `core.timeline.gap_inspection_resume` | Removed |
+| `koushi_core::timeline::gap_repair::tests::gap_repair_takes_a_scheduler_permit_around_one_bounded_batch` | `core.timeline.gap_repair_scheduler` | Removed |
+| `koushi_core::timeline::item_projection::tests::profile_change_projection_does_not_emit_user_id_body` | `core.timeline.profile_change_projection` | Removed |
+| `koushi_core::timeline::item_projection::tests::timeline_search_index_mutations_use_reliable_delivery` | `core.timeline.search_reliable_delivery` | Removed |
+| `koushi_core::timeline::item_projection::tests::media_gallery_and_thread_attention_projections_use_reliable_delivery` | `core.timeline.media_attention_reliable_delivery` | Removed |
+| `koushi_core::timeline::item_projection::tests::retry_send_reenables_sdk_room_queue_before_unwedge` | `core.timeline.retry_queue_order` | Removed |
+| `koushi_core::timeline::item_projection::tests::cancel_send_reenables_sdk_room_queue_after_abort` | `core.timeline.cancel_queue_order` | Removed |
+| `koushi_core::timeline::item_projection::tests::reaction_and_read_signal_handlers_emit_private_latency_traces` | `core.timeline.signal_traces` | Removed |
+| `koushi_core::timeline::item_projection::tests::timeline_link_preview_load_emits_private_data_free_trace_tokens` | `core.timeline.link_preview_trace` | Removed |
+| `koushi_core::timeline::item_projection::tests::timeline_link_preview_fetches_do_not_block_actor_command_queue` | `core.timeline.link_preview_off_loop` | Removed |
+| `koushi_core::timeline::item_projection::tests::timeline_link_preview_fetches_are_abortable_without_dropping_the_actor` | `core.timeline.link_preview_cancellation` | Removed |
+| `koushi_core::timeline::item_projection::tests::initial_timeline_items_are_forwarded_to_search_index` | `core.timeline.initial_search_forward` | Removed |
+| `koushi_core::timeline::manager::tests::room_subscribe_success_reduces_timeline_subscribed_action` | `core.timeline.subscribe_success` | Removed |
+| `koushi_core::timeline::manager::tests::timeline_subscribe_settles_use_reliable_reducer_actions` | `core.timeline.subscribe_reliable_settles` | Removed |
+| `koushi_core::timeline::manager::tests::thread_timeline_focus_uses_sdk_thread_pagination` | `core.timeline.thread_focus` | Removed |
+| `koushi_core::timeline::manager::tests::timeline_subscribe_is_idempotent_for_existing_key` | `core.timeline.idempotent_subscribe` | Removed |
+| `koushi_core::timeline::manager::tests::sync_started_subscribes_existing_timeline_rooms_with_live_room_list_service` | `core.timeline.sync_started_rebuild` | Removed |
+| `koushi_core::timeline::manager::tests::timeline_ensure_subscribed_can_skip_existing_actor_replay` | `core.timeline.ensure_subscribed` | Removed |
+| `koushi_core::timeline::manager::tests::replay_subscribed_recovery_replays_initial_items_causeless_for_all_timelines` | `core.timeline.replay_subscribed` | Removed |
+| `koushi_core::timeline::media::tests::media_downloads_spawn_bounded_tasks_and_report_all_exits` | `core.timeline.media_download_lifecycle` | Removed |
+| `koushi_core::timeline::media::tests::media_downloads_diagnose_stage_and_failure_boundaries` | `core.timeline.media_download_diagnostics` | Removed |
+| `koushi_core::timeline::navigation::tests::timeline_pagination_uses_the_account_work_scheduler` | `core.timeline.pagination_scheduler` | Removed |
+| `koushi_core::timeline::navigation::tests::timeline_pagination_is_abortable_without_dropping_the_actor` | `core.timeline.pagination_cancellation` | Removed |
+| `koushi_core::timeline::navigation::tests::pagination_terminal_is_emitted_after_active_task_release` | `core.timeline.pagination_terminal_release` | Removed |
+| `koushi_core::timeline::navigation::tests::restore_anchor_handler_is_room_only_and_bounded` | `core.timeline.restore_room_bounded` | Removed |
+| `koushi_core::timeline::navigation::tests::restore_anchor_budget_respects_frontend_hint` | `core.timeline.restore_budget` | Removed |
+| `koushi_core::timeline::navigation::tests::restore_walk_coalesces_items_updated_to_single_flush` | `core.timeline.restore_coalescing` | Removed |
+| `koushi_core::timeline::navigation::tests::restore_terminal_is_anchor_present_not_timing_dependent` | `core.timeline.restore_terminal` | Removed |
+| `koushi_core::timeline::outbound_send::tests::send_enqueue_takes_the_interactive_guard_before_the_sdk_enqueue` | `core.timeline.send_admission_guard` | Removed |
+| `koushi_core::timeline::outbound_send::tests::send_completion_keeps_the_interactive_guard_until_terminal` | `core.timeline.send_completion_guard` | Removed |
+| `koushi_core::timeline::outbound_send::tests::send_submission_is_not_reduced_before_manager_worker_route_exists` | `core.timeline.send_submission_route` | Removed |
+| `koushi_core::timeline::outbound_send::tests::thread_reply_submission_is_not_reduced_before_manager_worker_route_exists` | `core.timeline.thread_reply_submission_route` | Removed |
+| `koushi_core::timeline::outbound_send::tests::thread_timeline_keys_project_send_reply_to_thread_composer_actions` | `core.timeline.thread_composer_route` | Removed |
+| `koushi_core::timeline::outbound_send::tests::outbound_send_state_uses_sdk_truth_and_reliable_settles` | `core.timeline.outbound_state` | Removed |
+| `koushi_core::timeline::outbound_send::tests::outbound_sdk_enqueues_are_session_manager_owned_and_supervised` | `core.timeline.send_queue_supervision` | Removed |
+| `koushi_core::timeline::read_state::tests::set_fully_read_success_uses_private_read_receipt_before_clearing_room_unread_summary` | `core.timeline.room_read_marker` | Removed |
+| `koushi_core::timeline::read_state::tests::send_read_receipt_uses_threaded_receipt_for_thread_timelines` | `core.timeline.thread_read_receipts` | Removed |
+| `koushi_core::timeline::read_state::tests::manager_read_completion_lane_precedes_ordinary_mailbox` | `core.timeline.read_completion_priority` | Removed |
+| `koushi_core::timeline::read_state::tests::replaying_thread_initial_items_preserves_semantic_attention_tracker` | `core.timeline.replay_attention` | Removed |
+| `koushi_core::timeline::read_state::tests::timeline_builder_does_not_track_state_event_read_receipts` | `core.timeline.receipt_tracking` | Removed |
+| `koushi_core::timeline::read_state::tests::production_receipt_diff_path_uses_fenced_ordered_observation_delivery` | `core.timeline.receipt_observation_delivery` | Removed |
+| `koushi_core::timeline::read_state::tests::initial_receipts_use_the_ordered_local_profile_observation_batch` | `core.timeline.initial_receipt_observation` | Removed |
+| `koushi_core::timeline::read_state::tests::authoritative_recovery_receipts_use_the_same_ordered_observation_batch` | `core.timeline.recovery_receipt_observation` | Removed |
+| `koushi_core::timeline::relay::tests::timeline_subscribe_spawns_always_on_origin_observer` | `core.timeline.origin_observer` | Removed |
+| `koushi_core::timeline::room_key_recovery::tests::room_key_reshare_handler_does_not_hold_the_manager_on_sdk_work` | `core.timeline.room_key_reshare` | Removed |
+| `koushi_core::timeline::thread_projection::tests::room_live_timeline_focus_includes_threaded_events` | `core.timeline.room_focus` | Removed |
+| `koushi_core::timeline::thread_projection::tests::sdk_projection_reads_thread_contract_accessors` | `core.timeline.sdk_projection_accessors` | Removed |
+| `koushi_core::timeline::thread_projection::tests::recovery_and_manager_owned_receipt_success_preserve_attention_ordering` | `core.timeline.receipt_attention_ordering` | Removed |
+
+**Verification counts:** deleted `#[test]` identities: 52; mapping rows: 52; missing rows: 0; extra rows: 0. The existing rule `core.timeline.thread_root_hydration` has no corresponding deleted identity in the current diff (unmatched existing rule: 1); it is not counted as a mapping row. No mixed tests were found: all 52 deleted identities were source-only, so no behavioral assertion required restoration. Vacuous self-matches: 0. No Rust or checker source was edited.

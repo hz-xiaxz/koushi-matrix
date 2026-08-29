@@ -4446,27 +4446,6 @@ mod tests {
     }
 
     #[test]
-    fn profile_change_projection_does_not_emit_user_id_body() {
-        let source = include_str!("item_projection.rs");
-        let profile_branch = source
-            .split("TimelineItemContent::ProfileChange(change)")
-            .nth(1)
-            .expect("profile change branch should exist")
-            .split("_ => {}")
-            .next()
-            .expect("profile change branch should precede fallback branch");
-
-        assert!(
-            profile_branch.contains("profile_change_projection(change)"),
-            "profile changes should use Element-like notice text"
-        );
-        assert!(
-            !profile_branch.contains("change.user_id()"),
-            "timeline row body must not contain a raw Matrix user id for profile changes"
-        );
-    }
-
-    #[test]
     fn pinned_events_projection_is_a_supported_notice() {
         assert_eq!(
             state_event_notice_body("m.room.pinned_events").as_ref(),
@@ -4859,50 +4838,6 @@ mod tests {
     }
 
     #[test]
-    fn timeline_search_index_mutations_use_reliable_delivery() {
-        let source = include_str!("item_projection.rs");
-        let forwarder = source
-            .split("async fn forward_diff_to_search")
-            .nth(1)
-            .expect("search index diff forwarder should be async")
-            .split("fn search_index_messages_for_diff")
-            .next()
-            .expect("message builder should follow forwarder");
-
-        assert!(
-            forwarder.contains("emit_search_messages_reliable"),
-            "live search index mutations, including redactions, must use the generation-fenced reliable sender"
-        );
-        assert!(
-            !forwarder.contains("try_send(SearchIndexMessage"),
-            "search index mutation delivery must not silently drop redactions or edits"
-        );
-    }
-
-    #[test]
-    fn media_gallery_and_thread_attention_projections_use_reliable_delivery() {
-        let initial_subscribe = item_body(include_str!("actor.rs"), "async fn spawn(");
-        let diff_batch = item_body(include_str!("relay.rs"), "async fn handle_diff_batch");
-        let media_gallery_helper = item_body(
-            include_str!("media.rs"),
-            "async fn emit_media_gallery_if_changed",
-        );
-        assert!(
-            initial_subscribe.contains("action_tx.send(vec![action]).await"),
-            "initial media gallery projection must use reliable delivery"
-        );
-        assert!(
-            diff_batch.contains("self.emit_action_reliable(action).await"),
-            "thread attention projection must use reliable reducer delivery"
-        );
-        assert!(
-            media_gallery_helper.contains("self.emit_action_reliable(action).await")
-                && !media_gallery_helper.contains("try_send(vec![action])"),
-            "media gallery dedupe ledger must not advance behind a dropped try_send"
-        );
-    }
-
-    #[test]
     fn send_operation_guards_allow_retry_and_cancel_only_from_outbound_states() {
         assert_eq!(
             validate_retry_send(Some(&TimelineSendState::NotSent {
@@ -4935,48 +4870,6 @@ mod tests {
         assert_eq!(
             validate_cancel_send(None),
             Err(TimelineFailureKind::InvalidSendTarget)
-        );
-    }
-
-    #[test]
-    fn retry_send_reenables_sdk_room_queue_before_unwedge() {
-        let source = include_str!("outbound_send.rs");
-        let retry_handler = source
-            .split("async fn handle_retry_send")
-            .nth(1)
-            .and_then(|section| section.split("async fn handle_cancel_send").next())
-            .expect("retry handler source");
-        let enable_index = retry_handler
-            .find("set_enabled(true)")
-            .expect("retry must re-enable the SDK room send queue");
-        let unwedge_index = retry_handler
-            .find("unwedge().await")
-            .expect("retry must unwedge the SDK send handle");
-
-        assert!(
-            enable_index < unwedge_index,
-            "room send queue must be re-enabled before SendHandle::unwedge()"
-        );
-    }
-
-    #[test]
-    fn cancel_send_reenables_sdk_room_queue_after_abort() {
-        let source = include_str!("outbound_send.rs");
-        let cancel_handler = source
-            .split("async fn handle_cancel_send")
-            .nth(1)
-            .and_then(|section| section.split("fn sdk_room_for_key").next())
-            .expect("cancel handler source");
-        let abort_index = cancel_handler
-            .find("abort().await")
-            .expect("cancel must abort the SDK send handle");
-        let enable_index = cancel_handler
-            .find("set_enabled(true)")
-            .expect("cancel must re-enable the SDK room send queue after abort");
-
-        assert!(
-            abort_index < enable_index,
-            "room send queue must be re-enabled after a successful abort"
         );
     }
 
@@ -5109,42 +5002,6 @@ mod tests {
                 "$reaction:example.test"
             ),
             Err(TimelineFailureKind::InvalidReactionState)
-        );
-    }
-
-    #[test]
-    fn reaction_and_read_signal_handlers_emit_private_latency_traces() {
-        let item = include_str!("item_projection.rs");
-        let diagnostics = include_str!("diagnostics.rs");
-        let manager = include_str!("manager.rs");
-        let read = include_str!("read_state.rs");
-        let sources = [item, diagnostics, manager, read];
-        for kind in ["send_reaction", "redact_reaction"] {
-            assert!(sources.iter().any(|source| source.contains(&format!("trace_timeline_actor_operation(\n            \"actor_start\",\n            \"{kind}\""))), "{kind} should trace actor start");
-            assert!(sources.iter().any(|source| source.contains(&format!("trace_timeline_actor_operation(\n                    \"actor_finish\",\n                    \"{kind}\"")) || source.contains(&format!("trace_timeline_actor_operation(\n                \"actor_finish\",\n                \"{kind}\""))), "{kind} should trace actor completion");
-        }
-        for kind in ["send_read_receipt", "set_fully_read"] {
-            assert!(
-                sources.iter().any(|source| source.contains(&format!(
-                    "trace_timeline_route(\"manager_received\", \"{kind}\""
-                ))),
-                "{kind} should trace manager admission"
-            );
-        }
-        assert!(
-            sources
-                .iter()
-                .any(|source| source.contains("ReadWorkerCompletion::Network"))
-                && sources
-                    .iter()
-                    .any(|source| source.contains("ReadWorkerCompletion::ActorApplied")),
-            "read operations must expose manager-owned network and state-apply completion stages"
-        );
-        assert!(
-            sources.iter().any(|source| source
-                .contains("trace_timeline_actor_scan(\n                    \"target_scan\"")
-                || source.contains("trace_timeline_actor_scan(\n                \"target_scan\"")),
-            "reaction target scan should expose item count and elapsed time"
         );
     }
 
@@ -5444,80 +5301,6 @@ mod tests {
     }
 
     #[test]
-    fn timeline_link_preview_load_emits_private_data_free_trace_tokens() {
-        let source = include_str!("diagnostics.rs");
-        let production = source.split("\nmod tests").next().unwrap_or(source);
-        assert!(
-            production.contains("fn trace_timeline_link_preview"),
-            "link preview loads must have a private-data-free trace helper"
-        );
-        for token in [
-            "\"link_preview\"",
-            "\"lookup_miss\"",
-            "\"no_previews\"",
-            "\"start\"",
-            "\"complete\"",
-            "\"load_link_previews\"",
-            "DiagnosticField::count(\"pending\"",
-            "DiagnosticField::milliseconds(\"duration\"",
-            "DiagnosticField::request_id",
-        ] {
-            assert!(
-                production.contains(token),
-                "missing link preview trace token {token}"
-            );
-        }
-    }
-
-    #[test]
-    fn timeline_link_preview_fetches_do_not_block_actor_command_queue() {
-        let source = include_str!("item_projection.rs");
-        let production = source.split("\nmod tests").next().unwrap_or(source);
-        let load_src = production
-            .split("async fn handle_load_link_previews")
-            .nth(1)
-            .and_then(|s| s.split("async fn handle_hide_link_preview").next())
-            .expect("handle_load_link_previews should exist");
-
-        assert!(
-            !load_src.contains("fetch_link_preview("),
-            "link preview network fetches must not run on the TimelineActor command loop"
-        );
-        assert!(
-            production.contains("spawn_link_preview_fetch"),
-            "link preview loads must spawn fetch work outside the TimelineActor command loop"
-        );
-        assert!(
-            production.contains("LinkPreviewsFetched"),
-            "link preview worker results must return to the TimelineActor explicitly"
-        );
-    }
-
-    #[test]
-    fn timeline_link_preview_fetches_are_abortable_without_dropping_the_actor() {
-        let item = include_str!("item_projection.rs");
-        let actor = include_str!("actor.rs");
-        let handle_cancel_source = item_body(item, "fn handle_cancel_link_previews");
-        let fetched_source = item_body(item, "async fn handle_link_previews_fetched");
-        assert!(
-            actor.contains("CancelLinkPreviews"),
-            "timeline manager must expose a cancellation message for in-flight link previews"
-        );
-        assert!(
-            handle_cancel_source.contains(".abort()"),
-            "cancelling link previews must abort only link preview workers, not the timeline actor"
-        );
-        assert!(
-            handle_cancel_source.contains("reset_loading_link_previews_to_pending"),
-            "cancelled link preview workers must return Loading previews to Pending for future retries"
-        );
-        assert!(
-            fetched_source.contains("remove(&event_id).is_none()"),
-            "late results from cancelled link preview workers must be ignored"
-        );
-    }
-
-    #[test]
     fn cancelled_link_preview_loads_return_loading_previews_to_pending() {
         let mut item = timeline_item(
             "$link:test",
@@ -5547,33 +5330,5 @@ mod tests {
         assert_eq!(previews[0].state, LinkPreviewState::Pending);
         assert_eq!(previews[1].state, LinkPreviewState::Ready);
         assert!(!reset_loading_link_previews_to_pending(&mut item));
-    }
-
-    /// Proves that during a restore walk the diff-batch handler buffers
-    /// `TimelineDiff`s rather than emitting `ItemsUpdated` per chunk, and that
-    /// all terminal paths flush the buffer exactly once.  React therefore
-    /// receives a single settled `ItemsUpdated` per restore — no O(chunks)
-    /// render churn — while internal state (`timeline_contains_event_id`) stays
-    /// up-to-date every batch so the anchor can be found mid-walk.
-    #[test]
-    fn initial_timeline_items_are_forwarded_to_search_index() {
-        let source = include_str!("actor.rs");
-        let production = source.split("\nmod tests").next().unwrap_or(source);
-        let spawn_src = production
-            .split("async fn spawn(")
-            .nth(1)
-            .expect("TimelineActor::spawn must exist")
-            .split("async fn run(")
-            .next()
-            .expect("spawn should end before run");
-
-        assert!(
-            spawn_src.contains("forward_initial_items_to_search"),
-            "visible initial timeline items must enter the same search-index path as live diffs"
-        );
-        assert!(
-            spawn_src.find("forward_initial_items_to_search") < spawn_src.find("actor.run()"),
-            "initial items must be forwarded before the actor starts processing later diffs"
-        );
     }
 }

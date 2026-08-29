@@ -2012,6 +2012,679 @@ export function checkCoreThreadsReliableRelays() {
   return failures;
 }
 
+function timelineSource(relativePath) {
+  return coreSource(`timeline/${relativePath}`);
+}
+
+function timelineItemBody(relativePath, marker) {
+  return rustItemBody(timelineSource(relativePath), marker);
+}
+
+function timelineSection(relativePath, startMarker, endMarker) {
+  return sourceSection(timelineSource(relativePath), startMarker, endMarker);
+}
+
+export function checkCoreTimelineUnsubscribeCleanupOrder() {
+  const rule = "core.timeline.unsubscribe_cleanup_order";
+  const branch = timelineSection("manager.rs", "TimelineCommand::Unsubscribe { request_id, key } => {", "TimelineCommand::Paginate");
+  const clear = branch?.indexOf("self.clear_thread_root_projections_for_room(&key).await") ?? -1;
+  const remove = branch?.indexOf("self.timelines.remove(&key)") ?? -1;
+  return clear >= 0 && remove >= 0 && clear < remove
+    ? []
+    : [sourceContractFailure(rule, "Room unsubscribe does not clear projection state before dropping the actor")];
+}
+
+export function checkCoreTimelineStartupTrace() {
+  const rule = "core.timeline.startup_trace";
+  const failures = [];
+  if (!timelineItemBody("manager.rs", "async fn build_timeline_actor_handle")?.includes("StartupPhase::TimelineBuild")) failures.push(sourceContractFailure(rule, "timeline build lacks its startup phase"));
+  if (!timelineItemBody("actor.rs", "pub(super) async fn spawn(")?.includes("StartupPhase::TimelineSubscribe")) failures.push(sourceContractFailure(rule, "timeline subscribe lacks its startup phase"));
+  if (!timelineItemBody("navigation.rs", "async fn paginate_once_for")?.includes("trace_paginate")) failures.push(sourceContractFailure(rule, "pagination lacks its startup trace"));
+  return failures;
+}
+
+export function checkCoreTimelineTraceTokens() {
+  const rule = "core.timeline.trace_tokens";
+  const source = timelineSource("diagnostics.rs");
+  const failures = [];
+  for (const marker of ["fn trace_timeline_route", "fn trace_timeline_paginate", '"core.timeline"', '"manager_received"', '"actor_paginate_start"', '"gate_acquired"', '"sdk_finish"', "DiagnosticField::request_id", 'DiagnosticField::token("timeline"']) {
+    if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `timeline diagnostics lack ${marker}`));
+  }
+  return failures;
+}
+
+export function checkCoreTimelineGapRepairFailureResume() {
+  const rule = "core.timeline.gap_repair_failure_resume";
+  const handler = timelineItemBody("gap_repair.rs", "async fn handle_timeline_gap_repair_finished");
+  const helper = timelineItemBody("gap_repair.rs", "async fn emit_gap_repair_failure_and_resume");
+  const failures = [];
+  if (!handler || (handler.match(/emit_gap_repair_failure_and_resume/gu) ?? []).length < 3) failures.push(sourceContractFailure(rule, "gap-repair terminal outcomes do not all release queued work"));
+  const resume = helper?.indexOf("start_pending_timeline_gap_inspection().await") ?? -1;
+  const wake = helper?.indexOf("emit_gap_repair_released_if_idle") ?? -1;
+  if (resume < 0 || wake < 0 || resume >= wake) failures.push(sourceContractFailure(rule, "gap-repair resume does not precede the release wake"));
+  return failures;
+}
+
+export function checkCoreTimelineGapInspectionResume() {
+  const rule = "core.timeline.gap_inspection_resume";
+  const handler = timelineItemBody("gap_repair.rs", "async fn handle_timeline_gap_inspection_finished");
+  const resume = handler?.lastIndexOf("start_pending_timeline_gap_inspection().await") ?? -1;
+  const wake = handler?.lastIndexOf("emit_gap_repair_released_if_idle") ?? -1;
+  return resume >= 0 && wake >= 0 && resume < wake
+    ? []
+    : [sourceContractFailure(rule, "gap inspection does not resume queued work before the release wake")];
+}
+
+export function checkCoreTimelineGapRepairScheduler() {
+  const rule = "core.timeline.gap_repair_scheduler";
+  const source = timelineSource("gap_repair.rs");
+  const repair = sourceSection(source, "async fn start_timeline_gap_repair", "async fn handle_timeline_gap_repair_finished");
+  const acquire = repair?.indexOf("account_work.acquire(work_kind)") ?? -1;
+  const call = repair?.indexOf("repair_room_timeline_gap(") ?? -1;
+  const yieldOffset = repair?.indexOf("permit.record_yield(1,") ?? -1;
+  const settlement = repair?.indexOf("wait_for_gap_repair_projection_with_timeout") ?? -1;
+  const failures = [];
+
+  if (acquire < 0 || call < 0 || yieldOffset < 0 || !(acquire < call && call < yieldOffset)) failures.push(sourceContractFailure(rule, "gap repair does not acquire, run one batch, then yield"));
+  if (settlement < 0 || yieldOffset >= settlement) failures.push(sourceContractFailure(rule, "gap repair releases its permit after projection settlement"));
+  return failures;
+}
+
+export function checkCoreTimelineProfileChangeProjection() {
+  const rule = "core.timeline.profile_change_projection";
+  const branch = timelineSection("item_projection.rs", "TimelineItemContent::ProfileChange(change)", "_ => {}");
+  const failures = [];
+  if (!branch?.includes("profile_change_projection(change)")) failures.push(sourceContractFailure(rule, "profile changes lack notice projection"));
+  if (branch?.includes("change.user_id()")) failures.push(sourceContractFailure(rule, "profile projection exposes a raw user id"));
+  return failures;
+}
+
+export function checkCoreTimelineSearchReliableDelivery() {
+  const rule = "core.timeline.search_reliable_delivery";
+  const body = timelineSection("item_projection.rs", "async fn forward_diff_to_search", "fn search_index_messages_for_diff");
+  const failures = [];
+  if (!body?.includes("emit_search_messages_reliable")) failures.push(sourceContractFailure(rule, "timeline search mutations do not use reliable delivery"));
+  if (body?.includes("try_send(SearchIndexMessage")) failures.push(sourceContractFailure(rule, "timeline search mutations use lossy delivery"));
+  return failures;
+}
+
+export function checkCoreTimelineMediaAttentionReliableDelivery() {
+  const rule = "core.timeline.media_attention_reliable_delivery";
+  const failures = [];
+  if (!timelineItemBody("actor.rs", "pub(super) async fn spawn(")?.includes("action_tx.send(vec![action]).await")) failures.push(sourceContractFailure(rule, "initial media gallery projection is not reliable"));
+  if (!timelineItemBody("relay.rs", "async fn handle_diff_batch")?.includes("self.emit_action_reliable(action).await")) failures.push(sourceContractFailure(rule, "thread attention projection is not reliable"));
+  const gallery = timelineItemBody("media.rs", "async fn emit_media_gallery_if_changed");
+  if (!gallery?.includes("self.emit_action_reliable(action).await") || gallery.includes("try_send(vec![action])")) failures.push(sourceContractFailure(rule, "media gallery projection can advance behind a dropped action"));
+  return failures;
+}
+
+export function checkCoreTimelineRetryQueueOrder() {
+  const rule = "core.timeline.retry_queue_order";
+  const body = timelineSection("outbound_send.rs", "async fn handle_retry_send", "async fn handle_cancel_send");
+  const enable = body?.indexOf("set_enabled(true)") ?? -1;
+  const unwedge = body?.indexOf("unwedge().await") ?? -1;
+  return enable >= 0 && unwedge >= 0 && enable < unwedge
+    ? []
+    : [sourceContractFailure(rule, "retry unwedges the SDK queue before re-enabling it")];
+}
+
+export function checkCoreTimelineCancelQueueOrder() {
+  const rule = "core.timeline.cancel_queue_order";
+  const body = timelineSection("outbound_send.rs", "async fn handle_cancel_send", "fn sdk_room_for_key");
+  const abort = body?.indexOf("abort().await") ?? -1;
+  const enable = body?.indexOf("set_enabled(true)") ?? -1;
+  return abort >= 0 && enable >= 0 && abort < enable
+    ? []
+    : [sourceContractFailure(rule, "cancel does not re-enable the SDK queue after abort")];
+}
+
+export function checkCoreTimelineSignalTraces() {
+  const rule = "core.timeline.signal_traces";
+  const sources = ["item_projection.rs", "diagnostics.rs", "manager.rs", "read_state.rs"].map(timelineSource);
+  const failures = [];
+  for (const kind of ["send_reaction", "redact_reaction"]) {
+    if (!sources.some((source) => new RegExp(`trace_timeline_actor_operation\\(\\s*\\"actor_start\\",\\s*\\"${kind}\\"`).test(source))) failures.push(sourceContractFailure(rule, `${kind} lacks actor-start tracing`));
+    if (!sources.some((source) => new RegExp(`trace_timeline_actor_operation\\(\\s*\\"actor_finish\\",\\s*\\"${kind}\\"`).test(source))) failures.push(sourceContractFailure(rule, `${kind} lacks actor-finish tracing`));
+  }
+  for (const kind of ["send_read_receipt", "set_fully_read"]) {
+    if (!sources.some((source) => new RegExp(`trace_timeline_route\\(\\s*\\"manager_received\\",\\s*\\"${kind}\\"`).test(source))) failures.push(sourceContractFailure(rule, `${kind} lacks manager-admission tracing`));
+  }
+  const read = sources.join("\\n");
+  for (const marker of ["ReadWorkerCompletion::Network", "ReadWorkerCompletion::ActorApplied"]) if (!read.includes(marker)) failures.push(sourceContractFailure(rule, `read operations lack ${marker}`));
+  if (!sources.some((source) => /trace_timeline_actor_scan\(\s*"target_scan"/.test(source))) failures.push(sourceContractFailure(rule, "reaction target scans lack tracing"));
+  return failures;
+}
+
+export function checkCoreTimelineLinkPreviewTrace() {
+  const rule = "core.timeline.link_preview_trace";
+  const source = timelineSource("diagnostics.rs");
+  const failures = [];
+  for (const marker of ["fn trace_timeline_link_preview", '"link_preview"', '"lookup_miss"', '"no_previews"', '"start"', '"complete"', '"load_link_previews"', 'DiagnosticField::count("pending"', 'DiagnosticField::milliseconds("duration"', "DiagnosticField::request_id"]) if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `link-preview diagnostics lack ${marker}`));
+  return failures;
+}
+
+export function checkCoreTimelineLinkPreviewOffLoop() {
+  const rule = "core.timeline.link_preview_off_loop";
+  const production = timelineSource("item_projection.rs");
+  const load = timelineItemBody("item_projection.rs", "async fn handle_load_link_previews");
+  const failures = [];
+  if (load?.includes("fetch_link_preview(")) failures.push(sourceContractFailure(rule, "link-preview fetch runs on the actor command loop"));
+  for (const marker of ["spawn_link_preview_fetch", "LinkPreviewsFetched"]) if (!production.includes(marker)) failures.push(sourceContractFailure(rule, `link-preview worker path lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreTimelineLinkPreviewCancellation() {
+  const rule = "core.timeline.link_preview_cancellation";
+  const item = timelineSource("item_projection.rs");
+  const actor = timelineSource("actor.rs");
+  const cancel = timelineItemBody("item_projection.rs", "fn handle_cancel_link_previews");
+  const fetched = timelineItemBody("item_projection.rs", "async fn handle_link_previews_fetched");
+  const failures = [];
+  if (!actor.includes("CancelLinkPreviews")) failures.push(sourceContractFailure(rule, "timeline actor lacks link-preview cancellation"));
+  if (!cancel?.includes(".abort()")) failures.push(sourceContractFailure(rule, "link-preview cancellation does not abort the worker"));
+  if (!cancel?.includes("reset_loading_link_previews_to_pending")) failures.push(sourceContractFailure(rule, "link-preview cancellation does not reset loading state"));
+  if (!fetched?.includes("remove(&event_id).is_none()")) failures.push(sourceContractFailure(rule, "late cancelled link-preview results are not ignored"));
+  return failures;
+}
+
+export function checkCoreTimelineInitialSearchForward() {
+  const rule = "core.timeline.initial_search_forward";
+  const spawn = timelineItemBody("actor.rs", "pub(super) async fn spawn(");
+  const forward = spawn?.indexOf("forward_initial_items_to_search") ?? -1;
+  const run = spawn?.indexOf("actor.run()") ?? -1;
+  return forward >= 0 && run >= 0 && forward < run
+    ? []
+    : [sourceContractFailure(rule, "initial timeline items are not forwarded before the actor loop")];
+}
+
+export function checkCoreTimelineSubscribeSuccess() {
+  const rule = "core.timeline.subscribe_success";
+  const source = timelineSource("manager.rs");
+  const subscribe = timelineItemBody("manager.rs", "async fn handle_subscribe");
+  const build = timelineSection("manager.rs", "async fn build_timeline_actor_handle", "async fn route_to_actor_or_fail");
+  const success = subscribe?.split("Ok(handle) =>").at(1) ?? "";
+  const action = success.indexOf("emit_timeline_subscribed_action");
+  const failures = [];
+  for (const marker of ["TimelineActor::spawn", "TimelineKind::Room"]) if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `subscribe success lacks ${marker}`));
+  if (!build?.includes("TimelineActor::spawn")) failures.push(sourceContractFailure(rule, "subscribe success does not spawn the actor"));
+  if (action < 0) failures.push(sourceContractFailure(rule, "subscribe success does not reduce TimelineSubscribed"));
+  return failures;
+}
+
+export function checkCoreTimelineSubscribeReliableSettles() {
+  const rule = "core.timeline.subscribe_reliable_settles";
+  const subscribed = timelineItemBody("manager.rs", "async fn emit_timeline_subscribed_action");
+  const failure = timelineItemBody("diagnostics.rs", "fn timeline_subscription_failed_action");
+  const subscribe = timelineItemBody("manager.rs", "async fn handle_subscribe");
+  const failures = [];
+  if (!subscribed?.includes("self.action_tx.send(vec![action]).await") || subscribed.includes("try_send(vec![action])")) failures.push(sourceContractFailure(rule, "timeline subscribe success is not reliably delivered"));
+  for (const marker of ["TimelineKind::Room { .. } => None", "AppAction::ThreadSubscriptionFailed", "AppAction::FocusedContextSubscriptionFailed"]) if (!failure?.includes(marker)) failures.push(sourceContractFailure(rule, `subscription failure path lacks ${marker}`));
+  if (!subscribe?.includes("self.emit_subscription_failure")) failures.push(sourceContractFailure(rule, "subscribe failure branches do not settle reducer state"));
+  return failures;
+}
+
+export function checkCoreTimelineThreadFocus() {
+  const rule = "core.timeline.thread_focus";
+  const focus = timelineItemBody("manager.rs", "async fn build_timeline_actor_handle")?.split("let focus = match &key.kind").at(1)?.split("let timeline_result").at(0);
+  const thread = focus?.split("TimelineKind::Thread").at(1)?.split("TimelineKind::Focused").at(0);
+  const failures = [];
+  if (!thread?.includes("TimelineFocus::Thread")) failures.push(sourceContractFailure(rule, "thread timelines do not use SDK thread focus"));
+  if (thread?.includes("TimelineFocus::Event")) failures.push(sourceContractFailure(rule, "thread timelines use event focus"));
+  return failures;
+}
+
+export function checkCoreTimelineIdempotentSubscribe() {
+  const rule = "core.timeline.idempotent_subscribe";
+  const source = timelineSource("manager.rs");
+  const subscribe = timelineSection("manager.rs", "async fn handle_subscribe", "async fn route_to_actor_or_fail");
+  const existing = subscribe?.split("let replay_result = if let Some(handle) = self.timelines.get(&key)").at(1)?.split("let client = session.client()").at(0);
+  const build = timelineSection("manager.rs", "async fn build_timeline_actor_handle", "async fn route_to_actor_or_fail");
+  const failures = [];
+  for (const marker of ["ReplayInitialItems", "return;"]) if (!existing?.includes(marker)) failures.push(sourceContractFailure(rule, `existing timeline replay path lacks ${marker}`));
+  if (!build || build.includes("subscribe_to_rooms_with_generation")) failures.push(sourceContractFailure(rule, "timeline actor construction mutates room subscriptions"));
+  for (const marker of ["lease_room", "reconcile_subscriptions"]) if (!subscribe?.includes(marker)) failures.push(sourceContractFailure(rule, `new timeline subscription lacks ${marker}`));
+  if (!source.includes("let replay_result = if let Some(handle) = self.timelines.get(&key)")) failures.push(sourceContractFailure(rule, "subscribe does not detect an existing key"));
+  return failures;
+}
+
+export function checkCoreTimelineSyncStartedRebuild() {
+  const rule = "core.timeline.sync_started_rebuild";
+  const manager = timelineSource("manager.rs");
+  const run = timelineItemBody("manager.rs", "async fn run(mut self)");
+  const started = timelineItemBody("residency.rs", "async fn handle_sync_started");
+  const rebuild = timelineItemBody("residency.rs", "async fn rebuild_existing_room_timelines_after_sync_started");
+  const failures = [];
+  if (!run?.includes("self.handle_sync_started(room_list_service, core_generation)")) failures.push(sourceContractFailure(rule, "SyncStarted is not routed by the manager"));
+  for (const marker of ["self.room_list_service = Some(room_list_service.clone());", "self.subscribe_existing_timeline_rooms(&room_list_service)", "rebuild_existing_room_timelines_after_sync_started"]) if (!started?.includes(marker)) failures.push(sourceContractFailure(rule, `SyncStarted handler lacks ${marker}`));
+  for (const marker of ["session_subscribed_rooms", "reconcile_room_subscriptions_with_generation"]) if (!timelineSource("residency.rs").includes(marker)) failures.push(sourceContractFailure(rule, `residency lacks ${marker}`));
+  if (!rebuild?.includes("matches!(key.kind, TimelineKind::Room { .. })")) failures.push(sourceContractFailure(rule, "SyncStarted rebuild is not room-only"));
+  if (rebuild?.includes("self.timelines.remove(&key);")) failures.push(sourceContractFailure(rule, "SyncStarted rebuild drops the existing actor before replacement"));
+  if (!rebuild?.includes("replace_existing_room_timeline_after_sync_started")) failures.push(sourceContractFailure(rule, "SyncStarted rebuild lacks replacement swap"));
+  if (!manager.includes("handle_sync_started")) failures.push(sourceContractFailure(rule, "manager source lacks SyncStarted handling"));
+  return failures;
+}
+
+export function checkCoreTimelineEnsureSubscribed() {
+  const rule = "core.timeline.ensure_subscribed";
+  const source = timelineSource("manager.rs");
+  const command = timelineSection("manager.rs", "async fn handle_command(&mut self, command: TimelineCommand)", "async fn handle_command_with_permit");
+  const permitted = timelineSection("manager.rs", "async fn handle_command_with_permit", "async fn route_send_to_worker_or_fail");
+  const subscribe = timelineSection("manager.rs", "async fn handle_subscribe", "let client = session.client()");
+  const failures = [];
+  if (!command?.includes("self.handle_command_with_permit(command, None).await")) failures.push(sourceContractFailure(rule, "plain timeline commands bypass the permit-aware helper"));
+  for (const marker of ["TimelineCommand::EnsureSubscribed", "replay_existing"]) if (!permitted?.includes(marker)) failures.push(sourceContractFailure(rule, `ensure-subscription route lacks ${marker}`));
+  if (!subscribe?.includes("if replay_existing")) failures.push(sourceContractFailure(rule, "existing actors do not honor replay_existing"));
+  if (!source.includes("async fn handle_command_with_permit")) failures.push(sourceContractFailure(rule, "permit-aware command helper is missing"));
+  return failures;
+}
+
+export function checkCoreTimelineReplaySubscribed() {
+  const rule = "core.timeline.replay_subscribed";
+  const command = timelineSection("manager.rs", "async fn handle_command_with_permit", "async fn route_send_to_worker_or_fail");
+  const replay = timelineSection("manager.rs", "async fn handle_replay_subscribed", "async fn handle_subscribe");
+  const failures = [];
+  for (const marker of ["TimelineCommand::ReplaySubscribed { request_id }", "self.handle_replay_subscribed(request_id).await"]) if (!command?.includes(marker)) failures.push(sourceContractFailure(rule, `replay command route lacks ${marker}`));
+  for (const marker of ["for handle in self.timelines.values()", "TimelineActorMessage::ReplayInitialItems", "cause_request_id: None", ".await"]) if (!replay?.includes(marker)) failures.push(sourceContractFailure(rule, `replay handler lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreTimelineMediaDownloadLifecycle() {
+  const rule = "core.timeline.media_download_lifecycle";
+  const source = timelineSource("media.rs");
+  const handler = timelineItemBody("media.rs", "async fn handle_download_media")?.split("async fn download_media_for").at(0);
+  const worker = timelineSection("media.rs", "async fn download_media_for", "async fn handle_media_download_finished");
+  const failures = [];
+  for (const marker of ["TimelineActorMessage::MediaDownloadFinished", "executor::spawn(async move", "emit_media_download_current_state"]) if (!handler?.includes(marker)) failures.push(sourceContractFailure(rule, `media download handler lacks ${marker}`));
+  if (handler?.includes(".get_media_content(")) failures.push(sourceContractFailure(rule, "media transfer runs inline on the actor loop"));
+  for (const marker of ["executor::timeout(", "MEDIA_DOWNLOAD_TIMEOUT", "classify_media_download_error(&error)", "TimelineFailureKind::Timeout"]) if (!worker?.includes(marker)) failures.push(sourceContractFailure(rule, `media download worker lacks ${marker}`));
+  if (!source.includes("async fn download_media_for")) failures.push(sourceContractFailure(rule, "media download worker is missing"));
+  return failures;
+}
+
+export function checkCoreTimelineMediaDownloadDiagnostics() {
+  const rule = "core.timeline.media_download_diagnostics";
+  const source = timelineSource("media.rs");
+  const failures = [];
+  for (const marker of ["core.media_download", "request_received", "request_rejected", "cache_hit", "sdk_fetch_started", "sdk_fetch_failed", "file_write_failed", "completed", "selection", "source_encrypted", "thumbnail_source_present", "failure", "raw_os_error", "data_dir_present", "target_dir_exists", "target_path_exists", "target_path_is_file", "target_path_is_dir"]) if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `media download diagnostics lack ${marker}`));
+  return failures;
+}
+
+export function checkCoreTimelinePaginationScheduler() {
+  const rule = "core.timeline.pagination_scheduler";
+  const source = timelineSource("navigation.rs");
+  const admission = timelineSection("navigation.rs", "async fn acquire_pagination_permit_and_emit_paginating", "/// Emits an already-authorized group");
+  const operation = timelineSection("navigation.rs", "async fn paginate_once_for", "fn emit_pagination_completion");
+  const acquire = operation?.indexOf("acquire_pagination_permit_and_emit_paginating") ?? -1;
+  const paginate = operation?.indexOf("paginate_backwards") ?? -1;
+  const failures = [];
+  if (!source.includes("AccountWorkScheduler")) failures.push(sourceContractFailure(rule, "timeline actor lacks account work scheduler"));
+  if (!admission?.includes("AccountWorkKind::ExplicitPagination")) failures.push(sourceContractFailure(rule, "pagination lacks explicit-pagination work kind"));
+  if (acquire < 0 || paginate < 0 || acquire >= paginate) failures.push(sourceContractFailure(rule, "pagination calls the SDK before scheduler admission"));
+  return failures;
+}
+
+export function checkCoreTimelinePaginationCancellation() {
+  const rule = "core.timeline.pagination_cancellation";
+  const actor = timelineSource("actor.rs");
+  const actorStruct = timelineItemBody("actor.rs", "pub(super) struct TimelineActor {");
+  const paginate = timelineItemBody("navigation.rs", "pub(super) async fn handle_paginate");
+  const cancel = timelineItemBody("navigation.rs", "pub(super) fn handle_cancel_pagination");
+  const failures = [];
+  for (const [body, marker] of [[actor, "CancelPagination"], [actorStruct, "pagination_task"], [paginate, "executor::spawn"], [cancel, ".abort()"]]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `pagination cancellation lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreTimelinePaginationTerminalRelease() {
+  const rule = "core.timeline.pagination_terminal_release";
+  const handler = timelineItemBody("actor.rs", "async fn handle_msg");
+  const branch = handler?.split("TimelineActorMessage::PaginationFinished {").at(1);
+  const release = branch?.indexOf("self.pagination_task = None") ?? -1;
+  const terminal = branch?.indexOf("self.emit_pagination_completion") ?? -1;
+  return release >= 0 && terminal >= 0 && release < terminal
+    ? []
+    : [sourceContractFailure(rule, "pagination terminal is emitted before active-task release")];
+}
+
+export function checkCoreTimelineRestoreRoomBounded() {
+  const rule = "core.timeline.restore_room_bounded";
+  const handler = timelineSection("navigation.rs", "async fn handle_restore_timeline_anchor(", "async fn handle_restore_timeline_anchor_continue");
+  const continuation = timelineSection("navigation.rs", "async fn handle_restore_timeline_anchor_continue", "async fn schedule_restore_anchor_continue");
+  const failures = [];
+  if (!handler?.includes("TimelineKind::Room")) failures.push(sourceContractFailure(rule, "restore anchor is not room-only"));
+  if (!continuation?.includes("PaginationDirection::Backward")) failures.push(sourceContractFailure(rule, "restore anchor does not paginate backward"));
+  for (const marker of ["max_batches", "event_count"]) if (!handler?.includes(marker)) failures.push(sourceContractFailure(rule, `restore anchor lacks ${marker}`));
+  if (handler?.includes("TimelineKind::Focused")) failures.push(sourceContractFailure(rule, "restore anchor uses focused timeline path"));
+  return failures;
+}
+
+export function checkCoreTimelineRestoreBudget() {
+  const rule = "core.timeline.restore_budget";
+  const production = timelineSource("navigation.rs");
+  const construct = production.split("let restore = RestoreTimelineAnchorState {").at(1);
+  const existing = production.split("if existing.event_id == event_id {").at(1);
+  const failures = [];
+  if (!construct?.includes("max_batches_remaining: max_batches,")) failures.push(sourceContractFailure(rule, "restore initialization ignores the frontend budget"));
+  if (!existing?.includes(".max(max_batches);")) failures.push(sourceContractFailure(rule, "restore replacement inflates the in-flight budget"));
+  return failures;
+}
+
+export function checkCoreTimelineRestoreCoalescing() {
+  const rule = "core.timeline.restore_coalescing";
+  const actor = timelineItemBody("actor.rs", "pub(super) struct TimelineActor {");
+  const diff = timelineItemBody("relay.rs", "async fn handle_diff_batch");
+  const navigation = timelineSource("navigation.rs");
+  const finish = timelineItemBody("navigation.rs", "fn finish_anchor_restore");
+  const settlement = timelineItemBody("navigation.rs", "pub(super) fn publish_restore_settlement_for_generation(");
+  const handler = timelineItemBody("navigation.rs", "async fn handle_restore_timeline_anchor(");
+  const continuation = timelineItemBody("navigation.rs", "async fn handle_restore_timeline_anchor_continue(");
+  const failures = [];
+  for (const marker of ["restore_emit_buffer: Vec<TimelineDiff>"]) if (!actor?.includes(marker)) failures.push(sourceContractFailure(rule, `restore actor lacks ${marker}`));
+  for (const marker of ["restore_anchor.is_some()", "restore_emit_buffer", "ItemsUpdated"]) if (!diff?.includes(marker)) failures.push(sourceContractFailure(rule, `restore diff relay lacks ${marker}`));
+  if (!finish?.includes("publish_restore_settlement(Some((request_id, status)))")) failures.push(sourceContractFailure(rule, "restore finish bypasses atomic settlement"));
+  for (const marker of ["std::mem::take", "TimelineEvent::NavigationUpdated", "TimelineEvent::AnchorRestoreFinished"]) if (!settlement?.includes(marker)) failures.push(sourceContractFailure(rule, `restore settlement lacks ${marker}`));
+  if (finish?.includes("emit_anchor_restore_finished")) failures.push(sourceContractFailure(rule, "restore finish emits a second raw terminal"));
+  if ((handler?.match(/self\.emit_anchor_restore_finished\(/gu) ?? []).length > 1) failures.push(sourceContractFailure(rule, "restore handler emits too many raw terminals"));
+  if (continuation?.includes("self.emit_anchor_restore_finished(")) failures.push(sourceContractFailure(rule, "restore continuation bypasses finish_anchor_restore"));
+  if (!navigation.includes("publish_restore_settlement_for_generation")) failures.push(sourceContractFailure(rule, "restore settlement helper is missing"));
+  return failures;
+}
+
+export function checkCoreTimelineRestoreTerminal() {
+  const rule = "core.timeline.restore_terminal";
+  const production = timelineSource("navigation.rs");
+  const state = production.split("struct RestoreTimelineAnchorState {").at(1)?.split("}").at(0);
+  const continuation = timelineSection("navigation.rs", "async fn handle_restore_timeline_anchor_continue(", "async fn maybe_continue_restore_anchor_after_diff");
+  const handler = timelineSection("navigation.rs", "async fn handle_restore_timeline_anchor(", "async fn handle_restore_timeline_anchor_continue");
+  const failures = [];
+  if (!state?.includes("anchor_relay_wait")) failures.push(sourceContractFailure(rule, "restore state lacks relay wait"));
+  for (const marker of ["anchor_relay_wait", "outcome.anchor_present", "outcome.reached_start"]) if (!continuation?.includes(marker)) failures.push(sourceContractFailure(rule, `restore continuation lacks ${marker}`));
+  for (const marker of ["settle_last_seen_seq", "settle_awaiting_first_diff", "RESTORE_ANCHOR_SETTLE_TICK_DELAY_MS", "schedule_restore_anchor_settle_tick"]) if (production.includes(marker)) failures.push(sourceContractFailure(rule, `restore retains timing heuristic ${marker}`));
+  if (!handler?.includes("emit_anchor_restore_finished")) failures.push(sourceContractFailure(rule, "invalid restore requests do not emit their terminal"));
+  return failures;
+}
+
+export function checkCoreTimelineSendAdmissionGuard() {
+  const rule = "core.timeline.send_admission_guard";
+  const source = timelineSource("outbound_send.rs");
+  const spawn = timelineSection("outbound_send.rs", "fn spawn_send_enqueue(", "fn handle_send_enqueue_worker_completion");
+  const guard = spawn?.indexOf("begin_interactive(AccountWorkKind::MessageSend)") ?? -1;
+  const enqueue = spawn?.indexOf("enqueue_timeline_send(context, payload)") ?? -1;
+  const preflight = spawn?.indexOf("preflight_started_tx.send(())") ?? -1;
+  const failures = [];
+  if (guard < 0 || enqueue < 0 || guard >= enqueue) failures.push(sourceContractFailure(rule, "send enqueue is not held under the interactive guard"));
+  if (preflight < 0 || preflight >= guard) failures.push(sourceContractFailure(rule, "send admission waits for the scheduler"));
+  if (!source.includes("fn spawn_send_enqueue(")) failures.push(sourceContractFailure(rule, "send enqueue worker is missing"));
+  return failures;
+}
+
+export function checkCoreTimelineSendCompletionGuard() {
+  const rule = "core.timeline.send_completion_guard";
+  const source = timelineSource("outbound_send.rs");
+  const pending = source.split("struct CoordinatedPendingSend").at(1)?.split("enum SendCompletionObservation").at(0);
+  const spawn = timelineSection("outbound_send.rs", "fn spawn_send_enqueue(", "fn handle_send_enqueue_worker_completion");
+  const terminal = timelineSection("outbound_send.rs", "fn apply_terminal(", "fn media_upload_progress_identity");
+  const guard = spawn?.indexOf("begin_interactive(AccountWorkKind::MessageSend)") ?? -1;
+  const retain = spawn?.indexOf("registration.hold_interactive_guard") ?? -1;
+  const enqueue = spawn?.indexOf("enqueue_timeline_send(context, payload)") ?? -1;
+  const failures = [];
+  if (!pending?.includes("interactive_guard: Option<InteractiveWorkGuard>")) failures.push(sourceContractFailure(rule, "pending send does not retain its interactive guard"));
+  if (guard < 0 || retain < 0 || enqueue < 0 || !(guard < retain && retain < enqueue)) failures.push(sourceContractFailure(rule, "send guard is not retained before SDK enqueue"));
+  if (!terminal?.includes("pending.interactive_guard.take()")) failures.push(sourceContractFailure(rule, "send terminal does not release its interactive guard"));
+  return failures;
+}
+
+export function checkCoreTimelineSendSubmissionRoute() {
+  const rule = "core.timeline.send_submission_route";
+  const helper = timelineItemBody("outbound_send.rs", "async fn route_send_to_worker_or_fail");
+  const lookup = helper?.indexOf("handle.enqueue_context.clone()") ?? -1;
+  const submitted = helper?.indexOf("send_submitted_action") ?? -1;
+  const worker = helper?.indexOf("self.spawn_send_enqueue") ?? -1;
+  const failures = [];
+  if (lookup < 0 || submitted < 0 || worker < 0 || !(lookup < submitted && submitted < worker)) failures.push(sourceContractFailure(rule, "send submission is reduced outside the manager worker route"));
+  if (!timelineSource("outbound_send.rs").includes("AppAction::SendTextSubmitted")) failures.push(sourceContractFailure(rule, "room send projection lacks SendTextSubmitted"));
+  return failures;
+}
+
+export function checkCoreTimelineThreadReplySubmissionRoute() {
+  const rule = "core.timeline.thread_reply_submission_route";
+  const helper = timelineItemBody("outbound_send.rs", "async fn route_send_to_worker_or_fail");
+  const lookup = helper?.indexOf("handle.enqueue_context.clone()") ?? -1;
+  const submitted = helper?.indexOf("send_submitted_action") ?? -1;
+  const source = timelineSource("outbound_send.rs");
+  const failures = [];
+  if (lookup < 0 || submitted < 0 || lookup >= submitted) failures.push(sourceContractFailure(rule, "thread submission is reduced before manager route resolution"));
+  if (!source.includes("AppAction::ThreadReplySubmitted")) failures.push(sourceContractFailure(rule, "thread projection lacks ThreadReplySubmitted"));
+  return failures;
+}
+
+export function checkCoreTimelineThreadComposerRoute() {
+  const rule = "core.timeline.thread_composer_route";
+  const source = timelineSource("outbound_send.rs");
+  const helper = timelineItemBody("outbound_send.rs", "async fn route_send_to_worker_or_fail");
+  const projection = timelineSection("outbound_send.rs", "fn send_submitted_action", "fn send_finished_action");
+  const terminal = timelineSection("outbound_send.rs", "fn send_terminal_action", "fn timeline_send_terminal_handoff");
+  const failures = [];
+  if (!helper?.includes("send_submitted_action") || !projection?.includes("TimelineKind::Thread") || !projection?.includes("ThreadReplySubmitted")) failures.push(sourceContractFailure(rule, "thread reply does not submit thread composer state"));
+  if (!source.includes("ThreadReplyFailed")) failures.push(sourceContractFailure(rule, "thread reply failure does not clear pending state"));
+  for (const marker of ["ComposerSubmissionSettled", "ComposerSubmissionTerminalOutcome", "submission_target"]) if (!terminal?.includes(marker)) failures.push(sourceContractFailure(rule, `thread send terminal lacks ${marker}`));
+  if (!source.includes("TimelineKind::Focused { .. } => Self::None") || !source.includes("TimelineKind::Focused { .. } => None")) failures.push(sourceContractFailure(rule, "focused timelines own composer state"));
+  return failures;
+}
+
+export function checkCoreTimelineOutboundState() {
+  const rule = "core.timeline.outbound_state";
+  const outbound = timelineSource("outbound_send.rs");
+  const manager = timelineSource("manager.rs");
+  const monitor = timelineItemBody("outbound_send.rs", "async fn run_send_queue_monitor");
+  const projection = timelineItemBody("item_projection.rs", "fn sdk_item_to_timeline_item_with_send_states");
+  const boundary = timelineItemBody("outbound_send.rs", "fn apply_send_completion_observation_and_handoff");
+  const observer = timelineItemBody("outbound_send.rs", "async fn run_global_send_completion_observer");
+  const actor = timelineItemBody("outbound_send.rs", "async fn handle_send_queue_update");
+  const delivery = timelineItemBody("outbound_send.rs", "async fn handle_send_terminal_handoff");
+  const run = timelineItemBody("manager.rs", "async fn run(mut self)");
+  const failures = [];
+  if (!monitor?.includes("TimelineActorMessage::SendQueueLagged") || monitor.includes("not critical for send completion tracking")) failures.push(sourceContractFailure(rule, "send queue lag is not treated as terminally relevant"));
+  const sdk = projection?.indexOf("timeline_send_state_from_sdk") ?? -1;
+  const mirror = projection?.indexOf("send_statuses.get") ?? -1;
+  if (sdk < 0 || mirror < 0 || sdk >= mirror) failures.push(sourceContractFailure(rule, "SDK send state does not win over the actor mirror"));
+  if (!boundary?.includes("terminal_ingress.admit(handoff)") || boundary.includes(".await") || boundary.includes("executor::spawn")) failures.push(sourceContractFailure(rule, "terminal handoff is not synchronously admitted"));
+  for (const marker of ["SendQueueUpdate", "RecvError::Lagged", "apply_send_completion_observation_loss_and_handoff"]) if (!observer?.includes(marker)) failures.push(sourceContractFailure(rule, `global send observer lacks ${marker}`));
+  if (actor?.includes("apply_send_completion_observation_and_handoff") || actor?.includes("SendCompleted")) failures.push(sourceContractFailure(rule, "replaceable actor consumes send terminals"));
+  for (const marker of ["deliver_submission_terminal_action", ".await"]) if (!delivery?.includes(marker)) failures.push(sourceContractFailure(rule, `terminal delivery lacks ${marker}`));
+  if (delivery?.includes("try_send") || delivery?.includes("schedule_room_key_reshares")) failures.push(sourceContractFailure(rule, "terminal delivery is lossy or schedules a forbidden reshare"));
+  if (!run?.includes("tokio::select!") || !run.includes("biased;") || !run.includes("terminal_rx.recv()")) failures.push(sourceContractFailure(rule, "timeline manager does not prioritize terminal ingress"));
+  if ((manager.match(/session\.client\(\)\.send_queue\(\)\.subscribe\(\)/gu) ?? []).length !== 1) failures.push(sourceContractFailure(rule, "timeline manager does not have one global send terminal subscription"));
+  if (outbound.includes("SharedSendCompletionTracker") || manager.includes("SharedSendCompletionTracker")) failures.push(sourceContractFailure(rule, "obsolete shared send tracker remains"));
+  return failures;
+}
+
+export function checkCoreTimelineSendSupervision() {
+  const rule = "core.timeline.send_queue_supervision";
+  const outbound = timelineSource("outbound_send.rs");
+  const manager = timelineSource("manager.rs");
+  const route = timelineItemBody("outbound_send.rs", "async fn route_submission_to_worker");
+  const run = timelineItemBody("manager.rs", "async fn run(mut self)");
+  const supervisor = timelineItemBody("outbound_send.rs", "impl SendEnqueueWorkerSupervisor");
+  const supervisorDrop = timelineItemBody("outbound_send.rs", "impl Drop for SendEnqueueWorkerSupervisor");
+  const managerDrop = timelineItemBody("manager.rs", "impl Drop for TimelineManagerActor");
+  const runner = timelineItemBody("outbound_send.rs", "fn spawn_send_enqueue_future");
+  const spawn = route?.indexOf("self.spawn_send_enqueue") ?? -1;
+  const activate = route?.indexOf("activate_registration") ?? -1;
+  const action = route?.indexOf("self.action_tx.send") ?? -1;
+  const release = route?.indexOf("permit_tx.send") ?? -1;
+  const failures = [];
+  if (spawn < 0 || activate < 0 || action < 0 || release < 0 || !(spawn < activate && activate < action && action < release)) failures.push(sourceContractFailure(rule, "supervised send worker is not permit-blocked through reducer delivery"));
+  for (const marker of ["TimelineActorMessage::SendText", "TimelineActorMessage::SendReply", "TimelineActorMessage::UploadAndSendMedia"]) if (outbound.includes(marker) || manager.includes(marker)) failures.push(sourceContractFailure(rule, `replaceable actor owns ${marker}`));
+  for (const marker of ["route_send_to_worker_or_fail", "route_submission_to_worker", "route_media_send_to_worker_or_fail"]) if (!outbound.includes(marker)) failures.push(sourceContractFailure(rule, `send path lacks ${marker}`));
+  if (!outbound.includes("enqueue_timeline_send(context, payload).await")) failures.push(sourceContractFailure(rule, "send payloads bypass supervised enqueue"));
+  const workerPoll = run?.indexOf("worker = self.send_enqueue_workers.tasks.next()") ?? -1;
+  const mailbox = run?.indexOf("msg = self.msg_rx.recv()") ?? -1;
+  const join = run?.indexOf("self.join_send_enqueue_workers().await") ?? -1;
+  const observer = run?.indexOf("self.global_send_completion_observer_future.take()") ?? -1;
+  const actors = run?.indexOf("let timeline_actors = self") ?? -1;
+  if (!run?.includes("if !self.send_enqueue_workers.tasks.is_empty()") || workerPoll < 0 || mailbox < 0 || workerPoll >= mailbox) failures.push(sourceContractFailure(rule, "manager does not poll nonempty worker futures before its mailbox"));
+  if (join < 0 || observer < 0 || actors < 0 || !(join < observer && observer < actors)) failures.push(sourceContractFailure(rule, "manager shutdown order drops observer or actors too early"));
+  for (const marker of ["fn cancel_all(&mut self)", "self.tasks = FuturesUnordered::new()"]) if (!supervisor?.includes(marker)) failures.push(sourceContractFailure(rule, `worker supervisor lacks ${marker}`));
+  for (const marker of ["self.terminal_ingress.stop_accepting()", "self.cancel_all()"]) if (!supervisorDrop?.includes(marker)) failures.push(sourceContractFailure(rule, `worker supervisor drop lacks ${marker}`));
+  const admission = managerDrop?.indexOf("self.terminal_ingress.stop_accepting()") ?? -1;
+  const cancel = managerDrop?.indexOf("self.send_enqueue_workers.cancel_all()") ?? -1;
+  const dropObserver = managerDrop?.indexOf("self.global_send_completion_observer_future.take()") ?? -1;
+  if (admission < 0 || cancel < 0 || dropObserver < 0 || !(admission < cancel && cancel < dropObserver)) failures.push(sourceContractFailure(rule, "manager drop does not close admission, workers, then observer"));
+  if (!runner?.includes("AssertUnwindSafe") || !runner?.includes(".catch_unwind()")) failures.push(sourceContractFailure(rule, "enqueue future lacks panic isolation"));
+  return failures;
+}
+
+export function checkCoreTimelineRoomReadMarker() {
+  const rule = "core.timeline.room_read_marker";
+  const source = timelineSource("read_state.rs");
+  const network = timelineSection("read_state.rs", "async fn perform_read_network_operation", "async fn run_send_enqueue_future");
+  const actor = timelineSection("read_state.rs", "async fn handle_read_success", "async fn handle_own_read_receipt_changed");
+  const settlement = timelineSection("read_state.rs", "async fn settle_read_operation", "async fn route_to_actor_or_fail");
+  const failures = [];
+  for (const marker of ["send_multiple_receipts", "room.send_multiple_receipts", "fully_read_marker", "private_read_receipt"]) if (!network?.includes(marker)) failures.push(sourceContractFailure(rule, `room read marker lacks ${marker}`));
+  if (network?.includes("send_single_receipt(ReceiptType::FullyRead")) failures.push(sourceContractFailure(rule, "room read marker uses standalone fully-read receipt"));
+  for (const marker of ["AppAction::FullyReadMarkerUpdated", "emit_action_reliable"]) if (!actor?.includes(marker)) failures.push(sourceContractFailure(rule, `read success lacks ${marker}`));
+  if (!settlement?.includes("AppAction::RoomMarkedAsReadSucceeded")) failures.push(sourceContractFailure(rule, "read settlement does not clear room unread state"));
+  if (!source.includes("async fn perform_read_network_operation")) failures.push(sourceContractFailure(rule, "read network worker is missing"));
+  return failures;
+}
+
+export function checkCoreTimelineThreadReadReceipts() {
+  const rule = "core.timeline.thread_read_receipts";
+  const worker = timelineSection("read_state.rs", "async fn perform_read_network_operation", "async fn run_send_enqueue_future");
+  const failures = [];
+  for (const marker of ["ReadStateKey::ThreadRead", "ReceiptThread::Thread", "send_single_receipt"]) if (!worker?.includes(marker)) failures.push(sourceContractFailure(rule, `thread read receipt lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreTimelineReadCompletionPriority() {
+  const rule = "core.timeline.read_completion_priority";
+  const run = timelineItemBody("manager.rs", "async fn run(mut self)");
+  const completion = run?.indexOf("completion = self.read_workers.tasks.next()") ?? -1;
+  const mailbox = run?.indexOf("msg = self.msg_rx.recv()") ?? -1;
+  return completion >= 0 && mailbox >= 0 && completion < mailbox
+    ? []
+    : [sourceContractFailure(rule, "read completion lane does not precede the ordinary mailbox")];
+}
+
+export function checkCoreTimelineReplayAttention() {
+  const rule = "core.timeline.replay_attention";
+  const replay = timelineItemBody("navigation.rs", "fn handle_replay_initial_items");
+  return replay?.includes("ThreadAttentionObservation::Replay") && !replay.includes("ThreadAttentionTracker::default()")
+    ? []
+    : [sourceContractFailure(rule, "thread replay resets semantic attention tracking")];
+}
+
+export function checkCoreTimelineReceiptTracking() {
+  const rule = "core.timeline.receipt_tracking";
+  const builder = timelineSection("relay.rs", "fn koushi_timeline_builder", "struct PreparedRelayRecovery");
+  const failures = [];
+  if (!builder?.includes("TimelineReadReceiptTracking::MessageLikeEvents")) failures.push(sourceContractFailure(rule, "timeline builder does not use message-like receipt tracking"));
+  if (builder?.includes("TimelineReadReceiptTracking::AllEvents")) failures.push(sourceContractFailure(rule, "timeline builder tracks state-event receipts"));
+  return failures;
+}
+
+export function checkCoreTimelineReceiptObservationDelivery() {
+  const rule = "core.timeline.receipt_observation_delivery";
+  const diff = timelineItemBody("relay.rs", "async fn handle_diff_batch");
+  const delivery = timelineItemBody("item_projection.rs", "async fn emit_receipt_observation_actions");
+  const failures = [];
+  if (!diff?.includes("emit_live_receipt_observation_actions")) failures.push(sourceContractFailure(rule, "receipt diffs bypass the production observation path"));
+  if (!delivery?.includes("send_generation_fenced")) failures.push(sourceContractFailure(rule, "receipt actions lack generation fencing"));
+  if (diff?.includes("try_send(vec![action])")) failures.push(sourceContractFailure(rule, "receipt actions use lossy delivery"));
+  return failures;
+}
+
+export function checkCoreTimelineInitialReceiptObservation() {
+  const rule = "core.timeline.initial_receipt_observation";
+  const startup = timelineSection("actor.rs", "let initial_receipts = live_event_receipts_from_sdk_items", "let thread_attention = ThreadAttentionTracker::hydrate");
+  const failures = [];
+  if (!startup?.includes("emit_receipt_observation_actions")) failures.push(sourceContractFailure(rule, "initial receipts bypass local profile observation"));
+  if (startup?.includes("LiveRoomReceiptsUpdated {")) failures.push(sourceContractFailure(rule, "initial receipts bypass the ordered receipt batch"));
+  if (startup?.includes("try_send(actions)")) failures.push(sourceContractFailure(rule, "initial receipts use lossy delivery"));
+  return failures;
+}
+
+export function checkCoreTimelineRecoveryReceiptObservation() {
+  const rule = "core.timeline.recovery_receipt_observation";
+  const recovery = timelineSection("relay.rs", "async fn handle_relay_overflow", "// ---------------------------------------------------------------------------\n// Relay task");
+  const failures = [];
+  if (!recovery?.includes("emit_receipt_observation_actions")) failures.push(sourceContractFailure(rule, "receipt recovery bypasses local profile observation"));
+  if (recovery?.includes("if let Some(action) = receipts_action")) failures.push(sourceContractFailure(rule, "receipt recovery publishes an unobserved action"));
+  return failures;
+}
+
+export function checkCoreTimelineOriginObserver() {
+  const rule = "core.timeline.origin_observer";
+  const spawn = timelineItemBody("actor.rs", "pub(super) async fn spawn(");
+  const origin = timelineItemBody("diagnostics.rs", "fn event_cache_origin_trace_token");
+  const failures = [];
+  for (const [body, marker] of [[spawn, "startup_trace::trace_origin"], [spawn, "event_cache()"], [origin, "EventsOrigin"]]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `timeline origin observer lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreTimelineRoomKeyReshare() {
+  const rule = "core.timeline.room_key_reshare";
+  const source = timelineSource("room_key_recovery.rs");
+  const handler = timelineSection("room_key_recovery.rs", "fn handle_room_key_reshare(\n", "fn take_room_key_reshare_worker");
+  const failures = [];
+  if (handler?.includes(".await") || handler?.includes("force_reshare_room_key")) failures.push(sourceContractFailure(rule, "room-key handler performs SDK work on the manager"));
+  if (!source.includes("RoomKeyReshareCompleted")) failures.push(sourceContractFailure(rule, "room-key worker has no private completion message"));
+  return failures;
+}
+
+export function checkCoreTimelineRoomFocus() {
+  const rule = "core.timeline.room_focus";
+  const build = timelineItemBody("manager.rs", "async fn build_timeline_actor_handle");
+  const focus = build?.split("let focus = match &key.kind").at(1)?.split("let timeline_result").at(0);
+  const room = focus?.split("TimelineKind::Room").at(1)?.split("TimelineKind::Thread").at(0);
+  return room?.includes("hide_threaded_events: false")
+    ? []
+    : [sourceContractFailure(rule, "room live timelines hide threaded events")];
+}
+
+export function checkCoreTimelineThreadRootHydration() {
+  const rule = "core.timeline.thread_root_hydration";
+  const source = timelineSource("thread_projection.rs");
+  const hydration = sourceSection(source, "fn maybe_hydrate_missing_thread_roots", "async fn handle_ignored_users_updated");
+  const commit = sourceSection(source, "async fn commit_prepared_thread_root_hydration_for_generation", "fn thread_root_projection_action_from_record");
+  const failures = [];
+  if (!hydration?.includes("missing_activities") || !hydration.includes("commit_prepared_thread_root_hydration_for_generation")) failures.push(sourceContractFailure(rule, "missing roots do not request bounded hydration"));
+  for (const marker of ["reserve_owned().await", "ThreadRootProjectionDecision::StartFetch", "schedule_aggregate_refresh", "TimelineMessage::StartAggregateRefresh", "actor_generation"]) if (!commit?.includes(marker)) failures.push(sourceContractFailure(rule, `root hydration commit lacks ${marker}`));
+  if (commit?.includes("TimelineMessage::StartThreadRootProjectionFetch") || commit?.includes("try_send")) failures.push(sourceContractFailure(rule, "root hydration commit uses an obsolete or lossy path"));
+  if (hydration?.includes("paginate_backwards(") || hydration?.includes("handle_restore_timeline_anchor(")) failures.push(sourceContractFailure(rule, "root hydration initiates pagination or anchor materialization"));
+  return failures;
+}
+
+export function checkCoreTimelineSdkProjectionAccessors() {
+  const rule = "core.timeline.sdk_projection_accessors";
+  const projection = timelineItemBody("item_projection.rs", "fn sdk_item_to_timeline_item_with_send_states");
+  const compact = projection?.replace(/\s/gu, "") ?? "";
+  const failures = [];
+  for (const marker of ["content().thread_root()", "content().thread_summary()"]) if (!compact.includes(marker)) failures.push(sourceContractFailure(rule, `SDK projection lacks ${marker}`));
+  return failures;
+}
+
+export function checkCoreTimelineReceiptAttentionOrdering() {
+  const rule = "core.timeline.receipt_attention_ordering";
+  const recovery = timelineItemBody("relay.rs", "async fn handle_relay_overflow");
+  const startup = timelineItemBody("actor.rs", "pub(super) async fn spawn(");
+  const managerCompletion = timelineItemBody("read_state.rs", "async fn handle_read_worker_completion");
+  const actorApply = timelineItemBody("read_state.rs", "async fn handle_read_success");
+  const settlement = timelineItemBody("read_state.rs", "async fn settle_read_waiters");
+  const subscribe = startup?.indexOf("subscribe_own_user_read_receipts_changed") ?? -1;
+  const query = startup?.indexOf("latest_user_read_receipt_timeline_event_id") ?? -1;
+  const acknowledge = actorApply?.indexOf("thread_attention.acknowledge") ?? -1;
+  const reliable = actorApply?.indexOf("emit_action_reliable(action).await") ?? -1;
+  const failures = [];
+  if (!recovery?.includes("if let Some(action) = self.thread_attention.reconcile") || !recovery.includes("self.emit_action_reliable(action).await")) failures.push(sourceContractFailure(rule, "recovery attention is not reliably projected"));
+  if (subscribe < 0 || query < 0 || subscribe >= query) failures.push(sourceContractFailure(rule, "receipt observer subscribes after its initial query"));
+  if (!managerCompletion?.includes("self.spawn_read_actor_apply(operation.clone())") || managerCompletion.includes("LiveSignalsEvent::ReadReceiptSent")) failures.push(sourceContractFailure(rule, "read success settles before actor application"));
+  if (acknowledge < 0 || reliable < 0 || acknowledge >= reliable) failures.push(sourceContractFailure(rule, "thread attention is emitted before acknowledgement"));
+  if (!settlement?.includes("LiveSignalsEvent::ReadReceiptSent")) failures.push(sourceContractFailure(rule, "read receipt success is not owned by manager settlement"));
+  return failures;
+}
+
 export function checkCoreAccountSessionReplacementTeardown() {
   const rule = "core.account.session_replacement_teardown";
   const install = accountItemBody("session_lifecycle.rs", "async fn install_provisional_session");
@@ -2531,6 +3204,59 @@ export function runSourceContractRules() {
     checkCoreThreadsOpenSubscriptionInitialPage(),
     checkCoreThreadsPaginationRequestCorrelation(),
     checkCoreThreadsReliableRelays(),
+    checkCoreTimelineUnsubscribeCleanupOrder(),
+    checkCoreTimelineStartupTrace(),
+    checkCoreTimelineTraceTokens(),
+    checkCoreTimelineGapRepairFailureResume(),
+    checkCoreTimelineGapInspectionResume(),
+    checkCoreTimelineGapRepairScheduler(),
+    checkCoreTimelineProfileChangeProjection(),
+    checkCoreTimelineSearchReliableDelivery(),
+    checkCoreTimelineMediaAttentionReliableDelivery(),
+    checkCoreTimelineRetryQueueOrder(),
+    checkCoreTimelineCancelQueueOrder(),
+    checkCoreTimelineSignalTraces(),
+    checkCoreTimelineLinkPreviewTrace(),
+    checkCoreTimelineLinkPreviewOffLoop(),
+    checkCoreTimelineLinkPreviewCancellation(),
+    checkCoreTimelineInitialSearchForward(),
+    checkCoreTimelineSubscribeSuccess(),
+    checkCoreTimelineSubscribeReliableSettles(),
+    checkCoreTimelineThreadFocus(),
+    checkCoreTimelineIdempotentSubscribe(),
+    checkCoreTimelineSyncStartedRebuild(),
+    checkCoreTimelineEnsureSubscribed(),
+    checkCoreTimelineReplaySubscribed(),
+    checkCoreTimelineMediaDownloadLifecycle(),
+    checkCoreTimelineMediaDownloadDiagnostics(),
+    checkCoreTimelinePaginationScheduler(),
+    checkCoreTimelinePaginationCancellation(),
+    checkCoreTimelinePaginationTerminalRelease(),
+    checkCoreTimelineRestoreRoomBounded(),
+    checkCoreTimelineRestoreBudget(),
+    checkCoreTimelineRestoreCoalescing(),
+    checkCoreTimelineRestoreTerminal(),
+    checkCoreTimelineSendAdmissionGuard(),
+    checkCoreTimelineSendCompletionGuard(),
+    checkCoreTimelineSendSubmissionRoute(),
+    checkCoreTimelineThreadReplySubmissionRoute(),
+    checkCoreTimelineThreadComposerRoute(),
+    checkCoreTimelineOutboundState(),
+    checkCoreTimelineSendSupervision(),
+    checkCoreTimelineRoomReadMarker(),
+    checkCoreTimelineThreadReadReceipts(),
+    checkCoreTimelineReadCompletionPriority(),
+    checkCoreTimelineReplayAttention(),
+    checkCoreTimelineReceiptTracking(),
+    checkCoreTimelineReceiptObservationDelivery(),
+    checkCoreTimelineInitialReceiptObservation(),
+    checkCoreTimelineRecoveryReceiptObservation(),
+    checkCoreTimelineOriginObserver(),
+    checkCoreTimelineRoomKeyReshare(),
+    checkCoreTimelineRoomFocus(),
+    checkCoreTimelineThreadRootHydration(),
+    checkCoreTimelineSdkProjectionAccessors(),
+    checkCoreTimelineReceiptAttentionOrdering(),
     checkStateFocusedContextReducerContract(),
     checkStateHasNoLegacySyncModeVocabulary(),
     checkSdkPasswordSmokeRuntimeSafety(),
