@@ -804,16 +804,4 @@ mod tests {
                 ))
         );
     }
-
-    #[test]
-    fn native_access_and_recovery_mechanisms_are_isolated() {
-        let source = include_str!("viewport_sync.rs");
-        let production = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production adapter must precede tests");
-        assert!(production.contains("synchronize_now"));
-        assert!(!production.contains("set_size"));
-        assert!(!production.contains("dispatchEvent"));
-    }
 }

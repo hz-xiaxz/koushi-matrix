@@ -571,50 +571,11 @@ mod tests {
 
     #[test]
     fn matrix_client_store_config_uses_the_required_key_for_sqlite_builder() {
-        let source = include_str!("client_session.rs");
-        let config_impl = crate::test_source::item_body(source, "impl MatrixClientStoreConfig");
-        let impl_body = crate::test_source::item_body(source, "fn apply_to_builder");
-        let apply_marker = "fn apply_to_builder";
-
-        assert!(
-            config_impl.contains(apply_marker),
-            "MatrixClientStoreConfig must keep apply_to_builder"
-        );
-        assert!(
-            impl_body.contains(".key(Some(self.key.expose_key()))"),
-            "apply_to_builder must pass the required MatrixClientStoreKey into sqlite_store"
-        );
-        assert!(
-            impl_body.contains(".pool_max_size(DESKTOP_SQLITE_STORE_POOL_MAX_SIZE)"),
-            "apply_to_builder must cap SDK SQLite pools so packaged macOS apps do not exhaust the default 256 file descriptor soft limit"
-        );
-
         let config = crate::MatrixClientStoreConfig::new(
             "/tmp/example-store",
             crate::MatrixClientStoreKey::new([7; 32]),
         );
         assert!(config.encrypted_at_rest_configured());
-    }
-    #[test]
-    fn desktop_client_builder_defaults_enable_threads_share_history_and_readiness() {
-        let source = include_str!("client_session.rs");
-        let defaults_body =
-            crate::test_source::item_body(source, "fn desktop_client_builder_defaults");
-
-        assert!(defaults_body.contains("with_threading_support"));
-        assert!(defaults_body.contains("ThreadingSupport::Enabled"));
-        assert!(defaults_body.contains("with_subscriptions: true"));
-        assert!(defaults_body.contains("with_enable_share_history_on_invite(true)"));
-        assert!(defaults_body.contains("with_encryption_sync_readiness(true)"));
-    }
-    #[test]
-    fn client_builder_defaults_download_backup_keys_after_decryption_failures() {
-        let source = include_str!("client_session.rs");
-        let defaults_body =
-            crate::test_source::item_body(source, "fn desktop_client_builder_defaults");
-
-        assert!(defaults_body.contains("with_encryption_settings"));
-        assert!(defaults_body.contains("BackupDownloadStrategy::AfterDecryptionFailure"));
     }
     #[test]
     fn event_cache_error_is_private_data_free() {

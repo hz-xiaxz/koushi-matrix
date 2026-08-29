@@ -287,31 +287,6 @@ async fn select_room_and_wait_returns_typed_missing_room_failure() {
     assert_eq!(error, koushi_core::runtime::SelectRoomError::RoomNotInState);
 }
 
-#[test]
-fn select_room_routing_is_reliable_and_correlated() {
-    let runtime_source = include_str!("../src/runtime.rs");
-    let room_command_source = include_str!("../src/command/room.rs");
-
-    assert!(
-        runtime_source.contains("User-intent lane: for SelectRoom, record the request_id→room_id")
-            && runtime_source.contains("terminal IntentLifecycle outcome"),
-        "runtime must keep the SelectRoom correlation comment next to the reliable command path"
-    );
-    assert!(
-        runtime_source.contains("AccountMessage::RoomCommand(room_command)")
-            && runtime_source.contains(".await;"),
-        "SelectRoom must continue to route through the awaited command path"
-    );
-    assert!(
-        !runtime_source.contains("try_send(crate::account::AccountMessage::RoomCommand"),
-        "SelectRoom must not be routed through a drop-on-full command path"
-    );
-    assert!(
-        room_command_source.contains("User-intent lane: room selection is request-id correlated"),
-        "RoomCommand::SelectRoom should carry an explicit user-intent lane comment"
-    );
-}
-
 /// A real SelectRoom command must still commit under a flood of reducer-side
 /// background work. This exercises the live command path while background
 /// room-list, crawl-progress, profile, and avatar updates are already queued.

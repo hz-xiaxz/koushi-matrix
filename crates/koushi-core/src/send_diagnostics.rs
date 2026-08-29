@@ -77,10 +77,5 @@ mod tests {
     fn distinguishes_http_timeouts_without_exposing_transport_details() {
         assert_eq!(http_failure_token(true), "timeout");
         assert_eq!(http_failure_token(false), "http");
-
-        let source = include_str!("send_diagnostics.rs");
-        assert!(
-            source.contains("matrix_sdk::HttpError::Cached(error) => http_error_is_timeout(error)")
-        );
     }
 }

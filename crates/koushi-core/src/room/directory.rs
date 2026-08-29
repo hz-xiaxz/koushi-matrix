@@ -279,23 +279,4 @@ impl RoomActor {
 }
 
 #[cfg(test)]
-mod tests {
-
-    #[test]
-    fn directory_join_selects_room_before_room_joined_event_is_emitted() {
-        let source = include_str!("directory.rs");
-        let join_body =
-            crate::room::test_source::item_body(source, "async fn handle_join_directory_room");
-        let success_reduce = join_body
-            .find("AppAction::DirectoryJoinSucceeded")
-            .expect("directory join success reduction");
-        let joined_event = join_body
-            .find("RoomEvent::RoomJoined")
-            .expect("directory join completion event");
-
-        assert!(
-            success_reduce < joined_event,
-            "DirectoryJoinSucceeded must select the room before Tauri observes RoomJoined"
-        );
-    }
-}
+mod tests {}

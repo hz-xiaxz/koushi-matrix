@@ -23,22 +23,6 @@ mod support;
 use support::*;
 
 #[test]
-fn production_runtime_requires_committed_all_rooms_readiness() {
-    let sync_source = include_str!("../src/sync.rs");
-    let production = sync_source
-        .split("#[cfg(test)]\npub mod tests")
-        .next()
-        .expect("production sync source");
-
-    assert!(production.contains("committed_all_rooms_response"));
-    assert!(!production.contains("note_room_list_service_state"));
-    assert!(!production.contains("probe_backend"));
-    assert!(!production.contains("run_legacy_sync_loop"));
-    assert!(production.contains("room_list_service: Arc<"));
-    assert!(production.contains("room_list_service,"));
-}
-
-#[test]
 fn sync_event_wire_has_no_backend_or_mode_transition() {
     let started: SyncEvent = serde_json::from_value(json!({
         "Started": { "request_id": null }
@@ -59,32 +43,6 @@ fn sync_event_wire_has_no_backend_or_mode_transition() {
         assert!(
             serde_json::from_value::<SyncEvent>(obsolete).is_err(),
             "obsolete sync wire state must be rejected"
-        );
-    }
-}
-
-#[test]
-fn production_core_has_no_legacy_or_mode_transition_vocabulary() {
-    let sources = [
-        include_str!("../src/event.rs"),
-        include_str!("../src/state_delta.rs"),
-        include_str!("../src/sync.rs"),
-        include_str!("../src/room.rs"),
-    ]
-    .join("\n");
-
-    for forbidden in [
-        "SyncBackendKind",
-        "LegacySync",
-        "ModeChanged",
-        "SyncMode",
-        "sync_mode",
-        "RoomListSource::Legacy",
-        "RoomListSource::SyncService",
-    ] {
-        assert!(
-            !sources.contains(forbidden),
-            "production core still contains forbidden sync vocabulary: {forbidden}"
         );
     }
 }

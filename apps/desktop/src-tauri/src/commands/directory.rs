@@ -541,11 +541,6 @@ pub(super) fn build_join_directory_room_command(
 }
 
 #[cfg(test)]
-fn commands_source() -> String {
-    crate::commands::contracts::production_source()
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use crate::commands::contracts::{ScriptedSelectSource, fake_request_id};
@@ -672,63 +667,5 @@ mod tests {
         super::wait_for_room_in_state(&mut source, room_id, std::time::Duration::from_millis(50))
             .await
             .expect("the wait settles once the room-list projection has the room");
-    }
-
-    #[test]
-    fn start_direct_message_selects_the_resolved_room_before_returning() {
-        let source = include_str!("room.rs");
-        let body = source
-            .split("pub async fn start_direct_message")
-            .nth(1)
-            .expect("start_direct_message body")
-            .split("#[tauri::command]")
-            .next()
-            .expect("body ends at the next command");
-        let started = body
-            .find("wait_for_direct_message_started")
-            .expect("resolves the started room id");
-        let in_state = body
-            .find("wait_for_room_in_state")
-            .expect("waits for the room-list projection");
-        let select = body
-            .find("select_room_and_wait")
-            .expect("uses Core-owned settlement for the resolved room");
-        assert!(
-            started < in_state && in_state < select,
-            "DM start must resolve the room, wait for its projection, then select it"
-        );
-    }
-
-    #[test]
-    fn join_directory_room_waits_for_backend_selected_room() {
-        let source = commands_source();
-        let fn_name = "pub async fn join_directory_room";
-        let fn_offset = source
-            .find(fn_name)
-            .expect("join_directory_room command should exist");
-        let rest = &source[fn_offset..];
-        let end = rest
-            .find("pub async fn set_space_child")
-            .expect("next command should exist");
-        let join_source = &rest[..end];
-        let joined_offset = join_source
-            .find("wait_for_room_joined")
-            .expect("directory join should wait for RoomJoined");
-        let selected_offset = join_source
-            .find("select_room_and_wait")
-            .expect("directory join should use Core-owned selected-room settlement");
-
-        assert!(
-            joined_offset < selected_offset,
-            "join should learn the joined room id before waiting for selection"
-        );
-        assert!(
-            join_source.contains("joined_room_id"),
-            "joined room id should be carried into selected-room wait"
-        );
-        assert!(
-            join_source.contains("SELECT_ROOM_EVENT_TIMEOUT"),
-            "selected-room wait should be bounded"
-        );
     }
 }

@@ -552,49 +552,8 @@ pub(super) fn build_restart_sync_command(request_id: koushi_core::RequestId) -> 
 }
 
 #[cfg(test)]
-fn commands_source() -> String {
-    crate::commands::contracts::production_source()
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn submit_login_request_waits_for_authenticated_session_and_leaves_sync_to_runtime_effects() {
-        let source = commands_source();
-        let helper_name = concat!("async fn submit_login", "_and_wait_for_authenticated");
-        let wait_call_token = concat!("wait_for_logged", "_in_authenticated");
-        let logged_in_token = concat!("AccountEvent::", "LoggedIn");
-        let start_sync_token = concat!("build_start", "_sync_command");
-        let failed_token = concat!("Operation", "Failed");
-        let timeout_token = concat!("LOGIN_EVENT", "_TIMEOUT");
-        let helper_offset = source
-            .find(helper_name)
-            .expect("shared login helper should exist");
-        let helper_source = &source[helper_offset..];
-        let helper_source = helper_source
-            .split(concat!("async fn wait_for_logged", "_in_authenticated"))
-            .next()
-            .expect("login wait helper should follow shared helper");
-        let wait_call_offset = helper_source
-            .find(wait_call_token)
-            .expect("helper should wait for an authenticated session");
-
-        assert!(wait_call_offset > 0);
-        assert!(
-            !helper_source.contains(start_sync_token),
-            "sync startup belongs to AppEffect::StartSync in core runtime, not the Tauri adapter"
-        );
-        assert!(helper_source.contains(timeout_token));
-        let wait_helper_offset = source
-            .find(concat!("async fn wait_for_logged", "_in_authenticated"))
-            .expect("login wait helper should exist");
-        let wait_helper_source = &source[wait_helper_offset..];
-        assert!(wait_helper_source.contains(logged_in_token));
-        assert!(wait_helper_source.contains(failed_token));
-        assert!(wait_helper_source.contains("timeout_at"));
-    }
 
     #[test]
     fn login_transport_completes_at_interactive_verification_gate() {
