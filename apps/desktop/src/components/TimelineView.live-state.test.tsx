@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { roomTimelineKey, threadTimelineKey, type CoreEventPayload, type TimelineItem } from "../domain/coreEvents";
 import { setActiveLocaleProfile } from "../i18n/messages";
+import { createManualTimelineViewportScheduler } from "./timeline/TimelineViewportScheduler";
 import { KEY, baseTransport, message, mockTimelineRects } from "./timelineViewTestSupport";
 import { TimelineView, clearTimelineViewportSessionMemoryForTests } from "./TimelineView";
 import type { LiveSignalsState } from "../domain/types";
@@ -510,7 +511,8 @@ describe("TimelineView", () => {
   });
 
 
-  it("hides the first-unread pill while keeping the unread marker and bottom pill", async () => {
+  it("hides the first-unread pill while keeping the unread marker and bottom pill", () => {
+    const scheduler = createManualTimelineViewportScheduler();
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const transport = baseTransport({
       listenCoreEvents(nextListener) {
@@ -528,10 +530,11 @@ describe("TimelineView", () => {
         roomId="!room:example.invalid"
         transport={transport}
         onReply={vi.fn()}
+        viewportScheduler={scheduler}
       />
     );
 
-    const timeline = await screen.findByTestId("timeline-view");
+    const timeline = screen.getByTestId("timeline-view");
     Object.defineProperty(timeline, "clientHeight", { value: 500, configurable: true });
     Object.defineProperty(timeline, "scrollHeight", { value: 650 * 72, configurable: true });
     Object.defineProperty(timeline, "scrollTop", {
@@ -577,13 +580,12 @@ describe("TimelineView", () => {
     timeline.scrollTop = 0;
     fireEvent.wheel(timeline, { deltaY: -1 });
     fireEvent.scroll(timeline);
+    act(() => scheduler.flushAll());
 
-    await waitFor(() => {
-      expect(timeline.getAttribute("data-virtualized")).toBe("true");
-      expect(screen.queryByRole("button", { name: /Jump to first unread/ })).toBeNull();
-      expect(screen.getByRole("button", { name: /Jump to bottom/ })).toBeTruthy();
-      expect(screen.getByRole("separator", { name: "Unread messages" })).toBeTruthy();
-    });
+    expect(timeline.getAttribute("data-virtualized")).toBe("true");
+    expect(screen.queryByRole("button", { name: /Jump to first unread/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Jump to bottom/ })).toBeTruthy();
+    expect(screen.getByRole("separator", { name: "Unread messages" })).toBeTruthy();
   });
 
 

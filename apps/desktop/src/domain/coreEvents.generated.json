@@ -235,6 +235,7 @@
     "outcome": {
       "kind": "committed"
     },
+    "published_generation": 9,
     "request_id": {
       "connection_id": 3,
       "sequence": 7
@@ -246,6 +247,7 @@
       "kind": "failed_no_op",
       "reason": "room_not_in_state"
     },
+    "published_generation": 9,
     "request_id": {
       "connection_id": 3,
       "sequence": 7

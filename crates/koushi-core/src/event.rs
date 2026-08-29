@@ -81,6 +81,8 @@ pub enum IntentNoOpReason {
     /// The focused projection settled without the requested event, so the
     /// navigation safely returned to the room's live timeline.
     TimelineTargetMissing,
+    /// A later SelectRoom in the same action batch replaced this selection.
+    Superseded,
 }
 
 /// Terminal outcome of a user-intent command (§4.7 Slice 1 telemetry-lane
@@ -128,13 +130,19 @@ pub enum CoreEvent {
     ///
     /// This event is on a DEDICATED TELEMETRY LANE — it must never be mixed
     /// into product `StateDelta` or `StateChanged`, and product state must
-    /// never be derived from it. It is emitted after the reducer runs so the
-    /// AppActor can correlate the outcome with the originating `request_id`.
+    /// never be derived from it. It is emitted after the reducer runs and the
+    /// corresponding snapshot publication, so the AppActor can correlate the
+    /// outcome with the originating `request_id` and exact state generation.
     ///
     /// Slice 1 covers `SelectRoom` only.
     IntentLifecycle {
+        /// The connection-scoped request that produced this terminal outcome.
         request_id: RequestId,
+        /// The typed committed, benign no-op, or failed no-op result.
         outcome: IntentOutcome,
+        /// The generation containing the reduced state, or the current
+        /// generation when the intent produced no delta.
+        published_generation: u64,
     },
 }
 

@@ -936,23 +936,15 @@ pub async fn start_direct_message(
         wait_for_direct_message_started(&mut event_conn, request_id, ROOM_OPERATION_EVENT_TIMEOUT)
             .await?;
     wait_for_room_in_state(&mut event_conn, &room_id, ROOM_OPERATION_EVENT_TIMEOUT).await?;
-    let select_request_id = event_conn.next_request_id();
-    event_conn
-        .command(super::navigation::build_select_room_command(
-            select_request_id,
-            room_id.clone(),
-        ))
+    let selected_snapshot = event_conn
+        .select_room_and_wait(room_id.clone(), SELECT_ROOM_EVENT_TIMEOUT)
         .await
-        .map_err(|e| format!("command submit failed: {e}"))?;
-    super::navigation::wait_for_selected_room(
-        &mut event_conn,
-        select_request_id,
-        &room_id,
-        SELECT_ROOM_EVENT_TIMEOUT,
-    )
-    .await?;
+        .map_err(super::navigation::invoke_error_from_select_room_error)?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        selected_snapshot.state,
+        selected_snapshot.generation,
+    ))
 }
 
 #[tauri::command]

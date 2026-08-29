@@ -13,6 +13,7 @@ import {
 import type { TimelineContinuityState } from "../domain/types";
 import { createTimelineAcknowledgementDelivery } from "../backend/timelineAcknowledgementDelivery";
 import { setActiveLocaleProfile } from "../i18n/messages";
+import { createManualTimelineViewportScheduler } from "./timeline/TimelineViewportScheduler";
 import {
   KEY,
   baseTransport,
@@ -43,6 +44,71 @@ afterEach(() => {
 });
 
 describe("TimelineView", () => {
+  it("drops a stale live-edge follow-up after user viewport input", () => {
+    const scheduler = createManualTimelineViewportScheduler();
+    let listener: ((payload: CoreEventPayload) => void) | null = null;
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        listener = nextListener;
+        return () => undefined;
+      }
+    });
+
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={() => undefined}
+        viewportScheduler={scheduler}
+      />
+    );
+
+    const timeline = screen.getByTestId("timeline-view");
+    Object.defineProperty(timeline, "scrollHeight", { value: 2_000, configurable: true });
+    Object.defineProperty(timeline, "clientHeight", { value: 600, configurable: true });
+    Object.defineProperty(timeline, "scrollTop", {
+      value: 0,
+      writable: true,
+      configurable: true
+    });
+
+    act(() => {
+      listener?.({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [message("$latest", "Latest")]
+          }
+        }
+      });
+      listener?.({
+        kind: "Timeline",
+        event: {
+          NavigationUpdated: {
+            key: KEY,
+            snapshot: navigationSnapshot({
+              can_jump_to_bottom: true,
+              newer_event_count: 1
+            })
+          }
+        }
+      });
+    });
+    act(() => scheduler.flushAll());
+
+    fireEvent.click(screen.getByRole("button", { name: /Jump to bottom/ }));
+    timeline.scrollTop = 700;
+    fireEvent.wheel(timeline, { deltaY: -1 });
+    fireEvent.scroll(timeline);
+    act(() => scheduler.flushAll());
+
+    expect(timeline.scrollTop).toBe(700);
+  });
+
   it("classifies only stable suffix growth as a pure prepend", () => {
     expect(timelineRowsArePurePrependForTests(["b", "c"], ["a", "b", "c"])).toBe(true);
     expect(timelineRowsArePurePrependForTests(["b", "c"], ["b", "x", "c"])).toBe(false);
@@ -943,6 +1009,7 @@ describe("TimelineView", () => {
   });
 
   it("paginates older history when the user scrolls to the top even if prefetch is disabled", async () => {
+    const scheduler = createManualTimelineViewportScheduler();
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const paginateBackwards = vi.fn(async () => undefined);
     const onDiagnosticLogEntry = vi.fn();
@@ -962,6 +1029,7 @@ describe("TimelineView", () => {
         autoLoadOlderMessages={false}
         onReply={vi.fn()}
         onDiagnosticLogEntry={onDiagnosticLogEntry}
+        viewportScheduler={scheduler}
       />
     );
 
@@ -985,10 +1053,9 @@ describe("TimelineView", () => {
     });
     fireEvent.wheel(timeline, { deltaY: -120 });
     fireEvent.scroll(timeline);
+    act(() => scheduler.flushAll());
 
-    await waitFor(() => {
-      expect(paginateBackwards).toHaveBeenCalledWith(KEY);
-    });
+    expect(paginateBackwards).toHaveBeenCalledWith(KEY);
 
     emit({
       kind: "Timeline",

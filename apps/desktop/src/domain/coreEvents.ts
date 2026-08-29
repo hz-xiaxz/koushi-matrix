@@ -1216,7 +1216,8 @@ export type IntentNoOpReason =
   | "session_not_ready"
   | "room_not_in_state"
   | "already_active"
-  | "timeline_target_missing";
+  | "timeline_target_missing"
+  | "superseded";
 
 /**
  * Terminal outcome of a user-intent command (Slice 1: SelectRoom only).
@@ -1261,6 +1262,7 @@ export type CoreEventPayload =
       kind: "IntentLifecycle";
       request_id: RequestId;
       outcome: IntentOutcome;
+      published_generation: number;
     }
   /** Emitted by the Tauri adapter when EventStreamLag is detected. */
   | { kind: "ResyncMarker" };

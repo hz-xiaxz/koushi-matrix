@@ -13,8 +13,7 @@ export type PendingProjectionLayoutTransaction = {
   timelineKeyHash: string;
   generation: number;
   signature: string;
-  revision: number;
-  intentRevision: number;
+  viewportEpoch: number;
   mode: "free-scroll" | "live-edge";
   anchor: ScrollAnchor | null;
 };

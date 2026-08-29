@@ -292,6 +292,7 @@ impl AppActor {
     pub(super) async fn load_composer_drafts_for_current_session(&mut self) {
         let Some(key_id) = composer_draft_session_key(&self.state) else {
             self.composer_draft_load_status = ComposerDraftLoadStatus::Unloaded;
+            self.composer_draft_reload_required = false;
             return;
         };
         if matches!(
@@ -299,9 +300,13 @@ impl AppActor {
             ComposerDraftLoadStatus::Loaded(settled_key)
                 | ComposerDraftLoadStatus::Failed(settled_key)
                 if settled_key == &key_id
-        ) {
+        ) && !self.composer_draft_reload_required
+        {
             return;
         }
+        // A session transition may leave the same account key (lock/unlock).
+        // Flush the captured old draft before reloading it; selection state was
+        // already published by the action loop before this post-commit work.
         self.flush_pending_composer_drafts().await;
 
         let store = self.composer_draft_store_actor.clone();
@@ -314,17 +319,25 @@ impl AppActor {
             Ok(Ok(drafts)) => drafts,
             Ok(Err(_)) | Err(_) => {
                 self.composer_draft_load_status = ComposerDraftLoadStatus::Failed(key_id);
+                self.composer_draft_reload_required = false;
                 record(DiagnosticEvent::new(
                     DiagnosticLevel::Error,
                     "core.composer_draft",
                     "load_failed",
                 ));
+                #[cfg(any(test, feature = "test-hooks"))]
+                self.composer_draft_store_actor
+                    .notify_composer_draft_load_completed_for_testing();
                 return;
             }
         };
         let effects = reduce(&mut self.state, AppAction::ComposerDraftsLoaded { drafts });
         self.composer_draft_load_status = ComposerDraftLoadStatus::Loaded(key_id);
+        self.composer_draft_reload_required = false;
         self.handle_ui_event_effects(&effects).await;
+        #[cfg(any(test, feature = "test-hooks"))]
+        self.composer_draft_store_actor
+            .notify_composer_draft_load_completed_for_testing();
     }
     pub(super) async fn schedule_composer_draft_persist(
         &mut self,

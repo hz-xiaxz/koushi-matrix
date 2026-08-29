@@ -728,8 +728,6 @@ impl StoreActor {
             };
             decrypt_composer_drafts_payload(&self.load_unlock_secret(key_id)?, &bytes)
         })();
-        #[cfg(any(test, feature = "test-hooks"))]
-        self.notify_composer_draft_load_completed_for_testing();
         result
     }
 
@@ -856,7 +854,7 @@ impl StoreActor {
     }
 
     #[cfg(any(test, feature = "test-hooks"))]
-    fn notify_composer_draft_load_completed_for_testing(&self) {
+    pub(crate) fn notify_composer_draft_load_completed_for_testing(&self) {
         let completed = self
             .composer_draft_io_probe
             .lock()

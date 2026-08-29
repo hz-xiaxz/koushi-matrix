@@ -167,6 +167,46 @@ guidance, not a product contract, and never weakens required security, privacy,
 trust-boundary validation, data-loss prevention, accessibility, or explicitly
 approved requirements.
 
+## Issue #738 flake measurement
+
+The required CI workflow remains retry-free. The separate
+`.github/workflows/issue-738-flake-probe.yml` is a scheduled/manual,
+non-required measurement job; a failed probe is reported as a failed probe and
+cannot turn a required check green. It checks out one SHA and runs these named
+probes repeatedly: the Rust
+`committed_room_cleanup_bypasses_a_saturated_account_mailbox` test in
+single-thread and default mode, plus the named stale-live-edge and
+first-unread-pill Vitest tests. Rust test binaries are compiled in an explicit
+warm-up step outside measured attempts, so cold compilation is not mislabeled
+as a test flake. Each individual attempt is bounded to 120 seconds. The closed
+probe command list does not accept arbitrary shell commands and
+child output is not recorded; failures use fixed signatures only.
+
+Run locally with a bounded attempt count:
+
+```bash
+node scripts/flake-probe.mjs --attempts 10 --output-dir artifacts/issue-738-flake-probe
+node scripts/summarize-flake-probe.mjs --sha <40-hex-sha> artifacts/issue-738-flake-probe/flake-probe-results.json
+```
+
+The probe artifact contains one JSON record per executed attempt, JUnit XML,
+and a Markdown summary. `attempt` is an execution of one named test and its
+number restarts in each workflow run; `recorded_at` keeps rows from separate
+artifacts distinct. A GitHub workflow rerun is a separate run and must not
+replace or hide failed attempt records. The summarizer accepts one or more JSON
+result artifacts, reports
+attempt total, failures, failure rate, and the observed date window, and can
+validate one unchanged SHA with `--sha <40-hex-sha>` or
+`--require-unchanged-sha`. Use `--max-failure-rate 0.01` when a nonzero exit at
+or above the strict 1% threshold is wanted.
+
+A seven-day result is eligible for interpretation only when the observed
+attempt timestamps span at least seven days; a shorter window remains pending.
+The `<1%` value is computed from all attempts, not workflow reruns. Issue #738
+also requires ten consecutive full CI runs for one unchanged SHA with no rerun;
+the flake probe does not measure that criterion. Acceptance remains pending
+until both the ten-CI-run and seven-day attempt-level evidence actually exists.
+
 ## IME-safe text input checks
 
 When changing any text field, textarea, password/recovery entry, upload caption,
