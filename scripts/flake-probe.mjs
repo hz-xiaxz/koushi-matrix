@@ -71,9 +71,9 @@ export const PROBES = Object.freeze([
       "--",
       "vitest",
       "run",
-      "src/components/TimelineView.threads.test.tsx",
+      "src/components/TimelineView.live-state.test.tsx",
       "-t",
-      "renders an unread marker before a moved root by its latest activity identity"
+      "hides the first-unread pill while keeping the unread marker and bottom pill"
     ]
   }
 ]);

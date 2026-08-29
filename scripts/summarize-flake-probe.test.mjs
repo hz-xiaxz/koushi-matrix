@@ -144,7 +144,7 @@ test("probe whitelist names non-vacuous exact Rust and Vitest tests", () => {
     "drops a stale live-edge follow-up after user viewport input"
   )));
   assert.ok(vitestProbes.some((probe) => probe.args.includes(
-    "renders an unread marker before a moved root by its latest activity identity"
+    "hides the first-unread pill while keeping the unread marker and bottom pill"
   )));
 });
 

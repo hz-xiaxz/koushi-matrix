@@ -175,8 +175,8 @@ non-required measurement job; a failed probe is reported as a failed probe and
 cannot turn a required check green. It checks out one SHA and runs these named
 probes repeatedly: the Rust
 `committed_room_cleanup_bypasses_a_saturated_account_mailbox` test in
-single-thread and default mode, plus the named stale-live-edge and moved-root
-unread-marker Vitest tests. Rust test binaries are compiled in an explicit
+single-thread and default mode, plus the named stale-live-edge and
+first-unread-pill Vitest tests. Rust test binaries are compiled in an explicit
 warm-up step outside measured attempts, so cold compilation is not mislabeled
 as a test flake. Each individual attempt is bounded to 120 seconds. The closed
 probe command list does not accept arbitrary shell commands and
