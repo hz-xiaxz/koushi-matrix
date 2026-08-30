@@ -467,6 +467,14 @@ impl CoreConnection {
         }
 
         loop {
+            if let Some(outcome) = snapshot_outcome(
+                &expectation,
+                &self.versioned_snapshot(),
+                baseline_generation,
+                allows_initial_snapshot(&expectation),
+            ) {
+                return Ok(outcome);
+            }
             if let Some(outcome) = progress.as_ref().and_then(|progress| {
                 progress.snapshot_outcome(
                     &expectation,

@@ -401,8 +401,12 @@ async fn projection_only_idempotent_outcomes_settle_without_unavailable_terminal
         tokio::time::Instant::now() + Duration::from_secs(1),
     );
     tokio::pin!(wait);
+    assert!(wait.as_mut().now_or_never().is_none());
     control.send_snapshot(versioned(AppState::default(), 1));
-    assert!(matches!(wait.await, Ok(RequestOutcome::SignedOut { .. })));
+    assert!(matches!(
+        wait.as_mut().now_or_never(),
+        Some(Ok(RequestOutcome::SignedOut { .. }))
+    ));
 
     let (mut connection, control) = CoreConnection::new_for_testing(4);
     let request_id = request(12);
@@ -420,10 +424,11 @@ async fn projection_only_idempotent_outcomes_settle_without_unavailable_terminal
         tokio::time::Instant::now() + Duration::from_secs(1),
     );
     tokio::pin!(wait);
+    assert!(wait.as_mut().now_or_never().is_none());
     control.send_snapshot(versioned(closed, 1));
     assert!(matches!(
-        wait.await,
-        Ok(RequestOutcome::FocusedContext { .. })
+        wait.as_mut().now_or_never(),
+        Some(Ok(RequestOutcome::FocusedContext { .. }))
     ));
 
     let (mut connection, control) = CoreConnection::new_for_testing(4);
@@ -440,6 +445,10 @@ async fn projection_only_idempotent_outcomes_settle_without_unavailable_terminal
         tokio::time::Instant::now() + Duration::from_secs(1),
     );
     tokio::pin!(wait);
+    assert!(wait.as_mut().now_or_never().is_none());
     control.send_snapshot(versioned(ready_state("@alice:example.invalid"), 1));
-    assert!(matches!(wait.await, Ok(RequestOutcome::Search { .. })));
+    assert!(matches!(
+        wait.as_mut().now_or_never(),
+        Some(Ok(RequestOutcome::Search { .. }))
+    ));
 }
