@@ -81,7 +81,7 @@ fn media_staging_limits_are_named_and_checked_before_preparation() {
 
 #[tokio::test]
 async fn staging_publishes_preparing_then_ready_and_normalizes_mime() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (_runtime, mut connection) = ready_runtime().await;
     let before = connection.versioned_snapshot();
     let snapshot = connection
         .stage_upload_bytes(target(), vec![item("one", b"bytes")])
@@ -385,10 +385,17 @@ async fn blocked_preparation_preserves_caption_and_releases_removed_bytes() {
     let caption = ComposerDocument::new(vec![ComposerInline::Text {
         text: "caption while preparing".to_owned(),
     }]);
-    connection
-        .update_staged_upload_caption(target(), "captioned".to_owned(), Some(caption.clone()))
-        .await
-        .expect("caption mutation should settle during preparation");
+    runtime
+        .inject_actions(vec![AppAction::UploadStagingCaptionChanged {
+            target: target(),
+            staged_id: "captioned".to_owned(),
+            caption: Some(caption.clone()),
+        }])
+        .await;
+    support::wait_for_state_event(&mut connection, |state| {
+        state.timeline.staged_uploads[0].caption.as_ref() == Some(&caption)
+    })
+    .await;
     barrier.release();
     let settled = task.await.unwrap().expect("staging should settle");
     assert_eq!(
@@ -411,10 +418,13 @@ async fn blocked_preparation_preserves_caption_and_releases_removed_bytes() {
             .await
     });
     remove_barrier.wait_started().await;
-    connection
-        .clear_upload_staging(target())
-        .await
-        .expect("clear should settle while preparation is blocked");
+    runtime
+        .inject_actions(vec![AppAction::UploadStagingCleared { target: target() }])
+        .await;
+    support::wait_for_state_event(&mut connection, |state| {
+        state.timeline.staged_uploads.is_empty()
+    })
+    .await;
     remove_barrier.release();
     assert!(matches!(task.await.unwrap(), Err(MediaStagingError::Stale)));
     let stats = runtime.media_preparation().stats().await;
@@ -481,31 +491,44 @@ async fn selection_generation_race_is_latest_wins_and_stale_is_explicit() {
             .await
     });
     barrier.wait_started().await;
-    let latest = connection
-        .select_staged_upload_output(
-            target(),
-            "race".to_owned(),
-            koushi_state::StagedUploadOutputSelection {
-                resize: StagedUploadResizeChoice::Quarter,
-                format: StagedUploadFormatChoice::Webp,
-            },
+    let latest_selection = koushi_state::StagedUploadOutputSelection {
+        resize: StagedUploadResizeChoice::Quarter,
+        format: StagedUploadFormatChoice::Webp,
+    };
+    runtime
+        .inject_actions(vec![AppAction::UploadStagingOutputSelected {
+            target: target(),
+            staged_id: "race".to_owned(),
+            selection: latest_selection,
+        }])
+        .await;
+    support::wait_for_state_event(&mut connection, |state| {
+        matches!(
+            state.timeline.staged_uploads[0].preparation,
+            StagedUploadPreparation::Ready {
+                pending: Some(selection),
+                ..
+            } if selection == latest_selection
         )
-        .await
-        .expect("latest selection should settle");
+    })
+    .await;
     barrier.release();
     assert!(matches!(
         first.await.unwrap(),
         Err(MediaStagingError::Stale)
     ));
     assert!(matches!(
-        latest.state.timeline.staged_uploads[0].preparation,
-        StagedUploadPreparation::Ready { pending: None, .. }
+        connection.snapshot().timeline.staged_uploads[0].preparation,
+        StagedUploadPreparation::Ready {
+            pending: Some(selection),
+            ..
+        } if selection == latest_selection
     ));
 }
 
 #[tokio::test]
 async fn settings_change_fences_blocked_preparation() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (runtime, connection) = ready_runtime().await;
     let mut barrier = runtime
         .media_staging()
         .install_preparation_barrier_for_testing();

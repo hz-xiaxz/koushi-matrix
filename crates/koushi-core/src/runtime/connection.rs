@@ -363,6 +363,42 @@ impl CoreConnection {
         service.clear(self, target).await
     }
 
+    pub async fn prepared_upload_preview(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+        staged_id: String,
+        variant_id: String,
+    ) -> Result<Vec<u8>, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service
+            .prepared_upload_preview(self, target, staged_id, variant_id)
+            .await
+    }
+
+    pub async fn send_prepared_uploads(
+        &mut self,
+        expected_account: koushi_key::SessionKeyId,
+        generation: crate::composer_draft_lifecycle::ComposerRendererGeneration,
+        lease: crate::composer_draft_lifecycle::ComposerDraftLeaseId,
+        target: koushi_state::ComposerTarget,
+        draft_revision: koushi_state::ComposerDraftRevision,
+    ) -> Result<
+        crate::media_staging::PreparedUploadSendResult,
+        crate::media_staging::PreparedUploadSendError,
+    > {
+        let service = Arc::clone(&self.media_staging);
+        service
+            .send_prepared_uploads(
+                self,
+                expected_account,
+                generation,
+                lease,
+                target,
+                draft_revision,
+            )
+            .await
+    }
+
     /// Submit a command without a composer lease. Revision-bearing composer
     /// commands fail closed and must use [`Self::command_with_composer_lease`].
     pub async fn command(&self, command: CoreCommand) -> Result<(), CommandSubmitError> {

@@ -4,18 +4,24 @@
 //! preparation registry. Byte preparation is deliberately detached from the
 //! registry lock; only the short state/registry commit sections are serialized.
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex as StdMutex},
+    time::Duration,
+};
 
 #[cfg(any(test, feature = "test-hooks"))]
 use tokio::sync::oneshot;
 
 use koushi_state::{
-    ComposerDocument, ComposerTarget, ImageUploadCompressionPolicy, StagedUploadCompressionChoice,
-    StagedUploadItem, StagedUploadKind, StagedUploadOutputSelection, StagedUploadPreparation,
+    ComposerDocument, ComposerDraftRevision, ComposerTarget, ImageUploadCompressionPolicy,
+    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind, StagedUploadOutputSelection,
+    StagedUploadPreparation,
 };
 
 use crate::{
-    command::{AppCommand, CoreCommand},
+    command::{AppCommand, CoreCommand, TimelineCommand, UploadMediaKind, UploadMediaRequest},
     executor,
     ids::AccountKey,
     media_preparation::{
@@ -33,6 +39,9 @@ pub const MAX_MEDIA_STAGING_BATCH_BYTES: usize = 128 * 1024 * 1024;
 /// Maximum number of source items accepted by one staging request.
 pub const MAX_MEDIA_STAGING_BATCH_SIZE: usize = MAX_PREPARATION_BATCH_SIZE;
 const MEDIA_STAGING_TIMEOUT: Duration = Duration::from_secs(5);
+const PREPARED_MEDIA_QUEUE_TIMEOUT: Duration = Duration::from_secs(10);
+const COMPOSER_DRAFT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_secs(10);
+static NEXT_PREPARED_MEDIA_TRANSACTION_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum MediaStagingError {
@@ -68,9 +77,37 @@ pub enum MediaStagingError {
     Outcome(RequestOutcomeError),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum PreparedUploadSendError {
+    #[error("prepared upload account is not active")]
+    AccountMismatch,
+    #[error("prepared upload target is not active")]
+    TargetInactive,
+    #[error("prepared uploads are not sendable")]
+    NotSendable,
+    #[error("prepared upload bytes are no longer available")]
+    PreparedBytesUnavailable,
+    #[error("composer draft revision is stale or exhausted")]
+    DraftRevision,
+    #[error("composer draft permit is invalid")]
+    ComposerPermit,
+    #[error("prepared upload item is no longer available")]
+    StaleItem,
+    #[error("prepared upload command could not be submitted: {0}")]
+    CommandSubmit(crate::runtime::CommandSubmitError),
+    #[error("prepared upload outcome was not observed: {0}")]
+    Outcome(RequestOutcomeError),
+}
+
+pub struct PreparedUploadSendResult {
+    pub accepted_revision: ComposerDraftRevision,
+    pub snapshot: crate::event::VersionedAppStateSnapshot,
+}
+
 #[derive(Clone)]
 pub struct MediaStagingService {
     preparation: Arc<MediaPreparationService>,
+    target_admissions: Arc<StdMutex<BTreeMap<ComposerTarget, Arc<tokio::sync::Mutex<()>>>>>,
     #[cfg(any(test, feature = "test-hooks"))]
     preparation_pause: Arc<std::sync::Mutex<Option<PreparationPause>>>,
 }
@@ -108,9 +145,25 @@ impl MediaStagingService {
     pub(crate) fn new(preparation: Arc<MediaPreparationService>) -> Self {
         Self {
             preparation,
+            target_admissions: Arc::new(StdMutex::new(BTreeMap::new())),
             #[cfg(any(test, feature = "test-hooks"))]
             preparation_pause: Arc::new(std::sync::Mutex::new(None)),
         }
+    }
+
+    async fn admit_target(&self, target: &ComposerTarget) -> tokio::sync::OwnedMutexGuard<()> {
+        let admission = {
+            let mut admissions = self
+                .target_admissions
+                .lock()
+                .expect("media staging target admission mutex");
+            Arc::clone(
+                admissions
+                    .entry(target.clone())
+                    .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+            )
+        };
+        admission.lock_owned().await
     }
 
     #[cfg(any(test, feature = "test-hooks"))]
@@ -151,6 +204,7 @@ impl MediaStagingService {
         target: ComposerTarget,
         items: Vec<StageUploadBytesInput>,
     ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+        let _admission = self.admit_target(&target).await;
         validate_batch(&items)?;
         let initial = connection.snapshot();
         let policy = authoritative_policy(&initial);
@@ -263,6 +317,7 @@ impl MediaStagingService {
         staged_id: String,
         selection: StagedUploadOutputSelection,
     ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+        let _admission = self.admit_target(&target).await;
         let initial = connection.snapshot();
         let policy = authoritative_policy(&initial);
         let account = account_key(&initial);
@@ -357,6 +412,7 @@ impl MediaStagingService {
         target: ComposerTarget,
         staged_id: String,
     ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+        let _admission = self.admit_target(&target).await;
         let initial = connection.snapshot();
         let policy = authoritative_policy(&initial);
         let account = account_key(&initial);
@@ -421,6 +477,7 @@ impl MediaStagingService {
         target: ComposerTarget,
         staged_id: String,
     ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+        let _admission = self.admit_target(&target).await;
         let snapshot = connection.snapshot();
         let account = account_key(&snapshot);
         if !target_is_active(&snapshot, &target) {
@@ -446,6 +503,7 @@ impl MediaStagingService {
         staged_id: String,
         caption: Option<ComposerDocument>,
     ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+        let _admission = self.admit_target(&target).await;
         let snapshot = connection.snapshot();
         let account = account_key(&snapshot);
         let staged_id = staged_id.clone();
@@ -488,6 +546,7 @@ impl MediaStagingService {
         staged_id: String,
         compression_choice: StagedUploadCompressionChoice,
     ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+        let _admission = self.admit_target(&target).await;
         let snapshot = connection.snapshot();
         let account = account_key(&snapshot);
         if !target_is_active(&snapshot, &target) {
@@ -527,6 +586,7 @@ impl MediaStagingService {
         connection: &mut CoreConnection,
         target: ComposerTarget,
     ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+        let _admission = self.admit_target(&target).await;
         let snapshot = connection.snapshot();
         let account = account_key(&snapshot);
         let Some(items) = active_items(&snapshot, &target) else {
@@ -558,6 +618,245 @@ impl MediaStagingService {
             .await?;
         self.preparation.reconcile_snapshot(&result.state).await;
         Ok(result)
+    }
+
+    pub async fn prepared_upload_preview(
+        &self,
+        connection: &mut CoreConnection,
+        target: ComposerTarget,
+        staged_id: String,
+        variant_id: String,
+    ) -> Result<Vec<u8>, MediaStagingError> {
+        let _admission = self.admit_target(&target).await;
+        let snapshot = connection.snapshot();
+        let item = staged_item(&snapshot, &target, &staged_id)
+            .ok_or(MediaStagingError::MissingStagedItem)?;
+        let has_variant = matches!(
+            &item.preparation,
+            StagedUploadPreparation::Ready { variants, .. }
+                if variants.iter().any(|variant| variant.variant_id == variant_id)
+        );
+        if !has_variant {
+            return Err(MediaStagingError::PreparedBytesUnavailable);
+        }
+        let bytes = self
+            .preparation
+            .transition()
+            .await
+            .variant_bytes(&target, &staged_id, &variant_id)
+            .ok_or(MediaStagingError::PreparedBytesUnavailable)?;
+        let current = connection.snapshot();
+        if !target_is_active(&current, &target)
+            || staged_item(&current, &target, &staged_id).is_none()
+        {
+            return Err(MediaStagingError::Stale);
+        }
+        Ok(bytes)
+    }
+
+    pub async fn send_prepared_uploads(
+        &self,
+        connection: &mut CoreConnection,
+        expected_account: koushi_key::SessionKeyId,
+        generation: crate::composer_draft_lifecycle::ComposerRendererGeneration,
+        lease: crate::composer_draft_lifecycle::ComposerDraftLeaseId,
+        target: ComposerTarget,
+        draft_revision: ComposerDraftRevision,
+    ) -> Result<PreparedUploadSendResult, PreparedUploadSendError> {
+        let _admission = self.admit_target(&target).await;
+        let initial = connection.snapshot();
+        if ready_account(&initial).as_ref() != Some(&expected_account) {
+            return Err(PreparedUploadSendError::AccountMismatch);
+        }
+        if !target_is_active(&initial, &target) {
+            return Err(PreparedUploadSendError::TargetInactive);
+        }
+        let staged_ids = active_items(&initial, &target)
+            .filter(|items| !items.is_empty() && koushi_state::staged_uploads_are_sendable(items))
+            .map(|items| ids(items))
+            .ok_or(PreparedUploadSendError::NotSendable)?;
+        let expected_revision = next_acceptance_revision(&initial, &target, draft_revision)
+            .ok_or(PreparedUploadSendError::DraftRevision)?;
+        let _permit = connection
+            .acquire_composer_draft_command_permit(
+                generation,
+                lease,
+                &crate::composer_draft_lifecycle::ComposerDraftScope {
+                    account: expected_account.clone(),
+                    target: target.clone(),
+                },
+            )
+            .map_err(|_| PreparedUploadSendError::ComposerPermit)?;
+        let account_key = AccountKey(expected_account.user_id.clone());
+        let key = timeline_key(account_key.clone(), &target);
+
+        for staged_id in staged_ids {
+            let current = connection.snapshot();
+            if ready_account(&current).as_ref() != Some(&expected_account)
+                || composer_draft_revision(&current, &target) != draft_revision
+            {
+                return Err(PreparedUploadSendError::DraftRevision);
+            }
+            let item = staged_item(&current, &target, &staged_id)
+                .filter(|item| {
+                    koushi_state::staged_uploads_are_sendable(std::slice::from_ref(item))
+                })
+                .ok_or(PreparedUploadSendError::StaleItem)?;
+            let prepared = self
+                .preparation
+                .transition()
+                .await
+                .selected_upload(&target, &staged_id)
+                .ok_or(PreparedUploadSendError::PreparedBytesUnavailable)?;
+            let request_id = connection.next_request_id();
+            let transaction_id = format!(
+                "desktop-prepared-media-{}",
+                NEXT_PREPARED_MEDIA_TRANSACTION_ID.fetch_add(1, Ordering::Relaxed)
+            );
+            let descriptor = prepared.descriptor;
+            let kind = if descriptor.mime_type.starts_with("image/") {
+                UploadMediaKind::Image {
+                    width: descriptor.width,
+                    height: descriptor.height,
+                }
+            } else {
+                UploadMediaKind::File
+            };
+            let baseline = connection.versioned_snapshot().generation;
+            connection
+                .command(CoreCommand::Timeline(TimelineCommand::UploadAndSendMedia {
+                    request_id,
+                    expected_account: expected_account.clone(),
+                    key: key.clone(),
+                    transaction_id: transaction_id.clone(),
+                    request: UploadMediaRequest {
+                        filename: descriptor.filename,
+                        mime_type: descriptor.mime_type,
+                        bytes: prepared.bytes,
+                        kind,
+                        compression: None,
+                        thumbnail: None,
+                        caption: media_caption_from_composer_document(
+                            item.caption.as_ref(),
+                            current.settings.values.composer.formatting_options(),
+                        ),
+                    },
+                }))
+                .await
+                .map_err(PreparedUploadSendError::CommandSubmit)?;
+            self.wait_prepared_media_queue(
+                connection,
+                request_id,
+                key.clone(),
+                transaction_id,
+                baseline,
+            )
+            .await?;
+
+            let current = connection.snapshot();
+            if ready_account(&current).as_ref() != Some(&expected_account)
+                || !target_is_active(&current, &target)
+                || staged_item(&current, &target, &staged_id).is_none()
+            {
+                return Err(PreparedUploadSendError::StaleItem);
+            }
+            let mut remaining = active_items(&current, &target)
+                .ok_or(PreparedUploadSendError::TargetInactive)?
+                .to_vec();
+            remaining.retain(|item| item.staged_id != staged_id);
+            let remaining_ids = ids(&remaining);
+            self.publish(
+                connection,
+                account_key.clone(),
+                target.clone(),
+                remaining,
+                remaining_ids,
+                false,
+            )
+            .await
+            .map_err(map_staging_send_error)?;
+            self.preparation
+                .transition()
+                .await
+                .remove_item(&target, &staged_id);
+        }
+
+        let current = connection.snapshot();
+        if ready_account(&current).as_ref() != Some(&expected_account)
+            || !target_is_active(&current, &target)
+            || composer_draft_revision(&current, &target) != draft_revision
+        {
+            return Err(PreparedUploadSendError::DraftRevision);
+        }
+        let request_id = connection.next_request_id();
+        let baseline = connection.versioned_snapshot().generation;
+        connection
+            .command_with_composer_lease(
+                generation,
+                lease,
+                CoreCommand::App(AppCommand::AcceptComposerDraft {
+                    request_id,
+                    expected_account,
+                    target: target.clone(),
+                    submitted_revision: draft_revision,
+                }),
+            )
+            .await
+            .map_err(PreparedUploadSendError::CommandSubmit)?;
+        let outcome = connection
+            .wait_for_request_outcome(
+                OutcomeCorrelation::Request(request_id),
+                RequestOutcomeExpectation::ComposerAccepted {
+                    request_id,
+                    account_key,
+                    target,
+                    expected_revision,
+                },
+                baseline,
+                executor::Instant::now() + COMPOSER_DRAFT_ACCEPTANCE_TIMEOUT,
+            )
+            .await
+            .map_err(PreparedUploadSendError::Outcome)?;
+        match outcome {
+            RequestOutcome::ComposerAccepted {
+                revision, snapshot, ..
+            } => Ok(PreparedUploadSendResult {
+                accepted_revision: revision,
+                snapshot,
+            }),
+            _ => Err(PreparedUploadSendError::Outcome(
+                RequestOutcomeError::InvalidOutcome,
+            )),
+        }
+    }
+
+    async fn wait_prepared_media_queue(
+        &self,
+        connection: &mut CoreConnection,
+        request_id: crate::ids::RequestId,
+        key: crate::ids::TimelineKey,
+        transaction_id: String,
+        baseline_generation: u64,
+    ) -> Result<(), PreparedUploadSendError> {
+        match connection
+            .wait_for_request_outcome(
+                OutcomeCorrelation::Request(request_id),
+                RequestOutcomeExpectation::PreparedMediaQueued {
+                    request_id,
+                    key,
+                    transaction_id,
+                },
+                baseline_generation,
+                executor::Instant::now() + PREPARED_MEDIA_QUEUE_TIMEOUT,
+            )
+            .await
+            .map_err(PreparedUploadSendError::Outcome)?
+        {
+            RequestOutcome::PreparedMediaQueued { .. } => Ok(()),
+            _ => Err(PreparedUploadSendError::Outcome(
+                RequestOutcomeError::InvalidOutcome,
+            )),
+        }
     }
 
     async fn publish(
@@ -683,6 +982,88 @@ impl MediaStagingService {
     }
 }
 
+fn map_staging_send_error(error: MediaStagingError) -> PreparedUploadSendError {
+    match error {
+        MediaStagingError::CommandSubmit(error) => PreparedUploadSendError::CommandSubmit(error),
+        MediaStagingError::Outcome(error) => PreparedUploadSendError::Outcome(error),
+        MediaStagingError::TargetInactive => PreparedUploadSendError::TargetInactive,
+        MediaStagingError::MissingStagedItem
+        | MediaStagingError::Stale
+        | MediaStagingError::PreparationNotReady => PreparedUploadSendError::StaleItem,
+        _ => PreparedUploadSendError::StaleItem,
+    }
+}
+
+fn ready_account(state: &koushi_state::AppState) -> Option<koushi_key::SessionKeyId> {
+    match &state.session {
+        koushi_state::SessionState::Ready(info) => {
+            Some(crate::store::session_key_id_from_info(info))
+        }
+        _ => None,
+    }
+}
+
+fn composer_draft_revision(
+    state: &koushi_state::AppState,
+    target: &ComposerTarget,
+) -> ComposerDraftRevision {
+    match target {
+        ComposerTarget::Main { room_id } => state.composer_drafts.room_revision(room_id),
+        ComposerTarget::Thread {
+            room_id,
+            root_event_id,
+        } => state
+            .composer_drafts
+            .thread_revision(room_id, root_event_id),
+    }
+}
+
+fn next_acceptance_revision(
+    state: &koushi_state::AppState,
+    target: &ComposerTarget,
+    submitted_revision: ComposerDraftRevision,
+) -> Option<ComposerDraftRevision> {
+    ComposerDraftRevision::checked_successor(
+        composer_draft_revision(state, target),
+        submitted_revision,
+    )
+    .ok()
+}
+
+fn timeline_key(account_key: AccountKey, target: &ComposerTarget) -> crate::ids::TimelineKey {
+    match target {
+        ComposerTarget::Main { room_id } => crate::ids::TimelineKey {
+            account_key,
+            kind: crate::ids::TimelineKind::Room {
+                room_id: room_id.clone(),
+            },
+        },
+        ComposerTarget::Thread {
+            room_id,
+            root_event_id,
+        } => crate::ids::TimelineKey {
+            account_key,
+            kind: crate::ids::TimelineKind::Thread {
+                room_id: room_id.clone(),
+                root_event_id: root_event_id.clone(),
+            },
+        },
+    }
+}
+
+fn media_caption_from_composer_document(
+    document: Option<&ComposerDocument>,
+    formatting_options: koushi_state::ComposerFormattingOptions,
+) -> Option<koushi_state::FormattedMessageDraft> {
+    let document = document?;
+    let plain_body = document.plain_body();
+    (!plain_body.trim().is_empty()).then(|| koushi_state::FormattedMessageDraft {
+        plain_body,
+        formatted_body: document.formatted_body_with_options(formatting_options),
+        mentions: document.mention_intent(),
+    })
+}
+
 fn validate_batch(items: &[StageUploadBytesInput]) -> Result<(), MediaStagingError> {
     if items.is_empty() {
         return Err(MediaStagingError::BatchEmpty);
@@ -799,4 +1180,44 @@ fn account_key(state: &koushi_state::AppState) -> AccountKey {
         _ => String::new(),
     };
     AccountKey(user_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use koushi_state::{ComposerFormattingOptions, ComposerInline, MentionTarget};
+
+    #[test]
+    fn caption_document_converts_at_the_core_media_send_boundary() {
+        let document = ComposerDocument::new(vec![
+            ComposerInline::Text {
+                text: "**hello** ".to_owned(),
+            },
+            ComposerInline::Mention {
+                target: MentionTarget::User {
+                    user_id: "@alice:example.invalid".to_owned(),
+                    display_label: "Alice".to_owned(),
+                },
+                display_label: "Alice".to_owned(),
+            },
+        ]);
+        let draft = media_caption_from_composer_document(
+            Some(&document),
+            ComposerFormattingOptions { math_mode: true },
+        )
+        .expect("non-empty caption");
+
+        assert_eq!(draft.plain_body, "**hello** @Alice");
+        let formatted = draft.formatted_body.as_deref().unwrap_or_default();
+        assert!(formatted.contains("<strong>"));
+        assert!(formatted.contains("https://matrix.to/#/%40alice%3Aexample.invalid"));
+        assert_eq!(draft.mentions, document.mention_intent());
+        assert!(
+            media_caption_from_composer_document(
+                Some(&ComposerDocument::from_plain_text("  \n  ")),
+                ComposerFormattingOptions::default(),
+            )
+            .is_none()
+        );
+    }
 }

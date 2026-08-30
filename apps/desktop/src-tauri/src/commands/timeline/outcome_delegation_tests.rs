@@ -109,26 +109,4 @@ async fn timeline_wait_wrappers_delegate_to_core_outcome_service() {
     let response = settlement.await.expect("submission wrapper");
     assert_eq!(response.submission_id, submission_id);
     assert_eq!(response.transaction_id.as_deref(), Some("txn"));
-
-    let (mut connection, control) = CoreConnection::new_for_testing(8);
-    let request_id = connection.next_request_id();
-    let key = TimelineKey::room(account_key, room_id);
-    control.send_snapshot(koushi_core::event::VersionedAppStateSnapshot {
-        generation: 2,
-        state: ready_state(room_id),
-    });
-    let queued = wait_for_prepared_media_queue(
-        &mut connection,
-        request_id,
-        key.clone(),
-        "media-txn".to_owned(),
-        1,
-    );
-    tokio::pin!(queued);
-    control.send_event(CoreEvent::Timeline(TimelineEvent::MediaSendQueued {
-        request_id,
-        key,
-        transaction_id: "media-txn".to_owned(),
-    }));
-    assert_eq!(queued.await.expect("prepared media wrapper").generation, 2);
 }

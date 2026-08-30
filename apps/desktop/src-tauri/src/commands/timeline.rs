@@ -522,19 +522,6 @@ fn normalize_image_upload_compression(
     }
 }
 
-fn media_caption_from_composer_document(
-    document: Option<&ComposerDocument>,
-    formatting_options: ComposerFormattingOptions,
-) -> Option<koushi_state::FormattedMessageDraft> {
-    let document = document?;
-    let plain_body = document.plain_body();
-    (!plain_body.trim().is_empty()).then(|| koushi_state::FormattedMessageDraft {
-        plain_body,
-        formatted_body: document.formatted_body_with_options(formatting_options),
-        mentions: document.mention_intent(),
-    })
-}
-
 fn media_caption_from_composer_body(
     caption: Option<String>,
 ) -> Option<koushi_state::FormattedMessageDraft> {
@@ -814,7 +801,6 @@ pub(super) fn build_set_fully_read_command(
 }
 
 const SUBMISSION_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(10);
-const PREPARED_MEDIA_QUEUE_TIMEOUT: Duration = Duration::from_secs(10);
 const COMPOSER_DRAFT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn composer_draft_revision(
@@ -1133,32 +1119,6 @@ fn submission_failure_from_outcome_error(error: RequestOutcomeError) -> Submissi
     }
 }
 
-async fn wait_for_prepared_media_queue(
-    event_conn: &mut CoreConnection,
-    request_id: RequestId,
-    key: TimelineKey,
-    transaction_id: String,
-    baseline_generation: u64,
-) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
-    match event_conn
-        .wait_for_request_outcome(
-            OutcomeCorrelation::Request(request_id),
-            RequestOutcomeExpectation::PreparedMediaQueued {
-                request_id,
-                key,
-                transaction_id,
-            },
-            baseline_generation,
-            tokio::time::Instant::now() + PREPARED_MEDIA_QUEUE_TIMEOUT,
-        )
-        .await
-        .map_err(|error| invoke_error_from_request_outcome("prepared upload send", error))?
-    {
-        RequestOutcome::PreparedMediaQueued { snapshot, .. } => Ok(snapshot),
-        _ => Err("prepared upload send: invalid request outcome".to_owned()),
-    }
-}
-
 #[tauri::command]
 pub async fn resolve_composer_key_action(
     surface: ComposerSurface,
@@ -1473,84 +1433,7 @@ pub async fn stage_upload_bytes(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    const MAX_BATCH_BYTES: usize = 128 * 1024 * 1024;
-    if items.is_empty()
-        || items.len() > koushi_core::media_preparation::MAX_PREPARATION_BATCH_SIZE
-        || items
-            .iter()
-            .try_fold(0usize, |total, item| total.checked_add(item.bytes.len()))
-            .is_none_or(|total| total > MAX_BATCH_BYTES)
-    {
-        return Err("attachment batch is empty or exceeds the supported limit".to_owned());
-    }
-    let mut event_conn = state.runtime.attach();
-    let initial_snapshot = event_conn.snapshot();
-    if !composer_target_is_active(&initial_snapshot, &target) {
-        return current_snapshot(state.inner()).await;
-    }
-    let initial_account = account_key_from_app_state(&initial_snapshot);
-    let existing_items = staged_uploads_for_target(&initial_snapshot, &target)
-        .unwrap_or_default()
-        .to_vec();
-    let preparing_items = existing_items
-        .iter()
-        .cloned()
-        .chain(items.iter().map(|item| StagedUploadItem {
-            staged_id: item.staged_id.clone(),
-            room_id: target.room_id().to_owned(),
-            position: item.position,
-            filename: item.filename.clone(),
-            mime_type: normalized_attachment_mime(&item.mime_type),
-            byte_count: u64::try_from(item.bytes.len()).unwrap_or(u64::MAX),
-            kind: if item.mime_type.to_ascii_lowercase().starts_with("image/") {
-                StagedUploadKind::Image {
-                    width: None,
-                    height: None,
-                }
-            } else {
-                StagedUploadKind::File
-            },
-            caption: None,
-            compression_choice: StagedUploadCompressionChoice::NotApplicable,
-            preparation: koushi_state::StagedUploadPreparation::Preparing,
-        }))
-        .collect::<Vec<_>>();
-    let preparing_ids = preparing_items
-        .iter()
-        .map(|item| item.staged_id.clone())
-        .collect::<Vec<_>>();
-    {
-        let mut media = state.runtime.media_preparation().transition().await;
-        media.reconcile_snapshot(&initial_snapshot);
-        let preparing_baseline_generation = event_conn.versioned_snapshot().generation;
-        let preparing_request_id = event_conn.next_request_id();
-        event_conn
-            .command(CoreCommand::App(AppCommand::SetUploadStaging {
-                request_id: preparing_request_id,
-                target: target.clone(),
-                items: preparing_items,
-            }))
-            .await
-            .map_err(|error| format!("command submit failed: {error}"))?;
-        let _ = wait_for_upload_staging_snapshot(
-            &mut event_conn,
-            preparing_request_id,
-            initial_account.clone(),
-            target.clone(),
-            preparing_ids,
-            preparing_baseline_generation,
-            "upload staging did not enter preparing state",
-        )
-        .await?;
-    }
-
-    let snapshot = event_conn.snapshot();
-    let policy = snapshot
-        .settings
-        .values
-        .media
-        .image_upload_compression_policy;
-    let core_inputs = items
+    let items = items
         .into_iter()
         .map(
             |item| koushi_core::media_preparation::StageUploadBytesInput {
@@ -1562,63 +1445,12 @@ pub async fn stage_upload_bytes(
             },
         )
         .collect();
-    let preparation_target = target.clone();
-    let preparation = tokio::task::spawn_blocking(move || {
-        let mut registry = koushi_core::media_preparation::MediaPreparationRegistry::default();
-        let items = registry.prepare_items(&preparation_target, core_inputs, policy);
-        (registry, items)
-    })
-    .await;
-    let (prepared_registry, new_prepared_items) =
-        preparation.map_err(|_| "attachment preparation task did not complete".to_owned())?;
-    let mut media = state.runtime.media_preparation().transition().await;
-    let current = event_conn.snapshot();
-    if account_key_from_app_state(&current) != initial_account
-        || !composer_target_is_active(&current, &target)
-    {
-        return current_snapshot(state.inner()).await;
-    }
-    let mut prepared_by_id = new_prepared_items
-        .into_iter()
-        .map(|item| (item.staged_id.clone(), item))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    let mut prepared_items = staged_uploads_for_target(&current, &target)
-        .unwrap_or_default()
-        .to_vec();
-    for item in &mut prepared_items {
-        if let Some(prepared) = prepared_by_id.remove(&item.staged_id) {
-            *item = prepared;
-        }
-    }
-    if !prepared_by_id.is_empty() {
-        return current_snapshot(state.inner()).await;
-    }
-    media.merge_prepared(prepared_registry);
-
-    let ready_ids = prepared_items
-        .iter()
-        .map(|item| item.staged_id.clone())
-        .collect::<Vec<_>>();
-    let ready_baseline_generation = event_conn.versioned_snapshot().generation;
-    let ready_request_id = event_conn.next_request_id();
-    event_conn
-        .command(CoreCommand::App(AppCommand::SetUploadStaging {
-            request_id: ready_request_id,
-            target: target.clone(),
-            items: prepared_items,
-        }))
+    let settled = state
+        .runtime
+        .attach()
+        .stage_upload_bytes(target, items)
         .await
-        .map_err(|error| format!("command submit failed: {error}"))?;
-    let settled = wait_for_upload_staging_snapshot(
-        &mut event_conn,
-        ready_request_id,
-        initial_account,
-        target,
-        ready_ids,
-        ready_baseline_generation,
-        "upload preparation did not settle",
-    )
-    .await?;
+        .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(FrontendDesktopSnapshot::from_versioned(
         settled.state,
@@ -1633,129 +1465,16 @@ pub async fn select_staged_upload_output(
     selection: koushi_state::StagedUploadOutputSelection,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    let snapshot = state.runtime.attach().snapshot();
-    if !composer_target_is_active(&snapshot, &target) {
-        return current_snapshot(state.inner()).await;
-    }
-    let initial_account = account_key_from_app_state(&snapshot);
-    let policy = snapshot
-        .settings
-        .values
-        .media
-        .image_upload_compression_policy;
-    let variant_id =
-        koushi_core::media_preparation::MediaPreparationRegistry::output_identity(selection);
-
-    // Record the choice first: Rust owns which output uploads, and an
-    // unprepared pair becomes `pending` under a fresh generation.
-    let cached = {
-        let mut media = state.runtime.media_preparation().transition().await;
-        media.select_variant(&target, &staged_id, &variant_id)
-    };
-    let mut event_conn = state.runtime.attach();
-    let baseline_generation = event_conn.versioned_snapshot().generation;
-    let expected_ids = staged_uploads_for_target(&event_conn.snapshot(), &target)
-        .unwrap_or_default()
-        .iter()
-        .map(|item| item.staged_id.clone())
-        .collect::<Vec<_>>();
-    let request_id = event_conn.next_request_id();
-    event_conn
-        .command(CoreCommand::App(AppCommand::SelectStagedUploadOutput {
-            request_id,
-            target: target.clone(),
-            staged_id: staged_id.clone(),
-            selection,
-        }))
-        .await
-        .map_err(|error| format!("command submit failed: {error}"))?;
-    let settled = wait_for_upload_staging_snapshot(
-        &mut event_conn,
-        request_id,
-        initial_account.clone(),
-        target.clone(),
-        expected_ids,
-        baseline_generation,
-        "staged upload output selection did not update",
-    )
-    .await?;
-    if cached {
-        return Ok(FrontendDesktopSnapshot::from_versioned(
-            settled.state,
-            settled.generation,
-        ));
-    }
-
-    // Encode the newly requested pair. The generation captured here is what
-    // makes a slower encode lose to a newer selection.
-    let Some((generation, source)) =
-        staged_output_generation(&event_conn.snapshot(), &target, &staged_id).zip(
-            state
-                .runtime
-                .media_preparation()
-                .transition()
-                .await
-                .source_input(&target, &staged_id),
-        )
-    else {
-        return current_snapshot(state.inner()).await;
-    };
-    let encoded = tokio::task::spawn_blocking(move || {
-        koushi_core::media_preparation::MediaPreparationRegistry::encode_output(
-            &source, selection, policy,
-        )
-    })
-    .await
-    .map_err(|_| "attachment output encoding did not complete".to_owned())?;
-    let Some((descriptor, bytes)) = encoded else {
-        return current_snapshot(state.inner()).await;
-    };
-
-    let current = state.runtime.attach().snapshot();
-    if account_key_from_app_state(&current) != initial_account
-        || !composer_target_is_active(&current, &target)
-    {
-        return current_snapshot(state.inner()).await;
-    }
-    let Some(item) = staged_uploads_for_target(&current, &target).and_then(|items| {
-        items
-            .iter()
-            .find(|item| item.staged_id == staged_id)
-            .cloned()
-    }) else {
-        return current_snapshot(state.inner()).await;
-    };
-    // The state-owned fence decides whether this result is still wanted.
-    let Some(replacement) = koushi_state::staged_upload_item_with_completed_output(
-        &item,
-        descriptor.clone(),
-        generation,
-    ) else {
-        return current_snapshot(state.inner()).await;
-    };
-    state
+    let settled = state
         .runtime
-        .media_preparation()
-        .transition()
+        .attach()
+        .select_staged_upload_output(target, staged_id, selection)
         .await
-        .insert_prepared_output(&target, &staged_id, descriptor, bytes);
-    replace_staged_upload_item(state.inner(), &target, &staged_id, replacement).await?;
-    current_snapshot(state.inner()).await
-}
-
-/// Generation of the staged item's current output selection.
-fn staged_output_generation(
-    snapshot: &koushi_state::AppState,
-    target: &koushi_state::ComposerTarget,
-    staged_id: &str,
-) -> Option<u64> {
-    staged_uploads_for_target(snapshot, target)?
-        .iter()
-        .find(|item| item.staged_id == staged_id)
-        .and_then(|item| match &item.preparation {
-            koushi_state::StagedUploadPreparation::Ready { generation, .. } => Some(*generation),
-            _ => None,
-        })
+        .map_err(|error| error.to_string())?;
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        settled.state,
+        settled.generation,
+    ))
 }
 
 #[tauri::command]
@@ -1765,60 +1484,17 @@ pub async fn retry_staged_upload_preparation(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    let snapshot = state.runtime.attach().snapshot();
-    if !composer_target_is_active(&snapshot, &target) {
-        return current_snapshot(state.inner()).await;
-    }
-    let initial_account = account_key_from_app_state(&snapshot);
-    let policy = snapshot
-        .settings
-        .values
-        .media
-        .image_upload_compression_policy;
-    let Some(source) = state
+    let settled = state
         .runtime
-        .media_preparation()
-        .transition()
+        .attach()
+        .retry_staged_upload_preparation(target, staged_id)
         .await
-        .source_input(&target, &staged_id)
-    else {
-        return current_snapshot(state.inner()).await;
-    };
-    let retry_target = target.clone();
-    let retry = tokio::task::spawn_blocking(move || {
-        let mut registry = koushi_core::media_preparation::MediaPreparationRegistry::default();
-        let replacement = registry
-            .prepare_items(&retry_target, vec![source], policy)
-            .into_iter()
-            .next();
-        (registry, replacement)
-    })
-    .await;
-    let (prepared_registry, replacement) =
-        retry.map_err(|_| "attachment preparation task did not complete".to_owned())?;
-    let mut media = state.runtime.media_preparation().transition().await;
-    let current = state.runtime.attach().snapshot();
-    if account_key_from_app_state(&current) != initial_account
-        || !composer_target_is_active(&current, &target)
-        || !staged_uploads_for_target(&current, &target).is_some_and(|items| {
-            items.iter().any(|item| {
-                item.staged_id == staged_id
-                    && matches!(
-                        item.preparation,
-                        koushi_state::StagedUploadPreparation::Failed { .. }
-                    )
-            })
-        })
-    {
-        return current_snapshot(state.inner()).await;
-    }
-    if let Some(replacement) = replacement {
-        media.remove_item(&target, &staged_id);
-        media.merge_prepared(prepared_registry);
-        replace_staged_upload_item(state.inner(), &target, &staged_id, replacement).await?;
-    }
+        .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        settled.state,
+        settled.generation,
+    ))
 }
 
 #[tauri::command]
@@ -1828,94 +1504,17 @@ pub async fn use_original_staged_upload(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    let mut media = state.runtime.media_preparation().transition().await;
-    if !composer_target_is_active(&state.runtime.attach().snapshot(), &target) {
-        return current_snapshot(state.inner()).await;
-    }
-    let replacement = media.use_original(&target, &staged_id);
-    if let Some(replacement) = replacement {
-        replace_staged_upload_item(state.inner(), &target, &staged_id, replacement).await?;
-    }
+    let settled = state
+        .runtime
+        .attach()
+        .use_original_staged_upload(target, staged_id)
+        .await
+        .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
-}
-
-async fn replace_staged_upload_item(
-    state: &CoreRuntimeState,
-    target: &koushi_state::ComposerTarget,
-    staged_id: &str,
-    replacement: StagedUploadItem,
-) -> Result<(), String> {
-    let mut event_conn = state.runtime.attach();
-    if !composer_target_is_active(&event_conn.snapshot(), target) {
-        return Ok(());
-    }
-    let mut items = staged_uploads_for_target(&event_conn.snapshot(), target)
-        .unwrap_or_default()
-        .to_vec();
-    let Some(item) = items.iter_mut().find(|item| item.staged_id == staged_id) else {
-        return Ok(());
-    };
-    *item = replacement;
-    let expected_ids = items
-        .iter()
-        .map(|item| item.staged_id.clone())
-        .collect::<Vec<_>>();
-    let account_key = account_key_from_app_state(&event_conn.snapshot());
-    let baseline_generation = event_conn.versioned_snapshot().generation;
-    let request_id = event_conn.next_request_id();
-    event_conn
-        .command(CoreCommand::App(AppCommand::SetUploadStaging {
-            request_id,
-            target: target.clone(),
-            items,
-        }))
-        .await
-        .map_err(|error| format!("command submit failed: {error}"))?;
-    let _ = wait_for_upload_staging_snapshot(
-        &mut event_conn,
-        request_id,
-        account_key,
-        target.clone(),
-        expected_ids,
-        baseline_generation,
-        "upload preparation recovery did not settle",
-    )
-    .await?;
-    Ok(())
-}
-
-async fn publish_staged_upload_items(
-    event_conn: &mut CoreConnection,
-    target: &koushi_state::ComposerTarget,
-    items: Vec<StagedUploadItem>,
-) -> Result<(), String> {
-    let expected_ids = items
-        .iter()
-        .map(|item| item.staged_id.clone())
-        .collect::<Vec<_>>();
-    let account_key = account_key_from_app_state(&event_conn.snapshot());
-    let baseline_generation = event_conn.versioned_snapshot().generation;
-    let request_id = event_conn.next_request_id();
-    event_conn
-        .command(CoreCommand::App(AppCommand::SetUploadStaging {
-            request_id,
-            target: target.clone(),
-            items,
-        }))
-        .await
-        .map_err(|error| format!("command submit failed: {error}"))?;
-    let _ = wait_for_upload_staging_snapshot(
-        event_conn,
-        request_id,
-        account_key,
-        target.clone(),
-        expected_ids,
-        baseline_generation,
-        "prepared upload staging did not settle",
-    )
-    .await?;
-    Ok(())
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        settled.state,
+        settled.generation,
+    ))
 }
 
 #[tauri::command]
@@ -1925,13 +1524,12 @@ pub async fn prepared_upload_preview(
     variant_id: String,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<Vec<u8>, String> {
-    let media = state.runtime.media_preparation().transition().await;
-    if !composer_target_is_active(&state.runtime.attach().snapshot(), &target) {
-        return Err("prepared upload preview is unavailable".to_owned());
-    }
-    media
-        .variant_bytes(&target, &staged_id, &variant_id)
-        .ok_or_else(|| "prepared upload preview is unavailable".to_owned())
+    state
+        .runtime
+        .attach()
+        .prepared_upload_preview(target, staged_id, variant_id)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1946,182 +1544,27 @@ pub async fn send_prepared_uploads(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<ComposerDraftAcceptanceResponse, String> {
-    let snapshot = state.runtime.attach().snapshot();
     let expected_account = koushi_key::SessionKeyId {
         homeserver: account_homeserver,
         user_id: account_user_id,
         device_id: account_device_id,
     };
-    if composer_draft_session_key(&snapshot).as_ref() != Some(&expected_account) {
-        return Ok(ComposerDraftAcceptanceResponse {
-            accepted_revision: None,
-            snapshot: current_snapshot(state.inner()).await?,
-        });
-    }
-    if !composer_target_is_active(&snapshot, &target) {
-        return Ok(ComposerDraftAcceptanceResponse {
-            accepted_revision: None,
-            snapshot: current_snapshot(state.inner()).await?,
-        });
-    }
-    let staged_items = staged_uploads_for_target(&snapshot, &target)
-        .unwrap_or_default()
-        .to_vec();
-    if staged_items.is_empty() || !koushi_state::staged_uploads_are_sendable(&staged_items) {
-        return Ok(ComposerDraftAcceptanceResponse {
-            accepted_revision: None,
-            snapshot: current_snapshot(state.inner()).await?,
-        });
-    }
-    // Validate the eventual acceptance fence before the first upload. Revision
-    // exhaustion must be a side-effect-free rejection: no Matrix upload, send,
-    // or local prepared-item removal may happen before this check.
-    let expected_revision =
-        next_composer_draft_acceptance_revision(&snapshot, &target, draft_revision)?;
     let (generation, lease) =
         composer_transport_tokens(state.inner(), &renderer_generation, &lease_id)?;
-
-    let account_key = account_key_from_app_state(&snapshot);
-    let key = timeline_key_for_composer_target(account_key.clone(), &target);
-    let mut event_conn = state.runtime.attach();
-    let _terminal_permit = acquire_terminal_composer_permit(
-        &event_conn,
-        generation,
-        lease,
-        &expected_account,
-        &target,
-    )?;
-    for item in &staged_items {
-        let prepared = {
-            state
-                .runtime
-                .media_preparation()
-                .transition()
-                .await
-                .selected_upload(&target, &item.staged_id)
-                .ok_or_else(|| "selected prepared upload bytes are unavailable".to_owned())?
-        };
-        let baseline_generation = event_conn.versioned_snapshot().generation;
-        let request_id = event_conn.next_request_id();
-        let transaction_id = format!(
-            "desktop-prepared-media-{}",
-            NEXT_TRANSACTION_ID.fetch_add(1, Ordering::Relaxed)
-        );
-        let descriptor = prepared.descriptor;
-        let kind = if descriptor.mime_type.starts_with("image/") {
-            UploadMediaKind::Image {
-                width: descriptor.width,
-                height: descriptor.height,
-            }
-        } else {
-            UploadMediaKind::File
-        };
-        event_conn
-            .command(CoreCommand::Timeline(TimelineCommand::UploadAndSendMedia {
-                request_id,
-                expected_account: expected_account.clone(),
-                key: key.clone(),
-                transaction_id: transaction_id.clone(),
-                request: UploadMediaRequest {
-                    filename: descriptor.filename,
-                    mime_type: descriptor.mime_type,
-                    bytes: prepared.bytes,
-                    kind,
-                    compression: None,
-                    thumbnail: None,
-                    caption: media_caption_from_composer_document(
-                        item.caption.as_ref(),
-                        snapshot.settings.values.composer.formatting_options(),
-                    ),
-                },
-            }))
-            .await
-            .map_err(|error| format!("command submit failed: {error}"))?;
-        let _ = wait_for_prepared_media_queue(
-            &mut event_conn,
-            request_id,
-            key.clone(),
-            transaction_id.clone(),
-            baseline_generation,
-        )
-        .await?;
-        let mut media = state.runtime.media_preparation().transition().await;
-        media.remove_item(&target, &item.staged_id);
-        let current = event_conn.snapshot();
-        if composer_draft_session_key(&current).as_ref() != Some(&expected_account) {
-            return Ok(ComposerDraftAcceptanceResponse {
-                accepted_revision: None,
-                snapshot: current_snapshot(state.inner()).await?,
-            });
-        }
-        let mut remaining_items = staged_uploads_for_target(&current, &target)
-            .unwrap_or_default()
-            .to_vec();
-        remaining_items.retain(|candidate| candidate.staged_id != item.staged_id);
-        if composer_target_is_active(&current, &target) {
-            publish_staged_upload_items(&mut event_conn, &target, remaining_items).await?;
-        }
-    }
-    let baseline_generation = event_conn.versioned_snapshot().generation;
-    let request_id = event_conn.next_request_id();
-    event_conn
-        .command_with_composer_lease(
-            generation,
-            lease,
-            CoreCommand::App(AppCommand::AcceptComposerDraft {
-                request_id,
-                expected_account,
-                target: target.clone(),
-                submitted_revision: draft_revision,
-            }),
-        )
+    let settled = state
+        .runtime
+        .attach()
+        .send_prepared_uploads(expected_account, generation, lease, target, draft_revision)
         .await
-        .map_err(|error| format!("command submit failed: {error}"))?;
-    let (accepted_revision, settled_snapshot) = wait_for_composer_draft_acceptance(
-        &mut event_conn,
-        request_id,
-        account_key,
-        target,
-        expected_revision,
-        baseline_generation,
-    )
-    .await?;
+        .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(ComposerDraftAcceptanceResponse {
-        accepted_revision: Some(accepted_revision),
+        accepted_revision: Some(settled.accepted_revision),
         snapshot: FrontendDesktopSnapshot::from_versioned(
-            settled_snapshot.state,
-            settled_snapshot.generation,
+            settled.snapshot.state,
+            settled.snapshot.generation,
         ),
     })
-}
-
-fn timeline_key_for_composer_target(
-    account_key: koushi_core::AccountKey,
-    target: &koushi_state::ComposerTarget,
-) -> koushi_core::TimelineKey {
-    match target {
-        koushi_state::ComposerTarget::Main { room_id } => {
-            build_timeline_key(account_key, room_id.clone())
-        }
-        koushi_state::ComposerTarget::Thread {
-            room_id,
-            root_event_id,
-        } => koushi_core::TimelineKey {
-            account_key,
-            kind: koushi_core::TimelineKind::Thread {
-                room_id: room_id.clone(),
-                root_event_id: root_event_id.clone(),
-            },
-        },
-    }
-}
-
-fn normalized_attachment_mime(mime_type: &str) -> String {
-    match mime_type.trim() {
-        "" => "application/octet-stream".to_owned(),
-        value => value.to_owned(),
-    }
 }
 
 fn composer_target_is_active(
@@ -2146,34 +1589,6 @@ fn composer_target_is_active(
     }
 }
 
-fn staged_uploads_for_target<'a>(
-    snapshot: &'a koushi_state::AppState,
-    target: &koushi_state::ComposerTarget,
-) -> Option<&'a [StagedUploadItem]> {
-    match target {
-        koushi_state::ComposerTarget::Main { room_id }
-            if snapshot.timeline.room_id.as_deref() == Some(room_id.as_str()) =>
-        {
-            Some(&snapshot.timeline.staged_uploads)
-        }
-        koushi_state::ComposerTarget::Thread {
-            room_id,
-            root_event_id,
-        } => match &snapshot.thread {
-            koushi_state::ThreadPaneState::Open {
-                room_id: open_room_id,
-                root_event_id: open_root_event_id,
-                staged_uploads,
-                ..
-            } if open_room_id == room_id && open_root_event_id == root_event_id => {
-                Some(staged_uploads)
-            }
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
 #[tauri::command]
 pub async fn update_staged_upload_caption(
     target: koushi_state::ComposerTarget,
@@ -2182,43 +1597,12 @@ pub async fn update_staged_upload_caption(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    if staged_id.trim().is_empty() {
-        return current_snapshot(state.inner()).await;
-    }
-
-    let document = document
-        .and_then(|document| (!document.plain_body().trim().is_empty()).then_some(document));
-    let mut event_conn = state.runtime.attach();
-    if !composer_target_is_active(&event_conn.snapshot(), &target) {
-        return current_snapshot(state.inner()).await;
-    }
-    let account_key = account_key_from_app_state(&event_conn.snapshot());
-    let expected_ids = staged_uploads_for_target(&event_conn.snapshot(), &target)
-        .unwrap_or_default()
-        .iter()
-        .map(|item| item.staged_id.clone())
-        .collect::<Vec<_>>();
-    let baseline_generation = event_conn.versioned_snapshot().generation;
-    let request_id = event_conn.next_request_id();
-    event_conn
-        .command(CoreCommand::App(AppCommand::UpdateStagedUploadCaption {
-            request_id,
-            target: target.clone(),
-            staged_id,
-            caption: document,
-        }))
+    let settled = state
+        .runtime
+        .attach()
+        .update_staged_upload_caption(target, staged_id, document)
         .await
-        .map_err(|e| format!("command submit failed: {e}"))?;
-    let settled = wait_for_upload_staging_snapshot(
-        &mut event_conn,
-        request_id,
-        account_key,
-        target,
-        expected_ids,
-        baseline_generation,
-        "staged upload caption did not update",
-    )
-    .await?;
+        .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(FrontendDesktopSnapshot::from_versioned(
         settled.state,
@@ -2233,44 +1617,19 @@ pub async fn update_staged_upload_compression(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    if staged_id.trim().is_empty() {
-        return current_snapshot(state.inner()).await;
-    }
-
-    let mut event_conn = state.runtime.attach();
-    let Some(room_id) = event_conn.snapshot().timeline.room_id else {
-        return current_snapshot(state.inner()).await;
+    let target = {
+        let snapshot = state.runtime.attach().snapshot();
+        let Some(room_id) = snapshot.timeline.room_id else {
+            return current_snapshot(state.inner()).await;
+        };
+        koushi_state::ComposerTarget::Main { room_id }
     };
-    let target = koushi_state::ComposerTarget::Main { room_id };
-    let account_key = account_key_from_app_state(&event_conn.snapshot());
-    let expected_ids = staged_uploads_for_target(&event_conn.snapshot(), &target)
-        .unwrap_or_default()
-        .iter()
-        .map(|item| item.staged_id.clone())
-        .collect::<Vec<_>>();
-    let baseline_generation = event_conn.versioned_snapshot().generation;
-    let request_id = event_conn.next_request_id();
-    event_conn
-        .command(CoreCommand::App(
-            AppCommand::UpdateStagedUploadCompression {
-                request_id,
-                target: target.clone(),
-                staged_id,
-                compression_choice,
-            },
-        ))
+    let settled = state
+        .runtime
+        .attach()
+        .update_staged_upload_compression(target, staged_id, compression_choice)
         .await
-        .map_err(|e| format!("command submit failed: {e}"))?;
-    let settled = wait_for_upload_staging_snapshot(
-        &mut event_conn,
-        request_id,
-        account_key,
-        target,
-        expected_ids,
-        baseline_generation,
-        "staged upload compression did not update",
-    )
-    .await?;
+        .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(FrontendDesktopSnapshot::from_versioned(
         settled.state,
@@ -2284,32 +1643,12 @@ pub async fn clear_upload_staging(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    let mut media = state.runtime.media_preparation().transition().await;
-    let mut event_conn = state.runtime.attach();
-    if !composer_target_is_active(&event_conn.snapshot(), &target) {
-        return current_snapshot(state.inner()).await;
-    }
-    let account_key = account_key_from_app_state(&event_conn.snapshot());
-    let baseline_generation = event_conn.versioned_snapshot().generation;
-    let request_id = event_conn.next_request_id();
-    event_conn
-        .command(CoreCommand::App(AppCommand::ClearUploadStaging {
-            request_id,
-            target: target.clone(),
-        }))
+    let settled = state
+        .runtime
+        .attach()
+        .clear_upload_staging(target)
         .await
-        .map_err(|e| format!("command submit failed: {e}"))?;
-    let settled = wait_for_upload_staging_snapshot(
-        &mut event_conn,
-        request_id,
-        account_key,
-        target.clone(),
-        Vec::new(),
-        baseline_generation,
-        "upload staging did not clear",
-    )
-    .await?;
-    media.clear_target(&target);
+        .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(FrontendDesktopSnapshot::from_versioned(
         settled.state,

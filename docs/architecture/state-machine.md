@@ -2021,14 +2021,16 @@ stateDiagram-v2
   keyed by `(ComposerTarget, staged_id, variant_id)` and are cleared on remove,
   close, navigation, logout, send, or stale-target settlement. React renders
   the projection and requests previews; it owns no attachment state machine.
-- Issue #755 Phase B1 adds `MediaStagingService` as a Core runtime owner for
+- Issue #755 Phase B makes `MediaStagingService` the production Core runtime owner for
   staging, selection, retry, caption/compression mutation, original adoption,
   and replacement orchestration. It publishes `Preparing`, performs detached
   preparation through the Core executor, and revalidates account, target,
   staged-id residency, and selection generation before registry/state commit.
   This is an ownership change only: it reuses these existing reducer actions
-  and adds no `AppState`, `AppAction`, or reducer transition. The Tauri
-  production pipeline remains unchanged until the later adapter migration.
+  and adds no `AppState`, `AppAction`, or reducer transition. Per-target
+  admission serializes mutations, and preview/send methods validate the same
+  account/target/item/lease/revision fences before returning bytes or accepting
+  media send. Tauri is transport serialization only.
 - Room media gallery state is Rust-owned. `AppState.media_gallery` is the
   reducer backing store and is not serialized directly; the selected-room
   projection is `TimelinePaneState.media_gallery`, ordered by Rust from media
