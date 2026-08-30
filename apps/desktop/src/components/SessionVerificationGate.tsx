@@ -201,7 +201,12 @@ export function SessionVerificationGate({
     "user_id" in session
       ? `${session.homeserver}\u0000${session.user_id}\u0000${session.device_id}`
       : session.kind;
+  const secureBackupDestinationEpochRef = useRef(0);
   useEffect(() => {
+    secureBackupDestinationEpochRef.current += 1;
+    secureBackupDestinationPathRef.current = null;
+    setSecureBackupDestinationSelected(false);
+    setSecureBackupDestinationChoosing(false);
     setConfirmSecureBackupReenable(false);
   }, [secureBackupConfirmationOwner, secureBackupGate.kind]);
   const gateOperationRef = useRef<"recovery" | "sas" | "cleanup" | null>(null);
@@ -259,19 +264,25 @@ export function SessionVerificationGate({
   const chooseSecureBackupDestination = async () => {
     const operation = operations.chooseSecureBackupDestination;
     if (!operation || secureBackupDestinationChoosing) return;
+    const epoch = secureBackupDestinationEpochRef.current + 1;
+    secureBackupDestinationEpochRef.current = epoch;
     setSecureBackupDestinationChoosing(true);
     setSecureBackupOperationError(false);
     setSecureBackupDestinationSelectionError(false);
     try {
       const selected = (await operation())?.trim() || null;
-      if (selected) {
+      if (secureBackupDestinationEpochRef.current === epoch && selected) {
         secureBackupDestinationPathRef.current = selected;
         setSecureBackupDestinationSelected(true);
       }
     } catch {
-      setSecureBackupDestinationSelectionError(true);
+      if (secureBackupDestinationEpochRef.current === epoch) {
+        setSecureBackupDestinationSelectionError(true);
+      }
     } finally {
-      setSecureBackupDestinationChoosing(false);
+      if (secureBackupDestinationEpochRef.current === epoch) {
+        setSecureBackupDestinationChoosing(false);
+      }
     }
   };
   const submitSecureBackupSetup = (kind: "setup" | "reenable") => {

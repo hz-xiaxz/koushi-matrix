@@ -748,6 +748,12 @@ describe("SessionVerificationGate interactions", () => {
     let dialog = screen.getByRole("dialog", { name: "Re-enable secure backup" });
     expect(dialog).toBeTruthy();
     expect(bootstrapSecureBackup).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Choose recovery key destination" })
+    );
+    await vi.waitFor(() =>
+      expect(within(dialog).getByText("Recovery key destination selected.")).toBeTruthy()
+    );
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog", { name: "Re-enable secure backup" })).toBeNull();
     expect(bootstrapSecureBackup).not.toHaveBeenCalled();
@@ -759,6 +765,7 @@ describe("SessionVerificationGate interactions", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Re-enable secure backup" }));
     dialog = screen.getByRole("dialog", { name: "Re-enable secure backup" });
+    expect(within(dialog).getByText("No recovery key destination selected.")).toBeTruthy();
     const passphrase = within(dialog).getByLabelText(
       "Secure backup passphrase"
     ) as HTMLInputElement;
@@ -767,7 +774,7 @@ describe("SessionVerificationGate interactions", () => {
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Choose recovery key destination" })
     );
-    await vi.waitFor(() => expect(chooseSecureBackupDestination).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(chooseSecureBackupDestination).toHaveBeenCalledTimes(2));
     await vi.waitFor(() =>
       expect(within(dialog).getByText("Recovery key destination selected.")).toBeTruthy()
     );
