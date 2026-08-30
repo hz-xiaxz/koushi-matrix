@@ -450,7 +450,7 @@ test("pin and unpin actions dispatch typed commands and pinned banner waits for 
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   }, HARNESS_ROOM_ID);
 
   await expect(page.getByRole("button", { name: "Pinned · 1", exact: true })).toBeVisible();
@@ -490,7 +490,7 @@ test("pin and unpin actions dispatch typed commands and pinned banner waits for 
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   }, HARNESS_ROOM_ID);
 
   await expect(pinnedRegion).toHaveCount(0);
@@ -788,7 +788,7 @@ test("room media gallery opens a viewer from Rust-owned gallery projection", asy
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   await page.getByRole("button", { name: "Open media gallery" }).click();
@@ -878,7 +878,7 @@ test("live signals render from Rust state and dispatch only viewport/typing comm
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   }, LIVE_SIGNALS_EVENT_ID);
 
   const row = page.locator(`[data-event-id="${LIVE_SIGNALS_EVENT_ID}"]`);
@@ -977,7 +977,7 @@ test("read receipt avatars render from Rust projection with overflow and tooltip
       }
     }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   const row = page.locator('[data-event-id="$seed-event:example.invalid"]');
@@ -1068,7 +1068,7 @@ test("Seen popup keeps each reader on one compact line (#360)", async ({ page })
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   const receipts = page

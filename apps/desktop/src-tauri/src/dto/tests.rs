@@ -1612,3 +1612,37 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         "FrontendAppState wire shape changed — if intentional, regenerate with UPDATE_GOLDEN=1"
     );
 }
+
+#[test]
+fn state_update_envelope_serializes_the_v1_delta_and_snapshot_shapes() {
+    use super::{FrontendStateUpdateEnvelope, StateUpdateSnapshotReason};
+    use koushi_core::event::VersionedAppStateSnapshot;
+
+    let delta = FrontendStateUpdateEnvelope::delta(FrontendDesktopSnapshotDelta {
+        generation: 7,
+        changed: Default::default(),
+    });
+    assert_eq!(
+        serde_json::to_value(delta).expect("delta envelope should serialize"),
+        json!({
+            "protocol_version": 1,
+            "kind": "delta",
+            "generation": 7,
+            "changed": {}
+        })
+    );
+
+    let snapshot = FrontendStateUpdateEnvelope::snapshot(
+        VersionedAppStateSnapshot {
+            generation: 11,
+            state: AppState::default(),
+        },
+        StateUpdateSnapshotReason::Gap,
+    );
+    let value = serde_json::to_value(snapshot).expect("snapshot envelope should serialize");
+    assert_eq!(value["protocol_version"], json!(1));
+    assert_eq!(value["kind"], json!("snapshot"));
+    assert_eq!(value["generation"], json!(11));
+    assert_eq!(value["reason"], json!("gap"));
+    assert_eq!(value["snapshot"]["state_generation"], json!(11));
+}

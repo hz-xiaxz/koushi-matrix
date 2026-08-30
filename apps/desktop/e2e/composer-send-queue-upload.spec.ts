@@ -124,7 +124,7 @@ test("room mention candidates stay Rust-owned and send typed mention intent", as
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
   const composer = page.getByRole("textbox", { name: "Message composer" });
@@ -299,7 +299,7 @@ test("composer string revision stays exact above Number.MAX_SAFE_INTEGER", async
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
 
@@ -436,7 +436,7 @@ test("main composer delayed write survives churn then rejects stale completion",
       window.__harness.setSnapshot(next);
       return next;
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
 
@@ -543,7 +543,7 @@ test("main composer keeps an emptied local draft across stale snapshot refresh",
         };
       }
     );
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
 
@@ -568,7 +568,7 @@ test("main composer keeps an emptied local draft across stale snapshot refresh",
     });
 
   await page.evaluate(() => {
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
   await expect(composer).toHaveText("");
 });
@@ -825,7 +825,7 @@ test("account switch revokes unresolved composer lifecycle", async ({
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
   await expect(composer).toHaveText("next account draft");
 
@@ -979,7 +979,7 @@ test("scheduled send UI dispatches typed commands and waits for Rust snapshot ch
       window.__harness.setCommandResponse("cancel_scheduled_send", () =>
         window.__harness.currentSnapshot()
       );
-      window.__harness.pushStateChanged();
+      window.__harness.pushStateUpdate();
       window.__harness.clearInvocations();
     },
     { initialSendAt, editedSendAt }
@@ -1051,7 +1051,7 @@ test("scheduled send UI dispatches typed commands and waits for Rust snapshot ch
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   }, { editedSendAt });
   await expect(page.getByRole("region", { name: "Scheduled messages" })).toContainText(
     "Jan 3"
@@ -1081,7 +1081,7 @@ test("scheduled send UI dispatches typed commands and waits for Rust snapshot ch
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
   await expect(page.getByRole("region", { name: "Scheduled messages" })).toBeHidden();
 });
@@ -1114,7 +1114,7 @@ test("main composer composing Enter never sends or accepts mention autocomplete"
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
 

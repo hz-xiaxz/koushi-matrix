@@ -99,6 +99,7 @@ export interface ViewportSyncReceipt {
 
 export interface DesktopApi {
   getSnapshot(): Promise<DesktopSnapshot>;
+  resyncSnapshot(): Promise<DesktopSnapshot>;
   getDiagnosticSnapshot(): Promise<DiagnosticLogSnapshot>;
   observeViewportSync(observation: ViewportSyncObservation): Promise<ViewportSyncReceipt>;
   discoverLoginMethods(homeserver: string): Promise<DesktopSnapshot>;

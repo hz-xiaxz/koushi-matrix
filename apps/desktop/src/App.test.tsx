@@ -1379,26 +1379,23 @@ describe("ContextualRightPanel", () => {
     expect(roomPane).not.toContain("canPaginateOlderMessages");
   });
 
-  test("App event subscriptions keep renderer-owned setup and teardown", () => {
+  test("App consumes one ordered v1 state-update lane", () => {
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-    const listenerStart = source.indexOf("// Tauri production sends complete on the CoreEvent stream");
-    const listenerEnd = source.indexOf("// App-level timeline store", listenerStart);
-    const listenerSource = source.slice(listenerStart, listenerEnd);
-    const stateStart = source.indexOf("desktopEventPort.listenStateChanges");
-    const stateEnd = source.indexOf("  }, []);", stateStart);
-    const stateSource = source.slice(stateStart, stateEnd);
 
-    expect(listenerSource.match(/desktopEventPort\.listenCoreEvents/g)).toHaveLength(2);
-    expect(listenerSource).toContain("desktopEventPort.listenMenuActions");
-    expect(listenerSource.match(/\.then\(\(dispose\)/g)).toHaveLength(3);
-    expect(listenerSource.match(/unlisten\?\.\(\)/g)).toHaveLength(3);
-    expect(listenerSource).toContain("deltaBatcher.dispose()");
-    expect(stateStart).toBeGreaterThanOrEqual(0);
-    expect(stateEnd).toBeGreaterThan(stateStart);
-    expect(stateSource).toContain("stateRefreshTimerRef.current");
-    expect(stateSource).toContain("window.clearTimeout");
-    expect(stateSource).toContain("unlisten?.()");
-    expect(source.slice(stateEnd, stateEnd + 10)).toContain("}, []);");
+    const listenerIndex = source.indexOf("desktopEventPort.listenStateUpdates");
+    const initialSnapshotIndex = source.indexOf(".then(() => api.getSnapshot())", listenerIndex);
+    expect(listenerIndex).toBeGreaterThanOrEqual(0);
+    expect(initialSnapshotIndex).toBeGreaterThan(listenerIndex);
+    expect(source).toContain("api.resyncSnapshot");
+    expect(source).toContain("applyGlobalResync");
+    expect(source).toContain("pruneTimelineStore");
+    expect(source).toContain("api.getSnapshot");
+    expect(source).not.toContain("listenStateChanges");
+    expect(source).not.toMatch(/koushi-desktop:\/\/state["']/);
+    expect(source).not.toContain("stateRefreshTimerRef");
+    expect(source).not.toContain("STATE_EVENT_REFRESH_DEBOUNCE_MS");
+    expect(source).not.toContain('payload.kind !== "StateDelta"');
+    expect(source).not.toContain('Extract<CoreEventPayload, { kind: "StateDelta" }>');
   });
 
   test("timeline acknowledgement retry lifetime is not owned by TimelineView", () => {

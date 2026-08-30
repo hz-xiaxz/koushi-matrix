@@ -18,6 +18,34 @@ pub async fn get_snapshot(
     current_snapshot(state.inner()).await
 }
 
+/// Recover a frontend-detected state/timeline gap from one exact Core snapshot.
+///
+/// The snapshot is captured before submitting the single replay command so its
+/// generation is the generation returned to the caller, not a later watch value.
+#[tauri::command]
+pub async fn resync_snapshot(
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let (versioned_snapshot, request_id) = {
+        let connection = state.inner().connection.lock().await;
+        (
+            connection.versioned_snapshot(),
+            connection.next_request_id(),
+        )
+    };
+    submit_core_command(
+        state.inner(),
+        CoreCommand::Timeline(TimelineCommand::ReplaySubscribed { request_id }),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        versioned_snapshot.state,
+        versioned_snapshot.generation,
+    ))
+}
+
 #[tauri::command]
 pub async fn discover_login_methods(
     homeserver: String,

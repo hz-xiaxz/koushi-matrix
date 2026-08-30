@@ -178,6 +178,7 @@ import type {
 import { stageAttachmentFiles } from "./domain/attachmentIngestion";
 import { createLatestMutationOperationQueue } from "./domain/latestAsyncResult";
 import { createOrderedEventBatcher } from "./domain/orderedEventBatcher";
+import { createStateUpdateConsumer } from "./domain/stateUpdateConsumer";
 import { SNAPSHOT_SCHEMA_VERSION } from "./domain/types";
 import {
   type DisplayDensity,
@@ -191,7 +192,7 @@ import {
 } from "./app/localPresentation";
 import { createViewportSyncReporter } from "./app/viewportSyncReporter";
 import {
-  applyAppStoreDeltas,
+  applyAppStoreDelta,
   getAppStoreDeltaStats,
   selectSnapshot,
   setAppStoreSnapshot,
@@ -345,7 +346,6 @@ function spaceInviteCancellationAvailabilityReasonForSnapshot(
 }
 
 const DEFAULT_HOMESERVER = "https://matrix.org";
-const STATE_EVENT_REFRESH_DEBOUNCE_MS = 250;
 declare global {
   interface Window {
     __matrixDesktopQaErrorCaptureInstalled?: boolean;
@@ -1159,7 +1159,6 @@ export function App() {
     setSpaceLocalOverrides(setSpaceLocalOverride(spaceId, override));
   }
   const qaSendBaselineTimelineItems = useRef(0);
-  const stateRefreshTimerRef = useRef<number | null>(null);
   const panelDiagnosticRef = useRef<string | null>(null);
   // Page-lifetime renderer intent only: Rust owns privacy-safe diagnostic content, while this
   // epoch orders overlapping requests to open the one dialog. It deliberately survives account
@@ -1584,8 +1583,57 @@ export function App() {
   }
 
   useEffect(() => {
-    void refresh();
-  }, []);
+    if (!isTauriRuntime()) {
+      void refresh();
+      return;
+    }
+
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    const stateUpdates = createStateUpdateConsumer({
+      applySnapshot: setSnapshot,
+      applyDelta: (delta) =>
+        applyAppStoreDelta({
+          generation: delta.generation,
+          changed: delta.changed
+        }),
+      resetTimeline: () => {
+        setTimelineStore((current) =>
+          pruneTimelineStore(
+            applyGlobalResync(current),
+            retainedTimelineKeyIdsRef.current
+          )
+        );
+      },
+      resyncSnapshot: () => api.resyncSnapshot()
+    });
+    const listenerReady = desktopEventPort.listenStateUpdates(stateUpdates.receive);
+    void listenerReady.then((dispose) => {
+      if (disposed) {
+        dispose();
+      } else {
+        unlisten = dispose;
+      }
+    });
+    setIsBusy(true);
+    void listenerReady
+      .then(() => api.getSnapshot())
+      .then((snapshot) => {
+        if (!disposed) stateUpdates.initialize(snapshot);
+      })
+      .catch(() => {
+        if (!disposed) stateUpdates.recoverInitial();
+      })
+      .finally(() => {
+        if (!disposed) setIsBusy(false);
+      });
+
+    return () => {
+      disposed = true;
+      stateUpdates.dispose();
+      unlisten?.();
+    };
+  }, [setSnapshot]);
 
   useEffect(() => {
     return () => {
@@ -1867,46 +1915,6 @@ export function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-    const deltaBatcher = createOrderedEventBatcher<
-      Extract<CoreEventPayload, { kind: "StateDelta" }>
-    >((deltas) => {
-      const applied = applyAppStoreDeltas(
-        deltas.map((delta) => ({
-          generation: delta.generation,
-          changed: delta.changed
-        }))
-      );
-      if (!applied) {
-        void refresh();
-      }
-    });
-    void desktopEventPort.listenCoreEvents((payload) => {
-      if (payload.kind !== "StateDelta") {
-        return;
-      }
-      deltaBatcher.enqueue(payload);
-    }).then((dispose) => {
-      if (disposed) {
-        dispose();
-      } else {
-        unlisten = dispose;
-      }
-    });
-
-    return () => {
-      disposed = true;
-      deltaBatcher.dispose();
-      unlisten?.();
-    };
-  }, []);
-
   // App-level timeline store: apply CoreEvent::Timeline diffs once, then feed
   // the resulting store into every TimelineView. This keeps Matrix timeline
   // semantics Rust-owned and avoids per-view reducer ownership.
@@ -2079,39 +2087,6 @@ export function App() {
       unsubscribe();
     };
   }, [appTimelineTransport]);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-    void desktopEventPort.listenStateChanges(() => {
-      if (stateRefreshTimerRef.current !== null) {
-        return;
-      }
-      stateRefreshTimerRef.current = window.setTimeout(() => {
-        stateRefreshTimerRef.current = null;
-        void refresh();
-      }, STATE_EVENT_REFRESH_DEBOUNCE_MS);
-    }).then((dispose) => {
-      if (disposed) {
-        dispose();
-      } else {
-        unlisten = dispose;
-      }
-    });
-
-    return () => {
-      disposed = true;
-      if (stateRefreshTimerRef.current !== null) {
-        window.clearTimeout(stateRefreshTimerRef.current);
-        stateRefreshTimerRef.current = null;
-      }
-      unlisten?.();
-    };
-  }, []);
 
   useEffect(() => {
     if (!snapshot || rightPanelMode !== "roomInfo") {

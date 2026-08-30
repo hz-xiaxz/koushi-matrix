@@ -59,6 +59,10 @@ export class TauriDesktopApi implements DesktopApi {
     return invoke<DesktopSnapshot>("get_snapshot");
   }
 
+  async resyncSnapshot(): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("resync_snapshot");
+  }
+
   async getDiagnosticSnapshot(): Promise<DiagnosticLogSnapshot> {
     return invoke<DiagnosticLogSnapshot>("get_diagnostic_snapshot");
   }

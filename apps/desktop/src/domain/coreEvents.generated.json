@@ -768,7 +768,8 @@
       }
     },
     "generation": 1,
-    "kind": "StateDelta"
+    "kind": "delta",
+    "protocol_version": 1
   },
   "syncStarted": {
     "event": {

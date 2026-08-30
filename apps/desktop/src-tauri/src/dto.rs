@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use koushi_core::StateDelta;
+use koushi_core::{StateDelta, event::VersionedAppStateSnapshot};
 use koushi_state::{
     AccountManagementCapabilities, AccountManagementState, AccountManagementUrl, ActivityState,
     AppError, AppState, AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, ComposerState,
@@ -76,6 +76,55 @@ impl FrontendDesktopSnapshot {
         let mut snapshot = Self::from(state);
         snapshot.state_generation = Some(generation);
         snapshot
+    }
+}
+
+pub const STATE_UPDATE_PROTOCOL_VERSION: u8 = 1;
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StateUpdateSnapshotReason {
+    Initial,
+    Gap,
+    Lag,
+    Settlement,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum FrontendStateUpdateEnvelope {
+    Delta {
+        protocol_version: u8,
+        generation: u64,
+        changed: FrontendDesktopSnapshotChangedSlices,
+    },
+    Snapshot {
+        protocol_version: u8,
+        generation: u64,
+        snapshot: FrontendDesktopSnapshot,
+        reason: StateUpdateSnapshotReason,
+    },
+}
+
+impl FrontendStateUpdateEnvelope {
+    pub(crate) fn delta(delta: FrontendDesktopSnapshotDelta) -> Self {
+        Self::Delta {
+            protocol_version: STATE_UPDATE_PROTOCOL_VERSION,
+            generation: delta.generation,
+            changed: delta.changed,
+        }
+    }
+
+    pub(crate) fn snapshot(
+        snapshot: VersionedAppStateSnapshot,
+        reason: StateUpdateSnapshotReason,
+    ) -> Self {
+        Self::Snapshot {
+            protocol_version: STATE_UPDATE_PROTOCOL_VERSION,
+            generation: snapshot.generation,
+            snapshot: FrontendDesktopSnapshot::from_versioned(snapshot.state, snapshot.generation),
+            reason,
+        }
     }
 }
 

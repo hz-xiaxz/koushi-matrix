@@ -134,7 +134,7 @@ async function switchActiveRoom(
           }
         }
       });
-      window.__harness.pushStateChanged();
+      window.__harness.pushStateUpdate();
     },
     { nextRoomId: roomId, nextRoomName: roomName }
   );

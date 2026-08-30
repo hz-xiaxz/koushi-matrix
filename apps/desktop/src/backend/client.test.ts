@@ -24,6 +24,15 @@ describe("TauriDesktopApi", () => {
     expect(invoke).toHaveBeenCalledWith("get_diagnostic_snapshot");
   });
 
+  test("requests the one state/timeline resync command", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+
+    const api = new TauriDesktopApi();
+    await api.resyncSnapshot();
+
+    expect(invoke).toHaveBeenCalledWith("resync_snapshot");
+  });
+
   test("opens a thread with the Rust-owned creation intent", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 

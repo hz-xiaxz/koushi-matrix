@@ -77,7 +77,7 @@ async function gotoSignedOutAuth(page: Page): Promise<void> {
       },
       timeline: []
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
   await expect(page.getByTestId("auth-screen")).toBeVisible();
@@ -124,7 +124,7 @@ test("Rust-owned locale profile applies root lang and dir", async ({ page }) => 
       modifier_labels: { primary: "Ctrl" }
     };
     window.__harness.setSnapshot(snapshot);
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   await expect.poll(() => page.evaluate(() => document.documentElement.lang)).toBe("ar-XB");
@@ -211,7 +211,7 @@ test("Japanese locale renders shell labels and CJK text without clipping", async
         }))
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   }, { workspaceName: longWorkspaceName, roomNames: rustOrderedRoomNames });
 
@@ -426,7 +426,7 @@ test("pseudo RTL profile with CJK and combining samples does not overflow shell"
     snapshot.state.domain.spaces[0].display_name = "日本語 Space العربية";
     snapshot.sidebar.space_rail[0].display_name = "日本語 Space العربية";
     window.__harness.setSnapshot(snapshot);
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   }, longRoomName);
 
   await expect(page.locator("main.main-pane").getByText(longRoomName)).toBeVisible();
@@ -576,7 +576,7 @@ test("typography profile applies bundled font and emoji tokens from Rust snapsho
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   await expect
@@ -875,7 +875,7 @@ test("hide deleted messages setting hides only Rust-marked redacted timeline row
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
   const redactedEventId = "$redacted-hidden:example.invalid";
   const replyEventId = "$reply-to-hidden-redacted:example.invalid";
@@ -1028,7 +1028,7 @@ test("profile settings dispatch Rust-owned commands and avatars render from prof
       }
     };
     window.__harness.setSnapshot(next);
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   const key = roomTimelineKey("@harness-user:example.invalid", "!harness-room:example.invalid");
@@ -1129,7 +1129,7 @@ test("unsafe account-management destination is hidden in User Settings", async (
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
   await page.getByRole("button", { name: "User settings", exact: true }).click();
   await page.getByRole("button", { name: "Session", exact: true }).click();
@@ -1296,14 +1296,21 @@ test("a stale flat (v1) snapshot fails closed to the recovery screen instead of 
   // v2 shape and would itself throw on a flat snapshot.
   await page.evaluate(() => {
     const { sidebar } = window.__harness.currentSnapshot();
+    const generation = (window.__harness.currentSnapshot().state_generation ?? 0) + 1;
     const flatV1Snapshot = {
+      state_generation: generation,
       state: { session: { kind: "signedOut" }, sync: "stopped" },
       sidebar,
       timeline: [],
       thread: null
     };
-    window.__harness.setCommandResponse("get_snapshot", () => flatV1Snapshot);
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate({
+      protocol_version: 1,
+      kind: "snapshot",
+      generation,
+      snapshot: flatV1Snapshot as never,
+      reason: "settlement"
+    });
   });
 
   await expect(page.getByRole("alert")).toContainText(t("app.versionMismatch.title"));
@@ -1319,11 +1326,18 @@ test("a future snapshot schema_version is also rejected to the recovery screen",
   // newer Rust build) must fail closed rather than render against an unverified contract.
   await page.evaluate(() => {
     const snapshot = window.__harness.currentSnapshot();
-    window.__harness.setCommandResponse("get_snapshot", () => ({
-      ...snapshot,
-      state: { ...snapshot.state, schema_version: 999 }
-    }));
-    window.__harness.pushStateChanged();
+    const generation = (snapshot.state_generation ?? 0) + 1;
+    window.__harness.pushStateUpdate({
+      protocol_version: 1,
+      kind: "snapshot",
+      generation,
+      snapshot: {
+        ...snapshot,
+        state_generation: generation,
+        state: { ...snapshot.state, schema_version: 999 }
+      },
+      reason: "settlement"
+    });
   });
 
   await expect(page.getByRole("alert")).toContainText(t("app.versionMismatch.title"));

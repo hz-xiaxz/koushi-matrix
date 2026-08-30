@@ -89,7 +89,7 @@ test("applies a pre-screen Focused projection before ACK and fences a delayed ol
         event_id: key.kind.Focused.event_id
       };
       window.__harness.setSnapshot(snapshot);
-      await window.__harness.pushStateChanged();
+      await window.__harness.pushStateUpdate();
     },
     { key: FOCUSED_KEY, item: message("$stale:example.invalid", "must not replace") }
   );

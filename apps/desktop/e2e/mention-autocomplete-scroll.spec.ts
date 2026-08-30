@@ -59,7 +59,7 @@ async function seedMentionCandidates(page: Page): Promise<void> {
       // The harness's own query_mention_candidates response would replace the
       // seeded list with a single candidate; override it to keep all 30.
       window.__harness.setCommandResponse("query_mention_candidates", () => seeded);
-      window.__harness.pushStateChanged();
+      window.__harness.pushStateUpdate();
     },
     { roomId: ROOM_ID, count: CANDIDATE_COUNT }
   );

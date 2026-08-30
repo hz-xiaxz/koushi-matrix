@@ -258,7 +258,7 @@ test("single read receipt renders avatar initials and count", async ({ page }) =
           }
         }
       });
-      window.__harness.pushStateChanged();
+      window.__harness.pushStateUpdate();
     },
     { roomId: "!harness-room:example.invalid", evId: eventId }
   );
@@ -325,7 +325,7 @@ test("multiple read receipts render stacked avatars", async ({ page }) => {
           }
         }
       });
-      window.__harness.pushStateChanged();
+      window.__harness.pushStateUpdate();
     },
     { roomId: "!harness-room:example.invalid", evId: eventId }
   );
@@ -384,7 +384,7 @@ test("overflow count is shown when overflow_count > 0", async ({ page }) => {
           }
         }
       });
-      window.__harness.pushStateChanged();
+      window.__harness.pushStateUpdate();
     },
     { roomId: "!harness-room:example.invalid", evId: eventId }
   );
@@ -549,7 +549,7 @@ test("read receipt row is right-aligned within the message column", async ({ pag
           }
         }
       });
-      window.__harness.pushStateChanged();
+      window.__harness.pushStateUpdate();
     },
     { roomId: HARNESS_ROOM_ID, evId: eventId }
   );

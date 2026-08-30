@@ -8,17 +8,19 @@ use std::{
 
 use tauri::Emitter;
 
-use crate::dto::FrontendDesktopSnapshotDelta;
+use crate::dto::{
+    FrontendDesktopSnapshotDelta, FrontendStateUpdateEnvelope, StateUpdateSnapshotReason,
+};
 use koushi_core::{
     CoreCommand, CoreCommandHandle, CoreConnection, CoreEvent, EventStreamLag, SearchEvent,
-    TimelineCommand, TimelineEvent, event::AppStateSnapshot,
+    TimelineCommand, TimelineEvent, event::VersionedAppStateSnapshot,
 };
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 
 /// Tauri event for serialized CoreEvent payloads (discrete events + diff batches).
 pub(crate) const CORE_EVENT_NAME: &str = "koushi-desktop://event";
-/// Tauri event for serialized AppStateSnapshot payloads (latest-wins).
-const STATE_EVENT_NAME: &str = "koushi-desktop://state";
+/// Tauri event for the single ordered desktop state-update lane.
+pub(crate) const STATE_UPDATE_EVENT_NAME: &str = "koushi-desktop://state-update";
 const CORE_FORWARDER_TIMELINE_REPLAY_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ForwarderLagDisposition {
@@ -67,7 +69,7 @@ pub(super) fn spawn_core_event_forwarder(
                 Err(lag) => {
                     // Consumer fell behind or the stream closed. Emit the
                     // latest snapshot and marker once before replay or exit.
-                    let snapshot = event_conn.snapshot();
+                    let snapshot = event_conn.versioned_snapshot();
                     emit_forwarded_webview_events(
                         &app,
                         forwarded_webview_events_for_lag_resync(&snapshot),
@@ -119,21 +121,12 @@ fn forwarded_webview_events_for_core_event(
     }
 
     if let CoreEvent::StateDelta(delta) = event {
-        let requires_snapshot_refresh = delta.changed.session.is_some();
+        let delta = FrontendDesktopSnapshotDelta::from(delta.clone());
         forwarded.push(ForwardedWebviewEvent {
-            event_name: CORE_EVENT_NAME,
-            payload: serde_json::json!({
-                "kind": "StateDelta",
-                "generation": delta.generation,
-                "changed": FrontendDesktopSnapshotDelta::from(delta.clone()).changed,
-            }),
+            event_name: STATE_UPDATE_EVENT_NAME,
+            payload: serde_json::to_value(FrontendStateUpdateEnvelope::delta(delta))
+                .expect("state-update delta should serialize"),
         });
-        if requires_snapshot_refresh {
-            forwarded.push(ForwardedWebviewEvent {
-                event_name: STATE_EVENT_NAME,
-                payload: serde_json::Value::String("stateChanged".to_owned()),
-            });
-        }
     }
 
     if let Some(payload) = serialize_core_event(event) {
@@ -160,23 +153,23 @@ fn diffs_net_count_change(diffs: &[koushi_core::TimelineDiff]) -> i64 {
         })
         .sum()
 }
-fn forwarded_webview_events_for_state_changed(
-    _snapshot: &AppStateSnapshot,
-) -> Vec<ForwardedWebviewEvent> {
-    vec![ForwardedWebviewEvent {
-        event_name: STATE_EVENT_NAME,
-        payload: serde_json::Value::String("stateChanged".to_owned()),
-    }]
-}
 fn forwarded_webview_events_for_lag_resync(
-    snapshot: &AppStateSnapshot,
+    snapshot: &VersionedAppStateSnapshot,
 ) -> Vec<ForwardedWebviewEvent> {
-    let mut forwarded = forwarded_webview_events_for_state_changed(snapshot);
-    forwarded.push(ForwardedWebviewEvent {
-        event_name: CORE_EVENT_NAME,
-        payload: serde_json::json!({ "kind": "ResyncMarker" }),
-    });
-    forwarded
+    vec![
+        ForwardedWebviewEvent {
+            event_name: STATE_UPDATE_EVENT_NAME,
+            payload: serde_json::to_value(FrontendStateUpdateEnvelope::snapshot(
+                snapshot.clone(),
+                StateUpdateSnapshotReason::Lag,
+            ))
+            .expect("state-update snapshot should serialize"),
+        },
+        ForwardedWebviewEvent {
+            event_name: CORE_EVENT_NAME,
+            payload: serde_json::json!({ "kind": "ResyncMarker" }),
+        },
+    ]
 }
 fn emit_forwarded_webview_events(
     app: &tauri::AppHandle,

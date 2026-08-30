@@ -109,7 +109,7 @@ test("workspace rail space and Home clicks apply returned navigation snapshots",
   await expect(space).not.toHaveClass(/is-active/);
 });
 
-test("workspace rail keeps a newer StateDelta when the command returns a stale snapshot", async ({
+test("workspace rail keeps a newer state delta when the command returns a stale snapshot", async ({
   page
 }) => {
   await gotoReadyShell(page);
@@ -146,8 +146,9 @@ test("workspace rail keeps a newer StateDelta when the command returns a stale s
     window.__harness.setCommandResponse(
       "select_space",
       async ({ spaceId }: { spaceId: string | null }) => {
-        await window.__harness.pushCoreEvent({
-          kind: "StateDelta",
+        await window.__harness.pushStateUpdate({
+          protocol_version: 1,
+          kind: "delta",
           generation: 2,
           changed: {
             state: {
@@ -175,7 +176,7 @@ test("workspace rail keeps a newer StateDelta when the command returns a stale s
         return staleSnapshot;
       }
     );
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
 
@@ -237,7 +238,7 @@ test("space rail separates system buttons, reorders Spaces, and leaves a Space h
         space_rail: [...snapshot.sidebar.space_rail, secondRailItem]
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
 
@@ -685,7 +686,7 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
       return next;
     });
     window.__harness.setCommandResponse("invite_targets", () => window.__harness.currentSnapshot());
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
 
@@ -837,7 +838,7 @@ test("Explore searches public rooms and joins only after Rust snapshot updates",
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   await expect(page.getByRole("heading", { name: "Public Search Result" })).toBeVisible();
@@ -887,7 +888,7 @@ test("Explore searches public rooms and joins only after Rust snapshot updates",
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   const previewDialog = page.getByRole("dialog", { name: "Join this room?" });
@@ -954,7 +955,7 @@ test("Explore searches public rooms and joins only after Rust snapshot updates",
         space_rooms: [...snapshot.sidebar.space_rooms, roomListItem]
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   await expect(
@@ -1020,7 +1021,7 @@ test("room management panel updates settings, roles, and members from Rust state
     window.__harness.setCommandResponse("load_room_settings", () =>
       window.__harness.currentSnapshot()
     );
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   }, HARNESS_ROOM_ID);
 
@@ -1065,7 +1066,7 @@ test("room management panel updates settings, roles, and members from Rust state
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   }, HARNESS_ROOM_ID);
 
   await expect(currentTopicRow.getByText("Updated managed topic")).toBeVisible();
@@ -1109,7 +1110,7 @@ test("room management panel updates settings, roles, and members from Rust state
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   }, HARNESS_ROOM_ID);
 
   await expect(currentAvatarRow.getByText("mxc://example.invalid/managed-avatar")).toBeVisible();
@@ -1195,7 +1196,7 @@ test("room management panel updates settings, roles, and members from Rust state
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   await expect(targetMemberRoleSelect).toHaveValue("50");
@@ -1236,7 +1237,7 @@ test("room management panel updates settings, roles, and members from Rust state
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   await page
@@ -1339,7 +1340,7 @@ test("local aliases dispatch typed account command and render Rust-projected lab
     window.__harness.setCommandResponse("load_room_settings", () =>
       window.__harness.currentSnapshot()
     );
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   }, HARNESS_ROOM_ID);
 
@@ -1507,7 +1508,7 @@ test("room tag context menu dispatches typed commands and waits for Rust section
         )
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   }, HARNESS_ROOM_ID);
 
   await expect(roomsSection.getByRole("button", { name: "Harness Room" })).toHaveCount(0);
@@ -1526,7 +1527,7 @@ test("room tag context menu dispatches typed commands and waits for Rust section
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
   await expect(favouritesSection.getByRole("button", { name: "Harness Room" })).toBeVisible();
 
@@ -1567,7 +1568,7 @@ test("room tag context menu dispatches typed commands and waits for Rust section
         )
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   }, HARNESS_ROOM_ID);
 
   await page.evaluate(() => {
@@ -1585,7 +1586,7 @@ test("room tag context menu dispatches typed commands and waits for Rust section
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
   await expect(roomsSection.getByRole("button", { name: "Harness Room" })).toBeVisible();
   await expect(favouritesSection).toHaveCount(0);
@@ -1728,7 +1729,7 @@ test("room sections follow Element-aligned order and render Rust-owned counts", 
         dm_highlight_count: 0
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   await expect(page.getByRole("button", { name: "DMs, 2 unread, 1 total" })).toBeVisible();
@@ -1786,7 +1787,7 @@ test("room sections follow Element-aligned order and render Rust-owned counts", 
         account_home: { ...snapshot.sidebar.account_home, is_active: true }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
   await expect(page.locator('[data-room-section="favourites"]')).toHaveCount(0);
   await expect(page.locator('[data-room-section="low-priority"]')).toBeVisible();
@@ -1820,7 +1821,7 @@ test("category unread badges keep DMs and Rooms attention visible from Rust side
         space_highlight_count: 2
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   const dms = page.getByRole("button", { name: "DMs, 3 unread, 58 total" });
@@ -1854,7 +1855,7 @@ test("category unread badges keep DMs and Rooms attention visible from Rust side
         space_highlight_count: 0
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   const clearedDms = page.getByRole("button", { name: "DMs, 0 unread, 58 total" });
@@ -2029,7 +2030,7 @@ test("notification attention snapshot drives room, space, thread, and click rout
       window.__harness.setSnapshot(updated);
       return updated;
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
 
@@ -2103,7 +2104,7 @@ test("Home rail tooltip is absent while Space rail tooltip remains on hover and 
   await expect(spaceButton).not.toHaveAttribute("aria-describedby", /.+/);
 });
 
-test("room selection keeps a newer StateDelta when the command returns a stale snapshot", async ({
+test("room selection keeps a newer state delta when the command returns a stale snapshot", async ({
   page
 }) => {
   await gotoReadyShell(page);
@@ -2189,8 +2190,9 @@ test("room selection keeps a newer StateDelta when the command returns a stale s
     window.__harness.setSnapshot(staleSnapshot);
     window.__harness.setCommandResponse("select_room", async ({ roomId }: { roomId: string }) => {
       const targetRoomId = String(roomId);
-      await window.__harness.pushCoreEvent({
-        kind: "StateDelta",
+      await window.__harness.pushStateUpdate({
+        protocol_version: 1,
+        kind: "delta",
         generation: 2,
         changed: {
           state: {
@@ -2218,7 +2220,7 @@ test("room selection keeps a newer StateDelta when the command returns a stale s
       });
       return staleSnapshot;
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
 
@@ -2317,7 +2319,7 @@ test("room selection ignores unrelated avatar thumbnail bursts headlessly", asyn
       window.__harness.setSnapshot(next);
       return next;
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
 
@@ -2454,7 +2456,7 @@ test("room context menu mark unread dispatches Rust-owned commands", async ({ pa
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
 

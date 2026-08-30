@@ -666,6 +666,7 @@ pub fn run() {
             commands::diagnostics::get_diagnostic_snapshot,
             commands::diagnostics::observe_viewport_sync,
             commands::session::get_snapshot,
+            commands::session::resync_snapshot,
             commands::session::discover_login_methods,
             commands::session::start_oidc_login,
             commands::session::complete_oidc_login,

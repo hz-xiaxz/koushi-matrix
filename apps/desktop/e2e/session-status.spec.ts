@@ -58,7 +58,7 @@ async function seedReadyStatus(page: Page, accountManagementUrl: string | null):
       window.__harness.setSnapshot(checking);
       return checking;
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   }, accountManagementUrl);
 }
 
@@ -109,7 +109,7 @@ test("session popover refreshes through IPC and replaces stale facts on failure"
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
   await expect(dialog).toContainText("Harness Desktop");
   await expect(dialog).toContainText("HARNESSDEVICE");
@@ -175,7 +175,7 @@ test("session popover refreshes through IPC and replaces stale facts on failure"
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
   await expect(dialog).toContainText("Session check timed out");
   await expect(dialog).not.toContainText("Harness Desktop");

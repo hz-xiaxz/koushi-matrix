@@ -7,7 +7,7 @@ test("constructs one event adapter without subscribing eagerly", async () => {
   const port = {
     listenCoreEvents: vi.fn(),
     listenMenuActions: vi.fn(),
-    listenStateChanges: vi.fn()
+    listenStateUpdates: vi.fn()
   };
   const createTauriDesktopEventPort = vi.fn(() => port);
   vi.doMock("./tauri/desktopEventPort", () => ({ createTauriDesktopEventPort }));
@@ -18,7 +18,7 @@ test("constructs one event adapter without subscribing eagerly", async () => {
   expect(createTauriDesktopEventPort).toHaveBeenCalledOnce();
   expect(port.listenCoreEvents).not.toHaveBeenCalled();
   expect(port.listenMenuActions).not.toHaveBeenCalled();
-  expect(port.listenStateChanges).not.toHaveBeenCalled();
+  expect(port.listenStateUpdates).not.toHaveBeenCalled();
 });
 
 afterEach(() => {

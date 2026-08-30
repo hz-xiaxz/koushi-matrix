@@ -383,6 +383,10 @@ class BrowserFakeApi implements DesktopApi {
     return clone(this.snapshot);
   }
 
+  async resyncSnapshot(): Promise<DesktopSnapshot> {
+    return this.getSnapshot();
+  }
+
   async beginComposerDraftRendererGeneration(): Promise<string> {
     this.composerRendererGeneration += 1n;
     this.composerLeases.clear();
