@@ -395,9 +395,24 @@ stateDiagram-v2
   degradation retain normal use; an inconclusive initial inspection does not.
   Account/session generation fencing occurs in `AccountActor` before reducer
   projection.
-- Setup after an explicitly disabled state requires a separate user command;
-  the UI states that re-enabling the account-wide backup setting changes the
-  behavior observed by the user's other Matrix clients.
+- Secure-backup setup admission is Rust-owned and uses the closed
+  `SecureBackupSetupIntent`. `InitialSetup` is admitted only by `SetupRequired`
+  or recovery-key delivery retry; `Reenable { confirmed: true }` is admitted
+  only by `ExplicitlyDisabledRequiresSetup`. Initial setup, unconfirmed
+  re-enable, duplicate setup, and stale/forged confirmation produce a typed
+  confirmation-required or failed-no-op result before `AccountActor` routing.
+  The SDK's fresh server/local/trust inspection remains authoritative and may
+  still require confirmation. React renders catalog text, cancel sends no
+  command, confirm sends the explicit typed intent, and Tauri only maps it.
+
+```mermaid
+stateDiagram-v2
+    ExplicitlyDisabledRequiresSetup --> ExplicitlyDisabledRequiresSetup: InitialSetup or Reenable(unconfirmed) / typed reject, no actor effect
+    ExplicitlyDisabledRequiresSetup --> CreatingBackup: Reenable(confirmed) / project admission then route
+    SetupRequired --> CreatingBackup: InitialSetup / project admission then route
+    SetupRequired --> SetupRequired: Reenable(any) / failed-no-op, no actor effect
+    CreatingBackup --> CreatingBackup: duplicate intent / failed-no-op, no actor effect
+```
 - A genuine missing cross-signing identity may enter mandatory bootstrap. An
   existing identity without a verified other device or usable recovery method
   enters `Rejecting`; identity reset, skip, and verify-later are not gate exits.

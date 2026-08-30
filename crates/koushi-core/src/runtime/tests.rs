@@ -1743,7 +1743,7 @@ fn gate_sas_and_bootstrap_commands_project_only_opaque_flow_state() {
                 recovery_key_destination_path: Some(std::path::PathBuf::from(
                     "/private/recovery-key.txt",
                 )),
-                explicit_reenable_confirmed: false,
+                intent: koushi_state::SecureBackupSetupIntent::InitialSetup,
             },
         }
     );

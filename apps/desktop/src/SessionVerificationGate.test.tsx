@@ -39,13 +39,10 @@ describe("SessionVerificationGate interactions", () => {
     snapshot: DesktopSnapshot,
     overrides: Partial<{
       recoverSecureBackup: (secret: string) => Promise<DesktopSnapshot>;
-      setupSecureBackup: (
+      bootstrapSecureBackup: (
         passphrase: string | null,
-        recoveryKeyDestinationPath: string | null
-      ) => Promise<DesktopSnapshot>;
-      reenableSecureBackup: (
-        passphrase: string | null,
-        recoveryKeyDestinationPath: string | null
+        recoveryKeyDestinationPath: string | null,
+        intent: { kind: "initialSetup" } | { kind: "reenable"; confirmed: boolean }
       ) => Promise<DesktopSnapshot>;
       chooseSecureBackupDestination: () => Promise<string | null>;
       retrySecureBackupInspection: () => Promise<DesktopSnapshot>;
@@ -56,8 +53,7 @@ describe("SessionVerificationGate interactions", () => {
       startOwnUserSas: async () => snapshot,
       submitRecovery: async () => snapshot,
       recoverSecureBackup: async () => snapshot,
-      setupSecureBackup: async () => snapshot,
-      reenableSecureBackup: async () => snapshot,
+      bootstrapSecureBackup: async () => snapshot,
       chooseSecureBackupDestination: async () => "/tmp/recovery-key.txt",
       retrySecureBackupInspection: async () => snapshot,
       openSecureBackupDiagnostics: async () => undefined,
@@ -688,7 +684,7 @@ describe("SessionVerificationGate interactions", () => {
       await createBrowserFakeApi().getSnapshot(),
       { kind: "setupRequired" }
     );
-    const setupSecureBackup = vi.fn(async () => snapshot);
+    const bootstrapSecureBackup = vi.fn(async () => snapshot);
     const chooseSecureBackupDestination = vi.fn(async () => "/tmp/recovery-key.txt");
 
     render(
@@ -697,7 +693,7 @@ describe("SessionVerificationGate interactions", () => {
         onSnapshot={() => undefined}
         onSignOut={() => undefined}
         operations={secureBackupOperations(snapshot, {
-          setupSecureBackup,
+          bootstrapSecureBackup,
           chooseSecureBackupDestination
         })}
       />
@@ -717,9 +713,10 @@ describe("SessionVerificationGate interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Set up secure backup" }));
 
     await vi.waitFor(() =>
-      expect(setupSecureBackup).toHaveBeenCalledWith(
+      expect(bootstrapSecureBackup).toHaveBeenCalledWith(
         "synthetic-passphrase",
-        "/tmp/recovery-key.txt"
+        "/tmp/recovery-key.txt",
+        { kind: "initialSetup" }
       )
     );
     expect(passphrase.value).toBe("");
@@ -730,26 +727,38 @@ describe("SessionVerificationGate interactions", () => {
       await createBrowserFakeApi().getSnapshot(),
       { kind: "explicitlyDisabledRequiresSetup" }
     );
-    const reenableSecureBackup = vi.fn(async () => snapshot);
+    const bootstrapSecureBackup = vi.fn(async () => snapshot);
     const chooseSecureBackupDestination = vi.fn(async () => "/tmp/reenable-recovery-key.txt");
 
-    render(
+    const renderGate = (nextSnapshot = snapshot) => (
       <SessionVerificationGate
-        snapshot={snapshot}
+        snapshot={nextSnapshot}
         onSnapshot={() => undefined}
         onSignOut={() => undefined}
-        operations={secureBackupOperations(snapshot, {
-          reenableSecureBackup,
+        operations={secureBackupOperations(nextSnapshot, {
+          bootstrapSecureBackup,
           chooseSecureBackupDestination
         })}
       />
     );
+    const { rerender } = render(renderGate());
 
     expect(screen.getByText(/other Matrix clients/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Re-enable secure backup" }));
-    const dialog = screen.getByRole("dialog", { name: "Re-enable secure backup" });
+    let dialog = screen.getByRole("dialog", { name: "Re-enable secure backup" });
     expect(dialog).toBeTruthy();
-    expect(reenableSecureBackup).not.toHaveBeenCalled();
+    expect(bootstrapSecureBackup).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Re-enable secure backup" })).toBeNull();
+    expect(bootstrapSecureBackup).not.toHaveBeenCalled();
+
+    const changedGate = secureBackupSnapshot(structuredClone(snapshot), { kind: "setupRequired" });
+    rerender(renderGate(changedGate));
+    rerender(renderGate(snapshot));
+    expect(screen.queryByRole("dialog", { name: "Re-enable secure backup" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-enable secure backup" }));
+    dialog = screen.getByRole("dialog", { name: "Re-enable secure backup" });
     const passphrase = within(dialog).getByLabelText(
       "Secure backup passphrase"
     ) as HTMLInputElement;
@@ -766,9 +775,10 @@ describe("SessionVerificationGate interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm re-enable" }));
 
     await vi.waitFor(() =>
-      expect(reenableSecureBackup).toHaveBeenCalledWith(
+      expect(bootstrapSecureBackup).toHaveBeenCalledWith(
         "reenable-passphrase",
-        "/tmp/reenable-recovery-key.txt"
+        "/tmp/reenable-recovery-key.txt",
+        { kind: "reenable", confirmed: true }
       )
     );
     expect(passphrase.value).toBe("");

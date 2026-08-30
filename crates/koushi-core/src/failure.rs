@@ -32,6 +32,8 @@ pub enum CoreFailure {
     AccountOperationFailed {
         kind: AuthFailureKind,
     },
+    SecureBackupSetupConfirmationRequired,
+    SecureBackupSetupFailedNoOp,
     SearchFailed {
         kind: SearchFailureKind,
     },

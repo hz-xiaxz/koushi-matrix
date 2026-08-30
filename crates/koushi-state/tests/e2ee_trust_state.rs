@@ -131,11 +131,15 @@ fn room_key_export_completion_can_leave_session_count_unknown() {
 #[test]
 fn secure_backup_setup_recovery_key_ready_has_no_key_material() {
     let mut state = ready_state();
+    state.secure_backup_gate = koushi_state::SecureBackupGateState::SetupRequired;
 
     assert_eq!(
         reduce(
             &mut state,
-            AppAction::SecureBackupSetupRequested { request_id: 33 },
+            AppAction::SecureBackupSetupRequested {
+                request_id: 33,
+                intent: koushi_state::SecureBackupSetupIntent::InitialSetup,
+            },
         ),
         vec![
             AppEffect::EmitUiEvent(UiEvent::E2eeTrustChanged),

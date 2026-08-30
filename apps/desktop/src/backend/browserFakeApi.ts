@@ -171,8 +171,7 @@ export type BrowserFakeApiContract = DesktopApi &
     Pick<
       DesktopApi,
       | "recoverSecureBackup"
-      | "setupSecureBackup"
-      | "reenableSecureBackup"
+      | "bootstrapSecureBackup"
       | "retrySecureBackupInspection"
     >
   >;
@@ -647,33 +646,6 @@ class BrowserFakeApi implements DesktopApi {
     return this.getSnapshot();
   }
 
-  async setupSecureBackup(
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
-  ): Promise<DesktopSnapshot> {
-    if (!this.isReady()) {
-      return this.getSnapshot();
-    }
-
-    void passphrase;
-    void recoveryKeyDestinationPath;
-    this.snapshot.state.domain.secure_backup_gate = { kind: "ready" };
-    return this.getSnapshot();
-  }
-
-  async reenableSecureBackup(
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
-  ): Promise<DesktopSnapshot> {
-    if (!this.isReady()) {
-      return this.getSnapshot();
-    }
-
-    void passphrase;
-    void recoveryKeyDestinationPath;
-    this.snapshot.state.domain.secure_backup_gate = { kind: "ready" };
-    return this.getSnapshot();
-  }
 
   async retrySecureBackupInspection(): Promise<DesktopSnapshot> {
     if (!this.isReady()) {
@@ -1102,13 +1074,15 @@ class BrowserFakeApi implements DesktopApi {
 
   async bootstrapSecureBackup(
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
+    recoveryKeyDestinationPath: string | null,
+    intent: import("../domain/types").SecureBackupSetupIntent
   ): Promise<DesktopSnapshot> {
     if (!this.isReady()) {
       return this.getSnapshot();
     }
 
     void passphrase;
+    void intent;
     this.snapshot.state.domain.e2ee_trust.key_management.secure_backup_setup = {
       kind: "recoveryKeyReady",
       request_id: this.nextRequestId(),

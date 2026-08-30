@@ -240,31 +240,13 @@ export class TauriDesktopApi implements DesktopApi {
 
   async bootstrapSecureBackup(
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
+    recoveryKeyDestinationPath: string | null,
+    intent: import("../domain/types").SecureBackupSetupIntent
   ): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("bootstrap_secure_backup", {
       passphrase,
-      recoveryKeyDestinationPath
-    });
-  }
-
-  async setupSecureBackup(
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("bootstrap_secure_backup", {
-      passphrase,
-      recoveryKeyDestinationPath
-    });
-  }
-
-  async reenableSecureBackup(
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("reenable_secure_backup", {
-      passphrase,
-      recoveryKeyDestinationPath
+      recoveryKeyDestinationPath,
+      intent
     });
   }
 

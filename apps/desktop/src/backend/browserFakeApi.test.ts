@@ -844,27 +844,34 @@ describe("BrowserFakeApi secure backup gate fixtures", () => {
     }
   );
 
-  test("uses dedicated secure-backup recovery and re-enable operations", async () => {
-    const api = createBrowserFakeApi({
+  test("uses one typed operation for initial setup and re-enable", async () => {
+    const recoveryApi = createBrowserFakeApi({
       secureBackupGate: { kind: "existingBackupNeedsRecovery" }
     });
-    const legacyRecovery = vi.spyOn(api, "submitRecovery");
-    const legacyEnable = vi.spyOn(api, "enableKeyBackup");
-    const legacyBootstrap = vi.spyOn(api, "bootstrapSecureBackup");
+    const setupApi = createBrowserFakeApi({ secureBackupGate: { kind: "setupRequired" } });
+    const reenableApi = createBrowserFakeApi({
+      secureBackupGate: { kind: "explicitlyDisabledRequiresSetup" }
+    });
 
-    const recovered = await api.recoverSecureBackup("synthetic-recovery-key");
-    const setup = await api.setupSecureBackup("synthetic-passphrase", "/tmp/recovery-key.txt");
-    const reenabled = await api.reenableSecureBackup(
+    const recovered = await recoveryApi.recoverSecureBackup("synthetic-recovery-key");
+    const setup = await setupApi.bootstrapSecureBackup(
+      "synthetic-passphrase",
+      "/tmp/recovery-key.txt",
+      { kind: "initialSetup" }
+    );
+    const reenabled = await reenableApi.bootstrapSecureBackup(
       "reenable-passphrase",
-      "/tmp/reenable-recovery-key.txt"
+      "/tmp/reenable-recovery-key.txt",
+      { kind: "reenable", confirmed: true }
     );
 
-    expect(legacyRecovery).not.toHaveBeenCalled();
-    expect(legacyEnable).not.toHaveBeenCalled();
-    expect(legacyBootstrap).not.toHaveBeenCalled();
     expect(recovered.state.domain.secure_backup_gate).toEqual({ kind: "ready" });
-    expect(setup.state.domain.secure_backup_gate).toEqual({ kind: "ready" });
-    expect(reenabled.state.domain.secure_backup_gate).toEqual({ kind: "ready" });
+    expect(setup.state.domain.e2ee_trust.key_management.secure_backup_setup.kind).toBe(
+      "recoveryKeyReady"
+    );
+    expect(reenabled.state.domain.e2ee_trust.key_management.secure_backup_setup.kind).toBe(
+      "recoveryKeyReady"
+    );
   });
 
   test("exposes a dedicated inspection retry instead of using getSnapshot as the command", async () => {
@@ -2065,7 +2072,9 @@ describe("BrowserFakeApi settings preview", () => {
   });
 
   test("updates Rust-shaped key-management state without retaining secrets or paths", async () => {
-    const api = createBrowserFakeApi();
+    const api = createBrowserFakeApi({
+      secureBackupGate: { kind: "setupRequired" }
+    });
 
     const exported = await api.exportRoomKeys(
       "/tmp/private-export.txt",
@@ -2088,7 +2097,8 @@ describe("BrowserFakeApi settings preview", () => {
 
     const setup = await api.bootstrapSecureBackup(
       "private-secure-backup-passphrase",
-      "/tmp/private-recovery.txt"
+      "/tmp/private-recovery.txt",
+      { kind: "initialSetup" }
     );
     expect(setup.state.domain.e2ee_trust.key_management.secure_backup_setup).toMatchObject({
       kind: "recoveryKeyReady",

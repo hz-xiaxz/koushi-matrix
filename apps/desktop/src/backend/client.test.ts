@@ -333,7 +333,11 @@ describe("TauriDesktopApi", () => {
     const api = new TauriDesktopApi();
     await api.exportRoomKeys("/tmp/export.txt", "room-key-passphrase");
     await api.importRoomKeys("/tmp/import.txt", "room-key-passphrase");
-    await api.bootstrapSecureBackup("secure-backup-passphrase", "/tmp/recovery.txt");
+    await api.bootstrapSecureBackup(
+      "secure-backup-passphrase",
+      "/tmp/recovery.txt",
+      { kind: "initialSetup" }
+    );
     await api.changeSecureBackupPassphrase(
       "old-secure-backup-passphrase",
       "new-secure-backup-passphrase",
@@ -350,7 +354,8 @@ describe("TauriDesktopApi", () => {
     });
     expect(invoke).toHaveBeenCalledWith("bootstrap_secure_backup", {
       passphrase: "secure-backup-passphrase",
-      recoveryKeyDestinationPath: "/tmp/recovery.txt"
+      recoveryKeyDestinationPath: "/tmp/recovery.txt",
+      intent: { kind: "initialSetup" }
     });
     expect(invoke).toHaveBeenCalledWith("change_secure_backup_passphrase", {
       oldSecret: "old-secure-backup-passphrase",
@@ -364,9 +369,16 @@ describe("TauriDesktopApi", () => {
 
     const api = new TauriDesktopApi();
     await api.recoverSecureBackup("secure-backup-recovery-key");
-    const { setupSecureBackup, reenableSecureBackup } = api;
-    await setupSecureBackup("secure-backup-passphrase", "/tmp/recovery.txt");
-    await reenableSecureBackup("reenable-passphrase", "/tmp/reenable-recovery.txt");
+    await api.bootstrapSecureBackup(
+      "secure-backup-passphrase",
+      "/tmp/recovery.txt",
+      { kind: "initialSetup" }
+    );
+    await api.bootstrapSecureBackup(
+      "reenable-passphrase",
+      "/tmp/reenable-recovery.txt",
+      { kind: "reenable", confirmed: true }
+    );
     await api.retrySecureBackupInspection();
 
     expect(invoke).toHaveBeenCalledWith("recover_secure_backup", {
@@ -374,11 +386,13 @@ describe("TauriDesktopApi", () => {
     });
     expect(invoke).toHaveBeenCalledWith("bootstrap_secure_backup", {
       passphrase: "secure-backup-passphrase",
-      recoveryKeyDestinationPath: "/tmp/recovery.txt"
+      recoveryKeyDestinationPath: "/tmp/recovery.txt",
+      intent: { kind: "initialSetup" }
     });
-    expect(invoke).toHaveBeenCalledWith("reenable_secure_backup", {
+    expect(invoke).toHaveBeenCalledWith("bootstrap_secure_backup", {
       passphrase: "reenable-passphrase",
-      recoveryKeyDestinationPath: "/tmp/reenable-recovery.txt"
+      recoveryKeyDestinationPath: "/tmp/reenable-recovery.txt",
+      intent: { kind: "reenable", confirmed: true }
     });
     expect(invoke).toHaveBeenCalledWith("retry_secure_backup_inspection");
   });

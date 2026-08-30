@@ -46,6 +46,7 @@ import type {
   SearchCrawlerState,
   SettingsPatch,
   SettingsState,
+  SecureBackupSetupIntent,
   ProfileState,
   TimelineSettings
 } from "../domain/types";
@@ -128,7 +129,8 @@ export function UserSettingsPanel({
   onImportRoomKeys: (sourcePath: string, passphrase: string) => void;
   onBootstrapSecureBackup: (
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
+    recoveryKeyDestinationPath: string | null,
+    intent: SecureBackupSetupIntent
   ) => void;
   onChangeSecureBackupPassphrase: (
     oldSecret: string,

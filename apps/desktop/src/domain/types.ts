@@ -433,6 +433,10 @@ export type SoftLogoutReauthState =
 
 export type RecoveryMethod = "recoveryKey" | "securityPhrase";
 
+export type SecureBackupSetupIntent =
+  | { kind: "initialSetup" }
+  | { kind: "reenable"; confirmed: boolean };
+
 export type SecureBackupGateFailureKind =
   | "network"
   | "rateLimited"

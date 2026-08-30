@@ -627,7 +627,6 @@ export function checkDesktopE2eeCommandContract() {
     ["pub async fn export_room_keys", "build_export_room_keys_command", "commands::e2ee::export_room_keys"],
     ["pub async fn import_room_keys", "build_import_room_keys_command", "commands::e2ee::import_room_keys"],
     ["pub async fn bootstrap_secure_backup", "build_bootstrap_secure_backup_command", "commands::e2ee::bootstrap_secure_backup"],
-    ["pub async fn reenable_secure_backup", "build_bootstrap_secure_backup_command", "commands::e2ee::reenable_secure_backup"],
     ["pub async fn change_secure_backup_passphrase", "build_change_secure_backup_passphrase_command", "commands::e2ee::change_secure_backup_passphrase"],
     ["pub async fn accept_verification", "build_accept_verification_command", "commands::e2ee::accept_verification"],
     ["pub async fn confirm_sas_verification", "build_confirm_sas_verification_command", "commands::e2ee::confirm_sas_verification"],
@@ -639,6 +638,9 @@ export function checkDesktopE2eeCommandContract() {
   ]) {
     if (!source.includes(command) || !source.includes(builder) || !libSource.includes(route)) failures.push(sourceContractFailure(rule, `missing E2EE command contract for ${command}`));
   }
+  if (!source.includes("intent: koushi_state::SecureBackupSetupIntent")) failures.push(sourceContractFailure(rule, "secure-backup bootstrap lacks typed intent transport"));
+  if (source.includes("pub async fn reenable_secure_backup") || libSource.includes("commands::e2ee::reenable_secure_backup")) failures.push(sourceContractFailure(rule, "native secure-backup re-enable policy route remains"));
+  if (source.includes("MessageDialogButtons") || source.includes("Secure Backupを再有効化")) failures.push(sourceContractFailure(rule, "native secure-backup confirmation copy remains"));
   return failures;
 }
 

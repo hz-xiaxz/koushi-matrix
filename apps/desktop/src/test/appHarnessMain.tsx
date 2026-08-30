@@ -1664,8 +1664,12 @@ mock.setCommandResponse("import_room_keys", () =>
 );
 mock.setCommandResponse(
   "bootstrap_secure_backup",
-  ({ recoveryKeyDestinationPath }: { recoveryKeyDestinationPath?: string | null }) =>
-    setCurrentSnapshot({
+  ({ recoveryKeyDestinationPath, intent }: {
+    recoveryKeyDestinationPath?: string | null;
+    intent: { kind: "initialSetup" } | { kind: "reenable"; confirmed: boolean };
+  }) => {
+    void intent;
+    return setCurrentSnapshot({
       ...currentSnapshot,
       state: {
         ...currentSnapshot.state,
@@ -1686,7 +1690,8 @@ mock.setCommandResponse(
         }
         },
       }
-    })
+    });
+  }
 );
 mock.setCommandResponse(
   "change_secure_backup_passphrase",

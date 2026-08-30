@@ -273,6 +273,20 @@ registry/scope checks, not cross-process numeric uniqueness.
 
 This ownership move adds no `AppState`, `AppAction`, or reducer transition.
 
+### Rust-owned secure-backup confirmation admission (Phase E, issue #755)
+
+`SecureBackupSetupIntent` carries `InitialSetup` or `Reenable { confirmed }`
+through both the projected reducer action and `SecureBackupSetupRequest`.
+`AppActor` runs gate × intent admission before routing to `AccountActor`, so
+unconfirmed, stale, forged, duplicate, or gate-incompatible intents produce a
+typed private-safe failure and no SDK effect. Only confirmed re-enable at the
+explicitly-disabled gate maps to the SDK re-enable path; initial setup never
+claims confirmation. The SDK's fresh server/local/trust inspection remains the
+authoritative guard and Core never overrides its confirmation-required result.
+React renders the accessible catalog-backed dialog, cancel emits no command,
+and Tauri only transports the typed intent; native hardcoded policy copy is
+absent.
+
 ## Platform Portability
 
 The desktop app is the only shipping target today, but a browser-hosted build

@@ -170,7 +170,7 @@ fn tauri_command_routes_build_expected_core_commands() {
         fake_request_id(35),
         Some(AuthSecret::new("backup-setup-phrase")),
         Some("/tmp/recovery-artifact.txt".to_owned()),
-        false,
+        koushi_state::SecureBackupSetupIntent::InitialSetup,
     ) {
         CoreCommand::Account(AccountCommand::BootstrapSecureBackup {
             request_id,
@@ -188,6 +188,10 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(
                 request.recovery_key_destination_path,
                 Some(std::path::PathBuf::from("/tmp/recovery-artifact.txt"))
+            );
+            assert_eq!(
+                request.intent,
+                koushi_state::SecureBackupSetupIntent::InitialSetup
             );
         }
         other => panic!("unexpected command: {other:?}"),
@@ -1918,7 +1922,7 @@ fn tauri_command_routes_redact_secret_bearing_values_from_debug() {
         fake_request_id(25),
         Some(AuthSecret::new("backup-setup-phrase")),
         Some("/tmp/private-recovery-artifact.txt".to_owned()),
-        false,
+        koushi_state::SecureBackupSetupIntent::InitialSetup,
     );
     let secure_backup_change = build_change_secure_backup_passphrase_command(
         fake_request_id(26),

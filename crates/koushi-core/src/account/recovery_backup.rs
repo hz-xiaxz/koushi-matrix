@@ -10,7 +10,7 @@ use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, reco
 use koushi_sdk::MatrixClientSession;
 use koushi_state::{
     AppAction, AuthFailureKind, CrossSigningStatus, IdentityResetAuthType, IdentityResetState,
-    RecoveryKeyDeliveryState, RecoveryRequest, TrustOperationFailureKind,
+    RecoveryKeyDeliveryState, RecoveryRequest, SecureBackupSetupIntent, TrustOperationFailureKind,
 };
 
 use crate::command::{
@@ -699,7 +699,7 @@ impl AccountActor {
         let SecureBackupSetupRequest {
             passphrase,
             recovery_key_destination_path,
-            explicit_reenable_confirmed,
+            intent,
         } = request;
         if recovery_key_destination_path.is_none() {
             self.send_actions(vec![AppAction::SecureBackupGateChanged(
@@ -718,14 +718,20 @@ impl AccountActor {
             koushi_state::SecureBackupGateState::CreatingBackup,
         )])
         .await;
-        let result = if explicit_reenable_confirmed {
-            session
-                .reenable_secure_backup(passphrase.as_ref(), recovery_key_destination_path)
-                .await
-        } else {
-            session
-                .setup_secure_backup(passphrase.as_ref(), recovery_key_destination_path)
-                .await
+        let result = match intent {
+            SecureBackupSetupIntent::InitialSetup => {
+                session
+                    .setup_secure_backup(passphrase.as_ref(), recovery_key_destination_path)
+                    .await
+            }
+            SecureBackupSetupIntent::Reenable { confirmed: true } => {
+                session
+                    .reenable_secure_backup(passphrase.as_ref(), recovery_key_destination_path)
+                    .await
+            }
+            SecureBackupSetupIntent::Reenable { confirmed: false } => {
+                Err(koushi_sdk::E2eeTrustError::SecureBackupReenableConfirmationRequired)
+            }
         };
         drop(passphrase);
         match result {
@@ -950,7 +956,7 @@ impl AccountActor {
         let SecureBackupSetupRequest {
             passphrase,
             recovery_key_destination_path,
-            explicit_reenable_confirmed: _,
+            intent: _,
         } = request;
         let result = koushi_sdk::bootstrap_secure_backup(
             &session,

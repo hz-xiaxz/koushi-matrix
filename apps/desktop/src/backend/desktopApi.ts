@@ -31,6 +31,7 @@ import type {
   RoomTagKind,
   SavedSessionInfo,
   SearchScopeKind,
+  SecureBackupSetupIntent,
   SessionStatusRefreshTrigger,
   SettingsPatch,
   StageUploadBytesRequestItem,
@@ -119,14 +120,6 @@ export interface DesktopApi {
   submitRecovery(secret: string): Promise<DesktopSnapshot>;
   /** Dedicated Secure Backup commands. */
   recoverSecureBackup: (secret: string) => Promise<DesktopSnapshot>;
-  setupSecureBackup: (
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
-  ) => Promise<DesktopSnapshot>;
-  reenableSecureBackup: (
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
-  ) => Promise<DesktopSnapshot>;
   retrySecureBackupInspection: () => Promise<DesktopSnapshot>;
   startDeviceCleanup(): Promise<DesktopSnapshot>;
   submitDeviceCleanupUia(flowId: number, password: string): Promise<DesktopSnapshot>;
@@ -152,7 +145,8 @@ export interface DesktopApi {
   importRoomKeys(sourcePath: string, passphrase: string): Promise<DesktopSnapshot>;
   bootstrapSecureBackup(
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
+    recoveryKeyDestinationPath: string | null,
+    intent: SecureBackupSetupIntent
   ): Promise<DesktopSnapshot>;
   changeSecureBackupPassphrase(
     oldSecret: string,

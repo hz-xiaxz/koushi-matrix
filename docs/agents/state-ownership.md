@@ -1059,6 +1059,14 @@ normal QA-title mode and cannot change product title semantics.
   state, logs, QA tokens, screenshots, or issue comments. Desktop recovery-key
   delivery writes through the Rust/Tauri native artifact path and reports only
   `Written`/`NotWritten` style status.
+- Secure-backup setup/re-enable confirmation policy is Rust-owned. The closed
+  `SecureBackupSetupIntent` must ride both reducer projection and actor command;
+  Core admits it against the projected gate before actor routing and preserves
+  the SDK's fresh confirmation guard. React may own only the accessible,
+  catalog-backed confirmation dialog and mounted input values: cancel dispatches
+  nothing and confirm sends `Reenable { confirmed: true }`. Tauri must not show
+  native policy dialogs, contain hardcoded confirmation copy, or translate a
+  boolean outside the typed request.
 - `RestoreKeyBackup` must not be runtime gated to `SessionState::Ready` only. A
   newly logged-in device can become `NeedsRecovery` after sync discovers secret
   storage, and key-backup restore is the operation that gets it out of that

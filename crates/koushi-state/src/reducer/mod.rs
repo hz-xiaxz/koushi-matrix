@@ -303,8 +303,8 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::RoomKeyImportFailed { request_id, kind } => {
             e2ee::handle_room_key_import_failed(state, request_id, kind)
         }
-        AppAction::SecureBackupSetupRequested { request_id } => {
-            e2ee::handle_secure_backup_setup_requested(state, request_id)
+        AppAction::SecureBackupSetupRequested { request_id, intent } => {
+            e2ee::handle_secure_backup_setup_requested(state, request_id, intent)
         }
         AppAction::SecureBackupRecoveryKeyReady {
             request_id,

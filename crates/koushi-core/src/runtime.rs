@@ -15,6 +15,8 @@ mod profile_display_diagnostics;
 mod reducer_support;
 pub mod request_outcome;
 mod scheduled_send;
+#[cfg(test)]
+mod secure_backup_admission_tests;
 
 pub use composer::{COMPOSER_DRAFT_PERSIST_DEBOUNCE, ForwardedComposerDraftPermit};
 use composer::{
@@ -56,9 +58,10 @@ use koushi_state::{
     AccountManagementOperation, ActivityRowKind, ActivityState, AppAction, AppEffect, AppState,
     ComposerDraftStore, ComposerTarget, LoginAttemptId, NavigationState, OperationFailureKind,
     ProfileUpdateRequest, ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem,
-    SearchScope as AppSearchScope, SessionState, SpaceMembersCommandRejection, ThreadOpenIntent,
-    ThreadPaneState, UiEvent, admit_space_member_cancellation, admit_space_member_invite,
-    admit_space_member_role, admit_space_members_load, reduce,
+    SearchScope as AppSearchScope, SecureBackupSetupAdmission, SessionState,
+    SpaceMembersCommandRejection, ThreadOpenIntent, ThreadPaneState, UiEvent,
+    admit_space_member_cancellation, admit_space_member_invite, admit_space_member_role,
+    admit_space_members_load, reduce,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
@@ -1641,7 +1644,8 @@ impl AppActor {
                 .await;
                 let requires_projection_acceptance = matches!(
                     &account_command,
-                    AccountCommand::RestoreSession { .. }
+                    AccountCommand::BootstrapSecureBackup { .. }
+                        | AccountCommand::RestoreSession { .. }
                         | AccountCommand::RestoreLastSession { .. }
                         | AccountCommand::ResetLocalData { .. }
                         | AccountCommand::StartDeviceCleanup { .. }
@@ -1654,9 +1658,12 @@ impl AppActor {
                 );
                 let should_route = !requires_projection_acceptance || projected_state_changed;
                 if !should_route {
+                    let failure =
+                        secure_backup_setup_projection_failure(&self.state, &account_command)
+                            .unwrap_or(CoreFailure::SessionRequired);
                     self.emit(CoreEvent::OperationFailed {
                         request_id: command_request_id,
-                        failure: CoreFailure::SessionRequired,
+                        failure,
                     });
                     return false;
                 }
@@ -4161,6 +4168,28 @@ fn is_ready_session_for_commands(session: &SessionState) -> bool {
     matches!(session, SessionState::Ready(_))
 }
 
+fn secure_backup_setup_projection_failure(
+    state: &AppState,
+    command: &AccountCommand,
+) -> Option<CoreFailure> {
+    let AccountCommand::BootstrapSecureBackup { request, .. } = command else {
+        return None;
+    };
+    if matches!(
+        state.e2ee_trust.key_management.secure_backup_setup,
+        koushi_state::SecureBackupSetupState::SettingUp { .. }
+    ) {
+        return Some(CoreFailure::SecureBackupSetupFailedNoOp);
+    }
+    Some(match request.intent.admission(&state.secure_backup_gate) {
+        SecureBackupSetupAdmission::ConfirmationRequired => {
+            CoreFailure::SecureBackupSetupConfirmationRequired
+        }
+        SecureBackupSetupAdmission::Allowed => CoreFailure::SecureBackupSetupFailedNoOp,
+        SecureBackupSetupAdmission::FailedNoOp => CoreFailure::SecureBackupSetupFailedNoOp,
+    })
+}
+
 fn is_verification_gate_command(command: &CoreCommand, session: &SessionState) -> bool {
     if matches!(
         command,
@@ -4301,11 +4330,13 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
                 request_id: request_id.sequence,
             })
         }
-        AccountCommand::BootstrapSecureBackup { request_id, .. } => {
-            Some(AppAction::SecureBackupSetupRequested {
-                request_id: request_id.sequence,
-            })
-        }
+        AccountCommand::BootstrapSecureBackup {
+            request_id,
+            request,
+        } => Some(AppAction::SecureBackupSetupRequested {
+            request_id: request_id.sequence,
+            intent: request.intent,
+        }),
         AccountCommand::RecoverSecureBackup { .. }
         | AccountCommand::RetrySecureBackupInspection { .. } => Some(
             AppAction::SecureBackupGateChanged(koushi_state::SecureBackupGateState::Checking),
