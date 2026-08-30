@@ -50,7 +50,7 @@ No compatibility shim, TODO, parallel old/new production path, new generic retry
 - `reviewer-flash` failed before execution with `Insufficient Balance`; `reviewer-flash-opencode-go` failed before execution with its monthly usage limit. Neither produced a verdict.
 - The same different model family was run through the read-only `deepseek-brainstormer` fallback against exact tree `c3bfa6b`; verdict: `CORRECT-TO-MERGE`. It verified all five phase boundaries and identified only the corrected overbroad `recv_event` wording plus the documented worktree-font serving artifact.
 - The selected reviewer-profile availability mismatch must remain visible in the PR/merge audit; it is not silently represented as a `reviewer-flash` verdict.
-- Primary integration/self-review verdict on the resulting exact tree: pending.
+- Primary integration/self-review (`gpt-5.6-sol`) traced the production routes and checked the full `origin/main...9617691` tree against every issue/design acceptance item and the fresh gate evidence. Verdict: `CORRECT-TO-MERGE`, subject only to the explicitly recorded selected reviewer-profile availability decision.
 
 ## Final gates still required
 
