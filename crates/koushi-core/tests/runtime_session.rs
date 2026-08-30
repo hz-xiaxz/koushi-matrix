@@ -69,29 +69,18 @@ async fn password_command_projects_authentication_before_account_actor_completio
         .await
         .expect("submit");
 
-    loop {
-        match connection.recv_event().await.expect("event") {
-            CoreEvent::StateChanged(snapshot)
-                if matches!(
-                    &snapshot.session,
-                    SessionState::Authenticating { homeserver, attempt_id }
-                        if homeserver == "http://127.0.0.1:9"
-                            && *attempt_id == LoginAttemptId::new(
-                                request_id.connection_id.0,
-                                request_id.sequence,
-                            )
-                ) =>
-            {
-                return;
-            }
-            CoreEvent::OperationFailed {
-                request_id: failed, ..
-            } if failed == request_id => {
-                panic!("account actor completed before AuthenticationStarted was observed")
-            }
-            _ => {}
-        }
-    }
+    wait_for_state_event(&mut connection, |state| {
+        matches!(
+            &state.session,
+            SessionState::Authenticating { homeserver, attempt_id }
+                if homeserver == "http://127.0.0.1:9"
+                    && *attempt_id == LoginAttemptId::new(
+                        request_id.connection_id.0,
+                        request_id.sequence,
+                    )
+        )
+    })
+    .await;
 }
 
 #[tokio::test]

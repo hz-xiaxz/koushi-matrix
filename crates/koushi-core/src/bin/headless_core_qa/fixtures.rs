@@ -315,13 +315,8 @@ pub(super) async fn select_space_and_wait_for_room_scope(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
+            CoreEvent::Room(RoomEvent::RoomListUpdated) | CoreEvent::StateDelta(_) => {
                 let snapshot = conn.snapshot();
-                if matches_scope(&snapshot) {
-                    return Ok(snapshot);
-                }
-            }
-            CoreEvent::StateChanged(snapshot) => {
                 if matches_scope(&snapshot) {
                     return Ok(snapshot);
                 }
@@ -361,7 +356,7 @@ async fn select_room_list_filter_for_qa(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot) if snapshot.room_list.active_filter == filter => {
+            CoreEvent::StateDelta(_) if conn.snapshot().room_list.active_filter == filter => {
                 return Ok(());
             }
             CoreEvent::Room(RoomEvent::RoomListUpdated)

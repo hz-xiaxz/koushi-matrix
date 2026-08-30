@@ -531,7 +531,6 @@ impl CoreConnection {
                 project_room_event_display_labels(room_event, &snapshot);
             }
             CoreEvent::StateDelta(_)
-            | CoreEvent::StateChanged(_)
             | CoreEvent::Account(_)
             | CoreEvent::Sync(_)
             | CoreEvent::LiveSignals(_)
@@ -558,12 +557,11 @@ impl CoreConnection {
         self.snapshot_rx.borrow().clone()
     }
 
-    /// Causal snapshot-change barrier for deterministic runtime tests.
-    #[cfg(any(test, feature = "test-hooks"))]
-    #[doc(hidden)]
-    pub async fn next_versioned_snapshot_for_testing(
-        &mut self,
-    ) -> Option<VersionedAppStateSnapshot> {
+    /// Wait for the next latest-wins snapshot publication.
+    ///
+    /// The returned generation may equal the current generation when Core-only
+    /// state outside the desktop `StateDelta` contract changes.
+    pub async fn next_versioned_snapshot(&mut self) -> Option<VersionedAppStateSnapshot> {
         self.snapshot_rx.changed().await.ok()?;
         Some(self.snapshot_rx.borrow_and_update().clone())
     }

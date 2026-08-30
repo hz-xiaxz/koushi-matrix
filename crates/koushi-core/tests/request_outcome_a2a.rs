@@ -358,8 +358,14 @@ async fn search_outcomes_treat_lag_as_terminal() {
         tokio::time::Instant::now() + Duration::from_secs(1),
     );
     tokio::pin!(waiter);
-    control.send_event(CoreEvent::StateChanged(AppState::default()));
-    control.send_event(CoreEvent::StateChanged(AppState::default()));
+    control.send_event(CoreEvent::OperationFailed {
+        request_id: request(90),
+        failure: koushi_core::CoreFailure::SessionRequired,
+    });
+    control.send_event(CoreEvent::OperationFailed {
+        request_id: request(91),
+        failure: koushi_core::CoreFailure::SessionRequired,
+    });
     assert_eq!(waiter.await, Err(RequestOutcomeError::Lagged));
 
     let (mut connection, control) = CoreConnection::new_for_testing(1);
@@ -376,8 +382,14 @@ async fn search_outcomes_treat_lag_as_terminal() {
         tokio::time::Instant::now() + Duration::from_secs(1),
     );
     tokio::pin!(waiter);
-    control.send_event(CoreEvent::StateChanged(AppState::default()));
-    control.send_event(CoreEvent::StateChanged(AppState::default()));
+    control.send_event(CoreEvent::OperationFailed {
+        request_id: request(92),
+        failure: koushi_core::CoreFailure::SessionRequired,
+    });
+    control.send_event(CoreEvent::OperationFailed {
+        request_id: request(93),
+        failure: koushi_core::CoreFailure::SessionRequired,
+    });
     assert_eq!(waiter.await, Err(RequestOutcomeError::Lagged));
 }
 

@@ -322,13 +322,8 @@ async fn wait_for_existing_stress_fixture_room_list(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
+            CoreEvent::Room(RoomEvent::RoomListUpdated) | CoreEvent::StateDelta(_) => {
                 let snapshot = conn.snapshot();
-                if has_fixture_shape(&snapshot) {
-                    return Ok(snapshot);
-                }
-            }
-            CoreEvent::StateChanged(snapshot) => {
                 if has_fixture_shape(&snapshot) {
                     return Ok(snapshot);
                 }
@@ -890,8 +885,8 @@ async fn wait_for_selected_room(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot)
-                if snapshot.timeline.room_id.as_deref() == Some(room_id) =>
+            CoreEvent::StateDelta(_)
+                if conn.snapshot().timeline.room_id.as_deref() == Some(room_id) =>
             {
                 return Ok(());
             }
@@ -918,10 +913,10 @@ async fn wait_for_scheduled_send_count(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot)
-                if snapshot.timeline.scheduled_sends.len() == expected_count =>
+            CoreEvent::StateDelta(_)
+                if conn.snapshot().timeline.scheduled_sends.len() == expected_count =>
             {
-                return Ok(snapshot);
+                return Ok(conn.snapshot());
             }
             _ if conn.snapshot().timeline.scheduled_sends.len() == expected_count => {
                 return Ok(conn.snapshot());
@@ -954,7 +949,7 @@ async fn wait_for_scheduled_send_due(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot) if matches_due(&snapshot) => return Ok(()),
+            CoreEvent::StateDelta(_) if matches_due(&conn.snapshot()) => return Ok(()),
             _ if matches_due(&conn.snapshot()) => return Ok(()),
             _ => {}
         }
@@ -982,8 +977,8 @@ async fn wait_for_scheduled_send_fired(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot) => {
-                queue_removed = scheduled_item_absent(&snapshot, scheduled_id);
+            CoreEvent::StateDelta(_) => {
+                queue_removed = scheduled_item_absent(&conn.snapshot(), scheduled_id);
             }
             CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
                 key: ref ev_key,
@@ -3734,7 +3729,8 @@ async fn wait_for_read_receipt_projection(
             })?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
-        if let CoreEvent::StateChanged(snapshot) = event {
+        if matches!(event, CoreEvent::StateDelta(_)) {
+            let snapshot = conn.snapshot();
             last_status = read_receipt_projection_status(
                 &snapshot,
                 room_id,
@@ -3903,10 +3899,11 @@ async fn wait_for_live_signal_snapshot(
             .map_err(|_| format!("{label}: timed out waiting for live-signal state"))?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
-        if let CoreEvent::StateChanged(snapshot) = event
-            && predicate(&snapshot)
-        {
-            return Ok(snapshot);
+        if matches!(event, CoreEvent::StateDelta(_)) {
+            let snapshot = conn.snapshot();
+            if predicate(&snapshot) {
+                return Ok(snapshot);
+            }
         }
     }
 }

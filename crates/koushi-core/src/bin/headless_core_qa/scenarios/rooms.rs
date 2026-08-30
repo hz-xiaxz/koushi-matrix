@@ -1079,8 +1079,8 @@ async fn wait_for_room_management_forbidden(
                     "{label}: expected forbidden room-management failure, got {failure:?}"
                 ));
             }
-            CoreEvent::StateChanged(snapshot)
-                if room_management_forbidden_recorded(&snapshot, request_id) =>
+            CoreEvent::StateDelta(_)
+                if room_management_forbidden_recorded(&conn.snapshot(), request_id) =>
             {
                 if saw_forbidden_failure {
                     return Ok(());
@@ -1210,8 +1210,10 @@ pub(super) async fn wait_for_pinned_state(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot) => {
-                if snapshot_has_pinned_event(&snapshot, room_id, event_id) == expected_present {
+            CoreEvent::StateDelta(_) => {
+                if snapshot_has_pinned_event(&conn.snapshot(), room_id, event_id)
+                    == expected_present
+                {
                     return Ok(());
                 }
             }
@@ -1243,7 +1245,7 @@ fn snapshot_has_pinned_event(snapshot: &AppState, room_id: &str, event_id: &str)
         .unwrap_or(false)
 }
 
-/// Wait (event-driven on `RoomListUpdated`/`StateChanged`, bounded by
+/// Wait (event-driven on `RoomListUpdated`/`StateDelta`, bounded by
 /// `ROOM_LIST_EVENT_TIMEOUT`) until the snapshot's room list contains the
 /// expected room in `rooms` AND the expected space in `spaces`. Returns the matching
 /// snapshot. Waiting for "any non-empty list" is not enough: spaces only
@@ -1286,16 +1288,10 @@ pub(super) async fn wait_for_room_list_containing(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
-                // The discrete event may arrive before the reducer projected
-                // the matching snapshot; check the latest snapshot and keep
-                // waiting otherwise — a StateChanged will follow.
+            CoreEvent::Room(RoomEvent::RoomListUpdated) | CoreEvent::StateDelta(_) => {
+                // The discrete event may arrive before the reducer projection;
+                // check the latest snapshot and keep waiting otherwise.
                 let snapshot = conn.snapshot();
-                if contains_expected(&snapshot) {
-                    return Ok(snapshot);
-                }
-            }
-            CoreEvent::StateChanged(snapshot) => {
                 if contains_expected(&snapshot) {
                     return Ok(snapshot);
                 }
@@ -1363,7 +1359,7 @@ async fn select_space_scope_for_qa(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot) if matches_scope(&snapshot) => return Ok(()),
+            CoreEvent::StateDelta(_) if matches_scope(&conn.snapshot()) => return Ok(()),
             CoreEvent::Room(RoomEvent::RoomListUpdated) if matches_scope(&conn.snapshot()) => {
                 return Ok(());
             }
@@ -1422,7 +1418,7 @@ async fn wait_for_sidebar_dm_room_ids(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot) if matches_expected(&snapshot) => return Ok(()),
+            CoreEvent::StateDelta(_) if matches_expected(&conn.snapshot()) => return Ok(()),
             CoreEvent::Room(RoomEvent::RoomListUpdated) if matches_expected(&conn.snapshot()) => {
                 return Ok(());
             }
@@ -1476,13 +1472,8 @@ pub(super) async fn wait_for_invite_absent(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
+            CoreEvent::Room(RoomEvent::RoomListUpdated) | CoreEvent::StateDelta(_) => {
                 let snapshot = conn.snapshot();
-                if is_absent(&snapshot) {
-                    return Ok(snapshot);
-                }
-            }
-            CoreEvent::StateChanged(snapshot) => {
                 if is_absent(&snapshot) {
                     return Ok(snapshot);
                 }

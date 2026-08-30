@@ -7,7 +7,9 @@ use koushi_core::command::{AppCommand, CoreCommand, RoomCommand};
 use koushi_core::event::CoreEvent;
 use koushi_core::executor;
 use koushi_core::runtime::{CommandSubmitError, CoreRuntime};
-use koushi_state::{AppAction, AuthDiscoveryState, SessionState, SettingsPatch, ThreadListOrder};
+use koushi_state::{
+    AppAction, AuthDiscoveryState, ComposerDraftStore, SessionState, SettingsPatch, ThreadListOrder,
+};
 
 mod support;
 
@@ -33,9 +35,10 @@ async fn frontend_neutral_consumer_converges_and_shuts_down_without_tauri() {
     executor::timeout(Duration::from_secs(1), async {
         loop {
             match connection.recv_event().await.expect("Core event") {
-                CoreEvent::StateChanged(snapshot)
-                    if snapshot.settings.values.thread_list_order
-                        == ThreadListOrder::RootChronology =>
+                CoreEvent::StateDelta(delta)
+                    if delta.changed.settings.as_ref().is_some_and(|settings| {
+                        settings.values.thread_list_order == ThreadListOrder::RootChronology
+                    }) =>
                 {
                     break;
                 }
@@ -116,7 +119,7 @@ async fn result_events_correlate_in_submission_order() {
 }
 
 #[tokio::test]
-async fn reducer_actions_coalesce_into_single_state_changed() {
+async fn reducer_actions_coalesce_into_one_contiguous_delta_without_full_snapshot_events() {
     let runtime = CoreRuntime::start();
     let mut connection = runtime.attach();
 
@@ -132,26 +135,78 @@ async fn reducer_actions_coalesce_into_single_state_changed() {
         ])
         .await;
 
-    let mut state_changed_count = 0;
-    let mut last = None;
+    let mut state_delta_generations = Vec::new();
+    let mut non_delta_events = 0;
     // Drain everything emitted within a quiet period.
     while let Ok(Ok(event)) =
         executor::timeout(Duration::from_millis(200), connection.recv_event()).await
     {
-        if let CoreEvent::StateChanged(snapshot) = event {
-            state_changed_count += 1;
-            last = Some(snapshot);
+        if let CoreEvent::StateDelta(delta) = event {
+            state_delta_generations.push(delta.generation);
+        } else {
+            non_delta_events += 1;
         }
     }
 
+    assert_eq!(state_delta_generations, vec![1]);
     assert_eq!(
-        state_changed_count, 1,
-        "one batch of actions must coalesce into exactly one StateChanged"
+        non_delta_events, 0,
+        "state publication must use only StateDelta"
     );
-    let last = last.expect("snapshot");
+    let last = connection.snapshot();
     // The final state reflects the LAST action in the batch.
     assert!(matches!(last.auth, AuthDiscoveryState::Discovering { .. }));
-    assert_eq!(connection.snapshot(), last);
+    assert_eq!(last, connection.snapshot());
+}
+
+#[tokio::test]
+async fn snapshot_only_refresh_wakes_watch_without_advancing_generation_or_emitting_delta() {
+    let runtime = CoreRuntime::start();
+    let mut connection = runtime.attach();
+    runtime
+        .inject_actions(support::restore_ready_actions())
+        .await;
+
+    loop {
+        let snapshot = connection.versioned_snapshot();
+        if matches!(snapshot.state.session, SessionState::Ready(_)) {
+            break;
+        }
+        connection
+            .next_versioned_snapshot()
+            .await
+            .expect("runtime snapshot stream should remain open");
+    }
+    while executor::timeout(Duration::from_millis(20), connection.recv_event())
+        .await
+        .is_ok()
+    {}
+    let before = connection.versioned_snapshot();
+    let mut drafts = ComposerDraftStore::default();
+    drafts.set_room_draft("!snapshot-only:example.invalid".to_owned(), "draft");
+
+    runtime
+        .inject_actions(vec![AppAction::ComposerDraftsLoaded { drafts }])
+        .await;
+    let after = connection
+        .next_versioned_snapshot()
+        .await
+        .expect("snapshot-only refresh should wake the watch");
+
+    assert_eq!(after.generation, before.generation);
+    assert_eq!(
+        after
+            .state
+            .composer_drafts
+            .room_revision("!snapshot-only:example.invalid"),
+        koushi_state::ComposerDraftRevision::from_u64(1)
+    );
+    assert!(
+        executor::timeout(Duration::from_millis(100), connection.recv_event())
+            .await
+            .is_err(),
+        "snapshot-only state must wake only the snapshot watch"
+    );
 }
 
 #[tokio::test]

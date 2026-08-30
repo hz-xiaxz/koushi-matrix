@@ -3182,7 +3182,7 @@ export function checkCoreQaReconnectEncryptionGate() {
   for (const marker of ["create_room_for_qa", "wait_for_encrypted_room_projection_for_qa(", "subscribe_and_ack_active_timeline_projection_for_qa(", "TimelineCommand::SendText"]) {
     if (!stage?.includes(marker)) failures.push(sourceContractFailure(rule, `reconnect stage lacks ${marker}`));
   }
-  for (const marker of ["ROOM_LIST_EVENT_TIMEOUT", "room.room_id == expected_room_id && room.is_encrypted", "RoomEvent::RoomListUpdated", "CoreEvent::StateChanged(snapshot)", "tokio::time::timeout_at(deadline, conn.recv_event())"]) {
+  for (const marker of ["ROOM_LIST_EVENT_TIMEOUT", "room.room_id == expected_room_id && room.is_encrypted", "RoomEvent::RoomListUpdated", "CoreEvent::StateDelta(_)", "tokio::time::timeout_at(deadline, conn.recv_event())"]) {
     if (!helper?.includes(marker)) failures.push(sourceContractFailure(rule, `encrypted-room waiter lacks ${marker}`));
   }
   if (helper?.includes("tokio::time::sleep")) failures.push(sourceContractFailure(rule, "encrypted-room waiter uses a fixed sleep"));

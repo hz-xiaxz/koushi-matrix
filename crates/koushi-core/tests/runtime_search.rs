@@ -1,8 +1,4 @@
-use std::time::Duration;
-
 use koushi_core::command::{CoreCommand, SearchCommand, SearchScope};
-use koushi_core::event::CoreEvent;
-use koushi_core::executor;
 use koushi_core::runtime::CoreRuntime;
 use koushi_state::{SearchState, SessionState};
 
@@ -16,12 +12,10 @@ async fn search_query_projects_search_state_before_routing() {
 
     runtime.inject_actions(restore_ready_actions()).await;
 
-    loop {
-        if matches!(connection.snapshot().session, SessionState::Ready(_)) {
-            break;
-        }
-        executor::sleep(Duration::from_millis(5)).await;
-    }
+    support::wait_for_state_event(&mut connection, |state| {
+        matches!(state.session, SessionState::Ready(_))
+    })
+    .await;
 
     let request_id = connection.next_request_id();
     connection
@@ -34,20 +28,10 @@ async fn search_query_projects_search_state_before_routing() {
         .await
         .expect("submit");
 
-    let result = executor::timeout(Duration::from_secs(1), async {
-        loop {
-            match connection.recv_event().await.expect("event") {
-                CoreEvent::StateChanged(snapshot)
-                    if !matches!(snapshot.search, SearchState::Closed) =>
-                {
-                    return snapshot;
-                }
-                _ => continue,
-            }
-        }
+    let result = support::wait_for_state_event(&mut connection, |state| {
+        !matches!(state.search, SearchState::Closed)
     })
-    .await
-    .expect("search submission should publish a non-closed search snapshot");
+    .await;
 
     match result.search {
         SearchState::Searching {

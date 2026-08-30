@@ -4138,7 +4138,6 @@ impl AppActor {
             generation: self.state_generation,
             state: self.state.clone(),
         });
-        self.emit(CoreEvent::StateChanged(self.state.clone()));
     }
 
     fn publish_state_delta(&mut self, before_state: &AppState) -> Option<u64> {
@@ -4149,10 +4148,6 @@ impl AppActor {
             state: self.state.clone(),
         });
         self.emit(CoreEvent::StateDelta(delta));
-        // Legacy compatibility for core/headless consumers that still wait on
-        // full snapshots. The Tauri webview adapter ignores this event on the
-        // normal state path and applies StateDelta instead.
-        self.emit(CoreEvent::StateChanged(self.state.clone()));
         Some(self.state_generation)
     }
 }

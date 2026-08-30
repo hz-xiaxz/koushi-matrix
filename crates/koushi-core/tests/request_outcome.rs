@@ -265,8 +265,11 @@ async fn lag_policy_can_continue_or_finish_as_terminal_lag() {
         tokio::time::Instant::now() + Duration::from_secs(1),
     );
     tokio::pin!(operation);
-    for _ in 0..3 {
-        control.send_event(CoreEvent::StateChanged(AppState::default()));
+    for sequence in 2..=4 {
+        control.send_event(CoreEvent::OperationFailed {
+            request_id: request(5, sequence),
+            failure: koushi_core::CoreFailure::SessionRequired,
+        });
     }
     assert!(operation.as_mut().now_or_never().is_none());
     control.send_event(CoreEvent::Room(RoomEvent::RoomJoined {
@@ -295,8 +298,11 @@ async fn lag_policy_can_continue_or_finish_as_terminal_lag() {
         tokio::time::Instant::now() + Duration::from_secs(1),
     );
     tokio::pin!(operation);
-    for _ in 0..3 {
-        control.send_event(CoreEvent::StateChanged(AppState::default()));
+    for sequence in 2..=4 {
+        control.send_event(CoreEvent::OperationFailed {
+            request_id: request(6, sequence),
+            failure: koushi_core::CoreFailure::SessionRequired,
+        });
     }
     assert_eq!(operation.await, Err(RequestOutcomeError::Lagged));
 }

@@ -1,11 +1,7 @@
 //! Runtime integration tests covering soft-logout reauth and non-device
 //! account-management UIA submission projection.
 
-use std::time::Duration;
-
 use koushi_core::command::{AccountCommand, CoreCommand};
-use koushi_core::event::CoreEvent;
-use koushi_core::executor;
 use koushi_core::runtime::CoreRuntime;
 use koushi_state::{
     AccountManagementOperation, AccountManagementState, AppAction, AuthSecret,
@@ -13,7 +9,7 @@ use koushi_state::{
 };
 
 mod support;
-use support::{restore_ready_actions, wait_for_state};
+use support::{restore_ready_actions, wait_for_state, wait_for_state_event};
 
 #[tokio::test]
 async fn soft_logout_reauth_command_projects_authenticating_state() {
@@ -35,25 +31,15 @@ async fn soft_logout_reauth_command_projects_authenticating_state() {
         .await
         .expect("submit soft-logout reauth");
 
-    let snapshot = executor::timeout(Duration::from_secs(1), async {
-        loop {
-            match connection.recv_event().await.expect("event") {
-                CoreEvent::StateChanged(snapshot)
-                    if matches!(
-                        snapshot.soft_logout_reauth,
-                        SoftLogoutReauthState::Authenticating {
-                            request_id: rid,
-                        } if rid == request_id.sequence
-                    ) =>
-                {
-                    return snapshot;
-                }
-                _ => continue,
-            }
-        }
+    let snapshot = wait_for_state_event(&mut connection, |state| {
+        matches!(
+            state.soft_logout_reauth,
+            SoftLogoutReauthState::Authenticating {
+                request_id: rid,
+            } if rid == request_id.sequence
+        )
     })
-    .await
-    .expect("soft-logout reauth command should project Authenticating state before actor route");
+    .await;
 
     assert_eq!(
         snapshot.soft_logout_reauth,

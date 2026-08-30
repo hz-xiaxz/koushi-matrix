@@ -9,9 +9,9 @@ use super::event_wait::{
 };
 use super::registry::{E2EE_EVENT_TIMEOUT, EVENT_TIMEOUT};
 use super::{
-    AccountCommand, AccountKey, AppState, AuthSecret, CoreCommand, CoreConnection, CoreEvent,
-    CoreRuntime, Duration, E2eeTrustEvent, Future, RecoveryRequest, RequestId, SasEmoji,
-    SessionInfo, SessionState, SyncCommand, VerificationFlowState, VerificationTarget,
+    AccountCommand, AccountKey, AuthSecret, CoreCommand, CoreConnection, CoreEvent, CoreRuntime,
+    Duration, E2eeTrustEvent, Future, RecoveryRequest, RequestId, SasEmoji, SessionInfo,
+    SessionState, SyncCommand, VerificationFlowState, VerificationTarget,
 };
 
 pub(super) async fn complete_new_identity_gate_for_qa(
@@ -856,15 +856,7 @@ pub(super) async fn wait_for_verification_requested_event_only(
             .map_err(|_| format!("{label}: timed out waiting for incoming verification request"))?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
         match event {
-            CoreEvent::E2eeTrust(E2eeTrustEvent::VerificationProgress { state, .. })
-            | CoreEvent::StateChanged(AppState {
-                e2ee_trust:
-                    koushi_state::E2eeTrustState {
-                        verification: state,
-                        ..
-                    },
-                ..
-            }) => {
+            CoreEvent::E2eeTrust(E2eeTrustEvent::VerificationProgress { state, .. }) => {
                 if let Some(flow_id) =
                     requested_verification_flow_id(&state, expected_target, excluded_flow_id)?
                 {
@@ -920,15 +912,7 @@ pub(super) async fn wait_for_verification_accepted(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::E2eeTrust(E2eeTrustEvent::VerificationProgress { state, .. })
-            | CoreEvent::StateChanged(AppState {
-                e2ee_trust:
-                    koushi_state::E2eeTrustState {
-                        verification: state,
-                        ..
-                    },
-                ..
-            }) => {
+            CoreEvent::E2eeTrust(E2eeTrustEvent::VerificationProgress { state, .. }) => {
                 if verification_state_is_at_least_accepted(&state, flow_id)? {
                     return Ok(());
                 }

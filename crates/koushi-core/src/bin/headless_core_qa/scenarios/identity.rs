@@ -1662,7 +1662,7 @@ async fn wait_for_local_encryption_health(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot) if snapshot.local_encryption == expected_state => {
+            CoreEvent::StateDelta(_) if conn.snapshot().local_encryption == expected_state => {
                 return Ok(());
             }
             CoreEvent::LocalEncryption(LocalEncryptionEvent::HealthChanged { health })
@@ -1703,7 +1703,7 @@ async fn wait_for_native_attention_state(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot) if snapshot.native_attention == *expected => {
+            CoreEvent::StateDelta(_) if conn.snapshot().native_attention == *expected => {
                 return Ok(());
             }
             CoreEvent::OperationFailed {
@@ -1750,9 +1750,10 @@ pub(super) async fn run_session_status_stage(conn: &mut CoreConnection) -> Resul
                     lag.skipped
                 )
             })?;
-        let CoreEvent::StateChanged(snapshot) = event else {
+        if !matches!(event, CoreEvent::StateDelta(_)) {
             continue;
-        };
+        }
+        let snapshot = conn.snapshot();
         match &snapshot.current_session_status {
             CurrentSessionStatusState::Checking {
                 request_id: observed_request_id,
@@ -2413,7 +2414,7 @@ async fn wait_for_key_backup_enabled(
                 }
                 _ => {}
             },
-            CoreEvent::StateChanged(snapshot) => match snapshot.e2ee_trust.key_backup {
+            CoreEvent::StateDelta(_) => match conn.snapshot().e2ee_trust.key_backup {
                 KeyBackupStatus::Enabled { version } => return Ok(version),
                 KeyBackupStatus::Failed {
                     request_id: failed_id,
@@ -2513,7 +2514,7 @@ async fn wait_for_key_backup_failed(
                 }
                 _ => {}
             },
-            CoreEvent::StateChanged(snapshot) => match snapshot.e2ee_trust.key_backup {
+            CoreEvent::StateDelta(_) => match conn.snapshot().e2ee_trust.key_backup {
                 KeyBackupStatus::Failed {
                     request_id: failed_id,
                     ..
@@ -2590,7 +2591,7 @@ async fn wait_for_key_backup_restored(
                 }
                 _ => {}
             },
-            CoreEvent::StateChanged(snapshot) => match snapshot.e2ee_trust.key_backup {
+            CoreEvent::StateDelta(_) => match conn.snapshot().e2ee_trust.key_backup {
                 KeyBackupStatus::Restoring {
                     request_id: current,
                     restored_rooms,
@@ -2707,8 +2708,8 @@ async fn wait_for_identity_reset_auth_or_done(
                     saw_request_state = true;
                 }
             }
-            CoreEvent::StateChanged(snapshot) => {
-                let state = snapshot.e2ee_trust.identity_reset;
+            CoreEvent::StateDelta(_) => {
+                let state = conn.snapshot().e2ee_trust.identity_reset;
                 if !matches!(state, IdentityResetState::Idle) {
                     if let Some(result) = identity_reset_observation(&state, flow_id, label)? {
                         return Ok(result);
@@ -2775,7 +2776,7 @@ async fn wait_for_identity_reset_done(
                 }
                 _ => {}
             },
-            CoreEvent::StateChanged(snapshot) => match snapshot.e2ee_trust.identity_reset {
+            CoreEvent::StateDelta(_) => match conn.snapshot().e2ee_trust.identity_reset {
                 IdentityResetState::Idle if saw_request_state => return Ok(()),
                 IdentityResetState::Resetting {
                     request_id: current,

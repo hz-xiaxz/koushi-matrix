@@ -40,8 +40,6 @@ struct ForwardedWebviewEvent {
 /// (second `attach()`) so it can loop on `recv_event` without blocking command
 /// dispatch.
 ///
-/// On `CoreEvent::StateChanged`: emit `koushi-desktop://state` with the
-/// serialized snapshot + update QA window title.
 /// On any `CoreEvent`: emit `koushi-desktop://event` with a serialized DTO.
 /// On `EventStreamLag`: emit the latest snapshot (resync) + a
 /// `ResyncMarker` event so the frontend resets its timeline stores.
@@ -214,11 +212,6 @@ fn serialize_core_event(event: &CoreEvent) -> Option<serde_json::Value> {
         CoreEvent::StateDelta(_) => {
             return None;
         }
-        CoreEvent::StateChanged(_) => {
-            // StateChanged snapshots are sent via `koushi-desktop://state`;
-            // don't duplicate as a generic event.
-            return None;
-        }
         CoreEvent::Account(e) => serde_json::json!({ "kind": "Account", "event": e }),
         CoreEvent::Sync(e) => serde_json::json!({ "kind": "Sync", "event": e }),
         CoreEvent::Room(e) => serde_json::json!({ "kind": "Room", "event": e }),
@@ -251,7 +244,7 @@ fn serialize_core_event(event: &CoreEvent) -> Option<serde_json::Value> {
             })
         }
         // Telemetry-lane event: emitted after reduce, never mixed with
-        // StateDelta/StateChanged, never drives product state in React.
+        // StateDelta never drives product state from telemetry in React.
         CoreEvent::IntentLifecycle {
             request_id,
             outcome,

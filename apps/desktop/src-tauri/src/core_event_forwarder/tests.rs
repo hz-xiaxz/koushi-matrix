@@ -42,22 +42,6 @@ fn timeline_items_updated_forwarding_emits_core_event_name_and_all_diffs() {
     assert_eq!(diffs[999], json!({ "Remove": { "index": 999 } }));
 }
 #[test]
-fn legacy_state_changed_forwarding_is_not_the_webview_state_path() {
-    use koushi_core::CoreEvent;
-    use koushi_state::AppState;
-
-    let timeline_items_count = AtomicUsize::new(17);
-    let event = CoreEvent::StateChanged(AppState::default());
-
-    let forwarded = forwarded_webview_events_for_core_event(&event, &timeline_items_count);
-
-    assert_eq!(timeline_items_count.load(Ordering::Relaxed), 17);
-    assert!(
-        forwarded.is_empty(),
-        "legacy full StateChanged events must not drive the normal webview state path"
-    );
-}
-#[test]
 fn state_delta_forwarding_emits_core_event_changed_slices() {
     use koushi_core::{CoreEvent, build_state_delta};
     use koushi_state::{AppState, SearchCrawlerRoomState};

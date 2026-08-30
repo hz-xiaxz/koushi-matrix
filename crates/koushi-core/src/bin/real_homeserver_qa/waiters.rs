@@ -162,15 +162,12 @@ pub(super) async fn wait_for_ready_snapshot(
         return Ok(());
     }
     loop {
-        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
+        let snapshot = tokio::time::timeout(EVENT_TIMEOUT, conn.next_versioned_snapshot())
             .await
             .map_err(|_| format!("{label}: timed out waiting for Ready snapshot"))?
-            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
-
-        if let CoreEvent::StateChanged(snapshot) = event {
-            if matches!(snapshot.session, SessionState::Ready(_)) {
-                return Ok(());
-            }
+            .ok_or_else(|| format!("{label}: snapshot stream closed"))?;
+        if matches!(snapshot.state.session, SessionState::Ready(_)) {
+            return Ok(());
         }
     }
 }
@@ -292,15 +289,10 @@ pub(super) async fn wait_for_non_empty_room_list(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
-                let s = conn.snapshot();
-                if !s.rooms.is_empty() || !s.spaces.is_empty() {
-                    return Ok(s);
-                }
-            }
-            CoreEvent::StateChanged(s) => {
-                if !s.rooms.is_empty() || !s.spaces.is_empty() {
-                    return Ok(s);
+            CoreEvent::Room(RoomEvent::RoomListUpdated) | CoreEvent::StateDelta(_) => {
+                let snapshot = conn.snapshot();
+                if !snapshot.rooms.is_empty() || !snapshot.spaces.is_empty() {
+                    return Ok(snapshot);
                 }
             }
             _ => continue,
@@ -504,13 +496,8 @@ pub(super) async fn wait_for_room_list_space_child(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
+            CoreEvent::Room(RoomEvent::RoomListUpdated) | CoreEvent::StateDelta(_) => {
                 let snapshot = conn.snapshot();
-                if contains_expected(&snapshot) {
-                    return Ok(snapshot);
-                }
-            }
-            CoreEvent::StateChanged(snapshot) => {
                 if contains_expected(&snapshot) {
                     return Ok(snapshot);
                 }
@@ -844,12 +831,10 @@ pub(super) async fn wait_for_ready_or_recovery_required<S: QaSnapshotEventSource
             .map_err(|_| format!("{label}: timed out waiting for Ready snapshot"))?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
+        if matches!(conn.snapshot().session, SessionState::Ready(_)) {
+            return Ok(ReadyRecoveryWaitOutcome::Ready);
+        }
         match event {
-            CoreEvent::StateChanged(snapshot)
-                if matches!(snapshot.session, SessionState::Ready(_)) =>
-            {
-                return Ok(ReadyRecoveryWaitOutcome::Ready);
-            }
             CoreEvent::Account(AccountEvent::RecoveryRequired { .. }) => {
                 return Ok(ReadyRecoveryWaitOutcome::RecoveryRequired);
             }
@@ -989,6 +974,7 @@ pub(super) async fn wait_for_operation_failed<S: QaEventSource + ?Sized>(
                     | AccountEvent::LoggedOut { request_id: id, .. }
                     | AccountEvent::AccountSwitched { request_id: id, .. } => *id == request_id,
                     AccountEvent::OidcAuthorizationCreated { .. }
+                    | AccountEvent::AuthDiscoveryChanged { .. }
                     | AccountEvent::RecoveryRequired { .. } => false,
                 };
                 if matches_id {
@@ -1044,6 +1030,7 @@ pub(super) async fn wait_for_operation_failed_and_signed_out<S: QaSnapshotEventS
                     | AccountEvent::LoggedOut { request_id: id, .. }
                     | AccountEvent::AccountSwitched { request_id: id, .. } => *id == request_id,
                     AccountEvent::OidcAuthorizationCreated { .. }
+                    | AccountEvent::AuthDiscoveryChanged { .. }
                     | AccountEvent::RecoveryRequired { .. } => false,
                 };
                 if matches_request {

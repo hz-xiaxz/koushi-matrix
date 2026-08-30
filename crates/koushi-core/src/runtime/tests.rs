@@ -105,7 +105,7 @@ async fn wait_for_runtime_snapshot(
                 return snapshot;
             }
             connection
-                .next_versioned_snapshot_for_testing()
+                .next_versioned_snapshot()
                 .await
                 .expect("runtime snapshot stream should remain open");
         }
@@ -661,10 +661,8 @@ async fn projection_rejected_restore_emits_one_correlated_failure_without_routin
             .expect("event stream should remain open");
         if matches!(
             event,
-            CoreEvent::StateChanged(AppState {
-                session: SessionState::LoggingOut,
-                ..
-            })
+            CoreEvent::StateDelta(delta)
+                if matches!(delta.changed.session, Some(SessionState::LoggingOut))
         ) {
             break;
         }
@@ -857,7 +855,7 @@ async fn local_alias_clear_command_emits_target_display_label_update() {
                 .await
                 .expect("runtime should emit initial profile events")
                 .expect("event stream should stay open");
-        if matches!(event, CoreEvent::StateChanged(_)) {
+        if matches!(event, CoreEvent::StateDelta(_)) {
             break;
         }
     }
@@ -1049,7 +1047,6 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         loop {
             match event_rx.recv().await.expect("event stream remains open") {
                 event @ CoreEvent::IntentLifecycle { .. } => break event,
-                CoreEvent::StateChanged(_) => {}
                 _ => {}
             }
         }

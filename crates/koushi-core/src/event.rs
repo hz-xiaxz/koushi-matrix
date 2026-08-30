@@ -109,7 +109,6 @@ pub enum IntentOutcome {
 #[derive(Clone, Debug)]
 pub enum CoreEvent {
     StateDelta(StateDelta),
-    StateChanged(AppStateSnapshot),
     Account(AccountEvent),
     Sync(SyncEvent),
     Room(RoomEvent),
