@@ -1219,6 +1219,8 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
     let space_member_role_update_settled =
         serialize_core_event(&CoreEvent::Room(RoomEvent::SpaceMemberRoleUpdateSettled {
             request_id,
+            space_id: "!space:example.test".to_owned(),
+            user_id: "@target:example.test".to_owned(),
             generation: 4,
             outcome: koushi_state::SpaceMemberRoleUpdateOutcome::Succeeded,
         }))

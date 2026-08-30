@@ -120,6 +120,7 @@ pub async fn enable_key_backup(
 pub async fn bootstrap_secure_backup(
     passphrase: Option<String>,
     recovery_key_destination_path: Option<String>,
+    intent: koushi_state::SecureBackupSetupIntent,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
@@ -130,49 +131,7 @@ pub async fn bootstrap_secure_backup(
             request_id,
             passphrase.map(AuthSecret::new),
             recovery_key_destination_path,
-            false,
-        ),
-    )
-    .await?;
-    update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
-}
-
-#[tauri::command]
-pub async fn reenable_secure_backup(
-    passphrase: Option<String>,
-    recovery_key_destination_path: Option<String>,
-    app: AppHandle,
-    state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
-    use tauri_plugin_dialog::{DialogExt as _, MessageDialogButtons, MessageDialogKind};
-
-    let (confirmation_tx, confirmation_rx) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .message(
-            "Re-enabling Secure Backup changes the account-wide setting used by your other Matrix clients.\n\nSecure Backupを再有効化すると、他のMatrixクライアントも参照するアカウント全体の設定が変更されます。",
-        )
-        .title("Secure Backup")
-        .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            "Enable / 有効にする".to_owned(),
-            "Cancel / キャンセル".to_owned(),
-        ))
-        .show(move |confirmed| {
-            let _ = confirmation_tx.send(confirmed);
-        });
-    if !confirmation_rx.await.unwrap_or(false) {
-        return current_snapshot(state.inner()).await;
-    }
-
-    let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
-        state.inner(),
-        build_bootstrap_secure_backup_command(
-            request_id,
-            passphrase.map(AuthSecret::new),
-            recovery_key_destination_path,
-            true,
+            intent,
         ),
     )
     .await?;
@@ -398,14 +357,14 @@ pub(super) fn build_bootstrap_secure_backup_command(
     request_id: koushi_core::RequestId,
     passphrase: Option<AuthSecret>,
     recovery_key_destination_path: Option<String>,
-    explicit_reenable_confirmed: bool,
+    intent: koushi_state::SecureBackupSetupIntent,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::BootstrapSecureBackup {
         request_id,
         request: SecureBackupSetupRequest {
             passphrase,
             recovery_key_destination_path: recovery_key_destination_path.map(PathBuf::from),
-            explicit_reenable_confirmed,
+            intent,
         },
     })
 }
@@ -506,7 +465,7 @@ pub(super) fn build_start_session_bootstrap_command(
         request: SecureBackupSetupRequest {
             passphrase,
             recovery_key_destination_path: Some(PathBuf::from(recovery_key_destination_path)),
-            explicit_reenable_confirmed: false,
+            intent: koushi_state::SecureBackupSetupIntent::InitialSetup,
         },
     })
 }

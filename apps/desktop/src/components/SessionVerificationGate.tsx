@@ -1,9 +1,15 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImeSafeForm, ImeTextField, SecureImeTextField } from "./ImeTextControl";
 import { ResetLocalDataConfirmationDialog } from "./dialogs";
 import { t } from "../i18n/messages";
 import { api, startSessionVerificationWindowDrag } from "../backend/appRuntime";
-import type { DesktopSnapshot, PendingKeyCountBucket, SecureBackupGateFailureKind, SecureBackupGateState } from "../domain/types";
+import type {
+  DesktopSnapshot,
+  PendingKeyCountBucket,
+  SecureBackupGateFailureKind,
+  SecureBackupGateState,
+  SecureBackupSetupIntent
+} from "../domain/types";
 
 function provisionalPhaseKind(
   phase: import("../domain/types").ProvisionalPhase | undefined
@@ -48,13 +54,10 @@ export interface SessionVerificationGateOperations {
   submitDeviceCleanupUia?: (flowId: number, password: string) => Promise<DesktopSnapshot>;
   eraseLocalDataAnyway?: () => Promise<DesktopSnapshot>;
   recoverSecureBackup?: (secret: string) => Promise<DesktopSnapshot>;
-  setupSecureBackup?: (
+  bootstrapSecureBackup?: (
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
-  ) => Promise<DesktopSnapshot>;
-  reenableSecureBackup?: (
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
+    recoveryKeyDestinationPath: string | null,
+    intent: SecureBackupSetupIntent
   ) => Promise<DesktopSnapshot>;
   chooseSecureBackupDestination?: () => Promise<string | null>;
   retrySecureBackupInspection?: () => Promise<DesktopSnapshot>;
@@ -70,8 +73,8 @@ const defaultSessionVerificationGateOperations: SessionVerificationGateOperation
     api.submitDeviceCleanupUia(flowId, password),
   eraseLocalDataAnyway: () => api.eraseLocalDataAnyway(),
   recoverSecureBackup: api.recoverSecureBackup,
-  setupSecureBackup: api.setupSecureBackup,
-  reenableSecureBackup: api.reenableSecureBackup,
+  bootstrapSecureBackup: (passphrase, destination, intent) =>
+    api.bootstrapSecureBackup(passphrase, destination, intent),
   retrySecureBackupInspection: api.retrySecureBackupInspection,
   openSecureBackupDiagnostics: () => api.getDiagnosticSnapshot().then(() => undefined)
 };
@@ -194,6 +197,18 @@ export function SessionVerificationGate({
   const [confirmSecureBackupReenable, setConfirmSecureBackupReenable] = useState(false);
   const [secureBackupDestinationSelected, setSecureBackupDestinationSelected] = useState(false);
   const [secureBackupDestinationChoosing, setSecureBackupDestinationChoosing] = useState(false);
+  const secureBackupConfirmationOwner =
+    "user_id" in session
+      ? `${session.homeserver}\u0000${session.user_id}\u0000${session.device_id}`
+      : session.kind;
+  const secureBackupDestinationEpochRef = useRef(0);
+  useEffect(() => {
+    secureBackupDestinationEpochRef.current += 1;
+    secureBackupDestinationPathRef.current = null;
+    setSecureBackupDestinationSelected(false);
+    setSecureBackupDestinationChoosing(false);
+    setConfirmSecureBackupReenable(false);
+  }, [secureBackupConfirmationOwner, secureBackupGate.kind]);
   const gateOperationRef = useRef<"recovery" | "sas" | "cleanup" | null>(null);
   const secureBackupOperationRef = useRef<SecureBackupOperationKind | null>(null);
   const run = async (
@@ -249,19 +264,25 @@ export function SessionVerificationGate({
   const chooseSecureBackupDestination = async () => {
     const operation = operations.chooseSecureBackupDestination;
     if (!operation || secureBackupDestinationChoosing) return;
+    const epoch = secureBackupDestinationEpochRef.current + 1;
+    secureBackupDestinationEpochRef.current = epoch;
     setSecureBackupDestinationChoosing(true);
     setSecureBackupOperationError(false);
     setSecureBackupDestinationSelectionError(false);
     try {
       const selected = (await operation())?.trim() || null;
-      if (selected) {
+      if (secureBackupDestinationEpochRef.current === epoch && selected) {
         secureBackupDestinationPathRef.current = selected;
         setSecureBackupDestinationSelected(true);
       }
     } catch {
-      setSecureBackupDestinationSelectionError(true);
+      if (secureBackupDestinationEpochRef.current === epoch) {
+        setSecureBackupDestinationSelectionError(true);
+      }
     } finally {
-      setSecureBackupDestinationChoosing(false);
+      if (secureBackupDestinationEpochRef.current === epoch) {
+        setSecureBackupDestinationChoosing(false);
+      }
     }
   };
   const submitSecureBackupSetup = (kind: "setup" | "reenable") => {
@@ -272,15 +293,15 @@ export function SessionVerificationGate({
     secureBackupDestinationPathRef.current = null;
     setSecureBackupDestinationSelected(false);
     if (kind === "reenable") setConfirmSecureBackupReenable(false);
+    const intent: SecureBackupSetupIntent =
+      kind === "setup"
+        ? { kind: "initialSetup" }
+        : { kind: "reenable", confirmed: true };
     void runSecureBackup(
       kind,
-      kind === "setup"
-        ? operations.setupSecureBackup
-          ? () => operations.setupSecureBackup!(passphrase, destination)
-          : undefined
-        : operations.reenableSecureBackup
-          ? () => operations.reenableSecureBackup!(passphrase, destination)
-          : undefined
+      operations.bootstrapSecureBackup
+        ? () => operations.bootstrapSecureBackup!(passphrase, destination, intent)
+        : undefined
     );
   };
   const secureBackupSetupForm = (kind: "setup" | "reenable") => (

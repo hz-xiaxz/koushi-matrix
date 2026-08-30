@@ -433,6 +433,10 @@ export type SoftLogoutReauthState =
 
 export type RecoveryMethod = "recoveryKey" | "securityPhrase";
 
+export type SecureBackupSetupIntent =
+  | { kind: "initialSetup" }
+  | { kind: "reenable"; confirmed: boolean };
+
 export type SecureBackupGateFailureKind =
   | "network"
   | "rateLimited"
@@ -1585,16 +1589,6 @@ export interface StagedUploadItem {
   caption: ComposerDocument | null;
   compression_choice: StagedUploadCompressionChoice;
   preparation: StagedUploadPreparation;
-}
-
-export interface UploadStagingRequestItem {
-  stagedId: string;
-  position: number;
-  filename: string;
-  mimeType: string;
-  byteCount: number;
-  kind: StagedUploadKind;
-  compressionChoice: StagedUploadCompressionChoice;
 }
 
 export interface StageUploadBytesRequestItem {

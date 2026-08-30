@@ -2705,7 +2705,7 @@ describe("Timeline item row rendering", () => {
     );
   });
 
-  test("invite workflow Tauri commands return converged snapshots", () => {
+  test("invite workflow Tauri commands delegate convergence to Core outcomes", () => {
     const source = readFileSync(
       new URL("../src-tauri/src/commands/room.rs", import.meta.url),
       "utf8"
@@ -2717,9 +2717,9 @@ describe("Timeline item row rendering", () => {
     const workflowCommands = source.slice(start, end);
 
     expect(source).toContain("INVITE_WORKFLOW_CONVERGENCE_TIMEOUT");
-    expect(source).toContain("wait_for_invite_workflow_snapshot");
+    expect(workflowCommands).toContain("RequestOutcomeExpectation::InviteWorkflow");
     expect(workflowCommands).not.toContain("current_snapshot(state.inner())");
-    expect(workflowCommands.match(/wait_for_invite_workflow_snapshot/g)).toHaveLength(3);
+    expect(workflowCommands.match(/\.wait_for_request_outcome/g)).toHaveLength(3);
   });
 
   test("rejected login transport refreshes authoritative gate state without rejecting", async () => {

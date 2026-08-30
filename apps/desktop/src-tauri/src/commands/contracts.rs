@@ -5,30 +5,16 @@ use super::{
 };
 use koushi_core::AccountKey;
 use koushi_core::{
-    AccountCommand, AppCommand, CoreCommand, CoreConnection, CoreEvent, CreateRoomOptions,
-    CreateRoomParentSpace, CreateRoomVisibility, ImageUploadCompressionPolicy,
-    ImageUploadCompressionState, ImageUploadDimensions, ImageUploadVariantInfo,
-    ImageUploadVariantKind, MediaDownloadSelection, PaginationDirection, RequestId, RoomCommand,
-    SearchCommand, SearchScope, SyncCommand, TimelineCommand, TimelineKey, UploadMediaKind,
-    UploadMediaThumbnail,
+    AccountCommand, AppCommand, CoreCommand, CreateRoomOptions, CreateRoomParentSpace,
+    CreateRoomVisibility, MediaDownloadSelection, PaginationDirection, RequestId, RoomCommand,
+    SearchCommand, SearchScope, SyncCommand, TimelineCommand, TimelineKey,
 };
-use koushi_state::{ActivityMarkReadTarget, ActivityTab, ImageUploadCompressionMode};
+use koushi_state::{ActivityMarkReadTarget, ActivityTab};
 use koushi_state::{
-    AppState, AuthSecret, ComposerDocument, DisplayPlatform, LoginRequest, PresenceKind,
+    AuthSecret, ComposerDocument, DisplayPlatform, LoginRequest, PresenceKind,
     RoomHistoryVisibility, RoomJoinRule, RoomModerationAction, RoomSettingChange, RoomTagKind,
     ThreadOpenIntent,
 };
-use std::collections::VecDeque;
-
-pub(super) struct ScriptedSelectSource {
-    pub(super) snapshot: AppState,
-    pub(super) events: VecDeque<Result<CoreEvent, koushi_core::EventStreamLag>>,
-}
-
-struct ScriptedSearchPathIo;
-
-const SYNTHETIC_QUERY: &str = "  synthetic-query-text event synthetic-event-id user synthetic-user-id body synthetic-body-text url https://synthetic.example/path absolute /synthetic/private/path  ";
-
 pub(super) fn fake_request_id(sequence: u64) -> koushi_core::RequestId {
     koushi_core::RequestId {
         connection_id: koushi_core::RuntimeConnectionId(7),
@@ -41,61 +27,6 @@ pub(super) fn synthetic_session_key() -> koushi_key::SessionKeyId {
         homeserver: "https://example.org".to_owned(),
         user_id: "@alice:example.org".to_owned(),
         device_id: "DEVICE".to_owned(),
-    }
-}
-
-impl super::search::SearchPathIo for ScriptedSearchPathIo {
-    fn submit<'a>(
-        &'a self,
-        _state: &'a super::CoreRuntimeState,
-        command: CoreCommand,
-    ) -> super::search::SearchPathFuture<'a> {
-        match command {
-            CoreCommand::Search(SearchCommand::Query { query, scope, .. }) => {
-                assert_eq!(query, SYNTHETIC_QUERY);
-                assert_eq!(
-                    scope,
-                    SearchScope::CurrentRoom {
-                        room_id: "synthetic-room-id".to_owned()
-                    }
-                );
-            }
-            other => panic!("unexpected search command: {other:?}"),
-        }
-        Box::pin(std::future::ready(Ok(())))
-    }
-
-    fn wait<'a>(
-        &'a self,
-        _connection: &'a mut CoreConnection,
-        _request_id: RequestId,
-    ) -> super::search::SearchPathFuture<'a> {
-        Box::pin(std::future::ready(Ok(())))
-    }
-}
-
-impl super::navigation::SelectEventSource for ScriptedSelectSource {
-    fn snapshot(&self) -> AppState {
-        self.snapshot.clone()
-    }
-
-    fn recv_event(
-        &mut self,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = Result<CoreEvent, koushi_core::EventStreamLag>>
-                + Send
-                + '_,
-        >,
-    > {
-        let event = self
-            .events
-            .pop_front()
-            .unwrap_or_else(|| Err(koushi_core::EventStreamLag { skipped: 0 }));
-        if let Ok(CoreEvent::StateChanged(snapshot)) = &event {
-            self.snapshot = snapshot.clone();
-        }
-        Box::pin(std::future::ready(event))
     }
 }
 
@@ -239,7 +170,7 @@ fn tauri_command_routes_build_expected_core_commands() {
         fake_request_id(35),
         Some(AuthSecret::new("backup-setup-phrase")),
         Some("/tmp/recovery-artifact.txt".to_owned()),
-        false,
+        koushi_state::SecureBackupSetupIntent::InitialSetup,
     ) {
         CoreCommand::Account(AccountCommand::BootstrapSecureBackup {
             request_id,
@@ -257,6 +188,10 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(
                 request.recovery_key_destination_path,
                 Some(std::path::PathBuf::from("/tmp/recovery-artifact.txt"))
+            );
+            assert_eq!(
+                request.intent,
+                koushi_state::SecureBackupSetupIntent::InitialSetup
             );
         }
         other => panic!("unexpected command: {other:?}"),
@@ -717,168 +652,6 @@ fn tauri_command_routes_build_expected_core_commands() {
         )
         .is_none()
     );
-
-    match build_upload_media_command(
-        fake_request_id(25),
-        active_session_key.clone(),
-        active_account_key.clone(),
-        room_id.clone(),
-        "desktop-media-1".to_owned(),
-        "report.pdf".to_owned(),
-        "application/pdf".to_owned(),
-        vec![1, 2, 3, 4],
-        None,
-        ImageUploadCompressionMode::Never,
-        ImageUploadCompressionPolicy::default(),
-        None,
-        None,
-        None,
-    )
-    .expect("upload_media should build a command")
-    {
-        CoreCommand::Timeline(TimelineCommand::UploadAndSendMedia {
-            request_id,
-            expected_account,
-            key,
-            transaction_id,
-            request,
-        }) => {
-            assert_eq!(request_id, fake_request_id(25));
-            assert_eq!(expected_account, active_session_key);
-            assert_eq!(key.account_key, active_account_key);
-            assert_eq!(
-                key.kind,
-                koushi_core::TimelineKind::Room {
-                    room_id: room_id.clone()
-                }
-            );
-            assert_eq!(transaction_id, "desktop-media-1");
-            assert_eq!(request.filename, "report.pdf");
-            assert_eq!(request.mime_type, "application/pdf");
-            assert_eq!(request.bytes, vec![1, 2, 3, 4]);
-            assert_eq!(request.kind, UploadMediaKind::File);
-            assert_eq!(request.caption, None);
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
-
-    match build_upload_media_command(
-        fake_request_id(26),
-        active_session_key.clone(),
-        active_account_key.clone(),
-        room_id.clone(),
-        "desktop-media-2".to_owned(),
-        "photo.png".to_owned(),
-        "image/png".to_owned(),
-        vec![9],
-        Some("single **event** caption".to_owned()),
-        ImageUploadCompressionMode::Never,
-        ImageUploadCompressionPolicy::default(),
-        None,
-        None,
-        None,
-    )
-    .expect("image upload_media should build a command")
-    {
-        CoreCommand::Timeline(TimelineCommand::UploadAndSendMedia { request, .. }) => {
-            assert_eq!(
-                request.kind,
-                UploadMediaKind::Image {
-                    width: None,
-                    height: None
-                }
-            );
-            let caption = request.caption.expect("caption should be preserved");
-            assert_eq!(caption.plain_body, "single **event** caption");
-            assert_eq!(
-                caption.formatted_body.as_deref(),
-                Some("single <strong>event</strong> caption")
-            );
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
-
-    match build_upload_media_command(
-        fake_request_id(37),
-        active_session_key.clone(),
-        active_account_key.clone(),
-        room_id.clone(),
-        "desktop-media-3".to_owned(),
-        "screenshot.jpg".to_owned(),
-        "image/jpeg".to_owned(),
-        vec![7, 8, 9, 10],
-        None,
-        ImageUploadCompressionMode::Always,
-        ImageUploadCompressionPolicy::default(),
-        Some(ImageUploadDimensions {
-            width: 1200,
-            height: 900,
-        }),
-        Some(ImageUploadCompressionState {
-            mode: koushi_state::ImageUploadCompressionMode::Always,
-            policy: ImageUploadCompressionPolicy::default(),
-            original: ImageUploadVariantInfo {
-                mime_type: "image/jpeg".to_owned(),
-                byte_count: 3_200_000,
-                dimensions: Some(ImageUploadDimensions {
-                    width: 4032,
-                    height: 3024,
-                }),
-            },
-            selected: ImageUploadVariantInfo {
-                mime_type: "image/jpeg".to_owned(),
-                byte_count: 999,
-                dimensions: Some(ImageUploadDimensions {
-                    width: 1200,
-                    height: 900,
-                }),
-            },
-            selected_variant: ImageUploadVariantKind::Compressed,
-            skipped_small_image: false,
-            metadata_stripped: true,
-            thumbnail_refreshed: true,
-        }),
-        Some(UploadMediaThumbnail {
-            mime_type: "image/jpeg".to_owned(),
-            bytes: vec![1, 1, 1],
-            width: 320,
-            height: 240,
-        }),
-    )
-    .expect("compressed image upload_media should build a command")
-    {
-        CoreCommand::Timeline(TimelineCommand::UploadAndSendMedia { request, .. }) => {
-            assert_eq!(
-                request.kind,
-                UploadMediaKind::Image {
-                    width: Some(1200),
-                    height: Some(900)
-                }
-            );
-            let compression = request
-                .compression
-                .expect("image compression contract should be preserved");
-            assert_eq!(
-                compression.selected_variant,
-                ImageUploadVariantKind::Compressed
-            );
-            assert_eq!(compression.selected.byte_count, 4);
-            assert!(compression.metadata_stripped);
-            assert!(compression.thumbnail_refreshed);
-            assert_eq!(
-                request.thumbnail.as_ref().map(|thumbnail| {
-                    (
-                        thumbnail.mime_type.as_str(),
-                        thumbnail.bytes.len(),
-                        thumbnail.width,
-                        thumbnail.height,
-                    )
-                }),
-                Some(("image/jpeg", 3, 320, 240))
-            );
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
 
     match build_download_media_command(
         fake_request_id(27),
@@ -2119,23 +1892,6 @@ fn tauri_command_routes_redact_secret_bearing_values_from_debug() {
         ComposerDocument::from_plain_text("sensitive edit body"),
     )
     .expect("edit_message should build a command");
-    let upload = build_upload_media_command(
-        fake_request_id(21),
-        synthetic_session_key(),
-        AccountKey("@alice:example.org".to_owned()),
-        "!room:example.org".to_owned(),
-        "desktop-media-sensitive".to_owned(),
-        "secret-filename.pdf".to_owned(),
-        "application/pdf".to_owned(),
-        b"secret media bytes".to_vec(),
-        Some("secret media caption".to_owned()),
-        ImageUploadCompressionMode::Never,
-        ImageUploadCompressionPolicy::default(),
-        None,
-        None,
-        None,
-    )
-    .expect("upload_media should build a command");
     let download = build_download_media_command(
         fake_request_id(22),
         AccountKey("@alice:example.org".to_owned()),
@@ -2166,7 +1922,7 @@ fn tauri_command_routes_redact_secret_bearing_values_from_debug() {
         fake_request_id(25),
         Some(AuthSecret::new("backup-setup-phrase")),
         Some("/tmp/private-recovery-artifact.txt".to_owned()),
-        false,
+        koushi_state::SecureBackupSetupIntent::InitialSetup,
     );
     let secure_backup_change = build_change_secure_backup_passphrase_command(
         fake_request_id(26),
@@ -2180,8 +1936,6 @@ fn tauri_command_routes_redact_secret_bearing_values_from_debug() {
         (&recovery, "recovery-123"),
         (&send, "sensitive body"),
         (&edit, "sensitive edit body"),
-        (&upload, "secret-filename.pdf"),
-        (&upload, "secret media bytes"),
         (&download, "$secret-media-event"),
         (&search, "secret search terms"),
         (&room_key_export, "/tmp/private-room-key-export.txt"),
@@ -2221,129 +1975,4 @@ fn tauri_diagnostics_record_without_stderr_environment_switch() {
     assert!(records.iter().any(|record| {
         record.event.source == "desktop.timeline" && record.event.stage == "done"
     }));
-}
-
-#[test]
-fn env_unset_real_search_and_select_producers_are_private_data_free() {
-    let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "commands::contracts::env_unset_real_search_and_select_producers_child",
-            "--ignored",
-            "--nocapture",
-        ])
-        .env_remove("KOUSHI_SUBSCRIBE_TRACE")
-        .env_remove("KOUSHI_SEARCH_TRACE")
-        .output()
-        .expect("env-unset diagnostic child should run");
-    assert!(output.status.success(), "child failed: {output:?}");
-    let stdout = String::from_utf8(output.stdout).expect("child stdout should be utf8");
-    let snapshot: serde_json::Value = serde_json::from_str(
-        stdout
-            .lines()
-            .find(|line| line.starts_with('{'))
-            .expect("child should print one JSON snapshot"),
-    )
-    .expect("child output should be a JSON snapshot");
-    let records = snapshot["records"]
-        .as_array()
-        .expect("records should be an array");
-    let fields = |source: &str, stage: &str| {
-        records
-            .iter()
-            .find(|record| record["event"]["source"] == source && record["event"]["stage"] == stage)
-            .and_then(|record| record["event"]["fields"].as_array())
-            .expect("expected diagnostic record")
-    };
-    let field = |fields: &[serde_json::Value], key: &str| {
-        fields
-            .iter()
-            .find(|field| field["key"] == key)
-            .map(|field| field["value"].clone())
-            .expect("expected typed field")
-    };
-    let search_fields = fields("desktop.search", "submit");
-    assert_eq!(
-        field(search_fields, "ui_scope"),
-        serde_json::json!({"kind":"token","value":"current_room"})
-    );
-    assert_eq!(
-        field(search_fields, "resolved_scope"),
-        serde_json::json!({"kind":"token","value":"current_room"})
-    );
-    assert_eq!(
-        field(search_fields, "query_bytes"),
-        serde_json::json!({"kind":"count","value":161})
-    );
-    assert_eq!(
-        field(search_fields, "query_chars"),
-        serde_json::json!({"kind":"count","value":161})
-    );
-    assert_eq!(field(search_fields, "request_id")["kind"], "request_id");
-
-    assert!(
-        records
-            .iter()
-            .all(|record| record["event"]["source"] != "desktop.select"),
-        "Tauri must not duplicate Core-owned room-selection settlement telemetry"
-    );
-    let serialized_snapshot =
-        serde_json::to_string(&snapshot).expect("parsed diagnostic snapshot should serialize");
-    for private_value in [
-        "synthetic-room-id",
-        "synthetic-query-text",
-        "synthetic-event-id",
-        "synthetic-user-id",
-        "synthetic-body-text",
-        "https://synthetic.example/path",
-        "/synthetic/private/path",
-    ] {
-        assert!(
-            !serialized_snapshot.contains(private_value),
-            "diagnostic snapshot leaked {private_value}"
-        );
-    }
-}
-
-#[test]
-#[ignore]
-fn env_unset_real_search_and_select_producers_child() {
-    assert!(std::env::var_os("KOUSHI_SUBSCRIBE_TRACE").is_none());
-    assert!(std::env::var_os("KOUSHI_SEARCH_TRACE").is_none());
-
-    let async_runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .build()
-        .expect("test runtime should build");
-    async_runtime.block_on(async {
-        let data_dir = tempfile::tempdir().expect("runtime data dir should be created");
-        let runtime = koushi_core::CoreRuntime::start_with_data_dir(data_dir.path().to_owned());
-        let connection = runtime.attach();
-        let state = super::CoreRuntimeState {
-            runtime,
-            connection: tokio::sync::Mutex::new(connection),
-            composer_draft_transport: std::sync::Mutex::new(
-                crate::ComposerDraftTransportIdentities::default(),
-            ),
-            timeline_items_count: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            _forwarder_task: None,
-            native_window_focus_generation: std::sync::atomic::AtomicU64::new(0),
-            viewport_sync_generation: crate::viewport_sync::ViewportSyncGeneration::default(),
-        };
-        super::search::submit_search_production_path(
-            SYNTHETIC_QUERY.to_owned(),
-            SearchScopeKind::CurrentRoom,
-            SearchScope::CurrentRoom {
-                room_id: "synthetic-room-id".to_owned(),
-            },
-            &state,
-            &ScriptedSearchPathIo,
-        )
-        .await
-        .expect("production search path should reach searching state");
-    });
-
-    let serialized = serde_json::to_string(&koushi_diagnostics::snapshot())
-        .expect("diagnostic snapshot should serialize");
-    println!("{serialized}");
 }

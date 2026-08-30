@@ -40,11 +40,15 @@ pub enum RoomEvent {
     },
     SpaceMemberInviteSettled {
         request_id: RequestId,
+        space_id: String,
+        user_id: String,
         generation: u64,
         outcome: SpaceMemberInviteOutcome,
     },
     SpaceMemberInviteCancellationSettled {
         request_id: RequestId,
+        space_id: String,
+        user_id: String,
         generation: u64,
         outcome: SpaceMemberInviteOutcome,
     },
@@ -88,16 +92,19 @@ pub enum RoomEvent {
         tag: RoomTagKind,
     },
     PinnedEventsUpdated {
+        request_id: Option<RequestId>,
         room_id: String,
         pinned: Vec<PinnedEvent>,
     },
     PinEventCompleted {
         request_id: RequestId,
         room_id: String,
+        event_id: String,
     },
     UnpinEventCompleted {
         request_id: RequestId,
         room_id: String,
+        event_id: String,
     },
     DirectoryQueryCompleted {
         request_id: RequestId,
@@ -131,6 +138,8 @@ pub enum RoomEvent {
     },
     SpaceMemberRoleUpdateSettled {
         request_id: RequestId,
+        space_id: String,
+        user_id: String,
         generation: u64,
         outcome: koushi_state::SpaceMemberRoleUpdateOutcome,
     },
@@ -248,6 +257,7 @@ impl fmt::Debug for RoomEvent {
                 request_id,
                 generation,
                 outcome,
+                ..
             } => formatter
                 .debug_struct("SpaceMemberInviteSettled")
                 .field("request_id", request_id)
@@ -258,6 +268,7 @@ impl fmt::Debug for RoomEvent {
                 request_id,
                 generation,
                 outcome,
+                ..
             } => formatter
                 .debug_struct("SpaceMemberInviteCancellationSettled")
                 .field("request_id", request_id)
@@ -382,6 +393,7 @@ impl fmt::Debug for RoomEvent {
                 request_id,
                 generation,
                 outcome,
+                ..
             } => formatter
                 .debug_struct("SpaceMemberRoleUpdateSettled")
                 .field("request_id", request_id)
@@ -544,6 +556,8 @@ mod tests {
     fn space_invite_cancellation_event_debug_redacts_request_details() {
         let event = RoomEvent::SpaceMemberInviteCancellationSettled {
             request_id: fake_rid(45),
+            space_id: "!private-space:example.invalid".to_owned(),
+            user_id: "@private-target:example.invalid".to_owned(),
             generation: 4,
             outcome: SpaceMemberInviteOutcome::Cancelled,
         };

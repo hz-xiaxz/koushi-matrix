@@ -213,6 +213,80 @@ versioned-snapshot convergence, recovers a lagged consumer from the latest
 snapshot, and awaits ordered shutdown without importing Tauri. Serialized
 `FrontendDesktopSnapshot` mirrors remain adapter-only in `apps/desktop/src-tauri`.
 
+### Core request outcomes (Phase A, issue #755)
+
+`koushi-core` owns request settlement through the closed, non-serde
+`runtime::request_outcome` service. `CoreConnection::wait_for_request_outcome`
+uses the connection's event stream as a wake source and its versioned watch
+snapshot as authority: it checks the initial snapshot, applies the expectation's
+exact request/account/target/submission guards, uses one absolute deadline, and
+performs one final snapshot check after timeout, closure, or lag. A waiter may
+use a separate attached event connection; a `RequestId` is globally unique on
+the shared stream and is never compared with the waiting connection ID.
+Submission correlations require both the originating request and
+`SubmissionId`. Lag is either recoverable or terminal according to the closed
+expectation variant, and `Lagged`, `Disconnected`, `TimedOut`, operation
+failure, and typed no-op outcomes remain distinct. `select_room_and_wait` is a
+compatibility wrapper over this service.
+
+This is Phase A runtime infrastructure only: it adds no `AppState`,
+`AppAction`, reducer, or reducer transition. Tauri waiters and their product
+loops are intentionally not migrated until the later phases of issue #755.
+
+### Core-owned staged upload orchestration (Phase B, issue #755)
+
+`koushi_core::media_staging::MediaStagingService` owns the production staged-upload
+orchestration API. It validates a non-empty batch, the named
+`MAX_MEDIA_STAGING_BATCH_SIZE` and `MAX_MEDIA_STAGING_BATCH_BYTES` limits,
+normalizes MIME values, and derives the initial media kind before publishing
+`AppCommand::SetUploadStaging` with `StagedUploadPreparation::Preparing`.
+Preparation and output encoding run through `crate::executor::spawn_blocking`
+without either media lock held. The service captures the account, active
+`ComposerTarget`, staged-id set, and selection generation, then revalidates all
+of them before merging a detached `MediaPreparationRegistry`; stale or failed
+work that has not been merged drops its bytes. Caption and compression metadata
+are copied from the current state when a prepared item is replaced.
+
+The service reuses the existing `MediaPreparationService`/registry and
+`AppCommand` reducers; it adds no reducer action or transition. Its target
+mutation methods use the same Core request-outcome service and exact versioned
+snapshot generation. Transition guards acquire the transition owner before the
+registry and never hold either guard across an await or preparation work.
+The service serializes operations per `ComposerTarget` without holding the
+global preparation registry during encoding. It also owns prepared-preview byte
+lookup and prepared-send admission/correlation. Tauri handlers only deserialize
+inputs, convert opaque composer tokens, call these Core methods, and serialize
+the settled snapshot or preview bytes; they contain no batch, MIME, preparation,
+selection-generation, registry-merge, replacement, or send policy.
+
+### Core-owned composer transport identities (Phase D, issue #755)
+
+`ComposerDraftLeaseRegistry` is the sole authority for renderer generations,
+lease ids, exact account/target scopes, and command/persistence permits. The two
+opaque identities expose canonical nonzero decimal `u64` wire conversion;
+parsing validates shape only and grants no authority. Core rechecks the current
+Ready `SessionKeyId` and exact active main/thread `ComposerTarget` before lease
+or terminal-permit admission. Tauri stores no identity counter or lookup map and
+only parses/formats IPC strings. A fresh process may restart numeric values;
+safety comes from beginning that runtime's live generation and passing its
+registry/scope checks, not cross-process numeric uniqueness.
+
+This ownership move adds no `AppState`, `AppAction`, or reducer transition.
+
+### Rust-owned secure-backup confirmation admission (Phase E, issue #755)
+
+`SecureBackupSetupIntent` carries `InitialSetup` or `Reenable { confirmed }`
+through both the projected reducer action and `SecureBackupSetupRequest`.
+`AppActor` runs gate × intent admission before routing to `AccountActor`, so
+unconfirmed, stale, forged, duplicate, or gate-incompatible intents produce a
+typed private-safe failure and no SDK effect. Only confirmed re-enable at the
+explicitly-disabled gate maps to the SDK re-enable path; initial setup never
+claims confirmation. The SDK's fresh server/local/trust inspection remains the
+authoritative guard and Core never overrides its confirmation-required result.
+React renders the accessible catalog-backed dialog, cancel emits no command,
+and Tauri only transports the typed intent; native hardcoded policy copy is
+absent.
+
 ## Platform Portability
 
 The desktop app is the only shipping target today, but a browser-hosted build
@@ -237,12 +311,13 @@ rewriting the runtime.
    executor (wasm) as well as multi-threaded tokio.
 3. **Platform capabilities live behind ports, owned by `StoreActor` and the
    adapters.** OS credential store (`keyring`), filesystem paths, SQLite
-   store config, and process/OS APIs appear only behind traits with platform
-   backends (today: OS keychain + SQLite; browser later: WebCrypto-derived
-   keys + IndexedDB). `StoreActor` is the only actor allowed
-   platform-conditional code. The fail-closed local-encryption rule still
-   applies on every platform: a weaker browser at-rest story must be an
-   explicit, surfaced property, never a silent fallback.
+   store config, media-save filesystem operations, and process/OS APIs appear
+   only behind traits with platform backends (today: OS keychain + SQLite and
+   the native media-save port; browser later: WebCrypto-derived keys +
+   IndexedDB). `StoreActor` is the only actor allowed platform-conditional
+   code. The fail-closed local-encryption rule still applies on every
+   platform: a weaker browser at-rest story must be an explicit, surfaced
+   property, never a silent fallback.
 4. **Pure crates stay wasm-clean.** `koushi-state` and
    `koushi-search` must compile for `wasm32-unknown-unknown`; a CI
    check target should enforce this once wired. `koushi-core`'s

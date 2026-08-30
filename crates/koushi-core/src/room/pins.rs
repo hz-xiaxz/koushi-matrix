@@ -162,6 +162,7 @@ impl RoomActor {
                 self.emit(CoreEvent::Room(RoomEvent::PinEventCompleted {
                     request_id,
                     room_id: room_id.clone(),
+                    event_id,
                 }));
                 self.project_pinned_events_after_success(request_id, room_id)
                     .await;
@@ -209,6 +210,7 @@ impl RoomActor {
                 self.emit(CoreEvent::Room(RoomEvent::UnpinEventCompleted {
                     request_id,
                     room_id: room_id.clone(),
+                    event_id,
                 }));
                 self.project_pinned_events_after_success(request_id, room_id)
                     .await;
@@ -236,7 +238,10 @@ impl RoomActor {
             return;
         };
         match load_pinned_events_for_room(session, &room_id).await {
-            Ok(pinned) => self.project_pinned_events(room_id, pinned).await,
+            Ok(pinned) => {
+                self.project_pinned_events(room_id, pinned, Some(request_id))
+                    .await
+            }
             Err(kind) => {
                 self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
             }
@@ -249,7 +254,7 @@ impl RoomActor {
         };
         for room_id in room_ids {
             match load_pinned_events_for_room(session, &room_id).await {
-                Ok(pinned) => self.project_pinned_events(room_id, pinned).await,
+                Ok(pinned) => self.project_pinned_events(room_id, pinned, None).await,
                 Err(_kind) => {
                     // A background sync refresh has no request to fail. Keep
                     // the previous projection and wait for the next state
@@ -265,20 +270,29 @@ impl RoomActor {
             return;
         };
         match load_pinned_events_for_room(session, &room_id).await {
-            Ok(pinned) => self.project_pinned_events(room_id, pinned).await,
+            Ok(pinned) => {
+                self.project_pinned_events(room_id, pinned, Some(request_id))
+                    .await
+            }
             Err(kind) => {
                 self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
             }
         }
     }
 
-    async fn project_pinned_events(&self, room_id: String, pinned: Vec<PinnedEvent>) {
+    async fn project_pinned_events(
+        &self,
+        room_id: String,
+        pinned: Vec<PinnedEvent>,
+        request_id: Option<RequestId>,
+    ) {
         self.reduce_reliable(vec![AppAction::RoomPinnedEventsUpdated {
             room_id: room_id.clone(),
             pinned: pinned.clone(),
         }])
         .await;
         self.emit(CoreEvent::Room(RoomEvent::PinnedEventsUpdated {
+            request_id,
             room_id,
             pinned,
         }));

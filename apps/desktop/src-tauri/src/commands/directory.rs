@@ -1,7 +1,5 @@
-use super::navigation::{
-    SELECT_ROOM_EVENT_TIMEOUT, SelectEventSource, invoke_error_from_select_room_error,
-};
-use super::room::{ROOM_OPERATION_EVENT_TIMEOUT, snapshot_contains_room};
+use super::navigation::{SELECT_ROOM_EVENT_TIMEOUT, invoke_error_from_select_room_error};
+use super::room::ROOM_OPERATION_EVENT_TIMEOUT;
 use super::*;
 #[tauri::command]
 pub async fn query_directory(
@@ -13,6 +11,8 @@ pub async fn query_directory(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_query_directory_command(
@@ -24,22 +24,26 @@ pub async fn query_directory(
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    super::room::wait_for_room_operation(
-        &mut event_conn,
-        request_id,
-        ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, expected_request_id| {
-            matches!(
-                event,
-                RoomEvent::DirectoryQueryCompleted { request_id, .. } if *request_id == expected_request_id
-            )
-        },
-        "directory query did not complete",
-        "directory query failed",
-    )
-    .await?;
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::DirectoryQuery {
+                request_id,
+                account_key,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("directory query", error))?;
+    let RequestOutcome::Directory { snapshot, .. } = outcome else {
+        return Err("directory query returned an invalid outcome".to_owned());
+    };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -50,6 +54,8 @@ pub async fn join_directory_room(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     let Some(command) =
         build_join_directory_room_command(request_id, room_id_or_alias, via_servers)
@@ -62,8 +68,26 @@ pub async fn join_directory_room(
         .command(command)
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    let joined_room_id =
-        wait_for_room_joined(&mut event_conn, request_id, ROOM_OPERATION_EVENT_TIMEOUT).await?;
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::RoomJoined {
+                request_id,
+                account_key,
+                room_id: String::new(),
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("room join", error))?;
+    let RequestOutcome::RoomJoined {
+        room_id: joined_room_id,
+        ..
+    } = outcome
+    else {
+        return Err("room join returned an invalid outcome".to_owned());
+    };
     let selected_snapshot = event_conn
         .select_room_and_wait(joined_room_id.clone(), SELECT_ROOM_EVENT_TIMEOUT)
         .await
@@ -83,6 +107,8 @@ pub async fn preview_join_target(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     let Some(command) =
         build_preview_join_target_command(request_id, room_id_or_alias, via_servers)
@@ -95,22 +121,26 @@ pub async fn preview_join_target(
         .command(command)
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    super::room::wait_for_room_operation(
-        &mut event_conn,
-        request_id,
-        ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, expected_request_id| {
-            matches!(
-                event,
-                RoomEvent::DirectoryPreviewLoaded { request_id, .. } if *request_id == expected_request_id
-            )
-        },
-        "directory preview did not complete",
-        "directory preview failed",
-    )
-    .await?;
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::DirectoryPreview {
+                request_id,
+                account_key,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("directory preview", error))?;
+    let RequestOutcome::Directory { snapshot, .. } = outcome else {
+        return Err("directory preview returned an invalid outcome".to_owned());
+    };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -126,127 +156,6 @@ pub async fn dismiss_directory_preview(
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     current_snapshot(state.inner()).await
-}
-
-pub(super) async fn wait_for_room_created(
-    event_conn: &mut CoreConnection,
-    create_request_id: RequestId,
-    timeout: std::time::Duration,
-) -> Result<(), String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "room creation did not complete".to_owned())?;
-        match event {
-            Ok(CoreEvent::Room(RoomEvent::RoomCreated { request_id, .. }))
-                if request_id == create_request_id =>
-            {
-                return Ok(());
-            }
-            Ok(CoreEvent::OperationFailed {
-                request_id,
-                failure,
-            }) if request_id == create_request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "room creation failed",
-                    failure,
-                ));
-            }
-            Ok(_) => {}
-            Err(_) => continue,
-        }
-    }
-}
-
-pub(super) async fn wait_for_space_created(
-    event_conn: &mut CoreConnection,
-    create_request_id: RequestId,
-    timeout: std::time::Duration,
-) -> Result<(), String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "space creation did not complete".to_owned())?;
-        match event {
-            Ok(CoreEvent::Room(RoomEvent::SpaceCreated { request_id, .. }))
-                if request_id == create_request_id =>
-            {
-                return Ok(());
-            }
-            Ok(CoreEvent::OperationFailed {
-                request_id,
-                failure,
-            }) if request_id == create_request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "space creation failed",
-                    failure,
-                ));
-            }
-            Ok(_) => {}
-            Err(_) => continue,
-        }
-    }
-}
-
-pub(super) async fn wait_for_direct_message_started<S: SelectEventSource + ?Sized>(
-    event_conn: &mut S,
-    operation_request_id: RequestId,
-    timeout: std::time::Duration,
-) -> Result<String, String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "direct message start did not complete".to_owned())?;
-        match event {
-            Ok(CoreEvent::Room(koushi_core::RoomEvent::DirectMessageStarted {
-                request_id,
-                room_id,
-            })) if request_id == operation_request_id => {
-                return Ok(room_id);
-            }
-            Ok(CoreEvent::OperationFailed {
-                request_id,
-                failure,
-            }) if request_id == operation_request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "direct message start failed",
-                    failure,
-                ));
-            }
-            Ok(_) => {}
-            Err(_) => continue,
-        }
-    }
-}
-
-/// Wait until the room-list projection carries `room_id`. A freshly created
-/// DM is announced by `DirectMessageStarted` before the asynchronous
-/// room-list refresh lands, so selecting it immediately would race the
-/// known-room state (#368).
-pub(super) async fn wait_for_room_in_state<S: SelectEventSource + ?Sized>(
-    event_conn: &mut S,
-    room_id: &str,
-    timeout: std::time::Duration,
-) -> Result<(), String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        if snapshot_contains_room(&event_conn.snapshot(), room_id) {
-            return Ok(());
-        }
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "direct message room did not reach the room list".to_owned())?;
-        match event {
-            Ok(_) => {}
-            Err(_) if snapshot_contains_room(&event_conn.snapshot(), room_id) => {
-                return Ok(());
-            }
-            Err(_) => continue,
-        }
-    }
 }
 
 /// Preview and join name the same target, so they normalize it the same way.
@@ -461,35 +370,6 @@ pub(super) fn build_invite_targets_command(
     })
 }
 
-pub(super) async fn wait_for_room_joined(
-    event_conn: &mut CoreConnection,
-    operation_request_id: RequestId,
-    timeout: std::time::Duration,
-) -> Result<String, String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "room join did not complete".to_owned())?;
-        match event {
-            Ok(CoreEvent::Room(koushi_core::RoomEvent::RoomJoined {
-                request_id,
-                room_id,
-            })) if request_id == operation_request_id => {
-                return Ok(room_id);
-            }
-            Ok(CoreEvent::OperationFailed {
-                request_id,
-                failure,
-            }) if request_id == operation_request_id => {
-                return Err(invoke_error_from_core_failure("room join failed", failure));
-            }
-            Ok(_) => {}
-            Err(_) => continue,
-        }
-    }
-}
-
 pub(super) fn build_query_directory_command(
     request_id: koushi_core::RequestId,
     term: Option<String>,
@@ -538,134 +418,4 @@ pub(super) fn build_join_directory_room_command(
         room_id_or_alias,
         via_servers,
     }))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::commands::contracts::{ScriptedSelectSource, fake_request_id};
-    use koushi_state::{AppState, RoomSummary, RoomTags};
-    use std::collections::VecDeque;
-
-    fn dm_room_summary(room_id: &str) -> RoomSummary {
-        RoomSummary {
-            room_id: room_id.to_owned(),
-            display_name: "DM".to_owned(),
-            display_label: "DM".to_owned(),
-            original_display_label: "DM".to_owned(),
-            avatar: None,
-            is_dm: true,
-            dm_user_ids: vec!["@dm-target:example.invalid".to_owned()],
-            tags: RoomTags::default(),
-            unread_count: 0,
-            notification_count: 0,
-            highlight_count: 0,
-            marked_unread: false,
-            recency_stamp: None,
-            conversation_activity: None,
-            latest_event: None,
-            parent_space_ids: vec![],
-            dm_space_ids: vec![],
-            is_encrypted: false,
-            joined_members: 2,
-        }
-    }
-
-    struct SequencedSelectSource {
-        snapshots: std::sync::Mutex<VecDeque<AppState>>,
-        events: VecDeque<Result<CoreEvent, koushi_core::EventStreamLag>>,
-    }
-
-    impl SelectEventSource for SequencedSelectSource {
-        fn snapshot(&self) -> AppState {
-            let mut snapshots = self.snapshots.lock().expect("snapshots lock");
-            if snapshots.len() > 1 {
-                snapshots.pop_front().expect("non-empty snapshot queue")
-            } else {
-                snapshots
-                    .front()
-                    .cloned()
-                    .expect("at least one scripted snapshot")
-            }
-        }
-
-        fn recv_event(
-            &mut self,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<Output = Result<CoreEvent, koushi_core::EventStreamLag>>
-                    + Send
-                    + '_,
-            >,
-        > {
-            Box::pin(std::future::ready(self.events.pop_front().unwrap_or_else(
-                || Err(koushi_core::EventStreamLag { skipped: 0 }),
-            )))
-        }
-    }
-
-    #[tokio::test]
-    async fn direct_message_start_returns_the_started_room_id() {
-        let request_id = fake_request_id(91);
-        let mut source = ScriptedSelectSource {
-            snapshot: AppState::default(),
-            events: VecDeque::from([
-                Ok(CoreEvent::Room(koushi_core::RoomEvent::RoomJoined {
-                    request_id: fake_request_id(90),
-                    room_id: "!other:example.invalid".to_owned(),
-                })),
-                Ok(CoreEvent::Room(
-                    koushi_core::RoomEvent::DirectMessageStarted {
-                        request_id,
-                        room_id: "!dm:example.invalid".to_owned(),
-                    },
-                )),
-            ]),
-        };
-
-        let room_id = super::wait_for_direct_message_started(
-            &mut source,
-            request_id,
-            std::time::Duration::from_millis(50),
-        )
-        .await
-        .expect("started event should resolve the room id");
-        assert_eq!(room_id, "!dm:example.invalid");
-    }
-
-    #[tokio::test]
-    async fn direct_message_start_surfaces_the_correlated_failure() {
-        let request_id = fake_request_id(92);
-        let mut source = ScriptedSelectSource {
-            snapshot: AppState::default(),
-            events: VecDeque::from([Ok(CoreEvent::OperationFailed {
-                request_id,
-                failure: koushi_core::CoreFailure::SessionRequired,
-            })]),
-        };
-
-        let error = super::wait_for_direct_message_started(
-            &mut source,
-            request_id,
-            std::time::Duration::from_millis(50),
-        )
-        .await
-        .expect_err("correlated failure must fail the wait");
-        assert!(error.contains("direct message start failed"));
-    }
-
-    #[tokio::test]
-    async fn direct_message_room_wait_settles_after_the_room_projection_arrives() {
-        let room_id = "!dm:example.invalid";
-        let mut with_room = AppState::default();
-        with_room.rooms = vec![dm_room_summary(room_id)];
-        let mut source = SequencedSelectSource {
-            snapshots: std::sync::Mutex::new(VecDeque::from([AppState::default(), with_room])),
-            events: VecDeque::from([Ok(CoreEvent::StateChanged(AppState::default()))]),
-        };
-
-        super::wait_for_room_in_state(&mut source, room_id, std::time::Duration::from_millis(50))
-            .await
-            .expect("the wait settles once the room-list projection has the room");
-    }
 }

@@ -5,11 +5,11 @@ mod core_event_forwarder;
 mod desktop_menu;
 mod dto;
 pub mod keyring_backend;
+mod media_save;
 mod viewport_sync;
 mod window_state;
 
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -36,7 +36,6 @@ use crate::window_state::{
 // koushi-core: the production runtime host. All session, credential,
 // and Matrix operations go through CoreCommand/CoreEvent — the adapter never
 // touches the credential store or the SDK directly.
-use koushi_core::composer_draft_lifecycle::{ComposerDraftLeaseId, ComposerRendererGeneration};
 use koushi_core::renderable_thumbnail::{
     cleanup_legacy_plaintext_thumbnail_dirs, lookup_renderable_thumbnail,
 };
@@ -77,75 +76,11 @@ pub struct CoreRuntimeState {
     /// Command-dispatch connection. Uses `tokio::sync::Mutex` so the guard can
     /// be held across `.await` points in async Tauri command handlers.
     pub(crate) connection: TokioMutex<CoreConnection>,
-    pub(crate) composer_draft_transport: Mutex<ComposerDraftTransportIdentities>,
     /// Tauri-side timeline item count (updated by event loop; QA title only).
     pub(crate) timeline_items_count: Arc<AtomicUsize>,
     _forwarder_task: Option<CoreEventForwarderTask>,
     pub(crate) native_window_focus_generation: AtomicU64,
     pub(crate) viewport_sync_generation: viewport_sync::ViewportSyncGeneration,
-}
-
-#[derive(Default)]
-pub(crate) struct ComposerDraftTransportIdentities {
-    next_generation: u64,
-    next_lease_id: u64,
-    generations: HashMap<String, ComposerRendererGeneration>,
-    leases: HashMap<(String, String), ComposerDraftLeaseId>,
-}
-
-impl ComposerDraftTransportIdentities {
-    pub(crate) fn install_generation(
-        &mut self,
-        generation: ComposerRendererGeneration,
-    ) -> Result<String, String> {
-        self.next_generation = self
-            .next_generation
-            .checked_add(1)
-            .ok_or_else(|| "composer renderer generation exhausted".to_owned())?;
-        let wire = self.next_generation.to_string();
-        self.generations.clear();
-        self.leases.clear();
-        self.generations.insert(wire.clone(), generation);
-        Ok(wire)
-    }
-
-    pub(crate) fn generation(&self, wire: &str) -> Result<ComposerRendererGeneration, String> {
-        self.generations
-            .get(wire)
-            .copied()
-            .ok_or_else(|| "composer renderer generation retired".to_owned())
-    }
-
-    pub(crate) fn install_lease(
-        &mut self,
-        renderer_generation: &str,
-        lease_id: ComposerDraftLeaseId,
-    ) -> Result<String, String> {
-        self.next_lease_id = self
-            .next_lease_id
-            .checked_add(1)
-            .ok_or_else(|| "composer draft lease exhausted".to_owned())?;
-        let wire = self.next_lease_id.to_string();
-        self.leases
-            .insert((renderer_generation.to_owned(), wire.clone()), lease_id);
-        Ok(wire)
-    }
-
-    pub(crate) fn lease(
-        &self,
-        renderer_generation: &str,
-        lease_id: &str,
-    ) -> Result<ComposerDraftLeaseId, String> {
-        self.leases
-            .get(&(renderer_generation.to_owned(), lease_id.to_owned()))
-            .copied()
-            .ok_or_else(|| "composer draft lease mismatch".to_owned())
-    }
-
-    pub(crate) fn remove_lease(&mut self, renderer_generation: &str, lease_id: &str) {
-        self.leases
-            .remove(&(renderer_generation.to_owned(), lease_id.to_owned()));
-    }
 }
 
 fn restore_session_enabled_from_env_value(value: Option<&str>) -> bool {
@@ -578,7 +513,6 @@ pub fn run() {
             let core_state = CoreRuntimeState {
                 runtime,
                 connection: TokioMutex::new(command_conn),
-                composer_draft_transport: Mutex::new(ComposerDraftTransportIdentities::default()),
                 timeline_items_count,
                 _forwarder_task: Some(forwarder_task),
                 native_window_focus_generation: AtomicU64::new(0),
@@ -774,7 +708,6 @@ pub fn run() {
             commands::e2ee::confirm_session_bootstrap_saved,
             commands::e2ee::enable_key_backup,
             commands::e2ee::bootstrap_secure_backup,
-            commands::e2ee::reenable_secure_backup,
             commands::e2ee::recover_secure_backup,
             commands::e2ee::retry_secure_backup_inspection,
             commands::e2ee::change_secure_backup_passphrase,
@@ -809,7 +742,6 @@ pub fn run() {
             commands::timeline::paginate_thread_timeline_backwards,
             commands::timeline::send_text,
             commands::timeline::schedule_send,
-            commands::timeline::stage_uploads,
             commands::timeline::stage_upload_bytes,
             commands::timeline::select_staged_upload_output,
             commands::timeline::retry_staged_upload_preparation,
@@ -823,7 +755,6 @@ pub fn run() {
             commands::timeline::reschedule_scheduled_send,
             commands::timeline::retry_send,
             commands::timeline::cancel_send,
-            commands::timeline::upload_media,
             commands::timeline::download_media,
             commands::timeline::default_media_save_path,
             commands::timeline::save_downloaded_media,

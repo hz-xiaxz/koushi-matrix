@@ -1051,7 +1051,7 @@ fn descriptor_from_image_variant(
     }
 }
 
-fn normalized_mime(mime_type: &str) -> String {
+pub(crate) fn normalized_mime(mime_type: &str) -> String {
     let mime_type = mime_type.trim();
     if mime_type.is_empty() {
         "application/octet-stream".to_owned()

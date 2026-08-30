@@ -485,11 +485,12 @@ user/device ids.
 
 For media/file Phase B, the harness uses a plain hidden `<input type="file">`
 and Playwright `setInputFiles()`; do not open a native file dialog in headless
-tests. The GUI proof asserts file selection stages the attachment without
-invoking `upload_media`, caption edits go through the Rust-owned Upload
-attachments staging dialog, one Send invokes `upload_media` with the staged
-caption, no separate `send_text` is dispatched, and `download_media` uses the
-typed command shape. It also covers paste/drop staging and the Rust-owned room
+tests. The GUI proof asserts file selection invokes `stage_upload_bytes`, caption
+edits go through the Rust-owned Upload attachments staging dialog, and one Send
+invokes `send_prepared_uploads` with the staged caption and composer admission
+tokens. There is no direct renderer upload command and no separate `send_text`
+dispatch; `download_media` keeps its typed command shape. It also covers
+paste/drop staging and the Rust-owned room
 media gallery/viewer projection. It then injects Rust-shaped `TimelineEvent` payloads to
 render media metadata, caption body, and progress. Local echo rows use the
 canonical transaction DOM id prefix from `timelineItemDomId`, e.g.

@@ -6,105 +6,12 @@ use super::directory::{
     build_open_invite_workflow_command, build_remove_invite_target_command,
     build_search_invite_targets_command, build_select_invite_target_command,
     build_set_invite_scope_command, build_set_space_child_command,
-    build_start_direct_message_command, wait_for_direct_message_started, wait_for_room_created,
-    wait_for_room_in_state, wait_for_room_joined, wait_for_space_created,
+    build_start_direct_message_command,
 };
 use super::navigation::SELECT_ROOM_EVENT_TIMEOUT;
 use super::*;
 
 const INVITE_WORKFLOW_CONVERGENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
-const INVITE_WORKFLOW_CONVERGENCE_ERROR: &str = "invite workflow convergence timed out";
-
-enum InviteWorkflowTerminal<'a> {
-    Open { room_id: &'a str },
-    Search { room_id: &'a str, query: &'a str },
-    Closed,
-}
-
-fn invite_workflow_snapshot_matches(
-    snapshot: &koushi_state::AppState,
-    terminal: &InviteWorkflowTerminal<'_>,
-) -> bool {
-    match terminal {
-        InviteWorkflowTerminal::Open { room_id } => {
-            snapshot.invite_workflow.query.room_id.as_deref() == Some(*room_id)
-        }
-        InviteWorkflowTerminal::Search { room_id, query } => {
-            snapshot.invite_workflow.query.room_id.as_deref() == Some(*room_id)
-                && snapshot.invite_workflow.query.query == *query
-        }
-        InviteWorkflowTerminal::Closed => {
-            snapshot.invite_workflow == koushi_state::InviteWorkflowState::default()
-        }
-    }
-}
-
-#[derive(Debug)]
-struct InviteWorkflowVersionedSnapshot {
-    state: koushi_state::AppState,
-    generation: u64,
-}
-
-trait InviteWorkflowSnapshotSource {
-    fn versioned_snapshot(&self) -> InviteWorkflowVersionedSnapshot;
-    fn recv_event(
-        &mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<(), EventStreamLag>> + Send + '_>>;
-}
-
-impl InviteWorkflowSnapshotSource for CoreConnection {
-    fn versioned_snapshot(&self) -> InviteWorkflowVersionedSnapshot {
-        let snapshot = CoreConnection::versioned_snapshot(self);
-        InviteWorkflowVersionedSnapshot {
-            state: snapshot.state,
-            generation: snapshot.generation,
-        }
-    }
-
-    fn recv_event(
-        &mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<(), EventStreamLag>> + Send + '_>> {
-        Box::pin(async move { CoreConnection::recv_event(self).await.map(|_| ()) })
-    }
-}
-
-async fn wait_for_invite_workflow_snapshot_from<S: InviteWorkflowSnapshotSource>(
-    source: &mut S,
-    terminal: InviteWorkflowTerminal<'_>,
-    timeout: std::time::Duration,
-) -> Result<InviteWorkflowVersionedSnapshot, String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let snapshot = source.versioned_snapshot();
-        if invite_workflow_snapshot_matches(&snapshot.state, &terminal) {
-            return Ok(snapshot);
-        }
-
-        match tokio::time::timeout_at(deadline, source.recv_event()).await {
-            Err(_) => return Err(INVITE_WORKFLOW_CONVERGENCE_ERROR.to_owned()),
-            Ok(Err(lag)) if lag.skipped == 0 => {
-                return Err(INVITE_WORKFLOW_CONVERGENCE_ERROR.to_owned());
-            }
-            Ok(Ok(())) | Ok(Err(_)) => {}
-        }
-    }
-}
-
-async fn wait_for_invite_workflow_snapshot(
-    event_conn: &mut CoreConnection,
-    terminal: InviteWorkflowTerminal<'_>,
-) -> Result<FrontendDesktopSnapshot, String> {
-    let snapshot = wait_for_invite_workflow_snapshot_from(
-        event_conn,
-        terminal,
-        INVITE_WORKFLOW_CONVERGENCE_TIMEOUT,
-    )
-    .await?;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
-}
 
 #[tauri::command]
 pub async fn open_invite_workflow(
@@ -112,6 +19,8 @@ pub async fn open_invite_workflow(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_open_invite_workflow_command(
@@ -120,11 +29,28 @@ pub async fn open_invite_workflow(
         ))
         .await
         .map_err(|error| format!("command submit failed: {error}"))?;
-    wait_for_invite_workflow_snapshot(
-        &mut event_conn,
-        InviteWorkflowTerminal::Open { room_id: &room_id },
-    )
-    .await
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::InviteWorkflow {
+                request_id,
+                account_key,
+                room_id,
+                query: String::new(),
+                closed: false,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + INVITE_WORKFLOW_CONVERGENCE_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("invite workflow open", error))?;
+    let RequestOutcome::InviteWorkflow { snapshot, .. } = outcome else {
+        return Err("invite workflow open returned an invalid outcome".to_owned());
+    };
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -132,12 +58,35 @@ pub async fn close_invite_workflow(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_close_invite_workflow_command(request_id))
         .await
         .map_err(|error| format!("command submit failed: {error}"))?;
-    wait_for_invite_workflow_snapshot(&mut event_conn, InviteWorkflowTerminal::Closed).await
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::InviteWorkflow {
+                request_id,
+                account_key,
+                room_id: String::new(),
+                query: String::new(),
+                closed: true,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + INVITE_WORKFLOW_CONVERGENCE_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("invite workflow close", error))?;
+    let RequestOutcome::InviteWorkflow { snapshot, .. } = outcome else {
+        return Err("invite workflow close returned an invalid outcome".to_owned());
+    };
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -147,6 +96,8 @@ pub async fn search_invite_targets(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_search_invite_targets_command(
@@ -156,14 +107,28 @@ pub async fn search_invite_targets(
         ))
         .await
         .map_err(|error| format!("command submit failed: {error}"))?;
-    wait_for_invite_workflow_snapshot(
-        &mut event_conn,
-        InviteWorkflowTerminal::Search {
-            room_id: &room_id,
-            query: &query,
-        },
-    )
-    .await
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::InviteWorkflow {
+                request_id,
+                account_key,
+                room_id,
+                query,
+                closed: false,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + INVITE_WORKFLOW_CONVERGENCE_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("invite target search", error))?;
+    let RequestOutcome::InviteWorkflow { snapshot, .. } = outcome else {
+        return Err("invite target search returned an invalid outcome".to_owned());
+    };
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -385,6 +350,8 @@ pub async fn refresh_pinned_events(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_refresh_pinned_events_command(
@@ -393,25 +360,22 @@ pub async fn refresh_pinned_events(
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
+    let snapshot = wait_for_room_operation(
         &mut event_conn,
         request_id,
+        baseline.generation,
+        account_key,
+        room_id.clone(),
+        RoomOperationKind::PinnedEventsRefreshed,
         ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, _| {
-            matches!(
-                event,
-                RoomEvent::PinnedEventsUpdated {
-                    room_id: updated_room_id,
-                    ..
-                } if updated_room_id == &room_id
-            )
-        },
-        "pinned messages refresh did not complete",
-        "pinned messages refresh failed",
+        "pinned messages refresh",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -421,27 +385,32 @@ pub async fn load_room_settings(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
-        .command(build_load_room_settings_command(request_id, room_id))
+        .command(build_load_room_settings_command(
+            request_id,
+            room_id.clone(),
+        ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
+    let snapshot = wait_for_room_operation(
         &mut event_conn,
         request_id,
+        baseline.generation,
+        account_key,
+        room_id,
+        RoomOperationKind::RoomSettingsLoaded,
         ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, expected_request_id| {
-            matches!(
-                event,
-                RoomEvent::RoomSettingsLoaded { request_id, .. } if *request_id == expected_request_id
-            )
-        },
-        "room settings load did not complete",
-        "room settings load failed",
+        "room settings load",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -452,26 +421,33 @@ pub async fn load_space_members(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_load_space_members_command(
-            request_id, space_id, generation,
+            request_id,
+            space_id.clone(),
+            generation,
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
+    let snapshot = wait_for_room_operation(
         &mut event_conn,
         request_id,
+        baseline.generation,
+        account_key,
+        space_id,
+        RoomOperationKind::SpaceMembersLoaded { generation },
         ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, expected_request_id| {
-            space_members_loaded_event_matches(event, expected_request_id, generation)
-        },
-        "Space member load did not complete",
-        "Space member load failed",
+        "Space member load",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -518,34 +494,30 @@ pub async fn reshare_room_key(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<RoomKeyReshareOutcome, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
-        .command(build_reshare_room_key_command(request_id, room_id))
+        .command(build_reshare_room_key_command(request_id, room_id.clone()))
         .await
-        .map_err(|e| format!("command submit failed: {e}"))?;
-    let deadline = tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT;
-    loop {
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "room key reshare did not complete".to_owned())?;
-        match event {
-            Ok(CoreEvent::Room(RoomEvent::RoomKeyReshared {
-                request_id: event_request_id,
-                outcome,
-                ..
-            })) if event_request_id == request_id => return Ok(outcome),
-            Ok(CoreEvent::OperationFailed {
-                request_id: event_request_id,
-                failure,
-            }) if event_request_id == request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "room key reshare failed",
-                    failure,
-                ));
-            }
-            Ok(_) | Err(_) => {}
-        }
-    }
+        .map_err(|error| format!("command submit failed: {error}"))?;
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::RoomKeyReshare {
+                request_id,
+                account_key,
+                room_id,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("room key reshare", error))?;
+    let RequestOutcome::RoomKeyReshare { outcome, .. } = outcome else {
+        return Err("room key reshare returned an invalid outcome".to_owned());
+    };
+    Ok(outcome)
 }
 
 /// Temporary dangerous encryption-debug control (issue #538): rotate the
@@ -556,6 +528,8 @@ pub async fn force_new_outbound_session(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<EncryptionDebugOperationOutcome, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_force_new_outbound_session_command(
@@ -563,30 +537,25 @@ pub async fn force_new_outbound_session(
             room_id.clone(),
         ))
         .await
-        .map_err(|e| format!("command submit failed: {e}"))?;
-    let deadline = tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT;
-    loop {
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "force new outbound session did not complete".to_owned())?;
-        match event {
-            Ok(CoreEvent::Room(RoomEvent::OutboundSessionForced {
-                request_id: event_request_id,
-                outcome,
-                ..
-            })) if event_request_id == request_id => return Ok(outcome),
-            Ok(CoreEvent::OperationFailed {
-                request_id: event_request_id,
-                failure,
-            }) if event_request_id == request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "force new outbound session failed",
-                    failure,
-                ));
-            }
-            Ok(_) | Err(_) => {}
-        }
-    }
+        .map_err(|error| format!("command submit failed: {error}"))?;
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::EncryptionDebug {
+                request_id,
+                account_key,
+                room_id,
+                kind: EncryptionDebugOperationKind::ForceNewOutboundSession,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("force new outbound session", error))?;
+    let RequestOutcome::EncryptionDebug { outcome, .. } = outcome else {
+        return Err("force new outbound session returned an invalid outcome".to_owned());
+    };
+    Ok(outcome)
 }
 
 /// Temporary dangerous encryption-debug control (issue #538): share the
@@ -598,6 +567,8 @@ pub async fn share_index0_room_key(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<EncryptionDebugOperationOutcome, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_share_index0_room_key_command(
@@ -605,30 +576,25 @@ pub async fn share_index0_room_key(
             room_id.clone(),
         ))
         .await
-        .map_err(|e| format!("command submit failed: {e}"))?;
-    let deadline = tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT;
-    loop {
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "index-0 room key share did not complete".to_owned())?;
-        match event {
-            Ok(CoreEvent::Room(RoomEvent::Index0RoomKeyShared {
-                request_id: event_request_id,
-                outcome,
-                ..
-            })) if event_request_id == request_id => return Ok(outcome),
-            Ok(CoreEvent::OperationFailed {
-                request_id: event_request_id,
-                failure,
-            }) if event_request_id == request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "index-0 room key share failed",
-                    failure,
-                ));
-            }
-            Ok(_) | Err(_) => {}
-        }
-    }
+        .map_err(|error| format!("command submit failed: {error}"))?;
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::EncryptionDebug {
+                request_id,
+                account_key,
+                room_id,
+                kind: EncryptionDebugOperationKind::ShareIndex0Key,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("index-0 room key share", error))?;
+    let RequestOutcome::EncryptionDebug { outcome, .. } = outcome else {
+        return Err("index-0 room key share returned an invalid outcome".to_owned());
+    };
+    Ok(outcome)
 }
 
 /// Temporary dangerous encryption-debug control (issue #541): resend the
@@ -640,6 +606,8 @@ pub async fn resend_index0_room_key(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<EncryptionDebugOperationOutcome, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_resend_index0_room_key_command(
@@ -647,30 +615,25 @@ pub async fn resend_index0_room_key(
             room_id.clone(),
         ))
         .await
-        .map_err(|e| format!("command submit failed: {e}"))?;
-    let deadline = tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT;
-    loop {
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "index-0 room key resend did not complete".to_owned())?;
-        match event {
-            Ok(CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
-                request_id: event_request_id,
-                outcome,
-                ..
-            })) if event_request_id == request_id => return Ok(outcome),
-            Ok(CoreEvent::OperationFailed {
-                request_id: event_request_id,
-                failure,
-            }) if event_request_id == request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "index-0 room key resend failed",
-                    failure,
-                ));
-            }
-            Ok(_) | Err(_) => {}
-        }
-    }
+        .map_err(|error| format!("command submit failed: {error}"))?;
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::EncryptionDebug {
+                request_id,
+                account_key,
+                room_id,
+                kind: EncryptionDebugOperationKind::ResendIndex0Key,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("index-0 room key resend", error))?;
+    let RequestOutcome::EncryptionDebug { outcome, .. } = outcome else {
+        return Err("index-0 room key resend returned an invalid outcome".to_owned());
+    };
+    Ok(outcome)
 }
 
 #[tauri::command]
@@ -681,29 +644,33 @@ pub async fn update_room_setting(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_update_room_setting_command(
-            request_id, room_id, change,
+            request_id,
+            room_id.clone(),
+            change,
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
+    let snapshot = wait_for_room_operation(
         &mut event_conn,
         request_id,
+        baseline.generation,
+        account_key,
+        room_id,
+        RoomOperationKind::RoomSettingUpdated,
         ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, expected_request_id| {
-            matches!(
-                event,
-                RoomEvent::RoomSettingUpdated { request_id, .. } if *request_id == expected_request_id
-            )
-        },
-        "room setting update did not complete",
-        "room setting update failed",
+        "room setting update",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -716,33 +683,38 @@ pub async fn moderate_room_member(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_moderate_room_member_command(
             request_id,
-            room_id,
-            target_user_id,
+            room_id.clone(),
+            target_user_id.clone(),
             action,
             optional_non_blank(reason),
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
+    let snapshot = wait_for_room_operation(
         &mut event_conn,
         request_id,
-        ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, expected_request_id| {
-            matches!(
-                event,
-                RoomEvent::RoomMemberModerated { request_id, .. } if *request_id == expected_request_id
-            )
+        baseline.generation,
+        account_key,
+        room_id,
+        RoomOperationKind::MemberModerated {
+            target_user_id,
+            action,
         },
-        "room member moderation did not complete",
-        "room member moderation failed",
+        ROOM_OPERATION_EVENT_TIMEOUT,
+        "room member moderation",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -754,32 +726,34 @@ pub async fn update_room_member_role(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_update_room_member_role_command(
             request_id,
-            room_id,
-            target_user_id,
+            room_id.clone(),
+            target_user_id.clone(),
             power_level,
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
+    let snapshot = wait_for_room_operation(
         &mut event_conn,
         request_id,
+        baseline.generation,
+        account_key,
+        room_id,
+        RoomOperationKind::MemberRoleUpdated { target_user_id },
         ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, expected_request_id| {
-            matches!(
-                event,
-                RoomEvent::RoomMemberRoleUpdated { request_id, .. } if *request_id == expected_request_id
-            )
-        },
-        "room member role update did not complete",
-        "room member role update failed",
+        "room member role update",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -789,14 +763,33 @@ pub async fn create_room(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_create_room_command(request_id, options))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_created(&mut event_conn, request_id, CREATE_EVENT_TIMEOUT).await?;
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::RoomCreated {
+                request_id,
+                account_key,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + CREATE_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("room creation", error))?;
+    let RequestOutcome::RoomCreated { snapshot, .. } = outcome else {
+        return Err("room creation returned an invalid outcome".to_owned());
+    };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -806,14 +799,33 @@ pub async fn create_space(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_create_space_command(request_id, name))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_space_created(&mut event_conn, request_id, CREATE_EVENT_TIMEOUT).await?;
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::SpaceCreated {
+                request_id,
+                account_key,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + CREATE_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("space creation", error))?;
+    let RequestOutcome::SpaceCreated { snapshot, .. } = outcome else {
+        return Err("space creation returned an invalid outcome".to_owned());
+    };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -841,8 +853,10 @@ pub async fn join_room(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
-    let Some(command) = build_join_room_command(request_id, room_id) else {
+    let Some(command) = build_join_room_command(request_id, room_id.clone()) else {
         update_qa_window_title_from_state(&app, state.inner()).await;
         return current_snapshot(state.inner()).await;
     };
@@ -851,9 +865,27 @@ pub async fn join_room(
         .command(command)
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_joined(&mut event_conn, request_id, ROOM_OPERATION_EVENT_TIMEOUT).await?;
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::RoomJoined {
+                request_id,
+                account_key,
+                room_id,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("room join", error))?;
+    let RequestOutcome::RoomJoined { snapshot, .. } = outcome else {
+        return Err("room join returned an invalid outcome".to_owned());
+    };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -863,27 +895,29 @@ pub async fn accept_invite(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
-        .command(build_accept_invite_command(request_id, room_id))
+        .command(build_accept_invite_command(request_id, room_id.clone()))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
+    let snapshot = wait_for_room_operation(
         &mut event_conn,
         request_id,
+        baseline.generation,
+        account_key,
+        room_id,
+        RoomOperationKind::InviteAccepted,
         ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, expected_request_id| {
-            matches!(
-                event,
-                RoomEvent::InviteAccepted { request_id, .. } if *request_id == expected_request_id
-            )
-        },
-        "invite acceptance did not complete",
-        "invite acceptance failed",
+        "invite acceptance",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -893,27 +927,29 @@ pub async fn decline_invite(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
-        .command(build_decline_invite_command(request_id, room_id))
+        .command(build_decline_invite_command(request_id, room_id.clone()))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
+    let snapshot = wait_for_room_operation(
         &mut event_conn,
         request_id,
+        baseline.generation,
+        account_key,
+        room_id,
+        RoomOperationKind::InviteDeclined,
         ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, expected_request_id| {
-            matches!(
-                event,
-                RoomEvent::InviteDeclined { request_id, .. } if *request_id == expected_request_id
-            )
-        },
-        "invite decline did not complete",
-        "invite decline failed",
+        "invite decline",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -923,19 +959,30 @@ pub async fn start_direct_message(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_start_direct_message_command(request_id, user_id))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    // Get-or-create resolves the exact conversation; keep that identity,
-    // wait for it to reach the Rust room-list projection, and open it before
-    // returning so "Send message" lands in the DM instead of staying on the
-    // previous room (#368).
-    let room_id =
-        wait_for_direct_message_started(&mut event_conn, request_id, ROOM_OPERATION_EVENT_TIMEOUT)
-            .await?;
-    wait_for_room_in_state(&mut event_conn, &room_id, ROOM_OPERATION_EVENT_TIMEOUT).await?;
+    // Core settles the event payload and the same-account room projection as
+    // one composite outcome before the room is selected (#368).
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::DirectMessageStarted {
+                request_id,
+                account_key,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("direct message start", error))?;
+    let RequestOutcome::DirectMessageStarted { room_id, .. } = outcome else {
+        return Err("direct message start returned an invalid outcome".to_owned());
+    };
     let selected_snapshot = event_conn
         .select_room_and_wait(room_id.clone(), SELECT_ROOM_EVENT_TIMEOUT)
         .await
@@ -955,27 +1002,33 @@ pub async fn invite_user(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
-        .command(build_invite_user_command(request_id, room_id, user_id))
+        .command(build_invite_user_command(
+            request_id,
+            room_id.clone(),
+            user_id.clone(),
+        ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
+    let snapshot = wait_for_room_operation(
         &mut event_conn,
         request_id,
+        baseline.generation,
+        account_key,
+        room_id,
+        RoomOperationKind::UserInvited { user_id },
         ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, expected_request_id| {
-            matches!(
-                event,
-                RoomEvent::UserInvited { request_id, .. } if *request_id == expected_request_id
-            )
-        },
-        "user invite did not complete",
-        "user invite failed",
+        "user invite",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -987,26 +1040,37 @@ pub async fn invite_user_to_space(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_invite_user_to_space_command(
-            request_id, space_id, user_id, generation,
+            request_id,
+            space_id.clone(),
+            user_id.clone(),
+            generation,
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
+    let snapshot = wait_for_room_operation(
         &mut event_conn,
         request_id,
-        ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, expected_request_id| {
-            space_member_invite_settled_event_matches(event, expected_request_id, generation)
+        baseline.generation,
+        account_key,
+        space_id,
+        RoomOperationKind::SpaceMemberInviteSettled {
+            target_user_id: user_id,
+            generation,
         },
-        "Space member invite did not complete",
-        "Space member invite failed",
+        ROOM_OPERATION_EVENT_TIMEOUT,
+        "Space member invite",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -1022,12 +1086,14 @@ pub async fn update_space_member_role(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_update_space_member_role_command(
             request_id,
-            space_id,
-            user_id,
+            space_id.clone(),
+            user_id.clone(),
             generation,
             expected_power_levels_revision,
             expected_power_level,
@@ -1036,9 +1102,25 @@ pub async fn update_space_member_role(
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_space_member_role_update(&mut event_conn, request_id, generation).await?;
+    let snapshot = wait_for_room_operation(
+        &mut event_conn,
+        request_id,
+        baseline.generation,
+        account_key,
+        space_id,
+        RoomOperationKind::SpaceMemberRoleUpdated {
+            target_user_id: user_id,
+            generation,
+        },
+        ROOM_OPERATION_EVENT_TIMEOUT,
+        "Space member role update",
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -1050,30 +1132,37 @@ pub async fn cancel_space_invite(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_cancel_space_invite_command(
-            request_id, space_id, user_id, generation,
+            request_id,
+            space_id.clone(),
+            user_id.clone(),
+            generation,
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
+    let snapshot = wait_for_room_operation(
         &mut event_conn,
         request_id,
-        ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, expected_request_id| {
-            space_member_invite_cancellation_settled_event_matches(
-                event,
-                expected_request_id,
-                generation,
-            )
+        baseline.generation,
+        account_key,
+        space_id,
+        RoomOperationKind::SpaceMemberInviteCancellationSettled {
+            target_user_id: user_id,
+            generation,
         },
-        "Space member invite cancellation did not complete",
-        "Space member invite cancellation failed",
+        ROOM_OPERATION_EVENT_TIMEOUT,
+        "Space member invite cancellation",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -1085,120 +1174,64 @@ pub async fn invite_targets(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_invite_targets_command(
-            request_id, room_id, user_ids, scope,
+            request_id,
+            room_id.clone(),
+            user_ids.clone(),
+            scope.clone(),
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_invite_batch_completed(&mut event_conn, request_id).await?;
+    let snapshot = wait_for_room_operation(
+        &mut event_conn,
+        request_id,
+        baseline.generation,
+        account_key,
+        room_id,
+        RoomOperationKind::InviteBatch { user_ids, scope },
+        ROOM_OPERATION_EVENT_TIMEOUT,
+        "invite batch",
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
 }
 
-async fn wait_for_invite_batch_completed(
+pub(super) async fn wait_for_room_operation(
     event_conn: &mut CoreConnection,
     operation_request_id: RequestId,
-) -> Result<(), String> {
-    let deadline = tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT;
-    loop {
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "invite batch did not complete".to_owned())?;
-        match event {
-            Ok(CoreEvent::Room(RoomEvent::InviteBatchCompleted { request_id, .. }))
-                if request_id == operation_request_id =>
-            {
-                return Ok(());
-            }
-            Ok(CoreEvent::OperationFailed {
-                request_id,
-                failure,
-            }) if request_id == operation_request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "invite batch failed",
-                    failure,
-                ));
-            }
-            Ok(_) => {}
-            Err(_) => continue,
-        }
-    }
-}
-
-pub(super) fn snapshot_contains_room(snapshot: &koushi_state::AppState, room_id: &str) -> bool {
-    snapshot.rooms.iter().any(|room| room.room_id == room_id)
-}
-
-async fn wait_for_space_member_role_update(
-    event_conn: &mut CoreConnection,
-    operation_request_id: RequestId,
-    generation: u64,
-) -> Result<(), String> {
-    let deadline = tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT;
-    loop {
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "Space member role update did not complete".to_owned())?;
-        match event {
-            Ok(CoreEvent::Room(RoomEvent::SpaceMemberRoleUpdateSettled {
-                request_id,
-                generation: event_generation,
-                outcome,
-            })) if request_id == operation_request_id && event_generation == generation => {
-                return match outcome {
-                    koushi_state::SpaceMemberRoleUpdateOutcome::Succeeded => Ok(()),
-                    koushi_state::SpaceMemberRoleUpdateOutcome::Failed(kind) => {
-                        Err(format!("Space member role update failed: {kind:?}"))
-                    }
-                };
-            }
-            Ok(CoreEvent::OperationFailed {
-                request_id,
-                failure,
-            }) if request_id == operation_request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "Space member role update failed",
-                    failure,
-                ));
-            }
-            Ok(_) => {}
-            Err(_) => continue,
-        }
-    }
-}
-
-pub(super) async fn wait_for_room_operation<F>(
-    event_conn: &mut CoreConnection,
-    operation_request_id: RequestId,
+    baseline_generation: u64,
+    account_key: AccountKey,
+    room_id: String,
+    operation: RoomOperationKind,
     timeout: std::time::Duration,
-    is_success: F,
-    timeout_message: &'static str,
-    failure_message: &'static str,
-) -> Result<(), String>
-where
-    F: Fn(&RoomEvent, RequestId) -> bool,
-{
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| timeout_message.to_owned())?;
-        match event {
-            Ok(CoreEvent::Room(room_event)) if is_success(&room_event, operation_request_id) => {
-                return Ok(());
-            }
-            Ok(CoreEvent::OperationFailed {
-                request_id,
-                failure,
-            }) if request_id == operation_request_id => {
-                return Err(invoke_error_from_core_failure(failure_message, failure));
-            }
-            Ok(_) => {}
-            Err(_) => continue,
-        }
-    }
+    context: &'static str,
+) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(operation_request_id),
+            RequestOutcomeExpectation::RoomOperation {
+                request_id: operation_request_id,
+                account_key,
+                room_id,
+                operation,
+            },
+            baseline_generation,
+            tokio::time::Instant::now() + timeout,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome(context, error))?;
+    let RequestOutcome::RoomOperation { snapshot, .. } = outcome else {
+        return Err(format!("{context} returned an invalid outcome"));
+    };
+    Ok(snapshot)
 }
 
 pub(super) fn build_update_space_member_role_command(
@@ -1421,51 +1454,6 @@ pub(super) const ROOM_OPERATION_EVENT_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(60);
 
 const CREATE_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
-
-pub(super) fn space_members_loaded_event_matches(
-    event: &RoomEvent,
-    expected_request_id: RequestId,
-    expected_generation: u64,
-) -> bool {
-    matches!(
-        event,
-        RoomEvent::SpaceMembersLoaded {
-            request_id,
-            generation,
-            ..
-        } if *request_id == expected_request_id && *generation == expected_generation
-    )
-}
-
-pub(super) fn space_member_invite_settled_event_matches(
-    event: &RoomEvent,
-    expected_request_id: RequestId,
-    expected_generation: u64,
-) -> bool {
-    matches!(
-        event,
-        RoomEvent::SpaceMemberInviteSettled {
-            request_id,
-            generation,
-            ..
-        } if *request_id == expected_request_id && *generation == expected_generation
-    )
-}
-
-pub(super) fn space_member_invite_cancellation_settled_event_matches(
-    event: &RoomEvent,
-    expected_request_id: RequestId,
-    expected_generation: u64,
-) -> bool {
-    matches!(
-        event,
-        RoomEvent::SpaceMemberInviteCancellationSettled {
-            request_id,
-            generation,
-            ..
-        } if *request_id == expected_request_id && *generation == expected_generation
-    )
-}
 
 #[cfg(test)]
 mod tests;

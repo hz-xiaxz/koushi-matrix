@@ -548,6 +548,7 @@ pub enum AppAction {
     },
     SecureBackupSetupRequested {
         request_id: u64,
+        intent: crate::state::SecureBackupSetupIntent,
     },
     SecureBackupRecoveryKeyReady {
         request_id: u64,

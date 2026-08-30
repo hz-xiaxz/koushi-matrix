@@ -839,11 +839,16 @@ pub(crate) fn handle_room_key_import_failed(
 pub(crate) fn handle_secure_backup_setup_requested(
     state: &mut AppState,
     request_id: u64,
+    intent: crate::state::SecureBackupSetupIntent,
 ) -> Vec<AppEffect> {
     if !is_session_ready(state)
         || matches!(
             state.e2ee_trust.key_management.secure_backup_setup,
             SecureBackupSetupState::SettingUp { .. }
+        )
+        || !matches!(
+            intent.admission(&state.secure_backup_gate),
+            crate::state::SecureBackupSetupAdmission::Allowed
         )
     {
         return Vec::new();

@@ -1299,7 +1299,6 @@ test("attach control stages media caption and renders Rust-owned media progress"
 }) => {
   await gotoReadyShell(page);
   await page.evaluate(() => {
-    window.__harness.setCommandResponse("upload_media", () => window.__harness.currentSnapshot());
     window.__harness.setCommandResponse("download_media", () => window.__harness.currentSnapshot());
     window.__harness.clearInvocations();
   });
@@ -1319,7 +1318,6 @@ test("attach control stages media caption and renders Rust-owned media progress"
   await page
     .getByRole("textbox", { name: "Caption for media-fixture.txt" })
     .fill("single **event** caption");
-  await expect.poll(() => invocationCount(page, "upload_media")).toBe(0);
   // Attachments are sent from the staging panel; the composer send is
   // for the message text only.
   await page.getByRole("button", { name: "Send attachments" }).click();
@@ -1646,7 +1644,6 @@ test("resize and format are chosen independently before the send action", async 
   await expect.poll(() => invocationCount(page, "select_staged_upload_output")).toBe(
     selectionCountBeforeSend
   );
-  expect(await invocationCount(page, "upload_media")).toBe(0);
   await expect(dialog).toHaveCount(0);
 });
 

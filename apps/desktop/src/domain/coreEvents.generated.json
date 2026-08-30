@@ -523,7 +523,9 @@
         "request_id": {
           "connection_id": 3,
           "sequence": 7
-        }
+        },
+        "space_id": "!space:example.test",
+        "user_id": "@target:example.test"
       }
     },
     "kind": "Room"

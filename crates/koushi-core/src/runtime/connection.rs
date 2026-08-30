@@ -1,14 +1,19 @@
 use super::{CoreCommandEnvelope, CoreRuntime};
 use crate::command::{CoreCommand, RoomCommand};
 use crate::composer_draft_lifecycle::{
-    ComposerDraftCommandPermit, ComposerDraftLeaseFailure, ComposerDraftLeaseId,
-    ComposerDraftLeaseRegistry, ComposerDraftScope, ComposerRendererGeneration,
+    ComposerDraftCommandPermit, ComposerDraftLeaseAdmission, ComposerDraftLeaseAdmissionFailure,
+    ComposerDraftLeaseFailure, ComposerDraftLeaseId, ComposerDraftLeaseRegistry,
+    ComposerDraftScope, ComposerRendererGeneration,
 };
+#[cfg(test)]
+use crate::event::IntentOutcome;
 use crate::event::{
-    AppStateSnapshot, CoreEvent, IntentNoOpReason, IntentOutcome, VersionedAppStateSnapshot,
+    AppStateSnapshot, CoreEvent, IntentNoOpReason, VersionedAppStateSnapshot,
     project_room_event_display_labels, project_timeline_event_display_labels,
 };
 use crate::ids::{RequestId, RuntimeConnectionId};
+use crate::media_staging::MediaStagingService;
+use koushi_state::ComposerDraftRevision;
 use std::{
     sync::{
         Arc,
@@ -71,8 +76,9 @@ pub struct CoreConnection {
     connection_id: RuntimeConnectionId,
     command_tx: mpsc::Sender<CoreCommandEnvelope>,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
-    event_rx: broadcast::Receiver<CoreEvent>,
-    snapshot_rx: watch::Receiver<VersionedAppStateSnapshot>,
+    pub(super) media_staging: Arc<MediaStagingService>,
+    pub(super) event_rx: broadcast::Receiver<CoreEvent>,
+    pub(super) snapshot_rx: watch::Receiver<VersionedAppStateSnapshot>,
     next_sequence: AtomicU64,
 }
 
@@ -95,6 +101,7 @@ impl CoreRuntime {
             ),
             command_tx: self.command_tx.clone(),
             composer_draft_leases: Arc::clone(&self.composer_draft_leases),
+            media_staging: Arc::clone(&self.media_staging),
             event_rx: self.event_tx.subscribe(),
             snapshot_rx: self.snapshot_rx.clone(),
             next_sequence: AtomicU64::new(1),
@@ -212,7 +219,55 @@ impl CoreCommandHandle {
     }
 }
 
+#[cfg(any(test, feature = "test-hooks"))]
+#[doc(hidden)]
+pub struct CoreConnectionTestControl {
+    event_tx: broadcast::Sender<CoreEvent>,
+    snapshot_tx: watch::Sender<VersionedAppStateSnapshot>,
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+impl CoreConnectionTestControl {
+    #[doc(hidden)]
+    pub fn send_event(&self, event: CoreEvent) {
+        let _ = self.event_tx.send(event);
+    }
+
+    #[doc(hidden)]
+    pub fn send_snapshot(&self, snapshot: VersionedAppStateSnapshot) {
+        let _ = self.snapshot_tx.send(snapshot);
+    }
+}
+
 impl CoreConnection {
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[doc(hidden)]
+    pub fn new_for_testing(event_capacity: usize) -> (Self, CoreConnectionTestControl) {
+        let (command_tx, _command_rx) = mpsc::channel(1);
+        let (event_tx, event_rx) = broadcast::channel(event_capacity);
+        let (snapshot_tx, snapshot_rx) = watch::channel(VersionedAppStateSnapshot {
+            generation: 0,
+            state: koushi_state::AppState::default(),
+        });
+        (
+            Self {
+                connection_id: RuntimeConnectionId(41),
+                command_tx,
+                composer_draft_leases: Arc::new(ComposerDraftLeaseRegistry::new()),
+                media_staging: Arc::new(MediaStagingService::new(Arc::new(
+                    crate::media_preparation::MediaPreparationService::default(),
+                ))),
+                event_rx,
+                snapshot_rx,
+                next_sequence: AtomicU64::new(1),
+            },
+            CoreConnectionTestControl {
+                event_tx,
+                snapshot_tx,
+            },
+        )
+    }
+
     pub fn connection_id(&self) -> RuntimeConnectionId {
         self.connection_id
     }
@@ -236,6 +291,116 @@ impl CoreConnection {
         }
     }
 
+    /// Stage bytes through the Core-owned media preparation service.
+    pub async fn stage_upload_bytes(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+        items: Vec<crate::media_preparation::StageUploadBytesInput>,
+    ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service.stage_upload_bytes(self, target, items).await
+    }
+
+    pub async fn select_staged_upload_output(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+        staged_id: String,
+        selection: koushi_state::StagedUploadOutputSelection,
+    ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service
+            .select_staged_upload_output(self, target, staged_id, selection)
+            .await
+    }
+
+    pub async fn retry_staged_upload_preparation(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+        staged_id: String,
+    ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service
+            .retry_staged_upload_preparation(self, target, staged_id)
+            .await
+    }
+
+    pub async fn update_staged_upload_caption(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+        staged_id: String,
+        caption: Option<koushi_state::ComposerDocument>,
+    ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service
+            .update_caption(self, target, staged_id, caption)
+            .await
+    }
+
+    pub async fn update_staged_upload_compression(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+        staged_id: String,
+        compression_choice: koushi_state::StagedUploadCompressionChoice,
+    ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service
+            .update_compression(self, target, staged_id, compression_choice)
+            .await
+    }
+
+    pub async fn use_original_staged_upload(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+        staged_id: String,
+    ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service.use_original(self, target, staged_id).await
+    }
+
+    pub async fn clear_upload_staging(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+    ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service.clear(self, target).await
+    }
+
+    pub async fn prepared_upload_preview(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+        staged_id: String,
+        variant_id: String,
+    ) -> Result<Vec<u8>, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service
+            .prepared_upload_preview(self, target, staged_id, variant_id)
+            .await
+    }
+
+    pub async fn send_prepared_uploads(
+        &mut self,
+        expected_account: koushi_key::SessionKeyId,
+        generation: crate::composer_draft_lifecycle::ComposerRendererGeneration,
+        lease: crate::composer_draft_lifecycle::ComposerDraftLeaseId,
+        target: koushi_state::ComposerTarget,
+        draft_revision: koushi_state::ComposerDraftRevision,
+    ) -> Result<
+        crate::media_staging::PreparedUploadSendResult,
+        crate::media_staging::PreparedUploadSendError,
+    > {
+        let service = Arc::clone(&self.media_staging);
+        service
+            .send_prepared_uploads(
+                self,
+                expected_account,
+                generation,
+                lease,
+                target,
+                draft_revision,
+            )
+            .await
+    }
+
     /// Submit a command without a composer lease. Revision-bearing composer
     /// commands fail closed and must use [`Self::command_with_composer_lease`].
     pub async fn command(&self, command: CoreCommand) -> Result<(), CommandSubmitError> {
@@ -256,6 +421,55 @@ impl CoreConnection {
     ) -> Result<ComposerDraftLeaseId, ComposerDraftLeaseFailure> {
         self.command_handle()
             .acquire_composer_draft_lease(generation, scope)
+    }
+
+    pub fn acquire_composer_draft_lease_for_active_target(
+        &self,
+        expected_account: koushi_key::SessionKeyId,
+        generation: ComposerRendererGeneration,
+        target: koushi_state::ComposerTarget,
+    ) -> Result<ComposerDraftLeaseAdmission, ComposerDraftLeaseAdmissionFailure> {
+        let snapshot = self.snapshot();
+        validate_active_composer_scope(&snapshot, &expected_account, &target)?;
+        let lease_id = self
+            .composer_draft_leases
+            .acquire(
+                generation,
+                ComposerDraftScope {
+                    account: expected_account,
+                    target: target.clone(),
+                },
+            )
+            .map_err(ComposerDraftLeaseAdmissionFailure::Registry)?;
+        Ok(ComposerDraftLeaseAdmission {
+            lease_id,
+            revision: composer_draft_revision(&snapshot, &target),
+            last_accepted_clear_revision: composer_draft_last_accepted_clear_revision(
+                &snapshot, &target,
+            ),
+            has_authoritative_content: composer_draft_has_content(&snapshot, &target),
+        })
+    }
+
+    pub fn acquire_composer_draft_command_permit_for_active_target(
+        &self,
+        expected_account: koushi_key::SessionKeyId,
+        target: koushi_state::ComposerTarget,
+        generation: ComposerRendererGeneration,
+        lease_id: ComposerDraftLeaseId,
+    ) -> Result<ComposerDraftCommandPermit, ComposerDraftLeaseAdmissionFailure> {
+        let snapshot = self.snapshot();
+        validate_active_composer_scope(&snapshot, &expected_account, &target)?;
+        self.composer_draft_leases
+            .try_command_permit(
+                generation,
+                lease_id,
+                &ComposerDraftScope {
+                    account: expected_account,
+                    target,
+                },
+            )
+            .map_err(ComposerDraftLeaseAdmissionFailure::Registry)
     }
 
     pub fn release_composer_draft_lease(
@@ -306,7 +520,7 @@ impl CoreConnection {
         }
     }
 
-    fn project_event_for_consumer(&self, mut event: CoreEvent) -> CoreEvent {
+    pub(super) fn project_event_for_consumer(&self, mut event: CoreEvent) -> CoreEvent {
         match &mut event {
             CoreEvent::Timeline(timeline_event) => {
                 let snapshot = self.snapshot_rx.borrow().state.clone();
@@ -355,19 +569,15 @@ impl CoreConnection {
     }
 
     /// Select `room_id` and wait until the latest versioned watch snapshot names
-    /// it as the active room.
-    ///
-    /// Lifecycle events only classify progress or a matching failure. The
-    /// returned snapshot is the exact watch value that satisfied the predicate,
-    /// including its publication generation. Broadcast lag is recovered by
-    /// rechecking that latest value; `timeout` is one absolute deadline for the
-    /// wait, not a per-event allowance.
+    /// it as the active room. The typed outcome service owns the event/snapshot
+    /// settlement; this method preserves the historical error surface.
     pub async fn select_room_and_wait(
         &mut self,
         room_id: String,
         timeout: Duration,
     ) -> Result<VersionedAppStateSnapshot, SelectRoomError> {
         let deadline = tokio::time::Instant::now() + timeout;
+        let baseline_generation = self.versioned_snapshot().generation;
         let request_id = self.next_request_id();
         tokio::time::timeout_at(
             deadline,
@@ -379,71 +589,139 @@ impl CoreConnection {
         .await
         .map_err(|_| SelectRoomError::Timeout)?
         .map_err(SelectRoomError::CommandSubmit)?;
-        loop {
-            let current = self.versioned_snapshot();
-            if current.state.navigation.active_room_id.as_deref() == Some(room_id.as_str()) {
-                return Ok(current);
+
+        match self
+            .wait_for_request_outcome(
+                super::request_outcome::OutcomeCorrelation::Request(request_id),
+                super::request_outcome::RequestOutcomeExpectation::RoomSelected {
+                    request_id,
+                    room_id,
+                    account_key: None,
+                    allow_initial: true,
+                },
+                baseline_generation,
+                deadline,
+            )
+            .await
+        {
+            Ok(super::request_outcome::RequestOutcome::RoomSelected { snapshot }) => Ok(snapshot),
+            Ok(_) => Err(SelectRoomError::Timeout),
+            Err(super::request_outcome::RequestOutcomeError::OperationFailed { failure }) => {
+                Err(SelectRoomError::OperationFailed(failure))
             }
-
-            let event = match tokio::time::timeout_at(deadline, self.event_rx.recv()).await {
-                Ok(Ok(event)) => self.project_event_for_consumer(event),
-                Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
-                Ok(Err(broadcast::error::RecvError::Closed)) => {
-                    let current = self.versioned_snapshot();
-                    return if current.state.navigation.active_room_id.as_deref()
-                        == Some(room_id.as_str())
-                    {
-                        Ok(current)
-                    } else {
-                        Err(SelectRoomError::EventStreamClosed)
-                    };
-                }
-                Err(_) => {
-                    let current = self.versioned_snapshot();
-                    return if current.state.navigation.active_room_id.as_deref()
-                        == Some(room_id.as_str())
-                    {
-                        Ok(current)
-                    } else {
-                        Err(SelectRoomError::Timeout)
-                    };
-                }
-            };
-
-            let current = self.versioned_snapshot();
-            if current.state.navigation.active_room_id.as_deref() == Some(room_id.as_str()) {
-                return Ok(current);
+            Err(super::request_outcome::RequestOutcomeError::FailedNoOp { reason }) => {
+                Err(match reason {
+                    IntentNoOpReason::SessionNotReady => SelectRoomError::SessionNotReady,
+                    IntentNoOpReason::RoomNotInState => SelectRoomError::RoomNotInState,
+                    reason => SelectRoomError::FailedNoOp(reason),
+                })
             }
-
-            match event {
-                CoreEvent::OperationFailed {
-                    request_id: failed_request_id,
-                    failure,
-                } if failed_request_id == request_id => {
-                    return Err(SelectRoomError::OperationFailed(failure));
-                }
-                CoreEvent::IntentLifecycle {
-                    request_id: lifecycle_request_id,
-                    outcome: IntentOutcome::FailedNoOp(reason),
-                    ..
-                } if lifecycle_request_id == request_id => {
-                    return Err(match reason {
-                        IntentNoOpReason::SessionNotReady => SelectRoomError::SessionNotReady,
-                        IntentNoOpReason::RoomNotInState => SelectRoomError::RoomNotInState,
-                        reason => SelectRoomError::FailedNoOp(reason),
-                    });
-                }
-                // Committed and benign no-op outcomes are progress only. The
-                // watch snapshot remains the authoritative success transport.
-                CoreEvent::IntentLifecycle {
-                    request_id: lifecycle_request_id,
-                    outcome: IntentOutcome::Committed | IntentOutcome::BenignNoOp(_),
-                    ..
-                } if lifecycle_request_id == request_id => {}
-                _ => {}
+            Err(super::request_outcome::RequestOutcomeError::Disconnected) => {
+                Err(SelectRoomError::EventStreamClosed)
+            }
+            Err(super::request_outcome::RequestOutcomeError::TimedOut)
+            | Err(super::request_outcome::RequestOutcomeError::Lagged)
+            | Err(super::request_outcome::RequestOutcomeError::InvalidOutcome) => {
+                Err(SelectRoomError::Timeout)
             }
         }
     }
 }
+
+fn validate_active_composer_scope(
+    snapshot: &AppStateSnapshot,
+    expected_account: &koushi_key::SessionKeyId,
+    target: &koushi_state::ComposerTarget,
+) -> Result<(), ComposerDraftLeaseAdmissionFailure> {
+    let koushi_state::SessionState::Ready(info) = &snapshot.session else {
+        return Err(ComposerDraftLeaseAdmissionFailure::SessionNotReady);
+    };
+    if &crate::store::session_key_id_from_info(info) != expected_account {
+        return Err(ComposerDraftLeaseAdmissionFailure::AccountMismatch);
+    }
+    let active = match target {
+        koushi_state::ComposerTarget::Main { room_id } => {
+            snapshot.timeline.room_id.as_deref() == Some(room_id)
+        }
+        koushi_state::ComposerTarget::Thread {
+            room_id,
+            root_event_id,
+        } => matches!(
+            &snapshot.thread,
+            koushi_state::ThreadPaneState::Open {
+                room_id: active_room_id,
+                root_event_id: active_root_event_id,
+                ..
+            } if active_room_id == room_id && active_root_event_id == root_event_id
+        ),
+    };
+    active
+        .then_some(())
+        .ok_or(ComposerDraftLeaseAdmissionFailure::TargetInactive)
+}
+
+fn composer_draft_revision(
+    state: &AppStateSnapshot,
+    target: &koushi_state::ComposerTarget,
+) -> ComposerDraftRevision {
+    match target {
+        koushi_state::ComposerTarget::Main { room_id } => {
+            state.composer_drafts.room_revision(room_id)
+        }
+        koushi_state::ComposerTarget::Thread {
+            room_id,
+            root_event_id,
+        } => state
+            .composer_drafts
+            .thread_revision(room_id, root_event_id),
+    }
+}
+
+fn composer_draft_last_accepted_clear_revision(
+    state: &AppStateSnapshot,
+    target: &koushi_state::ComposerTarget,
+) -> ComposerDraftRevision {
+    match target {
+        koushi_state::ComposerTarget::Main { room_id } => state
+            .composer_drafts
+            .room_last_accepted_clear_revisions
+            .get(room_id)
+            .copied()
+            .unwrap_or_default(),
+        koushi_state::ComposerTarget::Thread {
+            room_id,
+            root_event_id,
+        } => state
+            .composer_drafts
+            .thread_last_accepted_clear_revisions
+            .get(room_id)
+            .and_then(|threads| threads.get(root_event_id))
+            .copied()
+            .unwrap_or_default(),
+    }
+}
+
+fn composer_draft_has_content(
+    state: &AppStateSnapshot,
+    target: &koushi_state::ComposerTarget,
+) -> bool {
+    match target {
+        koushi_state::ComposerTarget::Main { room_id } => state
+            .composer_drafts
+            .rooms
+            .get(room_id)
+            .is_some_and(|draft| !draft.is_empty()),
+        koushi_state::ComposerTarget::Thread {
+            room_id,
+            root_event_id,
+        } => state
+            .composer_drafts
+            .threads
+            .get(room_id)
+            .and_then(|threads| threads.get(root_event_id))
+            .is_some_and(|draft| !draft.is_empty()),
+    }
+}
+
 #[cfg(test)]
 mod tests;

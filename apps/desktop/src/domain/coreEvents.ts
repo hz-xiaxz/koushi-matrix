@@ -688,6 +688,8 @@ export type RoomEvent =
   | {
       SpaceMemberRoleUpdateSettled: {
         request_id: RequestId;
+        space_id: string;
+        user_id: string;
         generation: number;
         outcome: SpaceMemberRoleUpdateOutcome;
       };

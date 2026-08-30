@@ -61,8 +61,9 @@ pub use session::{
     DeviceCleanupLocalMode, DeviceCleanupOfferReason, DeviceCleanupRemoteOutcome,
     DeviceCleanupState, LoginAttemptId, LoginFlow, LoginFlowKind, PendingKeyCountBucket,
     ProvisionalPhase, QrLoginState, RecoveryMethod, SecureBackupGateFailureKind,
-    SecureBackupGateState, SessionAuthenticationMethod, SessionInfo, SessionLockReason,
-    SessionState, SoftLogoutReauthState, VerificationAccountKind, VerificationGateFailureKind,
+    SecureBackupGateState, SecureBackupSetupAdmission, SecureBackupSetupIntent,
+    SessionAuthenticationMethod, SessionInfo, SessionLockReason, SessionState,
+    SoftLogoutReauthState, VerificationAccountKind, VerificationGateFailureKind,
     VerificationGateRejectReason, VerificationGateState, VerificationMethod,
     VerificationMethodCapability,
 };

@@ -338,6 +338,8 @@ fn role_failure_mapping_is_closed_and_raw_sdk_values_do_not_escape() {
 fn role_settlement_debug_is_identifier_free() {
     let event = crate::event::RoomEvent::SpaceMemberRoleUpdateSettled {
         request_id: make_request_id(42),
+        space_id: "!private-space:example.invalid".to_owned(),
+        user_id: "@private-target:example.invalid".to_owned(),
         generation: 7,
         outcome: koushi_state::SpaceMemberRoleUpdateOutcome::Failed(
             koushi_state::SpaceMemberRoleFailureKind::Stale,

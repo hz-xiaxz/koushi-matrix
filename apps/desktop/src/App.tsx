@@ -168,6 +168,7 @@ import type {
   RoomSettingChange,
   SavedSessionInfo,
   SearchScopeKind,
+  SecureBackupSetupIntent,
   SettingsPatch,
   SpaceMemberRoleOption,
   ThreadOpenIntent,
@@ -2631,9 +2632,10 @@ export function App() {
 
   async function bootstrapSecureBackup(
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
+    recoveryKeyDestinationPath: string | null,
+    intent: SecureBackupSetupIntent
   ) {
-    setSnapshot(await api.bootstrapSecureBackup(passphrase, recoveryKeyDestinationPath));
+    setSnapshot(await api.bootstrapSecureBackup(passphrase, recoveryKeyDestinationPath, intent));
   }
 
   async function changeSecureBackupPassphrase(
@@ -5521,8 +5523,8 @@ export function App() {
           startOwnUserSas: () => api.startOwnUserSas(),
           submitRecovery: (secret) => api.submitRecovery(secret),
           recoverSecureBackup: api.recoverSecureBackup,
-          setupSecureBackup: api.setupSecureBackup,
-          reenableSecureBackup: api.reenableSecureBackup,
+          bootstrapSecureBackup: (passphrase, destination, intent) =>
+            api.bootstrapSecureBackup(passphrase, destination, intent),
           chooseSecureBackupDestination,
           retrySecureBackupInspection: api.retrySecureBackupInspection,
           openSecureBackupDiagnostics: openDiagnostics
@@ -6324,8 +6326,8 @@ export function App() {
           onImportRoomKeys={(sourcePath, passphrase) => {
             void importRoomKeys(sourcePath, passphrase);
           }}
-          onBootstrapSecureBackup={(passphrase, recoveryKeyDestinationPath) => {
-            void bootstrapSecureBackup(passphrase, recoveryKeyDestinationPath);
+          onBootstrapSecureBackup={(passphrase, recoveryKeyDestinationPath, intent) => {
+            void bootstrapSecureBackup(passphrase, recoveryKeyDestinationPath, intent);
           }}
           onChangeSecureBackupPassphrase={(
             oldSecret,

@@ -909,14 +909,16 @@ impl RoomActor {
         }
         actions.push(AppAction::SpaceMemberInviteSettled {
             request_id: request_id.sequence,
-            space_id,
-            user_id,
+            space_id: space_id.clone(),
+            user_id: user_id.clone(),
             generation,
             outcome: outcome.clone(),
         });
         self.reduce_reliable(actions).await;
         self.emit(CoreEvent::Room(RoomEvent::SpaceMemberInviteSettled {
             request_id,
+            space_id,
+            user_id,
             generation,
             outcome,
         }));
@@ -976,7 +978,7 @@ impl RoomActor {
         self.reduce_reliable(vec![AppAction::SpaceMemberRoleUpdateSettled {
             request_id: request_id.sequence,
             space_id: space_id.clone(),
-            user_id,
+            user_id: user_id.clone(),
             generation,
             outcome: outcome.clone(),
             sent_revision,
@@ -985,6 +987,8 @@ impl RoomActor {
         .await;
         self.emit(CoreEvent::Room(RoomEvent::SpaceMemberRoleUpdateSettled {
             request_id,
+            space_id,
+            user_id,
             generation,
             outcome,
         }));
@@ -1031,8 +1035,8 @@ impl RoomActor {
         }
         actions.push(AppAction::SpaceMemberInviteCancellationSettled {
             request_id: request_id.sequence,
-            space_id,
-            user_id,
+            space_id: space_id.clone(),
+            user_id: user_id.clone(),
             generation,
             outcome: outcome.clone(),
         });
@@ -1040,6 +1044,8 @@ impl RoomActor {
         self.emit(CoreEvent::Room(
             RoomEvent::SpaceMemberInviteCancellationSettled {
                 request_id,
+                space_id,
+                user_id,
                 generation,
                 outcome,
             },

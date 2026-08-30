@@ -1,7 +1,4 @@
-use super::navigation::SelectEventSource;
 use super::*;
-#[cfg(test)]
-use crate::commands::contracts::fake_request_id;
 
 #[tauri::command]
 pub async fn probe_local_encryption_health(
@@ -23,8 +20,10 @@ pub async fn reset_local_data(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    let mut event_conn = state.inner().runtime.attach();
-    let request_id = event_conn.next_request_id();
+    let mut wait_conn = state.inner().runtime.attach();
+    let baseline_generation = wait_conn.versioned_snapshot().generation;
+    let account_key = account_key_from_app_state(&wait_conn.snapshot());
+    let request_id = next_request_id(state.inner()).await;
     koushi_diagnostics::record_and_stderr(
         DiagnosticEvent::new(
             DiagnosticLevel::Info,
@@ -37,13 +36,20 @@ pub async fn reset_local_data(
             request_id.sequence,
         )),
     );
-    event_conn
-        .command(build_reset_local_data_command(request_id))
+    submit_core_command(state.inner(), build_reset_local_data_command(request_id)).await?;
+    let outcome = wait_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::SignedOut {
+                request_id,
+                account_key,
+                allow_projection_only: true,
+            },
+            baseline_generation,
+            tokio::time::Instant::now() + LOCAL_DATA_RESET_EVENT_TIMEOUT,
+        )
         .await
-        .map_err(|error| format!("command submit failed: {error}"))?;
-    let outcome =
-        wait_for_local_data_reset(&mut event_conn, request_id, LOCAL_DATA_RESET_EVENT_TIMEOUT)
-            .await;
+        .map_err(|error| invoke_error_from_request_outcome("local data reset", error));
     koushi_diagnostics::record_and_stderr(
         DiagnosticEvent::new(
             if outcome.is_ok() {
@@ -64,59 +70,18 @@ pub async fn reset_local_data(
             if outcome.is_ok() { "success" } else { "failed" },
         )),
     );
-    outcome?;
+    let settled_snapshot = match outcome? {
+        RequestOutcome::SignedOut { snapshot, .. } => snapshot,
+        _ => return Err("local data reset returned an invalid outcome".to_owned()),
+    };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        settled_snapshot.state,
+        settled_snapshot.generation,
+    ))
 }
 
 const LOCAL_DATA_RESET_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-
-fn snapshot_has_completed_local_data_reset(snapshot: &koushi_state::AppState) -> bool {
-    matches!(snapshot.session, SessionState::SignedOut)
-        && !matches!(
-            snapshot.local_encryption,
-            koushi_state::LocalEncryptionState::Resetting { .. }
-        )
-}
-
-async fn wait_for_local_data_reset(
-    event_conn: &mut impl SelectEventSource,
-    request_id: RequestId,
-    timeout: std::time::Duration,
-) -> Result<(), String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-
-    loop {
-        if snapshot_has_completed_local_data_reset(&event_conn.snapshot()) {
-            return Ok(());
-        }
-
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "local data reset did not complete".to_owned())?;
-        match event {
-            Ok(CoreEvent::StateChanged(snapshot))
-                if snapshot_has_completed_local_data_reset(&snapshot) =>
-            {
-                return Ok(());
-            }
-            Ok(CoreEvent::OperationFailed {
-                request_id: failed_request_id,
-                failure,
-            }) if failed_request_id == request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "local data reset failed",
-                    failure,
-                ));
-            }
-            Ok(_) => {}
-            Err(_) if snapshot_has_completed_local_data_reset(&event_conn.snapshot()) => {
-                return Ok(());
-            }
-            Err(_) => continue,
-        }
-    }
-}
 
 pub(super) fn build_probe_local_encryption_health_command(
     request_id: koushi_core::RequestId,
@@ -131,6 +96,7 @@ pub(super) fn build_reset_local_data_command(request_id: koushi_core::RequestId)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::contracts::fake_request_id;
 
     #[test]
     fn credential_health_command_routes_to_account_state_machine() {
@@ -150,34 +116,5 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
-    }
-}
-
-#[cfg(test)]
-mod issue551_moved_tests {
-    use super::*;
-    use crate::commands::contracts::{ScriptedSelectSource, fake_request_id};
-    use koushi_core::CoreEvent;
-    use koushi_state::AppState;
-    use std::collections::VecDeque;
-    #[tokio::test]
-    async fn reset_local_data_waits_for_the_correlated_signed_out_projection() {
-        let request_id = fake_request_id(48);
-        let mut signed_out = AppState::default();
-        signed_out.session = SessionState::SignedOut;
-        let mut before_reset = AppState::default();
-        before_reset.session = SessionState::Restoring;
-        let mut source = ScriptedSelectSource {
-            snapshot: before_reset,
-            events: VecDeque::from([Ok(CoreEvent::StateChanged(signed_out))]),
-        };
-
-        super::wait_for_local_data_reset(
-            &mut source,
-            request_id,
-            std::time::Duration::from_millis(10),
-        )
-        .await
-        .expect("reset should settle only after signed-out is projected");
     }
 }

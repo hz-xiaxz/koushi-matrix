@@ -136,7 +136,7 @@ carry tokens and counts only. The full prohibited list is in
   global/runtime and contains no private account values; the report composes it
   with current AppState. `copyDiagnostics` is a separate stateless clipboard
   action and does not use the dialog epoch.
-- `build_upload_media_command` Debug output redacts filenames, captions, media
+- Core `UploadMediaRequest` Debug output redacts filenames, captions, media
   bytes, and thumbnail bytes.
 
 ## State transport
@@ -863,8 +863,19 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   render these Rust projections and dispatch typed commands only; do not keep
   upload staging/gallery maps in React, synthesize a gallery from DOM rows, or
   parse Matrix media events in the webview.
-- Selecting a file shows the Rust-owned Upload attachments staging dialog and
-  must not invoke `upload_media` until Send. Each staged caption is a nullable
+- Core owns downloaded-media save policy through `MediaSaveFilesystem`: source
+  emptiness/URL/absolute checks, canonical cache/source containment, symlink and
+  component-prefix rejection, destination admission, parent creation ordering,
+  and copy admission. Tauri resolves the app-data cache root and selected
+  destination, and supplies only the native syscall port; paths never enter
+  Core state, events, commands, or diagnostics. Port and policy failures expose
+  closed private-safe kinds, never paths or raw filesystem errors. Linux
+  coverage uses deterministic port fakes plus a real temporary symlink escape;
+  Windows junction/canonicalization and short-name assumptions remain covered
+  by the hosted Windows gate rather than Core path normalization.
+- Selecting a file sends source bytes through `stage_upload_bytes` and shows the
+  Rust-owned Upload attachments staging dialog. Send invokes
+  `send_prepared_uploads`; there is no direct renderer upload command. Each staged caption is a nullable
   `ComposerDocument`, edited through the staging dialog
   (`TimelinePaneState.staged_uploads[*].caption`), not inferred from the
   ordinary Composer draft. At the media-send boundary Rust derives the
@@ -875,15 +886,13 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   keys include target/item identity and clear/send invalidates them so late
   results cannot restore removed items. Browser snapshots have no caption revision,
   so do not delete these lanes without a separately reviewed Rust editor revision.
-- Image upload compression keeps the same split: Rust owns
-  `SettingsValues.media.image_upload_compression`, policy
-  threshold/target/quality values, original-vs-selected variant metadata,
-  metadata-stripped assertion, and thumbnail-refresh assertion. The GUI/effect
-  layer may run the actual pixel transform, but it must return selected
-  bytes/dimensions/thumbnail through `upload_media`; Tauri then builds
-  `UploadMediaRequest.compression` from the current Rust-owned setting.
-- `build_upload_media_command` normalizes selected image byte count from
-  `bytes.len()` instead of trusting GUI metadata.
+- Rust owns image upload compression end to end: authoritative
+  `SettingsValues.media.image_upload_compression` policy, source/candidate bytes,
+  executor-hosted pixel transforms, original-vs-selected variant metadata,
+  metadata-stripped assertion, and thumbnail-refresh assertion. Core builds the
+  final `UploadMediaRequest` from the selected prepared registry entry and uses
+  the actual byte-vector length rather than renderer metadata. Tauri only
+  serializes staging inputs, preview bytes, and settled snapshots.
 - The core media tokens prove the Rust-owned upload-staging/gallery contracts
   only; codec/canvas/native transform behavior and the visible
   drag-drop/paste/gallery/viewer workflow must be covered by browser-headless plus
@@ -975,6 +984,13 @@ normal QA-title mode and cannot change product title semantics.
   React-local per-room/per-thread draft map. The backing store is encrypted,
   debounced, and account-scoped in `koushi-core`; it is not serialized as a full
   draft map to the webview snapshot.
+- Core exclusively allocates and validates composer renderer generations, lease
+  ids, account/target scopes, and command/persistence permits. Their IPC form is
+  a canonical nonzero decimal `u64`; parsing a string grants no authority.
+  Tauri only parses/formats these opaque identities and keeps no counter, map,
+  or mirror registry. A renderer must begin the current runtime generation,
+  acquire a lease for the exact Ready account and active main/thread target,
+  and pass Core's live generation/lease/scope check for every terminal permit.
 - Scheduled/send-later state follows the same boundary. The full queue and local
   fallback timer are Rust/core-owned; React may render only
   `snapshot.state.timeline.scheduled_sends` for the selected room and
@@ -1043,6 +1059,14 @@ normal QA-title mode and cannot change product title semantics.
   state, logs, QA tokens, screenshots, or issue comments. Desktop recovery-key
   delivery writes through the Rust/Tauri native artifact path and reports only
   `Written`/`NotWritten` style status.
+- Secure-backup setup/re-enable confirmation policy is Rust-owned. The closed
+  `SecureBackupSetupIntent` must ride both reducer projection and actor command;
+  Core admits it against the projected gate before actor routing and preserves
+  the SDK's fresh confirmation guard. React may own only the accessible,
+  catalog-backed confirmation dialog and mounted input values: cancel dispatches
+  nothing and confirm sends `Reenable { confirmed: true }`. Tauri must not show
+  native policy dialogs, contain hardcoded confirmation copy, or translate a
+  boolean outside the typed request.
 - `RestoreKeyBackup` must not be runtime gated to `SessionState::Ready` only. A
   newly logged-in device can become `NeedsRecovery` after sync discovers secret
   storage, and key-backup restore is the operation that gets it out of that

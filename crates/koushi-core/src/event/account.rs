@@ -42,6 +42,10 @@ pub enum AccountEvent {
         authorization_url: String,
         state: String,
     },
+    AuthDiscoveryChanged {
+        request_id: RequestId,
+        homeserver: String,
+    },
     LoggedIn {
         request_id: RequestId,
         account_key: AccountKey,
@@ -93,6 +97,14 @@ impl fmt::Debug for AccountEvent {
                 .field("request_id", request_id)
                 .field("authorization_url", &"AuthorizationUrl(..)")
                 .field("state", &"CsrfState(..)")
+                .finish(),
+            Self::AuthDiscoveryChanged {
+                request_id,
+                homeserver: _,
+            } => formatter
+                .debug_struct("AuthDiscoveryChanged")
+                .field("request_id", request_id)
+                .field("homeserver", &"Homeserver(..)")
                 .finish(),
             Self::LoggedIn {
                 request_id,

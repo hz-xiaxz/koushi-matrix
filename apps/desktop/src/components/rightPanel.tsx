@@ -20,6 +20,7 @@ import type {
   SearchResult,
   SettingsPatch,
   SpaceMemberRoleOption,
+  SecureBackupSetupIntent,
   PinnedEventNavigation,
   ThreadOpenIntent,
   ThreadsListScope
@@ -306,7 +307,8 @@ export function ContextualRightPanel({
   onImportRoomKeys: (sourcePath: string, passphrase: string) => void;
   onBootstrapSecureBackup: (
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
+    recoveryKeyDestinationPath: string | null,
+    intent: SecureBackupSetupIntent
   ) => void;
   onChangeSecureBackupPassphrase: (
     oldSecret: string,

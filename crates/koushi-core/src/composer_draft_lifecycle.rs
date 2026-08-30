@@ -5,7 +5,7 @@ use std::{
 };
 
 use koushi_key::SessionKeyId;
-use koushi_state::ComposerTarget;
+use koushi_state::{ComposerDraftRevision, ComposerTarget};
 use tokio::sync::watch;
 
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -26,6 +26,16 @@ impl fmt::Debug for ComposerDraftScope {
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub struct ComposerRendererGeneration(u64);
 
+impl ComposerRendererGeneration {
+    pub fn to_wire_string(self) -> String {
+        self.0.to_string()
+    }
+
+    pub fn parse_wire(wire: &str) -> Result<Self, ComposerDraftWireError> {
+        parse_wire_value(wire).map(Self)
+    }
+}
+
 impl fmt::Debug for ComposerRendererGeneration {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("ComposerRendererGeneration(..)")
@@ -35,17 +45,78 @@ impl fmt::Debug for ComposerRendererGeneration {
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub struct ComposerDraftLeaseId(u64);
 
+impl ComposerDraftLeaseId {
+    pub fn to_wire_string(self) -> String {
+        self.0.to_string()
+    }
+
+    pub fn parse_wire(wire: &str) -> Result<Self, ComposerDraftWireError> {
+        parse_wire_value(wire).map(Self)
+    }
+}
+
 impl fmt::Debug for ComposerDraftLeaseId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("ComposerDraftLeaseId(..)")
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum ComposerDraftWireError {
+    #[error("composer identity is not a decimal number")]
+    Invalid,
+    #[error("composer identity is not canonical")]
+    NonCanonical,
+    #[error("composer identity must be nonzero")]
+    Zero,
+    #[error("composer identity exceeds u64")]
+    Overflow,
+}
+
+fn parse_wire_value(wire: &str) -> Result<u64, ComposerDraftWireError> {
+    if wire.is_empty() || !wire.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(ComposerDraftWireError::Invalid);
+    }
+    if wire.len() > 1 && wire.starts_with('0') {
+        return Err(ComposerDraftWireError::NonCanonical);
+    }
+    let value = wire
+        .parse::<u64>()
+        .map_err(|_| ComposerDraftWireError::Overflow)?;
+    if value == 0 {
+        return Err(ComposerDraftWireError::Zero);
+    }
+    Ok(value)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum ComposerDraftLeaseFailure {
+    #[error("composer identity counter exhausted")]
     CounterExhausted,
+    #[error("composer renderer generation retired")]
     RendererGenerationRetired,
+    #[error("composer draft lease mismatch")]
     LeaseMismatch,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum ComposerDraftLeaseAdmissionFailure {
+    #[error("composer session is not ready")]
+    SessionNotReady,
+    #[error("composer draft account mismatch")]
+    AccountMismatch,
+    #[error("composer draft target is inactive")]
+    TargetInactive,
+    #[error("composer draft lease registry rejected admission: {0}")]
+    Registry(#[from] ComposerDraftLeaseFailure),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComposerDraftLeaseAdmission {
+    pub lease_id: ComposerDraftLeaseId,
+    pub revision: ComposerDraftRevision,
+    pub last_accepted_clear_revision: ComposerDraftRevision,
+    pub has_authoritative_content: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -161,6 +232,24 @@ impl ComposerDraftLeaseRegistry {
 
     pub fn subscribe(&self) -> watch::Receiver<()> {
         self.changes.subscribe()
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[doc(hidden)]
+    pub fn set_next_generation_for_testing(&self, next_generation: u64) {
+        self.state
+            .lock()
+            .expect("composer lease registry mutex")
+            .next_generation = next_generation;
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[doc(hidden)]
+    pub fn set_next_lease_id_for_testing(&self, next_lease_id: u64) {
+        self.state
+            .lock()
+            .expect("composer lease registry mutex")
+            .next_lease_id = next_lease_id;
     }
 
     pub fn begin_renderer_generation(

@@ -103,25 +103,6 @@ fn tauri_command_routes_blank_message_bodies_return_no_command() {
         .is_none()
     );
     assert!(
-        build_upload_media_command(
-            fake_request_id(17),
-            synthetic_session_key(),
-            AccountKey("@alice:example.org".to_owned()),
-            "!room:example.org".to_owned(),
-            "desktop-media-empty".to_owned(),
-            "empty.bin".to_owned(),
-            "application/octet-stream".to_owned(),
-            vec![],
-            None,
-            ImageUploadCompressionMode::Never,
-            ImageUploadCompressionPolicy::default(),
-            None,
-            None,
-            None,
-        )
-        .is_none()
-    );
-    assert!(
         build_download_media_command(
             fake_request_id(18),
             AccountKey("@alice:example.org".to_owned()),
@@ -175,38 +156,4 @@ fn thread_timeline_backwards_pagination_builder_targets_thread_key() {
         }
         other => panic!("unexpected command: {other:?}"),
     }
-}
-
-#[test]
-fn staged_caption_document_converts_at_media_send_boundary() {
-    let document = ComposerDocument::new(vec![
-        ComposerInline::Text {
-            text: "**hello** ".to_owned(),
-        },
-        ComposerInline::Mention {
-            target: MentionTarget::User {
-                user_id: "@alice:example.invalid".to_owned(),
-                display_label: "Alice".to_owned(),
-            },
-            display_label: "Alice".to_owned(),
-        },
-    ]);
-    let draft = media_caption_from_composer_document(
-        Some(&document),
-        ComposerFormattingOptions { math_mode: true },
-    )
-    .expect("non-empty caption");
-
-    assert_eq!(draft.plain_body, "**hello** @Alice");
-    let formatted_body = draft.formatted_body.as_deref().unwrap_or_default();
-    assert!(formatted_body.contains("<strong>"));
-    assert!(formatted_body.contains("https://matrix.to/#/%40alice%3Aexample.invalid"));
-    assert_eq!(draft.mentions, document.mention_intent());
-    assert!(
-        media_caption_from_composer_document(
-            Some(&ComposerDocument::from_plain_text("  \n  ")),
-            ComposerFormattingOptions::default()
-        )
-        .is_none()
-    );
 }

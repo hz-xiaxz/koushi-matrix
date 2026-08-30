@@ -10,35 +10,34 @@
 //! (Secret-bearing QA helpers remain behind `#[cfg(any(debug_assertions, test))]`.)
 
 use std::{
-    future::Future,
     path::PathBuf,
-    pin::Pin,
-    sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
+    sync::{
+        OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use koushi_core::{
-    AccountCommand, AccountEvent, AccountKey, AppCommand, CoreCommand, CoreConnection, CoreEvent,
-    CoreFailure, CreateRoomOptions, EncryptionDebugOperationOutcome, EventStreamLag,
-    ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,
-    ImageUploadVariantKind, IntentNoOpReason, IntentOutcome, MediaDownloadSelection,
-    PaginationDirection, RequestId, RoomCommand, RoomEvent, RoomKeyExportRequest,
-    RoomKeyImportRequest, RoomKeyReshareOutcome, SearchCommand, SearchEvent, SearchScope,
-    SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest, SyncCommand,
-    TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId, TimelineGeneration,
-    TimelineKey, TimelineKind, TimelineViewportObservation, UploadMediaKind, UploadMediaRequest,
-    UploadMediaThumbnail,
+    AccountCommand, AccountKey, AppCommand, CoreCommand, CoreConnection, CoreEvent, CoreFailure,
+    CreateRoomOptions, EncryptionDebugOperationKind, EncryptionDebugOperationOutcome,
+    IntentNoOpReason, IntentOutcome, MediaDownloadSelection, OutcomeCorrelation,
+    PaginationDirection, RequestId, RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation,
+    RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest, RoomKeyReshareOutcome,
+    RoomOperationKind, SearchCommand, SearchScope, SecureBackupPassphraseChangeRequest,
+    SecureBackupSetupRequest, SetAvatarRequest, SyncCommand, TimelineBatchId, TimelineCommand,
+    TimelineEvent, TimelineGapId, TimelineGeneration, TimelineKey, TimelineKind,
+    TimelineViewportObservation,
 };
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentSort, AuthSecret,
     ComposerDocument, ComposerDraftRevision, ComposerFormattingOptions, ComposerKeyEvent,
     ComposerResolvedAction, ComposerResolverContext, ComposerSurface, DirectoryQuery,
-    DisplayPlatform, FilesViewScope, FocusedContextState, IdentityResetAuthRequest,
-    ImageUploadCompressionMode, InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface,
-    PresenceKind, RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode,
-    RoomSettingChange, RoomTagKind, SessionInfo, SessionState, SettingsPatch,
-    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind, SubmissionId,
+    DisplayPlatform, FilesViewScope, IdentityResetAuthRequest, ImageUploadCompressionMode,
+    InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface, PresenceKind,
+    RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode, RoomSettingChange,
+    RoomTagKind, SessionInfo, SettingsPatch, StagedUploadCompressionChoice, SubmissionId,
     ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor, VerificationCancelReason,
     build_formatted_message_draft,
 };
@@ -51,6 +50,35 @@ use crate::{
 };
 
 static NEXT_TRANSACTION_ID: AtomicU64 = AtomicU64::new(1);
+static PROCESS_NONCE: OnceLock<u128> = OnceLock::new();
+
+pub(crate) fn next_transaction_id(prefix: &str) -> String {
+    let nonce = *PROCESS_NONCE.get_or_init(|| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must be after Unix epoch")
+            .as_nanos()
+            ^ u128::from(std::process::id())
+    });
+    format!(
+        "{prefix}-{nonce:x}-{}",
+        NEXT_TRANSACTION_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+#[cfg(test)]
+mod transaction_id_tests {
+    use super::next_transaction_id;
+
+    #[test]
+    fn transaction_ids_have_process_nonce_and_counter() {
+        let first = next_transaction_id("test");
+        let second = next_transaction_id("test");
+        assert!(first.starts_with("test-"));
+        assert_ne!(first, second);
+        assert!(first.rsplit_once('-').unwrap().1.parse::<u64>().is_ok());
+    }
+}
 
 const CORE_COMMAND_SUBMIT_TIMEOUT: Duration = Duration::from_secs(2);
 const QA_TITLE_ENV: &str = "KOUSHI_QA_TITLE";
@@ -108,6 +136,26 @@ async fn current_snapshot(state: &CoreRuntimeState) -> Result<FrontendDesktopSna
 
 pub(crate) fn invoke_error_from_core_failure(context: &str, failure: CoreFailure) -> String {
     format!("{context}: {failure:?}")
+}
+
+pub(crate) fn invoke_error_from_request_outcome(
+    context: &str,
+    error: RequestOutcomeError,
+) -> String {
+    match error {
+        RequestOutcomeError::OperationFailed { failure } => {
+            invoke_error_from_core_failure(context, failure)
+        }
+        RequestOutcomeError::FailedNoOp { reason } => {
+            format!("{context}: failed no-op ({reason:?})")
+        }
+        RequestOutcomeError::Lagged => format!("{context}: request event stream lagged"),
+        RequestOutcomeError::Disconnected => {
+            format!("{context}: request event stream disconnected")
+        }
+        RequestOutcomeError::TimedOut => format!("{context}: request timed out"),
+        RequestOutcomeError::InvalidOutcome => format!("{context}: invalid request outcome"),
+    }
 }
 
 // ---- QA window title ----

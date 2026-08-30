@@ -28,6 +28,9 @@ fn scripted_connection(
             connection_id,
             command_tx,
             composer_draft_leases: Arc::new(ComposerDraftLeaseRegistry::new()),
+            media_staging: Arc::new(MediaStagingService::new(Arc::new(
+                crate::media_preparation::MediaPreparationService::default(),
+            ))),
             event_rx,
             snapshot_rx,
             next_sequence: AtomicU64::new(1),
@@ -361,6 +364,9 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
         connection_id: RuntimeConnectionId(7),
         command_tx,
         composer_draft_leases: Arc::new(ComposerDraftLeaseRegistry::new()),
+        media_staging: Arc::new(MediaStagingService::new(Arc::new(
+            crate::media_preparation::MediaPreparationService::default(),
+        ))),
         event_rx,
         snapshot_rx,
         next_sequence: AtomicU64::new(1),

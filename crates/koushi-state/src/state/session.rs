@@ -110,6 +110,20 @@ pub struct VerificationGateState {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SecureBackupSetupIntent {
+    InitialSetup,
+    Reenable { confirmed: bool },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SecureBackupSetupAdmission {
+    Allowed,
+    ConfirmationRequired,
+    FailedNoOp,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SecureBackupGateFailureKind {
     Network,
@@ -159,6 +173,27 @@ pub enum SecureBackupGateState {
         failure: SecureBackupGateFailureKind,
     },
     Ready,
+}
+
+impl SecureBackupSetupIntent {
+    pub fn admission(self, gate: &SecureBackupGateState) -> SecureBackupSetupAdmission {
+        match (self, gate) {
+            (
+                Self::InitialSetup,
+                SecureBackupGateState::SetupRequired
+                | SecureBackupGateState::RecoveryKeyDeliveryRequired,
+            ) => SecureBackupSetupAdmission::Allowed,
+            (
+                Self::Reenable { confirmed: true },
+                SecureBackupGateState::ExplicitlyDisabledRequiresSetup,
+            ) => SecureBackupSetupAdmission::Allowed,
+            (
+                Self::Reenable { confirmed: false },
+                SecureBackupGateState::ExplicitlyDisabledRequiresSetup,
+            ) => SecureBackupSetupAdmission::ConfirmationRequired,
+            _ => SecureBackupSetupAdmission::FailedNoOp,
+        }
+    }
 }
 
 impl SecureBackupGateState {

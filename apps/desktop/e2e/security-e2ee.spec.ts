@@ -322,7 +322,8 @@ test("security settings drive Rust-owned room-key transfer and secure backup sta
     )
     .toEqual({
       passphrase: "[REDACTED]",
-      recoveryKeyDestinationPath: "[REDACTED]"
+      recoveryKeyDestinationPath: "[REDACTED]",
+      intent: { kind: "initialSetup" }
     });
 
   const passphraseChangeForm = page.getByRole("form", {

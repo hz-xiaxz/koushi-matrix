@@ -13,7 +13,10 @@ mod connection;
 mod navigation;
 mod profile_display_diagnostics;
 mod reducer_support;
+pub mod request_outcome;
 mod scheduled_send;
+#[cfg(test)]
+mod secure_backup_admission_tests;
 
 pub use composer::{COMPOSER_DRAFT_PERSIST_DEBOUNCE, ForwardedComposerDraftPermit};
 use composer::{
@@ -32,8 +35,14 @@ use navigation::{
 };
 use scheduled_send::scheduled_send_id;
 
+#[cfg(any(test, feature = "test-hooks"))]
+pub use connection::CoreConnectionTestControl;
 pub use connection::{
     CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag, SelectRoomError,
+};
+pub use request_outcome::{
+    OutcomeCorrelation, RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation,
+    RoomOperationKind,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::future;
@@ -49,9 +58,10 @@ use koushi_state::{
     AccountManagementOperation, ActivityRowKind, ActivityState, AppAction, AppEffect, AppState,
     ComposerDraftStore, ComposerTarget, LoginAttemptId, NavigationState, OperationFailureKind,
     ProfileUpdateRequest, ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem,
-    SearchScope as AppSearchScope, SessionState, SpaceMembersCommandRejection, ThreadOpenIntent,
-    ThreadPaneState, UiEvent, admit_space_member_cancellation, admit_space_member_invite,
-    admit_space_member_role, admit_space_members_load, reduce,
+    SearchScope as AppSearchScope, SecureBackupSetupAdmission, SessionState,
+    SpaceMembersCommandRejection, ThreadOpenIntent, ThreadPaneState, UiEvent,
+    admit_space_member_cancellation, admit_space_member_invite, admit_space_member_role,
+    admit_space_members_load, reduce,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
@@ -346,6 +356,7 @@ pub struct CoreRuntime {
     /// receives descriptors only; adapters may operate on this cache through
     /// the typed runtime boundary.
     media_preparation: Arc<crate::media_preparation::MediaPreparationService>,
+    media_staging: Arc<crate::media_staging::MediaStagingService>,
     media_lifecycle: AbortOnDrop<()>,
     #[cfg(any(test, feature = "test-hooks"))]
     account_actor_test_handle: AccountActorHandle,
@@ -577,6 +588,9 @@ impl CoreRuntime {
         let actor = executor::spawn(actor.run());
         let media_preparation =
             Arc::new(crate::media_preparation::MediaPreparationService::default());
+        let media_staging = Arc::new(crate::media_staging::MediaStagingService::new(Arc::clone(
+            &media_preparation,
+        )));
         let media_preparation_for_lifecycle = Arc::clone(&media_preparation);
         let mut media_snapshot_rx = snapshot_rx.clone();
         let media_lifecycle = executor::spawn(async move {
@@ -602,6 +616,7 @@ impl CoreRuntime {
             #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_test_tx,
             media_preparation,
+            media_staging,
             media_lifecycle: AbortOnDrop::new(media_lifecycle),
             #[cfg(any(test, feature = "test-hooks"))]
             account_actor_test_handle,
@@ -613,6 +628,10 @@ impl CoreRuntime {
 
     pub fn media_preparation(&self) -> &crate::media_preparation::MediaPreparationService {
         &self.media_preparation
+    }
+
+    pub fn media_staging(&self) -> &crate::media_staging::MediaStagingService {
+        &self.media_staging
     }
 
     pub fn sliding_sync_diagnostics(&self) -> crate::SlidingSyncDiagnosticsSnapshot {
@@ -743,6 +762,7 @@ impl CoreRuntime {
             #[cfg(any(test, feature = "test-hooks"))]
                 composer_draft_test_tx: _,
             media_preparation: _,
+            media_staging: _,
             mut media_lifecycle,
             #[cfg(any(test, feature = "test-hooks"))]
                 account_actor_test_handle: _,
@@ -1624,7 +1644,8 @@ impl AppActor {
                 .await;
                 let requires_projection_acceptance = matches!(
                     &account_command,
-                    AccountCommand::RestoreSession { .. }
+                    AccountCommand::BootstrapSecureBackup { .. }
+                        | AccountCommand::RestoreSession { .. }
                         | AccountCommand::RestoreLastSession { .. }
                         | AccountCommand::ResetLocalData { .. }
                         | AccountCommand::StartDeviceCleanup { .. }
@@ -1637,9 +1658,12 @@ impl AppActor {
                 );
                 let should_route = !requires_projection_acceptance || projected_state_changed;
                 if !should_route {
+                    let failure =
+                        secure_backup_setup_projection_failure(&self.state, &account_command)
+                            .unwrap_or(CoreFailure::SessionRequired);
                     self.emit(CoreEvent::OperationFailed {
                         request_id: command_request_id,
-                        failure: CoreFailure::SessionRequired,
+                        failure,
                     });
                     return false;
                 }
@@ -4144,6 +4168,28 @@ fn is_ready_session_for_commands(session: &SessionState) -> bool {
     matches!(session, SessionState::Ready(_))
 }
 
+fn secure_backup_setup_projection_failure(
+    state: &AppState,
+    command: &AccountCommand,
+) -> Option<CoreFailure> {
+    let AccountCommand::BootstrapSecureBackup { request, .. } = command else {
+        return None;
+    };
+    if matches!(
+        state.e2ee_trust.key_management.secure_backup_setup,
+        koushi_state::SecureBackupSetupState::SettingUp { .. }
+    ) {
+        return Some(CoreFailure::SecureBackupSetupFailedNoOp);
+    }
+    Some(match request.intent.admission(&state.secure_backup_gate) {
+        SecureBackupSetupAdmission::ConfirmationRequired => {
+            CoreFailure::SecureBackupSetupConfirmationRequired
+        }
+        SecureBackupSetupAdmission::Allowed => CoreFailure::SecureBackupSetupFailedNoOp,
+        SecureBackupSetupAdmission::FailedNoOp => CoreFailure::SecureBackupSetupFailedNoOp,
+    })
+}
+
 fn is_verification_gate_command(command: &CoreCommand, session: &SessionState) -> bool {
     if matches!(
         command,
@@ -4284,11 +4330,13 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
                 request_id: request_id.sequence,
             })
         }
-        AccountCommand::BootstrapSecureBackup { request_id, .. } => {
-            Some(AppAction::SecureBackupSetupRequested {
-                request_id: request_id.sequence,
-            })
-        }
+        AccountCommand::BootstrapSecureBackup {
+            request_id,
+            request,
+        } => Some(AppAction::SecureBackupSetupRequested {
+            request_id: request_id.sequence,
+            intent: request.intent,
+        }),
         AccountCommand::RecoverSecureBackup { .. }
         | AccountCommand::RetrySecureBackupInspection { .. } => Some(
             AppAction::SecureBackupGateChanged(koushi_state::SecureBackupGateState::Checking),

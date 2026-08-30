@@ -31,6 +31,7 @@ import type {
   RoomTagKind,
   SavedSessionInfo,
   SearchScopeKind,
+  SecureBackupSetupIntent,
   SessionStatusRefreshTrigger,
   SettingsPatch,
   StageUploadBytesRequestItem,
@@ -39,7 +40,6 @@ import type {
   SubmissionResponse,
   ThreadOpenIntent,
   ThreadsListScope,
-  UploadStagingRequestItem
 } from "../domain/types";
 import type { DiagnosticLogSnapshot } from "../domain/diagnostics";
 import type {
@@ -120,14 +120,6 @@ export interface DesktopApi {
   submitRecovery(secret: string): Promise<DesktopSnapshot>;
   /** Dedicated Secure Backup commands. */
   recoverSecureBackup: (secret: string) => Promise<DesktopSnapshot>;
-  setupSecureBackup: (
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
-  ) => Promise<DesktopSnapshot>;
-  reenableSecureBackup: (
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
-  ) => Promise<DesktopSnapshot>;
   retrySecureBackupInspection: () => Promise<DesktopSnapshot>;
   startDeviceCleanup(): Promise<DesktopSnapshot>;
   submitDeviceCleanupUia(flowId: number, password: string): Promise<DesktopSnapshot>;
@@ -153,7 +145,8 @@ export interface DesktopApi {
   importRoomKeys(sourcePath: string, passphrase: string): Promise<DesktopSnapshot>;
   bootstrapSecureBackup(
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
+    recoveryKeyDestinationPath: string | null,
+    intent: SecureBackupSetupIntent
   ): Promise<DesktopSnapshot>;
   changeSecureBackupPassphrase(
     oldSecret: string,
@@ -224,7 +217,6 @@ export interface DesktopApi {
     sendAtMs: number,
     draftRevision: ComposerDraftRevision
   ): Promise<ComposerDraftAcceptanceResponse>;
-  stageUploads(roomId: string, items: UploadStagingRequestItem[]): Promise<DesktopSnapshot>;
   stageUploadBytes(
     target: ComposerTarget,
     items: StageUploadBytesRequestItem[]
@@ -254,6 +246,7 @@ export interface DesktopApi {
     document: ComposerDocument | null
   ): Promise<DesktopSnapshot>;
   updateStagedUploadCompression(
+    target: ComposerTarget,
     stagedId: string,
     compressionChoice: StagedUploadCompressionChoice
   ): Promise<DesktopSnapshot>;

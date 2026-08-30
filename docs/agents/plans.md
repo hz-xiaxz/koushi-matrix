@@ -102,6 +102,7 @@ Phase A is Rust/headless work and comes before Phase B GUI wiring.
 | Deterministic settlement (#738) | [2026-08-28-issue-738-deterministic-settlement.md](../superpowers/plans/2026-08-28-issue-738-deterministic-settlement.md) | [2026-08-28-issue-738-deterministic-settlement.md](../superpowers/plans/2026-08-28-issue-738-deterministic-settlement.md) |
 | Canon and low-risk architecture cleanup (#750) | [2026-08-29-issue750-architecture-cleanup.md](../superpowers/plans/2026-08-29-issue750-architecture-cleanup.md) | — |
 | Rust source-contract and test-module cleanup (#753) | [2026-08-30-issue753-rust-test-structure.md](../superpowers/plans/2026-08-30-issue753-rust-test-structure.md) | — |
+| Thin Tauri adapter and Core-owned settlement (#755) | [2026-08-30-issue755-thin-tauri-adapter.md](../superpowers/plans/2026-08-30-issue755-thin-tauri-adapter.md) | [2026-08-30-issue755-thin-tauri-adapter.md](../superpowers/plans/2026-08-30-issue755-thin-tauri-adapter.md) |
 | Neutral DesktopApi contract (#552 Phase 2A) | [2026-08-28-issue552-neutral-desktop-api-contract.md](../superpowers/plans/2026-08-28-issue552-neutral-desktop-api-contract.md) | — |
 | External-link and media platform ports (#552 Phase 2B1) | [2026-08-28-issue552-link-media-platform-ports.md](../superpowers/plans/2026-08-28-issue552-link-media-platform-ports.md) | — |
 | Desktop attention platform port (#552 Phase 2B2) | [2026-08-28-issue552-desktop-attention-platform-port.md](../superpowers/plans/2026-08-28-issue552-desktop-attention-platform-port.md) | — |

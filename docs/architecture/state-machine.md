@@ -40,6 +40,20 @@ reset/reconnect, or explicit command-response projections only. A delta
 generation gap forces a full-snapshot reset whose `state_generation` restores
 ordering before later deltas apply.
 
+### Core request outcomes (Phase A, issue #755)
+
+The Core request-outcome service is runtime settlement infrastructure, not a
+reducer state machine. `CoreConnection::wait_for_request_outcome` consumes
+closed typed expectations, treats events as wake/payload signals, and accepts
+only exact request, account, timeline/target, and (where applicable)
+submission correlations against the authoritative versioned snapshot. It uses
+one absolute deadline and one final snapshot check after timeout, disconnect,
+or lag; expectation-specific lag policy distinguishes recoverable lag from
+terminal `Lagged`. `select_room_and_wait` delegates to this service without
+changing its behavior. No `AppState`, `AppAction`, reducer transition, or
+Tauri waiter migration is part of Phase A; later issue #755 phases consume the
+service from adapters.
+
 Reducer guard phrase: "Ready session" means exactly `SessionState::Ready(_)`:
 the SDK has authoritatively reported that the current device is verified.
 Authenticated provisional, awaiting-verification, verifying, and rejecting
@@ -381,9 +395,24 @@ stateDiagram-v2
   degradation retain normal use; an inconclusive initial inspection does not.
   Account/session generation fencing occurs in `AccountActor` before reducer
   projection.
-- Setup after an explicitly disabled state requires a separate user command;
-  the UI states that re-enabling the account-wide backup setting changes the
-  behavior observed by the user's other Matrix clients.
+- Secure-backup setup admission is Rust-owned and uses the closed
+  `SecureBackupSetupIntent`. `InitialSetup` is admitted only by `SetupRequired`
+  or recovery-key delivery retry; `Reenable { confirmed: true }` is admitted
+  only by `ExplicitlyDisabledRequiresSetup`. Initial setup, unconfirmed
+  re-enable, duplicate setup, and stale/forged confirmation produce a typed
+  confirmation-required or failed-no-op result before `AccountActor` routing.
+  The SDK's fresh server/local/trust inspection remains authoritative and may
+  still require confirmation. React renders catalog text, cancel sends no
+  command, confirm sends the explicit typed intent, and Tauri only maps it.
+
+```mermaid
+stateDiagram-v2
+    ExplicitlyDisabledRequiresSetup --> ExplicitlyDisabledRequiresSetup: InitialSetup or Reenable(unconfirmed) / typed reject, no actor effect
+    ExplicitlyDisabledRequiresSetup --> CreatingBackup: Reenable(confirmed) / project admission then route
+    SetupRequired --> CreatingBackup: InitialSetup / project admission then route
+    SetupRequired --> SetupRequired: Reenable(any) / failed-no-op, no actor effect
+    CreatingBackup --> CreatingBackup: duplicate intent / failed-no-op, no actor effect
+```
 - A genuine missing cross-signing identity may enter mandatory bootstrap. An
   existing identity without a verified other device or usable recovery method
   enters `Rejecting`; identity reset, skip, and verify-later are not gate exits.
@@ -1143,6 +1172,11 @@ QuiescentTombstone only after the final touching activation/command lease
 settles while the target is inactive. QuiescentTombstone is the only state that
 quota collection may remove. A retired renderer generation cannot reacquire or
 deliver a command; a fresh generation rehydrates Rust state before admission.
+Issue #755 Phase D leaves this state machine unchanged while removing the Tauri
+identity mirror: canonical nonzero decimal wire tokens are parsed into opaque
+Core identities, then the live Core registry revalidates generation, lease,
+Ready account, exact active target, scope, and permit kind. Parsing alone never
+moves state or grants authority.
 
 ```mermaid
 stateDiagram-v2
@@ -2007,6 +2041,20 @@ stateDiagram-v2
   keyed by `(ComposerTarget, staged_id, variant_id)` and are cleared on remove,
   close, navigation, logout, send, or stale-target settlement. React renders
   the projection and requests previews; it owns no attachment state machine.
+- Issue #755 Phase B makes `MediaStagingService` the production Core runtime owner for
+  staging, selection, retry, caption/compression mutation, original adoption,
+  and replacement orchestration. It publishes `Preparing`, performs detached
+  preparation through the Core executor, and revalidates account, target,
+  staged-id residency, and selection generation before registry/state commit.
+  This is an ownership change only: it reuses these existing reducer actions
+  and adds no `AppState`, `AppAction`, or reducer transition. Per-target
+  admission serializes mutations, and preview/send methods validate the same
+  account/target/item/lease/revision fences before returning bytes or accepting
+  media send. Tauri is transport serialization only.
+- Issue #755 Phase C adds no `AppState`, `AppAction`, or reducer transition.
+  Saving a downloaded file is a Core policy operation over the adapter-owned
+  filesystem port: its canonical containment and copy admission are not
+  product state, and paths never cross the command/event/snapshot boundary.
 - Room media gallery state is Rust-owned. `AppState.media_gallery` is the
   reducer backing store and is not serialized directly; the selected-room
   projection is `TimelinePaneState.media_gallery`, ordered by Rust from media

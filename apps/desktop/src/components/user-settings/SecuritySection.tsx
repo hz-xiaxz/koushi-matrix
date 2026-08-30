@@ -28,6 +28,7 @@ import type {
   RoomKeyExportState,
   RoomKeyImportState,
   SecureBackupPassphraseChangeState,
+  SecureBackupSetupIntent,
   SecureBackupSetupState
 } from "../../domain/types";
 
@@ -56,7 +57,8 @@ export function SecuritySection({
   onChooseSecureBackupDestination: () => Promise<string | null>;
   onBootstrapSecureBackup: (
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
+    recoveryKeyDestinationPath: string | null,
+    intent: SecureBackupSetupIntent
   ) => void;
   onChangeSecureBackupPassphrase: (
     oldSecret: string,
@@ -123,7 +125,11 @@ export function SecuritySection({
     if (!recoveryPath) {
       return;
     }
-    onBootstrapSecureBackup(passphrase.length > 0 ? passphrase : null, recoveryPath);
+    onBootstrapSecureBackup(
+      passphrase.length > 0 ? passphrase : null,
+      recoveryPath,
+      { kind: "initialSetup" }
+    );
     if (secureBackupPassphraseRef.current) {
       secureBackupPassphraseRef.current.value = "";
     }

@@ -86,10 +86,12 @@ pub async fn select_room(
 ) -> Result<FrontendDesktopSnapshot, String> {
     let selected_room_id = room_id.clone();
     let mut event_conn = state.runtime.attach();
-    let selected_snapshot = event_conn
+    event_conn
         .select_room_and_wait(selected_room_id.clone(), SELECT_ROOM_EVENT_TIMEOUT)
         .await
         .map_err(invoke_error_from_select_room_error)?;
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let refresh_request_id = event_conn.next_request_id();
     event_conn
         .command(build_refresh_pinned_events_command(
@@ -98,27 +100,21 @@ pub async fn select_room(
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
+    let snapshot = wait_for_room_operation(
         &mut event_conn,
         refresh_request_id,
+        baseline.generation,
+        account_key,
+        selected_room_id,
+        RoomOperationKind::PinnedEventsRefreshed,
         ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, _| {
-            matches!(
-                event,
-                RoomEvent::PinnedEventsUpdated {
-                    room_id: updated_room_id,
-                    ..
-                } if updated_room_id == &selected_room_id
-            )
-        },
-        "pinned messages refresh did not complete",
-        "pinned messages refresh failed",
+        "pinned messages refresh",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(FrontendDesktopSnapshot::from_versioned(
-        selected_snapshot.state,
-        selected_snapshot.generation,
+        snapshot.state,
+        snapshot.generation,
     ))
 }
 
@@ -160,6 +156,11 @@ async fn open_anchored_timeline(
     allow_live_fallback: bool,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let operation_snapshot = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&operation_snapshot.state);
+    let close_room_id = operation_snapshot.state.navigation.active_room_id.clone();
+    let close_baseline_generation = operation_snapshot.generation;
+    let close_deadline = tokio::time::Instant::now() + FOCUSED_CONTEXT_EVENT_TIMEOUT;
 
     let close_request_id = event_conn.next_request_id();
     event_conn
@@ -171,7 +172,10 @@ async fn open_anchored_timeline(
     wait_for_focused_context_closed(
         &mut event_conn,
         close_request_id,
-        FOCUSED_CONTEXT_EVENT_TIMEOUT,
+        account_key.clone(),
+        close_room_id,
+        close_baseline_generation,
+        close_deadline,
     )
     .await?;
 
@@ -180,6 +184,15 @@ async fn open_anchored_timeline(
         .await
         .map_err(invoke_error_from_select_room_error)?;
 
+    let anchor_baseline_generation = event_conn.versioned_snapshot().generation;
+    let anchor_key = TimelineKey {
+        account_key,
+        kind: koushi_core::TimelineKind::Focused {
+            room_id: room_id.clone(),
+            event_id: event_id.clone(),
+        },
+    };
+    let anchor_deadline = tokio::time::Instant::now() + FOCUSED_CONTEXT_EVENT_TIMEOUT;
     let open_request_id = event_conn.next_request_id();
     event_conn
         .command(CoreCommand::App(AppCommand::OpenAnchoredTimeline {
@@ -193,10 +206,11 @@ async fn open_anchored_timeline(
     let anchored_snapshot = wait_for_main_timeline_anchor(
         &mut event_conn,
         open_request_id,
-        &room_id,
-        &event_id,
+        anchor_key,
+        event_id,
         allow_live_fallback,
-        FOCUSED_CONTEXT_EVENT_TIMEOUT,
+        anchor_baseline_generation,
+        anchor_deadline,
     )
     .await?;
 
@@ -261,6 +275,11 @@ pub async fn close_focused_context(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let mut event_conn = state.runtime.attach();
+    let baseline_snapshot = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline_snapshot.state);
+    let room_id = baseline_snapshot.state.navigation.active_room_id.clone();
+    let baseline_generation = baseline_snapshot.generation;
+    let deadline = tokio::time::Instant::now() + FOCUSED_CONTEXT_EVENT_TIMEOUT;
     let request_id = event_conn.next_request_id();
     event_conn
         .command(CoreCommand::App(AppCommand::CloseFocusedContext {
@@ -268,8 +287,15 @@ pub async fn close_focused_context(
         }))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_focused_context_closed(&mut event_conn, request_id, FOCUSED_CONTEXT_EVENT_TIMEOUT)
-        .await?;
+    wait_for_focused_context_closed(
+        &mut event_conn,
+        request_id,
+        account_key,
+        room_id,
+        baseline_generation,
+        deadline,
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     current_snapshot(state.inner()).await
 }
@@ -281,13 +307,16 @@ pub async fn open_timeline_at_timestamp(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    let focused_room_id = room_id.clone();
     let mut event_conn = state.runtime.attach();
+    let baseline_snapshot = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline_snapshot.state);
+    let baseline_generation = baseline_snapshot.generation;
+    let deadline = tokio::time::Instant::now() + FOCUSED_CONTEXT_EVENT_TIMEOUT;
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_open_timeline_at_timestamp_command(
             request_id,
-            room_id,
+            room_id.clone(),
             timestamp_ms,
         ))
         .await
@@ -295,8 +324,11 @@ pub async fn open_timeline_at_timestamp(
     wait_for_focused_context(
         &mut event_conn,
         request_id,
-        &focused_room_id,
-        FOCUSED_CONTEXT_EVENT_TIMEOUT,
+        account_key,
+        room_id,
+        None,
+        baseline_generation,
+        deadline,
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
@@ -378,227 +410,104 @@ pub async fn observe_timeline_viewport(
     Ok(())
 }
 
-pub(super) trait SelectEventSource {
-    fn snapshot(&self) -> koushi_state::AppState;
-
-    fn recv_event(
-        &mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<CoreEvent, EventStreamLag>> + Send + '_>>;
-}
-
-impl SelectEventSource for CoreConnection {
-    fn snapshot(&self) -> koushi_state::AppState {
-        CoreConnection::snapshot(self)
-    }
-
-    fn recv_event(
-        &mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<CoreEvent, EventStreamLag>> + Send + '_>> {
-        Box::pin(CoreConnection::recv_event(self))
-    }
-}
-
-fn snapshot_has_focused_context(snapshot: &koushi_state::AppState, room_id: &str) -> bool {
-    match &snapshot.focused_context {
-        FocusedContextState::Opening {
-            room_id: focused_room_id,
-            ..
-        }
-        | FocusedContextState::Open {
-            room_id: focused_room_id,
-            ..
-        } => focused_room_id == room_id,
-        FocusedContextState::Closed => false,
-    }
-}
-
-fn snapshot_has_no_focused_context(snapshot: &koushi_state::AppState) -> bool {
-    snapshot.focused_context == FocusedContextState::Closed
-        && snapshot.navigation.main_timeline_anchor.is_none()
-}
-
-fn snapshot_has_main_timeline_anchor(
-    snapshot: &koushi_state::AppState,
-    room_id: &str,
-    event_id: &str,
-) -> bool {
-    snapshot.navigation.active_room_id.as_deref() == Some(room_id)
-        && snapshot
-            .navigation
-            .main_timeline_anchor
-            .as_ref()
-            .is_some_and(|anchor| anchor.event_id == event_id)
-}
-
-fn snapshot_has_live_main_timeline(snapshot: &koushi_state::AppState, room_id: &str) -> bool {
-    snapshot.navigation.active_room_id.as_deref() == Some(room_id)
-        && snapshot.focused_context == FocusedContextState::Closed
-        && snapshot.navigation.main_timeline_anchor.is_none()
-}
-
-fn snapshot_matches_main_timeline_settlement(
-    snapshot: &koushi_state::AppState,
-    room_id: &str,
-    event_id: &str,
-    settlement: Option<MainTimelineSettlement>,
-) -> bool {
-    match settlement {
-        Some(MainTimelineSettlement::Anchor) | None => {
-            snapshot_has_main_timeline_anchor(snapshot, room_id, event_id)
-        }
-        Some(MainTimelineSettlement::LiveFallback) => {
-            snapshot_has_live_main_timeline(snapshot, room_id)
-        }
-    }
-}
-
 async fn wait_for_focused_context_closed(
     event_conn: &mut CoreConnection,
     request_id: RequestId,
-    timeout: std::time::Duration,
-) -> Result<(), String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-
-    loop {
-        if snapshot_has_no_focused_context(&event_conn.snapshot()) {
-            return Ok(());
-        }
-
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "focused context did not close".to_owned())?;
-        match event {
-            Ok(CoreEvent::StateChanged(snapshot)) if snapshot_has_no_focused_context(&snapshot) => {
-                return Ok(());
+    account_key: AccountKey,
+    room_id: Option<String>,
+    baseline_generation: u64,
+    deadline: tokio::time::Instant,
+) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::FocusedContextClosed {
+                request_id,
+                account_key,
+                room_id,
+                allow_projection_only: true,
+            },
+            baseline_generation,
+            deadline,
+        )
+        .await
+        .map_err(|error| match error {
+            RequestOutcomeError::OperationFailed { failure } => {
+                invoke_error_from_core_failure("focused context close", failure)
             }
-            Ok(CoreEvent::OperationFailed {
-                request_id: failed_request_id,
-                failure,
-            }) if failed_request_id == request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "focused context close failed",
-                    failure,
-                ));
-            }
-            Ok(_) => {}
-            Err(_) if snapshot_has_no_focused_context(&event_conn.snapshot()) => {
-                return Ok(());
-            }
-            Err(_) => continue,
-        }
+            error => invoke_error_from_request_outcome("focused context close", error),
+        })?;
+    match outcome {
+        RequestOutcome::FocusedContext { snapshot } => Ok(snapshot),
+        _ => Err("focused context close returned an invalid outcome".to_owned()),
     }
 }
 
 async fn wait_for_focused_context(
     event_conn: &mut CoreConnection,
     request_id: RequestId,
-    room_id: &str,
-    timeout: std::time::Duration,
-) -> Result<(), String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-
-    loop {
-        if snapshot_has_focused_context(&event_conn.snapshot(), room_id) {
-            return Ok(());
-        }
-
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "focused context did not open".to_owned())?;
-        match event {
-            Ok(CoreEvent::StateChanged(snapshot))
-                if snapshot_has_focused_context(&snapshot, room_id) =>
-            {
-                return Ok(());
+    account_key: AccountKey,
+    room_id: String,
+    event_id: Option<String>,
+    baseline_generation: u64,
+    deadline: tokio::time::Instant,
+) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::FocusedContextOpened {
+                request_id,
+                account_key,
+                room_id,
+                event_id,
+            },
+            baseline_generation,
+            deadline,
+        )
+        .await
+        .map_err(|error| match error {
+            RequestOutcomeError::OperationFailed { failure } => {
+                invoke_error_from_core_failure("focused context open", failure)
             }
-            Ok(CoreEvent::OperationFailed {
-                request_id: failed_request_id,
-                failure,
-            }) if failed_request_id == request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "focused context open failed",
-                    failure,
-                ));
-            }
-            Ok(_) => {}
-            Err(_) if snapshot_has_focused_context(&event_conn.snapshot(), room_id) => {
-                return Ok(());
-            }
-            Err(_) => continue,
-        }
+            error => invoke_error_from_request_outcome("focused context open", error),
+        })?;
+    match outcome {
+        RequestOutcome::FocusedContext { snapshot } => Ok(snapshot),
+        _ => Err("focused context open returned an invalid outcome".to_owned()),
     }
 }
 
 async fn wait_for_main_timeline_anchor(
     event_conn: &mut CoreConnection,
     request_id: RequestId,
-    room_id: &str,
-    event_id: &str,
+    key: TimelineKey,
+    event_id: String,
     allow_live_fallback: bool,
-    timeout: std::time::Duration,
+    baseline_generation: u64,
+    deadline: tokio::time::Instant,
 ) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    let mut settlement = None;
-
-    loop {
-        let current = event_conn.versioned_snapshot();
-        if snapshot_matches_main_timeline_settlement(&current.state, room_id, event_id, settlement)
-        {
-            return Ok(current);
-        }
-
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "main timeline anchor did not open".to_owned())?;
-        match event {
-            Ok(CoreEvent::StateChanged(_)) => {}
-            Ok(CoreEvent::IntentLifecycle {
-                request_id: settled_request_id,
-                outcome: IntentOutcome::Committed,
-                ..
-            }) if settled_request_id == request_id => {
-                settlement = Some(MainTimelineSettlement::Anchor);
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::MainTimelineAnchor {
+                request_id,
+                key,
+                event_id,
+                allow_live_fallback,
+            },
+            baseline_generation,
+            deadline,
+        )
+        .await
+        .map_err(|error| match error {
+            RequestOutcomeError::OperationFailed { failure } => {
+                invoke_error_from_core_failure("main timeline anchor", failure)
             }
-            Ok(CoreEvent::IntentLifecycle {
-                request_id: settled_request_id,
-                outcome: IntentOutcome::BenignNoOp(IntentNoOpReason::TimelineTargetMissing),
-                ..
-            }) if settled_request_id == request_id => {
-                if allow_live_fallback {
-                    settlement = Some(MainTimelineSettlement::LiveFallback);
-                } else {
-                    return Err("pinned event is not available in the timeline".to_owned());
-                }
-            }
-            Ok(CoreEvent::IntentLifecycle {
-                request_id: settled_request_id,
-                outcome: IntentOutcome::FailedNoOp(_),
-                ..
-            }) if settled_request_id == request_id => {
-                return Err("main timeline anchor open failed".to_owned());
-            }
-            Ok(CoreEvent::OperationFailed {
-                request_id: failed_request_id,
-                failure,
-            }) if failed_request_id == request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "main timeline anchor open failed",
-                    failure,
-                ));
-            }
-            Ok(_) => {}
-            Err(_) => {
-                let current = event_conn.versioned_snapshot();
-                if snapshot_matches_main_timeline_settlement(
-                    &current.state,
-                    room_id,
-                    event_id,
-                    settlement,
-                ) {
-                    return Ok(current);
-                }
-            }
-        }
+            error => invoke_error_from_request_outcome("main timeline anchor", error),
+        })?;
+    match outcome {
+        RequestOutcome::MainTimelineAnchor { snapshot } => Ok(snapshot),
+        _ => Err("main timeline anchor returned an invalid outcome".to_owned()),
     }
 }
 
@@ -637,12 +546,6 @@ pub(super) const SELECT_ROOM_EVENT_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(10);
 
 const FOCUSED_CONTEXT_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
-
-#[derive(Clone, Copy)]
-enum MainTimelineSettlement {
-    Anchor,
-    LiveFallback,
-}
 
 #[cfg(test)]
 mod tests {
@@ -790,52 +693,42 @@ mod tests {
             }]
         );
     }
-}
 
-#[cfg(test)]
-mod issue551_moved_tests {
-    use koushi_state::AppState;
-
-    #[test]
-    fn main_timeline_lifecycle_requires_the_matching_settled_snapshot() {
-        let room_id = "!room:example.invalid";
-        let event_id = "$event:example.invalid";
-        let mut state = AppState::default();
-        state.navigation.active_room_id = Some(room_id.to_owned());
-
-        assert!(!super::snapshot_matches_main_timeline_settlement(
-            &state,
-            room_id,
-            event_id,
-            Some(super::MainTimelineSettlement::Anchor),
-        ));
-        state.navigation.main_timeline_anchor = Some(koushi_state::MainTimelineAnchor {
-            event_id: event_id.to_owned(),
+    #[tokio::test]
+    async fn focused_context_close_wait_uses_core_outcome_guards() {
+        let (mut connection, control) = CoreConnection::new_for_testing(4);
+        let request_id = fake_request_id(44);
+        let account_key = AccountKey("@alice:example.org".to_owned());
+        let room_id = Some("!room:example.org".to_owned());
+        let mut state = koushi_state::AppState::default();
+        state.session = koushi_state::SessionState::Ready(koushi_state::SessionInfo {
+            homeserver: "https://example.org".to_owned(),
+            user_id: account_key.0.clone(),
+            device_id: "DEVICE".to_owned(),
+            authentication_method: Default::default(),
         });
-        assert!(super::snapshot_matches_main_timeline_settlement(
-            &state,
-            room_id,
-            event_id,
-            Some(super::MainTimelineSettlement::Anchor),
-        ));
-
-        state.navigation.main_timeline_anchor = None;
-        state.focused_context = koushi_state::FocusedContextState::Opening {
-            room_id: room_id.to_owned(),
-            event_id: event_id.to_owned(),
-        };
-        assert!(!super::snapshot_matches_main_timeline_settlement(
-            &state,
-            room_id,
-            event_id,
-            Some(super::MainTimelineSettlement::LiveFallback),
-        ));
+        state.navigation.active_room_id = room_id.clone();
         state.focused_context = koushi_state::FocusedContextState::Closed;
-        assert!(super::snapshot_matches_main_timeline_settlement(
-            &state,
+        control.send_event(CoreEvent::IntentLifecycle {
+            request_id,
+            outcome: IntentOutcome::Committed,
+            published_generation: 1,
+        });
+        control.send_snapshot(koushi_core::event::VersionedAppStateSnapshot {
+            generation: 1,
+            state,
+        });
+
+        let snapshot = wait_for_focused_context_closed(
+            &mut connection,
+            request_id,
+            account_key,
             room_id,
-            event_id,
-            Some(super::MainTimelineSettlement::LiveFallback),
-        ));
+            0,
+            tokio::time::Instant::now() + std::time::Duration::from_secs(1),
+        )
+        .await
+        .expect("focused close should settle through Core");
+        assert_eq!(snapshot.generation, 1);
     }
 }

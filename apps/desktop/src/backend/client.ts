@@ -37,7 +37,6 @@ import type {
   StagedUploadCompressionChoice,
   StagedUploadOutputSelection,
   StageUploadBytesRequestItem,
-  UploadStagingRequestItem,
   AttachmentFilter,
   AttachmentSort,
   CreateRoomRequest,
@@ -241,31 +240,13 @@ export class TauriDesktopApi implements DesktopApi {
 
   async bootstrapSecureBackup(
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
+    recoveryKeyDestinationPath: string | null,
+    intent: import("../domain/types").SecureBackupSetupIntent
   ): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("bootstrap_secure_backup", {
       passphrase,
-      recoveryKeyDestinationPath
-    });
-  }
-
-  async setupSecureBackup(
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("bootstrap_secure_backup", {
-      passphrase,
-      recoveryKeyDestinationPath
-    });
-  }
-
-  async reenableSecureBackup(
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("reenable_secure_backup", {
-      passphrase,
-      recoveryKeyDestinationPath
+      recoveryKeyDestinationPath,
+      intent
     });
   }
 
@@ -418,13 +399,6 @@ export class TauriDesktopApi implements DesktopApi {
     });
   }
 
-  async stageUploads(
-    roomId: string,
-    items: UploadStagingRequestItem[]
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("stage_uploads", { roomId, items });
-  }
-
   async stageUploadBytes(
     target: ComposerTarget,
     items: StageUploadBytesRequestItem[]
@@ -493,10 +467,12 @@ export class TauriDesktopApi implements DesktopApi {
   }
 
   async updateStagedUploadCompression(
+    target: ComposerTarget,
     stagedId: string,
     compressionChoice: StagedUploadCompressionChoice
   ): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("update_staged_upload_compression", {
+      target,
       stagedId,
       compressionChoice
     });

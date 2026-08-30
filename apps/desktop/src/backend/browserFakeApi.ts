@@ -123,7 +123,6 @@ import type {
   ThreadOpenIntent,
   ThreadsListItem,
   ThreadsListScope,
-  UploadStagingRequestItem,
   AttachmentFilter,
   AttachmentScope,
   AttachmentSort,
@@ -172,8 +171,7 @@ export type BrowserFakeApiContract = DesktopApi &
     Pick<
       DesktopApi,
       | "recoverSecureBackup"
-      | "setupSecureBackup"
-      | "reenableSecureBackup"
+      | "bootstrapSecureBackup"
       | "retrySecureBackupInspection"
     >
   >;
@@ -648,33 +646,6 @@ class BrowserFakeApi implements DesktopApi {
     return this.getSnapshot();
   }
 
-  async setupSecureBackup(
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
-  ): Promise<DesktopSnapshot> {
-    if (!this.isReady()) {
-      return this.getSnapshot();
-    }
-
-    void passphrase;
-    void recoveryKeyDestinationPath;
-    this.snapshot.state.domain.secure_backup_gate = { kind: "ready" };
-    return this.getSnapshot();
-  }
-
-  async reenableSecureBackup(
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
-  ): Promise<DesktopSnapshot> {
-    if (!this.isReady()) {
-      return this.getSnapshot();
-    }
-
-    void passphrase;
-    void recoveryKeyDestinationPath;
-    this.snapshot.state.domain.secure_backup_gate = { kind: "ready" };
-    return this.getSnapshot();
-  }
 
   async retrySecureBackupInspection(): Promise<DesktopSnapshot> {
     if (!this.isReady()) {
@@ -1103,13 +1074,15 @@ class BrowserFakeApi implements DesktopApi {
 
   async bootstrapSecureBackup(
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null
+    recoveryKeyDestinationPath: string | null,
+    intent: import("../domain/types").SecureBackupSetupIntent
   ): Promise<DesktopSnapshot> {
     if (!this.isReady()) {
       return this.getSnapshot();
     }
 
     void passphrase;
+    void intent;
     this.snapshot.state.domain.e2ee_trust.key_management.secure_backup_setup = {
       kind: "recoveryKeyReady",
       request_id: this.nextRequestId(),
@@ -1562,29 +1535,6 @@ class BrowserFakeApi implements DesktopApi {
     return { acceptedRevision, snapshot: await this.getSnapshot() };
   }
 
-  async stageUploads(
-    roomId: string,
-    items: UploadStagingRequestItem[]
-  ): Promise<DesktopSnapshot> {
-    if (!this.canUseSyncedViews() || this.snapshot.state.ui.timeline.room_id !== roomId) {
-      return this.getSnapshot();
-    }
-    this.clearPreparedUploadBytes({ kind: "main", room_id: roomId });
-    this.snapshot.state.ui.timeline.staged_uploads = items.map((item, index) => ({
-      staged_id: item.stagedId,
-      room_id: roomId,
-      position: item.position || index + 1,
-      filename: item.filename.trim() || "attachment",
-      mime_type: item.mimeType.trim() || "application/octet-stream",
-      byte_count: Math.max(0, Math.floor(item.byteCount)),
-      kind: item.kind,
-      caption: null,
-      compression_choice: item.compressionChoice,
-      preparation: { kind: "preparing" }
-    }));
-    return this.getSnapshot();
-  }
-
   async stageUploadBytes(
     target: ComposerTarget,
     items: StageUploadBytesRequestItem[]
@@ -1759,17 +1709,19 @@ class BrowserFakeApi implements DesktopApi {
   }
 
   async updateStagedUploadCompression(
+    target: ComposerTarget,
     stagedId: string,
     compressionChoice: StagedUploadCompressionChoice
   ): Promise<DesktopSnapshot> {
-    if (!this.canUseSyncedViews()) {
+    if (!this.canUseSyncedViews() || !browserComposerTargetIsActive(this.snapshot, target)) {
       return this.getSnapshot();
     }
-    this.snapshot.state.ui.timeline.staged_uploads = this.snapshot.state.ui.timeline.staged_uploads.map(
-      (item) =>
-        item.staged_id === stagedId
-          ? { ...item, compression_choice: compressionChoice }
-          : item
+    setBrowserStagedUploadsForTarget(
+      this.snapshot,
+      target,
+      browserStagedUploadsForTarget(this.snapshot, target).map((item) =>
+        item.staged_id === stagedId ? { ...item, compression_choice: compressionChoice } : item
+      )
     );
     return this.getSnapshot();
   }
