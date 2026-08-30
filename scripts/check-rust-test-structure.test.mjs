@@ -37,6 +37,7 @@ import {
   checkCoreTimelinePaginationScheduler,
   checkCoreTimelineSendSupervision,
   checkCoreTimelineThreadReadReceipts,
+  checkDesktopEncryptionDebugDelegationContract,
   checkSdkLibrarySourceManifest,
   checkSdkRoomReadMarkerContract,
   checkSdkSessionBackupFence,
@@ -142,6 +143,7 @@ test("runs representative migrated state, SDK, and src-tauri source-contract rul
   assert.deepEqual(checkSdkSessionBackupFence(), []);
   assert.deepEqual(checkDesktopTauriCommandRegistrationContract(), []);
   assert.deepEqual(checkDesktopNativeWindowLifecycleContract(), []);
+  assert.deepEqual(checkDesktopEncryptionDebugDelegationContract(), []);
 });
 
 test("runs representative migrated core source-contract rules", () => {

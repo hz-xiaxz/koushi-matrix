@@ -19,16 +19,16 @@ use std::{
 
 use koushi_core::{
     AccountCommand, AccountEvent, AccountKey, AppCommand, CoreCommand, CoreConnection, CoreEvent,
-    CoreFailure, CreateRoomOptions, EncryptionDebugOperationOutcome, EventStreamLag,
-    ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,
-    ImageUploadVariantKind, IntentNoOpReason, IntentOutcome, MediaDownloadSelection,
-    OutcomeCorrelation, PaginationDirection, RequestId, RequestOutcome, RequestOutcomeError,
-    RequestOutcomeExpectation, RoomCommand, RoomEvent, RoomKeyExportRequest, RoomKeyImportRequest,
-    RoomKeyReshareOutcome, SearchCommand, SearchEvent, SearchScope,
-    SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest, SyncCommand,
-    TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId, TimelineGeneration,
-    TimelineKey, TimelineKind, TimelineViewportObservation, UploadMediaKind, UploadMediaRequest,
-    UploadMediaThumbnail,
+    CoreFailure, CreateRoomOptions, EncryptionDebugOperationKind, EncryptionDebugOperationOutcome,
+    EventStreamLag, ImageUploadCompressionPolicy, ImageUploadCompressionState,
+    ImageUploadDimensions, ImageUploadVariantKind, IntentNoOpReason, IntentOutcome,
+    MediaDownloadSelection, OutcomeCorrelation, PaginationDirection, RequestId, RequestOutcome,
+    RequestOutcomeError, RequestOutcomeExpectation, RoomCommand, RoomEvent, RoomKeyExportRequest,
+    RoomKeyImportRequest, RoomKeyReshareOutcome, RoomOperationKind, SearchCommand, SearchEvent,
+    SearchScope, SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
+    SyncCommand, TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId,
+    TimelineGeneration, TimelineKey, TimelineKind, TimelineViewportObservation, UploadMediaKind,
+    UploadMediaRequest, UploadMediaThumbnail,
 };
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{

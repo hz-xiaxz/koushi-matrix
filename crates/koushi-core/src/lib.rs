@@ -83,7 +83,7 @@ pub use ids::{
     AccountKey, RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration, TimelineKey,
     TimelineKind,
 };
-pub use koushi_state::MediaTransferProgress;
+pub use koushi_state::{EncryptionDebugOperationKind, MediaTransferProgress};
 pub use runtime::{
     COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandHandle, CoreConnection, CoreRuntime,
     EVENT_QUEUE_CAPACITY, EventStreamLag, OutcomeCorrelation, RequestOutcome, RequestOutcomeError,

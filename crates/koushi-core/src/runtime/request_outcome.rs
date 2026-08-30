@@ -7,7 +7,8 @@ use std::fmt;
 
 use koushi_state::{
     AppState, ComposerDraftRevision, ComposerTarget, FocusedContextState, InviteOperationState,
-    SearchScope, SessionState, SubmissionId,
+    InviteScopeSelection, SearchScope, SessionState, SpaceMemberInviteOutcome,
+    SpaceMemberRoleFailureKind, SubmissionId,
 };
 use tokio::sync::broadcast;
 
@@ -16,7 +17,7 @@ use crate::event::{
     AccountEvent, CoreEvent, IntentNoOpReason, IntentOutcome, RoomEvent, TimelineEvent,
     VersionedAppStateSnapshot,
 };
-use crate::failure::CoreFailure;
+use crate::failure::{CoreFailure, RoomFailureKind};
 use crate::ids::{AccountKey, RequestId, TimelineKey};
 
 #[derive(Clone, Eq, PartialEq)]
@@ -43,16 +44,49 @@ pub enum RoomOperationKind {
     MarkedAsUnread,
     RoomLeft,
     RoomForgotten,
-    RoomTagSet,
-    RoomTagRemoved,
-    PinEvent,
-    UnpinEvent,
+    RoomTagSet {
+        tag: koushi_state::RoomTagKind,
+    },
+    RoomTagRemoved {
+        tag: koushi_state::RoomTagKind,
+    },
+    PinEvent {
+        event_id: String,
+    },
+    UnpinEvent {
+        event_id: String,
+    },
+    PinnedEventsRefreshed,
+    RoomSettingsLoaded,
+    RoomSettingUpdated,
+    SpaceMembersLoaded {
+        generation: u64,
+    },
     MemberModerated {
         target_user_id: String,
+        action: koushi_state::RoomModerationAction,
     },
     MemberRoleUpdated {
         target_user_id: String,
     },
+    SpaceMemberInviteSettled {
+        target_user_id: String,
+        generation: u64,
+    },
+    SpaceMemberInviteCancellationSettled {
+        target_user_id: String,
+        generation: u64,
+    },
+    SpaceMemberRoleUpdated {
+        target_user_id: String,
+        generation: u64,
+    },
+    InviteBatch {
+        user_ids: Vec<String>,
+        scope: InviteScopeSelection,
+    },
+    DirectoryQuery,
+    DirectoryPreview,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -122,6 +156,15 @@ pub enum RequestOutcomeExpectation {
         account_key: AccountKey,
         room_id: String,
         query: String,
+        closed: bool,
+    },
+    DirectoryQuery {
+        request_id: RequestId,
+        account_key: AccountKey,
+    },
+    DirectoryPreview {
+        request_id: RequestId,
+        account_key: AccountKey,
     },
     RoomOperation {
         request_id: RequestId,
@@ -163,6 +206,17 @@ pub enum RequestOutcomeExpectation {
         request_id: RequestId,
         key: TimelineKey,
         transaction_id: String,
+    },
+    RoomKeyReshare {
+        request_id: RequestId,
+        account_key: AccountKey,
+        room_id: String,
+    },
+    EncryptionDebug {
+        request_id: RequestId,
+        account_key: AccountKey,
+        room_id: String,
+        kind: koushi_state::EncryptionDebugOperationKind,
     },
 }
 
@@ -223,6 +277,10 @@ pub enum RequestOutcome {
         request_id: RequestId,
         snapshot: VersionedAppStateSnapshot,
     },
+    Directory {
+        request_id: RequestId,
+        snapshot: VersionedAppStateSnapshot,
+    },
     RoomOperation {
         request_id: RequestId,
         snapshot: VersionedAppStateSnapshot,
@@ -256,6 +314,17 @@ pub enum RequestOutcome {
         request_id: RequestId,
         transaction_id: String,
         snapshot: VersionedAppStateSnapshot,
+    },
+    RoomKeyReshare {
+        request_id: RequestId,
+        room_id: String,
+        outcome: crate::event::RoomKeyReshareOutcome,
+    },
+    EncryptionDebug {
+        request_id: RequestId,
+        room_id: String,
+        kind: koushi_state::EncryptionDebugOperationKind,
+        outcome: koushi_state::EncryptionDebugOperationOutcome,
     },
 }
 
@@ -302,12 +371,24 @@ impl fmt::Debug for RoomOperationKind {
             Self::MarkedAsUnread => "MarkedAsUnread",
             Self::RoomLeft => "RoomLeft",
             Self::RoomForgotten => "RoomForgotten",
-            Self::RoomTagSet => "RoomTagSet",
-            Self::RoomTagRemoved => "RoomTagRemoved",
-            Self::PinEvent => "PinEvent",
-            Self::UnpinEvent => "UnpinEvent",
+            Self::RoomTagSet { .. } => "RoomTagSet",
+            Self::RoomTagRemoved { .. } => "RoomTagRemoved",
+            Self::PinEvent { .. } => "PinEvent",
+            Self::UnpinEvent { .. } => "UnpinEvent",
+            Self::PinnedEventsRefreshed => "PinnedEventsRefreshed",
+            Self::RoomSettingsLoaded => "RoomSettingsLoaded",
+            Self::RoomSettingUpdated => "RoomSettingUpdated",
+            Self::SpaceMembersLoaded { .. } => "SpaceMembersLoaded",
             Self::MemberModerated { .. } => "MemberModerated",
             Self::MemberRoleUpdated { .. } => "MemberRoleUpdated",
+            Self::SpaceMemberInviteSettled { .. } => "SpaceMemberInviteSettled",
+            Self::SpaceMemberInviteCancellationSettled { .. } => {
+                "SpaceMemberInviteCancellationSettled"
+            }
+            Self::SpaceMemberRoleUpdated { .. } => "SpaceMemberRoleUpdated",
+            Self::InviteBatch { .. } => "InviteBatch",
+            Self::DirectoryQuery => "DirectoryQuery",
+            Self::DirectoryPreview => "DirectoryPreview",
         };
         formatter
             .debug_tuple("RoomOperationKind")
@@ -333,6 +414,8 @@ impl fmt::Debug for RequestOutcomeExpectation {
             Self::DirectMessageStarted { .. } => "DirectMessageStarted",
             Self::RoomJoined { .. } => "RoomJoined",
             Self::InviteWorkflow { .. } => "InviteWorkflow",
+            Self::DirectoryQuery { .. } => "DirectoryQuery",
+            Self::DirectoryPreview { .. } => "DirectoryPreview",
             Self::RoomOperation { .. } => "RoomOperation",
             Self::SearchStarted { .. } => "SearchStarted",
             Self::SearchClosed { .. } => "SearchClosed",
@@ -340,6 +423,8 @@ impl fmt::Debug for RequestOutcomeExpectation {
             Self::ComposerAccepted { .. } => "ComposerAccepted",
             Self::Submission { .. } => "Submission",
             Self::PreparedMediaQueued { .. } => "PreparedMediaQueued",
+            Self::RoomKeyReshare { .. } => "RoomKeyReshare",
+            Self::EncryptionDebug { .. } => "EncryptionDebug",
         };
         formatter
             .debug_tuple("RequestOutcomeExpectation")
@@ -364,6 +449,7 @@ impl fmt::Debug for RequestOutcome {
             Self::DirectMessageStarted { .. } => "DirectMessageStarted",
             Self::RoomJoined { .. } => "RoomJoined",
             Self::InviteWorkflow { .. } => "InviteWorkflow",
+            Self::Directory { .. } => "Directory",
             Self::RoomOperation { .. } => "RoomOperation",
             Self::Search { .. } => "Search",
             Self::UploadStaging { .. } => "UploadStaging",
@@ -371,6 +457,8 @@ impl fmt::Debug for RequestOutcome {
             Self::SubmissionAccepted { .. } => "SubmissionAccepted",
             Self::SubmissionRejected { .. } => "SubmissionRejected",
             Self::PreparedMediaQueued { .. } => "PreparedMediaQueued",
+            Self::RoomKeyReshare { .. } => "RoomKeyReshare",
+            Self::EncryptionDebug { .. } => "EncryptionDebug",
         };
         formatter
             .debug_tuple("RequestOutcome")
@@ -415,13 +503,17 @@ impl RequestOutcomeExpectation {
             | Self::DirectMessageStarted { request_id, .. }
             | Self::RoomJoined { request_id, .. }
             | Self::InviteWorkflow { request_id, .. }
+            | Self::DirectoryQuery { request_id, .. }
+            | Self::DirectoryPreview { request_id, .. }
             | Self::RoomOperation { request_id, .. }
             | Self::SearchStarted { request_id, .. }
             | Self::SearchClosed { request_id, .. }
             | Self::UploadStaging { request_id, .. }
             | Self::ComposerAccepted { request_id, .. }
             | Self::Submission { request_id, .. }
-            | Self::PreparedMediaQueued { request_id, .. } => *request_id,
+            | Self::PreparedMediaQueued { request_id, .. }
+            | Self::RoomKeyReshare { request_id, .. }
+            | Self::EncryptionDebug { request_id, .. } => *request_id,
         }
     }
 
@@ -434,10 +526,14 @@ impl RequestOutcomeExpectation {
                 | Self::SearchClosed { .. }
                 | Self::RoomCreated { .. }
                 | Self::SpaceCreated { .. }
+                | Self::DirectoryQuery { .. }
+                | Self::DirectoryPreview { .. }
                 | Self::ComposerAccepted { .. }
                 | Self::Submission { .. }
                 | Self::PreparedMediaQueued { .. }
                 | Self::SavedSessions { .. }
+                | Self::RoomKeyReshare { .. }
+                | Self::EncryptionDebug { .. }
         )
     }
 }
@@ -609,8 +705,22 @@ enum EventProgress {
     },
     RoomOperation {
         request_id: RequestId,
+        room_id: String,
+        event_id: Option<String>,
+        user_id: Option<String>,
+        action: Option<koushi_state::RoomModerationAction>,
+        generation: Option<u64>,
+    },
+    InviteBatch {
+        request_id: RequestId,
+        room_id: String,
+        user_ids: Vec<String>,
+        scope: InviteScopeSelection,
     },
     InviteWorkflow {
+        request_id: RequestId,
+    },
+    Directory {
         request_id: RequestId,
     },
     Search {
@@ -635,6 +745,17 @@ enum EventProgress {
     PreparedMediaQueued {
         request_id: RequestId,
         transaction_id: String,
+    },
+    RoomKeyReshare {
+        request_id: RequestId,
+        room_id: String,
+        outcome: crate::event::RoomKeyReshareOutcome,
+    },
+    EncryptionDebug {
+        request_id: RequestId,
+        room_id: String,
+        kind: koushi_state::EncryptionDebugOperationKind,
+        outcome: koushi_state::EncryptionDebugOperationOutcome,
     },
 }
 
@@ -702,6 +823,69 @@ impl EventProgress {
                     snapshot: snapshot.clone(),
                 })
             }
+            (
+                Self::RoomKeyReshare {
+                    request_id,
+                    room_id,
+                    outcome,
+                },
+                RequestOutcomeExpectation::RoomKeyReshare {
+                    request_id: expected_request_id,
+                    account_key,
+                    room_id: expected_room_id,
+                },
+            ) if request_id == expected_request_id
+                && room_id == expected_room_id
+                && account_matches(&snapshot.state, Some(account_key)) =>
+            {
+                Some(RequestOutcome::RoomKeyReshare {
+                    request_id: *request_id,
+                    room_id: room_id.clone(),
+                    outcome: *outcome,
+                })
+            }
+            (
+                Self::EncryptionDebug {
+                    request_id,
+                    room_id,
+                    kind,
+                    outcome,
+                },
+                RequestOutcomeExpectation::EncryptionDebug {
+                    request_id: expected_request_id,
+                    account_key,
+                    room_id: expected_room_id,
+                    kind: expected_kind,
+                },
+            ) if request_id == expected_request_id
+                && room_id == expected_room_id
+                && kind == expected_kind
+                && account_matches(&snapshot.state, Some(account_key)) =>
+            {
+                Some(RequestOutcome::EncryptionDebug {
+                    request_id: *request_id,
+                    room_id: room_id.clone(),
+                    kind: *kind,
+                    outcome: *outcome,
+                })
+            }
+            (
+                Self::Directory { request_id },
+                RequestOutcomeExpectation::DirectoryQuery { .. }
+                | RequestOutcomeExpectation::DirectoryPreview { .. },
+            ) => Some(RequestOutcome::Directory {
+                request_id: *request_id,
+                snapshot: snapshot.clone(),
+            }),
+            (
+                Self::RoomOperation { request_id, .. },
+                RequestOutcomeExpectation::RoomOperation { operation, .. },
+            ) if room_operation_is_event_terminal(operation) => {
+                Some(RequestOutcome::RoomOperation {
+                    request_id: *request_id,
+                    snapshot: snapshot.clone(),
+                })
+            }
             _ => None,
         }
     }
@@ -719,14 +903,18 @@ impl EventProgress {
             | Self::SignedOut { request_id, .. }
             | Self::Focused { request_id, .. }
             | Self::Anchor { request_id, .. }
-            | Self::RoomOperation { request_id }
+            | Self::RoomOperation { request_id, .. }
+            | Self::InviteBatch { request_id, .. }
             | Self::InviteWorkflow { request_id }
+            | Self::Directory { request_id }
             | Self::Search { request_id }
             | Self::UploadStaging { request_id }
             | Self::ComposerAccepted { request_id }
             | Self::PreparedMediaQueued { request_id, .. }
             | Self::SubmissionAccepted { request_id, .. }
-            | Self::SubmissionRejected { request_id, .. } => *request_id,
+            | Self::SubmissionRejected { request_id, .. }
+            | Self::RoomKeyReshare { request_id, .. }
+            | Self::EncryptionDebug { request_id, .. } => *request_id,
         }
     }
 
@@ -956,6 +1144,13 @@ fn event_progress(
             RequestOutcomeExpectation::SearchClosed { .. } => {
                 Ok(Some(EventProgress::Search { request_id }))
             }
+            RequestOutcomeExpectation::InviteWorkflow { .. } => {
+                Ok(Some(EventProgress::InviteWorkflow { request_id }))
+            }
+            RequestOutcomeExpectation::DirectoryQuery { .. }
+            | RequestOutcomeExpectation::DirectoryPreview { .. } => {
+                Ok(Some(EventProgress::Directory { request_id }))
+            }
             _ => Ok(None),
         },
         _ => Ok(None),
@@ -1014,15 +1209,75 @@ fn room_event_progress(
                 room_id,
             }))
         }
-        RoomEvent::InviteBatchCompleted {
+        RoomEvent::RoomKeyReshared {
             request_id: event_request_id,
+            room_id,
+            outcome,
+        } if matches!(expectation, RequestOutcomeExpectation::RoomKeyReshare {
+            room_id: expected_room_id,
             ..
-        } if matches!(
-            expectation,
-            RequestOutcomeExpectation::InviteWorkflow { .. }
-        ) && event_request_id == request_id =>
+        } if expected_room_id == &room_id)
+            && event_request_id == request_id =>
         {
-            Ok(Some(EventProgress::InviteWorkflow { request_id }))
+            Ok(Some(EventProgress::RoomKeyReshare {
+                request_id,
+                room_id,
+                outcome,
+            }))
+        }
+        RoomEvent::OutboundSessionForced {
+            request_id: event_request_id,
+            room_id,
+            outcome,
+        } if matches!(expectation, RequestOutcomeExpectation::EncryptionDebug {
+            room_id: expected_room_id,
+            kind: koushi_state::EncryptionDebugOperationKind::ForceNewOutboundSession,
+            ..
+        } if expected_room_id == &room_id)
+            && event_request_id == request_id =>
+        {
+            Ok(Some(EventProgress::EncryptionDebug {
+                request_id,
+                room_id,
+                kind: koushi_state::EncryptionDebugOperationKind::ForceNewOutboundSession,
+                outcome,
+            }))
+        }
+        RoomEvent::Index0RoomKeyShared {
+            request_id: event_request_id,
+            room_id,
+            outcome,
+        } if matches!(expectation, RequestOutcomeExpectation::EncryptionDebug {
+            room_id: expected_room_id,
+            kind: koushi_state::EncryptionDebugOperationKind::ShareIndex0Key,
+            ..
+        } if expected_room_id == &room_id)
+            && event_request_id == request_id =>
+        {
+            Ok(Some(EventProgress::EncryptionDebug {
+                request_id,
+                room_id,
+                kind: koushi_state::EncryptionDebugOperationKind::ShareIndex0Key,
+                outcome,
+            }))
+        }
+        RoomEvent::Index0RoomKeyResent {
+            request_id: event_request_id,
+            room_id,
+            outcome,
+        } if matches!(expectation, RequestOutcomeExpectation::EncryptionDebug {
+            room_id: expected_room_id,
+            kind: koushi_state::EncryptionDebugOperationKind::ResendIndex0Key,
+            ..
+        } if expected_room_id == &room_id)
+            && event_request_id == request_id =>
+        {
+            Ok(Some(EventProgress::EncryptionDebug {
+                request_id,
+                room_id,
+                kind: koushi_state::EncryptionDebugOperationKind::ResendIndex0Key,
+                outcome,
+            }))
         }
         RoomEvent::ComposerSlashCommandRejected {
             request_id: event_request_id,
@@ -1036,86 +1291,533 @@ fn room_event_progress(
                 reason: IntentNoOpReason::SessionNotReady,
             })
         }
-        RoomEvent::MarkedAsRead {
+        RoomEvent::DirectoryQueryCompleted {
             request_id: event_request_id,
             ..
         } if matches!(
             expectation,
-            RequestOutcomeExpectation::RoomOperation {
-                operation: RoomOperationKind::MarkedAsRead,
-                ..
-            }
+            RequestOutcomeExpectation::DirectoryQuery { .. }
         ) && event_request_id == request_id =>
         {
-            Ok(Some(EventProgress::RoomOperation { request_id }))
+            Ok(Some(EventProgress::Directory { request_id }))
         }
-        RoomEvent::MarkedAsUnread {
+        RoomEvent::DirectoryPreviewLoaded {
             request_id: event_request_id,
             ..
         } if matches!(
             expectation,
-            RequestOutcomeExpectation::RoomOperation {
-                operation: RoomOperationKind::MarkedAsUnread,
-                ..
-            }
+            RequestOutcomeExpectation::DirectoryPreview { .. }
         ) && event_request_id == request_id =>
         {
-            Ok(Some(EventProgress::RoomOperation { request_id }))
+            Ok(Some(EventProgress::Directory { request_id }))
+        }
+        event => room_operation_progress(event, expectation, request_id),
+    }
+}
+
+fn room_operation_progress(
+    event: RoomEvent,
+    expectation: &RequestOutcomeExpectation,
+    request_id: RequestId,
+) -> Result<Option<EventProgress>, RequestOutcomeError> {
+    let RequestOutcomeExpectation::RoomOperation {
+        room_id: expected_room_id,
+        operation,
+        ..
+    } = expectation
+    else {
+        return Ok(None);
+    };
+
+    let progress = match event {
+        RoomEvent::SpaceChildSet {
+            request_id: event_request_id,
+            space_id,
+            child_room_id,
+        } if event_request_id == request_id
+            && matches!(
+                operation,
+                RoomOperationKind::SpaceChildSet {
+                    space_id: expected_space_id,
+                    child_room_id: expected_child_room_id,
+                } if expected_space_id == &space_id && expected_child_room_id == &child_room_id
+            ) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id: space_id,
+                event_id: Some(child_room_id),
+                user_id: None,
+                action: None,
+                generation: None,
+            }
+        }
+        RoomEvent::UserInvited {
+            request_id: event_request_id,
+            room_id,
+            user_id,
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::UserInvited { user_id: expected } if expected == &user_id) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: None,
+                user_id: Some(user_id),
+                action: None,
+                generation: None,
+            }
         }
         RoomEvent::InviteAccepted {
             request_id: event_request_id,
-            ..
-        } if matches!(
-            expectation,
-            RequestOutcomeExpectation::RoomOperation {
-                operation: RoomOperationKind::InviteAccepted,
-                ..
-            }
-        ) && event_request_id == request_id =>
+            room_id,
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::InviteAccepted) =>
         {
-            Ok(Some(EventProgress::RoomOperation { request_id }))
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: None,
+                user_id: None,
+                action: None,
+                generation: None,
+            }
         }
         RoomEvent::InviteDeclined {
             request_id: event_request_id,
-            ..
-        } if matches!(
-            expectation,
-            RequestOutcomeExpectation::RoomOperation {
-                operation: RoomOperationKind::InviteDeclined,
-                ..
-            }
-        ) && event_request_id == request_id =>
+            room_id,
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::InviteDeclined) =>
         {
-            Ok(Some(EventProgress::RoomOperation { request_id }))
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: None,
+                user_id: None,
+                action: None,
+                generation: None,
+            }
+        }
+        RoomEvent::MarkedAsRead {
+            request_id: event_request_id,
+            room_id,
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::MarkedAsRead) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: None,
+                user_id: None,
+                action: None,
+                generation: None,
+            }
+        }
+        RoomEvent::MarkedAsUnread {
+            request_id: event_request_id,
+            room_id,
+            ..
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::MarkedAsUnread) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: None,
+                user_id: None,
+                action: None,
+                generation: None,
+            }
         }
         RoomEvent::RoomLeft {
             request_id: event_request_id,
-            ..
-        } if matches!(
-            expectation,
-            RequestOutcomeExpectation::RoomOperation {
-                operation: RoomOperationKind::RoomLeft,
-                ..
-            }
-        ) && event_request_id == request_id =>
+            room_id,
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::RoomLeft) =>
         {
-            Ok(Some(EventProgress::RoomOperation { request_id }))
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: None,
+                user_id: None,
+                action: None,
+                generation: None,
+            }
         }
         RoomEvent::RoomForgotten {
             request_id: event_request_id,
-            ..
-        } if matches!(
-            expectation,
-            RequestOutcomeExpectation::RoomOperation {
-                operation: RoomOperationKind::RoomForgotten,
-                ..
-            }
-        ) && event_request_id == request_id =>
+            room_id,
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::RoomForgotten) =>
         {
-            Ok(Some(EventProgress::RoomOperation { request_id }))
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: None,
+                user_id: None,
+                action: None,
+                generation: None,
+            }
         }
-        _ => Ok(None),
+        RoomEvent::RoomTagSet {
+            request_id: event_request_id,
+            room_id,
+            tag,
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::RoomTagSet { tag: expected } if expected == &tag) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: None,
+                user_id: None,
+                action: None,
+                generation: None,
+            }
+        }
+        RoomEvent::RoomTagRemoved {
+            request_id: event_request_id,
+            room_id,
+            tag,
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::RoomTagRemoved { tag: expected } if expected == &tag) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: None,
+                user_id: None,
+                action: None,
+                generation: None,
+            }
+        }
+        RoomEvent::PinEventCompleted {
+            request_id: event_request_id,
+            room_id,
+            event_id,
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::PinEvent { event_id: expected } if expected == &event_id) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: Some(event_id),
+                user_id: None,
+                action: None,
+                generation: None,
+            }
+        }
+        RoomEvent::UnpinEventCompleted {
+            request_id: event_request_id,
+            room_id,
+            event_id,
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::UnpinEvent { event_id: expected } if expected == &event_id) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: Some(event_id),
+                user_id: None,
+                action: None,
+                generation: None,
+            }
+        }
+        RoomEvent::PinnedEventsUpdated {
+            request_id: Some(event_request_id),
+            room_id,
+            ..
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::PinnedEventsRefreshed) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: None,
+                user_id: None,
+                action: None,
+                generation: None,
+            }
+        }
+        RoomEvent::RoomSettingsLoaded {
+            request_id: event_request_id,
+            settings,
+        } if event_request_id == request_id
+            && expected_room_id == &settings.room_id
+            && matches!(operation, RoomOperationKind::RoomSettingsLoaded) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id: settings.room_id,
+                event_id: None,
+                user_id: None,
+                action: None,
+                generation: None,
+            }
+        }
+        RoomEvent::RoomSettingUpdated {
+            request_id: event_request_id,
+            settings,
+        } if event_request_id == request_id
+            && expected_room_id == &settings.room_id
+            && matches!(operation, RoomOperationKind::RoomSettingUpdated) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id: settings.room_id,
+                event_id: None,
+                user_id: None,
+                action: None,
+                generation: None,
+            }
+        }
+        RoomEvent::RoomMemberModerated {
+            request_id: event_request_id,
+            room_id,
+            target_user_id,
+            action,
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(
+                operation,
+                RoomOperationKind::MemberModerated {
+                    target_user_id: expected_user_id,
+                    action: expected_action,
+                } if expected_user_id == &target_user_id && expected_action == &action
+            ) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: None,
+                user_id: Some(target_user_id),
+                action: Some(action),
+                generation: None,
+            }
+        }
+        RoomEvent::RoomMemberRoleUpdated {
+            request_id: event_request_id,
+            room_id,
+            target_user_id,
+            ..
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::MemberRoleUpdated { target_user_id: expected } if expected == &target_user_id) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: None,
+                user_id: Some(target_user_id),
+                action: None,
+                generation: None,
+            }
+        }
+        RoomEvent::SpaceMembersLoaded {
+            request_id: event_request_id,
+            generation,
+            ..
+        } if event_request_id == request_id
+            && matches!(operation, RoomOperationKind::SpaceMembersLoaded { generation: expected } if *expected == generation) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id: expected_room_id.clone(),
+                event_id: None,
+                user_id: None,
+                action: None,
+                generation: Some(generation),
+            }
+        }
+        RoomEvent::SpaceMemberInviteSettled {
+            request_id: event_request_id,
+            space_id,
+            user_id,
+            generation,
+            outcome,
+        } if event_request_id == request_id
+            && expected_room_id == &space_id
+            && matches!(
+                operation,
+                RoomOperationKind::SpaceMemberInviteSettled {
+                    target_user_id: expected_user_id,
+                    generation: expected_generation,
+                } if expected_user_id == &user_id && *expected_generation == generation
+            ) =>
+        {
+            if let SpaceMemberInviteOutcome::Failed(kind) = outcome {
+                return Err(RequestOutcomeError::OperationFailed {
+                    failure: CoreFailure::RoomOperationFailed {
+                        kind: operation_failure_to_room_failure(kind),
+                    },
+                });
+            }
+            EventProgress::RoomOperation {
+                request_id,
+                room_id: space_id,
+                event_id: None,
+                user_id: Some(user_id),
+                action: None,
+                generation: Some(generation),
+            }
+        }
+        RoomEvent::SpaceMemberInviteCancellationSettled {
+            request_id: event_request_id,
+            space_id,
+            user_id,
+            generation,
+            outcome,
+        } if event_request_id == request_id
+            && expected_room_id == &space_id
+            && matches!(
+                operation,
+                RoomOperationKind::SpaceMemberInviteCancellationSettled {
+                    target_user_id: expected_user_id,
+                    generation: expected_generation,
+                } if expected_user_id == &user_id && *expected_generation == generation
+            ) =>
+        {
+            if let SpaceMemberInviteOutcome::Failed(kind) = outcome {
+                return Err(RequestOutcomeError::OperationFailed {
+                    failure: CoreFailure::RoomOperationFailed {
+                        kind: operation_failure_to_room_failure(kind),
+                    },
+                });
+            }
+            EventProgress::RoomOperation {
+                request_id,
+                room_id: space_id,
+                event_id: None,
+                user_id: Some(user_id),
+                action: None,
+                generation: Some(generation),
+            }
+        }
+        RoomEvent::SpaceMemberRoleUpdateSettled {
+            request_id: event_request_id,
+            space_id,
+            user_id,
+            generation,
+            outcome,
+        } if event_request_id == request_id
+            && expected_room_id == &space_id
+            && matches!(
+                operation,
+                RoomOperationKind::SpaceMemberRoleUpdated {
+                    target_user_id: expected_user_id,
+                    generation: expected_generation,
+                } if expected_user_id == &user_id && *expected_generation == generation
+            ) =>
+        {
+            if let koushi_state::SpaceMemberRoleUpdateOutcome::Failed(kind) = outcome {
+                return Err(RequestOutcomeError::OperationFailed {
+                    failure: CoreFailure::RoomOperationFailed {
+                        kind: role_failure_to_room_failure(kind),
+                    },
+                });
+            }
+            EventProgress::RoomOperation {
+                request_id,
+                room_id: space_id,
+                event_id: None,
+                user_id: Some(user_id),
+                action: None,
+                generation: Some(generation),
+            }
+        }
+        RoomEvent::InviteBatchCompleted {
+            request_id: event_request_id,
+            room_id,
+            results,
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::InviteBatch { .. })
+            && invite_batch_matches(operation, &results) =>
+        {
+            let RoomOperationKind::InviteBatch { user_ids, scope } = operation else {
+                unreachable!()
+            };
+            EventProgress::InviteBatch {
+                request_id,
+                room_id,
+                user_ids: user_ids.clone(),
+                scope: scope.clone(),
+            }
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(progress))
+}
+
+fn operation_failure_to_room_failure(kind: koushi_state::OperationFailureKind) -> RoomFailureKind {
+    match kind {
+        koushi_state::OperationFailureKind::Forbidden => RoomFailureKind::Forbidden,
+        koushi_state::OperationFailureKind::NotFound => RoomFailureKind::NotFound,
+        koushi_state::OperationFailureKind::Network => RoomFailureKind::Network,
+        koushi_state::OperationFailureKind::Timeout
+        | koushi_state::OperationFailureKind::Invalid
+        | koushi_state::OperationFailureKind::Sdk => RoomFailureKind::Sdk,
     }
+}
+
+fn role_failure_to_room_failure(kind: SpaceMemberRoleFailureKind) -> RoomFailureKind {
+    match kind {
+        SpaceMemberRoleFailureKind::Forbidden => RoomFailureKind::Forbidden,
+        SpaceMemberRoleFailureKind::NotFound => RoomFailureKind::NotFound,
+        SpaceMemberRoleFailureKind::Network => RoomFailureKind::Network,
+        SpaceMemberRoleFailureKind::Timeout
+        | SpaceMemberRoleFailureKind::Invalid
+        | SpaceMemberRoleFailureKind::Sdk => RoomFailureKind::Sdk,
+        SpaceMemberRoleFailureKind::Stale => RoomFailureKind::NotFound,
+    }
+}
+
+fn invite_batch_matches(
+    operation: &RoomOperationKind,
+    results: &[koushi_state::InviteDestinationResult],
+) -> bool {
+    let RoomOperationKind::InviteBatch { user_ids, scope } = operation else {
+        return false;
+    };
+    let expected_destinations = match scope {
+        InviteScopeSelection::RoomOnly => 1,
+        InviteScopeSelection::ParentSpaceAndRoom { .. } => 2,
+    };
+    user_ids.iter().all(|user_id| {
+        results
+            .iter()
+            .filter(|result| {
+                &result.user_id == user_id
+                    && match scope {
+                        InviteScopeSelection::RoomOnly => matches!(
+                            &result.destination,
+                            koushi_state::InviteDestination::Room { .. }
+                        ),
+                        InviteScopeSelection::ParentSpaceAndRoom { space_id } => {
+                            match &result.destination {
+                                koushi_state::InviteDestination::Room { .. } => true,
+                                koushi_state::InviteDestination::Space { space_id: actual } => {
+                                    actual == space_id
+                                }
+                            }
+                        }
+                    }
+            })
+            .count()
+            == expected_destinations
+    }) && results.len() == user_ids.len() * expected_destinations
 }
 
 fn timeline_event_progress(
@@ -1381,7 +2083,7 @@ fn snapshot_outcome_for_progress(
                 account_key,
                 room_id: expected_room_id,
             },
-        ) if room_id == expected_room_id
+        ) if (expected_room_id.is_empty() || room_id == expected_room_id)
             && account_matches(&snapshot.state, Some(account_key))
             && snapshot
                 .state
@@ -1462,22 +2164,60 @@ fn snapshot_outcome_for_progress(
             })
         }
         (
-            EventProgress::RoomOperation { .. },
-            RequestOutcomeExpectation::RoomOperation {
+            EventProgress::InviteBatch {
                 request_id,
-                account_key,
                 room_id,
-                ..
+                user_ids,
+                scope,
             },
-        ) if account_matches(&snapshot.state, Some(account_key))
-            && snapshot
-                .state
-                .rooms
-                .iter()
-                .any(|room| room.room_id == *room_id) =>
+            RequestOutcomeExpectation::RoomOperation {
+                request_id: expected_request_id,
+                account_key,
+                room_id: expected_room_id,
+                operation: RoomOperationKind::InviteBatch { .. },
+            },
+        ) if request_id == expected_request_id
+            && room_id == expected_room_id
+            && account_matches(&snapshot.state, Some(account_key))
+            && invite_batch_snapshot_matches(
+                &snapshot.state,
+                request_id.sequence,
+                room_id,
+                user_ids,
+                scope,
+            ) =>
         {
             Some(RequestOutcome::RoomOperation {
-                request_id: *request_id,
+                request_id: *expected_request_id,
+                snapshot: snapshot.clone(),
+            })
+        }
+        (
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                generation,
+                ..
+            },
+            RequestOutcomeExpectation::RoomOperation {
+                request_id: expected_request_id,
+                account_key,
+                room_id: expected_room_id,
+                operation,
+            },
+        ) if request_id == expected_request_id
+            && room_id == expected_room_id
+            && account_matches(&snapshot.state, Some(account_key))
+            && room_operation_snapshot_matches(
+                &snapshot.state,
+                request_id.sequence,
+                room_id,
+                generation,
+                operation,
+            ) =>
+        {
+            Some(RequestOutcome::RoomOperation {
+                request_id: *expected_request_id,
                 snapshot: snapshot.clone(),
             })
         }
@@ -1488,18 +2228,36 @@ fn snapshot_outcome_for_progress(
                 account_key,
                 room_id,
                 query,
+                closed,
             },
         ) if account_matches(&snapshot.state, Some(account_key))
-            && snapshot.state.invite_workflow.query.room_id.as_deref()
-                == Some(room_id.as_str())
-            && snapshot.state.invite_workflow.query.query == *query
-            && !matches!(
-                snapshot.state.invite_workflow.operation,
-                InviteOperationState::Idle | InviteOperationState::Pending { .. }
-            ) =>
+            && if *closed {
+                snapshot.state.invite_workflow == Default::default()
+            } else {
+                snapshot.state.invite_workflow.query.room_id.as_deref() == Some(room_id.as_str())
+                    && snapshot.state.invite_workflow.query.query == *query
+            } =>
         {
             Some(RequestOutcome::InviteWorkflow {
                 request_id: *request_id,
+                snapshot: snapshot.clone(),
+            })
+        }
+        (
+            EventProgress::Directory { request_id },
+            RequestOutcomeExpectation::DirectoryQuery {
+                request_id: expected_request_id,
+                account_key,
+            }
+            | RequestOutcomeExpectation::DirectoryPreview {
+                request_id: expected_request_id,
+                account_key,
+            },
+        ) if request_id == expected_request_id
+            && account_matches(&snapshot.state, Some(account_key)) =>
+        {
+            Some(RequestOutcome::Directory {
+                request_id: *expected_request_id,
                 snapshot: snapshot.clone(),
             })
         }
@@ -1602,6 +2360,90 @@ fn snapshot_outcome_for_progress(
         }
         _ => None,
     }
+}
+
+fn room_operation_is_event_terminal(operation: &RoomOperationKind) -> bool {
+    !matches!(
+        operation,
+        RoomOperationKind::InviteBatch { .. }
+            | RoomOperationKind::RoomLeft
+            | RoomOperationKind::RoomForgotten
+            | RoomOperationKind::RoomSettingsLoaded
+            | RoomOperationKind::RoomSettingUpdated
+            | RoomOperationKind::SpaceMembersLoaded { .. }
+            | RoomOperationKind::SpaceMemberInviteSettled { .. }
+            | RoomOperationKind::SpaceMemberInviteCancellationSettled { .. }
+            | RoomOperationKind::SpaceMemberRoleUpdated { .. }
+    )
+}
+
+fn room_operation_snapshot_matches(
+    state: &AppState,
+    request_sequence: u64,
+    room_id: &str,
+    generation: &Option<u64>,
+    operation: &RoomOperationKind,
+) -> bool {
+    match operation {
+        RoomOperationKind::RoomLeft | RoomOperationKind::RoomForgotten => {
+            !state.rooms.iter().any(|room| room.room_id == room_id)
+        }
+        RoomOperationKind::InviteBatch { user_ids, scope } => {
+            invite_batch_snapshot_matches(state, request_sequence, room_id, user_ids, scope)
+        }
+        RoomOperationKind::RoomSettingsLoaded | RoomOperationKind::RoomSettingUpdated => state
+            .room_management
+            .settings
+            .as_ref()
+            .is_some_and(|settings| settings.room_id == room_id),
+        RoomOperationKind::SpaceMembersLoaded {
+            generation: expected_generation,
+        }
+        | RoomOperationKind::SpaceMemberInviteSettled {
+            generation: expected_generation,
+            ..
+        }
+        | RoomOperationKind::SpaceMemberInviteCancellationSettled {
+            generation: expected_generation,
+            ..
+        }
+        | RoomOperationKind::SpaceMemberRoleUpdated {
+            generation: expected_generation,
+            ..
+        } => {
+            state.space_members.selected_space_id.as_deref() == Some(room_id)
+                && state.space_members.generation == *expected_generation
+                && generation == &Some(*expected_generation)
+        }
+        _ => true,
+    }
+}
+
+fn invite_batch_snapshot_matches(
+    state: &AppState,
+    request_sequence: u64,
+    room_id: &str,
+    user_ids: &[String],
+    scope: &InviteScopeSelection,
+) -> bool {
+    let InviteOperationState::Completed {
+        request_id,
+        room_id: completed_room_id,
+        results,
+        ..
+    } = &state.invite_workflow.operation
+    else {
+        return false;
+    };
+    *request_id == request_sequence
+        && completed_room_id == room_id
+        && invite_batch_matches(
+            &RoomOperationKind::InviteBatch {
+                user_ids: user_ids.to_vec(),
+                scope: scope.clone(),
+            },
+            results,
+        )
 }
 
 fn final_result(

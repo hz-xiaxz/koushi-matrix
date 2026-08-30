@@ -86,10 +86,12 @@ pub async fn select_room(
 ) -> Result<FrontendDesktopSnapshot, String> {
     let selected_room_id = room_id.clone();
     let mut event_conn = state.runtime.attach();
-    let selected_snapshot = event_conn
+    event_conn
         .select_room_and_wait(selected_room_id.clone(), SELECT_ROOM_EVENT_TIMEOUT)
         .await
         .map_err(invoke_error_from_select_room_error)?;
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let refresh_request_id = event_conn.next_request_id();
     event_conn
         .command(build_refresh_pinned_events_command(
@@ -98,27 +100,21 @@ pub async fn select_room(
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_room_operation(
+    let snapshot = wait_for_room_operation(
         &mut event_conn,
         refresh_request_id,
+        baseline.generation,
+        account_key,
+        selected_room_id,
+        RoomOperationKind::PinnedEventsRefreshed,
         ROOM_OPERATION_EVENT_TIMEOUT,
-        |event, _| {
-            matches!(
-                event,
-                RoomEvent::PinnedEventsUpdated {
-                    room_id: updated_room_id,
-                    ..
-                } if updated_room_id == &selected_room_id
-            )
-        },
-        "pinned messages refresh did not complete",
-        "pinned messages refresh failed",
+        "pinned messages refresh",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(FrontendDesktopSnapshot::from_versioned(
-        selected_snapshot.state,
-        selected_snapshot.generation,
+        snapshot.state,
+        snapshot.generation,
     ))
 }
 
@@ -412,26 +408,6 @@ pub async fn observe_timeline_viewport(
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(())
-}
-
-pub(super) trait SelectEventSource {
-    fn snapshot(&self) -> koushi_state::AppState;
-
-    fn recv_event(
-        &mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<CoreEvent, EventStreamLag>> + Send + '_>>;
-}
-
-impl SelectEventSource for CoreConnection {
-    fn snapshot(&self) -> koushi_state::AppState {
-        CoreConnection::snapshot(self)
-    }
-
-    fn recv_event(
-        &mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<CoreEvent, EventStreamLag>> + Send + '_>> {
-        Box::pin(CoreConnection::recv_event(self))
-    }
 }
 
 async fn wait_for_focused_context_closed(

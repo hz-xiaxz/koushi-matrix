@@ -19,11 +19,6 @@ use koushi_state::{
 };
 use std::collections::VecDeque;
 
-pub(super) struct ScriptedSelectSource {
-    pub(super) snapshot: AppState,
-    pub(super) events: VecDeque<Result<CoreEvent, koushi_core::EventStreamLag>>,
-}
-
 pub(super) fn fake_request_id(sequence: u64) -> koushi_core::RequestId {
     koushi_core::RequestId {
         connection_id: koushi_core::RuntimeConnectionId(7),
@@ -36,31 +31,6 @@ pub(super) fn synthetic_session_key() -> koushi_key::SessionKeyId {
         homeserver: "https://example.org".to_owned(),
         user_id: "@alice:example.org".to_owned(),
         device_id: "DEVICE".to_owned(),
-    }
-}
-
-impl super::navigation::SelectEventSource for ScriptedSelectSource {
-    fn snapshot(&self) -> AppState {
-        self.snapshot.clone()
-    }
-
-    fn recv_event(
-        &mut self,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = Result<CoreEvent, koushi_core::EventStreamLag>>
-                + Send
-                + '_,
-        >,
-    > {
-        let event = self
-            .events
-            .pop_front()
-            .unwrap_or_else(|| Err(koushi_core::EventStreamLag { skipped: 0 }));
-        if let Ok(CoreEvent::StateChanged(snapshot)) = &event {
-            self.snapshot = snapshot.clone();
-        }
-        Box::pin(std::future::ready(event))
     }
 }
 

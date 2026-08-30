@@ -520,42 +520,47 @@ export function checkDesktopSubmitCoreCommandContract() {
 
 export function checkDesktopEventWaitLagContract() {
   const rule = "desktop.commands.event_wait_lag_contract";
-  const source = tauriCommandsSource();
-  const waiters = [
-    "async fn wait_for_invite_workflow_snapshot_from",
-    "async fn wait_for_upload_staging_snapshot",
-    "async fn wait_for_room_created",
-    "async fn wait_for_space_created",
-    "async fn wait_for_room_operation",
-    "async fn wait_for_room_joined",
-    "async fn wait_for_invite_batch_completed"
-  ];
+  const directory = readTauriSource("commands/directory.rs");
+  const room = readTauriSource("commands/room.rs");
+  const source = `${directory}\n${room}`;
   const failures = [];
-  for (const start of waiters) {
-    const body = rustItemBody(source, start);
-    if (!body) failures.push(sourceContractFailure(rule, `missing wait path ${start}`));
-    else if (body.includes("event stream lagged")) failures.push(sourceContractFailure(rule, `lag is treated as terminal in ${start}`));
+  for (const marker of ["wait_for_request_outcome", "RequestOutcomeExpectation::DirectoryQuery", "RequestOutcomeExpectation::DirectoryPreview", "RequestOutcomeExpectation::RoomCreated", "RequestOutcomeExpectation::SpaceCreated", "RequestOutcomeExpectation::DirectMessageStarted", "RequestOutcomeExpectation::RoomJoined", "RequestOutcomeExpectation::InviteWorkflow", "RequestOutcomeExpectation::RoomOperation", "RequestOutcomeExpectation::RoomKeyReshare", "RequestOutcomeExpectation::EncryptionDebug"]) {
+    if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `missing Core outcome delegation ${marker}`));
+  }
+  for (const marker of ["timeout_at", "recv_event", "InviteWorkflowSnapshotSource"]) {
+    if (source.includes(marker)) failures.push(sourceContractFailure(rule, `adapter retains forbidden waiter marker ${marker}`));
+  }
+  return failures;
+}
+
+export function checkDesktopEncryptionDebugDelegationContract() {
+  const rule = "desktop.room.encryption_debug_delegation_contract";
+  const source = readTauriSource("commands/room.rs");
+  const failures = [];
+  for (const [command, expectation, kind] of [
+    ["pub async fn reshare_room_key", "RequestOutcomeExpectation::RoomKeyReshare", null],
+    ["pub async fn force_new_outbound_session", "RequestOutcomeExpectation::EncryptionDebug", "EncryptionDebugOperationKind::ForceNewOutboundSession"],
+    ["pub async fn share_index0_room_key", "RequestOutcomeExpectation::EncryptionDebug", "EncryptionDebugOperationKind::ShareIndex0Key"],
+    ["pub async fn resend_index0_room_key", "RequestOutcomeExpectation::EncryptionDebug", "EncryptionDebugOperationKind::ResendIndex0Key"]
+  ]) {
+    const body = rustItemBody(source, command);
+    for (const marker of ["versioned_snapshot", "next_request_id", ".command(", "wait_for_request_outcome", expectation]) {
+      if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} lacks ${marker}`));
+    }
+    if (kind && !body?.includes(kind)) failures.push(sourceContractFailure(rule, `${command} lacks exact operation kind`));
+    for (const marker of ["recv_event", "timeout_at", "invoke_error_from_core_failure"]) {
+      if (body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} retains forbidden waiter marker ${marker}`));
+    }
   }
   return failures;
 }
 
 export function checkDesktopFailureWaiterContract() {
   const rule = "desktop.commands.failure_waiter_contract";
-  const source = tauriCommandsSource();
-  const waiters = [
-    "async fn wait_for_upload_staging_snapshot",
-    "async fn wait_for_room_created",
-    "async fn wait_for_space_created",
-    "async fn wait_for_room_operation",
-    "async fn wait_for_room_joined",
-    "async fn wait_for_invite_batch_completed"
-  ];
+  const source = `${readTauriSource("commands/directory.rs")}\n${readTauriSource("commands/room.rs")}`;
   const failures = [];
-  for (const start of waiters) {
-    const body = rustItemBody(source, start);
-    if (!body) failures.push(sourceContractFailure(rule, `missing failure wait path ${start}`));
-    else if (!body.includes("invoke_error_from_core_failure")) failures.push(sourceContractFailure(rule, `failure kind is not preserved in ${start}`));
-  }
+  if (!source.includes("invoke_error_from_request_outcome")) failures.push(sourceContractFailure(rule, "room/directory outcome errors are not mapped through the Core outcome boundary"));
+  if (source.includes("invoke_error_from_core_failure")) failures.push(sourceContractFailure(rule, "room/directory retains adapter failure mapping"));
   return failures;
 }
 
@@ -670,17 +675,19 @@ export function checkDesktopProfileCommandContract() {
 export function checkDesktopDirectoryStartDmContract() {
   const rule = "desktop.directory.start_dm_contract";
   const body = rustItemBody(readTauriSource("commands/room.rs"), "pub async fn start_direct_message");
-  return orderedMarkers(rule, body ?? "", ["wait_for_direct_message_started", "wait_for_room_in_state", "select_room_and_wait"]);
+  const failures = [];
+  for (const marker of ["wait_for_request_outcome", "RequestOutcomeExpectation::DirectMessageStarted", "select_room_and_wait"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `start_direct_message lacks Core outcome marker ${marker}`));
+  for (const marker of ["wait_for_direct_message_started", "wait_for_room_in_state", "recv_event"]) if (body?.includes(marker)) failures.push(sourceContractFailure(rule, `start_direct_message retains adapter waiter ${marker}`));
+  return failures;
 }
 
 export function checkDesktopDirectoryJoinRoomContract() {
   const rule = "desktop.directory.join_room_selection_contract";
   const body = rustItemBody(readTauriSource("commands/directory.rs"), "pub async fn join_directory_room");
   const failures = [];
-  for (const marker of ["wait_for_room_joined", "select_room_and_wait", "joined_room_id", "SELECT_ROOM_EVENT_TIMEOUT"]) {
-    if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `join_directory_room lacks ${marker}`));
-  }
-  failures.push(...orderedMarkers(rule, body ?? "", ["wait_for_room_joined", "select_room_and_wait"]));
+  for (const marker of ["wait_for_request_outcome", "RequestOutcomeExpectation::RoomJoined", "select_room_and_wait", "joined_room_id", "SELECT_ROOM_EVENT_TIMEOUT"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `join_directory_room lacks ${marker}`));
+  if (body?.includes("wait_for_room_joined") || body?.includes("recv_event")) failures.push(sourceContractFailure(rule, "join_directory_room retains adapter waiter"));
+  failures.push(...orderedMarkers(rule, body ?? "", ["RequestOutcomeExpectation::RoomJoined", "select_room_and_wait"]));
   return failures;
 }
 
@@ -688,11 +695,10 @@ export function checkDesktopRoomOperationContract() {
   const rule = "desktop.room.operation_wait_contract";
   const source = readTauriSource("commands/room.rs");
   const failures = [];
-  for (const [command, event] of [["pub async fn load_room_settings", "RoomSettingsLoaded"], ["pub async fn update_room_setting", "RoomSettingUpdated"], ["pub async fn moderate_room_member", "RoomMemberModerated"], ["pub async fn update_room_member_role", "RoomMemberRoleUpdated"]]) {
+  for (const [command, operation] of [["pub async fn load_room_settings", "RoomSettingsLoaded"], ["pub async fn update_room_setting", "RoomSettingUpdated"], ["pub async fn moderate_room_member", "MemberModerated"], ["pub async fn update_room_member_role", "MemberRoleUpdated"]]) {
     const body = rustItemBody(source, command);
-    for (const marker of ["wait_for_room_operation", event, "update_qa_window_title_from_state", "current_snapshot"]) {
-      if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} lacks ${marker}`));
-    }
+    for (const marker of ["wait_for_room_operation", `RoomOperationKind::${operation}`, "FrontendDesktopSnapshot::from_versioned"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} lacks Core room outcome marker ${marker}`));
+    if (body?.includes("recv_event") || body?.includes("timeout_at")) failures.push(sourceContractFailure(rule, `${command} retains adapter waiter`));
   }
   return failures;
 }
@@ -702,16 +708,12 @@ export function checkDesktopSpaceOperationContract() {
   const source = readTauriSource("commands/room.rs");
   const libSource = productionOnly(readTauriSource("lib.rs"), "apps/desktop/src-tauri/src/lib.rs");
   const failures = [];
-  for (const [command, matcher] of [["pub async fn load_space_members", "space_members_loaded_event_matches"], ["pub async fn invite_user_to_space", "space_member_invite_settled_event_matches"], ["pub async fn cancel_space_invite", "space_member_invite_cancellation_settled_event_matches"], ["pub async fn update_space_member_role", "wait_for_space_member_role_update"]]) {
+  for (const [command, operation] of [["pub async fn load_space_members", "SpaceMembersLoaded"], ["pub async fn invite_user_to_space", "SpaceMemberInviteSettled"], ["pub async fn cancel_space_invite", "SpaceMemberInviteCancellationSettled"], ["pub async fn update_space_member_role", "SpaceMemberRoleUpdated"]]) {
     const body = rustItemBody(source, command);
-    const waiter = command === "pub async fn update_space_member_role" ? matcher : "wait_for_room_operation";
-    for (const marker of [waiter, matcher, "current_snapshot"]) {
-      if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} lacks ${marker}`));
-    }
+    for (const marker of ["wait_for_room_operation", `RoomOperationKind::${operation}`, "FrontendDesktopSnapshot::from_versioned"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} lacks Core space outcome marker ${marker}`));
+    if (body?.includes("recv_event") || body?.includes("timeout_at")) failures.push(sourceContractFailure(rule, `${command} retains adapter waiter`));
   }
-  for (const registration of ["commands::room::cancel_space_invite", "commands::room::update_space_member_role"]) {
-    if (!libSource.includes(registration)) failures.push(sourceContractFailure(rule, `space operation registration is missing ${registration}`));
-  }
+  for (const registration of ["commands::room::cancel_space_invite", "commands::room::update_space_member_role"]) if (!libSource.includes(registration)) failures.push(sourceContractFailure(rule, `space operation registration is missing ${registration}`));
   return failures;
 }
 
@@ -3772,6 +3774,7 @@ export function runSourceContractRules() {
     checkDesktopTauriCommandRegistrationContract(),
     checkDesktopSubmitCoreCommandContract(),
     checkDesktopEventWaitLagContract(),
+    checkDesktopEncryptionDebugDelegationContract(),
     checkDesktopFailureWaiterContract(),
     checkDesktopActivityNavigationContract(),
     checkDesktopActivityCommandContract(),

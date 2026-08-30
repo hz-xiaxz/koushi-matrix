@@ -50,3 +50,13 @@ adds no reducer transition or AppState/AppAction change.
 - A2 must implement and RED-test every currently declared expectation before its adapter waiter is migrated; unimplemented variants may not ship silently.
 - A2 must use operation-specific room guards (`RoomForgotten` settles on authoritative absence; leave uses its actual projected terminal) rather than the generic known-room predicate.
 - A2 also tightens authenticated session state, submission account/target guards, exact account keys for adapter calls, and search correlation. The vacuous lag-loop assertion found in review was removed immediately.
+
+## Phase A2b directory/room migration
+
+- Directory query/preview, room/space creation, DM start + projection, join + selection, invite workflow/batch, room settings/tags/pins/moderation/roles, Space member operations, and four encryption-debug outcomes now settle through closed Core expectations.
+- Uncorrelated room-in-state/invite-workflow helpers and all three adapter event-source traits are deleted. `wait_for_room_operation` remains a thin typed Core wrapper; no directory/room production `recv_event` or `timeout_at` loop remains.
+- Operation guards are event/state specific: forget requires authoritative absence; tag/pin/encryption-debug payloads do not require room presence; Space operations match exact generation/user/space.
+- `cargo test -p koushi-core --test request_outcome_a2b`: 8 passed.
+- `cargo test -p koushi-desktop`: 120 library tests and 5 integration tests passed.
+- Strict Rust test-structure checker, rustfmt, and diff checks passed.
+- A2b different-model integration checkpoint: pending (`deepseek-brainstormer`).
