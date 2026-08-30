@@ -437,7 +437,7 @@ impl AccountActor {
 
     pub(super) async fn handle_discover_login(
         &mut self,
-        _request_id: RequestId,
+        request_id: RequestId,
         homeserver: String,
     ) {
         let requested_homeserver = homeserver.clone();
@@ -448,25 +448,37 @@ impl AccountActor {
         match discovery_result {
             Ok(Ok(discovery)) => {
                 self.send_actions(vec![AppAction::LoginDiscoverySucceeded {
-                    homeserver: requested_homeserver,
+                    homeserver: requested_homeserver.clone(),
                     flows: discovery.flows,
                     delegated: discovery.delegated,
                 }])
                 .await;
+                self.emit(CoreEvent::Account(AccountEvent::AuthDiscoveryChanged {
+                    request_id,
+                    homeserver: requested_homeserver,
+                }));
             }
             Ok(Err(error)) => {
                 self.send_actions(vec![AppAction::LoginDiscoveryFailed {
-                    homeserver: requested_homeserver,
+                    homeserver: requested_homeserver.clone(),
                     kind: login_discovery_failure_kind(&error),
                 }])
                 .await;
+                self.emit(CoreEvent::Account(AccountEvent::AuthDiscoveryChanged {
+                    request_id,
+                    homeserver: requested_homeserver,
+                }));
             }
             Err(_) => {
                 self.send_actions(vec![AppAction::LoginDiscoveryFailed {
-                    homeserver: requested_homeserver,
+                    homeserver: requested_homeserver.clone(),
                     kind: AuthFailureKind::Sdk,
                 }])
                 .await;
+                self.emit(CoreEvent::Account(AccountEvent::AuthDiscoveryChanged {
+                    request_id,
+                    homeserver: requested_homeserver,
+                }));
             }
         }
     }

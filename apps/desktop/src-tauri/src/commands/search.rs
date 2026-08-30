@@ -1,6 +1,5 @@
 use super::*;
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
-use std::{future::Future, pin::Pin};
 
 fn search_scope_kind_trace_label(scope: SearchScopeKind) -> &'static str {
     match scope {
@@ -59,76 +58,60 @@ pub async fn submit_search(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     let search_scope = resolve_search_scope(scope, state.inner()).await;
-    submit_search_production_path(
-        query,
-        scope,
-        search_scope,
-        state.inner(),
-        &ProductionSearchPathIo,
-    )
-    .await?;
+    submit_search_production_path(query, scope, search_scope, state.inner()).await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     current_snapshot(state.inner()).await
 }
 
-/// Command-body boundary used by `submit_search` and its Tauri-adapter test.
-/// Keeping the runtime submission and correlated wait here exercises the same
-/// production path without requiring a platform-specific `AppHandle` in the
-/// mock-runtime child.
+/// Command-body boundary used by `submit_search` so the IPC handler remains a
+/// thin adapter over Core command submission and request settlement.
 pub(crate) async fn submit_search_production_path(
     query: String,
     scope: SearchScopeKind,
     search_scope: SearchScope,
     state: &CoreRuntimeState,
-    io: &impl SearchPathIo,
 ) -> Result<(), String> {
-    let mut event_conn = state.runtime.attach();
+    let mut wait_conn = state.runtime.attach();
+    let baseline_snapshot = wait_conn.versioned_snapshot();
+    let baseline_generation = baseline_snapshot.generation;
+    let account_key = account_key_from_app_state(&baseline_snapshot.state);
+    let account_key = (!account_key.0.is_empty()).then_some(account_key);
     let request_id = next_request_id(state).await;
     record_search_trace(scope, &search_scope, &query, request_id);
-    io.submit(
+    submit_core_command(
         state,
-        build_submit_search_command(request_id, query, search_scope),
+        build_submit_search_command(request_id, query.clone(), search_scope.clone()),
     )
     .await?;
-    io.wait(&mut event_conn, request_id).await?;
-    Ok(())
-}
-
-pub(crate) type SearchPathFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
-
-pub(crate) trait SearchPathIo {
-    fn submit<'a>(
-        &'a self,
-        state: &'a CoreRuntimeState,
-        command: CoreCommand,
-    ) -> SearchPathFuture<'a>;
-    fn wait<'a>(
-        &'a self,
-        connection: &'a mut CoreConnection,
-        request_id: RequestId,
-    ) -> SearchPathFuture<'a>;
-}
-
-struct ProductionSearchPathIo;
-
-impl SearchPathIo for ProductionSearchPathIo {
-    fn submit<'a>(
-        &'a self,
-        state: &'a CoreRuntimeState,
-        command: CoreCommand,
-    ) -> SearchPathFuture<'a> {
-        Box::pin(async move { submit_core_command(state, command).await })
-    }
-
-    fn wait<'a>(
-        &'a self,
-        connection: &'a mut CoreConnection,
-        request_id: RequestId,
-    ) -> SearchPathFuture<'a> {
-        Box::pin(async move {
-            wait_for_search_started(connection, request_id, SEARCH_EVENT_TIMEOUT).await
-        })
+    let outcome = wait_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::SearchStarted {
+                request_id,
+                account_key,
+                query,
+                scope: match &search_scope {
+                    SearchScope::AllRooms => koushi_state::SearchScope::AllRooms,
+                    SearchScope::CurrentRoom { room_id } => {
+                        koushi_state::SearchScope::CurrentRoom {
+                            room_id: room_id.clone(),
+                        }
+                    }
+                    SearchScope::CurrentSpace { space_id } => {
+                        koushi_state::SearchScope::CurrentSpace {
+                            space_id: space_id.clone(),
+                        }
+                    }
+                },
+            },
+            baseline_generation,
+            tokio::time::Instant::now() + SEARCH_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("search", error))?;
+    match outcome {
+        RequestOutcome::Search { .. } => Ok(()),
+        _ => Err("search returned an invalid outcome".to_owned()),
     }
 }
 
@@ -137,10 +120,30 @@ pub async fn close_search(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    let mut event_conn = state.runtime.attach();
+    let mut wait_conn = state.inner().runtime.attach();
+    let baseline_snapshot = wait_conn.versioned_snapshot();
+    let baseline_generation = baseline_snapshot.generation;
+    let account_key = account_key_from_app_state(&baseline_snapshot.state);
+    let account_key = (!account_key.0.is_empty()).then_some(account_key);
     let request_id = next_request_id(state.inner()).await;
     submit_core_command(state.inner(), build_close_search_command(request_id)).await?;
-    wait_for_search_closed(&mut event_conn, request_id, SEARCH_EVENT_TIMEOUT).await?;
+    let outcome = wait_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::SearchClosed {
+                request_id,
+                account_key,
+                allow_initial: false,
+            },
+            baseline_generation,
+            tokio::time::Instant::now() + SEARCH_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("search close", error))?;
+    match outcome {
+        RequestOutcome::Search { .. } => {}
+        _ => return Err("search close returned an invalid outcome".to_owned()),
+    }
     update_qa_window_title_from_state(&app, state.inner()).await;
     current_snapshot(state.inner()).await
 }
@@ -197,81 +200,6 @@ pub async fn stop_room_crawl(
 
 const SEARCH_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-pub(super) async fn wait_for_search_started(
-    event_conn: &mut CoreConnection,
-    request_id: RequestId,
-    timeout: std::time::Duration,
-) -> Result<(), String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-
-    loop {
-        if snapshot_has_started_search(&event_conn.snapshot(), request_id) {
-            return Ok(());
-        }
-
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "search did not start".to_owned())?;
-        match event {
-            Ok(CoreEvent::Search(SearchEvent::Results {
-                request_id: result_request_id,
-                ..
-            })) if result_request_id == request_id => {}
-            Ok(CoreEvent::OperationFailed {
-                request_id: failed_request_id,
-                failure,
-            }) if failed_request_id == request_id => {
-                return Err(invoke_error_from_core_failure("search failed", failure));
-            }
-            Ok(CoreEvent::StateChanged(snapshot))
-                if snapshot_has_started_search(&snapshot, request_id) =>
-            {
-                return Ok(());
-            }
-            Ok(_) => {}
-            Err(_) if snapshot_has_started_search(&event_conn.snapshot(), request_id) => {
-                return Ok(());
-            }
-            Err(_) => continue,
-        }
-    }
-}
-
-pub(super) async fn wait_for_search_closed(
-    event_conn: &mut CoreConnection,
-    request_id: RequestId,
-    timeout: std::time::Duration,
-) -> Result<(), String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-
-    loop {
-        if snapshot_has_closed_search(&event_conn.snapshot()) {
-            return Ok(());
-        }
-
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| "search did not close".to_owned())?;
-        match event {
-            Ok(CoreEvent::StateChanged(snapshot)) if snapshot_has_closed_search(&snapshot) => {
-                return Ok(());
-            }
-            Ok(CoreEvent::OperationFailed {
-                request_id: failed_request_id,
-                failure,
-            }) if failed_request_id == request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "search close failed",
-                    failure,
-                ));
-            }
-            Ok(_) => {}
-            Err(_) if snapshot_has_closed_search(&event_conn.snapshot()) => return Ok(()),
-            Err(_) => continue,
-        }
-    }
-}
-
 pub(super) fn build_submit_search_command(
     request_id: koushi_core::RequestId,
     query: String,
@@ -309,32 +237,6 @@ pub(super) fn resolve_search_scope_from_active_room(
     }
 }
 
-fn snapshot_has_started_search(snapshot: &koushi_state::AppState, request_id: RequestId) -> bool {
-    match &snapshot.search {
-        koushi_state::SearchState::Searching {
-            request_id: state_request_id,
-            ..
-        }
-        | koushi_state::SearchState::Results {
-            request_id: state_request_id,
-            ..
-        }
-        | koushi_state::SearchState::TooShort {
-            request_id: state_request_id,
-            ..
-        }
-        | koushi_state::SearchState::Failed {
-            request_id: state_request_id,
-            ..
-        } => *state_request_id == request_id.sequence,
-        _ => false,
-    }
-}
-
-fn snapshot_has_closed_search(snapshot: &koushi_state::AppState) -> bool {
-    snapshot.search == koushi_state::SearchState::Closed
-}
-
 async fn resolve_search_scope(
     scope: SearchScopeKind,
     state: &CoreRuntimeState,
@@ -345,9 +247,4 @@ async fn resolve_search_scope(
         snapshot.navigation.active_room_id,
         snapshot.navigation.active_space_id,
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 }

@@ -523,20 +523,12 @@ export function checkDesktopEventWaitLagContract() {
   const source = tauriCommandsSource();
   const waiters = [
     "async fn wait_for_invite_workflow_snapshot_from",
-    "async fn wait_for_logged_in_authenticated",
-    "async fn wait_for_auth_changed",
-    "async fn wait_for_focused_context_closed",
-    "async fn wait_for_focused_context",
-    "async fn wait_for_main_timeline_anchor",
-    "async fn wait_for_search_started",
-    "async fn wait_for_search_closed",
     "async fn wait_for_upload_staging_snapshot",
     "async fn wait_for_room_created",
     "async fn wait_for_space_created",
     "async fn wait_for_room_operation",
     "async fn wait_for_room_joined",
-    "async fn wait_for_invite_batch_completed",
-    "async fn wait_for_oidc_authorization"
+    "async fn wait_for_invite_batch_completed"
   ];
   const failures = [];
   for (const start of waiters) {
@@ -551,20 +543,12 @@ export function checkDesktopFailureWaiterContract() {
   const rule = "desktop.commands.failure_waiter_contract";
   const source = tauriCommandsSource();
   const waiters = [
-    "async fn wait_for_logged_in_authenticated",
-    "async fn wait_for_focused_context_closed",
-    "async fn wait_for_focused_context",
-    "async fn wait_for_main_timeline_anchor",
-    "async fn wait_for_search_started",
-    "async fn wait_for_search_closed",
     "async fn wait_for_upload_staging_snapshot",
     "async fn wait_for_room_created",
     "async fn wait_for_space_created",
     "async fn wait_for_room_operation",
     "async fn wait_for_room_joined",
-    "async fn wait_for_invite_batch_completed",
-    "async fn wait_for_oidc_authorization",
-    "pub async fn list_saved_sessions"
+    "async fn wait_for_invite_batch_completed"
   ];
   const failures = [];
   for (const start of waiters) {
@@ -613,13 +597,16 @@ export function checkDesktopLoginWaitContract() {
   const rule = "desktop.session.login_wait_contract";
   const source = readTauriSource("commands/session.rs");
   const helper = rustItemBody(source, "async fn submit_login_and_wait_for_authenticated");
-  const waiter = rustItemBody(source, "async fn wait_for_logged_in_authenticated");
+  const oidcStart = rustItemBody(source, "pub async fn start_oidc_login");
+  const oidcComplete = rustItemBody(source, "pub async fn complete_oidc_login");
+  const saved = rustItemBody(source, "pub async fn list_saved_sessions");
   const failures = [];
-  if (!helper?.includes("wait_for_logged_in_authenticated")) failures.push(sourceContractFailure(rule, "login helper does not await authenticated state"));
-  if (helper?.includes("build_start_sync_command")) failures.push(sourceContractFailure(rule, "login helper starts sync in the Tauri adapter"));
-  if (!helper?.includes("LOGIN_EVENT_TIMEOUT")) failures.push(sourceContractFailure(rule, "login helper lacks its timeout"));
-  for (const marker of ["AccountEvent::LoggedIn", "OperationFailed", "timeout_at"]) {
-    if (!waiter?.includes(marker)) failures.push(sourceContractFailure(rule, `login waiter lacks ${marker}`));
+  for (const marker of ["wait_for_request_outcome", "RequestOutcomeExpectation::Authenticated", "baseline_generation", "LOGIN_EVENT_TIMEOUT"]) {
+    if (!helper?.includes(marker)) failures.push(sourceContractFailure(rule, `login helper lacks Core outcome marker ${marker}`));
+  }
+  if (helper?.includes("build_start_sync_command") || helper?.includes("wait_for_logged_in_authenticated")) failures.push(sourceContractFailure(rule, "login helper retains adapter-owned settlement or sync start"));
+  for (const [body, expectation] of [[oidcStart, "OidcAuthorization"], [oidcComplete, "Authenticated"], [saved, "SavedSessions"]]) {
+    if (!body?.includes("wait_for_request_outcome") || !body.includes(`RequestOutcomeExpectation::${expectation}`)) failures.push(sourceContractFailure(rule, `session command lacks Core ${expectation} outcome delegation`));
   }
   return failures;
 }
@@ -661,9 +648,11 @@ export function checkDesktopLocalEncryptionCommandContract() {
   ]) {
     if (!source.includes(command) || !source.includes(builder) || !source.includes(route) || !libSource.includes(registration)) failures.push(sourceContractFailure(rule, `missing local-encryption contract for ${command}`));
   }
-  if (!rustItemBody(readTauriSource("commands/local_encryption.rs"), "pub async fn reset_local_data")?.includes("wait_for_local_data_reset")) {
-    failures.push(sourceContractFailure(rule, "reset_local_data does not await signed-out projection"));
+  const reset = rustItemBody(readTauriSource("commands/local_encryption.rs"), "pub async fn reset_local_data");
+  for (const marker of ["wait_for_request_outcome", "RequestOutcomeExpectation::SignedOut", "baseline_generation"]) {
+    if (!reset?.includes(marker)) failures.push(sourceContractFailure(rule, `reset_local_data lacks Core outcome marker ${marker}`));
   }
+  if (reset?.includes("wait_for_local_data_reset")) failures.push(sourceContractFailure(rule, "reset_local_data retains adapter-owned settlement"));
   return failures;
 }
 
@@ -736,8 +725,16 @@ export function checkDesktopSearchCommandContract() {
   for (const marker of ["SearchScope::CurrentSpace", "SearchScope::CurrentRoom"]) if (!resolver?.includes(marker)) failures.push(sourceContractFailure(rule, `search scope resolver lacks ${marker}`));
   if (resolver?.includes("unwrap_or(SearchScope::AllRooms)")) failures.push(sourceContractFailure(rule, "search scope resolver collapses to allRooms"));
   for (const marker of ["submit_search_production_path", "current_snapshot"]) if (!command?.includes(marker)) failures.push(sourceContractFailure(rule, `submit_search lacks ${marker}`));
-  failures.push(...orderedMarkers(rule, helper ?? "", ["let mut event_conn = state.runtime.attach()", "let request_id = next_request_id(state).await", "io.submit", "io.wait"]));
-  if (helper?.includes("let request_id = event_conn.next_request_id()")) failures.push(sourceContractFailure(rule, "search path allocates its request id from the transient event connection"));
+  for (const marker of ["state.runtime.attach", "versioned_snapshot", "baseline_generation", "next_request_id(state).await", "submit_core_command", "wait_for_request_outcome", "RequestOutcomeExpectation::SearchStarted", "account_key", "query", "search_scope"]) {
+    if (!helper?.includes(marker)) failures.push(sourceContractFailure(rule, `search path lacks Core outcome marker ${marker}`));
+  }
+  const close = rustItemBody(source, "pub async fn close_search");
+  for (const marker of ["state.inner().runtime.attach", "versioned_snapshot", "baseline_generation", "next_request_id(state.inner()).await", "submit_core_command", "wait_for_request_outcome", "RequestOutcomeExpectation::SearchClosed", "account_key"]) {
+    if (!close?.includes(marker)) failures.push(sourceContractFailure(rule, `close search lacks Core outcome marker ${marker}`));
+  }
+  for (const marker of ["wait_for_search_started", "wait_for_search_closed", "SearchPathIo", "timeout_at", "recv_event"]) {
+    if (source.includes(marker)) failures.push(sourceContractFailure(rule, `search adapter retains forbidden waiter marker ${marker}`));
+  }
   return failures;
 }
 

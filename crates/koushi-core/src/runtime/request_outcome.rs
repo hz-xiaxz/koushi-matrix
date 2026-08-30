@@ -6,8 +6,8 @@
 use std::fmt;
 
 use koushi_state::{
-    AppState, ComposerDraftRevision, ComposerTarget, InviteOperationState, SearchScope,
-    SessionState, SubmissionId,
+    AppState, ComposerDraftRevision, ComposerTarget, FocusedContextState, InviteOperationState,
+    SearchScope, SessionState, SubmissionId,
 };
 use tokio::sync::broadcast;
 
@@ -60,13 +60,20 @@ pub enum RequestOutcomeExpectation {
     OidcAuthorization {
         request_id: RequestId,
     },
+    AuthDiscovery {
+        request_id: RequestId,
+        homeserver: String,
+    },
     Authenticated {
         request_id: RequestId,
-        account_key: AccountKey,
+        account_key: Option<AccountKey>,
     },
     SignedOut {
         request_id: RequestId,
         account_key: AccountKey,
+    },
+    SavedSessions {
+        request_id: RequestId,
     },
     RoomSelected {
         request_id: RequestId,
@@ -77,18 +84,19 @@ pub enum RequestOutcomeExpectation {
     FocusedContextClosed {
         request_id: RequestId,
         account_key: AccountKey,
-        room_id: String,
+        room_id: Option<String>,
     },
     FocusedContextOpened {
         request_id: RequestId,
         account_key: AccountKey,
         room_id: String,
-        event_id: String,
+        event_id: Option<String>,
     },
     MainTimelineAnchor {
         request_id: RequestId,
         key: TimelineKey,
         event_id: String,
+        allow_live_fallback: bool,
     },
     RoomCreated {
         request_id: RequestId,
@@ -121,11 +129,14 @@ pub enum RequestOutcomeExpectation {
     },
     SearchStarted {
         request_id: RequestId,
+        account_key: Option<AccountKey>,
         query: String,
         scope: SearchScope,
     },
     SearchClosed {
         request_id: RequestId,
+        account_key: Option<AccountKey>,
+        allow_initial: bool,
     },
     UploadStaging {
         request_id: RequestId,
@@ -160,6 +171,10 @@ pub enum RequestOutcome {
         state: String,
         generation: u64,
     },
+    AuthDiscovery {
+        request_id: RequestId,
+        snapshot: VersionedAppStateSnapshot,
+    },
     Authenticated {
         request_id: RequestId,
         snapshot: VersionedAppStateSnapshot,
@@ -167,6 +182,10 @@ pub enum RequestOutcome {
     SignedOut {
         request_id: RequestId,
         snapshot: VersionedAppStateSnapshot,
+    },
+    SavedSessions {
+        request_id: RequestId,
+        sessions: Vec<koushi_state::SessionInfo>,
     },
     RoomSelected {
         snapshot: VersionedAppStateSnapshot,
@@ -298,8 +317,10 @@ impl fmt::Debug for RequestOutcomeExpectation {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let kind = match self {
             Self::OidcAuthorization { .. } => "OidcAuthorization",
+            Self::AuthDiscovery { .. } => "AuthDiscovery",
             Self::Authenticated { .. } => "Authenticated",
             Self::SignedOut { .. } => "SignedOut",
+            Self::SavedSessions { .. } => "SavedSessions",
             Self::RoomSelected { .. } => "RoomSelected",
             Self::FocusedContextClosed { .. } => "FocusedContextClosed",
             Self::FocusedContextOpened { .. } => "FocusedContextOpened",
@@ -328,8 +349,10 @@ impl fmt::Debug for RequestOutcome {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let kind = match self {
             Self::OidcAuthorization { .. } => "OidcAuthorization",
+            Self::AuthDiscovery { .. } => "AuthDiscovery",
             Self::Authenticated { .. } => "Authenticated",
             Self::SignedOut { .. } => "SignedOut",
+            Self::SavedSessions { .. } => "SavedSessions",
             Self::RoomSelected { .. } => "RoomSelected",
             Self::FocusedContext { .. } => "FocusedContext",
             Self::MainTimelineAnchor { .. } => "MainTimelineAnchor",
@@ -376,8 +399,10 @@ impl RequestOutcomeExpectation {
     fn request_id(&self) -> RequestId {
         match self {
             Self::OidcAuthorization { request_id }
+            | Self::AuthDiscovery { request_id, .. }
             | Self::Authenticated { request_id, .. }
             | Self::SignedOut { request_id, .. }
+            | Self::SavedSessions { request_id, .. }
             | Self::RoomSelected { request_id, .. }
             | Self::FocusedContextClosed { request_id, .. }
             | Self::FocusedContextOpened { request_id, .. }
@@ -389,7 +414,7 @@ impl RequestOutcomeExpectation {
             | Self::InviteWorkflow { request_id, .. }
             | Self::RoomOperation { request_id, .. }
             | Self::SearchStarted { request_id, .. }
-            | Self::SearchClosed { request_id }
+            | Self::SearchClosed { request_id, .. }
             | Self::UploadStaging { request_id, .. }
             | Self::ComposerAccepted { request_id, .. }
             | Self::Submission { request_id, .. }
@@ -401,6 +426,7 @@ impl RequestOutcomeExpectation {
         matches!(
             self,
             Self::OidcAuthorization { .. }
+                | Self::AuthDiscovery { .. }
                 | Self::SearchStarted { .. }
                 | Self::SearchClosed { .. }
                 | Self::RoomCreated { .. }
@@ -408,6 +434,7 @@ impl RequestOutcomeExpectation {
                 | Self::ComposerAccepted { .. }
                 | Self::Submission { .. }
                 | Self::PreparedMediaQueued { .. }
+                | Self::SavedSessions { .. }
         )
     }
 }
@@ -529,6 +556,14 @@ enum EventProgress {
         authorization_url: String,
         state: String,
     },
+    AuthDiscovery {
+        request_id: RequestId,
+        homeserver: String,
+    },
+    SavedSessions {
+        request_id: RequestId,
+        sessions: Vec<koushi_state::SessionInfo>,
+    },
     RoomCreated {
         request_id: RequestId,
         room_id: String,
@@ -547,6 +582,7 @@ enum EventProgress {
     },
     Authenticated {
         request_id: RequestId,
+        account_key: AccountKey,
     },
     SignedOut {
         request_id: RequestId,
@@ -554,9 +590,11 @@ enum EventProgress {
     },
     Focused {
         request_id: RequestId,
+        opened: bool,
     },
     Anchor {
         request_id: RequestId,
+        live_fallback: bool,
     },
     RoomOperation {
         request_id: RequestId,
@@ -610,6 +648,16 @@ impl EventProgress {
                 generation: snapshot.generation,
             }),
             (
+                Self::SavedSessions {
+                    request_id,
+                    sessions,
+                },
+                RequestOutcomeExpectation::SavedSessions { .. },
+            ) => Some(RequestOutcome::SavedSessions {
+                request_id: *request_id,
+                sessions: sessions.clone(),
+            }),
+            (
                 Self::SubmissionRejected {
                     request_id,
                     submission_id,
@@ -650,14 +698,16 @@ impl EventProgress {
     fn request_id(&self) -> RequestId {
         match self {
             Self::Oidc { request_id, .. }
+            | Self::AuthDiscovery { request_id, .. }
+            | Self::SavedSessions { request_id, .. }
             | Self::RoomCreated { request_id, .. }
             | Self::SpaceCreated { request_id, .. }
             | Self::DirectMessageStarted { request_id, .. }
             | Self::RoomJoined { request_id, .. }
-            | Self::Authenticated { request_id }
+            | Self::Authenticated { request_id, .. }
             | Self::SignedOut { request_id, .. }
-            | Self::Focused { request_id }
-            | Self::Anchor { request_id }
+            | Self::Focused { request_id, .. }
+            | Self::Anchor { request_id, .. }
             | Self::RoomOperation { request_id }
             | Self::InviteWorkflow { request_id }
             | Self::Search { request_id }
@@ -760,17 +810,52 @@ fn event_progress(
                     state,
                 }))
             }
+            AccountEvent::AuthDiscoveryChanged {
+                request_id: event_request_id,
+                homeserver,
+            } if matches!(expectation, RequestOutcomeExpectation::AuthDiscovery { .. })
+                && event_request_id == request_id =>
+            {
+                Ok(Some(EventProgress::AuthDiscovery {
+                    request_id,
+                    homeserver,
+                }))
+            }
+            AccountEvent::SavedSessionsListed {
+                request_id: event_request_id,
+                sessions,
+            } if matches!(expectation, RequestOutcomeExpectation::SavedSessions { .. })
+                && event_request_id == request_id =>
+            {
+                Ok(Some(EventProgress::SavedSessions {
+                    request_id,
+                    sessions,
+                }))
+            }
             AccountEvent::LoggedIn {
                 request_id: event_request_id,
-                ..
+                account_key,
             }
             | AccountEvent::SessionRestored {
                 request_id: event_request_id,
-                ..
+                account_key,
             } if matches!(expectation, RequestOutcomeExpectation::Authenticated { .. })
-                && event_request_id == request_id =>
+                && event_request_id == request_id
+                && matches!(
+                    expectation,
+                    RequestOutcomeExpectation::Authenticated {
+                        account_key: None,
+                        ..
+                    } | RequestOutcomeExpectation::Authenticated {
+                        account_key: Some(_),
+                        ..
+                    }
+                ) =>
             {
-                Ok(Some(EventProgress::Authenticated { request_id }))
+                Ok(Some(EventProgress::Authenticated {
+                    request_id,
+                    account_key,
+                }))
             }
             AccountEvent::LoggedOut {
                 request_id: event_request_id,
@@ -802,11 +887,63 @@ fn event_progress(
         },
         CoreEvent::IntentLifecycle {
             request_id: event_request_id,
-            outcome: IntentOutcome::Committed | IntentOutcome::BenignNoOp(_),
+            outcome: IntentOutcome::BenignNoOp(reason),
+            ..
+        } if event_request_id == request_id
+            && matches!(
+                expectation,
+                RequestOutcomeExpectation::MainTimelineAnchor { .. }
+            ) =>
+        {
+            if matches!(reason, IntentNoOpReason::TimelineTargetMissing)
+                && matches!(
+                    expectation,
+                    RequestOutcomeExpectation::MainTimelineAnchor {
+                        allow_live_fallback: true,
+                        ..
+                    }
+                )
+            {
+                Ok(Some(EventProgress::Anchor {
+                    request_id,
+                    live_fallback: true,
+                }))
+            } else {
+                Err(RequestOutcomeError::FailedNoOp { reason })
+            }
+        }
+        CoreEvent::IntentLifecycle {
+            request_id: event_request_id,
+            outcome: IntentOutcome::Committed,
             ..
         } if event_request_id == request_id => match expectation {
-            RequestOutcomeExpectation::RoomSelected { .. } => {
-                Ok(Some(EventProgress::Focused { request_id }))
+            RequestOutcomeExpectation::RoomSelected { .. } => Ok(Some(EventProgress::Focused {
+                request_id,
+                opened: false,
+            })),
+            RequestOutcomeExpectation::FocusedContextClosed { .. } => {
+                Ok(Some(EventProgress::Focused {
+                    request_id,
+                    opened: false,
+                }))
+            }
+            RequestOutcomeExpectation::FocusedContextOpened { .. } => {
+                Ok(Some(EventProgress::Focused {
+                    request_id,
+                    opened: true,
+                }))
+            }
+            RequestOutcomeExpectation::MainTimelineAnchor { .. } => {
+                Ok(Some(EventProgress::Anchor {
+                    request_id,
+                    live_fallback: false,
+                }))
+            }
+            RequestOutcomeExpectation::SearchStarted { .. } => {
+                Ok(Some(EventProgress::Search { request_id }))
+            }
+            RequestOutcomeExpectation::SearchClosed { .. } => {
+                Ok(Some(EventProgress::Search { request_id }))
             }
             _ => Ok(None),
         },
@@ -1044,21 +1181,32 @@ fn snapshot_outcome(
     if !allow_initial && snapshot.generation <= baseline_generation {
         return None;
     }
-    if let RequestOutcomeExpectation::RoomSelected {
-        room_id,
-        account_key,
-        ..
-    } = expectation
-    {
-        if snapshot.state.navigation.active_room_id.as_deref() == Some(room_id.as_str())
-            && account_matches(&snapshot.state, account_key.as_ref())
+    match expectation {
+        RequestOutcomeExpectation::RoomSelected {
+            room_id,
+            account_key,
+            ..
+        } if snapshot.state.navigation.active_room_id.as_deref() == Some(room_id.as_str())
+            && account_matches(&snapshot.state, account_key.as_ref()) =>
         {
-            return Some(RequestOutcome::RoomSelected {
+            Some(RequestOutcome::RoomSelected {
                 snapshot: snapshot.clone(),
-            });
+            })
         }
+        RequestOutcomeExpectation::SearchClosed {
+            request_id,
+            account_key,
+            allow_initial: true,
+        } if snapshot.state.search == koushi_state::SearchState::Closed
+            && account_matches(&snapshot.state, account_key.as_ref()) =>
+        {
+            Some(RequestOutcome::Search {
+                request_id: *request_id,
+                snapshot: snapshot.clone(),
+            })
+        }
+        _ => None,
     }
-    None
 }
 
 fn snapshot_outcome_for_progress(
@@ -1088,13 +1236,30 @@ fn snapshot_outcome_for_progress(
             generation: snapshot.generation,
         }),
         (
-            EventProgress::Authenticated { .. },
+            EventProgress::AuthDiscovery { homeserver, .. },
+            RequestOutcomeExpectation::AuthDiscovery {
+                request_id,
+                homeserver: expected_homeserver,
+            },
+        ) if homeserver == expected_homeserver
+            && auth_discovery_matches(&snapshot.state, expected_homeserver) =>
+        {
+            Some(RequestOutcome::AuthDiscovery {
+                request_id: *request_id,
+                snapshot: snapshot.clone(),
+            })
+        }
+        (
+            EventProgress::Authenticated { account_key, .. },
             RequestOutcomeExpectation::Authenticated {
                 request_id,
-                account_key,
+                account_key: expected_account_key,
             },
-        ) if account_matches(&snapshot.state, Some(account_key))
-            && session_is_authenticated(&snapshot.state.session) =>
+        ) if expected_account_key
+            .as_ref()
+            .is_none_or(|expected| expected == account_key)
+            && account_matches(&snapshot.state, Some(account_key))
+            && session_is_login_transport_terminal(&snapshot.state.session) =>
         {
             Some(RequestOutcome::Authenticated {
                 request_id: *request_id,
@@ -1194,7 +1359,38 @@ fn snapshot_outcome_for_progress(
             })
         }
         (
-            EventProgress::Focused { .. },
+            EventProgress::Focused { opened: false, .. },
+            RequestOutcomeExpectation::FocusedContextClosed {
+                request_id,
+                account_key,
+                room_id,
+            },
+        ) if account_matches(&snapshot.state, Some(account_key))
+            && snapshot.state.focused_context == FocusedContextState::Closed
+            && snapshot.state.navigation.main_timeline_anchor.is_none()
+            && room_target_matches(&snapshot.state, room_id.as_deref()) =>
+        {
+            Some(RequestOutcome::FocusedContext {
+                snapshot: snapshot.clone(),
+            })
+        }
+        (
+            EventProgress::Focused { opened: true, .. },
+            RequestOutcomeExpectation::FocusedContextOpened {
+                request_id,
+                account_key,
+                room_id,
+                event_id,
+            },
+        ) if account_matches(&snapshot.state, Some(account_key))
+            && focused_context_matches(&snapshot.state, room_id, event_id.as_deref()) =>
+        {
+            Some(RequestOutcome::FocusedContext {
+                snapshot: snapshot.clone(),
+            })
+        }
+        (
+            EventProgress::Focused { opened: false, .. },
             RequestOutcomeExpectation::RoomSelected {
                 room_id,
                 account_key,
@@ -1204,6 +1400,26 @@ fn snapshot_outcome_for_progress(
             && account_matches(&snapshot.state, account_key.as_ref()) =>
         {
             Some(RequestOutcome::RoomSelected {
+                snapshot: snapshot.clone(),
+            })
+        }
+        (
+            EventProgress::Anchor { live_fallback, .. },
+            RequestOutcomeExpectation::MainTimelineAnchor {
+                request_id,
+                key,
+                event_id,
+                ..
+            },
+        ) if account_matches(&snapshot.state, Some(&key.account_key))
+            && timeline_key_matches(key, event_id)
+            && if *live_fallback {
+                snapshot_has_live_main_timeline(&snapshot.state, key.room_id())
+            } else {
+                snapshot_has_main_timeline_anchor(&snapshot.state, key.room_id(), event_id)
+            } =>
+        {
+            Some(RequestOutcome::MainTimelineAnchor {
                 snapshot: snapshot.clone(),
             })
         }
@@ -1253,10 +1469,28 @@ fn snapshot_outcome_for_progress(
             EventProgress::Search { .. },
             RequestOutcomeExpectation::SearchStarted {
                 request_id,
+                account_key,
                 query,
                 scope,
             },
-        ) if matches!(&snapshot.state.search, koushi_state::SearchState::Searching { request_id: state_request, query: state_query, scope: state_scope } | koushi_state::SearchState::Results { request_id: state_request, query: state_query, scope: state_scope, .. } if *state_request == request_id.sequence && *state_query == *query && *state_scope == *scope) => {
+        ) if account_matches(&snapshot.state, account_key.as_ref())
+            && search_state_matches(&snapshot.state, request_id, query, scope) =>
+        {
+            Some(RequestOutcome::Search {
+                request_id: *request_id,
+                snapshot: snapshot.clone(),
+            })
+        }
+        (
+            EventProgress::Search { .. },
+            RequestOutcomeExpectation::SearchClosed {
+                request_id,
+                account_key,
+                ..
+            },
+        ) if account_matches(&snapshot.state, account_key.as_ref())
+            && snapshot.state.search == koushi_state::SearchState::Closed =>
+        {
             Some(RequestOutcome::Search {
                 request_id: *request_id,
                 snapshot: snapshot.clone(),
@@ -1388,9 +1622,108 @@ fn account_matches(state: &AppState, expected: Option<&AccountKey>) -> bool {
         .is_none_or(|expected| snapshot_account_key(state).as_deref() == Some(expected.0.as_str()))
 }
 
-fn session_is_authenticated(session: &SessionState) -> bool {
-    !matches!(
+fn session_is_login_transport_terminal(session: &SessionState) -> bool {
+    matches!(
         session,
-        SessionState::SignedOut | SessionState::Restoring | SessionState::Authenticating { .. }
+        SessionState::Provisional {
+            phase: koushi_state::ProvisionalPhase::RecheckingTrust { failure: Some(_) },
+            ..
+        } | SessionState::AwaitingVerification { .. }
+            | SessionState::Verifying { .. }
+            | SessionState::AwaitingBootstrapConfirmation { .. }
+            | SessionState::Rejecting { .. }
+            | SessionState::Ready(_)
+    )
+}
+
+fn auth_discovery_matches(state: &AppState, homeserver: &str) -> bool {
+    matches!(
+        &state.auth,
+        koushi_state::AuthDiscoveryState::Ready { homeserver: current, .. }
+            | koushi_state::AuthDiscoveryState::Failed { homeserver: current, .. }
+            if current == homeserver
+    )
+}
+
+fn room_target_matches(state: &AppState, expected_room_id: Option<&str>) -> bool {
+    state.navigation.active_room_id.as_deref() == expected_room_id
+}
+
+fn focused_context_matches(state: &AppState, room_id: &str, event_id: Option<&str>) -> bool {
+    match &state.focused_context {
+        FocusedContextState::Opening {
+            room_id: current_room_id,
+            event_id: current_event_id,
+        }
+        | FocusedContextState::Open {
+            room_id: current_room_id,
+            event_id: current_event_id,
+            ..
+        } => {
+            current_room_id == room_id
+                && event_id.is_none_or(|expected| expected == current_event_id)
+        }
+        FocusedContextState::Closed => false,
+    }
+}
+
+fn timeline_key_matches(key: &TimelineKey, event_id: &str) -> bool {
+    matches!(
+        &key.kind,
+        crate::ids::TimelineKind::Focused {
+            room_id,
+            event_id: key_event_id,
+        } if room_id == key.room_id() && key_event_id == event_id
+    )
+}
+
+fn snapshot_has_main_timeline_anchor(state: &AppState, room_id: &str, event_id: &str) -> bool {
+    state.navigation.active_room_id.as_deref() == Some(room_id)
+        && state
+            .navigation
+            .main_timeline_anchor
+            .as_ref()
+            .is_some_and(|anchor| anchor.event_id == event_id)
+}
+
+fn snapshot_has_live_main_timeline(state: &AppState, room_id: &str) -> bool {
+    state.navigation.active_room_id.as_deref() == Some(room_id)
+        && state.focused_context == FocusedContextState::Closed
+        && state.navigation.main_timeline_anchor.is_none()
+}
+
+fn search_state_matches(
+    state: &AppState,
+    request_id: &RequestId,
+    query: &str,
+    scope: &SearchScope,
+) -> bool {
+    matches!(
+        &state.search,
+        koushi_state::SearchState::TooShort {
+            request_id: state_request_id,
+            query: state_query,
+            scope: state_scope,
+            ..
+        }
+        | koushi_state::SearchState::Searching {
+            request_id: state_request_id,
+            query: state_query,
+            scope: state_scope,
+        }
+        | koushi_state::SearchState::Results {
+            request_id: state_request_id,
+            query: state_query,
+            scope: state_scope,
+            ..
+        }
+        | koushi_state::SearchState::Failed {
+            request_id: state_request_id,
+            query: state_query,
+            scope: state_scope,
+            ..
+        } if *state_request_id == request_id.sequence
+            && state_query == query
+            && state_scope == scope
     )
 }

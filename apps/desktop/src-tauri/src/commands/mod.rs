@@ -22,8 +22,9 @@ use koushi_core::{
     CoreFailure, CreateRoomOptions, EncryptionDebugOperationOutcome, EventStreamLag,
     ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,
     ImageUploadVariantKind, IntentNoOpReason, IntentOutcome, MediaDownloadSelection,
-    PaginationDirection, RequestId, RoomCommand, RoomEvent, RoomKeyExportRequest,
-    RoomKeyImportRequest, RoomKeyReshareOutcome, SearchCommand, SearchEvent, SearchScope,
+    OutcomeCorrelation, PaginationDirection, RequestId, RequestOutcome, RequestOutcomeError,
+    RequestOutcomeExpectation, RoomCommand, RoomEvent, RoomKeyExportRequest, RoomKeyImportRequest,
+    RoomKeyReshareOutcome, SearchCommand, SearchEvent, SearchScope,
     SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest, SyncCommand,
     TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId, TimelineGeneration,
     TimelineKey, TimelineKind, TimelineViewportObservation, UploadMediaKind, UploadMediaRequest,
@@ -108,6 +109,26 @@ async fn current_snapshot(state: &CoreRuntimeState) -> Result<FrontendDesktopSna
 
 pub(crate) fn invoke_error_from_core_failure(context: &str, failure: CoreFailure) -> String {
     format!("{context}: {failure:?}")
+}
+
+pub(crate) fn invoke_error_from_request_outcome(
+    context: &str,
+    error: RequestOutcomeError,
+) -> String {
+    match error {
+        RequestOutcomeError::OperationFailed { failure } => {
+            invoke_error_from_core_failure(context, failure)
+        }
+        RequestOutcomeError::FailedNoOp { reason } => {
+            format!("{context}: failed no-op ({reason:?})")
+        }
+        RequestOutcomeError::Lagged => format!("{context}: request event stream lagged"),
+        RequestOutcomeError::Disconnected => {
+            format!("{context}: request event stream disconnected")
+        }
+        RequestOutcomeError::TimedOut => format!("{context}: request timed out"),
+        RequestOutcomeError::InvalidOutcome => format!("{context}: invalid request outcome"),
+    }
 }
 
 // ---- QA window title ----

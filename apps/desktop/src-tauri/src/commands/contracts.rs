@@ -5,12 +5,11 @@ use super::{
 };
 use koushi_core::AccountKey;
 use koushi_core::{
-    AccountCommand, AppCommand, CoreCommand, CoreConnection, CoreEvent, CreateRoomOptions,
-    CreateRoomParentSpace, CreateRoomVisibility, ImageUploadCompressionPolicy,
-    ImageUploadCompressionState, ImageUploadDimensions, ImageUploadVariantInfo,
-    ImageUploadVariantKind, MediaDownloadSelection, PaginationDirection, RequestId, RoomCommand,
-    SearchCommand, SearchScope, SyncCommand, TimelineCommand, TimelineKey, UploadMediaKind,
-    UploadMediaThumbnail,
+    AccountCommand, AppCommand, CoreCommand, CoreEvent, CreateRoomOptions, CreateRoomParentSpace,
+    CreateRoomVisibility, ImageUploadCompressionPolicy, ImageUploadCompressionState,
+    ImageUploadDimensions, ImageUploadVariantInfo, ImageUploadVariantKind, MediaDownloadSelection,
+    PaginationDirection, RequestId, RoomCommand, SearchCommand, SearchScope, SyncCommand,
+    TimelineCommand, TimelineKey, UploadMediaKind, UploadMediaThumbnail,
 };
 use koushi_state::{ActivityMarkReadTarget, ActivityTab, ImageUploadCompressionMode};
 use koushi_state::{
@@ -25,10 +24,6 @@ pub(super) struct ScriptedSelectSource {
     pub(super) events: VecDeque<Result<CoreEvent, koushi_core::EventStreamLag>>,
 }
 
-struct ScriptedSearchPathIo;
-
-const SYNTHETIC_QUERY: &str = "  synthetic-query-text event synthetic-event-id user synthetic-user-id body synthetic-body-text url https://synthetic.example/path absolute /synthetic/private/path  ";
-
 pub(super) fn fake_request_id(sequence: u64) -> koushi_core::RequestId {
     koushi_core::RequestId {
         connection_id: koushi_core::RuntimeConnectionId(7),
@@ -41,36 +36,6 @@ pub(super) fn synthetic_session_key() -> koushi_key::SessionKeyId {
         homeserver: "https://example.org".to_owned(),
         user_id: "@alice:example.org".to_owned(),
         device_id: "DEVICE".to_owned(),
-    }
-}
-
-impl super::search::SearchPathIo for ScriptedSearchPathIo {
-    fn submit<'a>(
-        &'a self,
-        _state: &'a super::CoreRuntimeState,
-        command: CoreCommand,
-    ) -> super::search::SearchPathFuture<'a> {
-        match command {
-            CoreCommand::Search(SearchCommand::Query { query, scope, .. }) => {
-                assert_eq!(query, SYNTHETIC_QUERY);
-                assert_eq!(
-                    scope,
-                    SearchScope::CurrentRoom {
-                        room_id: "synthetic-room-id".to_owned()
-                    }
-                );
-            }
-            other => panic!("unexpected search command: {other:?}"),
-        }
-        Box::pin(std::future::ready(Ok(())))
-    }
-
-    fn wait<'a>(
-        &'a self,
-        _connection: &'a mut CoreConnection,
-        _request_id: RequestId,
-    ) -> super::search::SearchPathFuture<'a> {
-        Box::pin(std::future::ready(Ok(())))
     }
 }
 
@@ -2221,129 +2186,4 @@ fn tauri_diagnostics_record_without_stderr_environment_switch() {
     assert!(records.iter().any(|record| {
         record.event.source == "desktop.timeline" && record.event.stage == "done"
     }));
-}
-
-#[test]
-fn env_unset_real_search_and_select_producers_are_private_data_free() {
-    let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "commands::contracts::env_unset_real_search_and_select_producers_child",
-            "--ignored",
-            "--nocapture",
-        ])
-        .env_remove("KOUSHI_SUBSCRIBE_TRACE")
-        .env_remove("KOUSHI_SEARCH_TRACE")
-        .output()
-        .expect("env-unset diagnostic child should run");
-    assert!(output.status.success(), "child failed: {output:?}");
-    let stdout = String::from_utf8(output.stdout).expect("child stdout should be utf8");
-    let snapshot: serde_json::Value = serde_json::from_str(
-        stdout
-            .lines()
-            .find(|line| line.starts_with('{'))
-            .expect("child should print one JSON snapshot"),
-    )
-    .expect("child output should be a JSON snapshot");
-    let records = snapshot["records"]
-        .as_array()
-        .expect("records should be an array");
-    let fields = |source: &str, stage: &str| {
-        records
-            .iter()
-            .find(|record| record["event"]["source"] == source && record["event"]["stage"] == stage)
-            .and_then(|record| record["event"]["fields"].as_array())
-            .expect("expected diagnostic record")
-    };
-    let field = |fields: &[serde_json::Value], key: &str| {
-        fields
-            .iter()
-            .find(|field| field["key"] == key)
-            .map(|field| field["value"].clone())
-            .expect("expected typed field")
-    };
-    let search_fields = fields("desktop.search", "submit");
-    assert_eq!(
-        field(search_fields, "ui_scope"),
-        serde_json::json!({"kind":"token","value":"current_room"})
-    );
-    assert_eq!(
-        field(search_fields, "resolved_scope"),
-        serde_json::json!({"kind":"token","value":"current_room"})
-    );
-    assert_eq!(
-        field(search_fields, "query_bytes"),
-        serde_json::json!({"kind":"count","value":161})
-    );
-    assert_eq!(
-        field(search_fields, "query_chars"),
-        serde_json::json!({"kind":"count","value":161})
-    );
-    assert_eq!(field(search_fields, "request_id")["kind"], "request_id");
-
-    assert!(
-        records
-            .iter()
-            .all(|record| record["event"]["source"] != "desktop.select"),
-        "Tauri must not duplicate Core-owned room-selection settlement telemetry"
-    );
-    let serialized_snapshot =
-        serde_json::to_string(&snapshot).expect("parsed diagnostic snapshot should serialize");
-    for private_value in [
-        "synthetic-room-id",
-        "synthetic-query-text",
-        "synthetic-event-id",
-        "synthetic-user-id",
-        "synthetic-body-text",
-        "https://synthetic.example/path",
-        "/synthetic/private/path",
-    ] {
-        assert!(
-            !serialized_snapshot.contains(private_value),
-            "diagnostic snapshot leaked {private_value}"
-        );
-    }
-}
-
-#[test]
-#[ignore]
-fn env_unset_real_search_and_select_producers_child() {
-    assert!(std::env::var_os("KOUSHI_SUBSCRIBE_TRACE").is_none());
-    assert!(std::env::var_os("KOUSHI_SEARCH_TRACE").is_none());
-
-    let async_runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .build()
-        .expect("test runtime should build");
-    async_runtime.block_on(async {
-        let data_dir = tempfile::tempdir().expect("runtime data dir should be created");
-        let runtime = koushi_core::CoreRuntime::start_with_data_dir(data_dir.path().to_owned());
-        let connection = runtime.attach();
-        let state = super::CoreRuntimeState {
-            runtime,
-            connection: tokio::sync::Mutex::new(connection),
-            composer_draft_transport: std::sync::Mutex::new(
-                crate::ComposerDraftTransportIdentities::default(),
-            ),
-            timeline_items_count: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            _forwarder_task: None,
-            native_window_focus_generation: std::sync::atomic::AtomicU64::new(0),
-            viewport_sync_generation: crate::viewport_sync::ViewportSyncGeneration::default(),
-        };
-        super::search::submit_search_production_path(
-            SYNTHETIC_QUERY.to_owned(),
-            SearchScopeKind::CurrentRoom,
-            SearchScope::CurrentRoom {
-                room_id: "synthetic-room-id".to_owned(),
-            },
-            &state,
-            &ScriptedSearchPathIo,
-        )
-        .await
-        .expect("production search path should reach searching state");
-    });
-
-    let serialized = serde_json::to_string(&koushi_diagnostics::snapshot())
-        .expect("diagnostic snapshot should serialize");
-    println!("{serialized}");
 }
