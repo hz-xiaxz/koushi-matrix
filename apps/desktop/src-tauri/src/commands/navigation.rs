@@ -449,6 +449,7 @@ async fn wait_for_focused_context_closed(
                 request_id,
                 account_key,
                 room_id,
+                allow_projection_only: true,
             },
             baseline_generation,
             deadline,

@@ -134,6 +134,7 @@ pub async fn close_search(
                 request_id,
                 account_key,
                 allow_initial: false,
+                allow_projection_only: true,
             },
             baseline_generation,
             tokio::time::Instant::now() + SEARCH_EVENT_TIMEOUT,

@@ -44,7 +44,8 @@ adds no reducer transition or AppState/AppAction change.
 ## Integration checkpoint
 
 - A1 reviewer: `deepseek-brainstormer` (read-only), `VERDICT: CORRECT-TO-CONTINUE`.
-- A2a reviewer: pending (`deepseek-brainstormer`).
+- A2a reviewer round 1: `deepseek-brainstormer`, `VERDICT: FINDINGS`. Real-runtime audit showed local reset, focused close, and search close do not emit the synthetic terminals used by initial unit tests. The service now has explicit `allow_projection_only` admission for these idempotent commands, still requiring a newer exact guarded snapshot; adapter callers opt in and RED/GREEN tests prove settlement without unavailable events. Search/auth/account guards and outcome mapping remain typed.
+- A2a reviewer round 2: pending (`deepseek-brainstormer`).
 - This is an additional same-design slice checkpoint, not a restarted pre-implementation gate.
 - A2 must implement and RED-test every currently declared expectation before its adapter waiter is migrated; unimplemented variants may not ship silently.
 - A2 must use operation-specific room guards (`RoomForgotten` settles on authoritative absence; leave uses its actual projected terminal) rather than the generic known-room predicate.

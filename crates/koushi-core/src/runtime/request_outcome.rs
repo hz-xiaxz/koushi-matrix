@@ -71,6 +71,7 @@ pub enum RequestOutcomeExpectation {
     SignedOut {
         request_id: RequestId,
         account_key: AccountKey,
+        allow_projection_only: bool,
     },
     SavedSessions {
         request_id: RequestId,
@@ -85,6 +86,7 @@ pub enum RequestOutcomeExpectation {
         request_id: RequestId,
         account_key: AccountKey,
         room_id: Option<String>,
+        allow_projection_only: bool,
     },
     FocusedContextOpened {
         request_id: RequestId,
@@ -137,6 +139,7 @@ pub enum RequestOutcomeExpectation {
         request_id: RequestId,
         account_key: Option<AccountKey>,
         allow_initial: bool,
+        allow_projection_only: bool,
     },
     UploadStaging {
         request_id: RequestId,
@@ -1193,10 +1196,35 @@ fn snapshot_outcome(
                 snapshot: snapshot.clone(),
             })
         }
+        RequestOutcomeExpectation::SignedOut {
+            request_id,
+            allow_projection_only: true,
+            ..
+        } if matches!(snapshot.state.session, SessionState::SignedOut) => {
+            Some(RequestOutcome::SignedOut {
+                request_id: *request_id,
+                snapshot: snapshot.clone(),
+            })
+        }
+        RequestOutcomeExpectation::FocusedContextClosed {
+            request_id,
+            account_key,
+            room_id,
+            allow_projection_only: true,
+        } if account_matches(&snapshot.state, Some(account_key))
+            && room_target_matches(&snapshot.state, room_id.as_deref())
+            && snapshot.state.focused_context == FocusedContextState::Closed
+            && snapshot.state.navigation.main_timeline_anchor.is_none() =>
+        {
+            Some(RequestOutcome::FocusedContext {
+                snapshot: snapshot.clone(),
+            })
+        }
         RequestOutcomeExpectation::SearchClosed {
             request_id,
             account_key,
-            allow_initial: true,
+            allow_projection_only: true,
+            ..
         } if snapshot.state.search == koushi_state::SearchState::Closed
             && account_matches(&snapshot.state, account_key.as_ref()) =>
         {
@@ -1271,6 +1299,7 @@ fn snapshot_outcome_for_progress(
             RequestOutcomeExpectation::SignedOut {
                 request_id,
                 account_key: expected_account_key,
+                ..
             },
         ) if account_key == expected_account_key
             && matches!(snapshot.state.session, SessionState::SignedOut) =>
@@ -1364,6 +1393,7 @@ fn snapshot_outcome_for_progress(
                 request_id,
                 account_key,
                 room_id,
+                ..
             },
         ) if account_matches(&snapshot.state, Some(account_key))
             && snapshot.state.focused_context == FocusedContextState::Closed

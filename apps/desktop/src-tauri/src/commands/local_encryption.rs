@@ -43,6 +43,7 @@ pub async fn reset_local_data(
             RequestOutcomeExpectation::SignedOut {
                 request_id,
                 account_key,
+                allow_projection_only: true,
             },
             baseline_generation,
             tokio::time::Instant::now() + LOCAL_DATA_RESET_EVENT_TIMEOUT,

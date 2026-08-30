@@ -83,6 +83,7 @@ async fn signed_out_rejects_a_foreign_account_event() {
         RequestOutcomeExpectation::SignedOut {
             request_id,
             account_key: expected,
+            allow_projection_only: false,
         },
         0,
         tokio::time::Instant::now() + Duration::from_millis(20),
@@ -110,6 +111,7 @@ async fn focused_context_close_and_open_require_correlated_snapshot_targets() {
             request_id: close_request,
             account_key: account_key.clone(),
             room_id: Some(room_id.clone()),
+            allow_projection_only: false,
         },
         0,
         tokio::time::Instant::now() + Duration::from_secs(1),
@@ -259,6 +261,7 @@ async fn search_close_requires_the_correlated_commit_and_exact_account_snapshot(
             request_id,
             account_key: Some(AccountKey("@alice:example.invalid".to_owned())),
             allow_initial: false,
+            allow_projection_only: false,
         },
         0,
         tokio::time::Instant::now() + Duration::from_secs(1),
@@ -367,6 +370,7 @@ async fn search_outcomes_treat_lag_as_terminal() {
             request_id,
             account_key: None,
             allow_initial: false,
+            allow_projection_only: false,
         },
         0,
         tokio::time::Instant::now() + Duration::from_secs(1),
@@ -380,4 +384,62 @@ async fn search_outcomes_treat_lag_as_terminal() {
 #[test]
 fn request_outcome_error_remains_typed() {
     assert_eq!(format!("{:?}", RequestOutcomeError::TimedOut), "TimedOut");
+}
+
+#[tokio::test]
+async fn projection_only_idempotent_outcomes_settle_without_unavailable_terminal_events() {
+    let (mut connection, control) = CoreConnection::new_for_testing(4);
+    let request_id = request(11);
+    let wait = connection.wait_for_request_outcome(
+        OutcomeCorrelation::Request(request_id),
+        RequestOutcomeExpectation::SignedOut {
+            request_id,
+            account_key: AccountKey("@alice:example.invalid".to_owned()),
+            allow_projection_only: true,
+        },
+        0,
+        tokio::time::Instant::now() + Duration::from_secs(1),
+    );
+    tokio::pin!(wait);
+    control.send_snapshot(versioned(AppState::default(), 1));
+    assert!(matches!(wait.await, Ok(RequestOutcome::SignedOut { .. })));
+
+    let (mut connection, control) = CoreConnection::new_for_testing(4);
+    let request_id = request(12);
+    let mut closed = ready_state("@alice:example.invalid");
+    closed.navigation.active_room_id = Some("!room:example.invalid".to_owned());
+    let wait = connection.wait_for_request_outcome(
+        OutcomeCorrelation::Request(request_id),
+        RequestOutcomeExpectation::FocusedContextClosed {
+            request_id,
+            account_key: AccountKey("@alice:example.invalid".to_owned()),
+            room_id: Some("!room:example.invalid".to_owned()),
+            allow_projection_only: true,
+        },
+        0,
+        tokio::time::Instant::now() + Duration::from_secs(1),
+    );
+    tokio::pin!(wait);
+    control.send_snapshot(versioned(closed, 1));
+    assert!(matches!(
+        wait.await,
+        Ok(RequestOutcome::FocusedContext { .. })
+    ));
+
+    let (mut connection, control) = CoreConnection::new_for_testing(4);
+    let request_id = request(13);
+    let wait = connection.wait_for_request_outcome(
+        OutcomeCorrelation::Request(request_id),
+        RequestOutcomeExpectation::SearchClosed {
+            request_id,
+            account_key: Some(AccountKey("@alice:example.invalid".to_owned())),
+            allow_initial: false,
+            allow_projection_only: true,
+        },
+        0,
+        tokio::time::Instant::now() + Duration::from_secs(1),
+    );
+    tokio::pin!(wait);
+    control.send_snapshot(versioned(ready_state("@alice:example.invalid"), 1));
+    assert!(matches!(wait.await, Ok(RequestOutcome::Search { .. })));
 }
