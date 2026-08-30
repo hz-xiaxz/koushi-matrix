@@ -1218,6 +1218,7 @@ pub(super) async fn wait_for_pinned_state(
             CoreEvent::Room(RoomEvent::PinnedEventsUpdated {
                 room_id: ev_room_id,
                 pinned,
+                ..
             }) if ev_room_id == room_id => {
                 let has_event = pinned.iter().any(|event| event.event_id == event_id);
                 if has_event == expected_present {

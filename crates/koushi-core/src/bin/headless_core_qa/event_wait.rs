@@ -1135,6 +1135,7 @@ pub(super) async fn wait_for_operation_failed<S: QaEventSource + ?Sized>(
                     | AccountEvent::LoggedOut { request_id: id, .. }
                     | AccountEvent::AccountSwitched { request_id: id, .. } => *id == request_id,
                     AccountEvent::OidcAuthorizationCreated { .. }
+                    | AccountEvent::AuthDiscoveryChanged { .. }
                     | AccountEvent::RecoveryRequired { .. } => false,
                 };
                 if matches_request {
@@ -1189,6 +1190,7 @@ pub(super) async fn wait_for_operation_failed_and_signed_out<S: QaSnapshotEventS
                     | AccountEvent::LoggedOut { request_id: id, .. }
                     | AccountEvent::AccountSwitched { request_id: id, .. } => *id == request_id,
                     AccountEvent::OidcAuthorizationCreated { .. }
+                    | AccountEvent::AuthDiscoveryChanged { .. }
                     | AccountEvent::RecoveryRequired { .. } => false,
                 };
                 if matches_request {
