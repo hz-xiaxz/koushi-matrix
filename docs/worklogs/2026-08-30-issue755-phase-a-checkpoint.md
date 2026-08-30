@@ -61,3 +61,12 @@ adds no reducer transition or AppState/AppAction change.
 - Strict Rust test-structure checker, rustfmt, and diff checks passed.
 - A2b reviewer round 1: `deepseek-brainstormer`, `VERDICT: FINDINGS`. It required expectation-specific terminal lag for event-only room operations and broader guard evidence; `RoomOperation` now returns typed Lagged after final snapshot inspection and has a deterministic overflow test. The worklog scope wording now accurately leaves timeline's SubmissionEventSource for A2c.
 - A2b reviewer round 2: `deepseek-brainstormer`, `VERDICT: CORRECT-TO-CONTINUE`. The intentionally coarse RoomOperation lag policy is terminal for all variants because every operation still requires its correlated event; this avoids silent long waits after event loss. Snapshot guards still distinguish absence/presence/generation after an event was observed.
+
+## Phase A2c timeline settlement migration
+
+- Upload staging, composer revision acceptance, submission acceptance/rejection, and prepared-media queue admission now settle through Core expectations. Submission requires exact RequestId + SubmissionId + account + target; prepared media requires RequestId + transaction ID + TimelineKey.
+- Timeline production `recv_event`/`timeout_at` loops and `SubmissionEventSource` are deleted; four remaining `wait_for_*` names are thin Core wrappers returning typed settled snapshots/payloads.
+- `cargo test -p koushi-core --test request_outcome_a2c`: 6 passed.
+- `cargo test -p koushi-desktop`: 112 library tests and 5 integration tests passed.
+- Strict Rust test-structure checker, rustfmt, and diff checks passed.
+- A2c different-model integration checkpoint: pending (`deepseek-brainstormer`).

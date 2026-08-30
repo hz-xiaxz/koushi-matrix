@@ -41,31 +41,29 @@ pub(super) fn trace_tauri_timeline_command_elapsed(
 async fn wait_for_upload_staging_snapshot(
     event_conn: &mut CoreConnection,
     request_id: RequestId,
-    predicate: impl Fn(&koushi_state::AppState) -> bool,
+    account_key: AccountKey,
+    target: koushi_state::ComposerTarget,
+    staged_ids: Vec<String>,
+    baseline_generation: u64,
     description: &str,
-) -> Result<(), String> {
-    let deadline = tokio::time::Instant::now() + UPLOAD_STAGING_EVENT_TIMEOUT;
-
-    loop {
-        if predicate(&event_conn.snapshot()) {
-            return Ok(());
-        }
-
-        let event = tokio::time::timeout_at(deadline, event_conn.recv_event())
-            .await
-            .map_err(|_| description.to_owned())?;
-        match event {
-            Ok(CoreEvent::StateChanged(snapshot)) if predicate(&snapshot) => return Ok(()),
-            Ok(CoreEvent::OperationFailed {
-                request_id: failed_request_id,
-                failure,
-            }) if failed_request_id == request_id => {
-                return Err(invoke_error_from_core_failure(description, failure));
-            }
-            Ok(_) => {}
-            Err(_) if predicate(&event_conn.snapshot()) => return Ok(()),
-            Err(_) => continue,
-        }
+) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
+    match event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::UploadStaging {
+                request_id,
+                account_key,
+                target,
+                staged_ids,
+            },
+            baseline_generation,
+            tokio::time::Instant::now() + UPLOAD_STAGING_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome(description, error))?
+    {
+        RequestOutcome::UploadStaging { snapshot, .. } => Ok(snapshot),
+        _ => Err(format!("{description}: invalid request outcome")),
     }
 }
 
@@ -818,25 +816,6 @@ const SUBMISSION_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(10);
 const PREPARED_MEDIA_QUEUE_TIMEOUT: Duration = Duration::from_secs(10);
 const COMPOSER_DRAFT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_secs(10);
 
-trait SubmissionEventSource {
-    fn snapshot(&self) -> koushi_state::AppState;
-    fn recv_event(
-        &mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<CoreEvent, EventStreamLag>> + Send + '_>>;
-}
-
-impl SubmissionEventSource for CoreConnection {
-    fn snapshot(&self) -> koushi_state::AppState {
-        CoreConnection::snapshot(self)
-    }
-
-    fn recv_event(
-        &mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<CoreEvent, EventStreamLag>> + Send + '_>> {
-        Box::pin(CoreConnection::recv_event(self))
-    }
-}
-
 fn composer_draft_revision(
     state: &koushi_state::AppState,
     target: &koushi_state::ComposerTarget,
@@ -1062,60 +1041,78 @@ fn next_composer_draft_acceptance_revision(
     .map_err(|_| "composer draft revision exhausted".to_owned())
 }
 
-async fn wait_for_composer_draft_acceptance<S: SubmissionEventSource>(
-    source: &mut S,
-    request_id: koushi_core::RequestId,
-    target: &koushi_state::ComposerTarget,
+async fn wait_for_composer_draft_acceptance(
+    event_conn: &mut CoreConnection,
+    request_id: RequestId,
+    account_key: AccountKey,
+    target: koushi_state::ComposerTarget,
     expected_revision: koushi_state::ComposerDraftRevision,
-    timeout: Duration,
-) -> Result<koushi_state::ComposerDraftRevision, String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let revision = composer_draft_revision(&source.snapshot(), target);
-        if revision >= expected_revision {
-            return Ok(revision);
-        }
-        let terminal_failure = match tokio::time::timeout_at(deadline, source.recv_event()).await {
-            Ok(Ok(koushi_core::CoreEvent::OperationFailed {
-                request_id: failed_request_id,
-                ..
-            })) if failed_request_id == request_id => {
-                "composer draft acceptance was rejected".to_owned()
-            }
-            // Issue #450: schedule-time slash rejections are keyed events
-            // carrying the request id; terminate the wait immediately.
-            Ok(Ok(koushi_core::CoreEvent::Room(
-                koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
-                    request_id: rejected_request_id,
-                    ..
-                },
-            ))) if rejected_request_id == request_id => {
-                "composer draft acceptance was rejected".to_owned()
-            }
-            Ok(Ok(_)) => continue,
-            Ok(Err(lag)) if lag.skipped == 0 => "composer draft acceptance disconnected".to_owned(),
-            Ok(Err(_)) => "composer draft acceptance event stream lagged".to_owned(),
-            Err(_) => "composer draft acceptance did not settle".to_owned(),
-        };
-        // Broadcast delivery is only a wake-up hint. The reducer snapshot is
-        // authoritative and may already contain the acceptance even when the
-        // event was lagged, disconnected, or raced the deadline.
-        let revision = composer_draft_revision(&source.snapshot(), target);
-        if revision >= expected_revision {
-            return Ok(revision);
-        }
-        return Err(terminal_failure);
+    baseline_generation: u64,
+) -> Result<
+    (
+        koushi_state::ComposerDraftRevision,
+        koushi_core::event::VersionedAppStateSnapshot,
+    ),
+    String,
+> {
+    match event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::ComposerAccepted {
+                request_id,
+                account_key,
+                target,
+                expected_revision,
+            },
+            baseline_generation,
+            tokio::time::Instant::now() + COMPOSER_DRAFT_ACCEPTANCE_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("composer draft acceptance", error))?
+    {
+        RequestOutcome::ComposerAccepted {
+            revision, snapshot, ..
+        } => Ok((revision, snapshot)),
+        _ => Err("composer draft acceptance: invalid request outcome".to_owned()),
     }
 }
 
 async fn wait_for_submission_settlement(
     event_conn: &mut CoreConnection,
+    request_id: RequestId,
+    account_key: AccountKey,
+    target: koushi_state::ComposerTarget,
     submission_id: SubmissionId,
+    baseline_generation: u64,
 ) -> Result<SubmissionResponse, SubmissionFailure> {
-    let (outcome, transaction_id) =
-        wait_for_submission_outcome(event_conn, &submission_id, SUBMISSION_SETTLEMENT_TIMEOUT)
-            .await?;
-    let snapshot = event_conn.versioned_snapshot();
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Submission {
+                request_id,
+                submission_id: submission_id.clone(),
+            },
+            RequestOutcomeExpectation::Submission {
+                request_id,
+                account_key,
+                target,
+                submission_id: submission_id.clone(),
+            },
+            baseline_generation,
+            tokio::time::Instant::now() + SUBMISSION_SETTLEMENT_TIMEOUT,
+        )
+        .await
+        .map_err(submission_failure_from_outcome_error)?;
+    let (outcome, transaction_id, snapshot) = match outcome {
+        RequestOutcome::SubmissionAccepted {
+            transaction_id,
+            snapshot,
+            ..
+        } => (SubmissionOutcome::Accepted, Some(transaction_id), snapshot),
+        RequestOutcome::SubmissionRejected { kind, snapshot, .. } => {
+            (SubmissionOutcome::Rejected { kind }, None, snapshot)
+        }
+        _ => return Err(SubmissionFailure::SubmitFailed),
+    };
     Ok(SubmissionResponse {
         outcome,
         submission_id,
@@ -1124,95 +1121,40 @@ async fn wait_for_submission_settlement(
     })
 }
 
-async fn wait_for_submission_outcome<S: SubmissionEventSource>(
-    source: &mut S,
-    submission_id: &SubmissionId,
-    timeout: Duration,
-) -> Result<(SubmissionOutcome, Option<String>), SubmissionFailure> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    let (outcome, transaction_id) = loop {
-        let event = tokio::time::timeout_at(deadline, source.recv_event())
-            .await
-            .map_err(|_| SubmissionFailure::Timeout)?;
-        match event {
-            Ok(CoreEvent::Timeline(TimelineEvent::SubmissionAccepted {
-                submission_id: accepted_id,
-                transaction_id,
-                ..
-            })) if accepted_id == *submission_id => {
-                break (SubmissionOutcome::Accepted, Some(transaction_id));
-            }
-            Ok(CoreEvent::Timeline(TimelineEvent::SubmissionRejected {
-                submission_id: rejected_id,
-                kind,
-                ..
-            })) if rejected_id == *submission_id => {
-                break (SubmissionOutcome::Rejected { kind }, None);
-            }
-            Ok(_) => {}
-            Err(EventStreamLag { skipped: 0 }) => return Err(SubmissionFailure::Disconnected),
-            Err(_) => return Err(SubmissionFailure::Lagged),
-        }
-    };
-
-    if matches!(outcome, SubmissionOutcome::Accepted) {
-        loop {
-            let snapshot = source.snapshot();
-            let registry = &snapshot.timeline.submission_registry;
-            if registry.accepted_submission_ids.contains(submission_id)
-                || registry.settled_submission_ids.contains(submission_id)
-            {
-                break;
-            }
-            tokio::time::timeout_at(deadline, source.recv_event())
-                .await
-                .map_err(|_| SubmissionFailure::Timeout)?
-                .map_err(|lag| {
-                    if lag.skipped == 0 {
-                        SubmissionFailure::Disconnected
-                    } else {
-                        SubmissionFailure::Lagged
-                    }
-                })?;
-        }
+fn submission_failure_from_outcome_error(error: RequestOutcomeError) -> SubmissionFailure {
+    match error {
+        RequestOutcomeError::TimedOut => SubmissionFailure::Timeout,
+        RequestOutcomeError::Disconnected => SubmissionFailure::Disconnected,
+        RequestOutcomeError::Lagged => SubmissionFailure::Lagged,
+        RequestOutcomeError::OperationFailed { .. }
+        | RequestOutcomeError::FailedNoOp { .. }
+        | RequestOutcomeError::InvalidOutcome => SubmissionFailure::SubmitFailed,
     }
-    Ok((outcome, transaction_id))
 }
 
-async fn wait_for_prepared_media_queue<S: SubmissionEventSource>(
-    source: &mut S,
+async fn wait_for_prepared_media_queue(
+    event_conn: &mut CoreConnection,
     request_id: RequestId,
-    transaction_id: &str,
-    timeout: Duration,
-) -> Result<(), String> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let event = tokio::time::timeout_at(deadline, source.recv_event())
-            .await
-            .map_err(|_| "prepared upload queue admission did not settle".to_owned())?;
-        match event {
-            Ok(CoreEvent::Timeline(TimelineEvent::MediaSendQueued {
-                request_id: queued_request_id,
-                transaction_id: queued_transaction_id,
-                ..
-            })) if queued_request_id == request_id && queued_transaction_id == transaction_id => {
-                return Ok(());
-            }
-            Ok(CoreEvent::OperationFailed {
-                request_id: failed_request_id,
-                failure,
-            }) if failed_request_id == request_id => {
-                return Err(invoke_error_from_core_failure(
-                    "prepared upload send failed",
-                    failure,
-                ));
-            }
-            Ok(_) => {}
-            Err(EventStreamLag { skipped: 0 }) => {
-                return Err("prepared upload send disconnected".to_owned());
-            }
-            Err(_) => return Err("prepared upload send event stream lagged".to_owned()),
-        }
+    key: TimelineKey,
+    transaction_id: String,
+    baseline_generation: u64,
+) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
+    match event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::PreparedMediaQueued {
+                request_id,
+                key,
+                transaction_id,
+            },
+            baseline_generation,
+            tokio::time::Instant::now() + PREPARED_MEDIA_QUEUE_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("prepared upload send", error))?
+    {
+        RequestOutcome::PreparedMediaQueued { snapshot, .. } => Ok(snapshot),
+        _ => Err("prepared upload send: invalid request outcome".to_owned()),
     }
 }
 
@@ -1374,6 +1316,7 @@ pub async fn send_text(
         &target,
     )
     .map_err(|_| SubmissionFailure::SubmitFailed)?;
+    let baseline_generation = event_conn.versioned_snapshot().generation;
     let request_id = event_conn.next_request_id();
     let account_key = account_key_from_app_state(&event_conn.snapshot());
     let submission_id = SubmissionId::new(submission_id);
@@ -1381,7 +1324,7 @@ pub async fn send_text(
         request_id,
         expected_account,
         submission_id.clone(),
-        account_key,
+        account_key.clone(),
         room_id,
         transaction_id,
         document,
@@ -1392,7 +1335,15 @@ pub async fn send_text(
             .await
             .map_err(|_| SubmissionFailure::SubmitFailed)?;
     }
-    let response = wait_for_submission_settlement(&mut event_conn, submission_id).await?;
+    let response = wait_for_submission_settlement(
+        &mut event_conn,
+        request_id,
+        account_key,
+        target,
+        submission_id,
+        baseline_generation,
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(response)
 }
@@ -1424,6 +1375,8 @@ pub async fn schedule_send(
     }
     let expected_revision =
         next_composer_draft_acceptance_revision(&event_conn.snapshot(), &target, draft_revision)?;
+    let account_key = account_key_from_app_state(&event_conn.snapshot());
+    let baseline_generation = event_conn.versioned_snapshot().generation;
     let _terminal_permit = acquire_terminal_composer_permit(
         &event_conn,
         generation,
@@ -1432,7 +1385,7 @@ pub async fn schedule_send(
         &target,
     )?;
     let request_id = event_conn.next_request_id();
-    let accepted_revision = if let Some(command) = build_schedule_send_command(
+    let (accepted_revision, settled_snapshot) = if let Some(command) = build_schedule_send_command(
         request_id,
         expected_account,
         target.clone(),
@@ -1444,24 +1397,26 @@ pub async fn schedule_send(
             .command_with_composer_lease(generation, lease, command)
             .await
             .map_err(|error| format!("command submit failed: {error}"))?;
-        Some(
-            wait_for_composer_draft_acceptance(
-                &mut event_conn,
-                request_id,
-                &target,
-                expected_revision,
-                COMPOSER_DRAFT_ACCEPTANCE_TIMEOUT,
-            )
-            .await?,
+        let (accepted_revision, snapshot) = wait_for_composer_draft_acceptance(
+            &mut event_conn,
+            request_id,
+            account_key,
+            target.clone(),
+            expected_revision,
+            baseline_generation,
         )
+        .await?;
+        (Some(accepted_revision), snapshot)
     } else {
-        None
+        (None, event_conn.versioned_snapshot())
     };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    let snapshot = event_conn.versioned_snapshot();
     Ok(ComposerDraftAcceptanceResponse {
         accepted_revision,
-        snapshot: FrontendDesktopSnapshot::from_versioned(snapshot.state, snapshot.generation),
+        snapshot: FrontendDesktopSnapshot::from_versioned(
+            settled_snapshot.state,
+            settled_snapshot.generation,
+        ),
     })
 }
 
@@ -1477,36 +1432,37 @@ pub async fn stage_uploads(
     }
 
     let room_id_for_wait = room_id.trim().to_owned();
+    let target = koushi_state::ComposerTarget::Main {
+        room_id: room_id_for_wait.clone(),
+    };
     let expected_ids = items
         .iter()
         .filter(|item| !item.staged_id.trim().is_empty())
         .map(|item| item.staged_id.clone())
         .collect::<Vec<_>>();
     let mut event_conn = state.runtime.attach();
+    let account_key = account_key_from_app_state(&event_conn.snapshot());
+    let baseline_generation = event_conn.versioned_snapshot().generation;
     let request_id = event_conn.next_request_id();
     event_conn
         .command(build_set_upload_staging_command(request_id, room_id, items))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_upload_staging_snapshot(
+    let settled = wait_for_upload_staging_snapshot(
         &mut event_conn,
         request_id,
-        |snapshot| {
-            snapshot.timeline.room_id.as_deref() == Some(room_id_for_wait.as_str())
-                && snapshot.timeline.staged_uploads.len() == expected_ids.len()
-                && expected_ids.iter().all(|expected_id| {
-                    snapshot
-                        .timeline
-                        .staged_uploads
-                        .iter()
-                        .any(|item| item.staged_id == *expected_id)
-                })
-        },
+        account_key,
+        target,
+        expected_ids,
+        baseline_generation,
         "upload staging did not update",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        settled.state,
+        settled.generation,
+    ))
 }
 
 #[tauri::command]
@@ -1562,9 +1518,14 @@ pub async fn stage_upload_bytes(
             preparation: koushi_state::StagedUploadPreparation::Preparing,
         }))
         .collect::<Vec<_>>();
+    let preparing_ids = preparing_items
+        .iter()
+        .map(|item| item.staged_id.clone())
+        .collect::<Vec<_>>();
     {
         let mut media = state.runtime.media_preparation().transition().await;
         media.reconcile_snapshot(&initial_snapshot);
+        let preparing_baseline_generation = event_conn.versioned_snapshot().generation;
         let preparing_request_id = event_conn.next_request_id();
         event_conn
             .command(CoreCommand::App(AppCommand::SetUploadStaging {
@@ -1574,23 +1535,13 @@ pub async fn stage_upload_bytes(
             }))
             .await
             .map_err(|error| format!("command submit failed: {error}"))?;
-        wait_for_upload_staging_snapshot(
+        let _ = wait_for_upload_staging_snapshot(
             &mut event_conn,
             preparing_request_id,
-            |snapshot| {
-                staged_uploads_for_target(snapshot, &target).is_some_and(|staged| {
-                    staged.len() == existing_items.len() + expected_ids.len()
-                        && expected_ids.iter().all(|expected_id| {
-                            staged.iter().any(|item| {
-                                item.staged_id == *expected_id
-                                    && matches!(
-                                        item.preparation,
-                                        koushi_state::StagedUploadPreparation::Preparing
-                                    )
-                            })
-                        })
-                })
-            },
+            initial_account.clone(),
+            target.clone(),
+            preparing_ids,
+            preparing_baseline_generation,
             "upload staging did not enter preparing state",
         )
         .await?;
@@ -1647,7 +1598,11 @@ pub async fn stage_upload_bytes(
     }
     media.merge_prepared(prepared_registry);
 
-    let prepared_item_count = prepared_items.len();
+    let ready_ids = prepared_items
+        .iter()
+        .map(|item| item.staged_id.clone())
+        .collect::<Vec<_>>();
+    let ready_baseline_generation = event_conn.versioned_snapshot().generation;
     let ready_request_id = event_conn.next_request_id();
     event_conn
         .command(CoreCommand::App(AppCommand::SetUploadStaging {
@@ -1657,28 +1612,21 @@ pub async fn stage_upload_bytes(
         }))
         .await
         .map_err(|error| format!("command submit failed: {error}"))?;
-    wait_for_upload_staging_snapshot(
+    let settled = wait_for_upload_staging_snapshot(
         &mut event_conn,
         ready_request_id,
-        |snapshot| {
-            staged_uploads_for_target(snapshot, &target).is_some_and(|staged| {
-                staged.len() == prepared_item_count
-                    && expected_ids.iter().all(|expected_id| {
-                        staged.iter().any(|item| {
-                            item.staged_id == *expected_id
-                                && !matches!(
-                                    item.preparation,
-                                    koushi_state::StagedUploadPreparation::Preparing
-                                )
-                        })
-                    })
-            })
-        },
+        initial_account,
+        target,
+        ready_ids,
+        ready_baseline_generation,
         "upload preparation did not settle",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        settled.state,
+        settled.generation,
+    ))
 }
 
 #[tauri::command]
@@ -1708,6 +1656,12 @@ pub async fn select_staged_upload_output(
         media.select_variant(&target, &staged_id, &variant_id)
     };
     let mut event_conn = state.runtime.attach();
+    let baseline_generation = event_conn.versioned_snapshot().generation;
+    let expected_ids = staged_uploads_for_target(&event_conn.snapshot(), &target)
+        .unwrap_or_default()
+        .iter()
+        .map(|item| item.staged_id.clone())
+        .collect::<Vec<_>>();
     let request_id = event_conn.next_request_id();
     event_conn
         .command(CoreCommand::App(AppCommand::SelectStagedUploadOutput {
@@ -1718,27 +1672,21 @@ pub async fn select_staged_upload_output(
         }))
         .await
         .map_err(|error| format!("command submit failed: {error}"))?;
-    let selection_matches = |snapshot: &koushi_state::AppState| {
-        staged_uploads_for_target(snapshot, &target).is_some_and(|items| {
-            items.iter().any(|item| {
-                item.staged_id == staged_id
-                    && matches!(
-                        &item.preparation,
-                        koushi_state::StagedUploadPreparation::Ready { selected, .. }
-                            if selected == &selection
-                    )
-            })
-        })
-    };
-    wait_for_upload_staging_snapshot(
+    let settled = wait_for_upload_staging_snapshot(
         &mut event_conn,
         request_id,
-        selection_matches,
+        initial_account.clone(),
+        target.clone(),
+        expected_ids,
+        baseline_generation,
         "staged upload output selection did not update",
     )
     .await?;
     if cached {
-        return current_snapshot(state.inner()).await;
+        return Ok(FrontendDesktopSnapshot::from_versioned(
+            settled.state,
+            settled.generation,
+        ));
     }
 
     // Encode the newly requested pair. The generation captured here is what
@@ -1912,6 +1860,12 @@ async fn replace_staged_upload_item(
         return Ok(());
     };
     *item = replacement;
+    let expected_ids = items
+        .iter()
+        .map(|item| item.staged_id.clone())
+        .collect::<Vec<_>>();
+    let account_key = account_key_from_app_state(&event_conn.snapshot());
+    let baseline_generation = event_conn.versioned_snapshot().generation;
     let request_id = event_conn.next_request_id();
     event_conn
         .command(CoreCommand::App(AppCommand::SetUploadStaging {
@@ -1921,23 +1875,17 @@ async fn replace_staged_upload_item(
         }))
         .await
         .map_err(|error| format!("command submit failed: {error}"))?;
-    wait_for_upload_staging_snapshot(
+    let _ = wait_for_upload_staging_snapshot(
         &mut event_conn,
         request_id,
-        |snapshot| {
-            staged_uploads_for_target(snapshot, target).is_some_and(|items| {
-                items.iter().any(|item| {
-                    item.staged_id == staged_id
-                        && !matches!(
-                            item.preparation,
-                            koushi_state::StagedUploadPreparation::Preparing
-                        )
-                })
-            })
-        },
+        account_key,
+        target.clone(),
+        expected_ids,
+        baseline_generation,
         "upload preparation recovery did not settle",
     )
-    .await
+    .await?;
+    Ok(())
 }
 
 async fn publish_staged_upload_items(
@@ -1949,6 +1897,8 @@ async fn publish_staged_upload_items(
         .iter()
         .map(|item| item.staged_id.clone())
         .collect::<Vec<_>>();
+    let account_key = account_key_from_app_state(&event_conn.snapshot());
+    let baseline_generation = event_conn.versioned_snapshot().generation;
     let request_id = event_conn.next_request_id();
     event_conn
         .command(CoreCommand::App(AppCommand::SetUploadStaging {
@@ -1958,20 +1908,17 @@ async fn publish_staged_upload_items(
         }))
         .await
         .map_err(|error| format!("command submit failed: {error}"))?;
-    wait_for_upload_staging_snapshot(
+    let _ = wait_for_upload_staging_snapshot(
         event_conn,
         request_id,
-        |snapshot| {
-            staged_uploads_for_target(snapshot, target).is_some_and(|staged| {
-                staged.len() == expected_ids.len()
-                    && expected_ids
-                        .iter()
-                        .all(|expected_id| staged.iter().any(|item| item.staged_id == *expected_id))
-            })
-        },
+        account_key,
+        target.clone(),
+        expected_ids,
+        baseline_generation,
         "prepared upload staging did not settle",
     )
-    .await
+    .await?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -2057,6 +2004,7 @@ pub async fn send_prepared_uploads(
                 .selected_upload(&target, &item.staged_id)
                 .ok_or_else(|| "selected prepared upload bytes are unavailable".to_owned())?
         };
+        let baseline_generation = event_conn.versioned_snapshot().generation;
         let request_id = event_conn.next_request_id();
         let transaction_id = format!(
             "desktop-prepared-media-{}",
@@ -2092,11 +2040,12 @@ pub async fn send_prepared_uploads(
             }))
             .await
             .map_err(|error| format!("command submit failed: {error}"))?;
-        wait_for_prepared_media_queue(
+        let _ = wait_for_prepared_media_queue(
             &mut event_conn,
             request_id,
-            &transaction_id,
-            PREPARED_MEDIA_QUEUE_TIMEOUT,
+            key.clone(),
+            transaction_id.clone(),
+            baseline_generation,
         )
         .await?;
         let mut media = state.runtime.media_preparation().transition().await;
@@ -2116,6 +2065,7 @@ pub async fn send_prepared_uploads(
             publish_staged_upload_items(&mut event_conn, &target, remaining_items).await?;
         }
     }
+    let baseline_generation = event_conn.versioned_snapshot().generation;
     let request_id = event_conn.next_request_id();
     event_conn
         .command_with_composer_lease(
@@ -2130,19 +2080,22 @@ pub async fn send_prepared_uploads(
         )
         .await
         .map_err(|error| format!("command submit failed: {error}"))?;
-    let accepted_revision = wait_for_composer_draft_acceptance(
+    let (accepted_revision, settled_snapshot) = wait_for_composer_draft_acceptance(
         &mut event_conn,
         request_id,
-        &target,
+        account_key,
+        target,
         expected_revision,
-        COMPOSER_DRAFT_ACCEPTANCE_TIMEOUT,
+        baseline_generation,
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    let snapshot = event_conn.versioned_snapshot();
     Ok(ComposerDraftAcceptanceResponse {
         accepted_revision: Some(accepted_revision),
-        snapshot: FrontendDesktopSnapshot::from_versioned(snapshot.state, snapshot.generation),
+        snapshot: FrontendDesktopSnapshot::from_versioned(
+            settled_snapshot.state,
+            settled_snapshot.generation,
+        ),
     })
 }
 
@@ -2238,12 +2191,17 @@ pub async fn update_staged_upload_caption(
 
     let document = document
         .and_then(|document| (!document.plain_body().trim().is_empty()).then_some(document));
-    let expected_document = document.clone();
-    let staged_id_for_wait = staged_id.clone();
     let mut event_conn = state.runtime.attach();
     if !composer_target_is_active(&event_conn.snapshot(), &target) {
         return current_snapshot(state.inner()).await;
     }
+    let account_key = account_key_from_app_state(&event_conn.snapshot());
+    let expected_ids = staged_uploads_for_target(&event_conn.snapshot(), &target)
+        .unwrap_or_default()
+        .iter()
+        .map(|item| item.staged_id.clone())
+        .collect::<Vec<_>>();
+    let baseline_generation = event_conn.versioned_snapshot().generation;
     let request_id = event_conn.next_request_id();
     event_conn
         .command(CoreCommand::App(AppCommand::UpdateStagedUploadCaption {
@@ -2254,22 +2212,21 @@ pub async fn update_staged_upload_caption(
         }))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_upload_staging_snapshot(
+    let settled = wait_for_upload_staging_snapshot(
         &mut event_conn,
         request_id,
-        |snapshot| {
-            staged_uploads_for_target(snapshot, &target)
-                .unwrap_or_default()
-                .iter()
-                .find(|item| item.staged_id == staged_id_for_wait)
-                .map(|item| item.caption.as_ref())
-                == Some(expected_document.as_ref())
-        },
+        account_key,
+        target,
+        expected_ids,
+        baseline_generation,
         "staged upload caption did not update",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        settled.state,
+        settled.generation,
+    ))
 }
 
 #[tauri::command]
@@ -2283,41 +2240,45 @@ pub async fn update_staged_upload_compression(
         return current_snapshot(state.inner()).await;
     }
 
-    let staged_id_for_wait = staged_id.clone();
-    let expected_choice = compression_choice;
     let mut event_conn = state.runtime.attach();
-    let request_id = event_conn.next_request_id();
     let Some(room_id) = event_conn.snapshot().timeline.room_id else {
         return current_snapshot(state.inner()).await;
     };
+    let target = koushi_state::ComposerTarget::Main { room_id };
+    let account_key = account_key_from_app_state(&event_conn.snapshot());
+    let expected_ids = staged_uploads_for_target(&event_conn.snapshot(), &target)
+        .unwrap_or_default()
+        .iter()
+        .map(|item| item.staged_id.clone())
+        .collect::<Vec<_>>();
+    let baseline_generation = event_conn.versioned_snapshot().generation;
+    let request_id = event_conn.next_request_id();
     event_conn
         .command(CoreCommand::App(
             AppCommand::UpdateStagedUploadCompression {
                 request_id,
-                target: koushi_state::ComposerTarget::Main { room_id },
+                target: target.clone(),
                 staged_id,
                 compression_choice,
             },
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_upload_staging_snapshot(
+    let settled = wait_for_upload_staging_snapshot(
         &mut event_conn,
         request_id,
-        |snapshot| {
-            snapshot
-                .timeline
-                .staged_uploads
-                .iter()
-                .find(|item| item.staged_id == staged_id_for_wait)
-                .map(|item| item.compression_choice)
-                == Some(expected_choice)
-        },
+        account_key,
+        target,
+        expected_ids,
+        baseline_generation,
         "staged upload compression did not update",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        settled.state,
+        settled.generation,
+    ))
 }
 
 #[tauri::command]
@@ -2331,6 +2292,8 @@ pub async fn clear_upload_staging(
     if !composer_target_is_active(&event_conn.snapshot(), &target) {
         return current_snapshot(state.inner()).await;
     }
+    let account_key = account_key_from_app_state(&event_conn.snapshot());
+    let baseline_generation = event_conn.versioned_snapshot().generation;
     let request_id = event_conn.next_request_id();
     event_conn
         .command(CoreCommand::App(AppCommand::ClearUploadStaging {
@@ -2339,18 +2302,22 @@ pub async fn clear_upload_staging(
         }))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_upload_staging_snapshot(
+    let settled = wait_for_upload_staging_snapshot(
         &mut event_conn,
         request_id,
-        |snapshot| {
-            staged_uploads_for_target(snapshot, &target).is_some_and(|items| items.is_empty())
-        },
+        account_key,
+        target.clone(),
+        Vec::new(),
+        baseline_generation,
         "upload staging did not clear",
     )
     .await?;
     media.clear_target(&target);
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        settled.state,
+        settled.generation,
+    ))
 }
 
 #[tauri::command]
@@ -3037,6 +3004,7 @@ pub async fn send_reply(
         &target,
     )
     .map_err(|_| SubmissionFailure::SubmitFailed)?;
+    let baseline_generation = event_conn.versioned_snapshot().generation;
     let request_id = event_conn.next_request_id();
     let account_key = account_key_from_app_state(&event_conn.snapshot());
     let submission_id = SubmissionId::new(submission_id);
@@ -3044,7 +3012,7 @@ pub async fn send_reply(
         request_id,
         expected_account,
         submission_id.clone(),
-        account_key,
+        account_key.clone(),
         room_id,
         transaction_id,
         in_reply_to_event_id,
@@ -3056,7 +3024,15 @@ pub async fn send_reply(
             .await
             .map_err(|_| SubmissionFailure::SubmitFailed)?;
     }
-    let response = wait_for_submission_settlement(&mut event_conn, submission_id).await?;
+    let response = wait_for_submission_settlement(
+        &mut event_conn,
+        request_id,
+        account_key,
+        target,
+        submission_id,
+        baseline_generation,
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(response)
 }
@@ -3108,6 +3084,7 @@ pub async fn send_thread_reply(
         &target,
     )
     .map_err(|_| SubmissionFailure::SubmitFailed)?;
+    let baseline_generation = event_conn.versioned_snapshot().generation;
     let request_id = event_conn.next_request_id();
     let account_key = account_key_from_app_state(&event_conn.snapshot());
     let submission_id = SubmissionId::new(submission_id);
@@ -3115,7 +3092,7 @@ pub async fn send_thread_reply(
         request_id,
         expected_account,
         submission_id.clone(),
-        account_key,
+        account_key.clone(),
         room_id,
         root_event_id,
         transaction_id,
@@ -3127,7 +3104,15 @@ pub async fn send_thread_reply(
             .await
             .map_err(|_| SubmissionFailure::SubmitFailed)?;
     }
-    let response = wait_for_submission_settlement(&mut event_conn, submission_id).await?;
+    let response = wait_for_submission_settlement(
+        &mut event_conn,
+        request_id,
+        account_key,
+        target,
+        submission_id,
+        baseline_generation,
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(response)
 }
@@ -3332,9 +3317,6 @@ async fn image_upload_compression_contract_from_snapshot(
         },
     )
 }
-
-#[cfg(test)]
-mod submission_settlement_tests;
 
 #[cfg(test)]
 mod save_downloaded_media_tests {

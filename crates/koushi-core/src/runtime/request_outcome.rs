@@ -312,6 +312,7 @@ pub enum RequestOutcome {
     },
     PreparedMediaQueued {
         request_id: RequestId,
+        key: TimelineKey,
         transaction_id: String,
         snapshot: VersionedAppStateSnapshot,
     },
@@ -727,24 +728,21 @@ enum EventProgress {
     Search {
         request_id: RequestId,
     },
-    UploadStaging {
-        request_id: RequestId,
-    },
-    ComposerAccepted {
-        request_id: RequestId,
-    },
     SubmissionAccepted {
         request_id: RequestId,
+        key: TimelineKey,
         submission_id: SubmissionId,
         transaction_id: String,
     },
     SubmissionRejected {
         request_id: RequestId,
+        key: TimelineKey,
         submission_id: SubmissionId,
         kind: crate::failure::TimelineFailureKind,
     },
     PreparedMediaQueued {
         request_id: RequestId,
+        key: TimelineKey,
         transaction_id: String,
     },
     RoomKeyReshare {
@@ -793,14 +791,19 @@ impl EventProgress {
             (
                 Self::SubmissionRejected {
                     request_id,
+                    key,
                     submission_id,
                     kind,
                 },
                 RequestOutcomeExpectation::Submission {
+                    account_key,
+                    target,
                     submission_id: expected_submission_id,
                     ..
                 },
-            ) if submission_id == expected_submission_id => {
+            ) if submission_id == expected_submission_id
+                && timeline_key_matches_composer_target(key, account_key, target) =>
+            {
                 Some(RequestOutcome::SubmissionRejected {
                     request_id: *request_id,
                     submission_id: submission_id.clone(),
@@ -811,15 +814,18 @@ impl EventProgress {
             (
                 Self::PreparedMediaQueued {
                     request_id,
+                    key,
                     transaction_id,
                 },
                 RequestOutcomeExpectation::PreparedMediaQueued {
+                    key: expected_key,
                     transaction_id: expected_transaction_id,
                     ..
                 },
-            ) if transaction_id == expected_transaction_id => {
+            ) if key == expected_key && transaction_id == expected_transaction_id => {
                 Some(RequestOutcome::PreparedMediaQueued {
                     request_id: *request_id,
+                    key: key.clone(),
                     transaction_id: transaction_id.clone(),
                     snapshot: snapshot.clone(),
                 })
@@ -909,8 +915,6 @@ impl EventProgress {
             | Self::InviteWorkflow { request_id }
             | Self::Directory { request_id }
             | Self::Search { request_id }
-            | Self::UploadStaging { request_id }
-            | Self::ComposerAccepted { request_id }
             | Self::PreparedMediaQueued { request_id, .. }
             | Self::SubmissionAccepted { request_id, .. }
             | Self::SubmissionRejected { request_id, .. }
@@ -1829,58 +1833,48 @@ fn timeline_event_progress(
     match event {
         TimelineEvent::SubmissionAccepted {
             request_id: event_request_id,
+            key,
             submission_id,
             transaction_id,
-            ..
         } if matches!(expectation, RequestOutcomeExpectation::Submission { .. })
             && event_request_id == request_id =>
         {
             Ok(Some(EventProgress::SubmissionAccepted {
                 request_id,
+                key,
                 submission_id,
                 transaction_id,
             }))
         }
         TimelineEvent::SubmissionRejected {
             request_id: event_request_id,
+            key,
             submission_id,
             kind,
-            ..
         } if matches!(expectation, RequestOutcomeExpectation::Submission { .. })
             && event_request_id == request_id =>
         {
             Ok(Some(EventProgress::SubmissionRejected {
                 request_id,
+                key,
                 submission_id,
                 kind,
             }))
         }
         TimelineEvent::MediaSendQueued {
             request_id: event_request_id,
-            transaction_id,
             key,
+            transaction_id,
         } if matches!(
             expectation,
             RequestOutcomeExpectation::PreparedMediaQueued { .. }
         ) && event_request_id == request_id =>
         {
-            if let RequestOutcomeExpectation::PreparedMediaQueued {
-                key: expected_key,
-                transaction_id: expected_transaction_id,
-                ..
-            } = expectation
-            {
-                if key == *expected_key && transaction_id == *expected_transaction_id {
-                    Ok(Some(EventProgress::PreparedMediaQueued {
-                        request_id,
-                        transaction_id,
-                    }))
-                } else {
-                    Ok(None)
-                }
-            } else {
-                Ok(None)
-            }
+            Ok(Some(EventProgress::PreparedMediaQueued {
+                request_id,
+                key,
+                transaction_id,
+            }))
         }
         _ => Ok(None),
     }
@@ -1941,6 +1935,34 @@ fn snapshot_outcome(
         {
             Some(RequestOutcome::Search {
                 request_id: *request_id,
+                snapshot: snapshot.clone(),
+            })
+        }
+        RequestOutcomeExpectation::UploadStaging {
+            request_id,
+            account_key,
+            target,
+            staged_ids,
+        } if account_matches(&snapshot.state, Some(account_key))
+            && staged_upload_ids_match(&snapshot.state, target, staged_ids) =>
+        {
+            Some(RequestOutcome::UploadStaging {
+                request_id: *request_id,
+                snapshot: snapshot.clone(),
+            })
+        }
+        RequestOutcomeExpectation::ComposerAccepted {
+            request_id,
+            account_key,
+            target,
+            expected_revision,
+        } if account_matches(&snapshot.state, Some(account_key))
+            && composer_target_matches_snapshot(&snapshot.state, target)
+            && composer_draft_revision(&snapshot.state, target) >= *expected_revision =>
+        {
+            Some(RequestOutcome::ComposerAccepted {
+                request_id: *request_id,
+                revision: composer_draft_revision(&snapshot.state, target),
                 snapshot: snapshot.clone(),
             })
         }
@@ -2295,6 +2317,7 @@ fn snapshot_outcome_for_progress(
         }
         (
             EventProgress::SubmissionAccepted {
+                key,
                 submission_id,
                 transaction_id,
                 ..
@@ -2306,6 +2329,7 @@ fn snapshot_outcome_for_progress(
                 submission_id: expected_submission_id,
             },
         ) if submission_id == expected_submission_id
+            && timeline_key_matches_composer_target(key, account_key, target)
             && account_matches(&snapshot.state, Some(account_key))
             && snapshot
                 .state
@@ -2328,33 +2352,42 @@ fn snapshot_outcome_for_progress(
         }
         (
             EventProgress::SubmissionRejected {
+                key,
                 submission_id,
                 kind,
                 ..
             },
             RequestOutcomeExpectation::Submission {
                 request_id,
+                account_key,
+                target,
                 submission_id: expected_submission_id,
+            },
+        ) if submission_id == expected_submission_id
+            && timeline_key_matches_composer_target(key, account_key, target) =>
+        {
+            Some(RequestOutcome::SubmissionRejected {
+                request_id: *request_id,
+                submission_id: submission_id.clone(),
+                kind: *kind,
+                snapshot: snapshot.clone(),
+            })
+        }
+        (
+            EventProgress::PreparedMediaQueued {
+                key: event_key,
+                transaction_id,
                 ..
             },
-        ) if submission_id == expected_submission_id => Some(RequestOutcome::SubmissionRejected {
-            request_id: *request_id,
-            submission_id: submission_id.clone(),
-            kind: *kind,
-            snapshot: snapshot.clone(),
-        }),
-        (
-            EventProgress::PreparedMediaQueued { transaction_id, .. },
             RequestOutcomeExpectation::PreparedMediaQueued {
                 request_id,
-                key,
+                key: expected_key,
                 transaction_id: expected_transaction_id,
             },
-        ) if transaction_id == expected_transaction_id
-            && key.account_key.0 == snapshot_account_key(&snapshot.state).unwrap_or_default() =>
-        {
+        ) if event_key == expected_key && transaction_id == expected_transaction_id => {
             Some(RequestOutcome::PreparedMediaQueued {
                 request_id: *request_id,
+                key: event_key.clone(),
                 transaction_id: transaction_id.clone(),
                 snapshot: snapshot.clone(),
             })
@@ -2478,6 +2511,102 @@ fn allows_initial_snapshot(expectation: &RequestOutcomeExpectation) -> bool {
             ..
         }
     )
+}
+
+fn composer_draft_revision(state: &AppState, target: &ComposerTarget) -> ComposerDraftRevision {
+    match target {
+        ComposerTarget::Main { room_id } => state.composer_drafts.room_revision(room_id),
+        ComposerTarget::Thread {
+            room_id,
+            root_event_id,
+        } => state
+            .composer_drafts
+            .thread_revision(room_id, root_event_id),
+    }
+}
+
+fn composer_target_matches_snapshot(state: &AppState, target: &ComposerTarget) -> bool {
+    match target {
+        ComposerTarget::Main { room_id } => {
+            state.timeline.room_id.as_deref() == Some(room_id.as_str())
+        }
+        ComposerTarget::Thread {
+            room_id,
+            root_event_id,
+        } => matches!(
+            &state.thread,
+            koushi_state::ThreadPaneState::Open {
+                room_id: current_room_id,
+                root_event_id: current_root_event_id,
+                ..
+            } if current_room_id == room_id && current_root_event_id == root_event_id
+        ),
+    }
+}
+
+fn staged_upload_ids_match(
+    state: &AppState,
+    target: &ComposerTarget,
+    expected_ids: &[String],
+) -> bool {
+    let items = match target {
+        ComposerTarget::Main { room_id }
+            if state.timeline.room_id.as_deref() == Some(room_id.as_str()) =>
+        {
+            Some(state.timeline.staged_uploads.as_slice())
+        }
+        ComposerTarget::Thread {
+            room_id,
+            root_event_id,
+        } => match &state.thread {
+            koushi_state::ThreadPaneState::Open {
+                room_id: current_room_id,
+                root_event_id: current_root_event_id,
+                staged_uploads,
+                ..
+            } if current_room_id == room_id && current_root_event_id == root_event_id => {
+                Some(staged_uploads.as_slice())
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    items.is_some_and(|items| {
+        items.len() == expected_ids.len()
+            && items
+                .iter()
+                .map(|item| item.staged_id.as_str())
+                .eq(expected_ids.iter().map(String::as_str))
+    })
+}
+
+fn timeline_key_matches_composer_target(
+    key: &TimelineKey,
+    account_key: &AccountKey,
+    target: &ComposerTarget,
+) -> bool {
+    if key.account_key != *account_key {
+        return false;
+    }
+    match (target, &key.kind) {
+        (
+            ComposerTarget::Main { room_id },
+            crate::ids::TimelineKind::Room {
+                room_id: key_room_id,
+            },
+        ) => room_id == key_room_id,
+        (
+            ComposerTarget::Thread {
+                room_id,
+                root_event_id,
+            },
+            crate::ids::TimelineKind::Thread {
+                room_id: key_room_id,
+                root_event_id: key_root_event_id,
+            },
+        ) => room_id == key_room_id && root_event_id == key_root_event_id,
+        _ => false,
+    }
 }
 
 fn snapshot_account_key(state: &AppState) -> Option<String> {
