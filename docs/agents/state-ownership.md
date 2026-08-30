@@ -136,7 +136,7 @@ carry tokens and counts only. The full prohibited list is in
   global/runtime and contains no private account values; the report composes it
   with current AppState. `copyDiagnostics` is a separate stateless clipboard
   action and does not use the dialog epoch.
-- `build_upload_media_command` Debug output redacts filenames, captions, media
+- Core `UploadMediaRequest` Debug output redacts filenames, captions, media
   bytes, and thumbnail bytes.
 
 ## State transport
@@ -863,8 +863,9 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   render these Rust projections and dispatch typed commands only; do not keep
   upload staging/gallery maps in React, synthesize a gallery from DOM rows, or
   parse Matrix media events in the webview.
-- Selecting a file shows the Rust-owned Upload attachments staging dialog and
-  must not invoke `upload_media` until Send. Each staged caption is a nullable
+- Selecting a file sends source bytes through `stage_upload_bytes` and shows the
+  Rust-owned Upload attachments staging dialog. Send invokes
+  `send_prepared_uploads`; there is no direct renderer upload command. Each staged caption is a nullable
   `ComposerDocument`, edited through the staging dialog
   (`TimelinePaneState.staged_uploads[*].caption`), not inferred from the
   ordinary Composer draft. At the media-send boundary Rust derives the
@@ -875,15 +876,13 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   keys include target/item identity and clear/send invalidates them so late
   results cannot restore removed items. Browser snapshots have no caption revision,
   so do not delete these lanes without a separately reviewed Rust editor revision.
-- Image upload compression keeps the same split: Rust owns
-  `SettingsValues.media.image_upload_compression`, policy
-  threshold/target/quality values, original-vs-selected variant metadata,
-  metadata-stripped assertion, and thumbnail-refresh assertion. The GUI/effect
-  layer may run the actual pixel transform, but it must return selected
-  bytes/dimensions/thumbnail through `upload_media`; Tauri then builds
-  `UploadMediaRequest.compression` from the current Rust-owned setting.
-- `build_upload_media_command` normalizes selected image byte count from
-  `bytes.len()` instead of trusting GUI metadata.
+- Rust owns image upload compression end to end: authoritative
+  `SettingsValues.media.image_upload_compression` policy, source/candidate bytes,
+  executor-hosted pixel transforms, original-vs-selected variant metadata,
+  metadata-stripped assertion, and thumbnail-refresh assertion. Core builds the
+  final `UploadMediaRequest` from the selected prepared registry entry and uses
+  the actual byte-vector length rather than renderer metadata. Tauri only
+  serializes staging inputs, preview bytes, and settled snapshots.
 - The core media tokens prove the Rust-owned upload-staging/gallery contracts
   only; codec/canvas/native transform behavior and the visible
   drag-drop/paste/gallery/viewer workflow must be covered by browser-headless plus

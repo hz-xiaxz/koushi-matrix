@@ -26,10 +26,11 @@ Phase B2 switches staged-upload production handlers to the approved Core service
 - `cargo test -p koushi-desktop`: 112 library tests and 5 integration tests passed.
 - Focused Tauri outcome-wrapper delegation test passed after B2 ownership changes.
 - Frontend TypeScript typecheck passed using the shared installed dependency tree; the temporary worktree `node_modules` symlink was removed afterward.
-- Strict Rust test-structure checker, rustfmt, diff checks, and a repository search proving zero legacy command references passed.
+- Strict Rust test-structure checker, rustfmt, diff checks, and a search proving zero legacy command references in executable desktop source/tests passed. Dated superseded plans retain historical names only.
 
 ## Integration checkpoint
 
 - Round 1 reviewer: `deepseek-brainstormer`, `VERDICT: FINDINGS`; registered legacy `stage_uploads`/`upload_media` bypasses, preview account fencing, send error identity, transaction restart identity, and overbroad worklog wording required correction.
-- Round 1 findings are fixed; round 2 recheck is pending (`deepseek-brainstormer`).
+- Round 2 reviewer: `deepseek-brainstormer`, `VERDICT: FINDINGS`; code findings were closed, but current state-ownership and headless-QA canon still described the deleted direct-upload route.
+- Round 2 canon findings are fixed in place; round 3 recheck is pending (`deepseek-brainstormer`).
 - This is an additional same-design checkpoint, not a restarted pre-implementation gate.
