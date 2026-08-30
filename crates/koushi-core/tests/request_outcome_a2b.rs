@@ -306,6 +306,31 @@ async fn encryption_debug_lag_is_terminal_when_event_payload_is_lost() {
     ));
 }
 
+#[tokio::test]
+async fn event_terminal_room_operation_returns_lagged_without_waiting_for_deadline() {
+    let (mut connection, control) = CoreConnection::new_for_testing(1);
+    let request_id = request(20);
+    control.send_event(CoreEvent::Room(RoomEvent::RoomListUpdated));
+    control.send_event(CoreEvent::Room(RoomEvent::RoomListUpdated));
+    let waiter = connection.wait_for_request_outcome(
+        OutcomeCorrelation::Request(request_id),
+        RequestOutcomeExpectation::RoomOperation {
+            request_id,
+            account_key: AccountKey("@alice:example.invalid".to_owned()),
+            room_id: "!room:example.invalid".to_owned(),
+            operation: RoomOperationKind::RoomTagSet {
+                tag: RoomTagKind::Favourite,
+            },
+        },
+        0,
+        tokio::time::Instant::now() + Duration::from_secs(1),
+    );
+    assert!(matches!(
+        waiter.await,
+        Err(koushi_core::RequestOutcomeError::Lagged)
+    ));
+}
+
 #[test]
 fn request_outcome_a2b_fixtures_are_private_safe() {
     let _ = ready_state("@alice:example.invalid");

@@ -528,6 +528,7 @@ impl RequestOutcomeExpectation {
                 | Self::SpaceCreated { .. }
                 | Self::DirectoryQuery { .. }
                 | Self::DirectoryPreview { .. }
+                | Self::RoomOperation { .. }
                 | Self::ComposerAccepted { .. }
                 | Self::Submission { .. }
                 | Self::PreparedMediaQueued { .. }

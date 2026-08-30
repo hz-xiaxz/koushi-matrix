@@ -54,9 +54,10 @@ adds no reducer transition or AppState/AppAction change.
 ## Phase A2b directory/room migration
 
 - Directory query/preview, room/space creation, DM start + projection, join + selection, invite workflow/batch, room settings/tags/pins/moderation/roles, Space member operations, and four encryption-debug outcomes now settle through closed Core expectations.
-- Uncorrelated room-in-state/invite-workflow helpers and all three adapter event-source traits are deleted. `wait_for_room_operation` remains a thin typed Core wrapper; no directory/room production `recv_event` or `timeout_at` loop remains.
+- Uncorrelated room-in-state/invite-workflow helpers plus `SelectEventSource` and `InviteWorkflowSnapshotSource` are deleted. Timeline's `SubmissionEventSource` remains for the next A2c slice. `wait_for_room_operation` remains a thin typed Core wrapper; no directory/room production `recv_event` or `timeout_at` loop remains.
 - Operation guards are event/state specific: forget requires authoritative absence; tag/pin/encryption-debug payloads do not require room presence; Space operations match exact generation/user/space.
-- `cargo test -p koushi-core --test request_outcome_a2b`: 8 passed.
+- `cargo test -p koushi-core --test request_outcome_a2b`: 9 passed after review fixes.
 - `cargo test -p koushi-desktop`: 120 library tests and 5 integration tests passed.
 - Strict Rust test-structure checker, rustfmt, and diff checks passed.
-- A2b different-model integration checkpoint: pending (`deepseek-brainstormer`).
+- A2b reviewer round 1: `deepseek-brainstormer`, `VERDICT: FINDINGS`. It required expectation-specific terminal lag for event-only room operations and broader guard evidence; `RoomOperation` now returns typed Lagged after final snapshot inspection and has a deterministic overflow test. The worklog scope wording now accurately leaves timeline's SubmissionEventSource for A2c.
+- A2b reviewer round 2: pending (`deepseek-brainstormer`).
