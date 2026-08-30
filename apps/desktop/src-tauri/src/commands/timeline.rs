@@ -55,6 +55,7 @@ async fn wait_for_upload_staging_snapshot(
                 account_key,
                 target,
                 staged_ids,
+                allow_initial: true,
             },
             baseline_generation,
             tokio::time::Instant::now() + UPLOAD_STAGING_EVENT_TIMEOUT,
@@ -1491,10 +1492,6 @@ pub async fn stage_upload_bytes(
     let existing_items = staged_uploads_for_target(&initial_snapshot, &target)
         .unwrap_or_default()
         .to_vec();
-    let expected_ids = items
-        .iter()
-        .map(|item| item.staged_id.clone())
-        .collect::<Vec<_>>();
     let preparing_items = existing_items
         .iter()
         .cloned()
@@ -3364,3 +3361,5 @@ mod save_downloaded_media_tests {
 
 #[cfg(test)]
 mod issue551_moved_tests;
+#[cfg(test)]
+mod outcome_delegation_tests;

@@ -77,6 +77,7 @@ async fn upload_staging_requires_exact_ids_target_account_and_newer_snapshot() {
             account_key: account_key.clone(),
             target: target.clone(),
             staged_ids: vec!["one".to_owned(), "two".to_owned()],
+            allow_initial: false,
         },
         1,
         tokio::time::Instant::now() + Duration::from_secs(1),
@@ -342,6 +343,71 @@ async fn prepared_media_queue_requires_exact_request_transaction_key_and_returns
         Ok(RequestOutcome::PreparedMediaQueued { key, snapshot, .. })
             if key == expected_key && snapshot == published
     ));
+}
+
+#[tokio::test]
+async fn submission_acceptance_survives_already_settled_snapshot_coalescing() {
+    let (mut connection, control) = CoreConnection::new_for_testing(8);
+    let request_id = request(20);
+    let submission_id = koushi_state::SubmissionId::new("submission-fast");
+    let target = main_target("!room-a:example.invalid");
+    let key = TimelineKey::room(
+        AccountKey("@alice:example.invalid".to_owned()),
+        "!room-a:example.invalid",
+    );
+    let settled_snapshot = versioned(ready_state("@alice:example.invalid"), 2);
+    control.send_snapshot(settled_snapshot.clone());
+    let waiter = connection.wait_for_request_outcome(
+        OutcomeCorrelation::Submission {
+            request_id,
+            submission_id: submission_id.clone(),
+        },
+        RequestOutcomeExpectation::Submission {
+            request_id,
+            account_key: AccountKey("@alice:example.invalid".to_owned()),
+            target,
+            submission_id: submission_id.clone(),
+        },
+        1,
+        tokio::time::Instant::now() + Duration::from_secs(1),
+    );
+    tokio::pin!(waiter);
+    control.send_event(CoreEvent::Timeline(TimelineEvent::SubmissionAccepted {
+        request_id,
+        key,
+        submission_id,
+        transaction_id: "txn-fast".to_owned(),
+    }));
+    assert!(matches!(
+        waiter.await,
+        Ok(RequestOutcome::SubmissionAccepted { snapshot, .. }) if snapshot == settled_snapshot
+    ));
+}
+
+#[tokio::test]
+async fn upload_staging_allows_an_already_satisfied_idempotent_projection() {
+    let (mut connection, control) = CoreConnection::new_for_testing(8);
+    let request_id = request(21);
+    let target = main_target("!room-a:example.invalid");
+    let mut state = ready_state("@alice:example.invalid");
+    state.timeline.room_id = Some("!room-a:example.invalid".to_owned());
+    state.timeline.staged_uploads = vec![staged("one", "!room-a:example.invalid")];
+    control.send_snapshot(versioned(state, 1));
+    let outcome = connection
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::UploadStaging {
+                request_id,
+                account_key: AccountKey("@alice:example.invalid".to_owned()),
+                target,
+                staged_ids: vec!["one".to_owned()],
+                allow_initial: true,
+            },
+            1,
+            tokio::time::Instant::now() + Duration::from_secs(1),
+        )
+        .await;
+    assert!(matches!(outcome, Ok(RequestOutcome::UploadStaging { .. })));
 }
 
 #[tokio::test]

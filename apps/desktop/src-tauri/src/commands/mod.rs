@@ -10,38 +10,35 @@
 //! (Secret-bearing QA helpers remain behind `#[cfg(any(debug_assertions, test))]`.)
 
 use std::{
-    future::Future,
     path::PathBuf,
-    pin::Pin,
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
 use koushi_core::{
-    AccountCommand, AccountEvent, AccountKey, AppCommand, CoreCommand, CoreConnection, CoreEvent,
-    CoreFailure, CreateRoomOptions, EncryptionDebugOperationKind, EncryptionDebugOperationOutcome,
-    EventStreamLag, ImageUploadCompressionPolicy, ImageUploadCompressionState,
-    ImageUploadDimensions, ImageUploadVariantKind, IntentNoOpReason, IntentOutcome,
-    MediaDownloadSelection, OutcomeCorrelation, PaginationDirection, RequestId, RequestOutcome,
-    RequestOutcomeError, RequestOutcomeExpectation, RoomCommand, RoomEvent, RoomKeyExportRequest,
-    RoomKeyImportRequest, RoomKeyReshareOutcome, RoomOperationKind, SearchCommand, SearchEvent,
-    SearchScope, SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
-    SyncCommand, TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId,
-    TimelineGeneration, TimelineKey, TimelineKind, TimelineViewportObservation, UploadMediaKind,
-    UploadMediaRequest, UploadMediaThumbnail,
+    AccountCommand, AccountKey, AppCommand, CoreCommand, CoreConnection, CoreEvent, CoreFailure,
+    CreateRoomOptions, EncryptionDebugOperationKind, EncryptionDebugOperationOutcome,
+    ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,
+    ImageUploadVariantKind, IntentNoOpReason, IntentOutcome, MediaDownloadSelection,
+    OutcomeCorrelation, PaginationDirection, RequestId, RequestOutcome, RequestOutcomeError,
+    RequestOutcomeExpectation, RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest,
+    RoomKeyReshareOutcome, RoomOperationKind, SearchCommand, SearchScope,
+    SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest, SyncCommand,
+    TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId, TimelineGeneration,
+    TimelineKey, TimelineKind, TimelineViewportObservation, UploadMediaKind, UploadMediaRequest,
+    UploadMediaThumbnail,
 };
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentSort, AuthSecret,
     ComposerDocument, ComposerDraftRevision, ComposerFormattingOptions, ComposerKeyEvent,
     ComposerResolvedAction, ComposerResolverContext, ComposerSurface, DirectoryQuery,
-    DisplayPlatform, FilesViewScope, FocusedContextState, IdentityResetAuthRequest,
-    ImageUploadCompressionMode, InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface,
-    PresenceKind, RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode,
-    RoomSettingChange, RoomTagKind, SessionInfo, SessionState, SettingsPatch,
-    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind, SubmissionId,
-    ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor, VerificationCancelReason,
-    build_formatted_message_draft,
+    DisplayPlatform, FilesViewScope, IdentityResetAuthRequest, ImageUploadCompressionMode,
+    InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface, PresenceKind,
+    RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode, RoomSettingChange,
+    RoomTagKind, SessionInfo, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem,
+    StagedUploadKind, SubmissionId, ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor,
+    VerificationCancelReason, build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};

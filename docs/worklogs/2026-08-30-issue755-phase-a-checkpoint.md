@@ -66,7 +66,8 @@ adds no reducer transition or AppState/AppAction change.
 
 - Upload staging, composer revision acceptance, submission acceptance/rejection, and prepared-media queue admission now settle through Core expectations. Submission requires exact RequestId + SubmissionId + account + target; prepared media requires RequestId + transaction ID + TimelineKey.
 - Timeline production `recv_event`/`timeout_at` loops and `SubmissionEventSource` are deleted; four remaining `wait_for_*` names are thin Core wrappers returning typed settled snapshots/payloads.
-- `cargo test -p koushi-core --test request_outcome_a2c`: 6 passed.
-- `cargo test -p koushi-desktop`: 112 library tests and 5 integration tests passed.
+- `cargo test -p koushi-core --test request_outcome_a2c`: 8 passed after review fixes.
+- Focused Tauri wrapper delegation test: 1 passed; full Tauri previously passed 112 library tests and 5 integration tests.
 - Strict Rust test-structure checker, rustfmt, and diff checks passed.
-- A2c different-model integration checkpoint: pending (`deepseek-brainstormer`).
+- A2c reviewer round 1: `deepseek-brainstormer`, `VERDICT: FINDINGS`. Fixes completed: orphan scripted adapter waiter file deleted; one focused Tauri test drives all four thin wrappers; accepted submission settles from the exact terminal even after the transient active-submission entry is already removed; upload staging explicitly admits already-satisfied idempotent projections. Core tests cover both races.
+- A2c reviewer round 2: pending (`deepseek-brainstormer`).

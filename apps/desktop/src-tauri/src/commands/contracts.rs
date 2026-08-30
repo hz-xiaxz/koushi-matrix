@@ -5,7 +5,7 @@ use super::{
 };
 use koushi_core::AccountKey;
 use koushi_core::{
-    AccountCommand, AppCommand, CoreCommand, CoreEvent, CreateRoomOptions, CreateRoomParentSpace,
+    AccountCommand, AppCommand, CoreCommand, CreateRoomOptions, CreateRoomParentSpace,
     CreateRoomVisibility, ImageUploadCompressionPolicy, ImageUploadCompressionState,
     ImageUploadDimensions, ImageUploadVariantInfo, ImageUploadVariantKind, MediaDownloadSelection,
     PaginationDirection, RequestId, RoomCommand, SearchCommand, SearchScope, SyncCommand,
@@ -13,12 +13,10 @@ use koushi_core::{
 };
 use koushi_state::{ActivityMarkReadTarget, ActivityTab, ImageUploadCompressionMode};
 use koushi_state::{
-    AppState, AuthSecret, ComposerDocument, DisplayPlatform, LoginRequest, PresenceKind,
+    AuthSecret, ComposerDocument, DisplayPlatform, LoginRequest, PresenceKind,
     RoomHistoryVisibility, RoomJoinRule, RoomModerationAction, RoomSettingChange, RoomTagKind,
     ThreadOpenIntent,
 };
-use std::collections::VecDeque;
-
 pub(super) fn fake_request_id(sequence: u64) -> koushi_core::RequestId {
     koushi_core::RequestId {
         connection_id: koushi_core::RuntimeConnectionId(7),

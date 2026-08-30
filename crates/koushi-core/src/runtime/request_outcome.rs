@@ -189,6 +189,7 @@ pub enum RequestOutcomeExpectation {
         account_key: AccountKey,
         target: ComposerTarget,
         staged_ids: Vec<String>,
+        allow_initial: bool,
     },
     ComposerAccepted {
         request_id: RequestId,
@@ -788,6 +789,29 @@ impl EventProgress {
                 request_id: *request_id,
                 sessions: sessions.clone(),
             }),
+            (
+                Self::SubmissionAccepted {
+                    request_id,
+                    key,
+                    submission_id,
+                    transaction_id,
+                },
+                RequestOutcomeExpectation::Submission {
+                    account_key,
+                    target,
+                    submission_id: expected_submission_id,
+                    ..
+                },
+            ) if submission_id == expected_submission_id
+                && timeline_key_matches_composer_target(key, account_key, target) =>
+            {
+                Some(RequestOutcome::SubmissionAccepted {
+                    request_id: *request_id,
+                    submission_id: submission_id.clone(),
+                    transaction_id: transaction_id.clone(),
+                    snapshot: snapshot.clone(),
+                })
+            }
             (
                 Self::SubmissionRejected {
                     request_id,
@@ -1943,6 +1967,7 @@ fn snapshot_outcome(
             account_key,
             target,
             staged_ids,
+            ..
         } if account_matches(&snapshot.state, Some(account_key))
             && staged_upload_ids_match(&snapshot.state, target, staged_ids) =>
         {
@@ -2507,6 +2532,12 @@ fn allows_initial_snapshot(expectation: &RequestOutcomeExpectation) -> bool {
     matches!(
         expectation,
         RequestOutcomeExpectation::RoomSelected {
+            allow_initial: true,
+            ..
+        } | RequestOutcomeExpectation::SearchClosed {
+            allow_initial: true,
+            ..
+        } | RequestOutcomeExpectation::UploadStaging {
             allow_initial: true,
             ..
         }
