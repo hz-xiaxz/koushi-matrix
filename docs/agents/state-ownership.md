@@ -863,6 +863,16 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   render these Rust projections and dispatch typed commands only; do not keep
   upload staging/gallery maps in React, synthesize a gallery from DOM rows, or
   parse Matrix media events in the webview.
+- Core owns downloaded-media save policy through `MediaSaveFilesystem`: source
+  emptiness/URL/absolute checks, canonical cache/source containment, symlink and
+  component-prefix rejection, destination admission, parent creation ordering,
+  and copy admission. Tauri resolves the app-data cache root and selected
+  destination, and supplies only the native syscall port; paths never enter
+  Core state, events, commands, or diagnostics. Port and policy failures expose
+  closed private-safe kinds, never paths or raw filesystem errors. Linux
+  coverage uses deterministic port fakes plus a real temporary symlink escape;
+  Windows junction/canonicalization and short-name assumptions remain covered
+  by the hosted Windows gate rather than Core path normalization.
 - Selecting a file sends source bytes through `stage_upload_bytes` and shows the
   Rust-owned Upload attachments staging dialog. Send invokes
   `send_prepared_uploads`; there is no direct renderer upload command. Each staged caption is a nullable

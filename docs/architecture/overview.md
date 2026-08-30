@@ -283,12 +283,13 @@ rewriting the runtime.
    executor (wasm) as well as multi-threaded tokio.
 3. **Platform capabilities live behind ports, owned by `StoreActor` and the
    adapters.** OS credential store (`keyring`), filesystem paths, SQLite
-   store config, and process/OS APIs appear only behind traits with platform
-   backends (today: OS keychain + SQLite; browser later: WebCrypto-derived
-   keys + IndexedDB). `StoreActor` is the only actor allowed
-   platform-conditional code. The fail-closed local-encryption rule still
-   applies on every platform: a weaker browser at-rest story must be an
-   explicit, surfaced property, never a silent fallback.
+   store config, media-save filesystem operations, and process/OS APIs appear
+   only behind traits with platform backends (today: OS keychain + SQLite and
+   the native media-save port; browser later: WebCrypto-derived keys +
+   IndexedDB). `StoreActor` is the only actor allowed platform-conditional
+   code. The fail-closed local-encryption rule still applies on every
+   platform: a weaker browser at-rest story must be an explicit, surfaced
+   property, never a silent fallback.
 4. **Pure crates stay wasm-clean.** `koushi-state` and
    `koushi-search` must compile for `wasm32-unknown-unknown`; a CI
    check target should enforce this once wired. `koushi-core`'s

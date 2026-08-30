@@ -29,6 +29,7 @@ mod live_tail_freshness;
 #[cfg(any(test, feature = "test-hooks"))]
 pub mod login_store_test_support;
 pub mod media_preparation;
+pub mod media_save;
 pub mod media_staging;
 pub(crate) mod mention_candidates;
 pub(crate) mod read_state;
@@ -85,6 +86,10 @@ pub use ids::{
     TimelineKind,
 };
 pub use koushi_state::{EncryptionDebugOperationKind, MediaTransferProgress};
+pub use media_save::{
+    MediaSaveError, MediaSaveFilesystem, MediaSaveIoError, default_media_save_path,
+    safe_media_save_filename, save_downloaded_media,
+};
 pub use runtime::{
     COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandHandle, CoreConnection, CoreRuntime,
     EVENT_QUEUE_CAPACITY, EventStreamLag, OutcomeCorrelation, RequestOutcome, RequestOutcomeError,

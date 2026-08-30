@@ -2031,6 +2031,10 @@ stateDiagram-v2
   admission serializes mutations, and preview/send methods validate the same
   account/target/item/lease/revision fences before returning bytes or accepting
   media send. Tauri is transport serialization only.
+- Issue #755 Phase C adds no `AppState`, `AppAction`, or reducer transition.
+  Saving a downloaded file is a Core policy operation over the adapter-owned
+  filesystem port: its canonical containment and copy admission are not
+  product state, and paths never cross the command/event/snapshot boundary.
 - Room media gallery state is Rust-owned. `AppState.media_gallery` is the
   reducer backing store and is not serialized directly; the selected-room
   projection is `TimelinePaneState.media_gallery`, ordered by Rust from media
