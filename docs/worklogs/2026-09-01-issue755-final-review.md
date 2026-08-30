@@ -1,6 +1,6 @@
 # Issue #755 final integration review
 
-Status: implementation complete; local and hosted gates are being rechecked after a QA-feature compile fix; final exact-tree review recheck pending.
+Status: implementation complete; local and hosted CI-equivalent gates green; fallback different-model and primary exact-tree reviews are `CORRECT-TO-MERGE`; selected reviewer-profile availability decision remains.
 
 Base: `origin/main` / `a03aeb86deab6f3c3bdc8329572ac6b9f215e687`.
 Reviewed tree: `c3bfa6b0d84e383ead71d031a17689d6fe9ced76`.
@@ -48,17 +48,18 @@ No compatibility shim, TODO, parallel old/new production path, new generic retry
 ## Final review record
 
 - `reviewer-flash` failed before execution with `Insufficient Balance`; `reviewer-flash-opencode-go` failed before execution with its monthly usage limit. Neither produced a verdict.
-- The same different model family was run through the read-only `deepseek-brainstormer` fallback against exact tree `c3bfa6b`; verdict: `CORRECT-TO-MERGE`. It verified all five phase boundaries and identified only the corrected overbroad `recv_event` wording plus the documented worktree-font serving artifact. A narrow recheck is required after the hosted QA-feature compile fix below.
+- The same different model family was run through the read-only `deepseek-brainstormer` fallback against exact tree `c3bfa6b`; verdict: `CORRECT-TO-MERGE`. It verified all five phase boundaries and identified only the corrected overbroad `recv_event` wording plus the documented worktree-font serving artifact. Narrow recheck of the later QA observer fix at `ea6344f`: `CORRECT-TO-MERGE`.
 - The selected reviewer-profile availability mismatch must remain visible in the PR/merge audit; it is not silently represented as a `reviewer-flash` verdict.
-- Primary integration/self-review (`gpt-5.6-sol`) traced the production routes and checked the full `origin/main...9617691` tree against every issue/design acceptance item and the fresh gate evidence. Verdict was `CORRECT-TO-MERGE`; a narrow exact-tree recheck is pending after the hosted QA-feature compile fix.
+- Primary integration/self-review (`gpt-5.6-sol`) traced the production routes and checked the full tree and later QA observer delta against every issue/design acceptance item and the fresh gate evidence. Exact code tree `ea6344f` verdict: `CORRECT-TO-MERGE`, subject only to the explicitly recorded selected reviewer-profile availability decision.
 
 ## Hosted CI correction
 
 - PR #777 run `33299958018`: frontend, browser-headless, Rust workspace/src-tauri/wasm, macOS check, and Windows overlay passed.
 - Core QA binary and both invitation lanes failed from the same compile-only QA-feature drift: two exhaustive `AccountEvent` matches lacked the new non-request-correlated `AuthDiscoveryChanged` arm, and one pinned-event observer omitted the new `request_id` field.
 - Fixed the QA observers without weakening correlation: auth discovery is explicitly nonmatching; pinned-state observation ignores the correlation field because this helper waits for the exact room/event state rather than one request terminal.
-- Fresh local CI command `cargo test -p koushi-core --features qa-bin --bin headless-core-qa`: 88 passed. Hosted rerun pending.
+- Fresh local CI command `cargo test -p koushi-core --features qa-bin --bin headless-core-qa`: 88 passed.
+- Hosted run `33300477412`: QA binary, Tuwunel and Synapse invitation lanes, Rust workspace/src-tauri/wasm/dependencies, browser-headless, macOS, and Windows passed on `ea6344f`. Frontend's first attempt hit one unrelated Space Members timing failure; the exact test passed locally 3/3 and the failed job rerun passed all frontend gates.
 
 ## Final gates still required
 
-- Push/PR, hosted CI (including macOS/Windows and required QA lanes), merge-gate decision for the unavailable selected profile, issue/umbrella update, artifact/worktree cleanup.
+- Record this final evidence commit, obtain green hosted CI for that exact docs-only tree, make the merge-gate decision for the unavailable selected profile, then merge, update issue/umbrella, and clean artifacts/worktree.
