@@ -70,4 +70,4 @@ adds no reducer transition or AppState/AppAction change.
 - Focused Tauri wrapper delegation test: 1 passed; full Tauri previously passed 112 library tests and 5 integration tests.
 - Strict Rust test-structure checker, rustfmt, and diff checks passed.
 - A2c reviewer round 1: `deepseek-brainstormer`, `VERDICT: FINDINGS`. Fixes completed: orphan scripted adapter waiter file deleted; one focused Tauri test drives all four thin wrappers; accepted submission settles from the exact terminal even after the transient active-submission entry is already removed; upload staging explicitly admits already-satisfied idempotent projections. Core tests cover both races.
-- A2c reviewer round 2: pending (`deepseek-brainstormer`).
+- A2c reviewer round 2: `deepseek-brainstormer`, `VERDICT: CORRECT-TO-CONTINUE`; exact-event fast settlement, idempotent staging, wrapper delegation, guards, lag policy, and orphan removal verified.
