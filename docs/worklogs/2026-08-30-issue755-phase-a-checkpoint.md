@@ -60,4 +60,4 @@ adds no reducer transition or AppState/AppAction change.
 - `cargo test -p koushi-desktop`: 120 library tests and 5 integration tests passed.
 - Strict Rust test-structure checker, rustfmt, and diff checks passed.
 - A2b reviewer round 1: `deepseek-brainstormer`, `VERDICT: FINDINGS`. It required expectation-specific terminal lag for event-only room operations and broader guard evidence; `RoomOperation` now returns typed Lagged after final snapshot inspection and has a deterministic overflow test. The worklog scope wording now accurately leaves timeline's SubmissionEventSource for A2c.
-- A2b reviewer round 2: pending (`deepseek-brainstormer`).
+- A2b reviewer round 2: `deepseek-brainstormer`, `VERDICT: CORRECT-TO-CONTINUE`. The intentionally coarse RoomOperation lag policy is terminal for all variants because every operation still requires its correlated event; this avoids silent long waits after event loss. Snapshot guards still distinguish absence/presence/generation after an event was observed.
