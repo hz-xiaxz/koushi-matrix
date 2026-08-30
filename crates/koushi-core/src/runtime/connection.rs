@@ -11,6 +11,7 @@ use crate::event::{
     project_room_event_display_labels, project_timeline_event_display_labels,
 };
 use crate::ids::{RequestId, RuntimeConnectionId};
+use crate::media_staging::MediaStagingService;
 use std::{
     sync::{
         Arc,
@@ -73,6 +74,7 @@ pub struct CoreConnection {
     connection_id: RuntimeConnectionId,
     command_tx: mpsc::Sender<CoreCommandEnvelope>,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
+    pub(super) media_staging: Arc<MediaStagingService>,
     pub(super) event_rx: broadcast::Receiver<CoreEvent>,
     pub(super) snapshot_rx: watch::Receiver<VersionedAppStateSnapshot>,
     next_sequence: AtomicU64,
@@ -97,6 +99,7 @@ impl CoreRuntime {
             ),
             command_tx: self.command_tx.clone(),
             composer_draft_leases: Arc::clone(&self.composer_draft_leases),
+            media_staging: Arc::clone(&self.media_staging),
             event_rx: self.event_tx.subscribe(),
             snapshot_rx: self.snapshot_rx.clone(),
             next_sequence: AtomicU64::new(1),
@@ -249,6 +252,9 @@ impl CoreConnection {
                 connection_id: RuntimeConnectionId(41),
                 command_tx,
                 composer_draft_leases: Arc::new(ComposerDraftLeaseRegistry::new()),
+                media_staging: Arc::new(MediaStagingService::new(Arc::new(
+                    crate::media_preparation::MediaPreparationService::default(),
+                ))),
                 event_rx,
                 snapshot_rx,
                 next_sequence: AtomicU64::new(1),
@@ -281,6 +287,85 @@ impl CoreConnection {
             connection_id: self.connection_id,
             sequence: self.next_sequence.fetch_add(1, Ordering::Relaxed),
         }
+    }
+
+    /// Stage bytes through the Core-owned media preparation service.
+    pub async fn stage_upload_bytes(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+        items: Vec<crate::media_preparation::StageUploadBytesInput>,
+        policy: koushi_state::ImageUploadCompressionPolicy,
+    ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service
+            .stage_upload_bytes(self, target, items, policy)
+            .await
+    }
+
+    pub async fn select_staged_upload_output(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+        staged_id: String,
+        selection: koushi_state::StagedUploadOutputSelection,
+        policy: koushi_state::ImageUploadCompressionPolicy,
+    ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service
+            .select_staged_upload_output(self, target, staged_id, selection, policy)
+            .await
+    }
+
+    pub async fn retry_staged_upload_preparation(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+        staged_id: String,
+        policy: koushi_state::ImageUploadCompressionPolicy,
+    ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service
+            .retry_staged_upload_preparation(self, target, staged_id, policy)
+            .await
+    }
+
+    pub async fn update_staged_upload_caption(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+        staged_id: String,
+        caption: Option<koushi_state::ComposerDocument>,
+    ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service
+            .update_caption(self, target, staged_id, caption)
+            .await
+    }
+
+    pub async fn update_staged_upload_compression(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+        staged_id: String,
+        compression_choice: koushi_state::StagedUploadCompressionChoice,
+    ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service
+            .update_compression(self, target, staged_id, compression_choice)
+            .await
+    }
+
+    pub async fn use_original_staged_upload(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+        staged_id: String,
+    ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service.use_original(self, target, staged_id).await
+    }
+
+    pub async fn clear_upload_staging(
+        &mut self,
+        target: koushi_state::ComposerTarget,
+    ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
+        let service = Arc::clone(&self.media_staging);
+        service.clear(self, target).await
     }
 
     /// Submit a command without a composer lease. Revision-bearing composer

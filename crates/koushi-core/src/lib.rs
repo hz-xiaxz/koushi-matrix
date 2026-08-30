@@ -29,6 +29,7 @@ mod live_tail_freshness;
 #[cfg(any(test, feature = "test-hooks"))]
 pub mod login_store_test_support;
 pub mod media_preparation;
+pub mod media_staging;
 pub(crate) mod mention_candidates;
 pub(crate) mod read_state;
 pub mod renderable_thumbnail;

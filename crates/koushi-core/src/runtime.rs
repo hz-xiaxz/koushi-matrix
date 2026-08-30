@@ -353,6 +353,7 @@ pub struct CoreRuntime {
     /// receives descriptors only; adapters may operate on this cache through
     /// the typed runtime boundary.
     media_preparation: Arc<crate::media_preparation::MediaPreparationService>,
+    media_staging: Arc<crate::media_staging::MediaStagingService>,
     media_lifecycle: AbortOnDrop<()>,
     #[cfg(any(test, feature = "test-hooks"))]
     account_actor_test_handle: AccountActorHandle,
@@ -584,6 +585,9 @@ impl CoreRuntime {
         let actor = executor::spawn(actor.run());
         let media_preparation =
             Arc::new(crate::media_preparation::MediaPreparationService::default());
+        let media_staging = Arc::new(crate::media_staging::MediaStagingService::new(Arc::clone(
+            &media_preparation,
+        )));
         let media_preparation_for_lifecycle = Arc::clone(&media_preparation);
         let mut media_snapshot_rx = snapshot_rx.clone();
         let media_lifecycle = executor::spawn(async move {
@@ -609,6 +613,7 @@ impl CoreRuntime {
             #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_test_tx,
             media_preparation,
+            media_staging,
             media_lifecycle: AbortOnDrop::new(media_lifecycle),
             #[cfg(any(test, feature = "test-hooks"))]
             account_actor_test_handle,
@@ -620,6 +625,10 @@ impl CoreRuntime {
 
     pub fn media_preparation(&self) -> &crate::media_preparation::MediaPreparationService {
         &self.media_preparation
+    }
+
+    pub fn media_staging(&self) -> &crate::media_staging::MediaStagingService {
+        &self.media_staging
     }
 
     pub fn sliding_sync_diagnostics(&self) -> crate::SlidingSyncDiagnosticsSnapshot {
@@ -750,6 +759,7 @@ impl CoreRuntime {
             #[cfg(any(test, feature = "test-hooks"))]
                 composer_draft_test_tx: _,
             media_preparation: _,
+            media_staging: _,
             mut media_lifecycle,
             #[cfg(any(test, feature = "test-hooks"))]
                 account_actor_test_handle: _,

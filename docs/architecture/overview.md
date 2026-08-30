@@ -233,6 +233,29 @@ This is Phase A runtime infrastructure only: it adds no `AppState`,
 `AppAction`, reducer, or reducer transition. Tauri waiters and their product
 loops are intentionally not migrated until the later phases of issue #755.
 
+### Core-owned staged upload orchestration (Phase B1, issue #755)
+
+`koushi_core::media_staging::MediaStagingService` owns the staged-upload
+orchestration API while the Tauri pipeline remains the production caller until
+later issue #755 phases. It validates a non-empty batch, the named
+`MAX_MEDIA_STAGING_BATCH_SIZE` and `MAX_MEDIA_STAGING_BATCH_BYTES` limits,
+normalizes MIME values, and derives the initial media kind before publishing
+`AppCommand::SetUploadStaging` with `StagedUploadPreparation::Preparing`.
+Preparation and output encoding run through `crate::executor::spawn_blocking`
+without either media lock held. The service captures the account, active
+`ComposerTarget`, staged-id set, and selection generation, then revalidates all
+of them before merging a detached `MediaPreparationRegistry`; stale or failed
+work that has not been merged drops its bytes. Caption and compression metadata
+are copied from the current state when a prepared item is replaced.
+
+The service reuses the existing `MediaPreparationService`/registry and
+`AppCommand` reducers; it adds no reducer action or transition. Its target
+mutation methods use the same Core request-outcome service and exact versioned
+snapshot generation. Transition guards acquire the transition owner before the
+registry and never hold either guard across an await or preparation work.
+Tauri production handlers are intentionally not switched or deleted in B1;
+that adapter migration is deferred to the subsequent phase.
+
 ## Platform Portability
 
 The desktop app is the only shipping target today, but a browser-hosted build
