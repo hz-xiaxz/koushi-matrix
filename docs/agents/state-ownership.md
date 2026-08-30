@@ -145,14 +145,19 @@ carry tokens and counts only. The full prohibited list is in
   plus a selector-subscribed WebView projection cache. React may cache and
   subscribe to Rust snapshots for rendering, but it must not mutate product
   state, synthesize Matrix semantics, or repair command results locally.
-- Runtime/background state updates enter the WebView as `CoreEvent::StateDelta`
-  changed-slice DTOs. Full snapshots are initial, reset/reconnect, or explicit
-  command-response projections only. Apply both paths through the projection
-  store by preserving references for unchanged `domain`, `ui`, `sidebar`,
-  timeline, and thread data. Hot derived arrays such as mention candidates and
-  forward destinations must be memoized from Rust DTO input references.
-- Delta generation gaps must recover through a versioned full snapshot
-  (`state_generation`) before later deltas apply.
+- Runtime/background state updates enter the WebView on one ordered state-update
+  lane as versioned `StateDelta` changed-slice DTOs. Full snapshots are initial
+  attach or explicit gap, lag, and command-watermark resync only. Normal command
+  returns carry a typed Core settlement/admission generation or their non-state
+  result and may never be applied as product state. Apply deltas and resync
+  snapshots through the projection store by preserving references for unchanged
+  `domain`, `ui`, `sidebar`, timeline, and thread data. Hot derived arrays such
+  as mention candidates and forward destinations must be memoized from Rust DTO
+  input references.
+- Delta generation gaps must atomically recover through a versioned full
+  snapshot (`state_generation`), timeline-store reset, and timeline replay before
+  later deltas apply. A command generation ahead of appStore triggers one
+  deterministic snapshot resync; it is not proof of renderer receipt or paint.
 - Tauri Channels are high-frequency only and measurement-gated. Keep crawler,
   typing, receipt, and presence semantics Rust-owned; a Channel transports Rust
   projections, not React-local state.
@@ -327,17 +332,17 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   matches a recent programmatic-write signature. The one-shot `timeline.scroll
   stage=room_reentry_restore` diagnostic carries session mode, age bucket,
   anchor-live verdict, and path only.
-- Projection acknowledgement ownership is split at the only truthful boundary:
-  TimelineView owns committed Room DOM evidence; App's canonical timeline store
-  owns Focused/Thread application evidence; the App-lifetime
-  `timelineAcknowledgementDelivery` adapter owns bounded submission only until
-  the Core command queue accepts it; Rust owns every actor/request/generation
-  fence, focused-navigation outcome, repair continuation and timeout after that.
-- The adapter has four closed channels (Room, Thread, Focused, repair), at most
-  seven total attempts per intent, finite exponential delay, same-kind
-  supersession, actor-aware identity, account reset and renderer disposal. View
-  unmount never cancels a captured delivery. Do not reintroduce acknowledgement
-  retries or backoff timers into TimelineView.
+- Projection commitment is Core-internal. TimelineActor reports exact
+  request/key/actor/timeline-generation and target-presence facts through the
+  reliable manager/account/AppActor ownership chain; focused-navigation outcome
+  never waits for App timeline-store application, Room DOM evidence, WebView
+  command delivery or paint. Renderer application/DOM evidence remains local
+  layout/diagnostic state and is safe to drop on unmount.
+- Gap-repair continuation is released by an exact
+  actor/timeline/repair/minimum-batch-fenced relay/display-projection commit
+  signal inside Core. No DesktopApi projection/render acknowledgement command,
+  delivery retry owner, timeout, or browser backoff participates in product
+  progress. Do not reintroduce the removed acknowledgement route.
 
 ## Live catch-up and gap repair
 
@@ -349,8 +354,9 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   observation-owned gap exactly and never substitute another persisted gap.
   Explicit no-update/no-gap closes the intent; stale descriptors get one
   authoritative re-inspection.
-- Relay/render settlement fences must be bounded and recover through
-  authoritative resync while retaining queued work. SDK diff projection tags from
+- Relay settlement fences must be bounded and recover through authoritative
+  resync while retaining queued work. Exact relay/display-projection commitment,
+  not renderer paint, releases repair continuation. SDK diff projection tags from
   a superseded timeline actor generation are discarded at the relay boundary
   before `relay_received=queued`; keep `rejected_operation` for current-actor
   correlation violations rather than filling it with known-obsolete generation

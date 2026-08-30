@@ -637,18 +637,24 @@ subscriptions, and keys live in actor-owned runtime state.
 
 Desktop WebViews consume `AppState` through a selector-subscribed projection
 cache, not as React-owned product state. Runtime/background state updates use
-ordered Rust-owned `StateDelta` events that replace only changed top-level
-`AppState` slices and carry a monotonic generation. Complete snapshots remain
-the initial/reset/reconnect fallback and may still be returned by explicit
-Tauri command responses; the WebView applies those snapshots by comparing
-top-level `DesktopSnapshot`/`AppState` slices and preserving references for
-unchanged `domain`, `ui`, `sidebar`, timeline, and thread data. Components
-subscribe to selectors or memoized derived selectors for the slices they
-render, so background changes to unrelated slices do not force hot timeline or
-composer consumers to receive freshly allocated derived arrays. A delta
-generation gap triggers a full-snapshot reset whose `state_generation` restores
-ordering. Tauri Channels are reserved for measured high-frequency streams and
-must not become a second React-owned state source.
+one ordered Rust-owned state-update lane: contiguous `StateDelta` envelopes
+replace only changed top-level `AppState` slices and carry a monotonic
+generation. Versioned full snapshots are limited to initial attach and explicit
+gap, lag, or command-watermark resync; normal product commands return typed
+Core settlement/admission generations or their non-state result, never an
+application snapshot. The WebView compares top-level
+`DesktopSnapshot`/`AppState` slices and preserves references for unchanged
+`domain`, `ui`, `sidebar`, timeline, and thread data. Components subscribe to
+selectors or memoized derived selectors for the slices they render, so
+background changes to unrelated slices do not force hot timeline or composer
+consumers to receive freshly allocated derived arrays. A delta generation gap
+atomically admits a full versioned snapshot, resets the timeline projection
+cache and requests timeline replay before later deltas apply; AppState and
+timeline events share the delivery lane, so state-only gap recovery is invalid.
+A settlement/admission generation ahead of the store is a deterministic resync
+watermark, not proof of renderer delivery or paint. Tauri Channels are reserved
+for measured high-frequency streams and must not become a second React-owned
+state source.
 
 Core identity types are concrete and stable:
 
@@ -891,8 +897,9 @@ relay that model, not fight it.
     explicit: versioned state snapshots are latest-wins (watch semantics),
     runtime state changes emit at most one `StateDelta` per batch, and
     discrete events use bounded channels with a defined recovery path (drop +
-    full snapshot resync). A slow UI must not stall the core or grow memory
-    without bound.
+    full versioned snapshot and timeline replay). A slow, missing, stale, or
+    unmounted UI must not stall Core product progress or grow memory without
+    bound.
 12. **SDK handles are dropped inside a Tokio runtime context.** Store-backed
     SDK clients panic (`deadpool-runtime`) when dropped outside one. Shutdown
     paths and QA binaries must respect this.
@@ -1132,25 +1139,23 @@ UI responsibilities:
   `ResyncMarker`, continue to require a fresh `InitialItems`.
 - Keep command completion and projection ownership causally distinct.
   `InitialItems` retains the original projection request identity until the
-  exact actor/generation is acknowledged, while a separate causal request
-  identity correlates each initial or idempotent replay to the Subscribe command
-  that requested it. A same-key event without the matching causal identity must
-  not settle a later Subscribe; failures remain correlated to that later
-  command's request identity.
-- A Focused main-pane anchor is not display success by itself. For Activity,
-  search, and date navigation, Core publishes the anchor only after the
-  app-level timeline store applies and acknowledges the exact actor-owned
-  InitialItems key/generation. Until then the actor retains that projection
-  identity and `EnsureSubscribed` reprojects it after consumer remount or lost
-  delivery. Tauri transports this handshake but does not own its state.
+  TimelineActor commits the exact actor/generation internally, while a separate
+  causal request identity correlates each initial or idempotent replay to the
+  Subscribe command that requested it. A same-key event without the matching
+  causal identity must not settle a later Subscribe; failures remain correlated
+  to that later command's request identity.
+- A Focused main-pane anchor is not event delivery or display success. For
+  Activity, search, and date navigation, Core publishes the anchor only after
+  the reliable internal `FocusedProjectionCommitted` route proves the exact
+  actor-owned InitialItems request/key/actor/timeline generation and target
+  presence. `EnsureSubscribed` may reproject rows after consumer remount or lost
+  delivery, but renderer application and DOM paint never participate in Core
+  navigation settlement. Tauri only transports the resulting state/events.
 - Consumer evidence is renderer-specific: TimelineView captures committed Room
-  DOM evidence and App's canonical store captures Focused/Thread application.
-  One App-lifetime adapter owns at most four finite delivery jobs only until the
-  bounded Core queue accepts them; identical intents coalesce, newer same-kind
-  actor/generation intent supersedes older work, and view unmount does not cancel
-  delivery. Account replacement and renderer teardown reset/dispose it. After
-  queue acceptance, Rust alone owns acknowledgement admission, navigation/repair
-  consequences, stale rejection and repair timeout.
+  DOM evidence and App's canonical store captures Focused/Thread application for
+  layout and diagnostics only. It is safe to drop on unmount and has no
+  DesktopApi acknowledgement, retry/backoff delivery owner, navigation/repair
+  consequence, or Core timeout.
 - Before a backward pagination request can affect the viewport, capture an
   anchor item (first visible stable item ID plus pixel offset, or an equivalent
   bottom-aligned strategy). After applying the diff and after React commits the
@@ -1527,13 +1532,14 @@ Core selects the projected gap intersecting the viewport, falling back to the
 gap nearest the live edge, and queues an automatic inspection only when that
 candidate or its relation changes. Repeated observations of the same candidate
 are idle. A wake that arrives during an active inspection or an outstanding
-projection/render acknowledgement remains queued and is released when the
-existing fence settles, independent of ACK/event ordering.
+Core relay/display-projection commit remains queued and is released by the
+exact actor/timeline/repair/batch-fenced internal commit signal. DOM paint and
+renderer acknowledgements are never scheduler prerequisites.
 
 Room live-edge recovery is a distinct bounded scheduler intent, not a
-relaxation of viewport-driven automatic repair. After the initial projection
-acknowledgement, and again when the actor-private rendered live-edge target
-changes, Core may repair the newest SDK descriptor even when its raw boundary
+relaxation of viewport-driven automatic repair. After the initial Core
+projection commit, and again when the actor-private live-edge target changes,
+Core may repair the newest SDK descriptor even when its raw boundary
 is an aggregated relation with no standalone row. This intent reveals at most
 one cached chunk per request, has a small actor-generation batch ceiling, and
 stops on unchanged topology or zero progress. It never invents a gap row or
@@ -1549,7 +1555,7 @@ live-edge intent. An explicit update for the room with no timeline gap still
 closes the intent; omission is not inferred from a timeout or pre-commit room
 update broadcast.
 When that intent first selects a projected descriptor, it remains live-edge
-work after the exact render fence. It downgrades to ordinary automatic repair
+work after the exact actor/timeline/repair/minimum-batch internal projection commit. It downgrades to ordinary automatic repair
 only after a joined/start-reached descriptor was actually selected by the
 unprojected live-edge fallback, so repairing another visible gap cannot discard
 the live-edge recovery target.
@@ -1569,18 +1575,18 @@ repair retains the zero cached-chunk budget; viewport motion cannot silently
 turn it into cache hydration or an unbounded background backfill loop.
 
 Every SDK gap-repair publication is causally tagged through the UI timeline
-relay. Core fences continuation on the exact desktop batch containing the
-final tagged publication, not on whichever live batch happens to arrive next.
-The SDK UI layer settles each tag at its observable boundary: filtered repairs
-with no remote item report no projection, while aggregation-only repairs emit
-one tagged remote-item barrier. Gap-only cache reveals likewise report that no
-projection was published. The required desktop batch ID remains in
-`Repairing` state so a lag-triggered `InitialItems` replay can still complete
-the post-layout acknowledgement, but no acknowledgement is accepted while the
-consumer is still awaiting that replay.
-If the observable update is lost to a lagged SDK subscriber, Core bounds the
-settlement wait at five seconds and exposes a retryable repair failure instead
-of leaving the timeline permanently `Repairing`.
+relay. Core fences continuation on the exact actor/timeline/repair/minimum-batch
+`GapProjectionRelayed` commit containing the final tagged publication, not on
+whichever live batch happens to arrive next. The SDK UI layer settles each tag
+at its observable Core boundary: filtered repairs with no remote item report no
+projection, while aggregation-only repairs emit one tagged remote-item barrier.
+Gap-only cache reveals likewise report that no projection was published. A
+lag-triggered `InitialItems` replay repairs renderer transport independently;
+Core repair continuation never waits for that replay, WebView application,
+renderer layout signal, or DOM paint. If the observable update is lost to
+a lagged SDK subscriber, Core bounds the internal relay settlement wait and
+exposes a retryable repair failure instead of leaving the timeline permanently
+`Repairing`.
 
 See
 `docs/superpowers/specs/2026-07-03-room-timeline-cache-repair-design.md`.
