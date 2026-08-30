@@ -6,6 +6,9 @@
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+#[cfg(any(test, feature = "test-hooks"))]
+use tokio::sync::oneshot;
+
 use koushi_state::{
     ComposerDocument, ComposerTarget, ImageUploadCompressionPolicy, StagedUploadCompressionChoice,
     StagedUploadItem, StagedUploadKind, StagedUploadOutputSelection, StagedUploadPreparation,
@@ -39,8 +42,16 @@ pub enum MediaStagingError {
     BatchTooLarge,
     #[error("media staging contains a duplicate staged id")]
     DuplicateStagedId,
+    #[error("media staging positions must be nonzero and unique")]
+    InvalidPosition,
     #[error("media staging target is no longer active")]
     TargetInactive,
+    #[error("staged upload item is not ready for this operation")]
+    PreparationNotReady,
+    #[error("staged upload selection is invalid for this item")]
+    InvalidSelection,
+    #[error("staged upload compression choice is invalid for this item")]
+    InvalidCompressionChoice,
     #[error("staged upload item is no longer available")]
     MissingStagedItem,
     #[error("prepared media bytes are no longer available")]
@@ -60,11 +71,76 @@ pub enum MediaStagingError {
 #[derive(Clone)]
 pub struct MediaStagingService {
     preparation: Arc<MediaPreparationService>,
+    #[cfg(any(test, feature = "test-hooks"))]
+    preparation_pause: Arc<std::sync::Mutex<Option<PreparationPause>>>,
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+struct PreparationPause {
+    started: oneshot::Sender<()>,
+    release: std::sync::mpsc::Receiver<()>,
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+pub struct PreparationBarrierForTesting {
+    started: oneshot::Receiver<()>,
+    release: Option<std::sync::mpsc::Sender<()>>,
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+impl PreparationBarrierForTesting {
+    pub async fn wait_started(&mut self) {
+        (&mut self.started)
+            .await
+            .expect("preparation barrier must start");
+    }
+
+    pub fn release(mut self) {
+        self.release
+            .take()
+            .expect("preparation barrier releases once")
+            .send(())
+            .expect("preparation must be waiting at barrier");
+    }
 }
 
 impl MediaStagingService {
     pub(crate) fn new(preparation: Arc<MediaPreparationService>) -> Self {
-        Self { preparation }
+        Self {
+            preparation,
+            #[cfg(any(test, feature = "test-hooks"))]
+            preparation_pause: Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn install_preparation_barrier_for_testing(&self) -> PreparationBarrierForTesting {
+        let (started, started_rx) = oneshot::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        *self
+            .preparation_pause
+            .lock()
+            .expect("preparation barrier mutex") = Some(PreparationPause {
+            started,
+            release: release_rx,
+        });
+        PreparationBarrierForTesting {
+            started: started_rx,
+            release: Some(release),
+        }
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    fn pause_preparation_for_testing(&self) {
+        let pause = self
+            .preparation_pause
+            .lock()
+            .expect("preparation barrier mutex")
+            .take();
+        if let Some(pause) = pause {
+            let _ = pause.started.send(());
+            let _ = pause.release.recv();
+        }
     }
 
     /// Publish Preparing, prepare bytes off-lock, then publish the exact
@@ -74,10 +150,10 @@ impl MediaStagingService {
         connection: &mut CoreConnection,
         target: ComposerTarget,
         items: Vec<StageUploadBytesInput>,
-        policy: ImageUploadCompressionPolicy,
     ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
         validate_batch(&items)?;
         let initial = connection.snapshot();
+        let policy = authoritative_policy(&initial);
         let initial_account = account_key(&initial);
         let existing = active_items(&initial, &target).ok_or(MediaStagingError::TargetInactive)?;
         let existing_ids = existing
@@ -85,19 +161,31 @@ impl MediaStagingService {
             .map(|item| item.staged_id.as_str())
             .collect::<std::collections::BTreeSet<_>>();
         let mut seen = std::collections::BTreeSet::new();
+        let mut positions = existing
+            .iter()
+            .map(|item| item.position)
+            .collect::<std::collections::BTreeSet<_>>();
         for item in &items {
             if !seen.insert(item.staged_id.as_str())
                 || existing_ids.contains(item.staged_id.as_str())
             {
                 return Err(MediaStagingError::DuplicateStagedId);
             }
+            if item.position == 0 || !positions.insert(item.position) {
+                return Err(MediaStagingError::InvalidPosition);
+            }
         }
 
-        let preparing_items = existing
+        let mut preparing_items = existing
             .iter()
             .cloned()
             .chain(items.iter().map(|item| preparing_item(&target, item)))
             .collect::<Vec<_>>();
+        preparing_items.sort_by(|left, right| {
+            left.position
+                .cmp(&right.position)
+                .then_with(|| left.staged_id.cmp(&right.staged_id))
+        });
         let preparing_ids = ids(&preparing_items);
         self.publish(
             connection,
@@ -111,7 +199,11 @@ impl MediaStagingService {
 
         let preparation_target = target.clone();
         let prepared_inputs = items;
+        #[cfg(any(test, feature = "test-hooks"))]
+        let preparation_service = self.clone();
         let prepared = executor::spawn_blocking(move || {
+            #[cfg(any(test, feature = "test-hooks"))]
+            preparation_service.pause_preparation_for_testing();
             let mut registry = MediaPreparationRegistry::default();
             let items = registry.prepare_items(&preparation_target, prepared_inputs, policy);
             (registry, items)
@@ -123,6 +215,7 @@ impl MediaStagingService {
         let current = connection.snapshot();
         let current_items = active_items(&current, &target).ok_or(MediaStagingError::Stale)?;
         if account_key(&current) != initial_account
+            || authoritative_policy(&current) != policy
             || ids(current_items) != preparing_ids
             || prepared_items.iter().any(|prepared| {
                 !current_items.iter().any(|current| {
@@ -169,12 +262,20 @@ impl MediaStagingService {
         target: ComposerTarget,
         staged_id: String,
         selection: StagedUploadOutputSelection,
-        policy: ImageUploadCompressionPolicy,
     ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
         let initial = connection.snapshot();
+        let policy = authoritative_policy(&initial);
         let account = account_key(&initial);
-        if active_items(&initial, &target).is_none() {
+        if !target_is_active(&initial, &target) {
             return Err(MediaStagingError::TargetInactive);
+        }
+        let item = staged_item(&initial, &target, &staged_id)
+            .ok_or(MediaStagingError::MissingStagedItem)?;
+        if !matches!(item.preparation, StagedUploadPreparation::Ready { .. }) {
+            return Err(MediaStagingError::PreparationNotReady);
+        }
+        if !matches!(item.kind, StagedUploadKind::Image { .. }) {
+            return Err(MediaStagingError::InvalidSelection);
         }
         let selected = self
             .publish_selection(
@@ -211,7 +312,11 @@ impl MediaStagingService {
                 .source_input(&target, &staged_id)
                 .ok_or(MediaStagingError::PreparedBytesUnavailable)?
         };
+        #[cfg(any(test, feature = "test-hooks"))]
+        let preparation_service = self.clone();
         let encoded = executor::spawn_blocking(move || {
+            #[cfg(any(test, feature = "test-hooks"))]
+            preparation_service.pause_preparation_for_testing();
             MediaPreparationRegistry::encode_output(&source, selection, policy)
         })
         .await
@@ -222,6 +327,7 @@ impl MediaStagingService {
         let current = connection.snapshot();
         let item = staged_item(&current, &target, &staged_id).ok_or(MediaStagingError::Stale)?;
         if account_key(&current) != account
+            || authoritative_policy(&current) != policy
             || !target_is_active(&current, &target)
             || !matches!(
                 item.preparation,
@@ -250,14 +356,17 @@ impl MediaStagingService {
         connection: &mut CoreConnection,
         target: ComposerTarget,
         staged_id: String,
-        policy: ImageUploadCompressionPolicy,
     ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
         let initial = connection.snapshot();
+        let policy = authoritative_policy(&initial);
         let account = account_key(&initial);
-        let item =
-            staged_item(&initial, &target, &staged_id).ok_or(MediaStagingError::TargetInactive)?;
+        if !target_is_active(&initial, &target) {
+            return Err(MediaStagingError::TargetInactive);
+        }
+        let item = staged_item(&initial, &target, &staged_id)
+            .ok_or(MediaStagingError::MissingStagedItem)?;
         if !matches!(item.preparation, StagedUploadPreparation::Failed { .. }) {
-            return Err(MediaStagingError::Stale);
+            return Err(MediaStagingError::PreparationNotReady);
         }
         let source = {
             let transition = self.preparation.transition().await;
@@ -266,7 +375,11 @@ impl MediaStagingService {
                 .ok_or(MediaStagingError::PreparedBytesUnavailable)?
         };
         let retry_target = target.clone();
+        #[cfg(any(test, feature = "test-hooks"))]
+        let preparation_service = self.clone();
         let (prepared_registry, replacement) = executor::spawn_blocking(move || {
+            #[cfg(any(test, feature = "test-hooks"))]
+            preparation_service.pause_preparation_for_testing();
             let mut registry = MediaPreparationRegistry::default();
             let replacement = registry
                 .prepare_items(&retry_target, vec![source], policy)
@@ -278,7 +391,10 @@ impl MediaStagingService {
         .map_err(|_| MediaStagingError::PreparationTask)?;
         let replacement = replacement.ok_or(MediaStagingError::PreparationFailed)?;
         let current = connection.snapshot();
-        if account_key(&current) != account || !target_is_active(&current, &target) {
+        if account_key(&current) != account
+            || authoritative_policy(&current) != policy
+            || !target_is_active(&current, &target)
+        {
             return Err(MediaStagingError::Stale);
         }
         let current_item = staged_item(&current, &target, &staged_id)
@@ -287,6 +403,9 @@ impl MediaStagingService {
         let mut replacement = replacement;
         replacement.caption = current_item.caption.clone();
         replacement.compression_choice = current_item.compression_choice;
+        if replacement == *current_item {
+            return Ok(connection.versioned_snapshot());
+        }
         {
             let mut transition = self.preparation.transition().await;
             transition.remove_item(&target, &staged_id);
@@ -307,6 +426,9 @@ impl MediaStagingService {
         if !target_is_active(&snapshot, &target) {
             return Err(MediaStagingError::TargetInactive);
         }
+        if staged_item(&snapshot, &target, &staged_id).is_none() {
+            return Err(MediaStagingError::MissingStagedItem);
+        }
         let replacement = {
             let mut transition = self.preparation.transition().await;
             transition
@@ -326,6 +448,13 @@ impl MediaStagingService {
     ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
         let snapshot = connection.snapshot();
         let account = account_key(&snapshot);
+        let staged_id = staged_id.clone();
+        if !target_is_active(&snapshot, &target) {
+            return Err(MediaStagingError::TargetInactive);
+        }
+        if staged_item(&snapshot, &target, &staged_id).is_none() {
+            return Err(MediaStagingError::MissingStagedItem);
+        }
         let expected_ids = active_ids(&snapshot, &target)?;
         let caption = caption
             .and_then(|document| (!document.plain_body().trim().is_empty()).then_some(document));
@@ -361,6 +490,12 @@ impl MediaStagingService {
     ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
         let snapshot = connection.snapshot();
         let account = account_key(&snapshot);
+        if !target_is_active(&snapshot, &target) {
+            return Err(MediaStagingError::TargetInactive);
+        }
+        if staged_item(&snapshot, &target, &staged_id).is_none() {
+            return Err(MediaStagingError::MissingStagedItem);
+        }
         let expected_ids = active_ids(&snapshot, &target)?;
         let request_id = connection.next_request_id();
         let baseline = connection.versioned_snapshot().generation;
@@ -394,11 +529,32 @@ impl MediaStagingService {
     ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
         let snapshot = connection.snapshot();
         let account = account_key(&snapshot);
-        if active_items(&snapshot, &target).is_none() {
+        let Some(items) = active_items(&snapshot, &target) else {
             return Err(MediaStagingError::TargetInactive);
+        };
+        if items.is_empty() {
+            self.preparation.reconcile_snapshot(&snapshot).await;
+            return Ok(connection.versioned_snapshot());
         }
+        let request_id = connection.next_request_id();
+        let baseline = connection.versioned_snapshot().generation;
+        connection
+            .command(CoreCommand::App(AppCommand::ClearUploadStaging {
+                request_id,
+                target: target.clone(),
+            }))
+            .await
+            .map_err(MediaStagingError::CommandSubmit)?;
         let result = self
-            .publish(connection, account, target, Vec::new(), Vec::new(), true)
+            .wait(
+                connection,
+                request_id,
+                account,
+                target,
+                Vec::new(),
+                baseline,
+                false,
+            )
             .await?;
         self.preparation.reconcile_snapshot(&result.state).await;
         Ok(result)
@@ -542,6 +698,10 @@ fn validate_batch(items: &[StageUploadBytesInput]) -> Result<(), MediaStagingErr
         return Err(MediaStagingError::BatchTooLarge);
     }
     Ok(())
+}
+
+fn authoritative_policy(state: &koushi_state::AppState) -> ImageUploadCompressionPolicy {
+    state.settings.values.media.image_upload_compression_policy
 }
 
 fn preparing_item(target: &ComposerTarget, input: &StageUploadBytesInput) -> StagedUploadItem {

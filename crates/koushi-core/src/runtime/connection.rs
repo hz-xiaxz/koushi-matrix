@@ -294,12 +294,9 @@ impl CoreConnection {
         &mut self,
         target: koushi_state::ComposerTarget,
         items: Vec<crate::media_preparation::StageUploadBytesInput>,
-        policy: koushi_state::ImageUploadCompressionPolicy,
     ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
         let service = Arc::clone(&self.media_staging);
-        service
-            .stage_upload_bytes(self, target, items, policy)
-            .await
+        service.stage_upload_bytes(self, target, items).await
     }
 
     pub async fn select_staged_upload_output(
@@ -307,11 +304,10 @@ impl CoreConnection {
         target: koushi_state::ComposerTarget,
         staged_id: String,
         selection: koushi_state::StagedUploadOutputSelection,
-        policy: koushi_state::ImageUploadCompressionPolicy,
     ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
         let service = Arc::clone(&self.media_staging);
         service
-            .select_staged_upload_output(self, target, staged_id, selection, policy)
+            .select_staged_upload_output(self, target, staged_id, selection)
             .await
     }
 
@@ -319,11 +315,10 @@ impl CoreConnection {
         &mut self,
         target: koushi_state::ComposerTarget,
         staged_id: String,
-        policy: koushi_state::ImageUploadCompressionPolicy,
     ) -> Result<VersionedAppStateSnapshot, crate::media_staging::MediaStagingError> {
         let service = Arc::clone(&self.media_staging);
         service
-            .retry_staged_upload_preparation(self, target, staged_id, policy)
+            .retry_staged_upload_preparation(self, target, staged_id)
             .await
     }
 
