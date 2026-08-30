@@ -35,9 +35,8 @@ adds no reducer transition or AppState/AppAction change.
 
 ## Verification
 
-- `cargo test -p koushi-core --test request_outcome_a2a`: 9 passed.
 - `cargo test -p koushi-core --test request_outcome`: 10 passed.
-- `cargo test -p koushi-core --test request_outcome_a2a`: 9 passed.
+- `cargo test -p koushi-core --test request_outcome_a2a`: 10 passed.
 - `cargo test -p koushi-desktop`: 126 library tests passed on full rerun; 5 integration tests passed. One pre-existing global diagnostic-context count test failed in the first parallel run and passed focused plus full rerun without changes.
 - Strict Rust test-structure checker, checker tests, rustfmt, and `git diff --check`: passed.
 
@@ -46,7 +45,7 @@ adds no reducer transition or AppState/AppAction change.
 - A1 reviewer: `deepseek-brainstormer` (read-only), `VERDICT: CORRECT-TO-CONTINUE`.
 - A2a reviewer round 1: `deepseek-brainstormer`, `VERDICT: FINDINGS`. Real-runtime audit showed local reset, focused close, and search close do not emit the synthetic terminals used by initial unit tests. The service now has explicit `allow_projection_only` admission for these idempotent commands, still requiring a newer exact guarded snapshot; adapter callers opt in and RED/GREEN tests prove settlement without unavailable events. Search/auth/account guards and outcome mapping remain typed.
 - A2a reviewer round 2: `deepseek-brainstormer`, `VERDICT: FINDINGS`. It found `SnapshotWake::SnapshotChanged` did not re-evaluate projection-only expectations, causing 10–60 second deadline settlement. The loop now rechecks authoritative projection at every iteration; a deterministic `now_or_never` test proves reset/focused-close/search-close settle on the first matching watch update without any unavailable terminal event.
-- A2a reviewer round 3: pending (`deepseek-brainstormer`).
+- A2a reviewer round 3: `deepseek-brainstormer`, `VERDICT: CORRECT-TO-CONTINUE`; immediate watch settlement and non-opt-in/foreign guards verified.
 - This is an additional same-design slice checkpoint, not a restarted pre-implementation gate.
 - A2 must implement and RED-test every currently declared expectation before its adapter waiter is migrated; unimplemented variants may not ship silently.
 - A2 must use operation-specific room guards (`RoomForgotten` settles on authoritative absence; leave uses its actual projected terminal) rather than the generic known-room predicate.
