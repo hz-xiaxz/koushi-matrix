@@ -1989,7 +1989,7 @@ mock.setCommandResponse(
       throw new Error("composer draft target is not active");
     }
     nextComposerLeaseId += 1;
-    const leaseId = `harness-composer-lease-${nextComposerLeaseId}`;
+    const leaseId = nextComposerLeaseId.toString();
     composerLeases.set(leaseId, {
       rendererGeneration,
       accountHomeserver,

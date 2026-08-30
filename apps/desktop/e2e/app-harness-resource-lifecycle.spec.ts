@@ -132,6 +132,15 @@ async function replaceReadyAccountRetainingStagedProjection(page: Page): Promise
   });
 }
 
+test("composer transport uses canonical numeric tokens", async ({ page }) => {
+  await gotoReadyShell(page);
+  const rendererGeneration = await beginLease(page);
+  const lease = await acquireLease(page, rendererGeneration);
+
+  expect(rendererGeneration).toMatch(/^[1-9][0-9]*$/);
+  expect(lease.leaseId).toMatch(/^[1-9][0-9]*$/);
+});
+
 test("clear staging releases prepared bytes", async ({ page }) => {
   await gotoReadyShell(page);
   await stageUpload(page);

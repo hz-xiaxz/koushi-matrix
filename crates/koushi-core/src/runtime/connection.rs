@@ -1,8 +1,9 @@
 use super::{CoreCommandEnvelope, CoreRuntime};
 use crate::command::{CoreCommand, RoomCommand};
 use crate::composer_draft_lifecycle::{
-    ComposerDraftCommandPermit, ComposerDraftLeaseFailure, ComposerDraftLeaseId,
-    ComposerDraftLeaseRegistry, ComposerDraftScope, ComposerRendererGeneration,
+    ComposerDraftCommandPermit, ComposerDraftLeaseAdmission, ComposerDraftLeaseAdmissionFailure,
+    ComposerDraftLeaseFailure, ComposerDraftLeaseId, ComposerDraftLeaseRegistry,
+    ComposerDraftScope, ComposerRendererGeneration,
 };
 #[cfg(test)]
 use crate::event::IntentOutcome;
@@ -12,6 +13,7 @@ use crate::event::{
 };
 use crate::ids::{RequestId, RuntimeConnectionId};
 use crate::media_staging::MediaStagingService;
+use koushi_state::ComposerDraftRevision;
 use std::{
     sync::{
         Arc,
@@ -421,6 +423,55 @@ impl CoreConnection {
             .acquire_composer_draft_lease(generation, scope)
     }
 
+    pub fn acquire_composer_draft_lease_for_active_target(
+        &self,
+        expected_account: koushi_key::SessionKeyId,
+        generation: ComposerRendererGeneration,
+        target: koushi_state::ComposerTarget,
+    ) -> Result<ComposerDraftLeaseAdmission, ComposerDraftLeaseAdmissionFailure> {
+        let snapshot = self.snapshot();
+        validate_active_composer_scope(&snapshot, &expected_account, &target)?;
+        let lease_id = self
+            .composer_draft_leases
+            .acquire(
+                generation,
+                ComposerDraftScope {
+                    account: expected_account,
+                    target: target.clone(),
+                },
+            )
+            .map_err(ComposerDraftLeaseAdmissionFailure::Registry)?;
+        Ok(ComposerDraftLeaseAdmission {
+            lease_id,
+            revision: composer_draft_revision(&snapshot, &target),
+            last_accepted_clear_revision: composer_draft_last_accepted_clear_revision(
+                &snapshot, &target,
+            ),
+            has_authoritative_content: composer_draft_has_content(&snapshot, &target),
+        })
+    }
+
+    pub fn acquire_composer_draft_command_permit_for_active_target(
+        &self,
+        expected_account: koushi_key::SessionKeyId,
+        target: koushi_state::ComposerTarget,
+        generation: ComposerRendererGeneration,
+        lease_id: ComposerDraftLeaseId,
+    ) -> Result<ComposerDraftCommandPermit, ComposerDraftLeaseAdmissionFailure> {
+        let snapshot = self.snapshot();
+        validate_active_composer_scope(&snapshot, &expected_account, &target)?;
+        self.composer_draft_leases
+            .try_command_permit(
+                generation,
+                lease_id,
+                &ComposerDraftScope {
+                    account: expected_account,
+                    target,
+                },
+            )
+            .map_err(ComposerDraftLeaseAdmissionFailure::Registry)
+    }
+
     pub fn release_composer_draft_lease(
         &self,
         generation: ComposerRendererGeneration,
@@ -576,5 +627,101 @@ impl CoreConnection {
         }
     }
 }
+
+fn validate_active_composer_scope(
+    snapshot: &AppStateSnapshot,
+    expected_account: &koushi_key::SessionKeyId,
+    target: &koushi_state::ComposerTarget,
+) -> Result<(), ComposerDraftLeaseAdmissionFailure> {
+    let koushi_state::SessionState::Ready(info) = &snapshot.session else {
+        return Err(ComposerDraftLeaseAdmissionFailure::SessionNotReady);
+    };
+    if &crate::store::session_key_id_from_info(info) != expected_account {
+        return Err(ComposerDraftLeaseAdmissionFailure::AccountMismatch);
+    }
+    let active = match target {
+        koushi_state::ComposerTarget::Main { room_id } => {
+            snapshot.timeline.room_id.as_deref() == Some(room_id)
+        }
+        koushi_state::ComposerTarget::Thread {
+            room_id,
+            root_event_id,
+        } => matches!(
+            &snapshot.thread,
+            koushi_state::ThreadPaneState::Open {
+                room_id: active_room_id,
+                root_event_id: active_root_event_id,
+                ..
+            } if active_room_id == room_id && active_root_event_id == root_event_id
+        ),
+    };
+    active
+        .then_some(())
+        .ok_or(ComposerDraftLeaseAdmissionFailure::TargetInactive)
+}
+
+fn composer_draft_revision(
+    state: &AppStateSnapshot,
+    target: &koushi_state::ComposerTarget,
+) -> ComposerDraftRevision {
+    match target {
+        koushi_state::ComposerTarget::Main { room_id } => {
+            state.composer_drafts.room_revision(room_id)
+        }
+        koushi_state::ComposerTarget::Thread {
+            room_id,
+            root_event_id,
+        } => state
+            .composer_drafts
+            .thread_revision(room_id, root_event_id),
+    }
+}
+
+fn composer_draft_last_accepted_clear_revision(
+    state: &AppStateSnapshot,
+    target: &koushi_state::ComposerTarget,
+) -> ComposerDraftRevision {
+    match target {
+        koushi_state::ComposerTarget::Main { room_id } => state
+            .composer_drafts
+            .room_last_accepted_clear_revisions
+            .get(room_id)
+            .copied()
+            .unwrap_or_default(),
+        koushi_state::ComposerTarget::Thread {
+            room_id,
+            root_event_id,
+        } => state
+            .composer_drafts
+            .thread_last_accepted_clear_revisions
+            .get(room_id)
+            .and_then(|threads| threads.get(root_event_id))
+            .copied()
+            .unwrap_or_default(),
+    }
+}
+
+fn composer_draft_has_content(
+    state: &AppStateSnapshot,
+    target: &koushi_state::ComposerTarget,
+) -> bool {
+    match target {
+        koushi_state::ComposerTarget::Main { room_id } => state
+            .composer_drafts
+            .rooms
+            .get(room_id)
+            .is_some_and(|draft| !draft.is_empty()),
+        koushi_state::ComposerTarget::Thread {
+            room_id,
+            root_event_id,
+        } => state
+            .composer_drafts
+            .threads
+            .get(room_id)
+            .and_then(|threads| threads.get(root_event_id))
+            .is_some_and(|draft| !draft.is_empty()),
+    }
+}
+
 #[cfg(test)]
 mod tests;

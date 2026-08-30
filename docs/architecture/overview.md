@@ -259,6 +259,20 @@ inputs, convert opaque composer tokens, call these Core methods, and serialize
 the settled snapshot or preview bytes; they contain no batch, MIME, preparation,
 selection-generation, registry-merge, replacement, or send policy.
 
+### Core-owned composer transport identities (Phase D, issue #755)
+
+`ComposerDraftLeaseRegistry` is the sole authority for renderer generations,
+lease ids, exact account/target scopes, and command/persistence permits. The two
+opaque identities expose canonical nonzero decimal `u64` wire conversion;
+parsing validates shape only and grants no authority. Core rechecks the current
+Ready `SessionKeyId` and exact active main/thread `ComposerTarget` before lease
+or terminal-permit admission. Tauri stores no identity counter or lookup map and
+only parses/formats IPC strings. A fresh process may restart numeric values;
+safety comes from beginning that runtime's live generation and passing its
+registry/scope checks, not cross-process numeric uniqueness.
+
+This ownership move adds no `AppState`, `AppAction`, or reducer transition.
+
 ## Platform Portability
 
 The desktop app is the only shipping target today, but a browser-hosted build

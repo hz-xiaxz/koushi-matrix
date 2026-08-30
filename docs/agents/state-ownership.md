@@ -984,6 +984,13 @@ normal QA-title mode and cannot change product title semantics.
   React-local per-room/per-thread draft map. The backing store is encrypted,
   debounced, and account-scoped in `koushi-core`; it is not serialized as a full
   draft map to the webview snapshot.
+- Core exclusively allocates and validates composer renderer generations, lease
+  ids, account/target scopes, and command/persistence permits. Their IPC form is
+  a canonical nonzero decimal `u64`; parsing a string grants no authority.
+  Tauri only parses/formats these opaque identities and keeps no counter, map,
+  or mirror registry. A renderer must begin the current runtime generation,
+  acquire a lease for the exact Ready account and active main/thread target,
+  and pass Core's live generation/lease/scope check for every terminal permit.
 - Scheduled/send-later state follows the same boundary. The full queue and local
   fallback timer are Rust/core-owned; React may render only
   `snapshot.state.timeline.scheduled_sends` for the selected room and

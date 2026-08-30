@@ -1157,6 +1157,11 @@ QuiescentTombstone only after the final touching activation/command lease
 settles while the target is inactive. QuiescentTombstone is the only state that
 quota collection may remove. A retired renderer generation cannot reacquire or
 deliver a command; a fresh generation rehydrates Rust state before admission.
+Issue #755 Phase D leaves this state machine unchanged while removing the Tauri
+identity mirror: canonical nonzero decimal wire tokens are parsed into opaque
+Core identities, then the live Core registry revalidates generation, lease,
+Ready account, exact active target, scope, and permit kind. Parsing alone never
+moves state or grants authority.
 
 ```mermaid
 stateDiagram-v2
