@@ -46,7 +46,7 @@ C–E.
 - Missing/not-ready/stale operations return typed errors; retry of an unchanged failed result returns the authoritative current version without waiting for an impossible generation.
 - Concurrent operation orphan bytes are dropped before merge or reclaimed by lifecycle reconciliation; the invariant is tested with causal preparation barriers.
 - B2 will add/delegate prepared-preview byte lookup and send-prepared orchestration through Core methods before deleting the Tauri path. The adapter retains only IPC byte/URL serialization.
-- Round 2 reviewer: pending (`deepseek-brainstormer`).
+- Round 2 reviewer: `deepseek-brainstormer`, `VERDICT: CORRECT-TO-CONTINUE`; coverage, ordering, policy authority, typed errors/idempotence, cleanup, locks/executor/fences, and B2 API decision verified. B2 should serialize same-target staging and convert the remaining pre-check→reducer stale window to a typed result where practical.
 
 ## Remaining work
 
