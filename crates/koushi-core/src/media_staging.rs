@@ -7,8 +7,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex as StdMutex},
-    time::Duration,
+    sync::{Arc, Mutex as StdMutex, OnceLock},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(any(test, feature = "test-hooks"))]
@@ -42,6 +42,21 @@ const MEDIA_STAGING_TIMEOUT: Duration = Duration::from_secs(5);
 const PREPARED_MEDIA_QUEUE_TIMEOUT: Duration = Duration::from_secs(10);
 const COMPOSER_DRAFT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_secs(10);
 static NEXT_PREPARED_MEDIA_TRANSACTION_ID: AtomicU64 = AtomicU64::new(1);
+static PREPARED_MEDIA_PROCESS_NONCE: OnceLock<u128> = OnceLock::new();
+
+fn next_prepared_media_transaction_id() -> String {
+    let nonce = *PREPARED_MEDIA_PROCESS_NONCE.get_or_init(|| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must be after Unix epoch")
+            .as_nanos()
+            ^ u128::from(std::process::id())
+    });
+    format!(
+        "desktop-prepared-media-{nonce:x}-{}",
+        NEXT_PREPARED_MEDIA_TRANSACTION_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum MediaStagingError {
@@ -629,6 +644,7 @@ impl MediaStagingService {
     ) -> Result<Vec<u8>, MediaStagingError> {
         let _admission = self.admit_target(&target).await;
         let snapshot = connection.snapshot();
+        let account = ready_account(&snapshot);
         let item = staged_item(&snapshot, &target, &staged_id)
             .ok_or(MediaStagingError::MissingStagedItem)?;
         let has_variant = matches!(
@@ -646,8 +662,17 @@ impl MediaStagingService {
             .variant_bytes(&target, &staged_id, &variant_id)
             .ok_or(MediaStagingError::PreparedBytesUnavailable)?;
         let current = connection.snapshot();
-        if !target_is_active(&current, &target)
-            || staged_item(&current, &target, &staged_id).is_none()
+        let current_item = staged_item(&current, &target, &staged_id);
+        let current_has_variant = current_item.is_some_and(|item| {
+            matches!(
+                &item.preparation,
+                StagedUploadPreparation::Ready { variants, .. }
+                    if variants.iter().any(|variant| variant.variant_id == variant_id)
+            )
+        });
+        if ready_account(&current) != account
+            || !target_is_active(&current, &target)
+            || !current_has_variant
         {
             return Err(MediaStagingError::Stale);
         }
@@ -692,9 +717,10 @@ impl MediaStagingService {
 
         for staged_id in staged_ids {
             let current = connection.snapshot();
-            if ready_account(&current).as_ref() != Some(&expected_account)
-                || composer_draft_revision(&current, &target) != draft_revision
-            {
+            if ready_account(&current).as_ref() != Some(&expected_account) {
+                return Err(PreparedUploadSendError::AccountMismatch);
+            }
+            if composer_draft_revision(&current, &target) != draft_revision {
                 return Err(PreparedUploadSendError::DraftRevision);
             }
             let item = staged_item(&current, &target, &staged_id)
@@ -709,10 +735,7 @@ impl MediaStagingService {
                 .selected_upload(&target, &staged_id)
                 .ok_or(PreparedUploadSendError::PreparedBytesUnavailable)?;
             let request_id = connection.next_request_id();
-            let transaction_id = format!(
-                "desktop-prepared-media-{}",
-                NEXT_PREPARED_MEDIA_TRANSACTION_ID.fetch_add(1, Ordering::Relaxed)
-            );
+            let transaction_id = next_prepared_media_transaction_id();
             let descriptor = prepared.descriptor;
             let kind = if descriptor.mime_type.starts_with("image/") {
                 UploadMediaKind::Image {
@@ -782,8 +805,10 @@ impl MediaStagingService {
         }
 
         let current = connection.snapshot();
-        if ready_account(&current).as_ref() != Some(&expected_account)
-            || !target_is_active(&current, &target)
+        if ready_account(&current).as_ref() != Some(&expected_account) {
+            return Err(PreparedUploadSendError::AccountMismatch);
+        }
+        if !target_is_active(&current, &target)
             || composer_draft_revision(&current, &target) != draft_revision
         {
             return Err(PreparedUploadSendError::DraftRevision);

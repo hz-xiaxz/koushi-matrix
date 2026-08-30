@@ -38,48 +38,6 @@ pub(super) fn trace_tauri_timeline_command_elapsed(
     );
 }
 
-async fn wait_for_upload_staging_snapshot(
-    event_conn: &mut CoreConnection,
-    request_id: RequestId,
-    account_key: AccountKey,
-    target: koushi_state::ComposerTarget,
-    staged_ids: Vec<String>,
-    baseline_generation: u64,
-    description: &str,
-) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
-    match event_conn
-        .wait_for_request_outcome(
-            OutcomeCorrelation::Request(request_id),
-            RequestOutcomeExpectation::UploadStaging {
-                request_id,
-                account_key,
-                target,
-                staged_ids,
-                allow_initial: true,
-            },
-            baseline_generation,
-            tokio::time::Instant::now() + UPLOAD_STAGING_EVENT_TIMEOUT,
-        )
-        .await
-        .map_err(|error| invoke_error_from_request_outcome(description, error))?
-    {
-        RequestOutcome::UploadStaging { snapshot, .. } => Ok(snapshot),
-        _ => Err(format!("{description}: invalid request outcome")),
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StageUploadInputItem {
-    staged_id: String,
-    position: u64,
-    filename: String,
-    mime_type: String,
-    byte_count: u64,
-    kind: StagedUploadKind,
-    compression_choice: StagedUploadCompressionChoice,
-}
-
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StageUploadBytesInputItem {
@@ -308,41 +266,6 @@ pub(super) fn build_schedule_send_command(
     }))
 }
 
-pub(super) fn build_set_upload_staging_command(
-    request_id: koushi_core::RequestId,
-    room_id: String,
-    items: Vec<StageUploadInputItem>,
-) -> CoreCommand {
-    let room_id = room_id.trim().to_owned();
-    let staged_items = items
-        .into_iter()
-        .filter(|item| !item.staged_id.trim().is_empty())
-        .map(|item| StagedUploadItem {
-            staged_id: item.staged_id,
-            room_id: room_id.clone(),
-            position: item.position,
-            filename: match item.filename.trim() {
-                "" => "attachment".to_owned(),
-                value => value.to_owned(),
-            },
-            mime_type: match item.mime_type.trim() {
-                "" => "application/octet-stream".to_owned(),
-                value => value.to_owned(),
-            },
-            byte_count: item.byte_count,
-            kind: item.kind,
-            caption: None,
-            compression_choice: item.compression_choice,
-            preparation: Default::default(),
-        })
-        .collect();
-    CoreCommand::App(AppCommand::SetUploadStaging {
-        request_id,
-        target: koushi_state::ComposerTarget::Main { room_id },
-        items: staged_items,
-    })
-}
-
 pub(super) fn build_cancel_scheduled_send_command(
     request_id: koushi_core::RequestId,
     scheduled_id: String,
@@ -403,136 +326,6 @@ pub(super) fn build_cancel_send_command(
         key: build_timeline_key(account_key, room_id),
         transaction_id,
     }))
-}
-
-pub(super) fn build_upload_media_command(
-    request_id: koushi_core::RequestId,
-    expected_account: koushi_key::SessionKeyId,
-    account_key: AccountKey,
-    room_id: String,
-    transaction_id: String,
-    filename: String,
-    mime_type: String,
-    bytes: Vec<u8>,
-    caption: Option<String>,
-    image_compression_mode: ImageUploadCompressionMode,
-    image_compression_policy: ImageUploadCompressionPolicy,
-    image_dimensions: Option<ImageUploadDimensions>,
-    image_compression: Option<ImageUploadCompressionState>,
-    thumbnail: Option<UploadMediaThumbnail>,
-) -> Option<CoreCommand> {
-    if bytes.is_empty() {
-        return None;
-    }
-    let filename = match filename.trim() {
-        "" => "attachment".to_owned(),
-        value => value.to_owned(),
-    };
-    let mime_type = match mime_type.trim() {
-        "" => "application/octet-stream".to_owned(),
-        value => value.to_owned(),
-    };
-    let is_image = mime_type.to_ascii_lowercase().starts_with("image/");
-    let selected_byte_count = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-    let image_compression = if is_image {
-        Some(normalize_image_upload_compression(
-            image_compression_mode,
-            image_compression_policy,
-            mime_type.clone(),
-            selected_byte_count,
-            image_dimensions,
-            image_compression,
-            thumbnail.is_some(),
-        ))
-    } else {
-        None
-    };
-    let selected_dimensions = image_compression
-        .as_ref()
-        .and_then(|compression| compression.selected.dimensions)
-        .or(image_dimensions);
-    let kind = if is_image {
-        UploadMediaKind::Image {
-            width: selected_dimensions.map(|dimensions| dimensions.width),
-            height: selected_dimensions.map(|dimensions| dimensions.height),
-        }
-    } else {
-        UploadMediaKind::File
-    };
-
-    Some(CoreCommand::Timeline(TimelineCommand::UploadAndSendMedia {
-        request_id,
-        expected_account,
-        key: build_timeline_key(account_key, room_id),
-        transaction_id,
-        request: UploadMediaRequest {
-            filename,
-            mime_type,
-            bytes,
-            kind,
-            compression: image_compression,
-            thumbnail: if is_image { thumbnail } else { None },
-            caption: media_caption_from_composer_body(caption),
-        },
-    }))
-}
-
-fn normalize_image_upload_compression(
-    mode: ImageUploadCompressionMode,
-    policy: ImageUploadCompressionPolicy,
-    mime_type: String,
-    selected_byte_count: u64,
-    image_dimensions: Option<ImageUploadDimensions>,
-    image_compression: Option<ImageUploadCompressionState>,
-    thumbnail_present: bool,
-) -> ImageUploadCompressionState {
-    match image_compression {
-        Some(mut compression) => {
-            compression.mode = mode;
-            compression.policy = policy;
-            if compression.original.mime_type.trim().is_empty() {
-                compression.original.mime_type = mime_type.clone();
-            }
-            if compression.selected.mime_type.trim().is_empty() {
-                compression.selected.mime_type = mime_type;
-            }
-            compression.selected.byte_count = selected_byte_count;
-            if compression.selected.dimensions.is_none() {
-                compression.selected.dimensions = image_dimensions;
-            }
-            if compression.selected_variant == ImageUploadVariantKind::Original {
-                compression.metadata_stripped = false;
-            }
-            if thumbnail_present {
-                compression.thumbnail_refreshed = true;
-            }
-            compression
-        }
-        None => {
-            let mut compression = ImageUploadCompressionState::original(
-                mode,
-                mime_type,
-                selected_byte_count,
-                image_dimensions,
-            );
-            compression.policy = policy;
-            compression.skipped_small_image = policy.should_skip(&compression.original);
-            compression
-        }
-    }
-}
-
-fn media_caption_from_composer_body(
-    caption: Option<String>,
-) -> Option<koushi_state::FormattedMessageDraft> {
-    let caption = caption?.trim().to_owned();
-    if caption.is_empty() {
-        return None;
-    }
-    Some(build_formatted_message_draft(
-        caption,
-        MentionIntent::default(),
-    ))
 }
 
 pub(super) fn build_download_media_command(
@@ -1250,10 +1043,7 @@ pub async fn send_text(
         return Err(SubmissionFailure::Invalid);
     }
 
-    let transaction_id = format!(
-        "desktop-{}",
-        NEXT_TRANSACTION_ID.fetch_add(1, Ordering::Relaxed)
-    );
+    let transaction_id = super::next_transaction_id("desktop");
     let expected_account = koushi_key::SessionKeyId {
         homeserver: account_homeserver,
         user_id: account_user_id,
@@ -1379,51 +1169,6 @@ pub async fn schedule_send(
             settled_snapshot.generation,
         ),
     })
-}
-
-#[tauri::command]
-pub async fn stage_uploads(
-    room_id: String,
-    items: Vec<StageUploadInputItem>,
-    app: AppHandle,
-    state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
-    if room_id.trim().is_empty() {
-        return current_snapshot(state.inner()).await;
-    }
-
-    let room_id_for_wait = room_id.trim().to_owned();
-    let target = koushi_state::ComposerTarget::Main {
-        room_id: room_id_for_wait.clone(),
-    };
-    let expected_ids = items
-        .iter()
-        .filter(|item| !item.staged_id.trim().is_empty())
-        .map(|item| item.staged_id.clone())
-        .collect::<Vec<_>>();
-    let mut event_conn = state.runtime.attach();
-    let account_key = account_key_from_app_state(&event_conn.snapshot());
-    let baseline_generation = event_conn.versioned_snapshot().generation;
-    let request_id = event_conn.next_request_id();
-    event_conn
-        .command(build_set_upload_staging_command(request_id, room_id, items))
-        .await
-        .map_err(|e| format!("command submit failed: {e}"))?;
-    let settled = wait_for_upload_staging_snapshot(
-        &mut event_conn,
-        request_id,
-        account_key,
-        target,
-        expected_ids,
-        baseline_generation,
-        "upload staging did not update",
-    )
-    .await?;
-    update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        settled.state,
-        settled.generation,
-    ))
 }
 
 #[tauri::command]
@@ -1612,18 +1357,12 @@ pub async fn update_staged_upload_caption(
 
 #[tauri::command]
 pub async fn update_staged_upload_compression(
+    target: koushi_state::ComposerTarget,
     staged_id: String,
     compression_choice: StagedUploadCompressionChoice,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    let target = {
-        let snapshot = state.runtime.attach().snapshot();
-        let Some(room_id) = snapshot.timeline.room_id else {
-            return current_snapshot(state.inner()).await;
-        };
-        koushi_state::ComposerTarget::Main { room_id }
-    };
     let settled = state
         .runtime
         .attach()
@@ -1718,57 +1457,6 @@ pub async fn cancel_send(
     if let Some(command) =
         build_cancel_send_command(request_id, account_key, room_id, transaction_id)
     {
-        submit_core_command(state.inner(), command).await?;
-    }
-    update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
-}
-
-#[tauri::command]
-pub async fn upload_media(
-    room_id: String,
-    filename: String,
-    mime_type: String,
-    bytes: Vec<u8>,
-    caption: Option<String>,
-    image_dimensions: Option<ImageUploadDimensions>,
-    image_compression: Option<ImageUploadCompressionState>,
-    thumbnail: Option<UploadMediaThumbnail>,
-    app: AppHandle,
-    state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
-    if bytes.is_empty() {
-        return current_snapshot(state.inner()).await;
-    }
-
-    let transaction_id = format!(
-        "desktop-media-{}",
-        NEXT_TRANSACTION_ID.fetch_add(1, Ordering::Relaxed)
-    );
-    let snapshot = state.runtime.attach().snapshot();
-    let Some(expected_account) = composer_draft_session_key(&snapshot) else {
-        return current_snapshot(state.inner()).await;
-    };
-    let account_key = account_key_from_app_state(&snapshot);
-    let (image_compression_mode, image_compression_policy) =
-        image_upload_compression_contract_from_snapshot(state.inner()).await;
-    let request_id = next_request_id(state.inner()).await;
-    if let Some(command) = build_upload_media_command(
-        request_id,
-        expected_account,
-        account_key,
-        room_id,
-        transaction_id,
-        filename,
-        mime_type,
-        bytes,
-        caption,
-        image_compression_mode,
-        image_compression_policy,
-        image_dimensions,
-        image_compression,
-        thumbnail,
-    ) {
         submit_core_command(state.inner(), command).await?;
     }
     update_qa_window_title_from_state(&app, state.inner()).await;
@@ -1999,10 +1687,7 @@ pub async fn forward_message(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
-    let transaction_id = format!(
-        "desktop-forward-{}",
-        NEXT_TRANSACTION_ID.fetch_add(1, Ordering::Relaxed)
-    );
+    let transaction_id = super::next_transaction_id("desktop-forward");
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
     if let Some(command) = build_forward_message_command(
@@ -2313,10 +1998,7 @@ pub async fn send_reply(
         return Err(SubmissionFailure::Invalid);
     }
 
-    let transaction_id = format!(
-        "desktop-{}",
-        NEXT_TRANSACTION_ID.fetch_add(1, Ordering::Relaxed)
-    );
+    let transaction_id = super::next_transaction_id("desktop");
     let expected_account = koushi_key::SessionKeyId {
         homeserver: account_homeserver,
         user_id: account_user_id,
@@ -2392,10 +2074,7 @@ pub async fn send_thread_reply(
         return Err(SubmissionFailure::Invalid);
     }
 
-    let transaction_id = format!(
-        "desktop-{}",
-        NEXT_TRANSACTION_ID.fetch_add(1, Ordering::Relaxed)
-    );
+    let transaction_id = super::next_transaction_id("desktop");
     let expected_account = koushi_key::SessionKeyId {
         homeserver: account_homeserver,
         user_id: account_user_id,
@@ -2452,8 +2131,6 @@ pub async fn send_thread_reply(
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(response)
 }
-
-const UPLOAD_STAGING_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2628,30 +2305,6 @@ pub(super) fn build_submit_thread_reply_command(
         document,
         draft_revision,
     }))
-}
-
-async fn image_upload_compression_contract_from_snapshot(
-    state: &CoreRuntimeState,
-) -> (ImageUploadCompressionMode, ImageUploadCompressionPolicy) {
-    let media = state
-        .connection
-        .lock()
-        .await
-        .snapshot()
-        .settings
-        .values
-        .media;
-    (
-        // #305 retired the stored mode. The direct upload path keeps the former
-        // default so its behavior matches a user who never changed the setting.
-        ImageUploadCompressionMode::default(),
-        ImageUploadCompressionPolicy {
-            threshold_bytes: media.image_upload_compression_policy.threshold_bytes,
-            threshold_long_edge: media.image_upload_compression_policy.threshold_long_edge,
-            target_long_edge: media.image_upload_compression_policy.target_long_edge,
-            quality_percent: media.image_upload_compression_policy.quality_percent,
-        },
-    )
 }
 
 #[cfg(test)]

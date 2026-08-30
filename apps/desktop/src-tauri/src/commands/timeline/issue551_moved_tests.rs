@@ -103,25 +103,6 @@ fn tauri_command_routes_blank_message_bodies_return_no_command() {
         .is_none()
     );
     assert!(
-        build_upload_media_command(
-            fake_request_id(17),
-            synthetic_session_key(),
-            AccountKey("@alice:example.org".to_owned()),
-            "!room:example.org".to_owned(),
-            "desktop-media-empty".to_owned(),
-            "empty.bin".to_owned(),
-            "application/octet-stream".to_owned(),
-            vec![],
-            None,
-            ImageUploadCompressionMode::Never,
-            ImageUploadCompressionPolicy::default(),
-            None,
-            None,
-            None,
-        )
-        .is_none()
-    );
-    assert!(
         build_download_media_command(
             fake_request_id(18),
             AccountKey("@alice:example.org".to_owned()),

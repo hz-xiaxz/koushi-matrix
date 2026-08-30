@@ -46,8 +46,7 @@ import {
   type SettingsPatch,
   type StagedUploadItem,
   type StagedUploadOutputSelection,
-  type StagedUploadCompressionChoice,
-  type UploadStagingRequestItem
+  type StagedUploadCompressionChoice
 } from "../domain/types";
 import { TauriIpcMock, type IpcInvocation } from "./tauriIpcMock";
 import { documentFromText, plainBodyFromDocument } from "../domain/composerDocument";
@@ -2765,35 +2764,6 @@ mock.setCommandResponse("moderate_room_member", () => currentSnapshot);
 mock.setCommandResponse("update_room_member_role", () => currentSnapshot);
 mock.setCommandResponse("pin_event", () => currentSnapshot);
 mock.setCommandResponse("unpin_event", () => currentSnapshot);
-mock.setCommandResponse(
-  "stage_uploads",
-  ({ roomId, items }: { roomId: string; items: UploadStagingRequestItem[] }) => {
-  const stagedUploads = (items ?? []).map((item, index: number) => ({
-    staged_id: item.stagedId,
-    room_id: roomId,
-    position: item.position ?? index + 1,
-    filename: item.filename,
-    mime_type: item.mimeType,
-    byte_count: item.byteCount,
-    kind: item.kind,
-    caption: null,
-    compression_choice: item.compressionChoice,
-    preparation: { kind: "preparing" as const }
-  }));
-  return setCurrentSnapshot({
-    ...currentSnapshot,
-    state: {
-      ...currentSnapshot.state,
-      ui: {
-        ...currentSnapshot.state.ui,
-      timeline: {
-        ...currentSnapshot.state.ui.timeline,
-        staged_uploads: stagedUploads
-      }
-      },
-    }
-  });
-});
 mock.setCommandResponse("stage_upload_bytes", ({ target, items }: {
   target: ComposerTarget;
   items: StageUploadBytesRequestItem[];
@@ -3035,7 +3005,6 @@ mock.setCommandResponse("update_staged_upload_compression", ({ stagedId, compres
 mock.setCommandResponse("clear_upload_staging", ({ target }: { target: ComposerTarget }) =>
   setCurrentSnapshot(replaceStagedUploadsForTarget(currentSnapshot, target, []))
 );
-mock.setCommandResponse("upload_media", () => currentSnapshot);
 mock.setCommandResponse("download_media", () => currentSnapshot);
 mock.setCommandResponse("load_message_source", () => currentSnapshot);
 mock.setCommandResponse("forward_message", () => currentSnapshot);

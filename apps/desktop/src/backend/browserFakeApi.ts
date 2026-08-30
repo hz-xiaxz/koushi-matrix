@@ -123,7 +123,6 @@ import type {
   ThreadOpenIntent,
   ThreadsListItem,
   ThreadsListScope,
-  UploadStagingRequestItem,
   AttachmentFilter,
   AttachmentScope,
   AttachmentSort,
@@ -1562,29 +1561,6 @@ class BrowserFakeApi implements DesktopApi {
     return { acceptedRevision, snapshot: await this.getSnapshot() };
   }
 
-  async stageUploads(
-    roomId: string,
-    items: UploadStagingRequestItem[]
-  ): Promise<DesktopSnapshot> {
-    if (!this.canUseSyncedViews() || this.snapshot.state.ui.timeline.room_id !== roomId) {
-      return this.getSnapshot();
-    }
-    this.clearPreparedUploadBytes({ kind: "main", room_id: roomId });
-    this.snapshot.state.ui.timeline.staged_uploads = items.map((item, index) => ({
-      staged_id: item.stagedId,
-      room_id: roomId,
-      position: item.position || index + 1,
-      filename: item.filename.trim() || "attachment",
-      mime_type: item.mimeType.trim() || "application/octet-stream",
-      byte_count: Math.max(0, Math.floor(item.byteCount)),
-      kind: item.kind,
-      caption: null,
-      compression_choice: item.compressionChoice,
-      preparation: { kind: "preparing" }
-    }));
-    return this.getSnapshot();
-  }
-
   async stageUploadBytes(
     target: ComposerTarget,
     items: StageUploadBytesRequestItem[]
@@ -1759,17 +1735,19 @@ class BrowserFakeApi implements DesktopApi {
   }
 
   async updateStagedUploadCompression(
+    target: ComposerTarget,
     stagedId: string,
     compressionChoice: StagedUploadCompressionChoice
   ): Promise<DesktopSnapshot> {
-    if (!this.canUseSyncedViews()) {
+    if (!this.canUseSyncedViews() || !browserComposerTargetIsActive(this.snapshot, target)) {
       return this.getSnapshot();
     }
-    this.snapshot.state.ui.timeline.staged_uploads = this.snapshot.state.ui.timeline.staged_uploads.map(
-      (item) =>
-        item.staged_id === stagedId
-          ? { ...item, compression_choice: compressionChoice }
-          : item
+    setBrowserStagedUploadsForTarget(
+      this.snapshot,
+      target,
+      browserStagedUploadsForTarget(this.snapshot, target).map((item) =>
+        item.staged_id === stagedId ? { ...item, compression_choice: compressionChoice } : item
+      )
     );
     return this.getSnapshot();
   }

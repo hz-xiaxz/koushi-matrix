@@ -12,21 +12,6 @@ fn ready_state(room_id: &str) -> koushi_state::AppState {
     state
 }
 
-fn staged_item(room_id: &str, staged_id: &str) -> koushi_state::StagedUploadItem {
-    koushi_state::StagedUploadItem {
-        staged_id: staged_id.to_owned(),
-        room_id: room_id.to_owned(),
-        position: 0,
-        filename: "fixture.bin".to_owned(),
-        mime_type: "application/octet-stream".to_owned(),
-        byte_count: 1,
-        kind: koushi_state::StagedUploadKind::File,
-        caption: None,
-        compression_choice: koushi_state::StagedUploadCompressionChoice::NotApplicable,
-        preparation: Default::default(),
-    }
-}
-
 #[tokio::test]
 async fn timeline_wait_wrappers_delegate_to_core_outcome_service() {
     let room_id = "!room:example.invalid";
@@ -34,27 +19,6 @@ async fn timeline_wait_wrappers_delegate_to_core_outcome_service() {
     let target = koushi_state::ComposerTarget::Main {
         room_id: room_id.to_owned(),
     };
-
-    let (mut connection, control) = CoreConnection::new_for_testing(8);
-    let request_id = connection.next_request_id();
-    let mut staged_state = ready_state(room_id);
-    staged_state.timeline.staged_uploads = vec![staged_item(room_id, "staged")];
-    control.send_snapshot(koushi_core::event::VersionedAppStateSnapshot {
-        generation: 1,
-        state: staged_state,
-    });
-    let staged = wait_for_upload_staging_snapshot(
-        &mut connection,
-        request_id,
-        account_key.clone(),
-        target.clone(),
-        vec!["staged".to_owned()],
-        1,
-        "staging",
-    )
-    .await
-    .expect("staging wrapper");
-    assert_eq!(staged.generation, 1);
 
     let (mut connection, control) = CoreConnection::new_for_testing(8);
     let request_id = connection.next_request_id();

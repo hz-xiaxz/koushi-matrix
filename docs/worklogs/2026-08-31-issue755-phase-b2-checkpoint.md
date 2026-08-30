@@ -10,8 +10,10 @@ Phase B2 switches staged-upload production handlers to the approved Core service
 
 - `MediaStagingService` serializes operations per `ComposerTarget`, while preparation/encoding remains outside global media locks.
 - Added Core preview lookup and prepared-send orchestration with exact account/target/item/revision/lease/transaction fences and Core outcome settlement.
-- Tauri stage/select/retry/original/caption/compression/clear/preview/send handlers map IPC inputs, invoke Core, and serialize settled snapshots/bytes only.
+- Tauri staged-bytes/select/retry/original/caption/compression/clear/preview/send handlers map IPC inputs, invoke Core, and serialize settled snapshots/bytes only. Compression mutation now receives the typed target instead of deriving it in the adapter.
 - Removed adapter 128 MiB/MIME/classification/preparation/registry merge/generation/replacement policy and direct `tokio::task::spawn_blocking`.
+- Deleted the unused but invoke-registered legacy `stage_uploads` and `upload_media` commands, builders, waiters, frontend API surfaces, fake/harness routes, and source-only tests; there is no renderer-accessible bypass around Core admission.
+- Preview rechecks the exact account as well as target/item/variant. Prepared send reports an account change as `AccountMismatch`, and transaction IDs include a process nonce plus monotonic counter so restarts do not reuse the old counter-only identity.
 - Moved caption formatting behavior proof to the Core media-send boundary.
 - Same-target concurrent operations are serialized; stale pre-check/reducer windows return typed errors or authoritative idempotent snapshots and lifecycle reconciliation removes orphan bytes.
 - Updated the causal stale-state tests to inject reducer-owned external state changes rather than recursively invoke a second same-target service operation while the admission guard is deliberately held; this removed the test-only self-deadlock and keeps both boundaries proven.
@@ -23,9 +25,11 @@ Phase B2 switches staged-upload production handlers to the approved Core service
 - `cargo test -p koushi-core --lib`: 936 passed, 8 ignored.
 - `cargo test -p koushi-desktop`: 112 library tests and 5 integration tests passed.
 - Focused Tauri outcome-wrapper delegation test passed after B2 ownership changes.
-- Strict Rust test-structure checker, rustfmt, and diff checks passed.
+- Frontend TypeScript typecheck passed using the shared installed dependency tree; the temporary worktree `node_modules` symlink was removed afterward.
+- Strict Rust test-structure checker, rustfmt, diff checks, and a repository search proving zero legacy command references passed.
 
 ## Integration checkpoint
 
-- Reviewer: pending (`deepseek-brainstormer`).
+- Round 1 reviewer: `deepseek-brainstormer`, `VERDICT: FINDINGS`; registered legacy `stage_uploads`/`upload_media` bypasses, preview account fencing, send error identity, transaction restart identity, and overbroad worklog wording required correction.
+- Round 1 findings are fixed; round 2 recheck is pending (`deepseek-brainstormer`).
 - This is an additional same-design checkpoint, not a restarted pre-implementation gate.

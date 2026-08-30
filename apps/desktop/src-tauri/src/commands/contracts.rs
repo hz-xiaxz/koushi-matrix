@@ -6,12 +6,10 @@ use super::{
 use koushi_core::AccountKey;
 use koushi_core::{
     AccountCommand, AppCommand, CoreCommand, CreateRoomOptions, CreateRoomParentSpace,
-    CreateRoomVisibility, ImageUploadCompressionPolicy, ImageUploadCompressionState,
-    ImageUploadDimensions, ImageUploadVariantInfo, ImageUploadVariantKind, MediaDownloadSelection,
-    PaginationDirection, RequestId, RoomCommand, SearchCommand, SearchScope, SyncCommand,
-    TimelineCommand, TimelineKey, UploadMediaKind, UploadMediaThumbnail,
+    CreateRoomVisibility, MediaDownloadSelection, PaginationDirection, RequestId, RoomCommand,
+    SearchCommand, SearchScope, SyncCommand, TimelineCommand, TimelineKey,
 };
-use koushi_state::{ActivityMarkReadTarget, ActivityTab, ImageUploadCompressionMode};
+use koushi_state::{ActivityMarkReadTarget, ActivityTab};
 use koushi_state::{
     AuthSecret, ComposerDocument, DisplayPlatform, LoginRequest, PresenceKind,
     RoomHistoryVisibility, RoomJoinRule, RoomModerationAction, RoomSettingChange, RoomTagKind,
@@ -650,168 +648,6 @@ fn tauri_command_routes_build_expected_core_commands() {
         )
         .is_none()
     );
-
-    match build_upload_media_command(
-        fake_request_id(25),
-        active_session_key.clone(),
-        active_account_key.clone(),
-        room_id.clone(),
-        "desktop-media-1".to_owned(),
-        "report.pdf".to_owned(),
-        "application/pdf".to_owned(),
-        vec![1, 2, 3, 4],
-        None,
-        ImageUploadCompressionMode::Never,
-        ImageUploadCompressionPolicy::default(),
-        None,
-        None,
-        None,
-    )
-    .expect("upload_media should build a command")
-    {
-        CoreCommand::Timeline(TimelineCommand::UploadAndSendMedia {
-            request_id,
-            expected_account,
-            key,
-            transaction_id,
-            request,
-        }) => {
-            assert_eq!(request_id, fake_request_id(25));
-            assert_eq!(expected_account, active_session_key);
-            assert_eq!(key.account_key, active_account_key);
-            assert_eq!(
-                key.kind,
-                koushi_core::TimelineKind::Room {
-                    room_id: room_id.clone()
-                }
-            );
-            assert_eq!(transaction_id, "desktop-media-1");
-            assert_eq!(request.filename, "report.pdf");
-            assert_eq!(request.mime_type, "application/pdf");
-            assert_eq!(request.bytes, vec![1, 2, 3, 4]);
-            assert_eq!(request.kind, UploadMediaKind::File);
-            assert_eq!(request.caption, None);
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
-
-    match build_upload_media_command(
-        fake_request_id(26),
-        active_session_key.clone(),
-        active_account_key.clone(),
-        room_id.clone(),
-        "desktop-media-2".to_owned(),
-        "photo.png".to_owned(),
-        "image/png".to_owned(),
-        vec![9],
-        Some("single **event** caption".to_owned()),
-        ImageUploadCompressionMode::Never,
-        ImageUploadCompressionPolicy::default(),
-        None,
-        None,
-        None,
-    )
-    .expect("image upload_media should build a command")
-    {
-        CoreCommand::Timeline(TimelineCommand::UploadAndSendMedia { request, .. }) => {
-            assert_eq!(
-                request.kind,
-                UploadMediaKind::Image {
-                    width: None,
-                    height: None
-                }
-            );
-            let caption = request.caption.expect("caption should be preserved");
-            assert_eq!(caption.plain_body, "single **event** caption");
-            assert_eq!(
-                caption.formatted_body.as_deref(),
-                Some("single <strong>event</strong> caption")
-            );
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
-
-    match build_upload_media_command(
-        fake_request_id(37),
-        active_session_key.clone(),
-        active_account_key.clone(),
-        room_id.clone(),
-        "desktop-media-3".to_owned(),
-        "screenshot.jpg".to_owned(),
-        "image/jpeg".to_owned(),
-        vec![7, 8, 9, 10],
-        None,
-        ImageUploadCompressionMode::Always,
-        ImageUploadCompressionPolicy::default(),
-        Some(ImageUploadDimensions {
-            width: 1200,
-            height: 900,
-        }),
-        Some(ImageUploadCompressionState {
-            mode: koushi_state::ImageUploadCompressionMode::Always,
-            policy: ImageUploadCompressionPolicy::default(),
-            original: ImageUploadVariantInfo {
-                mime_type: "image/jpeg".to_owned(),
-                byte_count: 3_200_000,
-                dimensions: Some(ImageUploadDimensions {
-                    width: 4032,
-                    height: 3024,
-                }),
-            },
-            selected: ImageUploadVariantInfo {
-                mime_type: "image/jpeg".to_owned(),
-                byte_count: 999,
-                dimensions: Some(ImageUploadDimensions {
-                    width: 1200,
-                    height: 900,
-                }),
-            },
-            selected_variant: ImageUploadVariantKind::Compressed,
-            skipped_small_image: false,
-            metadata_stripped: true,
-            thumbnail_refreshed: true,
-        }),
-        Some(UploadMediaThumbnail {
-            mime_type: "image/jpeg".to_owned(),
-            bytes: vec![1, 1, 1],
-            width: 320,
-            height: 240,
-        }),
-    )
-    .expect("compressed image upload_media should build a command")
-    {
-        CoreCommand::Timeline(TimelineCommand::UploadAndSendMedia { request, .. }) => {
-            assert_eq!(
-                request.kind,
-                UploadMediaKind::Image {
-                    width: Some(1200),
-                    height: Some(900)
-                }
-            );
-            let compression = request
-                .compression
-                .expect("image compression contract should be preserved");
-            assert_eq!(
-                compression.selected_variant,
-                ImageUploadVariantKind::Compressed
-            );
-            assert_eq!(compression.selected.byte_count, 4);
-            assert!(compression.metadata_stripped);
-            assert!(compression.thumbnail_refreshed);
-            assert_eq!(
-                request.thumbnail.as_ref().map(|thumbnail| {
-                    (
-                        thumbnail.mime_type.as_str(),
-                        thumbnail.bytes.len(),
-                        thumbnail.width,
-                        thumbnail.height,
-                    )
-                }),
-                Some(("image/jpeg", 3, 320, 240))
-            );
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
 
     match build_download_media_command(
         fake_request_id(27),
@@ -2052,23 +1888,6 @@ fn tauri_command_routes_redact_secret_bearing_values_from_debug() {
         ComposerDocument::from_plain_text("sensitive edit body"),
     )
     .expect("edit_message should build a command");
-    let upload = build_upload_media_command(
-        fake_request_id(21),
-        synthetic_session_key(),
-        AccountKey("@alice:example.org".to_owned()),
-        "!room:example.org".to_owned(),
-        "desktop-media-sensitive".to_owned(),
-        "secret-filename.pdf".to_owned(),
-        "application/pdf".to_owned(),
-        b"secret media bytes".to_vec(),
-        Some("secret media caption".to_owned()),
-        ImageUploadCompressionMode::Never,
-        ImageUploadCompressionPolicy::default(),
-        None,
-        None,
-        None,
-    )
-    .expect("upload_media should build a command");
     let download = build_download_media_command(
         fake_request_id(22),
         AccountKey("@alice:example.org".to_owned()),
@@ -2113,8 +1932,6 @@ fn tauri_command_routes_redact_secret_bearing_values_from_debug() {
         (&recovery, "recovery-123"),
         (&send, "sensitive body"),
         (&edit, "sensitive edit body"),
-        (&upload, "secret-filename.pdf"),
-        (&upload, "secret media bytes"),
         (&download, "$secret-media-event"),
         (&search, "secret search terms"),
         (&room_key_export, "/tmp/private-room-key-export.txt"),

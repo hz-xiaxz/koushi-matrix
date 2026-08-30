@@ -39,7 +39,6 @@ import type {
   SubmissionResponse,
   ThreadOpenIntent,
   ThreadsListScope,
-  UploadStagingRequestItem
 } from "../domain/types";
 import type { DiagnosticLogSnapshot } from "../domain/diagnostics";
 import type {
@@ -224,7 +223,6 @@ export interface DesktopApi {
     sendAtMs: number,
     draftRevision: ComposerDraftRevision
   ): Promise<ComposerDraftAcceptanceResponse>;
-  stageUploads(roomId: string, items: UploadStagingRequestItem[]): Promise<DesktopSnapshot>;
   stageUploadBytes(
     target: ComposerTarget,
     items: StageUploadBytesRequestItem[]
@@ -254,6 +252,7 @@ export interface DesktopApi {
     document: ComposerDocument | null
   ): Promise<DesktopSnapshot>;
   updateStagedUploadCompression(
+    target: ComposerTarget,
     stagedId: string,
     compressionChoice: StagedUploadCompressionChoice
   ): Promise<DesktopSnapshot>;

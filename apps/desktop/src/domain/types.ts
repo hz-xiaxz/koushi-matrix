@@ -1587,16 +1587,6 @@ export interface StagedUploadItem {
   preparation: StagedUploadPreparation;
 }
 
-export interface UploadStagingRequestItem {
-  stagedId: string;
-  position: number;
-  filename: string;
-  mimeType: string;
-  byteCount: number;
-  kind: StagedUploadKind;
-  compressionChoice: StagedUploadCompressionChoice;
-}
-
 export interface StageUploadBytesRequestItem {
   stagedId: string;
   position: number;

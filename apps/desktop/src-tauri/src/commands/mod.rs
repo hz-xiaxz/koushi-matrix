@@ -11,22 +11,23 @@
 
 use std::{
     path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
+    sync::{
+        OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use koushi_core::{
     AccountCommand, AccountKey, AppCommand, CoreCommand, CoreConnection, CoreEvent, CoreFailure,
     CreateRoomOptions, EncryptionDebugOperationKind, EncryptionDebugOperationOutcome,
-    ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,
-    ImageUploadVariantKind, IntentNoOpReason, IntentOutcome, MediaDownloadSelection,
-    OutcomeCorrelation, PaginationDirection, RequestId, RequestOutcome, RequestOutcomeError,
-    RequestOutcomeExpectation, RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest,
-    RoomKeyReshareOutcome, RoomOperationKind, SearchCommand, SearchScope,
-    SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest, SyncCommand,
-    TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId, TimelineGeneration,
-    TimelineKey, TimelineKind, TimelineViewportObservation, UploadMediaKind, UploadMediaRequest,
-    UploadMediaThumbnail,
+    IntentNoOpReason, IntentOutcome, MediaDownloadSelection, OutcomeCorrelation,
+    PaginationDirection, RequestId, RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation,
+    RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest, RoomKeyReshareOutcome,
+    RoomOperationKind, SearchCommand, SearchScope, SecureBackupPassphraseChangeRequest,
+    SecureBackupSetupRequest, SetAvatarRequest, SyncCommand, TimelineBatchId, TimelineCommand,
+    TimelineEvent, TimelineGapId, TimelineGeneration, TimelineKey, TimelineKind,
+    TimelineViewportObservation,
 };
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
@@ -36,9 +37,9 @@ use koushi_state::{
     DisplayPlatform, FilesViewScope, IdentityResetAuthRequest, ImageUploadCompressionMode,
     InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface, PresenceKind,
     RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode, RoomSettingChange,
-    RoomTagKind, SessionInfo, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem,
-    StagedUploadKind, SubmissionId, ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor,
-    VerificationCancelReason, build_formatted_message_draft,
+    RoomTagKind, SessionInfo, SettingsPatch, StagedUploadCompressionChoice, SubmissionId,
+    ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor, VerificationCancelReason,
+    build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -49,6 +50,35 @@ use crate::{
 };
 
 static NEXT_TRANSACTION_ID: AtomicU64 = AtomicU64::new(1);
+static PROCESS_NONCE: OnceLock<u128> = OnceLock::new();
+
+pub(crate) fn next_transaction_id(prefix: &str) -> String {
+    let nonce = *PROCESS_NONCE.get_or_init(|| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must be after Unix epoch")
+            .as_nanos()
+            ^ u128::from(std::process::id())
+    });
+    format!(
+        "{prefix}-{nonce:x}-{}",
+        NEXT_TRANSACTION_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+#[cfg(test)]
+mod transaction_id_tests {
+    use super::next_transaction_id;
+
+    #[test]
+    fn transaction_ids_have_process_nonce_and_counter() {
+        let first = next_transaction_id("test");
+        let second = next_transaction_id("test");
+        assert!(first.starts_with("test-"));
+        assert_ne!(first, second);
+        assert!(first.rsplit_once('-').unwrap().1.parse::<u64>().is_ok());
+    }
+}
 
 const CORE_COMMAND_SUBMIT_TIMEOUT: Duration = Duration::from_secs(2);
 const QA_TITLE_ENV: &str = "KOUSHI_QA_TITLE";
