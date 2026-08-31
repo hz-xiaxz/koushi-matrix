@@ -11,7 +11,7 @@ pub async fn select_space(
     space_id: Option<String>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let started = std::time::Instant::now();
     let requested_space_id = space_id.clone();
     let request_id = next_request_id(state.inner()).await;
@@ -27,18 +27,17 @@ pub async fn select_space(
                 requested_space_id.is_some(),
             )),
     );
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_select_space_command(request_id, space_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    let snapshot = current_snapshot(state.inner()).await?;
     record(
         DiagnosticEvent::new(
             DiagnosticLevel::Debug,
             "desktop.space.transition",
-            "snapshot",
+            "admitted",
         )
         .field(DiagnosticField::request_id(
             "request_id",
@@ -48,18 +47,9 @@ pub async fn select_space(
         .field(DiagnosticField::milliseconds(
             "elapsed_ms",
             started.elapsed().as_millis(),
-        ))
-        .field(DiagnosticField::boolean(
-            "active_space_selected",
-            snapshot.state.ui.navigation.active_space_id.as_deref()
-                == requested_space_id.as_deref(),
-        ))
-        .field(DiagnosticField::boolean(
-            "active_room_present",
-            snapshot.state.ui.navigation.active_room_id.is_some(),
         )),
     );
-    Ok(snapshot)
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -67,15 +57,15 @@ pub async fn reorder_spaces(
     space_ids: Vec<String>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_reorder_spaces_command(request_id, space_ids),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -83,7 +73,7 @@ pub async fn select_room(
     room_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let selected_room_id = room_id.clone();
     let mut event_conn = state.runtime.attach();
     event_conn
@@ -112,8 +102,7 @@ pub async fn select_room(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
+    Ok(FrontendCommandSettlement::from_published_generation(
         snapshot.generation,
     ))
 }
@@ -124,7 +113,7 @@ pub async fn open_activity_event(
     event_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     open_anchored_timeline(room_id, event_id, app, state, true).await
 }
 
@@ -134,7 +123,7 @@ pub async fn open_pinned_event(
     event_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     open_anchored_timeline(room_id, event_id, app, state, false).await
 }
 
@@ -144,7 +133,7 @@ pub async fn select_search_result(
     event_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     open_anchored_timeline(room_id, event_id, app, state, true).await
 }
 
@@ -154,7 +143,7 @@ async fn open_anchored_timeline(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
     allow_live_fallback: bool,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let operation_snapshot = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&operation_snapshot.state);
@@ -215,65 +204,16 @@ async fn open_anchored_timeline(
     .await?;
 
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        anchored_snapshot.state,
+    Ok(FrontendCommandSettlement::from_published_generation(
         anchored_snapshot.generation,
     ))
-}
-
-#[tauri::command]
-pub async fn acknowledge_timeline_projection(
-    projection_request_id: RequestId,
-    key: TimelineKey,
-    generation: TimelineGeneration,
-    item_count: u64,
-    target_present: bool,
-    state: State<'_, CoreRuntimeState>,
-) -> Result<(), String> {
-    let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
-        state.inner(),
-        CoreCommand::App(AppCommand::AcknowledgeTimelineProjection {
-            request_id,
-            projection_request_id,
-            key,
-            generation,
-            item_count,
-            target_present,
-        }),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn acknowledge_timeline_batch_rendered(
-    key: TimelineKey,
-    actor_generation: u64,
-    timeline_generation: TimelineGeneration,
-    repair_generation: u64,
-    batch_id: TimelineBatchId,
-    state: State<'_, CoreRuntimeState>,
-) -> Result<(), String> {
-    let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
-        state.inner(),
-        CoreCommand::App(AppCommand::AcknowledgeTimelineBatchRendered {
-            request_id,
-            key,
-            actor_generation,
-            timeline_generation,
-            repair_generation,
-            batch_id,
-        }),
-    )
-    .await
 }
 
 #[tauri::command]
 pub async fn close_focused_context(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline_snapshot = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline_snapshot.state);
@@ -287,7 +227,7 @@ pub async fn close_focused_context(
         }))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_focused_context_closed(
+    let snapshot = wait_for_focused_context_closed(
         &mut event_conn,
         request_id,
         account_key,
@@ -297,7 +237,9 @@ pub async fn close_focused_context(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendCommandSettlement::from_published_generation(
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -306,7 +248,7 @@ pub async fn open_timeline_at_timestamp(
     timestamp_ms: u64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline_snapshot = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline_snapshot.state);
@@ -321,7 +263,7 @@ pub async fn open_timeline_at_timestamp(
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    wait_for_focused_context(
+    let snapshot = wait_for_focused_context(
         &mut event_conn,
         request_id,
         account_key,
@@ -332,7 +274,9 @@ pub async fn open_timeline_at_timestamp(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendCommandSettlement::from_published_generation(
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]

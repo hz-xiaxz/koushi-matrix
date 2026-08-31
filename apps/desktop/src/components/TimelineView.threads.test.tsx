@@ -470,11 +470,6 @@ describe("TimelineView", () => {
 
 
   it("covers selected-room persisted gap recovery through live history and room switch", async () => {
-    let releaseRepairAcknowledgement: () => void = () => undefined;
-    const pendingRepairAcknowledgement = new Promise<void>((resolve) => {
-      releaseRepairAcknowledgement = resolve;
-    });
-    const acknowledgeRenderedBatch = vi.fn(() => pendingRepairAcknowledgement);
     const observeViewport = vi.fn().mockResolvedValue(undefined);
     const gapId = { topology_revision: "14695981039346656037", ordinal: 0 };
     const otherRoomId = "!other-room:example.invalid";
@@ -517,7 +512,7 @@ describe("TimelineView", () => {
       { top: 0, height: 500 },
       scrollContainerRef
     );
-    const transport = baseTransport({ acknowledgeRenderedBatch, observeViewport });
+    const transport = baseTransport({ observeViewport });
     const repairing = {
       kind: "repairing" as const,
       generation: 31,
@@ -675,13 +670,10 @@ describe("TimelineView", () => {
           true,
           null
         );
-        expect(acknowledgeRenderedBatch).toHaveBeenCalledWith(KEY, 0, 1, 31, 6);
       });
-      expect(acknowledgeRenderedBatch).toHaveBeenCalledTimes(1);
       rerender(view(KEY, "!room:example.invalid", repairingAfterBatch));
       fireEvent.scroll(timeline);
       await act(async () => Promise.resolve());
-      expect(acknowledgeRenderedBatch).toHaveBeenCalledTimes(1);
 
       rerender(view(KEY, "!room:example.invalid", repairingAfterBatch));
       timeline.scrollTop = 0;
@@ -692,8 +684,6 @@ describe("TimelineView", () => {
       expect(oldRoomGapObservations().at(-1)?.[3]).toEqual([gapId]);
       expect(oldRoomGapObservations().every((call) => call[3].length === 1)).toBe(true);
 
-      act(() => releaseRepairAcknowledgement());
-      await act(async () => pendingRepairAcknowledgement);
       store = applyTimelineEvent(store, {
         GapPositionsUpdated: {
           key: KEY,
@@ -755,7 +745,6 @@ describe("TimelineView", () => {
       expect(screen.queryByTestId("timeline-gap-row")).toBeNull();
       expect(oldRoomGapObservations()).toHaveLength(oldGapObservationCount);
     } finally {
-      releaseRepairAcknowledgement();
       rectSpy.mockRestore();
     }
   });

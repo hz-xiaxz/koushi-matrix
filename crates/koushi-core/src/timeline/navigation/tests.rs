@@ -30,7 +30,7 @@ use crate::executor;
 use crate::failure::{CoreFailure, TimelineFailureKind};
 #[cfg(any(test, feature = "test-hooks"))]
 use crate::ids::AccountKey;
-use crate::ids::{TimelineBatchId, TimelineKey, TimelineKind};
+use crate::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 use crate::link_preview::LinkPreviewContext;
 
 use crate::live_tail_freshness::{
@@ -70,15 +70,57 @@ use super::super::test_support::{
 };
 use super::super::thread_projection::ThreadAttentionTracker;
 use super::{
-    NavigationProjectionCleanup, NavigationProjectionIngress, NavigationProjectionIntent,
-    ROOM_REPLAY_INITIAL_ITEMS_MAX, TimelineActorGenerationGate,
+    InitialItemsRequestIdentity, NavigationProjectionCleanup, NavigationProjectionIngress,
+    NavigationProjectionIntent, ROOM_REPLAY_INITIAL_ITEMS_MAX, TimelineActorGenerationGate,
     acquire_pagination_permit_and_emit_paginating, activity_row_from_timeline_item,
     backward_pagination_changed_oldest_edge, derive_timeline_navigation_snapshot,
-    derive_timeline_navigation_snapshot_with_read_state,
-    projection_acknowledgement_for_current_items, receive_navigation_projection,
-    replay_initial_items_window, should_hydrate_empty_initial_room_timeline,
-    timeline_unread_consistency_diagnostic_event,
+    derive_timeline_navigation_snapshot_with_read_state, emit_initial_items_for_generation,
+    receive_navigation_projection, replay_initial_items_window,
+    should_hydrate_empty_initial_room_timeline, timeline_unread_consistency_diagnostic_event,
 };
+
+#[tokio::test]
+async fn focused_projection_commit_does_not_require_a_core_event_consumer() {
+    let key = focused_key();
+    let request_id = fake_rid(73);
+    let (focused_projection_tx, mut focused_projection_rx) = mpsc::unbounded_channel();
+    let generations = Arc::new(
+        TimelineActorGenerationGate::with_focused_projection_commits(Some(focused_projection_tx)),
+    );
+    let actor_generation = generations.activate_after_quiescence(&key).await.generation;
+    let (event_tx, event_rx) = broadcast::channel(1);
+    drop(event_rx);
+    let target_event_id = match &key.kind {
+        TimelineKind::Focused { event_id, .. } => event_id.clone(),
+        _ => unreachable!("focused test key"),
+    };
+
+    assert!(emit_initial_items_for_generation(
+        &event_tx,
+        &generations,
+        &key,
+        actor_generation,
+        InitialItemsRequestIdentity::fresh(request_id),
+        TimelineGeneration(0),
+        vec![timeline_item(
+            &target_event_id,
+            Some("target"),
+            "@alice:test",
+            false
+        )],
+        Vec::new(),
+    ));
+    let committed = focused_projection_rx
+        .recv()
+        .await
+        .expect("focused projection commit must use the private actor lane");
+    assert_eq!(committed.projection_request_id, request_id);
+    assert_eq!(committed.key, key);
+    assert_eq!(committed.actor_generation, actor_generation);
+    assert_eq!(committed.timeline_generation, TimelineGeneration(0));
+    assert_eq!(committed.item_count, 1);
+    assert!(committed.target_present);
+}
 
 #[test]
 fn eligibility_skips_redacted_and_own_rows_for_first_unread_and_newer_count() {
@@ -187,35 +229,6 @@ async fn pagination_waits_for_permit_before_publishing_paginating() {
         }) if request_id == fake_rid(91) && event_key == key
     ));
     drop(permit);
-}
-
-#[test]
-fn projection_ack_evidence_is_recomputed_from_current_actor_items() {
-    let key = focused_key();
-    let TimelineKind::Focused { event_id, .. } = &key.kind else {
-        panic!("fixture must be focused");
-    };
-    let with_target = vec![timeline_item(
-        event_id,
-        Some("target"),
-        "@sender:test",
-        false,
-    )];
-    let present = projection_acknowledgement_for_current_items(&key, &with_target, true);
-    assert!(present.accepted);
-    assert!(present.target_present);
-    assert_eq!(present.item_count, 1);
-
-    let without_target = vec![timeline_item(
-        "$other:test",
-        Some("other"),
-        "@sender:test",
-        false,
-    )];
-    let missing = projection_acknowledgement_for_current_items(&key, &without_target, true);
-    assert!(missing.accepted);
-    assert!(!missing.target_present);
-    assert_eq!(missing.item_count, 1);
 }
 
 #[test]

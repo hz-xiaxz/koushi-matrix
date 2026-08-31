@@ -1,10 +1,8 @@
 //! Runtime settings integration tests.
 
-use std::time::Duration;
-
 use koushi_core::command::AppCommand;
 use koushi_core::settings::{SettingsStore, SettingsStoreErrorKind};
-use koushi_core::{CoreCommand, CoreEvent, CoreRuntime, executor};
+use koushi_core::{CoreCommand, CoreRuntime};
 use koushi_state::{
     DisplaySettings, MediaSettings, NativeAttentionCandidate, NativeAttentionCapabilities,
     NativeAttentionCapability, NativeAttentionDispatchState, NativeAttentionState,
@@ -30,20 +28,10 @@ async fn app_update_settings_projects_state_and_persists() {
         .await
         .expect("submit settings update");
 
-    let snapshot = executor::timeout(Duration::from_secs(1), async {
-        loop {
-            match connection.recv_event().await.expect("event") {
-                CoreEvent::StateChanged(snapshot)
-                    if snapshot.settings.values.appearance.theme == ThemePreference::Dark =>
-                {
-                    return snapshot;
-                }
-                _ => continue,
-            }
-        }
+    let snapshot = support::wait_for_state_event(&mut connection, |state| {
+        state.settings.values.appearance.theme == ThemePreference::Dark
     })
-    .await
-    .expect("settings state should change");
+    .await;
 
     assert_eq!(
         snapshot.settings.persistence,
@@ -71,21 +59,11 @@ async fn persisted_settings_load_when_runtime_restarts() {
             .await
             .expect("submit settings update");
 
-        executor::timeout(Duration::from_secs(1), async {
-            loop {
-                match connection.recv_event().await.expect("event") {
-                    CoreEvent::StateChanged(snapshot)
-                        if snapshot.settings.values.appearance.theme == ThemePreference::Dark
-                            && snapshot.settings.persistence == SettingsPersistenceState::Idle =>
-                    {
-                        return;
-                    }
-                    _ => continue,
-                }
-            }
+        support::wait_for_state_event(&mut connection, |state| {
+            state.settings.values.appearance.theme == ThemePreference::Dark
+                && state.settings.persistence == SettingsPersistenceState::Idle
         })
-        .await
-        .expect("settings state should persist before restart");
+        .await;
     }
 
     let restarted = CoreRuntime::start_with_data_dir(data_dir.path().to_path_buf());
@@ -124,21 +102,11 @@ async fn disabled_badges_remain_rust_projected_to_zero_after_runtime_restart() {
             .await
             .expect("disable badges");
 
-        executor::timeout(Duration::from_secs(1), async {
-            loop {
-                match connection.recv_event().await.expect("event") {
-                    CoreEvent::StateChanged(snapshot)
-                        if !snapshot.settings.values.notifications.badges
-                            && snapshot.settings.persistence == SettingsPersistenceState::Idle =>
-                    {
-                        return;
-                    }
-                    _ => continue,
-                }
-            }
+        support::wait_for_state_event(&mut connection, |state| {
+            !state.settings.values.notifications.badges
+                && state.settings.persistence == SettingsPersistenceState::Idle
         })
-        .await
-        .expect("disabled badge setting should persist before restart");
+        .await;
     }
 
     let restarted = CoreRuntime::start_with_data_dir(data_dir.path().to_path_buf());

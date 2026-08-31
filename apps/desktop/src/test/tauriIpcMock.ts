@@ -6,7 +6,7 @@
  *     controlled responses.
  *   - Utilities to push fake CoreEvent / AppStateSnapshot payloads to
  *     registered listeners (simulating what the real Tauri backend emits on
- *     `koushi-desktop://event` and `koushi-desktop://state`).
+ *     `koushi-desktop://event` and `koushi-desktop://state-update`).
  *
  * Used by two test tiers (plan changelog 2026-06-13):
  *   - Vitest node-mode logic tests (timelineStore.test.ts);
@@ -32,6 +32,72 @@ type CommandResponse =
   | unknown
   | ((args: Record<string, any>) => unknown | Promise<unknown>);
 
+const SNAPSHOT_READ_COMMANDS = new Set([
+  "get_snapshot",
+  "settlement_snapshot",
+  "resync_snapshot"
+]);
+const VOID_COMMANDS = new Set([
+  "download_avatar_thumbnail",
+  "download_media",
+  "query_mention_candidates",
+  "release_composer_draft_lease",
+  "send_read_receipt",
+  "set_fully_read",
+  "set_room_list_projection",
+  "set_typing"
+]);
+const ADMISSION_COMMANDS = new Set(
+  `retry_sliding_sync_capability change_homeserver submit_recovery start_device_cleanup submit_device_cleanup_uia erase_local_data_anyway restart_sync update_settings rebuild_search_index set_room_url_preview_override dismiss_directory_preview select_room_list_filter mark_room_as_read mark_room_as_unread set_room_notification_mode refresh_current_session_status submit_account_management_uia load_account_management_capabilities change_password deactivate_account probe_local_encryption_health reset_local_data bootstrap_cross_signing enable_key_backup export_room_keys import_room_keys bootstrap_secure_backup recover_secure_backup retry_secure_backup_inspection change_secure_backup_passphrase accept_verification start_own_user_sas retry_current_device_trust_discovery mismatch_sas_verification start_session_bootstrap confirm_session_bootstrap_saved confirm_sas_verification cancel_verification reset_identity cancel_identity_reset submit_identity_reset_password submit_identity_reset_oauth select_space reorder_spaces cancel_scheduled_send reschedule_scheduled_send retry_send cancel_send send_reaction redact_reaction set_presence set_display_name set_local_user_alias ignore_user unignore_user report_user report_content report_room set_avatar edit_message redact_message load_message_source request_room_key request_late_decryption forward_message load_link_previews hide_link_preview leave_room forget_room open_activity close_activity set_activity_tab paginate_activity retry_activity_resolution mark_activity_read set_composer_draft open_thread close_thread open_threads_list close_threads_list paginate_threads_list open_files_view close_files_view set_thread_composer_draft start_room_crawl stop_room_crawl repair_room_timeline set_space_child set_composer_reply_target cancel_composer_reply`
+    .split(" ")
+);
+
+function isSnapshot(value: unknown): value is { state_generation?: number } {
+  return Boolean(value && typeof value === "object" && "state" in value && "sidebar" in value);
+}
+
+function normalizeCommandResponse(command: string, value: unknown, generation = 0): unknown {
+  if (SNAPSHOT_READ_COMMANDS.has(command)) return value;
+  if (VOID_COMMANDS.has(command)) return undefined;
+  if (command === "start_oidc_login" && value && typeof value === "object") {
+    return {
+      ...value,
+      settlement: { protocolVersion: 1, publishedGeneration: generation }
+    };
+  }
+  if (
+    [
+      "reshare_room_key",
+      "force_new_outbound_session",
+      "share_index0_room_key",
+      "resend_index0_room_key"
+    ].includes(command)
+  ) {
+    return {
+      result: value,
+      settlement: { protocolVersion: 1, publishedGeneration: generation }
+    };
+  }
+
+  if (value && typeof value === "object" && "snapshot" in value) {
+    const { snapshot, ...result } = value as Record<string, unknown> & {
+      snapshot: { state_generation?: number };
+    };
+    return {
+      ...result,
+      settlement: {
+        protocolVersion: 1,
+        publishedGeneration: snapshot.state_generation ?? 0
+      }
+    };
+  }
+  if (!isSnapshot(value)) return value;
+  const snapshotGeneration = value.state_generation ?? 0;
+  return ADMISSION_COMMANDS.has(command)
+    ? { protocolVersion: 1, admittedGeneration: snapshotGeneration }
+    : { protocolVersion: 1, publishedGeneration: snapshotGeneration };
+}
+
 // ---------------------------------------------------------------------------
 // Mock IPC state
 // ---------------------------------------------------------------------------
@@ -42,6 +108,7 @@ export class TauriIpcMock {
   private invocations: IpcInvocation[] = [];
   private listeners: Map<string, EventListener[]> = new Map();
   private commandResponses: Map<string, CommandResponse> = new Map();
+  private responseGeneration = 0;
 
   // ---- Recording ----
 
@@ -63,6 +130,25 @@ export class TauriIpcMock {
     this.commandResponses.set(command, response);
   }
 
+  private normalizeResponse(command: string, value: unknown): unknown {
+    const snapshot = isSnapshot(value)
+      ? value
+      : value && typeof value === "object" && "snapshot" in value
+        ? (value as { snapshot: { state_generation?: number } }).snapshot
+        : null;
+    if (snapshot) {
+      this.responseGeneration = Math.max(
+        this.responseGeneration,
+        snapshot.state_generation ?? 0
+      );
+      if (!SNAPSHOT_READ_COMMANDS.has(command) && !VOID_COMMANDS.has(command)) {
+        this.responseGeneration += 1;
+        snapshot.state_generation = this.responseGeneration;
+      }
+    }
+    return normalizeCommandResponse(command, value, this.responseGeneration);
+  }
+
   // ---- The fake invoke function ----
 
    
@@ -75,7 +161,9 @@ export class TauriIpcMock {
       const response = this.commandResponses.get(command);
       const resolved =
         typeof response === "function" ? response(args) : response;
-      return Promise.resolve(resolved as T);
+      return Promise.resolve(resolved).then((value) =>
+        this.normalizeResponse(command, value) as T
+      );
     }
 
     if (command === "observe_viewport_sync") {
@@ -101,7 +189,9 @@ export class TauriIpcMock {
     }
 
     // Default: return a minimal empty snapshot.
-    return Promise.resolve(defaultSnapshotResponse() as unknown as T);
+    return Promise.resolve(
+      this.normalizeResponse(command, defaultSnapshotResponse()) as T
+    );
   }
 
   // ---- Event emission (simulates core backend) ----
@@ -114,11 +204,20 @@ export class TauriIpcMock {
     }
   }
 
-  /** Push a state-changed notification as if the backend emitted koushi-desktop://state */
-  emitStateChanged(): void {
-    const listeners = this.listeners.get("koushi-desktop://state") ?? [];
+  /** Push a v1 state snapshot as if the backend emitted koushi-desktop://state-update. */
+  emitStateUpdate(snapshot = defaultSnapshotResponse()): void {
+    const listeners = this.listeners.get("koushi-desktop://state-update") ?? [];
+    const generation = (snapshot as { state_generation?: number }).state_generation ?? 0;
     for (const listener of listeners) {
-      listener({ payload: "stateChanged" });
+      listener({
+        payload: {
+          protocol_version: 1,
+          kind: "snapshot",
+          generation,
+          snapshot,
+          reason: "settlement"
+        }
+      });
     }
   }
 

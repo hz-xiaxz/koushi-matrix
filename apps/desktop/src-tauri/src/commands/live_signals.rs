@@ -106,13 +106,13 @@ pub async fn set_presence(
     presence: PresenceKind,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_set_presence_command(request_id, presence),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }

@@ -1,9 +1,4 @@
-import type {
-  CoreEventPayload,
-  TimelineKey,
-  RequestId,
-  TimelineGapId
-} from "../../domain/coreEvents";
+import type { CoreEventPayload, TimelineKey, TimelineGapId } from "../../domain/coreEvents";
 import type { ComposerDocument, TimelineScrollAnchor } from "../../domain/types";
 
 // ---------------------------------------------------------------------------
@@ -15,24 +10,6 @@ export interface TimelineTransport {
   listenCoreEvents(listener: (payload: CoreEventPayload) => void): () => void;
   /** Re/subscribe this key after the listener is active so InitialItems cannot be missed. */
   ensureSubscribed?(timelineKey: TimelineKey): Promise<void>;
-  /** Confirm that one Room InitialItems projection committed through layout. */
-  acknowledgeProjection?(
-    projectionRequestId: RequestId,
-    timelineKey: TimelineKey,
-    /** Delivery identity only; DesktopApi/Core command serialization is unchanged. */
-    actorGeneration: number,
-    generation: number,
-    itemCount: number,
-    targetPresent: boolean
-  ): Promise<void>;
-  /** Confirm that one repair-produced Room batch committed through layout. */
-  acknowledgeRenderedBatch?(
-    timelineKey: TimelineKey,
-    actorGeneration: number,
-    timelineGeneration: number,
-    repairGeneration: number,
-    batchId: number
-  ): Promise<void>;
   /** Invoke a backward-pagination command for this timeline key. */
   paginateBackwards(timelineKey: TimelineKey): Promise<void>;
   repairTimeline?(roomId: string): Promise<void>;

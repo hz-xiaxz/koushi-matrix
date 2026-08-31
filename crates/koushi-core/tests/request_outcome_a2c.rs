@@ -192,8 +192,14 @@ async fn composer_terminal_lag_still_checks_the_final_authoritative_snapshot() {
         tokio::time::Instant::now() + Duration::from_secs(1),
     );
     tokio::pin!(waiter);
-    control.send_event(CoreEvent::StateChanged(AppState::default()));
-    control.send_event(CoreEvent::StateChanged(AppState::default()));
+    control.send_event(CoreEvent::OperationFailed {
+        request_id: request(30),
+        failure: koushi_core::CoreFailure::SessionRequired,
+    });
+    control.send_event(CoreEvent::OperationFailed {
+        request_id: request(31),
+        failure: koushi_core::CoreFailure::SessionRequired,
+    });
     let published = versioned(
         state_with_revision("@alice:example.invalid", "!room-a:example.invalid", 3),
         2,

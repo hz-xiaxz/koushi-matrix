@@ -3,7 +3,7 @@ use crate::contracts::{
     FirstEventSharedSnapshotPendingSource, FirstEventThenTerminalLagSource,
     IntervalQaSnapshotEventSource, RecordedOwnedE2eeCleanupOperation,
     ScriptedQaSnapshotEventSource, qa_logged_out_event, qa_operation_failed_event,
-    qa_state_with_session, recording_owned_e2ee_cleanup_operations,
+    qa_state_delta_event, qa_state_with_session, recording_owned_e2ee_cleanup_operations,
 };
 use crate::event_wait::{
     wait_for_logged_out, wait_for_operation_failed_and_signed_out, wait_for_signed_out_after_logout,
@@ -214,23 +214,16 @@ async fn logged_out_waiter_requires_event_and_signed_out_snapshot_in_either_orde
         sequence: 7,
     };
     let account_key = AccountKey("@logout-barrier:example.invalid".to_owned());
-    let signed_out = qa_state_with_session(SessionState::SignedOut);
     let cases = [
         [
             (
                 qa_logged_out_event(request_id, account_key.clone()),
                 SessionState::LoggingOut,
             ),
-            (
-                CoreEvent::StateChanged(signed_out.clone()),
-                SessionState::SignedOut,
-            ),
+            (qa_state_delta_event(), SessionState::SignedOut),
         ],
         [
-            (
-                CoreEvent::StateChanged(signed_out.clone()),
-                SessionState::SignedOut,
-            ),
+            (qa_state_delta_event(), SessionState::SignedOut),
             (
                 qa_logged_out_event(request_id, account_key.clone()),
                 SessionState::SignedOut,
@@ -392,23 +385,16 @@ async fn operation_failed_signed_out_waiter_requires_both_signals_in_either_orde
         connection_id: koushi_core::ids::RuntimeConnectionId(1),
         sequence: 10,
     };
-    let signed_out = qa_state_with_session(SessionState::SignedOut);
     let cases = [
         [
             (
                 qa_operation_failed_event(request_id),
                 SessionState::Restoring,
             ),
-            (
-                CoreEvent::StateChanged(signed_out.clone()),
-                SessionState::SignedOut,
-            ),
+            (qa_state_delta_event(), SessionState::SignedOut),
         ],
         [
-            (
-                CoreEvent::StateChanged(signed_out.clone()),
-                SessionState::SignedOut,
-            ),
+            (qa_state_delta_event(), SessionState::SignedOut),
             (
                 qa_operation_failed_event(request_id),
                 SessionState::SignedOut,
@@ -445,7 +431,7 @@ async fn operation_failed_signed_out_waiter_requires_both_signals_in_either_orde
             SessionState::SignedOut,
         )]
         .into(),
-        snapshot: signed_out,
+        snapshot: qa_state_with_session(SessionState::SignedOut),
         received: 0,
     };
     let error = wait_for_operation_failed_and_signed_out(

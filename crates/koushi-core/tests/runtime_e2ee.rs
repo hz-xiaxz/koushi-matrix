@@ -7,7 +7,6 @@ use std::{
 };
 
 use koushi_core::command::{AccountCommand, CoreCommand};
-use koushi_core::event::CoreEvent;
 use koushi_core::executor;
 use koushi_core::runtime::CoreRuntime;
 use koushi_state::{AuthSecret, CrossSigningStatus, LoginRequest, SessionState};
@@ -157,18 +156,16 @@ async fn provisional_verification_hands_one_encryption_sync_owner_to_normal_runt
 }
 
 #[tokio::test]
-async fn e2ee_trust_account_command_projects_pending_state_before_routing() {
+async fn e2ee_trust_account_command_settles_without_an_sdk_session() {
     let runtime = CoreRuntime::start();
     let mut connection = runtime.attach();
 
     runtime.inject_actions(restore_ready_actions()).await;
 
-    loop {
-        if matches!(connection.snapshot().session, SessionState::Ready(_)) {
-            break;
-        }
-        executor::sleep(Duration::from_millis(5)).await;
-    }
+    wait_for_state_event(&mut connection, |state| {
+        matches!(state.session, SessionState::Ready(_))
+    })
+    .await;
 
     let request_id = connection.next_request_id();
     connection
@@ -181,28 +178,17 @@ async fn e2ee_trust_account_command_projects_pending_state_before_routing() {
         .await
         .expect("submit bootstrap cross-signing");
 
-    let snapshot = executor::timeout(Duration::from_secs(1), async {
-        loop {
-            match connection.recv_event().await.expect("event") {
-                CoreEvent::StateChanged(snapshot)
-                    if matches!(
-                        snapshot.e2ee_trust.cross_signing,
-                        CrossSigningStatus::Bootstrapping { .. }
-                    ) =>
-                {
-                    return snapshot;
-                }
-                _ => continue,
-            }
-        }
+    let snapshot = wait_for_state_event(&mut connection, |state| {
+        matches!(
+            state.e2ee_trust.cross_signing,
+            CrossSigningStatus::Failed { request_id: observed, .. }
+                if observed == request_id.sequence
+        )
     })
-    .await
-    .expect("E2EE trust command should project Rust-owned pending state before actor route");
-
-    assert_eq!(
+    .await;
+    assert!(matches!(
         snapshot.e2ee_trust.cross_signing,
-        CrossSigningStatus::Bootstrapping {
-            request_id: request_id.sequence,
-        }
-    );
+        CrossSigningStatus::Failed { request_id: observed, .. }
+            if observed == request_id.sequence
+    ));
 }

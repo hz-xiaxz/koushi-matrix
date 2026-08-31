@@ -28,17 +28,17 @@ use composer::{
 };
 use navigation::{
     NavigationPersistenceStatus, NavigationReplacementRoomForCleanup, PendingFocusedNavigation,
-    anchored_action_after_projection_ack, cancel_replaced_room_timeline_link_previews_key,
-    cancel_replaced_room_timeline_pagination_key, effects_open_focused_timeline,
-    focused_navigation_outcome_after_reduce, navigation_replacement_room_for_cleanup,
-    unsubscribe_replaced_timeline_key,
+    cancel_replaced_room_timeline_link_previews_key, cancel_replaced_room_timeline_pagination_key,
+    effects_open_focused_timeline, focused_navigation_outcome_after_reduce,
+    navigation_replacement_room_for_cleanup, unsubscribe_replaced_timeline_key,
 };
 use scheduled_send::scheduled_send_id;
 
 #[cfg(any(test, feature = "test-hooks"))]
 pub use connection::CoreConnectionTestControl;
 pub use connection::{
-    CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag, SelectRoomError,
+    CommandSubmitError, CoreCommandAdmission, CoreCommandHandle, CoreConnection, EventStreamLag,
+    SelectRoomError,
 };
 pub use request_outcome::{
     OutcomeCorrelation, RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation,
@@ -85,7 +85,9 @@ use activity::{
 
 use crate::executor;
 use crate::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
-use crate::ids::{AccountKey, RequestId, RuntimeConnectionId, TimelineKey, TimelineKind};
+use crate::ids::{
+    AccountKey, RequestId, RuntimeConnectionId, TimelineGeneration, TimelineKey, TimelineKind,
+};
 use crate::settings::SettingsStore;
 use crate::state_delta::build_state_delta;
 use crate::store::{StoreActor, session_key_id_from_info};
@@ -296,6 +298,7 @@ pub(crate) fn space_member_forward_failure_action(
 struct CoreCommandEnvelope {
     command: CoreCommand,
     composer_permit: Option<ComposerDraftCommandPermit>,
+    admission: Option<oneshot::Sender<CoreCommandAdmission>>,
 }
 
 /// A task handle that is aborted if its owner is dropped without an orderly
@@ -549,6 +552,9 @@ impl CoreRuntime {
             sliding_sync_diagnostics.clone(),
         );
 
+        let focused_projection_rx = account_actor
+            .take_focused_projection_commits()
+            .expect("AppActor must own the focused projection commit receiver");
         #[cfg(any(test, feature = "test-hooks"))]
         let account_actor_test_handle = account_actor.clone();
         #[cfg(any(test, feature = "test-hooks"))]
@@ -556,6 +562,7 @@ impl CoreRuntime {
         let actor = AppActor {
             command_rx,
             action_rx,
+            focused_projection_rx: Some(focused_projection_rx),
             #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_test_rx,
             event_tx: event_tx.clone(),
@@ -576,6 +583,7 @@ impl CoreRuntime {
             composer_draft_rejected_tx,
             composer_draft_rejected_rx,
             pending_composer_acceptances: HashMap::new(),
+            pending_command_admissions: Vec::new(),
             account_actor,
             activity_projection: ActivityProjection::default(),
             activity_resolution_generation: 0,
@@ -583,6 +591,7 @@ impl CoreRuntime {
             navigation_projection_generation: 0,
             pending_select: HashMap::new(),
             pending_focused_navigation: None,
+            latest_focused_projection_generation: HashMap::new(),
             pending_date_navigation_request_id: None,
         };
         let actor = executor::spawn(actor.run());
@@ -779,6 +788,8 @@ impl CoreRuntime {
 struct AppActor {
     command_rx: mpsc::Receiver<CoreCommandEnvelope>,
     action_rx: mpsc::Receiver<Vec<AppAction>>,
+    focused_projection_rx:
+        Option<mpsc::UnboundedReceiver<crate::timeline::FocusedProjectionCommitted>>,
     #[cfg(any(test, feature = "test-hooks"))]
     composer_draft_test_rx: mpsc::Receiver<ComposerDraftTestMutation>,
     event_tx: broadcast::Sender<CoreEvent>,
@@ -801,6 +812,7 @@ struct AppActor {
     composer_draft_rejected_tx: mpsc::UnboundedSender<RequestId>,
     composer_draft_rejected_rx: mpsc::UnboundedReceiver<RequestId>,
     pending_composer_acceptances: HashMap<RequestId, PendingComposerAcceptance>,
+    pending_command_admissions: Vec<oneshot::Sender<CoreCommandAdmission>>,
     account_actor: AccountActorHandle,
     activity_projection: ActivityProjection,
     activity_resolution_generation: u64,
@@ -817,6 +829,7 @@ struct AppActor {
     /// Main-pane Focused navigation awaiting proof that the WebView canonical
     /// store applied the actor-owned InitialItems projection.
     pending_focused_navigation: Option<PendingFocusedNavigation>,
+    latest_focused_projection_generation: HashMap<TimelineKey, (u64, TimelineGeneration)>,
     pending_date_navigation_request_id: Option<RequestId>,
 }
 
@@ -833,6 +846,21 @@ fn command_disposition(envelope: CoreCommandEnvelope) -> CommandDisposition {
         CommandDisposition::Shutdown
     } else {
         CommandDisposition::Handle(envelope)
+    }
+}
+
+async fn receive_focused_projection_commit(
+    receiver: &mut Option<mpsc::UnboundedReceiver<crate::timeline::FocusedProjectionCommitted>>,
+) -> Option<crate::timeline::FocusedProjectionCommitted> {
+    let Some(active) = receiver.as_mut() else {
+        return future::pending().await;
+    };
+    match active.recv().await {
+        Some(commit) => Some(commit),
+        None => {
+            *receiver = None;
+            None
+        }
     }
 }
 
@@ -922,7 +950,7 @@ impl AppActor {
                     let mut handled = 1u32;
                     let mut shutdown = false;
                     // Coalesce: drain whatever is already queued before
-                    // emitting a single StateChanged for the batch. Shutdown is
+                    // emitting a single StateDelta for the batch. Shutdown is
                     // an ordered barrier: publish preceding changes, then stop
                     // without handling duplicate or later commands.
                     while let Ok(next) = self.command_rx.try_recv() {
@@ -944,9 +972,17 @@ impl AppActor {
                         let published_state = self.snapshot_tx.borrow().state.clone();
                         self.publish_state_change(&published_state);
                     }
+                    self.settle_command_admissions();
                     app_loop_trace("command", handled, clone_ms, loop_started.elapsed());
                     if shutdown {
                         break;
+                    }
+                }
+                focused_projection = receive_focused_projection_commit(
+                    &mut self.focused_projection_rx
+                ) => {
+                    if let Some(focused_projection) = focused_projection {
+                        self.handle_focused_projection_commit(focused_projection).await;
                     }
                 }
                 actions = self.action_rx.recv() => {
@@ -1555,7 +1591,11 @@ impl AppActor {
         let CoreCommandEnvelope {
             command,
             composer_permit,
+            admission,
         } = envelope;
+        if let Some(admission) = admission {
+            self.pending_command_admissions.push(admission);
+        }
         debug_assert_eq!(
             command.composer_draft_scope().is_some(),
             composer_permit.is_some(),
@@ -2199,155 +2239,6 @@ impl AppActor {
                     }
                     self.handle_app_effects(request_id, effects).await;
                     true
-                }
-                AppCommand::AcknowledgeTimelineProjection {
-                    request_id: _,
-                    projection_request_id,
-                    key,
-                    generation,
-                    item_count,
-                    target_present,
-                } => {
-                    let pending_navigation = self
-                        .pending_focused_navigation
-                        .as_ref()
-                        .filter(|pending| {
-                            pending.projection_request_id == projection_request_id
-                                && pending.key == key
-                        })
-                        .cloned();
-                    let pending_matches = pending_navigation.is_some();
-                    let (response, accepted) = oneshot::channel();
-                    let routed = self
-                        .account_actor
-                        .send(AccountMessage::AcknowledgeTimelineProjection {
-                            projection_request_id,
-                            key: key.clone(),
-                            generation,
-                            response,
-                        })
-                        .await;
-                    let actor_acknowledgement = if routed {
-                        accepted.await.unwrap_or_default()
-                    } else {
-                        crate::timeline::TimelineProjectionAcknowledgement::default()
-                    };
-                    record(
-                        DiagnosticEvent::new(
-                            DiagnosticLevel::Debug,
-                            "core.activity_navigation",
-                            "projection_acknowledged",
-                        )
-                        .field(DiagnosticField::count("item_count", item_count))
-                        .field(DiagnosticField::boolean(
-                            "frontend_target_present",
-                            target_present,
-                        ))
-                        .field(DiagnosticField::count(
-                            "actor_item_count",
-                            actor_acknowledgement.item_count,
-                        ))
-                        .field(DiagnosticField::boolean(
-                            "actor_target_present",
-                            actor_acknowledgement.target_present,
-                        ))
-                        .field(DiagnosticField::boolean(
-                            "evidence_matches",
-                            target_present == actor_acknowledgement.target_present
-                                && item_count == actor_acknowledgement.item_count,
-                        ))
-                        .field(DiagnosticField::boolean(
-                            "actor_accepted",
-                            actor_acknowledgement.accepted,
-                        )),
-                    );
-                    if pending_matches
-                        && let Some(action) = anchored_action_after_projection_ack(
-                            &mut self.pending_focused_navigation,
-                            projection_request_id,
-                            &key,
-                            actor_acknowledgement.accepted,
-                            target_present,
-                            actor_acknowledgement.target_present,
-                        )
-                    {
-                        let navigation = pending_navigation
-                            .expect("matching focused navigation must remain available");
-                        let target_found =
-                            matches!(action, AppAction::EnterAnchoredTimeline { .. });
-                        let outcome = if target_found {
-                            "anchor_committed"
-                        } else {
-                            "live_fallback"
-                        };
-                        record(DiagnosticEvent::new(
-                            DiagnosticLevel::Debug,
-                            "core.activity_navigation",
-                            outcome,
-                        ));
-                        let focused_key = (!target_found)
-                            .then(|| self.current_focused_context_timeline_key())
-                            .flatten();
-                        // Include any earlier coalesced command mutations that have
-                        // not yet reached the watch snapshot in this commit point.
-                        let before_state = self.snapshot_tx.borrow().state.clone();
-                        let (effects, deferred_reducer_side_effects) =
-                            self.reduce_app_action_state(action);
-                        let published_generation = self
-                            .publish_state_delta(&before_state)
-                            .unwrap_or(self.state_generation);
-                        let lifecycle_outcome = focused_navigation_outcome_after_reduce(
-                            &self.state,
-                            &navigation,
-                            target_found,
-                        );
-                        self.emit(CoreEvent::IntentLifecycle {
-                            request_id: projection_request_id,
-                            outcome: lifecycle_outcome,
-                            published_generation,
-                        });
-                        self.apply_deferred_reducer_side_effects(deferred_reducer_side_effects)
-                            .await;
-                        if let Some(key) = focused_key {
-                            self.send_timeline_command_or_fail(
-                                projection_request_id,
-                                TimelineCommand::Unsubscribe {
-                                    request_id: projection_request_id,
-                                    key,
-                                },
-                            )
-                            .await;
-                        }
-                        self.handle_app_effects(projection_request_id, effects)
-                            .await;
-                    }
-                    true
-                }
-                AppCommand::AcknowledgeTimelineBatchRendered {
-                    request_id,
-                    key,
-                    actor_generation,
-                    timeline_generation,
-                    repair_generation,
-                    batch_id,
-                } => {
-                    if !self
-                        .account_actor
-                        .send(AccountMessage::AcknowledgeTimelineBatchRendered {
-                            key,
-                            actor_generation,
-                            timeline_generation,
-                            repair_generation,
-                            batch_id,
-                        })
-                        .await
-                    {
-                        self.emit(CoreEvent::OperationFailed {
-                            request_id,
-                            failure: CoreFailure::ShutdownFailed,
-                        });
-                    }
-                    false
                 }
                 AppCommand::EnterAnchoredTimeline {
                     request_id,
@@ -4120,6 +4011,15 @@ impl AppActor {
         let _ = self.event_tx.send(event);
     }
 
+    fn settle_command_admissions(&mut self) {
+        let generation = self.state_generation;
+        for admission in self.pending_command_admissions.drain(..) {
+            let _ = admission.send(CoreCommandAdmission {
+                admitted_generation: generation,
+            });
+        }
+    }
+
     fn publish_state_change(&mut self, before_state: &AppState) -> u64 {
         if let Some(generation) = self.publish_state_delta(before_state) {
             return generation;
@@ -4138,7 +4038,6 @@ impl AppActor {
             generation: self.state_generation,
             state: self.state.clone(),
         });
-        self.emit(CoreEvent::StateChanged(self.state.clone()));
     }
 
     fn publish_state_delta(&mut self, before_state: &AppState) -> Option<u64> {
@@ -4149,10 +4048,6 @@ impl AppActor {
             state: self.state.clone(),
         });
         self.emit(CoreEvent::StateDelta(delta));
-        // Legacy compatibility for core/headless consumers that still wait on
-        // full snapshots. The Tauri webview adapter ignores this event on the
-        // normal state path and applies StateDelta instead.
-        self.emit(CoreEvent::StateChanged(self.state.clone()));
         Some(self.state_generation)
     }
 }

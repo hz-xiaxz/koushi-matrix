@@ -70,6 +70,13 @@ pub struct EventStreamLag {
     pub skipped: u64,
 }
 
+/// Generation at which Core has handled a command and published its
+/// synchronous admission state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CoreCommandAdmission {
+    pub admitted_generation: u64,
+}
+
 /// One attached consumer: allocates request ids, submits commands, and
 /// observes the shared event stream plus the latest snapshot.
 pub struct CoreConnection {
@@ -123,7 +130,32 @@ impl CoreCommandHandle {
             .send(CoreCommandEnvelope {
                 command,
                 composer_permit: None,
+                admission: None,
             })
+            .await
+            .map_err(|_| CommandSubmitError::RuntimeClosed)
+    }
+
+    /// Submit a command and wait until AppActor has handled it and published
+    /// the synchronous state it owns. This is admission, not terminal outcome.
+    pub async fn command_with_admission(
+        &self,
+        command: CoreCommand,
+    ) -> Result<CoreCommandAdmission, CommandSubmitError> {
+        self.validate_request_id(&command)?;
+        if command.composer_draft_scope().is_some() {
+            return Err(CommandSubmitError::ComposerLeaseRequired);
+        }
+        let (admission_tx, admission_rx) = oneshot::channel();
+        self.command_tx
+            .send(CoreCommandEnvelope {
+                command,
+                composer_permit: None,
+                admission: Some(admission_tx),
+            })
+            .await
+            .map_err(|_| CommandSubmitError::RuntimeClosed)?;
+        admission_rx
             .await
             .map_err(|_| CommandSubmitError::RuntimeClosed)
     }
@@ -173,6 +205,24 @@ impl CoreCommandHandle {
             .map_err(|_| CommandSubmitError::RuntimeClosed)
     }
 
+    pub async fn command_with_composer_lease_and_admission(
+        &self,
+        generation: ComposerRendererGeneration,
+        lease_id: ComposerDraftLeaseId,
+        command: CoreCommand,
+    ) -> Result<CoreCommandAdmission, CommandSubmitError> {
+        let mut envelope = self.admit_composer_command(generation, lease_id, command)?;
+        let (admission_tx, admission_rx) = oneshot::channel();
+        envelope.admission = Some(admission_tx);
+        self.command_tx
+            .send(envelope)
+            .await
+            .map_err(|_| CommandSubmitError::RuntimeClosed)?;
+        admission_rx
+            .await
+            .map_err(|_| CommandSubmitError::RuntimeClosed)
+    }
+
     #[cfg(any(test, feature = "test-hooks"))]
     pub async fn command_with_composer_lease_after_admission(
         &self,
@@ -215,6 +265,7 @@ impl CoreCommandHandle {
         Ok(CoreCommandEnvelope {
             command,
             composer_permit: Some(composer_permit),
+            admission: None,
         })
     }
 }
@@ -491,6 +542,13 @@ impl CoreConnection {
             .acquire_composer_draft_command_permit(generation, lease_id, scope)
     }
 
+    pub async fn command_with_admission(
+        &self,
+        command: CoreCommand,
+    ) -> Result<CoreCommandAdmission, CommandSubmitError> {
+        self.command_handle().command_with_admission(command).await
+    }
+
     pub async fn command_with_composer_lease(
         &self,
         generation: ComposerRendererGeneration,
@@ -499,6 +557,17 @@ impl CoreConnection {
     ) -> Result<(), CommandSubmitError> {
         self.command_handle()
             .command_with_composer_lease(generation, lease_id, command)
+            .await
+    }
+
+    pub async fn command_with_composer_lease_and_admission(
+        &self,
+        generation: ComposerRendererGeneration,
+        lease_id: ComposerDraftLeaseId,
+        command: CoreCommand,
+    ) -> Result<CoreCommandAdmission, CommandSubmitError> {
+        self.command_handle()
+            .command_with_composer_lease_and_admission(generation, lease_id, command)
             .await
     }
 
@@ -531,7 +600,6 @@ impl CoreConnection {
                 project_room_event_display_labels(room_event, &snapshot);
             }
             CoreEvent::StateDelta(_)
-            | CoreEvent::StateChanged(_)
             | CoreEvent::Account(_)
             | CoreEvent::Sync(_)
             | CoreEvent::LiveSignals(_)
@@ -558,12 +626,11 @@ impl CoreConnection {
         self.snapshot_rx.borrow().clone()
     }
 
-    /// Causal snapshot-change barrier for deterministic runtime tests.
-    #[cfg(any(test, feature = "test-hooks"))]
-    #[doc(hidden)]
-    pub async fn next_versioned_snapshot_for_testing(
-        &mut self,
-    ) -> Option<VersionedAppStateSnapshot> {
+    /// Wait for the next latest-wins snapshot publication.
+    ///
+    /// The returned generation may equal the current generation when Core-only
+    /// state outside the desktop `StateDelta` contract changes.
+    pub async fn next_versioned_snapshot(&mut self) -> Option<VersionedAppStateSnapshot> {
         self.snapshot_rx.changed().await.ok()?;
         Some(self.snapshot_rx.borrow_and_update().clone())
     }

@@ -141,16 +141,25 @@ describe("App diagnostics lifecycle", () => {
 
     expect(await screen.findByRole("button", { name: "Create room" })).toBeTruthy();
     await waitFor(() =>
-      expect(tauriEventListeners.get("koushi-desktop://state")).toBeDefined()
+      expect(tauriEventListeners.get("koushi-desktop://state-update")).toBeDefined()
     );
 
     mutable.snapshot.state.domain.secure_backup_gate = {
       kind: "degradedRetrying",
       failure: "network"
     };
+    mutable.snapshot.state_generation = 1;
 
     await act(async () => {
-      tauriEventListeners.get("koushi-desktop://state")?.({ payload: "stateChanged" });
+      tauriEventListeners.get("koushi-desktop://state-update")?.({
+        payload: {
+          protocol_version: 1,
+          kind: "snapshot",
+          generation: 1,
+          snapshot: await api.getSnapshot(),
+          reason: "settlement"
+        }
+      });
     });
 
     const statusTrigger = await screen.findByRole("button", {
@@ -211,10 +220,7 @@ describe("App diagnostics lifecycle", () => {
         schema_version: incompatibleSchemaVersion
       }
     };
-    const getSnapshot = vi
-      .spyOn(api, "getSnapshot")
-      .mockResolvedValueOnce(incompatibleSnapshot)
-      .mockResolvedValueOnce(compatibleSnapshot);
+    vi.spyOn(api, "getSnapshot").mockResolvedValueOnce(incompatibleSnapshot);
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
@@ -226,16 +232,22 @@ describe("App diagnostics lifecycle", () => {
     expect(await screen.findByRole("alert")).toBeTruthy();
     expect(consoleError).not.toHaveBeenCalled();
     await waitFor(() =>
-      expect(tauriEventListeners.get("koushi-desktop://state")).toBeDefined()
+      expect(tauriEventListeners.get("koushi-desktop://state-update")).toBeDefined()
     );
 
+    compatibleSnapshot.state_generation = 1;
     await act(async () => {
-      tauriEventListeners.get("koushi-desktop://state")?.({ payload: "stateChanged" });
+      tauriEventListeners.get("koushi-desktop://state-update")?.({
+        payload: {
+          protocol_version: 1,
+          kind: "snapshot",
+          generation: 1,
+          snapshot: compatibleSnapshot,
+          reason: "settlement"
+        }
+      });
     });
-    await waitFor(() => {
-      expect(getSnapshot.mock.calls.length).toBeGreaterThanOrEqual(2);
-      expect(screen.queryByRole("alert")).toBeNull();
-    });
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(screen.getByRole("button", { name: "Open diagnostics" })).toBeTruthy();
 
     const dialog = await openDiagnostics();
@@ -433,7 +445,10 @@ describe("App diagnostics lifecycle", () => {
       "access_token=private-token"
     ].join(" ");
     vi.spyOn(api, "getSnapshot").mockResolvedValue(encryptedSnapshot);
-    vi.spyOn(api, "loadRoomSettings").mockResolvedValue(encryptedSnapshot);
+    vi.spyOn(api, "loadRoomSettings").mockResolvedValue({
+      protocolVersion: 1,
+      publishedGeneration: encryptedSnapshot.state_generation ?? 0
+    });
     const reshareRoomKey = vi
       .spyOn(api, "reshareRoomKey")
       .mockRejectedValue(new Error(rawError));

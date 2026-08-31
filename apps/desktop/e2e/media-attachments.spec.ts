@@ -111,7 +111,7 @@ async function pushMediaDownloadState(
           }
         }
       });
-      window.__harness.pushStateChanged();
+      window.__harness.pushStateUpdate();
     },
     { evId: eventId, state: downloadState }
   );

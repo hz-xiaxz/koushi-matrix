@@ -128,7 +128,7 @@ test("search scope selector fits Room/DM in English and Japanese", async ({ page
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   await expect(page.locator(".scope-select option[value=currentRoom]")).toHaveText("ルーム/DM");

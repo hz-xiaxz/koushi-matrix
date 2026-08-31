@@ -386,6 +386,7 @@ impl AccountActor {
             self.link_preview_policy.clone(),
             self.account_work.clone(),
             Some(self.navigation_projection.subscribe()),
+            Some(self.focused_projection_tx.clone()),
         );
         self.room_actor
             .bind_timeline_residency(session.clone(), self.timeline_manager.residency_handle());
@@ -495,6 +496,7 @@ impl AccountActor {
             Some(self.data_dir.clone()),
             self.account_work.clone(),
             Some(self.navigation_projection.subscribe()),
+            Some(self.focused_projection_tx.clone()),
         );
         self.record_lifecycle_probe("stop_threads_manager");
         self.stop_threads_list_actor().await;

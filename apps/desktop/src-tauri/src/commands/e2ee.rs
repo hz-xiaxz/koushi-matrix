@@ -6,33 +6,33 @@ use crate::commands::contracts::fake_request_id;
 pub async fn retry_current_device_trust_discovery(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_retry_current_device_trust_discovery_command(request_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
 pub async fn start_own_user_sas(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
     // The persistent CoreConnection request sequence is process-unique and
     // therefore owns the opaque verification flow identity across retries.
     let flow_id = request_id.sequence;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_start_own_user_sas_command(request_id, flow_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -40,15 +40,15 @@ pub async fn mismatch_sas_verification(
     flow_id: u64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_cancel_verification_command(request_id, flow_id, VerificationCancelReason::Mismatch),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -57,10 +57,10 @@ pub async fn start_session_bootstrap(
     recovery_key_destination_path: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
     let flow_id = request_id.sequence;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_start_session_bootstrap_command(
             request_id,
@@ -71,7 +71,7 @@ pub async fn start_session_bootstrap(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -79,41 +79,45 @@ pub async fn confirm_session_bootstrap_saved(
     flow_id: u64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_confirm_session_bootstrap_saved_command(request_id, flow_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
 pub async fn bootstrap_cross_signing(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_bootstrap_cross_signing_command(request_id, None),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
 pub async fn enable_key_backup(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(state.inner(), build_enable_key_backup_command(request_id)).await?;
+    let admission = submit_core_command_with_admission(
+        state.inner(),
+        build_enable_key_backup_command(request_id),
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -123,9 +127,9 @@ pub async fn bootstrap_secure_backup(
     intent: koushi_state::SecureBackupSetupIntent,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_bootstrap_secure_backup_command(
             request_id,
@@ -136,7 +140,7 @@ pub async fn bootstrap_secure_backup(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -144,30 +148,30 @@ pub async fn recover_secure_backup(
     secret: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_recover_secure_backup_command(request_id, AuthSecret::new(secret)),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
 pub async fn retry_secure_backup_inspection(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_retry_secure_backup_inspection_command(request_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -177,9 +181,9 @@ pub async fn change_secure_backup_passphrase(
     recovery_key_destination_path: Option<String>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_change_secure_backup_passphrase_command(
             request_id,
@@ -190,7 +194,7 @@ pub async fn change_secure_backup_passphrase(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -199,15 +203,15 @@ pub async fn export_room_keys(
     passphrase: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_export_room_keys_command(request_id, destination_path, AuthSecret::new(passphrase)),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -216,15 +220,15 @@ pub async fn import_room_keys(
     passphrase: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_import_room_keys_command(request_id, source_path, AuthSecret::new(passphrase)),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -232,15 +236,15 @@ pub async fn accept_verification(
     flow_id: u64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_accept_verification_command(request_id, flow_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -248,15 +252,15 @@ pub async fn confirm_sas_verification(
     flow_id: u64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_confirm_sas_verification_command(request_id, flow_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -264,26 +268,28 @@ pub async fn cancel_verification(
     flow_id: u64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_cancel_verification_command(request_id, flow_id, VerificationCancelReason::User),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
 pub async fn reset_identity(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(state.inner(), build_reset_identity_command(request_id)).await?;
+    let admission =
+        submit_core_command_with_admission(state.inner(), build_reset_identity_command(request_id))
+            .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -291,15 +297,15 @@ pub async fn cancel_identity_reset(
     flow_id: u64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_cancel_identity_reset_command(request_id, flow_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -308,9 +314,9 @@ pub async fn submit_identity_reset_password(
     password: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_submit_identity_reset_password_command(
             request_id,
@@ -320,7 +326,7 @@ pub async fn submit_identity_reset_password(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -328,15 +334,15 @@ pub async fn submit_identity_reset_oauth(
     flow_id: u64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_submit_identity_reset_oauth_command(request_id, flow_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 pub(super) fn build_bootstrap_cross_signing_command(

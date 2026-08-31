@@ -24,8 +24,13 @@ import { createRoot } from "react-dom/client";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 
-import type { CoreEventPayload, TimelineItem } from "../domain/coreEvents";
+import type {
+  CoreEventPayload,
+  StateUpdateEnvelope,
+  TimelineItem
+} from "../domain/coreEvents";
 import { roomTimelineKey } from "../domain/coreEvents";
+import { applyDeltaToState } from "../domain/appStore";
 import {
   SNAPSHOT_SCHEMA_VERSION,
   type ActivityTab,
@@ -63,7 +68,7 @@ import type { ComposerDraftLeaseSnapshot } from "../domain/composerDraftLifecycl
 import "../styles.css";
 
 const CORE_EVENT_NAME = "koushi-desktop://event";
-const STATE_EVENT_NAME = "koushi-desktop://state";
+const STATE_UPDATE_EVENT_NAME = "koushi-desktop://state-update";
 
 // Identity used across the ready snapshot, timeline key, and CoreEvents.
 const HOMESERVER = "https://harness.example.invalid";
@@ -90,7 +95,7 @@ interface AppHarnessControl {
   setCommandResponse(command: string, response: any): void;
   setSnapshot(snapshot: DesktopSnapshot): void;
   pushCoreEvent(event: CoreEventPayload): Promise<void>;
-  pushStateChanged(): void;
+  pushStateUpdate(envelope?: StateUpdateEnvelope): void;
   currentSnapshot(): DesktopSnapshot;
   e2eeTrustSnapshot(): DesktopSnapshot;
   replyModeSnapshot(): DesktopSnapshot;
@@ -173,8 +178,9 @@ function readySnapshot(
     },
     space_rail: railItems
   };
-      return {
-      state: {
+  return {
+    state_generation: 0,
+    state: {
         schema_version: 5,
         domain: {
           session: { kind: "ready", homeserver: HOMESERVER, user_id: USER_ID, device_id: DEVICE_ID },
@@ -610,6 +616,12 @@ const mock = new TauriIpcMock();
 // end-to-end flows should continue past an explicit destructive confirmation.
 mock.setCommandResponse("plugin:dialog|message", "Ok");
 let currentSnapshot = readySnapshot();
+let lastStateUpdateGeneration = currentSnapshot.state_generation ?? 0;
+mock.setCommandResponse(
+  "settlement_snapshot",
+  () => new Promise((resolve) => setTimeout(() => resolve(currentSnapshot), 0))
+);
+mock.setCommandResponse("resync_snapshot", () => currentSnapshot);
 let nextGateFlowId = 80;
 const preparedUploadBytes = new Map<string, number[]>();
 let composerRendererGeneration = 0;
@@ -868,6 +880,23 @@ function reconcileComposerLeases(snapshot: DesktopSnapshot): void {
   }
 }
 
+function canProjectHarnessSnapshot(value: unknown): value is DesktopSnapshot {
+  const candidate = value as {
+    state?: {
+      domain?: { rooms?: unknown; spaces?: unknown; session?: unknown };
+      ui?: { navigation?: unknown };
+    };
+  };
+  return (
+    Array.isArray(candidate?.state?.domain?.rooms) &&
+    Array.isArray(candidate.state.domain.spaces) &&
+    candidate.state.domain.session !== null &&
+    typeof candidate.state.domain.session === "object" &&
+    candidate.state.ui?.navigation !== null &&
+    typeof candidate.state.ui?.navigation === "object"
+  );
+}
+
 function setCurrentSnapshot(next: DesktopSnapshot): DesktopSnapshot {
   const previousSnapshot = currentSnapshot;
   const rooms = next.state.domain.rooms.map(normalizeHarnessRoomSummary);
@@ -883,6 +912,10 @@ function setCurrentSnapshot(next: DesktopSnapshot): DesktopSnapshot {
   };
   currentSnapshot = {
     ...next,
+    state_generation: Math.max(
+      previousSnapshot.state_generation ?? 0,
+      next.state_generation ?? 0
+    ),
     state: {
       ...next.state,
       domain: {
@@ -955,6 +988,12 @@ function normalizeHarnessCommandResponse(value: unknown): unknown {
   }
   if (isDesktopSnapshotLike(value)) {
     return setCurrentSnapshot(value);
+  }
+  if (value && typeof value === "object" && "snapshot" in value) {
+    const response = value as Record<string, unknown> & { snapshot: unknown };
+    if (isDesktopSnapshotLike(response.snapshot)) {
+      return { ...response, snapshot: setCurrentSnapshot(response.snapshot) };
+    }
   }
   return value;
 }
@@ -3229,8 +3268,37 @@ const harnessControl: AppHarnessControl = {
     externalCoreEventPushSeen = true;
     return emit(CORE_EVENT_NAME, event);
   },
-  pushStateChanged: () => {
-    void emit(STATE_EVENT_NAME, "stateChanged");
+  pushStateUpdate: (envelope) => {
+    let update = envelope;
+    if (!update) {
+      const generation = Math.max(
+        lastStateUpdateGeneration + 1,
+        currentSnapshot.state_generation ?? 0
+      );
+      currentSnapshot = { ...currentSnapshot, state_generation: generation };
+      update = {
+        protocol_version: 1,
+        kind: "snapshot",
+        generation,
+        snapshot: currentSnapshot,
+        reason: "settlement"
+      };
+    }
+    lastStateUpdateGeneration = Math.max(lastStateUpdateGeneration, update.generation);
+    if (update.kind === "snapshot") {
+      if (canProjectHarnessSnapshot(update.snapshot)) {
+        setCurrentSnapshot(update.snapshot);
+      }
+    } else if (
+      update.generation === (currentSnapshot.state_generation ?? 0) + 1
+    ) {
+      const next = applyDeltaToState(currentSnapshot, {
+        generation: update.generation,
+        changed: update.changed
+      });
+      if (next) setCurrentSnapshot(next);
+    }
+    void emit(STATE_UPDATE_EVENT_NAME, update);
   },
   currentSnapshot: () => currentSnapshot,
   e2eeTrustSnapshot,

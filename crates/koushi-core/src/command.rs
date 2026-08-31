@@ -37,8 +37,6 @@ impl CoreCommand {
                 | AppCommand::CloseThread { request_id }
                 | AppCommand::OpenFocusedContext { request_id, .. }
                 | AppCommand::OpenAnchoredTimeline { request_id, .. }
-                | AppCommand::AcknowledgeTimelineProjection { request_id, .. }
-                | AppCommand::AcknowledgeTimelineBatchRendered { request_id, .. }
                 | AppCommand::EnterAnchoredTimeline { request_id, .. }
                 | AppCommand::OpenTimelineAtTimestamp { request_id, .. }
                 | AppCommand::RepairRoomTimeline { request_id, .. }
@@ -351,7 +349,6 @@ impl CoreCommand {
                     | AppCommand::CloseThreadsList { .. }
                     | AppCommand::PaginateThreadsList { .. }
                     | AppCommand::TimelineScrollAnchorUpdated { .. }
-                    | AppCommand::AcknowledgeTimelineBatchRendered { .. }
             )
         )
     }

@@ -239,87 +239,19 @@ fn open_timeline_at_timestamp_requires_ready_session_and_redacts_debug() {
 }
 
 #[test]
-fn focused_projection_commands_redact_matrix_identifiers() {
-    let request_id = fake_rid(29);
-    let key = TimelineKey {
-        account_key: AccountKey("@private:example.invalid".to_owned()),
-        kind: crate::ids::TimelineKind::Focused {
-            room_id: "!private-room:example.invalid".to_owned(),
-            event_id: "$private-event:example.invalid".to_owned(),
-        },
-    };
+fn focused_projection_command_redacts_matrix_identifiers() {
     let debug = format!(
-        "{:?} {:?}",
+        "{:?}",
         AppCommand::OpenAnchoredTimeline {
-            request_id,
+            request_id: fake_rid(29),
             room_id: "!private-room:example.invalid".to_owned(),
             event_id: "$private-event:example.invalid".to_owned(),
             allow_live_fallback: false,
-        },
-        AppCommand::AcknowledgeTimelineProjection {
-            request_id,
-            projection_request_id: fake_rid(28),
-            key,
-            generation: TimelineGeneration(3),
-            item_count: 7,
-            target_present: true,
         }
     );
     assert!(debug.contains("RoomId(..)"), "{debug}");
-    assert!(debug.contains("TimelineKey(..)"), "{debug}");
-    for private in [
-        "@private:example.invalid",
-        "!private-room:example.invalid",
-        "$private-event:example.invalid",
-    ] {
-        assert!(!debug.contains(private), "{debug}");
-    }
-}
-
-#[test]
-fn acknowledge_timeline_batch_rendered_preserves_fences_and_redacts_key() {
-    let request_id = fake_rid(30);
-    let command = AppCommand::AcknowledgeTimelineBatchRendered {
-        request_id,
-        key: TimelineKey {
-            account_key: AccountKey("@private:example.invalid".to_owned()),
-            kind: crate::ids::TimelineKind::Room {
-                room_id: "!private-room:example.invalid".to_owned(),
-            },
-        },
-        actor_generation: 9,
-        timeline_generation: TimelineGeneration(3),
-        repair_generation: 11,
-        batch_id: crate::ids::TimelineBatchId(5),
-    };
-
-    assert_eq!(CoreCommand::App(command).request_id(), request_id);
-    let debug = format!(
-        "{:?}",
-        AppCommand::AcknowledgeTimelineBatchRendered {
-            request_id,
-            key: TimelineKey {
-                account_key: AccountKey("@private:example.invalid".to_owned()),
-                kind: crate::ids::TimelineKind::Room {
-                    room_id: "!private-room:example.invalid".to_owned(),
-                },
-            },
-            actor_generation: 9,
-            timeline_generation: TimelineGeneration(3),
-            repair_generation: 11,
-            batch_id: crate::ids::TimelineBatchId(5),
-        }
-    );
-    for expected in [
-        "actor_generation: 9",
-        "repair_generation: 11",
-        "TimelineBatchId(5)",
-    ] {
-        assert!(debug.contains(expected), "{debug}");
-    }
-    assert!(debug.contains("TimelineKey(..)"), "{debug}");
-    assert!(!debug.contains("@private:example.invalid"), "{debug}");
     assert!(!debug.contains("!private-room:example.invalid"), "{debug}");
+    assert!(!debug.contains("$private-event:example.invalid"), "{debug}");
 }
 
 #[test]

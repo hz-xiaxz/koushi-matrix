@@ -81,7 +81,7 @@ test("Security settings render local encryption health and dispatch probe comman
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
 
@@ -104,7 +104,7 @@ test("Security settings render local encryption health and dispatch probe comman
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
   await expect(page.getByText("macOS Keychain")).toBeVisible();
   await expect(page.getByText("Credential store locked")).toBeVisible();
@@ -127,7 +127,7 @@ test("Security settings render local encryption health and dispatch probe comman
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
   await expect(page.getByText("Windows Credential Manager")).toBeVisible();
   await expect(page.getByText("Reset local data required")).toBeVisible();
@@ -174,7 +174,7 @@ test("E2EE trust controls dispatch Rust-owned commands and render snapshot updat
     window.__harness.setCommandResponse("refresh_current_session_status", () =>
       window.__harness.currentSnapshot()
     );
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   await page.getByRole("button", { name: "User settings" }).click();
@@ -259,7 +259,7 @@ test("security settings drive Rust-owned room-key transfer and secure backup sta
   await gotoReadyShell(page);
   await page.evaluate(() => {
     window.__harness.setSnapshot(window.__harness.e2eeTrustSnapshot());
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   });
 
@@ -399,7 +399,7 @@ test("sliding sync capability block exposes only Rust-owned recovery actions", a
       };
       window.__harness.setSnapshot(blocked);
       window.__harness.setCommandResponse("retry_sliding_sync_capability", blocked);
-      window.__harness.pushStateChanged();
+      window.__harness.pushStateUpdate();
       window.__harness.clearInvocations();
     });
     await expect(page.getByTestId("sliding-sync-capability-blocked")).toBeVisible();
@@ -414,6 +414,9 @@ test("sliding sync capability block exposes only Rust-owned recovery actions", a
   await page.getByRole("button", { name: "Change homeserver" }).click();
   await expect.poll(() => invocationCount(page, "change_homeserver")).toBe(1);
   expect(await invocationCount(page, "logout")).toBe(0);
+  await expect
+    .poll(() => page.evaluate(() => window.__harness.currentSnapshot().state.domain.session.kind))
+    .toBe("signedOut");
   await expect(page.getByTestId("auth-screen")).toBeVisible();
 
   await showCapabilityBlock();
@@ -438,7 +441,7 @@ test("encrypted room suppresses link previews and shows privacy notice", async (
         }
       }
     });
-    await window.__harness.pushStateChanged();
+    await window.__harness.pushStateUpdate();
   });
 
   await page.getByRole("button", { name: t("room.roomInfo") }).click();

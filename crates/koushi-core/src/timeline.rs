@@ -72,11 +72,11 @@ pub(crate) use diagnostics::record_thread_summary_reconciliation;
 pub use item_projection::sdk_item_to_timeline_item;
 pub(crate) use manager::TimelineMessage;
 pub use manager::{TIMELINE_DIFF_QUEUE_CAPACITY, TimelineManagerActor, TimelineManagerHandle};
-pub use navigation::TimelineProjectionAcknowledgement;
 #[cfg(any(test, feature = "qa-bin"))]
 pub use navigation::display_projection_reset_fallback_count;
 pub(crate) use navigation::{
-    NavigationProjectionCleanup, NavigationProjectionIngress, NavigationProjectionIntent,
+    FocusedProjectionCommitted, NavigationProjectionCleanup, NavigationProjectionIngress,
+    NavigationProjectionIntent,
 };
 pub(crate) use read_state::{ReadPersistenceIngress, ReadPersistenceRequest};
 pub(crate) use residency::{

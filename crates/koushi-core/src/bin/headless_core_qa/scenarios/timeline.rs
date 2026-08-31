@@ -322,13 +322,8 @@ async fn wait_for_existing_stress_fixture_room_list(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::Room(RoomEvent::RoomListUpdated) => {
+            CoreEvent::Room(RoomEvent::RoomListUpdated) | CoreEvent::StateDelta(_) => {
                 let snapshot = conn.snapshot();
-                if has_fixture_shape(&snapshot) {
-                    return Ok(snapshot);
-                }
-            }
-            CoreEvent::StateChanged(snapshot) => {
                 if has_fixture_shape(&snapshot) {
                     return Ok(snapshot);
                 }
@@ -890,8 +885,8 @@ async fn wait_for_selected_room(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot)
-                if snapshot.timeline.room_id.as_deref() == Some(room_id) =>
+            CoreEvent::StateDelta(_)
+                if conn.snapshot().timeline.room_id.as_deref() == Some(room_id) =>
             {
                 return Ok(());
             }
@@ -918,10 +913,10 @@ async fn wait_for_scheduled_send_count(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot)
-                if snapshot.timeline.scheduled_sends.len() == expected_count =>
+            CoreEvent::StateDelta(_)
+                if conn.snapshot().timeline.scheduled_sends.len() == expected_count =>
             {
-                return Ok(snapshot);
+                return Ok(conn.snapshot());
             }
             _ if conn.snapshot().timeline.scheduled_sends.len() == expected_count => {
                 return Ok(conn.snapshot());
@@ -954,7 +949,7 @@ async fn wait_for_scheduled_send_due(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot) if matches_due(&snapshot) => return Ok(()),
+            CoreEvent::StateDelta(_) if matches_due(&conn.snapshot()) => return Ok(()),
             _ if matches_due(&conn.snapshot()) => return Ok(()),
             _ => {}
         }
@@ -982,8 +977,8 @@ async fn wait_for_scheduled_send_fired(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot) => {
-                queue_removed = scheduled_item_absent(&snapshot, scheduled_id);
+            CoreEvent::StateDelta(_) => {
+                queue_removed = scheduled_item_absent(&conn.snapshot(), scheduled_id);
             }
             CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
                 key: ref ev_key,
@@ -2203,13 +2198,13 @@ pub(super) async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> R
 
     let key_a = TimelineKey::room(account_key_a.clone(), room_id.clone());
     let key_b = TimelineKey::room(account_key_b.clone(), room_id);
-    subscribe_and_ack_active_timeline_projection_for_qa(
+    subscribe_active_timeline_projection_for_qa(
         &mut conn_a,
         &key_a,
         "timeline_reconnect subscribe A",
     )
     .await?;
-    subscribe_and_ack_active_timeline_projection_for_qa(
+    subscribe_active_timeline_projection_for_qa(
         &mut conn_b,
         &key_b,
         "timeline_reconnect subscribe B",
@@ -2577,7 +2572,7 @@ pub(super) async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> R
             qa_detached_live_tail_events(&user_b_full_id),
             detached_end_token.clone(),
         )?;
-        let detached_items = subscribe_and_ack_active_timeline_projection_for_qa(
+        let detached_items = subscribe_active_timeline_projection_for_qa(
             &mut detached_conn,
             &key_a,
             "timeline legacy persisted gap detached live tail subscription",
@@ -3312,7 +3307,7 @@ pub(super) async fn run_activity_stage(
     Ok(())
 }
 
-pub(super) async fn subscribe_and_ack_active_timeline_projection_for_qa(
+pub(super) async fn subscribe_active_timeline_projection_for_qa(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     label: &str,
@@ -3335,27 +3330,10 @@ pub(super) async fn subscribe_and_ack_active_timeline_projection_for_qa(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
         match event {
             CoreEvent::Timeline(TimelineEvent::InitialItems {
-                request_id: Some(projection_request_id),
                 key: ref event_key,
-                generation,
                 items,
                 ..
-            }) if event_key == key => {
-                let acknowledgement_request_id = conn.next_request_id();
-                conn.command(CoreCommand::App(
-                    koushi_core::command::AppCommand::AcknowledgeTimelineProjection {
-                        request_id: acknowledgement_request_id,
-                        projection_request_id,
-                        key: key.clone(),
-                        generation,
-                        item_count: items.len() as u64,
-                        target_present: true,
-                    },
-                ))
-                .await
-                .map_err(|e| format!("{label}: submit projection acknowledgement failed: {e}"))?;
-                return Ok(items);
-            }
+            }) if event_key == key => return Ok(items),
             CoreEvent::OperationFailed {
                 request_id,
                 failure,
@@ -3734,7 +3712,8 @@ async fn wait_for_read_receipt_projection(
             })?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
-        if let CoreEvent::StateChanged(snapshot) = event {
+        if matches!(event, CoreEvent::StateDelta(_)) {
+            let snapshot = conn.snapshot();
             last_status = read_receipt_projection_status(
                 &snapshot,
                 room_id,
@@ -3903,10 +3882,11 @@ async fn wait_for_live_signal_snapshot(
             .map_err(|_| format!("{label}: timed out waiting for live-signal state"))?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
-        if let CoreEvent::StateChanged(snapshot) = event
-            && predicate(&snapshot)
-        {
-            return Ok(snapshot);
+        if matches!(event, CoreEvent::StateDelta(_)) {
+            let snapshot = conn.snapshot();
+            if predicate(&snapshot) {
+                return Ok(snapshot);
+            }
         }
     }
 }
@@ -4831,12 +4811,6 @@ async fn wait_for_exact_items_and_gap_release(
     let mut expected_gap_absent = expected_closed_gap.is_none();
     let mut saw_post_demand_gap_positions = false;
     let mut closure_projection = None;
-    let mut gap_actor_generation =
-        initial_gap_projection.map(|(actor_generation, _)| actor_generation);
-    let mut pending_render_ack = None;
-    let mut render_ack_request_id = None;
-    let mut render_ack_sent_at: Option<tokio::time::Instant> = None;
-    let mut render_ack_actor_generation = None;
     loop {
         let counts = expected_bodies
             .iter()
@@ -4864,12 +4838,8 @@ async fn wait_for_exact_items_and_gap_release(
                     "{label}: timed out with {missing_count} rows missing; gap_release={released}; \
                      expected_gap_absent={expected_gap_absent}; \
                      post_demand_gap_positions={saw_post_demand_gap_positions}; \
-                     closure_projection={}; render_ack_sent={}; render_ack_same_actor={}",
+                     closure_projection={}",
                     closure_projection.is_some(),
-                    render_ack_sent_at.is_some(),
-                    closure_projection.is_some_and(|(actor_generation, _)| {
-                        render_ack_actor_generation == Some(actor_generation)
-                    }),
                 )
             })?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
@@ -4881,16 +4851,11 @@ async fn wait_for_exact_items_and_gap_release(
             }) if event_key == key => items = replacement,
             CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
                 key: ref event_key,
-                generation,
-                batch_id,
                 diffs,
                 ..
             }) if event_key == key => {
                 for diff in &diffs {
                     apply_timeline_diff(&mut items, diff);
-                }
-                if let Some(actor_generation) = gap_actor_generation {
-                    pending_render_ack = Some((actor_generation, generation, batch_id));
                 }
             }
             CoreEvent::Timeline(TimelineEvent::GapPositionsUpdated {
@@ -4900,12 +4865,6 @@ async fn wait_for_exact_items_and_gap_release(
                 positions,
                 ..
             }) if event_key == key => {
-                if expected_closed_gap.is_none()
-                    || initial_gap_projection
-                        .is_some_and(|(initial_actor, _)| initial_actor == actor_generation)
-                {
-                    gap_actor_generation = Some(actor_generation);
-                }
                 saw_post_demand_gap_positions = true;
                 if let (Some(expected_gap), Some((initial_actor, initial_generation))) =
                     (expected_closed_gap, initial_gap_projection)
@@ -4924,62 +4883,12 @@ async fn wait_for_exact_items_and_gap_release(
                 generation,
             }) if event_key == key => {
                 let release_projection = (actor_generation, generation);
-                if expected_closed_gap.is_some()
-                    && (closure_projection != Some(release_projection)
-                        || render_ack_actor_generation != Some(actor_generation)
-                        || render_ack_request_id.is_none())
-                {
+                if expected_closed_gap.is_some() && closure_projection != Some(release_projection) {
                     continue;
-                }
-                let Some(sent_at) = render_ack_sent_at else {
-                    if expected_closed_gap.is_some() {
-                        continue;
-                    }
-                    return Err(format!(
-                        "{label}: gap repair released without a correlated render acknowledgement"
-                    ));
-                };
-                if sent_at.elapsed() >= Duration::from_secs(5) {
-                    return Err(format!(
-                        "{label}: gap repair released only after render-settlement timeout"
-                    ));
                 }
                 released = true;
             }
-            CoreEvent::OperationFailed {
-                request_id,
-                failure,
-            } if Some(request_id) == render_ack_request_id => {
-                return Err(format!(
-                    "{label}: render acknowledgement was rejected: {failure:?}"
-                ));
-            }
             _ => {}
-        }
-
-        if let Some((actor_generation, timeline_generation, batch_id)) = pending_render_ack
-            && let koushi_state::TimelineContinuityState::Repairing {
-                generation: repair_generation,
-                ..
-            } = conn.snapshot().timeline.continuity
-        {
-            let request_id = conn.next_request_id();
-            conn.command(CoreCommand::App(
-                koushi_core::command::AppCommand::AcknowledgeTimelineBatchRendered {
-                    request_id,
-                    key: key.clone(),
-                    actor_generation,
-                    timeline_generation,
-                    repair_generation,
-                    batch_id,
-                },
-            ))
-            .await
-            .map_err(|error| format!("{label}: render acknowledgement failed: {error}"))?;
-            render_ack_request_id = Some(request_id);
-            render_ack_sent_at = Some(tokio::time::Instant::now());
-            render_ack_actor_generation = Some(actor_generation);
-            pending_render_ack = None;
         }
     }
 }

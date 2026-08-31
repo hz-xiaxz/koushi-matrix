@@ -53,18 +53,24 @@ describe("Tauri desktop event port", () => {
     expect(menuListener).toHaveBeenCalledWith("toggleFullscreen");
   });
 
-  test("ignores the state payload and returns the Tauri disposer", async () => {
+  test("forwards v1 state updates on the single state-update channel", async () => {
     const stateListener = vi.fn();
     const port = createTauriDesktopEventPort();
 
-    await expect(port.listenStateChanges(stateListener)).resolves.toBe(unlisten);
-    expect(listen).toHaveBeenCalledWith("koushi-desktop://state", expect.any(Function));
+    await expect(port.listenStateUpdates(stateListener)).resolves.toBe(unlisten);
+    expect(listen).toHaveBeenCalledWith("koushi-desktop://state-update", expect.any(Function));
+    const envelope = {
+      protocol_version: 1 as const,
+      kind: "delta" as const,
+      generation: 7,
+      changed: {}
+    };
     const envelopeListener = vi.mocked(listen).mock.calls[0]?.[1] as (
-      event: { payload: string }
+      event: { payload: typeof envelope }
     ) => void;
-    envelopeListener({ payload: "private ignored payload" });
+    envelopeListener({ payload: envelope });
 
     expect(stateListener).toHaveBeenCalledOnce();
-    expect(stateListener).toHaveBeenCalledWith();
+    expect(stateListener).toHaveBeenCalledWith(envelope);
   });
 });

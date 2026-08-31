@@ -91,9 +91,10 @@ pub use media_save::{
     safe_media_save_filename, save_downloaded_media,
 };
 pub use runtime::{
-    COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandHandle, CoreConnection, CoreRuntime,
-    EVENT_QUEUE_CAPACITY, EventStreamLag, OutcomeCorrelation, RequestOutcome, RequestOutcomeError,
-    RequestOutcomeExpectation, RoomOperationKind, SelectRoomError,
+    COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandAdmission, CoreCommandHandle,
+    CoreConnection, CoreRuntime, EVENT_QUEUE_CAPACITY, EventStreamLag, OutcomeCorrelation,
+    RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation, RoomOperationKind,
+    SelectRoomError,
 };
 pub use sliding_sync_diagnostics::{
     DiagnosticAgeBucket, SlidingSyncDiagnostics, SlidingSyncDiagnosticsSnapshot,

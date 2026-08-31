@@ -281,7 +281,7 @@ test("Activity renders Rust-owned streams and waits for mark-read snapshots", as
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   await expect(alphaUnreadRow).toHaveCount(0);
@@ -312,7 +312,7 @@ test("Activity renders Rust-owned streams and waits for mark-read snapshots", as
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   await expect(page.getByText("No unread activity")).toBeVisible();
@@ -806,7 +806,7 @@ test("timeline header Threads button opens the threads list and row opens a thre
         return next;
       }
     );
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();
   }, HARNESS_ROOM_ID);
 
@@ -862,7 +862,7 @@ test("timeline header Threads button opens the threads list and row opens a thre
       }
     }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   const contextPanel = page.locator('aside[aria-label="Context panel"]');
@@ -948,7 +948,7 @@ test("thread attention renders one Rust count in the root and header and clears 
           }
         }
       });
-      window.__harness.pushStateChanged();
+      window.__harness.pushStateUpdate();
     },
     { roomId: HARNESS_ROOM_ID, rootEventId }
   );
@@ -981,7 +981,7 @@ test("thread attention renders one Rust count in the root and header and clears 
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
 
   await expect(page.getByRole("button", { name: /View new replies/ })).toHaveCount(0);

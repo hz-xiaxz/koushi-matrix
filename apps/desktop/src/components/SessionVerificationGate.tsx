@@ -4,6 +4,7 @@ import { ResetLocalDataConfirmationDialog } from "./dialogs";
 import { t } from "../i18n/messages";
 import { api, startSessionVerificationWindowDrag } from "../backend/appRuntime";
 import type {
+  CommandReceipt,
   DesktopSnapshot,
   PendingKeyCountBucket,
   SecureBackupGateFailureKind,
@@ -44,23 +45,24 @@ function provisionalPhaseFailure(
   return null;
 }
 
+type GateOperationKind = "recovery" | "sas" | "cleanup";
 type SecureBackupOperationKind = "recovery" | "setup" | "reenable" | "retry";
 
 export interface SessionVerificationGateOperations {
-  startOwnUserSas: () => Promise<DesktopSnapshot>;
-  submitRecovery: (secret: string) => Promise<DesktopSnapshot>;
-  retryCurrentDeviceTrustDiscovery?: () => Promise<DesktopSnapshot>;
-  startDeviceCleanup?: () => Promise<DesktopSnapshot>;
-  submitDeviceCleanupUia?: (flowId: number, password: string) => Promise<DesktopSnapshot>;
-  eraseLocalDataAnyway?: () => Promise<DesktopSnapshot>;
-  recoverSecureBackup?: (secret: string) => Promise<DesktopSnapshot>;
+  startOwnUserSas: () => Promise<CommandReceipt>;
+  submitRecovery: (secret: string) => Promise<CommandReceipt>;
+  retryCurrentDeviceTrustDiscovery?: () => Promise<CommandReceipt>;
+  startDeviceCleanup?: () => Promise<CommandReceipt>;
+  submitDeviceCleanupUia?: (flowId: number, password: string) => Promise<CommandReceipt>;
+  eraseLocalDataAnyway?: () => Promise<CommandReceipt>;
+  recoverSecureBackup?: (secret: string) => Promise<CommandReceipt>;
   bootstrapSecureBackup?: (
     passphrase: string | null,
     recoveryKeyDestinationPath: string | null,
     intent: SecureBackupSetupIntent
-  ) => Promise<DesktopSnapshot>;
+  ) => Promise<CommandReceipt>;
   chooseSecureBackupDestination?: () => Promise<string | null>;
-  retrySecureBackupInspection?: () => Promise<DesktopSnapshot>;
+  retrySecureBackupInspection?: () => Promise<CommandReceipt>;
   openSecureBackupDiagnostics?: () => Promise<void> | void;
 }
 
@@ -139,13 +141,13 @@ export function secureBackupGateFailure(
 
 export function SessionVerificationGate({
   snapshot,
-  onSnapshot,
+  onReceipt,
   onSignOut,
   onStartWindowDrag = startSessionVerificationWindowDrag,
   operations: providedOperations
 }: {
   snapshot: DesktopSnapshot;
-  onSnapshot: (snapshot: DesktopSnapshot) => void;
+  onReceipt: (receipt: CommandReceipt) => Promise<void>;
   onSignOut: () => void;
   onStartWindowDrag?: () => void;
   operations?: SessionVerificationGateOperations;
@@ -184,7 +186,9 @@ export function SessionVerificationGate({
   const preparationFailure =
     session.kind === "provisional" ? provisionalPhaseFailure(session.phase) : null;
   const activelyVerifying = session.kind === "verifying";
-  const [gateOperation, setGateOperation] = useState<"recovery" | "sas" | "cleanup" | null>(null);
+  const [gateOperations, setGateOperations] = useState<ReadonlySet<GateOperationKind>>(
+    () => new Set()
+  );
   const [secureBackupOperation, setSecureBackupOperation] =
     useState<SecureBackupOperationKind | null>(null);
   const [secureBackupOperationError, setSecureBackupOperationError] = useState(false);
@@ -209,18 +213,18 @@ export function SessionVerificationGate({
     setSecureBackupDestinationChoosing(false);
     setConfirmSecureBackupReenable(false);
   }, [secureBackupConfirmationOwner, secureBackupGate.kind]);
-  const gateOperationRef = useRef<"recovery" | "sas" | "cleanup" | null>(null);
+  const gateOperationsRef = useRef(new Set<GateOperationKind>());
   const secureBackupOperationRef = useRef<SecureBackupOperationKind | null>(null);
   const run = async (
-    kind: "recovery" | "sas" | "cleanup",
-    operation: () => Promise<DesktopSnapshot>
+    kind: GateOperationKind,
+    operation: () => Promise<CommandReceipt>
   ) => {
-    if (gateOperationRef.current === kind) return;
-    gateOperationRef.current = kind;
+    if (gateOperationsRef.current.has(kind)) return;
+    gateOperationsRef.current.add(kind);
     setOperationError(null);
-    setGateOperation(kind);
+    setGateOperations(new Set(gateOperationsRef.current));
     try {
-      onSnapshot(await operation());
+      await onReceipt(await operation());
     } catch {
       setOperationError(
         kind === "cleanup"
@@ -228,13 +232,13 @@ export function SessionVerificationGate({
           : t("gate.verificationCommandFailed")
       );
     } finally {
-      gateOperationRef.current = null;
-      setGateOperation(null);
+      gateOperationsRef.current.delete(kind);
+      setGateOperations(new Set(gateOperationsRef.current));
     }
   };
   const runSecureBackup = async (
     kind: SecureBackupOperationKind,
-    operation: (() => Promise<DesktopSnapshot>) | undefined
+    operation: (() => Promise<CommandReceipt>) | undefined
   ) => {
     if (secureBackupOperationRef.current !== null) return;
     if (!operation) {
@@ -245,7 +249,7 @@ export function SessionVerificationGate({
     setSecureBackupOperationError(false);
     setSecureBackupOperation(kind);
     try {
-      onSnapshot(await operation());
+      await onReceipt(await operation());
     } catch {
       setSecureBackupOperationError(true);
     } finally {
@@ -515,7 +519,7 @@ export function SessionVerificationGate({
     {(discovering || rechecking) && <button
       className="dialog-button is-primary"
       type="button"
-      disabled={gateOperation !== null}
+      disabled={gateOperations.size > 0}
       onClick={() => void run(
         "recovery",
         operations.retryCurrentDeviceTrustDiscovery ?? (() => api.retryCurrentDeviceTrustDiscovery())
@@ -531,12 +535,12 @@ export function SessionVerificationGate({
     {preparationFailure && <p role="alert">{gateFailureLabel(preparationFailure)}</p>}
     {operationError && !session.gate?.failureKind && !preparationFailure && <p role="alert">{operationError}</p>}
     {session.kind === "rejecting" && session.reason && <p role="alert">{gateRejectLabel(session.reason)}</p>}
-    {awaiting && canUseRecoverySecret && <ImeSafeForm onSubmit={(event) => { event.preventDefault(); const secret = recoveryRef.current?.value.trim() ?? ""; if (secret) void run("recovery", () => operations.submitRecovery(secret)); if (recoveryRef.current) recoveryRef.current.value = ""; }}><SecureImeTextField ref={recoveryRef} aria-label={t("gate.recoverySecret")} autoComplete="off"/><button className="dialog-button is-primary" disabled={gateOperation === "recovery"} type="submit">{t("gate.verifyRecoveryKey")}</button></ImeSafeForm>}
+    {awaiting && canUseRecoverySecret && <ImeSafeForm onSubmit={(event) => { event.preventDefault(); const secret = recoveryRef.current?.value.trim() ?? ""; if (secret) void run("recovery", () => operations.submitRecovery(secret)); if (recoveryRef.current) recoveryRef.current.value = ""; }}><SecureImeTextField ref={recoveryRef} aria-label={t("gate.recoverySecret")} autoComplete="off"/><button className="dialog-button is-primary" disabled={gateOperations.has("recovery")} type="submit">{t("gate.verifyRecoveryKey")}</button></ImeSafeForm>}
     {awaiting && !canUseRecoverySecret && !deviceVerificationAvailable && !methods.includes("bootstrap") && <div className="gate-no-recovery">
       <h2>{t("gate.noRecoveryKeyTitle")}</h2>
       <p>{t("gate.noRecoveryKeyCopy")}</p>
     </div>}
-    {awaiting && deviceVerificationAvailable && <button className="dialog-button" disabled={gateOperation === "sas"} onClick={() => setConfirmDeviceVerification(true)}>{t("gate.otherDevice")}</button>}
+    {awaiting && deviceVerificationAvailable && <button className="dialog-button" disabled={gateOperations.has("sas")} onClick={() => setConfirmDeviceVerification(true)}>{t("gate.otherDevice")}</button>}
     {awaiting && deviceVerificationAvailable && confirmDeviceVerification && <div className="trust-verification-dialog" role="dialog" aria-modal="true" aria-labelledby="device-verification-confirm-title">
       <h2 id="device-verification-confirm-title">{t("gate.deviceVerificationDialogTitle")}</h2>
       <p>{t("gate.deviceVerificationDialogCopy")}</p>
@@ -551,9 +555,9 @@ export function SessionVerificationGate({
     {awaiting && methods.includes("bootstrap") && <ImeSafeForm onSubmit={(event) => { event.preventDefault(); const destination = destinationRef.current?.value.trim() ?? ""; const passphrase = passphraseRef.current?.value || null; if (destinationRef.current) destinationRef.current.value = ""; if (passphraseRef.current) passphraseRef.current.value = ""; if (destination) void run("recovery", () => api.startSessionBootstrap(passphrase, destination)); }}><ImeTextField ref={destinationRef} aria-label={t("gate.destination")} syncKey="session-bootstrap-destination"/><SecureImeTextField ref={passphraseRef} aria-label={t("gate.passphrase")} autoComplete="new-password"/><button type="submit">{t("gate.bootstrap")}</button></ImeSafeForm>}
     {session.kind === "awaitingBootstrapConfirmation" && flowId !== undefined && <button onClick={() => void run("recovery", () => api.confirmSessionBootstrapSaved(flowId))}>{t("gate.saved")}</button>}
     {sasVerifying && flowId !== undefined && <button onClick={() => void run("sas", () => api.cancelVerification(flowId))}>{t("action.cancel")}</button>}
-    {cleanupSurfaceOwned && deviceCleanup.kind === "offered" && <button className="dialog-button danger" type="button" disabled={gateOperation !== null} onClick={() => setConfirmDeviceCleanup(true)}>{t("gate.cleanupOffer")}</button>}
+    {cleanupSurfaceOwned && deviceCleanup.kind === "offered" && <button className="dialog-button danger" type="button" disabled={gateOperations.size > 0} onClick={() => setConfirmDeviceCleanup(true)}>{t("gate.cleanupOffer")}</button>}
     {cleanupSurfaceOwned && confirmDeviceCleanup && <ResetLocalDataConfirmationDialog
-      isBusy={gateOperation !== null}
+      isBusy={gateOperations.size > 0}
       title={t("gate.cleanupDialogTitle")}
       copy={t("gate.cleanupDialogCopy")}
       confirmLabel={t("gate.cleanupConfirm")}
@@ -574,15 +578,15 @@ export function SessionVerificationGate({
       }
     }}>
       <SecureImeTextField ref={cleanupPasswordRef} aria-label={t("gate.cleanupAccountPassword")} autoComplete="current-password"/>
-      <button className="dialog-button is-primary" disabled={gateOperation === "cleanup"} type="submit">{t("gate.cleanupContinue")}</button>
+      <button className="dialog-button is-primary" disabled={gateOperations.has("cleanup")} type="submit">{t("gate.cleanupContinue")}</button>
     </ImeSafeForm>}
     {cleanupSurfaceOwned && deviceCleanup.kind === "remoteFailed" && <>
       <p role="alert">{t("gate.cleanupRemoteFailed")}</p>
-      <button className="dialog-button" type="button" disabled={gateOperation !== null} onClick={startDeviceCleanup}>{t("gate.cleanupRetryRemote")}</button>
-      <button className="dialog-button danger" type="button" disabled={gateOperation !== null} onClick={() => setConfirmEraseLocalAnyway(true)}>{t("gate.cleanupEraseAnywayOffer")}</button>
+      <button className="dialog-button" type="button" disabled={gateOperations.size > 0} onClick={startDeviceCleanup}>{t("gate.cleanupRetryRemote")}</button>
+      <button className="dialog-button danger" type="button" disabled={gateOperations.size > 0} onClick={() => setConfirmEraseLocalAnyway(true)}>{t("gate.cleanupEraseAnywayOffer")}</button>
     </>}
     {cleanupSurfaceOwned && confirmEraseLocalAnyway && <ResetLocalDataConfirmationDialog
-      isBusy={gateOperation !== null}
+      isBusy={gateOperations.size > 0}
       title={t("gate.cleanupEraseAnywayTitle")}
       copy={t("gate.cleanupEraseAnywayCopy")}
       confirmLabel={t("gate.cleanupEraseAnywayConfirm")}
@@ -593,7 +597,7 @@ export function SessionVerificationGate({
     {cleanupSurfaceOwned && deviceCleanup.kind === "erasingLocalAnyway" && <p>{t("gate.cleanupErasingLocal")}</p>}
     {cleanupSurfaceOwned && deviceCleanup.kind === "localResetFailed" && <>
       <p role="alert">{t("gate.cleanupLocalFailed")}</p>
-      <button className="dialog-button" type="button" disabled={gateOperation !== null} onClick={startDeviceCleanup}>{t("gate.cleanupRetryLocal")}</button>
+      <button className="dialog-button" type="button" disabled={gateOperations.size > 0} onClick={startDeviceCleanup}>{t("gate.cleanupRetryLocal")}</button>
     </>}
     <button onClick={onSignOut}>{t("gate.signOut")}</button>
   </main>;

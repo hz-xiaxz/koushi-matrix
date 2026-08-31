@@ -159,6 +159,13 @@ fn qa_operation_failed_event(request_id: RequestId) -> CoreEvent {
     }
 }
 
+fn qa_state_delta_event() -> CoreEvent {
+    CoreEvent::StateDelta(koushi_core::StateDelta {
+        generation: 1,
+        changed: koushi_core::StateDeltaChangedSlices::default(),
+    })
+}
+
 #[test]
 fn session_restored_account_mismatch_is_private_safe() {
     let error = ensure_session_restored_account_key(
@@ -178,23 +185,16 @@ async fn logged_out_waiter_requires_event_and_signed_out_snapshot_in_either_orde
         sequence: 7,
     };
     let account_key = AccountKey("@logout-barrier:example.invalid".to_owned());
-    let signed_out = qa_state_with_session(SessionState::SignedOut);
     let cases = [
         [
             (
                 qa_logged_out_event(request_id, account_key.clone()),
                 SessionState::LoggingOut,
             ),
-            (
-                CoreEvent::StateChanged(signed_out.clone()),
-                SessionState::SignedOut,
-            ),
+            (qa_state_delta_event(), SessionState::SignedOut),
         ],
         [
-            (
-                CoreEvent::StateChanged(signed_out.clone()),
-                SessionState::SignedOut,
-            ),
+            (qa_state_delta_event(), SessionState::SignedOut),
             (
                 qa_logged_out_event(request_id, account_key.clone()),
                 SessionState::SignedOut,
@@ -274,23 +274,16 @@ async fn operation_failed_signed_out_waiter_requires_both_signals_in_either_orde
         connection_id: koushi_core::ids::RuntimeConnectionId(1),
         sequence: 10,
     };
-    let signed_out = qa_state_with_session(SessionState::SignedOut);
     let cases = [
         [
             (
                 qa_operation_failed_event(request_id),
                 SessionState::Restoring,
             ),
-            (
-                CoreEvent::StateChanged(signed_out.clone()),
-                SessionState::SignedOut,
-            ),
+            (qa_state_delta_event(), SessionState::SignedOut),
         ],
         [
-            (
-                CoreEvent::StateChanged(signed_out.clone()),
-                SessionState::SignedOut,
-            ),
+            (qa_state_delta_event(), SessionState::SignedOut),
             (
                 qa_operation_failed_event(request_id),
                 SessionState::SignedOut,
@@ -327,7 +320,7 @@ async fn operation_failed_signed_out_waiter_requires_both_signals_in_either_orde
             SessionState::SignedOut,
         )]
         .into(),
-        snapshot: signed_out,
+        snapshot: qa_state_with_session(SessionState::SignedOut),
         received: 0,
     };
     let error = wait_for_operation_failed_and_signed_out(
@@ -469,10 +462,7 @@ async fn recovery_gate_waits_for_late_authoritative_recovery_required_after_read
     let ready = qa_state_with_session(SessionState::Ready(info.clone()));
     let mut source = ScriptedQaSnapshotEventSource {
         events: [
-            (
-                CoreEvent::StateChanged(ready.clone()),
-                ready.session.clone(),
-            ),
+            (qa_state_delta_event(), ready.session.clone()),
             (
                 CoreEvent::Account(AccountEvent::RecoveryRequired {
                     account_key: AccountKey(info.user_id),

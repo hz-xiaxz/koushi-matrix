@@ -3,10 +3,12 @@ use super::account::{
     build_submit_device_cleanup_uia_command,
 };
 use super::*;
+use crate::dto::FrontendDesktopSnapshot;
 #[derive(serde::Serialize)]
 pub struct OidcAuthorizationResponse {
     pub authorization_url: String,
     pub state: String,
+    pub settlement: FrontendCommandSettlement,
 }
 
 #[tauri::command]
@@ -15,14 +17,58 @@ pub async fn get_snapshot(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDesktopSnapshot, String> {
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    let snapshot = state.inner().connection.lock().await.versioned_snapshot();
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
+}
+
+/// Reconcile a command receipt whose state delta has not reached the renderer.
+#[tauri::command]
+pub async fn settlement_snapshot(
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let snapshot = state.inner().connection.lock().await.versioned_snapshot();
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        snapshot.state,
+        snapshot.generation,
+    ))
+}
+
+/// Recover a frontend-detected state/timeline gap from one exact Core snapshot.
+///
+/// The snapshot is captured before submitting the single replay command so its
+/// generation is the generation returned to the caller, not a later watch value.
+#[tauri::command]
+pub async fn resync_snapshot(
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendDesktopSnapshot, String> {
+    let (versioned_snapshot, request_id) = {
+        let connection = state.inner().connection.lock().await;
+        (
+            connection.versioned_snapshot(),
+            connection.next_request_id(),
+        )
+    };
+    submit_core_command(
+        state.inner(),
+        CoreCommand::Timeline(TimelineCommand::ReplaySubscribed { request_id }),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(FrontendDesktopSnapshot::from_versioned(
+        versioned_snapshot.state,
+        versioned_snapshot.generation,
+    ))
 }
 
 #[tauri::command]
 pub async fn discover_login_methods(
     homeserver: String,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut wait_conn = state.inner().runtime.attach();
     let baseline_generation = wait_conn.versioned_snapshot().generation;
     let request_id = next_request_id(state.inner()).await;
@@ -46,10 +92,7 @@ pub async fn discover_login_methods(
     let RequestOutcome::AuthDiscovery { snapshot, .. } = outcome else {
         return Err("login discovery returned an invalid outcome".to_owned());
     };
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -77,6 +120,7 @@ pub async fn start_oidc_login(
     let RequestOutcome::OidcAuthorization {
         authorization_url,
         state,
+        generation,
         ..
     } = outcome
     else {
@@ -85,6 +129,7 @@ pub async fn start_oidc_login(
     Ok(OidcAuthorizationResponse {
         authorization_url,
         state,
+        settlement: FrontendCommandSettlement::from_published_generation(generation),
     })
 }
 
@@ -94,7 +139,7 @@ pub async fn complete_oidc_login(
     callback_url: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut wait_conn = state.inner().runtime.attach();
     let baseline_generation = wait_conn.versioned_snapshot().generation;
     let account_key = account_key_from_app_state(&wait_conn.snapshot());
@@ -125,10 +170,7 @@ pub async fn complete_oidc_login(
         return Err("OIDC login returned an invalid outcome".to_owned());
     };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -140,7 +182,7 @@ pub async fn submit_login(
     platform: DisplayPlatform,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let login_request = LoginRequest {
         homeserver,
         username,
@@ -148,10 +190,7 @@ pub async fn submit_login(
         device_display_name,
     };
     let snapshot = submit_login_request(app, state.inner(), login_request, platform).await?;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -159,13 +198,10 @@ pub async fn submit_soft_logout_reauth(
     password: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let snapshot =
         submit_soft_logout_reauth_request(app, state.inner(), AuthSecret::new(password)).await?;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -207,17 +243,34 @@ pub async fn switch_account(
     device_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
+    let mut wait_conn = state.inner().runtime.attach();
+    let baseline_generation = wait_conn.versioned_snapshot().generation;
     let request_id = next_request_id(state.inner()).await;
     submit_core_command(
         state.inner(),
-        build_switch_account_command(request_id, user_id),
+        build_switch_account_command(request_id, user_id.clone()),
     )
     .await?;
+    let outcome = wait_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::Authenticated {
+                request_id,
+                account_key: Some(AccountKey(user_id)),
+            },
+            baseline_generation,
+            tokio::time::Instant::now() + LOGIN_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("account switch", error))?;
+    let RequestOutcome::Authenticated { snapshot, .. } = outcome else {
+        return Err("account switch returned an invalid outcome".to_owned());
+    };
     // AccountKey canonically identifies the account by user_id.
     let _ = (homeserver, device_id);
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -225,22 +278,21 @@ pub async fn submit_recovery(
     secret: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
-    submit_recovery_request(app, state.inner(), AuthSecret::new(secret)).await?;
-    current_snapshot(state.inner()).await
+) -> Result<FrontendCommandAdmission, String> {
+    submit_recovery_request(app, state.inner(), AuthSecret::new(secret)).await
 }
 
 #[tauri::command]
 pub async fn start_device_cleanup(
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_start_device_cleanup_command(request_id),
     )
     .await?;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -248,71 +300,96 @@ pub async fn submit_device_cleanup_uia(
     flow_id: u64,
     password: String,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_submit_device_cleanup_uia_command(request_id, flow_id, AuthSecret::new(password)),
     )
     .await?;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
 pub async fn erase_local_data_anyway(
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_erase_device_cleanup_local_data_anyway_command(request_id),
     )
     .await?;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
 pub async fn logout(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
+    let mut wait_conn = state.inner().runtime.attach();
+    let baseline = wait_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
     let request_id = next_request_id(state.inner()).await;
     submit_core_command(state.inner(), build_logout_command(request_id)).await?;
+    let outcome = wait_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::SignedOut {
+                request_id,
+                account_key,
+                allow_projection_only: false,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + LOGIN_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("logout", error))?;
+    let RequestOutcome::SignedOut { snapshot, .. } = outcome else {
+        return Err("logout returned an invalid outcome".to_owned());
+    };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
 pub async fn retry_sliding_sync_capability(
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_retry_sliding_sync_capability_command(request_id),
     )
     .await?;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
 pub async fn change_homeserver(
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(state.inner(), build_change_homeserver_command(request_id)).await?;
-    current_snapshot(state.inner()).await
+    let admission = submit_core_command_with_admission(
+        state.inner(),
+        build_change_homeserver_command(request_id),
+    )
+    .await?;
+    Ok(admission)
 }
 
 #[tauri::command]
 pub async fn restart_sync(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(state.inner(), build_restart_sync_command(request_id)).await?;
+    let admission =
+        submit_core_command_with_admission(state.inner(), build_restart_sync_command(request_id))
+            .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 pub(super) async fn submit_login_request(
@@ -408,11 +485,15 @@ pub(super) async fn submit_recovery_request(
     app: AppHandle,
     state: &CoreRuntimeState,
     secret: AuthSecret,
-) -> Result<(), String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state).await;
-    submit_core_command(state, build_submit_recovery_command(request_id, secret)).await?;
+    let admission = submit_core_command_with_admission(
+        state,
+        build_submit_recovery_command(request_id, secret),
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state).await;
-    Ok(())
+    Ok(admission)
 }
 
 pub(super) fn build_submit_login_command(

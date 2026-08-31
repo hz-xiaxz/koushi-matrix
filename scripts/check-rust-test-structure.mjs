@@ -656,10 +656,12 @@ export function checkDesktopLocalEncryptionCommandContract() {
     if (!source.includes(command) || !source.includes(builder) || !source.includes(route) || !libSource.includes(registration)) failures.push(sourceContractFailure(rule, `missing local-encryption contract for ${command}`));
   }
   const reset = rustItemBody(readTauriSource("commands/local_encryption.rs"), "pub async fn reset_local_data");
-  for (const marker of ["wait_for_request_outcome", "RequestOutcomeExpectation::SignedOut", "baseline_generation"]) {
-    if (!reset?.includes(marker)) failures.push(sourceContractFailure(rule, `reset_local_data lacks Core outcome marker ${marker}`));
+  for (const marker of ["submit_core_command_with_admission", "FrontendCommandAdmission"]) {
+    if (!reset?.includes(marker)) failures.push(sourceContractFailure(rule, `reset_local_data lacks Core admission marker ${marker}`));
   }
-  if (reset?.includes("wait_for_local_data_reset")) failures.push(sourceContractFailure(rule, "reset_local_data retains adapter-owned settlement"));
+  for (const marker of ["wait_for_request_outcome", "RequestOutcomeExpectation::SignedOut", "current_snapshot"]) {
+    if (reset?.includes(marker)) failures.push(sourceContractFailure(rule, `reset_local_data retains terminal snapshot marker ${marker}`));
+  }
   return failures;
 }
 
@@ -699,7 +701,7 @@ export function checkDesktopRoomOperationContract() {
   const failures = [];
   for (const [command, operation] of [["pub async fn load_room_settings", "RoomSettingsLoaded"], ["pub async fn update_room_setting", "RoomSettingUpdated"], ["pub async fn moderate_room_member", "MemberModerated"], ["pub async fn update_room_member_role", "MemberRoleUpdated"]]) {
     const body = rustItemBody(source, command);
-    for (const marker of ["wait_for_room_operation", `RoomOperationKind::${operation}`, "FrontendDesktopSnapshot::from_versioned"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} lacks Core room outcome marker ${marker}`));
+    for (const marker of ["wait_for_room_operation", `RoomOperationKind::${operation}`, "command_settlement"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} lacks Core room outcome marker ${marker}`));
     if (body?.includes("recv_event") || body?.includes("timeout_at")) failures.push(sourceContractFailure(rule, `${command} retains adapter waiter`));
   }
   return failures;
@@ -712,7 +714,7 @@ export function checkDesktopSpaceOperationContract() {
   const failures = [];
   for (const [command, operation] of [["pub async fn load_space_members", "SpaceMembersLoaded"], ["pub async fn invite_user_to_space", "SpaceMemberInviteSettled"], ["pub async fn cancel_space_invite", "SpaceMemberInviteCancellationSettled"], ["pub async fn update_space_member_role", "SpaceMemberRoleUpdated"]]) {
     const body = rustItemBody(source, command);
-    for (const marker of ["wait_for_room_operation", `RoomOperationKind::${operation}`, "FrontendDesktopSnapshot::from_versioned"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} lacks Core space outcome marker ${marker}`));
+    for (const marker of ["wait_for_room_operation", `RoomOperationKind::${operation}`, "command_settlement"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} lacks Core space outcome marker ${marker}`));
     if (body?.includes("recv_event") || body?.includes("timeout_at")) failures.push(sourceContractFailure(rule, `${command} retains adapter waiter`));
   }
   for (const registration of ["commands::room::cancel_space_invite", "commands::room::update_space_member_role"]) if (!libSource.includes(registration)) failures.push(sourceContractFailure(rule, `space operation registration is missing ${registration}`));
@@ -728,7 +730,7 @@ export function checkDesktopSearchCommandContract() {
   const failures = [];
   for (const marker of ["SearchScope::CurrentSpace", "SearchScope::CurrentRoom"]) if (!resolver?.includes(marker)) failures.push(sourceContractFailure(rule, `search scope resolver lacks ${marker}`));
   if (resolver?.includes("unwrap_or(SearchScope::AllRooms)")) failures.push(sourceContractFailure(rule, "search scope resolver collapses to allRooms"));
-  for (const marker of ["submit_search_production_path", "current_snapshot"]) if (!command?.includes(marker)) failures.push(sourceContractFailure(rule, `submit_search lacks ${marker}`));
+  for (const marker of ["submit_search_production_path", "FrontendCommandSettlement", "Ok(settlement)"]) if (!command?.includes(marker)) failures.push(sourceContractFailure(rule, `submit_search lacks ${marker}`));
   for (const marker of ["state.runtime.attach", "versioned_snapshot", "baseline_generation", "next_request_id(state).await", "submit_core_command", "wait_for_request_outcome", "RequestOutcomeExpectation::SearchStarted", "account_key", "query", "search_scope"]) {
     if (!helper?.includes(marker)) failures.push(sourceContractFailure(rule, `search path lacks Core outcome marker ${marker}`));
   }
@@ -774,24 +776,16 @@ export function checkDesktopNavigationContract() {
   for (const marker of ["EnterAnchoredTimeline", "wait_for_focused_timeline_event", "build_subscribe_timeline_command"]) if (anchored?.includes(marker)) failures.push(sourceContractFailure(rule, `anchored navigation contains forbidden ${marker}`));
   failures.push(...orderedMarkers(rule, anchored ?? "", ["select_room_and_wait", "OpenAnchoredTimeline", "wait_for_main_timeline_anchor"]));
   const close = rustItemBody(source, "pub async fn close_focused_context");
-  for (const marker of ["CloseFocusedContext", "update_qa_window_title_from_state", "current_snapshot"]) if (!close?.includes(marker)) failures.push(sourceContractFailure(rule, `close_focused_context lacks ${marker}`));
-  failures.push(...orderedMarkers(rule, close ?? "", ["CloseFocusedContext", "wait_for_focused_context_closed", "current_snapshot"]));
+  for (const marker of ["CloseFocusedContext", "update_qa_window_title_from_state", "FrontendCommandSettlement::from_published_generation"]) if (!close?.includes(marker)) failures.push(sourceContractFailure(rule, `close_focused_context lacks ${marker}`));
+  failures.push(...orderedMarkers(rule, close ?? "", ["CloseFocusedContext", "wait_for_focused_context_closed", "FrontendCommandSettlement::from_published_generation"]));
   return failures;
 }
 
 export function checkDesktopSpaceTraceContract() {
   const rule = "desktop.navigation.space_trace_contract";
   const body = rustItemBody(readTauriSource("commands/navigation.rs"), "pub async fn select_space");
-  const failures = orderedMarkers(rule, body ?? "", ["\"desktop.space.transition\", \"submit\"", "build_select_space_command", "\"snapshot\""]);
+  const failures = orderedMarkers(rule, body ?? "", ["\"desktop.space.transition\", \"submit\"", "build_select_space_command", "\"admitted\""]);
   for (const marker of ["DiagnosticField::request_id", "DiagnosticField::milliseconds", "DiagnosticField::boolean"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `space transition trace lacks ${marker}`));
-  return failures;
-}
-
-export function checkDesktopTimelineGenerationAckContract() {
-  const rule = "desktop.timeline.generation_ack_contract";
-  const body = rustItemBody(readTauriSource("commands/navigation.rs"), "pub async fn acknowledge_timeline_batch_rendered");
-  const failures = [];
-  for (const marker of ["key: TimelineKey", "actor_generation: u64", "timeline_generation: TimelineGeneration", "repair_generation: u64", "batch_id: TimelineBatchId", "AppCommand::AcknowledgeTimelineBatchRendered"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `timeline ACK lacks ${marker}`));
   return failures;
 }
 
@@ -943,7 +937,6 @@ function sourceContractFailure(rule, message) {
 // koushi_core::runtime::tests::opening_focused_context_repairs_target_event_cache_before_subscribe | 1 | core.runtime.focused_cache_repair | 1
 // koushi_core::runtime::tests::selecting_a_replacement_room_cancels_previous_room_pagination_before_subscribe | 2 | core.runtime.room_switch_pagination | 2
 // koushi_core::runtime::tests::selecting_a_replacement_room_cancels_previous_room_link_previews_before_subscribe | 2 | core.runtime.room_switch_link_previews | 2
-// koushi_core::runtime::tests::focused_ack_and_command_coalescer_share_the_latest_published_baseline | 2 | core.runtime.coalescer_baseline | 2
 // koushi_core::runtime::tests::timestamp_jump_uses_local_activity_projection_before_homeserver_fallback | 2 | core.runtime.timestamp_activity_projection | 2
 // koushi_core::runtime::connection::tests::core_connection_command_handle_clones_submit_path | 4 | core.runtime.connection_command_handle | 8
 // koushi_core::executor::tests::executor_exposes_blocking_task_port | 2 | core.runtime.executor_blocking_port | 2
@@ -1592,10 +1585,9 @@ export function checkCoreRuntimeConnectionCommandHandle() {
 export function checkCoreRuntimeCoalescerBaseline() {
   const rule = "core.runtime.coalescer_baseline";
   const source = coreSource("runtime.rs");
-  const command = sourceSection(source, "command = self.command_rx.recv()", "actions = self.action_rx.recv()");
-  const ack = sourceSection(source, "AppCommand::AcknowledgeTimelineProjection", "AppCommand::OpenTimelineAtTimestamp");
+  const command = sourceSection(source, "command = self.command_rx.recv()", "focused_projection = self.focused_projection_rx.recv()");
   const failures = [];
-  for (const section of [command, ack]) if (!section?.includes("self.snapshot_tx.borrow().state.clone()")) failures.push(sourceContractFailure(rule, "coalescer path does not publish the latest unpublished baseline"));
+  if (!command?.includes("self.snapshot_tx.borrow().state.clone()")) failures.push(sourceContractFailure(rule, "coalescer path does not publish the latest unpublished baseline"));
   return failures;
 }
 
@@ -3179,14 +3171,14 @@ export function checkCoreQaReconnectEncryptionGate() {
   const stage = coreQaItemBody("bin/headless_core_qa/scenarios/timeline.rs", "async fn run_timeline_reconnect_scenario_impl");
   const helper = coreQaItemBody("bin/headless_core_qa/event_wait.rs", "async fn wait_for_encrypted_room_projection_for_qa");
   const failures = [];
-  for (const marker of ["create_room_for_qa", "wait_for_encrypted_room_projection_for_qa(", "subscribe_and_ack_active_timeline_projection_for_qa(", "TimelineCommand::SendText"]) {
+  for (const marker of ["create_room_for_qa", "wait_for_encrypted_room_projection_for_qa(", "subscribe_active_timeline_projection_for_qa(", "TimelineCommand::SendText"]) {
     if (!stage?.includes(marker)) failures.push(sourceContractFailure(rule, `reconnect stage lacks ${marker}`));
   }
-  for (const marker of ["ROOM_LIST_EVENT_TIMEOUT", "room.room_id == expected_room_id && room.is_encrypted", "RoomEvent::RoomListUpdated", "CoreEvent::StateChanged(snapshot)", "tokio::time::timeout_at(deadline, conn.recv_event())"]) {
+  for (const marker of ["ROOM_LIST_EVENT_TIMEOUT", "room.room_id == expected_room_id && room.is_encrypted", "RoomEvent::RoomListUpdated", "CoreEvent::StateDelta(_)", "tokio::time::timeout_at(deadline, conn.recv_event())"]) {
     if (!helper?.includes(marker)) failures.push(sourceContractFailure(rule, `encrypted-room waiter lacks ${marker}`));
   }
   if (helper?.includes("tokio::time::sleep")) failures.push(sourceContractFailure(rule, "encrypted-room waiter uses a fixed sleep"));
-  const subscribe = stage?.indexOf("subscribe_and_ack_active_timeline_projection_for_qa(") ?? -1;
+  const subscribe = stage?.indexOf("subscribe_active_timeline_projection_for_qa(") ?? -1;
   const send = stage?.indexOf("TimelineCommand::SendText") ?? -1;
   const gateA = stage?.indexOf("wait_for_encrypted_room_projection_for_qa(\n            &mut conn_a") ?? -1;
   const gateB = stage?.indexOf("wait_for_encrypted_room_projection_for_qa(\n            &mut conn_b") ?? -1;
@@ -3337,7 +3329,7 @@ export function checkCoreQaStrictWaiters() {
   const waiters = [
     ["wait_for_existing_identity_gate", "participants.rs"],
     ["wait_for_room_in_room_list", "event_wait.rs"],
-    ["subscribe_and_ack_active_timeline_projection_for_qa", "scenarios/timeline.rs"],
+    ["subscribe_active_timeline_projection_for_qa", "scenarios/timeline.rs"],
     ["wait_for_verification_requested_event_only", "participants.rs"],
     ["wait_for_verification_accepted", "participants.rs"],
     ["wait_for_initial_items_from_source", "event_wait.rs"],
@@ -3792,7 +3784,6 @@ export function runSourceContractRules() {
     checkDesktopSettingsCommandContract(),
     checkDesktopNavigationContract(),
     checkDesktopSpaceTraceContract(),
-    checkDesktopTimelineGenerationAckContract(),
     checkDesktopTimelineCommandContract(),
     checkDesktopTimelineSignalContract(),
     checkDesktopScheduledSendCommandContract(),

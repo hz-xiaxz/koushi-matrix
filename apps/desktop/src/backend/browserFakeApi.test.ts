@@ -1,3 +1,4 @@
+import { browserCommandSnapshot, browserSubmissionResponse } from "./browserFakeApi.testSupport";
 import { describe, expect, test, vi } from "vitest";
 
 import { createBrowserFakeApi } from "./browserFakeApi";
@@ -6,6 +7,7 @@ import { parseComposerDraftRevision as revision } from "../domain/composerDraftR
 import type {
   ComposerTarget,
   ComposerDocument,
+  CommandReceipt,
   DesktopSnapshot,
   LiveReadReceipt,
   SecureBackupGateState
@@ -133,25 +135,25 @@ function sessionViewProjection(snapshot: DesktopSnapshot) {
 
 async function dirtyBrowserFakeSessionViews(api: ReturnType<typeof createBrowserFakeApi>) {
   const roomId = "!room-alpha:example.invalid";
-  await api.refreshCurrentSessionStatus("manual");
-  await api.loadAccountManagementCapabilities();
-  await api.setRoomUrlPreviewOverride(roomId, false);
-  await api.selectSpace("!space-alpha:example.invalid");
-  await api.loadSpaceMembers("!space-alpha:example.invalid", 1);
-  await api.setRoomNotificationMode(roomId, { kind: "mute" });
-  await api.pinEvent(roomId, "$session-reset-pin");
+  await browserCommandSnapshot(api, api.refreshCurrentSessionStatus("manual"));
+  await browserCommandSnapshot(api, api.loadAccountManagementCapabilities());
+  await browserCommandSnapshot(api, api.setRoomUrlPreviewOverride(roomId, false));
+  await browserCommandSnapshot(api, api.selectSpace("!space-alpha:example.invalid"));
+  await browserCommandSnapshot(api, api.loadSpaceMembers("!space-alpha:example.invalid", 1));
+  await browserCommandSnapshot(api, api.setRoomNotificationMode(roomId, { kind: "mute" }));
+  await browserCommandSnapshot(api, api.pinEvent(roomId, "$session-reset-pin"));
   await api.queryMentionCandidates(roomId, "main", "ali");
-  await api.openInviteWorkflow(roomId);
-  await api.startRoomCrawl(roomId);
-  await api.setPresence("online");
-  await api.probeLocalEncryptionHealth();
-  await api.openActivityEvent(roomId, "$alpha-update");
-  await api.openThreadsList({ kind: "room", room_id: roomId });
-  await api.openFilesView(
+  await browserCommandSnapshot(api, api.openInviteWorkflow(roomId));
+  await browserCommandSnapshot(api, api.startRoomCrawl(roomId));
+  await browserCommandSnapshot(api, api.setPresence("online"));
+  await browserCommandSnapshot(api, api.probeLocalEncryptionHealth());
+  await browserCommandSnapshot(api, api.openActivityEvent(roomId, "$alpha-update"));
+  await browserCommandSnapshot(api, api.openThreadsList({ kind: "room", room_id: roomId }));
+  await browserCommandSnapshot(api, api.openFilesView(
     { kind: "room", room_id: roomId },
     { kinds: ["image", "video", "audio", "file", "sticker"], filename_query: null },
     "newestFirst"
-  );
+  ));
 }
 
 const alphaRoomId = "!room-alpha:example.invalid";
@@ -165,11 +167,11 @@ async function dirtyRoomOwnedState(
   roomId: string,
   eventId: string
 ) {
-  await api.setRoomUrlPreviewOverride(roomId, false);
-  await api.setRoomNotificationMode(roomId, { kind: "mentions" });
-  await api.pinEvent(roomId, `${eventId}-pin`);
+  await browserCommandSnapshot(api, api.setRoomUrlPreviewOverride(roomId, false));
+  await browserCommandSnapshot(api, api.setRoomNotificationMode(roomId, { kind: "mentions" }));
+  await browserCommandSnapshot(api, api.pinEvent(roomId, `${eventId}-pin`));
   await api.queryMentionCandidates(roomId, "main", "member");
-  await api.startRoomCrawl(roomId);
+  await browserCommandSnapshot(api, api.startRoomCrawl(roomId));
   await api.sendReadReceipt(roomId, eventId);
   await api.setFullyRead(roomId, eventId);
   await api.setTyping(roomId, true);
@@ -245,12 +247,12 @@ describe("BrowserFakeApi session-view reset", () => {
 
       const snapshot =
         operation === "logout"
-          ? await api.logout()
+          ? await browserCommandSnapshot(api, api.logout())
           : operation === "changeHomeserver"
-            ? await api.changeHomeserver()
+            ? await browserCommandSnapshot(api, api.changeHomeserver())
             : operation === "failedSubmitLogin"
-              ? await api.submitLogin("https://example.invalid", "user", "password", "device", "linux")
-              : await api.resetLocalData();
+              ? await browserCommandSnapshot(api, api.submitLogin("https://example.invalid", "user", "password", "device", "linux"))
+              : await browserCommandSnapshot(api, api.resetLocalData());
 
       expect(resetSessionViewProjection(snapshot)).toEqual(
         resetSessionViewProjection(signedOut)
@@ -276,13 +278,13 @@ describe("BrowserFakeApi session-view reset", () => {
       soft_logout: true
     };
 
-    const snapshot = await api.submitLogin(
+    const snapshot = await browserCommandSnapshot(api, api.submitLogin(
       "https://example.invalid",
       "user",
       "password",
       "device",
       "linux"
-    );
+    ));
 
     expect(snapshot.state.domain.session).toEqual({ kind: "signedOut" });
     expect(snapshot.state.domain.session_lock_reason).toBeNull();
@@ -300,8 +302,8 @@ describe("BrowserFakeApi session-view reset", () => {
 
       const snapshot =
         operation === "completeOidcLogin"
-          ? await api.completeOidcLogin("https://example.invalid", "http://localhost/callback")
-          : await api.switchAccount((await api.listSavedSessions())[1]);
+          ? await browserCommandSnapshot(api, api.completeOidcLogin("https://example.invalid", "http://localhost/callback"))
+          : await browserCommandSnapshot(api, api.switchAccount((await api.listSavedSessions())[1]));
 
       expect(snapshot.state.domain.session.kind).toBe("ready");
       expect(sessionViewProjection(snapshot)).toEqual(sessionViewProjection(ready));
@@ -336,7 +338,7 @@ describe("BrowserFakeApi Space member audit", () => {
   test("loads the requested Space generation and preserves classified sections", async () => {
     const api = createBrowserFakeApi();
 
-    const snapshot = await api.loadSpaceMembers(spaceId, 1);
+    const snapshot = await browserCommandSnapshot(api, api.loadSpaceMembers(spaceId, 1));
 
     expect(snapshot.state.domain.space_members).toMatchObject({
       selected_space_id: spaceId,
@@ -352,7 +354,7 @@ describe("BrowserFakeApi Space member audit", () => {
     const api = createBrowserFakeApi();
     const before = await api.getSnapshot();
 
-    const after = await api.loadSpaceMembers("!space-beta:example.invalid", 1);
+    const after = await browserCommandSnapshot(api, api.loadSpaceMembers("!space-beta:example.invalid", 1));
 
     expect(after).toEqual(before);
   });
@@ -361,8 +363,8 @@ describe("BrowserFakeApi Space member audit", () => {
     const api = createBrowserFakeApi();
     const before = await api.getSnapshot();
 
-    const stale = await api.loadSpaceMembers(spaceId, 0);
-    const future = await api.loadSpaceMembers(spaceId, 2);
+    const stale = await browserCommandSnapshot(api, api.loadSpaceMembers(spaceId, 0));
+    const future = await browserCommandSnapshot(api, api.loadSpaceMembers(spaceId, 2));
 
     expect(stale).toEqual(before);
     expect(future).toEqual(before);
@@ -378,10 +380,10 @@ describe("BrowserFakeApi Space member audit", () => {
       operation: { kind: "idle" }
     };
 
-    const rejected = await api.loadSpaceMembers("!space-beta:example.invalid", 99);
+    const rejected = await browserCommandSnapshot(api, api.loadSpaceMembers("!space-beta:example.invalid", 99));
     expect(rejected.state.domain.space_members.selected_space_id).toBeNull();
 
-    const snapshot = await api.loadSpaceMembers(spaceId, 99);
+    const snapshot = await browserCommandSnapshot(api, api.loadSpaceMembers(spaceId, 99));
 
     expect(snapshot.state.domain.space_members).toMatchObject({
       selected_space_id: spaceId,
@@ -408,8 +410,9 @@ describe("BrowserFakeApi Space member audit", () => {
     };
     const newerInvite = api.inviteUserToSpace(spaceId, childOnly!.user_id, currentMembers.generation);
 
-    const snapshot = await staleLoad;
+    await staleLoad;
     await newerInvite;
+    const snapshot = await api.getSnapshot();
 
     expect(snapshot.state.domain.space_members.operation).toMatchObject({
       kind: "inviting",
@@ -428,9 +431,9 @@ describe("BrowserFakeApi Space member audit", () => {
 
   test("does not replace an in-flight invite with a load operation", async () => {
     const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "pending" });
-    const before = await api.inviteUserToSpace(spaceId, childOnlyUserId, 1);
+    const before = await browserCommandSnapshot(api, api.inviteUserToSpace(spaceId, childOnlyUserId, 1));
 
-    const after = await api.loadSpaceMembers(spaceId, 1);
+    const after = await browserCommandSnapshot(api, api.loadSpaceMembers(spaceId, 1));
 
     expect(after).toEqual(before);
   });
@@ -438,7 +441,7 @@ describe("BrowserFakeApi Space member audit", () => {
   test("switching Spaces fences and clears the previous member projection", async () => {
     const api = createBrowserFakeApi();
 
-    const snapshot = await api.selectSpace("!space-beta:example.invalid");
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace("!space-beta:example.invalid"));
 
     expect(snapshot.state.domain.space_members).toMatchObject({
       selected_space_id: "!space-beta:example.invalid",
@@ -453,7 +456,7 @@ describe("BrowserFakeApi Space member audit", () => {
   test("keeps an invite in the pending operation state when settlement is deferred", async () => {
     const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "pending" });
 
-    const snapshot = await api.inviteUserToSpace(spaceId, childOnlyUserId, 1);
+    const snapshot = await browserCommandSnapshot(api, api.inviteUserToSpace(spaceId, childOnlyUserId, 1));
     const members = snapshot.state.domain.space_members;
 
     expect(members.child_room_only.map((entry) => entry.user_id)).not.toContain(
@@ -479,7 +482,7 @@ describe("BrowserFakeApi Space member audit", () => {
   test("settles a successful fake invite as a non-pending Space invitation", async () => {
     const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "success" });
 
-    const snapshot = await api.inviteUserToSpace(spaceId, childOnlyUserId, 1);
+    const snapshot = await browserCommandSnapshot(api, api.inviteUserToSpace(spaceId, childOnlyUserId, 1));
     const members = snapshot.state.domain.space_members;
 
     expect(members.space_invited).toEqual(
@@ -497,7 +500,7 @@ describe("BrowserFakeApi Space member audit", () => {
   test("returns a failed fake invite to the child-only section", async () => {
     const api = createBrowserFakeApi({ spaceMemberInviteOutcome: "failure" });
 
-    const snapshot = await api.inviteUserToSpace(spaceId, childOnlyUserId, 1);
+    const snapshot = await browserCommandSnapshot(api, api.inviteUserToSpace(spaceId, childOnlyUserId, 1));
     const members = snapshot.state.domain.space_members;
 
     expect(members.child_room_only.map((entry) => entry.user_id)).toContain(
@@ -518,11 +521,11 @@ describe("BrowserFakeApi Space member audit", () => {
   test("cancels an invited fake Space member and settles idle", async () => {
     const api = createBrowserFakeApi();
 
-    const snapshot = await api.cancelSpaceInvite(
+    const snapshot = await browserCommandSnapshot(api, api.cancelSpaceInvite(
       spaceId,
       "@invited:example.invalid",
       1
-    );
+    ));
     const members = snapshot.state.domain.space_members;
 
     expect(members.space_invited.map((entry) => entry.user_id)).not.toContain(
@@ -536,11 +539,11 @@ describe("BrowserFakeApi Space member audit", () => {
       spaceMemberInviteCancellationOutcome: "pending"
     });
 
-    const snapshot = await api.cancelSpaceInvite(
+    const snapshot = await browserCommandSnapshot(api, api.cancelSpaceInvite(
       spaceId,
       "@invited:example.invalid",
       1
-    );
+    ));
 
     expect(snapshot.state.domain.space_members.operation).toMatchObject({
       kind: "cancellingInvite",
@@ -561,11 +564,11 @@ describe("BrowserFakeApi Space member audit", () => {
   test("does not cancel a joined or non-invited fake Space member", async () => {
     const api = createBrowserFakeApi();
 
-    const snapshot = await api.cancelSpaceInvite(
+    const snapshot = await browserCommandSnapshot(api, api.cancelSpaceInvite(
       spaceId,
       "@joined:example.invalid",
       1
-    );
+    ));
 
     expect(snapshot.state.domain.space_members.space_joined.map((entry) => entry.user_id)).toContain(
       "@joined:example.invalid"
@@ -577,11 +580,11 @@ describe("BrowserFakeApi Space member audit", () => {
     const api = createBrowserFakeApi();
     const before = await api.getSnapshot();
 
-    const rejected = await api.cancelSpaceInvite(
+    const rejected = await browserCommandSnapshot(api, api.cancelSpaceInvite(
       spaceId,
       "@missing:example.invalid",
       1
-    );
+    ));
 
     expect(rejected).toEqual(before);
     expect(rejected.state.domain.space_members.operation).toEqual({ kind: "idle" });
@@ -592,11 +595,11 @@ describe("BrowserFakeApi Space member audit", () => {
       spaceMemberInviteCancellationOutcome: "notInvited"
     });
 
-    const snapshot = await api.cancelSpaceInvite(
+    const snapshot = await browserCommandSnapshot(api, api.cancelSpaceInvite(
       spaceId,
       "@invited:example.invalid",
       1
-    );
+    ));
     const members = snapshot.state.domain.space_members;
     const joinedEntry = members.space_joined.find(
       (entry) => entry.user_id === "@invited:example.invalid"
@@ -616,11 +619,11 @@ describe("BrowserFakeApi Space member audit", () => {
   test("retains the invited fake member when cancellation transport rejects", async () => {
     const api = createBrowserFakeApi({ spaceMemberInviteCancellationOutcome: "failure" });
 
-    const snapshot = await api.cancelSpaceInvite(
+    const snapshot = await browserCommandSnapshot(api, api.cancelSpaceInvite(
       spaceId,
       "@invited:example.invalid",
       1
-    );
+    ));
     const members = snapshot.state.domain.space_members;
 
     expect(members.space_invited.map((entry) => entry.user_id)).toContain(
@@ -640,11 +643,11 @@ describe("BrowserFakeApi Space member audit", () => {
       spaceMemberInviteCancellationOutcomes: ["failure", "success"]
     });
 
-    const failed = await api.cancelSpaceInvite(
+    const failed = await browserCommandSnapshot(api, api.cancelSpaceInvite(
       spaceId,
       "@invited:example.invalid",
       1
-    );
+    ));
     expect(failed.state.domain.space_members.operation).toMatchObject({
       kind: "failed",
       space_id: spaceId,
@@ -652,11 +655,11 @@ describe("BrowserFakeApi Space member audit", () => {
       generation: 1
     });
 
-    const retried = await api.cancelSpaceInvite(
+    const retried = await browserCommandSnapshot(api, api.cancelSpaceInvite(
       spaceId,
       "@invited:example.invalid",
       1
-    );
+    ));
     expect(retried.state.domain.space_members.space_invited.map((entry) => entry.user_id)).not.toContain(
       "@invited:example.invalid"
     );
@@ -667,11 +670,11 @@ describe("BrowserFakeApi Space member audit", () => {
     const api = createBrowserFakeApi();
     const before = await api.getSnapshot();
 
-    const stale = await api.cancelSpaceInvite(
+    const stale = await browserCommandSnapshot(api, api.cancelSpaceInvite(
       spaceId,
       "@invited:example.invalid",
       0
-    );
+    ));
 
     expect(stale).toEqual(before);
   });
@@ -680,19 +683,30 @@ describe("BrowserFakeApi Space member audit", () => {
     const api = createBrowserFakeApi();
     const before = await api.getSnapshot();
     const unchanged = async (generation: number, revision: string | null, level: number) =>
-      api.updateSpaceMemberRole(spaceId, "@joined:example.invalid", generation, revision, level, 50, false);
+      browserCommandSnapshot(
+        api,
+        api.updateSpaceMemberRole(
+          spaceId,
+          "@joined:example.invalid",
+          generation,
+          revision,
+          level,
+          50,
+          false
+        )
+      );
 
     expect(await unchanged(0, "revision-1", 0)).toEqual(before);
     expect(await unchanged(1, "stale-revision", 0)).toEqual(before);
     expect(await unchanged(1, "revision-1", 50)).toEqual(before);
     expect(
-      await api.updateSpaceMemberRole(spaceId, "@child-only:example.invalid", 1, "revision-1", 0, 50, false)
+      await browserCommandSnapshot(api, api.updateSpaceMemberRole(spaceId, "@child-only:example.invalid", 1, "revision-1", 0, 50, false))
     ).toEqual(before);
     expect(
-      await api.updateSpaceMemberRole(spaceId, "@joined:example.invalid", 1, "revision-1", 0, 75, false)
+      await browserCommandSnapshot(api, api.updateSpaceMemberRole(spaceId, "@joined:example.invalid", 1, "revision-1", 0, 75, false))
     ).toEqual(before);
     expect(
-      await api.updateSpaceMemberRole(spaceId, "@joined:example.invalid", 1, "revision-1", 0, 100, false)
+      await browserCommandSnapshot(api, api.updateSpaceMemberRole(spaceId, "@joined:example.invalid", 1, "revision-1", 0, 100, false))
     ).toEqual(before);
   });
 
@@ -722,7 +736,7 @@ describe("BrowserFakeApi Space member audit", () => {
     );
     if (!target) throw new Error("expected joined role target");
 
-    const after = await api.updateSpaceMemberRole(
+    const after = await browserCommandSnapshot(api, api.updateSpaceMemberRole(
       spaceId,
       target.user_id,
       before.state.domain.space_members.generation,
@@ -730,7 +744,7 @@ describe("BrowserFakeApi Space member audit", () => {
       target.power_level!,
       50,
       false
-    );
+    ));
     const members = after.state.domain.space_members;
     expect(members.operation).toEqual({ kind: "idle" });
     expect(members.power_levels_revision).toBe("revision-1000");
@@ -758,7 +772,7 @@ describe("BrowserFakeApi Space member audit", () => {
     async (failureKind) => {
       const api = createBrowserFakeApi({ spaceMemberRoleUpdateOutcome: failureKind });
       const before = await api.getSnapshot();
-      const after = await api.updateSpaceMemberRole(
+      const after = await browserCommandSnapshot(api, api.updateSpaceMemberRole(
         spaceId,
         "@joined:example.invalid",
         1,
@@ -766,7 +780,7 @@ describe("BrowserFakeApi Space member audit", () => {
         0,
         50,
         false
-      );
+      ));
       expect(after.state.domain.space_members.space_joined).toEqual(
         before.state.domain.space_members.space_joined
       );
@@ -787,7 +801,7 @@ describe("BrowserFakeApi Space member audit", () => {
     const api = createBrowserFakeApi({
       spaceMemberRoleUpdateOutcomes: ["stale", "success"]
     });
-    const failed = await api.updateSpaceMemberRole(
+    const failed = await browserCommandSnapshot(api, api.updateSpaceMemberRole(
       spaceId,
       "@joined:example.invalid",
       1,
@@ -795,7 +809,7 @@ describe("BrowserFakeApi Space member audit", () => {
       0,
       50,
       false
-    );
+    ));
     expect(failed.state.domain.space_members.operation).toMatchObject({
       kind: "roleUpdateFailed",
       expected_power_levels_revision: "revision-1",
@@ -804,7 +818,7 @@ describe("BrowserFakeApi Space member audit", () => {
     });
     expect(failed.state.domain.space_members.power_levels_revision).toBe("revision-1000");
 
-    const retried = await api.updateSpaceMemberRole(
+    const retried = await browserCommandSnapshot(api, api.updateSpaceMemberRole(
       spaceId,
       "@joined:example.invalid",
       1,
@@ -812,7 +826,7 @@ describe("BrowserFakeApi Space member audit", () => {
       0,
       50,
       false
-    );
+    ));
     expect(retried.state.domain.space_members.operation).toEqual({ kind: "idle" });
     expect(retried.state.domain.space_members.space_joined[0]).toMatchObject({
       power_level: 50,
@@ -853,17 +867,17 @@ describe("BrowserFakeApi secure backup gate fixtures", () => {
       secureBackupGate: { kind: "explicitlyDisabledRequiresSetup" }
     });
 
-    const recovered = await recoveryApi.recoverSecureBackup("synthetic-recovery-key");
-    const setup = await setupApi.bootstrapSecureBackup(
+    const recovered = await browserCommandSnapshot(recoveryApi, recoveryApi.recoverSecureBackup("synthetic-recovery-key"));
+    const setup = await browserCommandSnapshot(setupApi, setupApi.bootstrapSecureBackup(
       "synthetic-passphrase",
       "/tmp/recovery-key.txt",
       { kind: "initialSetup" }
-    );
-    const reenabled = await reenableApi.bootstrapSecureBackup(
+    ));
+    const reenabled = await browserCommandSnapshot(reenableApi, reenableApi.bootstrapSecureBackup(
       "reenable-passphrase",
       "/tmp/reenable-recovery-key.txt",
       { kind: "reenable", confirmed: true }
-    );
+    ));
 
     expect(recovered.state.domain.secure_backup_gate).toEqual({ kind: "ready" });
     expect(setup.state.domain.e2ee_trust.key_management.secure_backup_setup.kind).toBe(
@@ -880,9 +894,9 @@ describe("BrowserFakeApi secure backup gate fixtures", () => {
     });
     const getSnapshot = vi.spyOn(api, "getSnapshot");
 
-    const retried = await api.retrySecureBackupInspection();
-
+    await api.retrySecureBackupInspection();
     expect(getSnapshot).not.toHaveBeenCalled();
+    const retried = await api.settlementSnapshot();
     expect(retried.state.domain.secure_backup_gate).toEqual({
       kind: "blockedFailed",
       failure: "network"
@@ -908,8 +922,8 @@ describe("BrowserFakeApi settings preview", () => {
       };
 
       const retried = method === "existingDeviceSas"
-        ? await api.startOwnUserSas()
-        : await api.submitRecovery("synthetic-recovery-key");
+        ? await browserCommandSnapshot(api, api.startOwnUserSas())
+        : await browserCommandSnapshot(api, api.submitRecovery("synthetic-recovery-key"));
 
       expect(retried.state.domain.session).toMatchObject({
         kind: "verifying",
@@ -931,10 +945,10 @@ describe("BrowserFakeApi settings preview", () => {
         failureKind: "timeout"
       }
     };
-    const bootstrapped = await api.startSessionBootstrap(
+    const bootstrapped = await browserCommandSnapshot(api, api.startSessionBootstrap(
       "synthetic-passphrase",
       "/tmp/synthetic-recovery-key.txt"
-    );
+    ));
     expect(bootstrapped.state.domain.session).toMatchObject({
       kind: "awaitingBootstrapConfirmation",
       gate: { failureKind: null }
@@ -955,8 +969,8 @@ describe("BrowserFakeApi settings preview", () => {
       ,
       sas_emojis: []
     };
-    expect((await api.confirmSasVerification(50)).state.domain.session.flow_id).toBe(51);
-    const confirmed = await api.confirmSasVerification(51);
+    expect((await browserCommandSnapshot(api, api.confirmSasVerification(50))).state.domain.session.flow_id).toBe(51);
+    const confirmed = await browserCommandSnapshot(api, api.confirmSasVerification(51));
     expect(confirmed.state.domain.session).toMatchObject({
       kind: "provisional",
       phase: { recheckingTrust: { failureKind: null } }
@@ -969,18 +983,18 @@ describe("BrowserFakeApi settings preview", () => {
     mutable.snapshot.state.domain.native_attention.summary.unread_count = 6;
     mutable.snapshot.state.domain.native_attention.summary.badge_count = 6;
     mutable.snapshot.state.domain.native_attention.summary.capabilities.badge = "available";
-    const snapshot = await api.updateSettings({
+    const snapshot = await browserCommandSnapshot(api, api.updateSettings({
       notifications: {
         ...mutable.snapshot.state.domain.settings.values.notifications,
         badges: false
       }
-    });
+    }));
     expect(snapshot.state.domain.native_attention.summary.badge_count).toBe(0);
   });
   test("deduplicates main submissions by id and exposes accepted terminal snapshot fields", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
-    await api.selectRoom(roomId);
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
     const account = await readyAccount(api);
     const { generation, lease } = await beginComposerLease(
       api,
@@ -989,22 +1003,22 @@ describe("BrowserFakeApi settings preview", () => {
     );
     const before = (await api.getSnapshot()).timeline.length;
 
-    const first = await api.sendText(
+    const first = await browserSubmissionResponse(api, api.sendText(
       account,
       lease.leaseId,
       generation,
       "submission-same",
       roomId,
       documentFromText("original")
-    );
-    const replay = await api.sendText(
+    ));
+    const replay = await browserSubmissionResponse(api, api.sendText(
       account,
       lease.leaseId,
       generation,
       "submission-same",
       roomId,
       documentFromText("changed")
-    );
+    ));
 
     expect(first.outcome).toBe("accepted");
     expect(replay.transactionId).toBe(first.transactionId);
@@ -1017,37 +1031,37 @@ describe("BrowserFakeApi settings preview", () => {
   test("reuses a submission id after an account switch with a fresh composer lease", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
-    await api.selectRoom(roomId);
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
     const sessions = await api.listSavedSessions();
     const accountA = await readyAccount(api);
     const firstLease = await beginComposerLease(api, accountA, {
       kind: "main",
       room_id: roomId
     });
-    await api.sendText(
+    await browserSubmissionResponse(api, api.sendText(
       accountA,
       firstLease.lease.leaseId,
       firstLease.generation,
       "session-reuse",
       roomId,
       documentFromText("old body")
-    );
-    await api.switchAccount(sessions[1]!);
-    await api.switchAccount(sessions[0]!);
-    await api.selectRoom(roomId);
+    ));
+    await browserCommandSnapshot(api, api.switchAccount(sessions[1]!));
+    await browserCommandSnapshot(api, api.switchAccount(sessions[0]!));
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
     const freshLease = await beginComposerLease(api, accountA, {
       kind: "main",
       room_id: roomId
     });
     const before = (await api.getSnapshot()).timeline.length;
-    const response = await api.sendText(
+    const response = await browserSubmissionResponse(api, api.sendText(
       accountA,
       freshLease.lease.leaseId,
       freshLease.generation,
       "session-reuse",
       roomId,
       documentFromText("new body")
-    );
+    ));
     expect(response.snapshot.timeline).toHaveLength(before + 1);
     expect(response.snapshot.timeline.at(-1)?.body).toBe("new body");
   });
@@ -1055,7 +1069,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("draft snapshots retain structured mention identity instead of inferring display text", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
-    await api.selectRoom(roomId);
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
     const account = await readyAccount(api);
     const { generation, lease } = await beginComposerLease(api, account, {
       kind: "main",
@@ -1068,14 +1082,14 @@ describe("BrowserFakeApi settings preview", () => {
     };
     const document = insertMention(documentFromText("hello "), 6, 6, target, "Same Name");
 
-    const snapshot = await api.setComposerDraft(
+    const snapshot = await browserCommandSnapshot(api, api.setComposerDraft(
       account,
       lease.leaseId,
       generation,
       roomId,
       document,
       revision("1")
-    );
+    ));
 
     expect(snapshot.state.ui.timeline.composer.draft).toBe("hello @Same Name");
     expect(snapshot.state.ui.timeline.composer.document).toEqual(document);
@@ -1088,7 +1102,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("revokes composer leases when returning to a logged-out saved account", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
-    await api.selectRoom(roomId);
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
     const sessions = await api.listSavedSessions();
     const account = await readyAccount(api);
     const target = { kind: "main" as const, room_id: roomId };
@@ -1103,9 +1117,9 @@ describe("BrowserFakeApi settings preview", () => {
     const rendererGeneration = await api.beginComposerDraftRendererGeneration();
     const lease = await api.acquireComposerDraftLease(scope, rendererGeneration);
 
-    await api.logout();
-    await api.switchAccount(sessions[0]!);
-    await api.selectRoom(roomId);
+    await browserCommandSnapshot(api, api.logout());
+    await browserCommandSnapshot(api, api.switchAccount(sessions[0]!));
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
 
     await expect(
       api.setComposerDraft(
@@ -1130,7 +1144,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("leases preserve exact large revisions and expose the Rust-owned clear token", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
-    await api.selectRoom(roomId);
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
     const account = await readyAccount(api);
     const target = { kind: "main" as const, room_id: roomId };
     const scope = {
@@ -1146,15 +1160,15 @@ describe("BrowserFakeApi settings preview", () => {
     const captured = revision("9007199254740993");
     const accepted = revision("9007199254740994");
 
-    await api.setComposerDraft(
+    await browserCommandSnapshot(api, api.setComposerDraft(
       account,
       lease.leaseId,
       rendererGeneration,
       roomId,
       documentFromText("captured"),
       captured
-    );
-    const response = await api.sendText(
+    ));
+    const response = await browserSubmissionResponse(api, api.sendText(
       account,
       lease.leaseId,
       rendererGeneration,
@@ -1162,7 +1176,7 @@ describe("BrowserFakeApi settings preview", () => {
       roomId,
       documentFromText("captured"),
       captured
-    );
+    ));
 
     expect(response.outcome).toBe("accepted");
     expect(response.snapshot.state.ui.timeline.composer).toMatchObject({
@@ -1178,7 +1192,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("fences stale main and thread draft writes after accepted sends", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
-    await api.selectRoom(roomId);
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
     const session = (await api.getSnapshot()).state.domain.session;
     const account = {
       homeserver: session.homeserver!,
@@ -1191,15 +1205,15 @@ describe("BrowserFakeApi settings preview", () => {
       account,
       target
     );
-    await api.setComposerDraft(
+    await browserCommandSnapshot(api, api.setComposerDraft(
       account,
       mainLease.leaseId,
       generation,
       roomId,
       documentFromText("main accepted"),
       revision("1")
-    );
-    const sent = await api.sendText(
+    ));
+    const sent = await browserSubmissionResponse(api, api.sendText(
       account,
       mainLease.leaseId,
       generation,
@@ -1207,31 +1221,31 @@ describe("BrowserFakeApi settings preview", () => {
       roomId,
       documentFromText("main accepted"),
       revision("1")
-    );
+    ));
     expect(sent.outcome).toBe("accepted");
     expect(sent.snapshot.state.ui.timeline.composer).toMatchObject({
       draft: "",
       draft_revision: "2"
     });
-    const staleMain = await api.setComposerDraft(
+    const staleMain = await browserCommandSnapshot(api, api.setComposerDraft(
       account,
       mainLease.leaseId,
       generation,
       roomId,
       documentFromText("main accepted"),
       revision("1")
-    );
+    ));
     expect(staleMain.state.ui.timeline.composer.draft).toBe("");
-    const nextMain = await api.setComposerDraft(
+    const nextMain = await browserCommandSnapshot(api, api.setComposerDraft(
       account,
       mainLease.leaseId,
       generation,
       roomId,
       documentFromText("immediate next"),
       revision("3")
-    );
+    ));
     expect(nextMain.state.ui.timeline.composer.draft).toBe("immediate next");
-    const lateMainAcceptance = await api.sendText(
+    const lateMainAcceptance = await browserSubmissionResponse(api, api.sendText(
       account,
       mainLease.leaseId,
       generation,
@@ -1239,21 +1253,21 @@ describe("BrowserFakeApi settings preview", () => {
       roomId,
       documentFromText("main accepted"),
       revision("1")
-    );
+    ));
     expect(lateMainAcceptance.snapshot.state.ui.timeline.composer).toMatchObject({
       draft: "immediate next",
       draft_revision: "4"
     });
 
     const rootId = nextMain.timeline[0]!.event_id;
-    await api.openThread(roomId, rootId, "existingThread");
+    await browserCommandSnapshot(api, api.openThread(roomId, rootId, "existingThread"));
     const { lease: threadLease } = await beginComposerLease(
       api,
       account,
       { kind: "thread", room_id: roomId, root_event_id: rootId },
       generation
     );
-    await api.setThreadComposerDraft(
+    await browserCommandSnapshot(api, api.setThreadComposerDraft(
       account,
       threadLease.leaseId,
       generation,
@@ -1261,8 +1275,8 @@ describe("BrowserFakeApi settings preview", () => {
       rootId,
       documentFromText("thread accepted"),
       revision("5")
-    );
-    const threadSent = await api.sendThreadReply(
+    ));
+    const threadSent = await browserSubmissionResponse(api, api.sendThreadReply(
       account,
       threadLease.leaseId,
       generation,
@@ -1271,9 +1285,9 @@ describe("BrowserFakeApi settings preview", () => {
       rootId,
       documentFromText("thread accepted"),
       revision("5")
-    );
+    ));
     expect(threadSent.outcome).toBe("accepted");
-    const staleThread = await api.setThreadComposerDraft(
+    const staleThread = await browserCommandSnapshot(api, api.setThreadComposerDraft(
       account,
       threadLease.leaseId,
       generation,
@@ -1281,12 +1295,12 @@ describe("BrowserFakeApi settings preview", () => {
       rootId,
       documentFromText("thread accepted"),
       revision("5")
-    );
+    ));
     expect(staleThread.state.ui.thread).toMatchObject({
       kind: "open",
       composer: { draft: "", draft_revision: "6" }
     });
-    await api.setThreadComposerDraft(
+    await browserCommandSnapshot(api, api.setThreadComposerDraft(
       account,
       threadLease.leaseId,
       generation,
@@ -1294,8 +1308,8 @@ describe("BrowserFakeApi settings preview", () => {
       rootId,
       documentFromText("immediate thread next"),
       revision("7")
-    );
-    const lateThreadAcceptance = await api.sendThreadReply(
+    ));
+    const lateThreadAcceptance = await browserSubmissionResponse(api, api.sendThreadReply(
       account,
       threadLease.leaseId,
       generation,
@@ -1304,7 +1318,7 @@ describe("BrowserFakeApi settings preview", () => {
       rootId,
       documentFromText("thread accepted"),
       revision("5")
-    );
+    ));
     expect(lateThreadAcceptance.snapshot.state.ui.thread).toMatchObject({
       kind: "open",
       composer: { draft: "immediate thread next", draft_revision: "8" }
@@ -1314,7 +1328,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("preserves a newer persisted draft when a reply acceptance settles late", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
-    const selected = await api.selectRoom(roomId);
+    const selected = await browserCommandSnapshot(api, api.selectRoom(roomId));
     const rootId = selected.timeline[0]!.event_id;
     const account = await readyAccount(api);
     const { generation, lease } = await beginComposerLease(api, account, {
@@ -1322,23 +1336,23 @@ describe("BrowserFakeApi settings preview", () => {
       room_id: roomId
     });
 
-    await api.setComposerDraft(
+    await browserCommandSnapshot(api, api.setComposerDraft(
       account,
       lease.leaseId,
       generation,
       roomId,
       documentFromText("captured reply"),
       revision("1")
-    );
-    await api.setComposerDraft(
+    ));
+    await browserCommandSnapshot(api, api.setComposerDraft(
       account,
       lease.leaseId,
       generation,
       roomId,
       documentFromText("newer draft"),
       revision("2")
-    );
-    const response = await api.sendReply(
+    ));
+    const response = await browserSubmissionResponse(api, api.sendReply(
       account,
       lease.leaseId,
       generation,
@@ -1347,20 +1361,20 @@ describe("BrowserFakeApi settings preview", () => {
       rootId,
       documentFromText("captured reply"),
       revision("1")
-    );
+    ));
 
     expect(response.outcome).toBe("accepted");
     expect(response.snapshot.state.ui.timeline.composer.draft).toBe("newer draft");
-    expect((await api.selectRoom(roomId)).state.ui.timeline.composer.draft).toBe("newer draft");
+    expect((await browserCommandSnapshot(api, api.selectRoom(roomId))).state.ui.timeline.composer.draft).toBe("newer draft");
   });
 
   test("rejects draft writes and acceptances captured for another account", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
-    await api.selectRoom(roomId);
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
     const before = await api.getSnapshot();
     const rootId = before.timeline[0]!.event_id;
-    await api.openThread(roomId, rootId, "existingThread");
+    await browserCommandSnapshot(api, api.openThread(roomId, rootId, "existingThread"));
     const account = await readyAccount(api);
     const mainTarget = { kind: "main" as const, room_id: roomId };
     const threadTarget = {
@@ -1438,7 +1452,7 @@ describe("BrowserFakeApi settings preview", () => {
         revision("0")
       )
     ).rejects.toThrow("composer draft lease mismatch");
-    await api.stageUploadBytes(threadTarget, [
+    await browserCommandSnapshot(api, api.stageUploadBytes(threadTarget, [
       {
         stagedId: "stale-account-upload",
         position: 0,
@@ -1446,7 +1460,7 @@ describe("BrowserFakeApi settings preview", () => {
         mimeType: "text/plain",
         bytes: [1, 2, 3]
       }
-    ]);
+    ]));
     await expect(
       api.sendPreparedUploads(
         staleAccount,
@@ -1469,7 +1483,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("deduplicates reply submissions without incrementing the root twice", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
-    await api.selectRoom(roomId);
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
     const account = await readyAccount(api);
     const root = (await api.getSnapshot()).timeline[0]!;
     const { generation, lease } = await beginComposerLease(
@@ -1478,7 +1492,7 @@ describe("BrowserFakeApi settings preview", () => {
       { kind: "main", room_id: roomId }
     );
     const before = root.reply_count;
-    await api.sendReply(
+    await browserSubmissionResponse(api, api.sendReply(
       account,
       lease.leaseId,
       generation,
@@ -1486,8 +1500,8 @@ describe("BrowserFakeApi settings preview", () => {
       roomId,
       root.event_id,
       documentFromText("original")
-    );
-    const replay = await api.sendReply(
+    ));
+    const replay = await browserSubmissionResponse(api, api.sendReply(
       account,
       lease.leaseId,
       generation,
@@ -1495,23 +1509,23 @@ describe("BrowserFakeApi settings preview", () => {
       roomId,
       root.event_id,
       documentFromText("changed")
-    );
+    ));
     expect(replay.snapshot.timeline.find((item) => item.event_id === root.event_id)?.reply_count).toBe(before + 1);
   });
 
   test("deduplicates an unknown thread retry and preserves terminal correlation fields", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
-    await api.selectRoom(roomId);
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
     const account = await readyAccount(api);
     const rootId = (await api.getSnapshot()).timeline[0]!.event_id;
-    await api.openThread(roomId, rootId, "existingThread");
+    await browserCommandSnapshot(api, api.openThread(roomId, rootId, "existingThread"));
     const { generation, lease } = await beginComposerLease(
       api,
       account,
       { kind: "thread", room_id: roomId, root_event_id: rootId }
     );
-    const first = await api.sendThreadReply(
+    const first = await browserSubmissionResponse(api, api.sendThreadReply(
       account,
       lease.leaseId,
       generation,
@@ -1519,8 +1533,8 @@ describe("BrowserFakeApi settings preview", () => {
       roomId,
       rootId,
       documentFromText("original")
-    );
-    const replay = await api.sendThreadReply(
+    ));
+    const replay = await browserSubmissionResponse(api, api.sendThreadReply(
       account,
       lease.leaseId,
       generation,
@@ -1528,7 +1542,7 @@ describe("BrowserFakeApi settings preview", () => {
       roomId,
       rootId,
       documentFromText("edited")
-    );
+    ));
     expect(replay.transactionId).toBe(first.transactionId);
     const thread = replay.snapshot.state.ui.thread;
     expect(thread.kind).toBe("open");
@@ -1541,7 +1555,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("bounds terminal submission replay tombstones to 128 entries", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
-    await api.selectRoom(roomId);
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
     const account = await readyAccount(api);
     const { generation, lease } = await beginComposerLease(
       api,
@@ -1549,14 +1563,14 @@ describe("BrowserFakeApi settings preview", () => {
       { kind: "main", room_id: roomId }
     );
     for (let index = 0; index < 129; index += 1) {
-      await api.sendText(
+      await browserSubmissionResponse(api, api.sendText(
         account,
         lease.leaseId,
         generation,
         `bounded-${index}`,
         roomId,
         documentFromText(`body-${index}`)
-      );
+      ));
     }
     const bounded = await api.getSnapshot();
     const before = bounded.timeline.length;
@@ -1565,40 +1579,40 @@ describe("BrowserFakeApi settings preview", () => {
     expect(bounded.state.ui.timeline.submission_registry.settled_submission_ids).not.toContain("bounded-0");
     expect(bounded.state.ui.timeline.composer.accepted_submission_ids).toHaveLength(128);
     expect(bounded.state.ui.timeline.composer.accepted_submission_ids).not.toContain("bounded-0");
-    await api.sendText(
+    await browserSubmissionResponse(api, api.sendText(
       account,
       lease.leaseId,
       generation,
       "bounded-1",
       roomId,
       documentFromText("deduped")
-    );
+    ));
     expect((await api.getSnapshot()).timeline).toHaveLength(before);
-    await api.sendText(
+    await browserSubmissionResponse(api, api.sendText(
       account,
       lease.leaseId,
       generation,
       "bounded-0",
       roomId,
       documentFromText("evicted")
-    );
+    ));
     expect((await api.getSnapshot()).timeline).toHaveLength(before + 1);
   });
 
   test("bounds thread submission tombstones to 128 entries", async () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
-    await api.selectRoom(roomId);
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
     const account = await readyAccount(api);
     const rootId = (await api.getSnapshot()).timeline[0]!.event_id;
-    await api.openThread(roomId, rootId, "existingThread");
+    await browserCommandSnapshot(api, api.openThread(roomId, rootId, "existingThread"));
     const { generation, lease } = await beginComposerLease(api, account, {
       kind: "thread",
       room_id: roomId,
       root_event_id: rootId
     });
     for (let index = 0; index < 129; index += 1) {
-      await api.sendThreadReply(
+      await browserSubmissionResponse(api, api.sendThreadReply(
         account,
         lease.leaseId,
         generation,
@@ -1606,7 +1620,7 @@ describe("BrowserFakeApi settings preview", () => {
         roomId,
         rootId,
         documentFromText(`body-${index}`)
-      );
+      ));
     }
     const thread = (await api.getSnapshot()).state.ui.thread;
     expect(thread.kind).toBe("open");
@@ -1672,7 +1686,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("logout clears the active session and session-owned views", async () => {
     const api = createBrowserFakeApi();
 
-    const snapshot = await api.logout();
+    const snapshot = await browserCommandSnapshot(api, api.logout());
 
     expect(snapshot.state.domain.session.kind).toBe("signedOut");
     expect(snapshot.state.ui.navigation.active_room_id).toBeNull();
@@ -1683,10 +1697,10 @@ describe("BrowserFakeApi settings preview", () => {
   test("applies the Rust-shaped settings patch to the fixture snapshot", async () => {
     const api = createBrowserFakeApi();
 
-    const snapshot = await api.updateSettings({
+    const snapshot = await browserCommandSnapshot(api, api.updateSettings({
       appearance: { theme: "dark" },
       keyboard: { composer_send_shortcut: "modEnter" }
-    });
+    }));
 
     expect(snapshot.state.domain.settings.values.appearance.theme).toBe("dark");
     expect(snapshot.state.domain.settings.values.keyboard.composer_send_shortcut).toBe("modEnter");
@@ -1697,11 +1711,11 @@ describe("BrowserFakeApi settings preview", () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
 
-    const disabled = await api.setRoomUrlPreviewOverride(roomId, false);
+    const disabled = await browserCommandSnapshot(api, api.setRoomUrlPreviewOverride(roomId, false));
     expect(disabled.state.domain.link_preview_settings.room_overrides[roomId]).toBe(false);
     expect("room_url_previews" in disabled.state.domain.settings.values).toBe(false);
 
-    const restored = await api.setRoomUrlPreviewOverride(roomId, true);
+    const restored = await browserCommandSnapshot(api, api.setRoomUrlPreviewOverride(roomId, true));
     expect(restored.state.domain.link_preview_settings.room_overrides[roomId]).toBeUndefined();
   });
 
@@ -1714,27 +1728,27 @@ describe("BrowserFakeApi settings preview", () => {
       "!room-planning:example.invalid"
     ]);
 
-    const people = await api.selectRoomListFilter({ kind: "people" });
+    const people = await browserCommandSnapshot(api, api.selectRoomListFilter({ kind: "people" }));
     expect(people.state.ui.room_list.items).toEqual([]);
 
-    const unread = await api.selectRoomListFilter({ kind: "unread" });
+    const unread = await browserCommandSnapshot(api, api.selectRoomListFilter({ kind: "unread" }));
     expect(unread.state.ui.room_list.items?.map((item) => item.room_id)).toEqual([
       "!room-alpha:example.invalid",
       "!room-planning:example.invalid"
     ]);
 
-    await api.setRoomTag("!room-planning:example.invalid", "favourite");
-    const roomsAfterFavourite = await api.selectRoomListFilter({ kind: "rooms" });
+    await browserCommandSnapshot(api, api.setRoomTag("!room-planning:example.invalid", "favourite"));
+    const roomsAfterFavourite = await browserCommandSnapshot(api, api.selectRoomListFilter({ kind: "rooms" }));
     expect(roomsAfterFavourite.state.ui.room_list.items).toEqual([
       { room_id: "!room-alpha:example.invalid", kind: "room" }
     ]);
 
-    const favourites = await api.selectRoomListFilter({ kind: "favourites" });
+    const favourites = await browserCommandSnapshot(api, api.selectRoomListFilter({ kind: "favourites" }));
     expect(favourites.state.ui.room_list.items).toEqual([
       { room_id: "!room-planning:example.invalid", kind: "room" }
     ]);
 
-    const invites = await api.selectRoomListFilter({ kind: "invites" });
+    const invites = await browserCommandSnapshot(api, api.selectRoomListFilter({ kind: "invites" }));
     expect(invites.state.ui.room_list.items).toEqual([
       { room_id: "!invite-design-review:example.invalid", kind: "invite" }
     ]);
@@ -1742,9 +1756,9 @@ describe("BrowserFakeApi settings preview", () => {
 
   test("people filter at account home includes all DMs", async () => {
     const api = createBrowserFakeApi();
-    await api.selectSpace(null);
+    await browserCommandSnapshot(api, api.selectSpace(null));
 
-    const people = await api.selectRoomListFilter({ kind: "people" });
+    const people = await browserCommandSnapshot(api, api.selectRoomListFilter({ kind: "people" }));
     expect(people.state.ui.room_list.items).toEqual([
       { room_id: "!dm-member-1:example.invalid", kind: "room" },
       { room_id: "!dm-member-2:example.invalid", kind: "room" }
@@ -1753,9 +1767,9 @@ describe("BrowserFakeApi settings preview", () => {
 
   test("selecting account home clears the active room instead of selecting a default timeline", async () => {
     const api = createBrowserFakeApi();
-    await api.selectSpace("!space-beta:example.invalid");
+    await browserCommandSnapshot(api, api.selectSpace("!space-beta:example.invalid"));
 
-    const home = await api.selectSpace(null);
+    const home = await browserCommandSnapshot(api, api.selectSpace(null));
 
     expect(home.state.ui.navigation.active_space_id).toBeNull();
     expect(home.state.ui.navigation.active_room_id).toBeNull();
@@ -1772,7 +1786,7 @@ describe("BrowserFakeApi settings preview", () => {
       "!room-planning:example.invalid"
     ]);
 
-    const beta = await api.selectSpace("!space-beta:example.invalid");
+    const beta = await browserCommandSnapshot(api, api.selectSpace("!space-beta:example.invalid"));
     expect(beta.state.ui.navigation.active_space_id).toBe("!space-beta:example.invalid");
     expect(beta.state.ui.room_list.items?.map((item) => item.room_id)).toEqual([
       "!room-search:example.invalid"
@@ -1838,9 +1852,9 @@ describe("BrowserFakeApi settings preview", () => {
       )
     ).resolves.toBe("send");
 
-    await api.updateSettings({
+    await browserCommandSnapshot(api, api.updateSettings({
       keyboard: { composer_send_shortcut: "modEnter" }
-    });
+    }));
 
     await expect(
       api.resolveComposerKeyAction(
@@ -1902,9 +1916,9 @@ describe("BrowserFakeApi settings preview", () => {
   test("updates the Rust-shaped locale display profile from locale settings", async () => {
     const api = createBrowserFakeApi();
 
-    const snapshot = await api.updateSettings({
+    const snapshot = await browserCommandSnapshot(api, api.updateSettings({
       locale: { language_tag: "ar-XB", text_direction: "auto" }
-    });
+    }));
 
     expect(snapshot.state.domain.locale_profile).toMatchObject({
       lang: "ar-XB",
@@ -1919,11 +1933,11 @@ describe("BrowserFakeApi settings preview", () => {
   test("updates the Rust-shaped profile snapshot for preview controls", async () => {
     const api = createBrowserFakeApi();
 
-    const named = await api.setDisplayName("Alice");
+    const named = await browserCommandSnapshot(api, api.setDisplayName("Alice"));
     expect(named.state.domain.profile.own.display_name).toBe("Alice");
     expect(named.state.domain.profile.update).toEqual({ kind: "idle" });
 
-    const avatar = await api.setAvatar("image/png", [1, 2, 3, 4]);
+    const avatar = await browserCommandSnapshot(api, api.setAvatar("image/png", [1, 2, 3, 4]));
     expect(avatar.state.domain.profile.own.avatar).toEqual({
       mxc_uri: "mxc://browser.fake/profile-avatar",
       thumbnail: { kind: "notRequested" }
@@ -1935,7 +1949,7 @@ describe("BrowserFakeApi settings preview", () => {
     const api = createBrowserFakeApi();
     const targetUserId = "@member-1:example.invalid";
 
-    const aliased = await api.setLocalUserAlias(targetUserId, "Desk Alias");
+    const aliased = await browserCommandSnapshot(api, api.setLocalUserAlias(targetUserId, "Desk Alias"));
 
     expect(aliased.state.domain.profile.local_aliases[targetUserId]).toBe("Desk Alias");
     expect(aliased.state.domain.profile.local_alias_update).toEqual({ kind: "idle" });
@@ -1953,7 +1967,7 @@ describe("BrowserFakeApi settings preview", () => {
       original_display_label: "Member 1"
     });
 
-    const loaded = await api.loadRoomSettings("!room-alpha:example.invalid");
+    const loaded = await browserCommandSnapshot(api, api.loadRoomSettings("!room-alpha:example.invalid"));
     expect(
       loaded.state.domain.room_management.settings?.members.find(
         (member) => member.user_id === targetUserId
@@ -1963,7 +1977,7 @@ describe("BrowserFakeApi settings preview", () => {
       original_display_label: "Member 1"
     });
 
-    const cleared = await api.setLocalUserAlias(targetUserId, null);
+    const cleared = await browserCommandSnapshot(api, api.setLocalUserAlias(targetUserId, null));
     expect(cleared.state.domain.profile.local_aliases[targetUserId]).toBeUndefined();
     expect(cleared.state.domain.profile.users[targetUserId]).toMatchObject({
       display_label: "Member 1",
@@ -1979,7 +1993,7 @@ describe("BrowserFakeApi settings preview", () => {
 
   test("queries mention candidates only from the loaded room member projection", async () => {
     const api = createBrowserFakeApi();
-    const loaded = await api.loadRoomSettings("!room-alpha:example.invalid");
+    const loaded = await browserCommandSnapshot(api, api.loadRoomSettings("!room-alpha:example.invalid"));
     const roomMember = loaded.state.domain.room_management.settings?.members[0];
     expect(roomMember).toBeDefined();
     await api.queryMentionCandidates(
@@ -2023,7 +2037,9 @@ describe("BrowserFakeApi settings preview", () => {
   test("updates the Rust-shaped E2EE trust snapshot for preview controls", async () => {
     const api = createBrowserFakeApi();
 
-    await expect(api.bootstrapCrossSigning()).resolves.toMatchObject({
+    await expect(
+      browserCommandSnapshot(api, api.bootstrapCrossSigning())
+    ).resolves.toMatchObject({
       state: {
         domain: {
           e2ee_trust: {
@@ -2033,7 +2049,9 @@ describe("BrowserFakeApi settings preview", () => {
       }
     });
 
-    await expect(api.enableKeyBackup()).resolves.toMatchObject({
+    await expect(
+      browserCommandSnapshot(api, api.enableKeyBackup())
+    ).resolves.toMatchObject({
       state: {
         domain: {
           e2ee_trust: {
@@ -2043,7 +2061,7 @@ describe("BrowserFakeApi settings preview", () => {
       }
     });
 
-    const awaitingAuth = await api.resetIdentity();
+    const awaitingAuth = await browserCommandSnapshot(api, api.resetIdentity());
     expect(awaitingAuth.state.domain.e2ee_trust.identity_reset).toMatchObject({
       kind: "awaitingAuth",
       auth_type: "uiaa"
@@ -2053,19 +2071,19 @@ describe("BrowserFakeApi settings preview", () => {
       awaitingAuth.state.domain.e2ee_trust.identity_reset.kind === "awaitingAuth"
         ? awaitingAuth.state.domain.e2ee_trust.identity_reset.request_id
         : 0;
-    const cancelled = await api.cancelIdentityReset(flow);
+    const cancelled = await browserCommandSnapshot(api, api.cancelIdentityReset(flow));
     expect(cancelled.state.domain.e2ee_trust.identity_reset).toEqual({
       kind: "failed",
       request_id: flow,
       failureKind: "cancelled"
     });
 
-    const retryAwaitingAuth = await api.resetIdentity();
+    const retryAwaitingAuth = await browserCommandSnapshot(api, api.resetIdentity());
     const retryFlow =
       retryAwaitingAuth.state.domain.e2ee_trust.identity_reset.kind === "awaitingAuth"
         ? retryAwaitingAuth.state.domain.e2ee_trust.identity_reset.request_id
         : 0;
-    const reset = await api.submitIdentityResetPassword(retryFlow, "synthetic-password");
+    const reset = await browserCommandSnapshot(api, api.submitIdentityResetPassword(retryFlow, "synthetic-password"));
     expect(reset.state.domain.e2ee_trust.identity_reset).toEqual({ kind: "idle" });
     expect(reset.state.domain.e2ee_trust.cross_signing).toEqual({ kind: "missing" });
     expect(reset.state.domain.e2ee_trust.key_backup).toEqual({ kind: "disabled" });
@@ -2076,40 +2094,40 @@ describe("BrowserFakeApi settings preview", () => {
       secureBackupGate: { kind: "setupRequired" }
     });
 
-    const exported = await api.exportRoomKeys(
+    const exported = await browserCommandSnapshot(api, api.exportRoomKeys(
       "/tmp/private-export.txt",
       "private-room-key-passphrase"
-    );
+    ));
     expect(exported.state.domain.e2ee_trust.key_management.room_key_export).toMatchObject({
       kind: "exported",
       exported_sessions: null
     });
 
-    const imported = await api.importRoomKeys(
+    const imported = await browserCommandSnapshot(api, api.importRoomKeys(
       "/tmp/private-import.txt",
       "private-room-key-passphrase"
-    );
+    ));
     expect(imported.state.domain.e2ee_trust.key_management.room_key_import).toMatchObject({
       kind: "imported",
       imported_count: 1,
       total_count: 1
     });
 
-    const setup = await api.bootstrapSecureBackup(
+    const setup = await browserCommandSnapshot(api, api.bootstrapSecureBackup(
       "private-secure-backup-passphrase",
       "/tmp/private-recovery.txt",
       { kind: "initialSetup" }
-    );
+    ));
     expect(setup.state.domain.e2ee_trust.key_management.secure_backup_setup).toMatchObject({
       kind: "recoveryKeyReady",
       delivery: { kind: "written" }
     });
 
-    const changed = await api.changeSecureBackupPassphrase(
+    const changed = await browserCommandSnapshot(api, api.changeSecureBackupPassphrase(
       "private-old-secure-backup-passphrase",
       "private-new-secure-backup-passphrase",
       null
-    );
+    ));
     expect(changed.state.domain.e2ee_trust.key_management.passphrase_change).toMatchObject({
       kind: "changed",
       delivery: { kind: "notWritten" }
@@ -2124,8 +2142,8 @@ describe("BrowserFakeApi settings preview", () => {
   test("does not synthesize pin state for an unknown room", async () => {
     const api = createBrowserFakeApi();
 
-    await api.pinEvent("!missing:browser.fake", "$event:browser.fake");
-    const snapshot = await api.unpinEvent("!missing:browser.fake", "$event:browser.fake");
+    await browserCommandSnapshot(api, api.pinEvent("!missing:browser.fake", "$event:browser.fake"));
+    const snapshot = await browserCommandSnapshot(api, api.unpinEvent("!missing:browser.fake", "$event:browser.fake"));
 
     expect(snapshot.state.domain.room_interactions["!missing:browser.fake"]).toBeUndefined();
   });
@@ -2134,7 +2152,7 @@ describe("BrowserFakeApi settings preview", () => {
     const api = createBrowserFakeApi();
     const before = await api.getSnapshot();
 
-    const selected = await api.selectRoom("!missing:example.invalid");
+    const selected = await browserCommandSnapshot(api, api.selectRoom("!missing:example.invalid"));
 
     expect(selected.state.ui.navigation.active_room_id).toBe(
       before.state.ui.navigation.active_room_id
@@ -2148,8 +2166,8 @@ describe("BrowserFakeApi settings preview", () => {
   test("selectRoom closes dependent panes like the Rust reducer", async () => {
     const api = createBrowserFakeApi();
 
-    await api.openThreadsList({ kind: "room", room_id: "!room-alpha:example.invalid" });
-    const selected = await api.selectRoom("!room-planning:example.invalid");
+    await browserCommandSnapshot(api, api.openThreadsList({ kind: "room", room_id: "!room-alpha:example.invalid" }));
+    const selected = await browserCommandSnapshot(api, api.selectRoom("!room-planning:example.invalid"));
 
     expect(selected.state.ui.navigation.active_room_id).toBe("!room-planning:example.invalid");
     expect(selected.state.ui.thread).toEqual({ kind: "closed" });
@@ -2162,9 +2180,9 @@ describe("BrowserFakeApi settings preview", () => {
   test("selectSpace restores the last non-DM room visited in that space", async () => {
     const api = createBrowserFakeApi();
 
-    await api.selectRoom("!room-planning:example.invalid");
-    await api.selectRoom("!room-search:example.invalid");
-    const restored = await api.selectSpace("!space-alpha:example.invalid");
+    await browserCommandSnapshot(api, api.selectRoom("!room-planning:example.invalid"));
+    await browserCommandSnapshot(api, api.selectRoom("!room-search:example.invalid"));
+    const restored = await browserCommandSnapshot(api, api.selectSpace("!space-alpha:example.invalid"));
 
     expect(restored.state.ui.navigation.active_space_id).toBe("!space-alpha:example.invalid");
     expect(restored.state.ui.navigation.active_room_id).toBe("!room-planning:example.invalid");
@@ -2178,10 +2196,10 @@ describe("BrowserFakeApi settings preview", () => {
   test("reorderSpaces persists the synthetic rail order", async () => {
     const api = createBrowserFakeApi();
 
-    const reordered = await api.reorderSpaces([
+    const reordered = await browserCommandSnapshot(api, api.reorderSpaces([
       "!space-beta:example.invalid",
       "!space-alpha:example.invalid"
-    ]);
+    ]));
 
     expect(reordered.state.ui.navigation.space_order).toEqual([
       "!space-beta:example.invalid",
@@ -2206,10 +2224,10 @@ describe("BrowserFakeApi settings preview", () => {
       "!space-beta:example.invalid"
     ];
 
-    const reordered = await api.reorderSpaces([
+    const reordered = await browserCommandSnapshot(api, api.reorderSpaces([
       "!space-beta:example.invalid",
       "!space-alpha:example.invalid"
-    ]);
+    ]));
 
     expect(reordered.state.ui.navigation.space_order).toEqual([
       "!space-beta:example.invalid",
@@ -2221,7 +2239,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("leaveRoom removes a Space without leaving its child rooms", async () => {
     const api = createBrowserFakeApi();
 
-    const left = await api.leaveRoom("!space-alpha:example.invalid");
+    const left = await browserCommandSnapshot(api, api.leaveRoom("!space-alpha:example.invalid"));
 
     expect(left.state.domain.spaces.map((space) => space.space_id)).toEqual([
       "!space-beta:example.invalid"
@@ -2244,33 +2262,33 @@ describe("BrowserFakeApi settings preview", () => {
     "%s clears every active ordinary-room projection",
     async (operation) => {
       const api = createBrowserFakeApi();
-      await api.selectRoom(alphaRoomId);
+      await browserCommandSnapshot(api, api.selectRoom(alphaRoomId));
       await dirtyRoomOwnedState(api, alphaRoomId, "$alpha-update");
-      await api.openActivity();
-      await api.openActivityEvent(alphaRoomId, "$alpha-update");
-      await api.selectSearchResult(alphaRoomId, "$alpha-update");
-      await api.submitSearch("Alpha", "currentRoom");
-      await api.openThreadsList({ kind: "room", room_id: alphaRoomId });
-      await api.openFilesView(
+      await browserCommandSnapshot(api, api.openActivity());
+      await browserCommandSnapshot(api, api.openActivityEvent(alphaRoomId, "$alpha-update"));
+      await browserCommandSnapshot(api, api.selectSearchResult(alphaRoomId, "$alpha-update"));
+      await browserCommandSnapshot(api, api.submitSearch("Alpha", "currentRoom"));
+      await browserCommandSnapshot(api, api.openThreadsList({ kind: "room", room_id: alphaRoomId }));
+      await browserCommandSnapshot(api, api.openFilesView(
         { kind: "room", room_id: alphaRoomId },
         { kinds: [...allAttachmentKinds], filename_query: null },
         "newestFirst"
-      );
+      ));
 
       const account = await readyAccount(api);
       const { generation, lease } = await beginComposerLease(api, account, {
         kind: "main",
         room_id: alphaRoomId
       });
-      await api.setComposerDraft(
+      await browserCommandSnapshot(api, api.setComposerDraft(
         account,
         lease.leaseId,
         generation,
         alphaRoomId,
         documentFromText("Alpha draft"),
         revision("7")
-      );
-      await api.stageUploadBytes(
+      ));
+      await browserCommandSnapshot(api, api.stageUploadBytes(
         { kind: "main", room_id: alphaRoomId },
         [{
           stagedId: "alpha-upload",
@@ -2279,7 +2297,7 @@ describe("BrowserFakeApi settings preview", () => {
           mimeType: "text/plain",
           bytes: [1, 2, 3]
         }]
-      );
+      ));
 
       const dirty = roomOwnedProjection(await api.getSnapshot(), alphaRoomId);
       expect(dirty).toMatchObject({
@@ -2304,7 +2322,7 @@ describe("BrowserFakeApi settings preview", () => {
         up_to_event_id: "$alpha-update"
       });
       const removed =
-        operation === "leaveRoom" ? await api.leaveRoom(alphaRoomId) : await api.forgetRoom(alphaRoomId);
+        operation === "leaveRoom" ? await browserCommandSnapshot(api, api.leaveRoom(alphaRoomId)) : await browserCommandSnapshot(api, api.forgetRoom(alphaRoomId));
       await markRead;
 
       expect(removed.state.domain.rooms.some((room) => room.room_id === alphaRoomId)).toBe(false);
@@ -2348,31 +2366,31 @@ describe("BrowserFakeApi settings preview", () => {
     const api = createBrowserFakeApi();
     await dirtyRoomOwnedState(api, alphaRoomId, "$alpha-update");
     await dirtyRoomOwnedState(api, planningRoomId, "$late-original");
-    await api.selectRoom(planningRoomId);
-    await api.openActivity();
-    await api.openThreadsList({ kind: "home" });
-    await api.openFilesView(
+    await browserCommandSnapshot(api, api.selectRoom(planningRoomId));
+    await browserCommandSnapshot(api, api.openActivity());
+    await browserCommandSnapshot(api, api.openThreadsList({ kind: "home" }));
+    await browserCommandSnapshot(api, api.openFilesView(
       { kind: "space", space_id: alphaSpaceId },
       { kinds: [...allAttachmentKinds], filename_query: null },
       "newestFirst"
-    );
-    await api.submitSearch("synthetic", "allRooms");
-    await api.openThread(alphaRoomId, "$alpha-update", "existingThread");
+    ));
+    await browserCommandSnapshot(api, api.submitSearch("synthetic", "allRooms"));
+    await browserCommandSnapshot(api, api.openThread(alphaRoomId, "$alpha-update", "existingThread"));
 
     const account = await readyAccount(api);
     const { generation, lease } = await beginComposerLease(api, account, {
       kind: "main",
       room_id: planningRoomId
     });
-    await api.setComposerDraft(
+    await browserCommandSnapshot(api, api.setComposerDraft(
       account,
       lease.leaseId,
       generation,
       planningRoomId,
       documentFromText("Retained Planning draft"),
       revision("9")
-    );
-    await api.stageUploadBytes(
+    ));
+    await browserCommandSnapshot(api, api.stageUploadBytes(
       { kind: "main", room_id: planningRoomId },
       [{
         stagedId: "retained-planning-upload",
@@ -2381,7 +2399,7 @@ describe("BrowserFakeApi settings preview", () => {
         mimeType: "text/plain",
         bytes: [4, 5, 6]
       }]
-    );
+    ));
 
     const before = await api.getSnapshot();
     const planningBefore = roomOwnedProjection(before, planningRoomId);
@@ -2397,7 +2415,7 @@ describe("BrowserFakeApi settings preview", () => {
       room_id: alphaRoomId,
       up_to_event_id: "$alpha-update"
     });
-    await api.leaveRoom(alphaRoomId);
+    await browserCommandSnapshot(api, api.leaveRoom(alphaRoomId));
     await markRead;
     const after = await api.getSnapshot();
 
@@ -2442,17 +2460,17 @@ describe("BrowserFakeApi settings preview", () => {
 
   test("removing a Space preserves children and closes only its Space scopes", async () => {
     const api = createBrowserFakeApi();
-    await api.selectSpace(alphaSpaceId);
-    await api.loadSpaceMembers(alphaSpaceId, 1);
-    await api.openThreadsList({ kind: "space", space_id: alphaSpaceId });
-    await api.openFilesView(
+    await browserCommandSnapshot(api, api.selectSpace(alphaSpaceId));
+    await browserCommandSnapshot(api, api.loadSpaceMembers(alphaSpaceId, 1));
+    await browserCommandSnapshot(api, api.openThreadsList({ kind: "space", space_id: alphaSpaceId }));
+    await browserCommandSnapshot(api, api.openFilesView(
       { kind: "space", space_id: alphaSpaceId },
       { kinds: [...allAttachmentKinds], filename_query: null },
       "newestFirst"
-    );
+    ));
 
     const before = await api.getSnapshot();
-    const removed = await api.leaveRoom(alphaSpaceId);
+    const removed = await browserCommandSnapshot(api, api.leaveRoom(alphaSpaceId));
 
     expect(removed.state.domain.spaces.map((space) => space.space_id)).toEqual([betaSpaceId]);
     expect(removed.state.domain.rooms).toEqual(
@@ -2489,14 +2507,14 @@ describe("BrowserFakeApi settings preview", () => {
 
   test("Space removal retains unrelated Home and account scopes", async () => {
     const api = createBrowserFakeApi();
-    await api.openThreadsList({ kind: "home" });
-    await api.openFilesView(
+    await browserCommandSnapshot(api, api.openThreadsList({ kind: "home" }));
+    await browserCommandSnapshot(api, api.openFilesView(
       { kind: "account" },
       { kinds: [...allAttachmentKinds], filename_query: null },
       "newestFirst"
-    );
+    ));
 
-    const removed = await api.forgetRoom(alphaSpaceId);
+    const removed = await browserCommandSnapshot(api, api.forgetRoom(alphaSpaceId));
 
     expect(removed.state.ui.threads_list.kind).toBe("open");
     expect(removed.state.ui.files_view.kind).toBe("open");
@@ -2508,7 +2526,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("openThreadsList mirrors visible timeline thread summaries", async () => {
     const api = createBrowserFakeApi();
 
-    const opened = await api.openThreadsList({ kind: "room", room_id: "!room-alpha:example.invalid" });
+    const opened = await browserCommandSnapshot(api, api.openThreadsList({ kind: "room", room_id: "!room-alpha:example.invalid" }));
 
     expect(opened.state.ui.threads_list).toMatchObject({
       kind: "open",
@@ -2529,7 +2547,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("openThreadsList aggregates Home and Space scopes with owning room ids", async () => {
     const api = createBrowserFakeApi();
 
-    const home = await api.openThreadsList({ kind: "home" });
+    const home = await browserCommandSnapshot(api, api.openThreadsList({ kind: "home" }));
     expect(home.state.ui.threads_list).toMatchObject({ kind: "open", room_id: "home" });
     expect(
       home.state.ui.threads_list.kind === "open"
@@ -2537,10 +2555,10 @@ describe("BrowserFakeApi settings preview", () => {
         : false
     ).toBe(true);
 
-    const space = await api.openThreadsList({
+    const space = await browserCommandSnapshot(api, api.openThreadsList({
       kind: "space",
       space_id: "!space-alpha:example.invalid"
-    });
+    }));
     expect(space.state.ui.threads_list).toMatchObject({
       kind: "open",
       room_id: "space:!space-alpha:example.invalid"
@@ -2555,11 +2573,11 @@ describe("BrowserFakeApi settings preview", () => {
   test("openFilesView mirrors visible timeline attachments", async () => {
     const api = createBrowserFakeApi();
 
-    const opened = await api.openFilesView(
+    const opened = await browserCommandSnapshot(api, api.openFilesView(
       { kind: "room", room_id: "!room-alpha:example.invalid" },
       { kinds: ["image", "video", "audio", "file", "sticker"], filename_query: null },
       "newestFirst"
-    );
+    ));
 
     expect(opened.state.ui.files_view).toMatchObject({
       kind: "open",
@@ -2577,25 +2595,26 @@ describe("BrowserFakeApi settings preview", () => {
   test("selectSearchResult anchors the main timeline without using the right-panel context", async () => {
     const api = createBrowserFakeApi();
 
-    const focused = await api.selectSearchResult(
+    const focused = await browserCommandSnapshot(api, api.selectSearchResult(
       "!room-alpha:example.invalid",
       "$alpha-update"
-    );
+    ));
     expect(focused.state.ui.focused_context.kind).toBe("closed");
     expect(focused.state.ui.navigation.main_timeline_anchor).toEqual({
       event_id: "$alpha-update"
     });
 
-    const selected = await api.selectRoom("!room-planning:example.invalid");
+    const selected = await browserCommandSnapshot(api, api.selectRoom("!room-planning:example.invalid"));
 
     expect(selected.state.ui.focused_context).toEqual({ kind: "closed" });
   });
 
   test("openActivityEvent anchors the activity event in the main timeline", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await (api as unknown as {
-      openActivityEvent(roomId: string, eventId: string): Promise<DesktopSnapshot>;
-    }).openActivityEvent("!room-alpha:example.invalid", "$alpha-update");
+    const snapshot = await browserCommandSnapshot(
+      api,
+      api.openActivityEvent("!room-alpha:example.invalid", "$alpha-update")
+    );
 
     expect(snapshot.state.ui.focused_context).toEqual({ kind: "closed" });
     expect(snapshot.state.ui.navigation.main_timeline_anchor).toEqual({
@@ -2627,7 +2646,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("acceptInvite joins the invited room", async () => {
     const api = createBrowserFakeApi();
 
-    const accepted = await api.acceptInvite("!invite-design-review:example.invalid");
+    const accepted = await browserCommandSnapshot(api, api.acceptInvite("!invite-design-review:example.invalid"));
 
     expect(
       accepted.state.domain.invites.some(
@@ -2644,7 +2663,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("declineInvite removes the pending invite", async () => {
     const api = createBrowserFakeApi();
 
-    const declined = await api.declineInvite("!invite-design-review:example.invalid");
+    const declined = await browserCommandSnapshot(api, api.declineInvite("!invite-design-review:example.invalid"));
 
     expect(
       declined.state.domain.invites.some(
@@ -2657,19 +2676,19 @@ describe("BrowserFakeApi settings preview", () => {
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
 
-    const opened = await api.openInviteWorkflow(roomId);
+    const opened = await browserCommandSnapshot(api, api.openInviteWorkflow(roomId));
     expect(opened.state.domain.invite_workflow?.scope_plan?.default_scope).toEqual({
       kind: "parentSpaceAndRoom",
       space_id: "!space-alpha:example.invalid"
     });
 
-    const searched = await api.searchInviteTargets(roomId, "@new:example.invalid");
+    const searched = await browserCommandSnapshot(api, api.searchInviteTargets(roomId, "@new:example.invalid"));
     expect(searched.state.domain.invite_workflow?.query.explicit_user_id).toMatchObject({
       user_id: "@new:example.invalid",
       status: "selectable"
     });
 
-    const selected = await api.selectInviteTarget(roomId, "@new:example.invalid");
+    const selected = await browserCommandSnapshot(api, api.selectInviteTarget(roomId, "@new:example.invalid"));
     expect(selected.state.domain.invite_workflow?.selected_targets).toEqual([
       {
         user_id: "@new:example.invalid",
@@ -2681,13 +2700,13 @@ describe("BrowserFakeApi settings preview", () => {
 
   test("records already-in-space notice while continuing room invite", async () => {
     const api = createBrowserFakeApi();
-    await api.loadRoomSettings("!space-alpha:example.invalid");
+    await browserCommandSnapshot(api, api.loadRoomSettings("!space-alpha:example.invalid"));
 
-    const invited = await api.inviteTargets(
+    const invited = await browserCommandSnapshot(api, api.inviteTargets(
       "!room-alpha:example.invalid",
       ["@browser-member:browser.fake"],
       { kind: "parentSpaceAndRoom", space_id: "!space-alpha:example.invalid" }
-    );
+    ));
 
     expect(invited.state.domain.invite_workflow?.operation).toMatchObject({
       kind: "completed",
@@ -2718,7 +2737,8 @@ describe("BrowserFakeApi settings preview", () => {
       }
     });
 
-    const queried = await queryPromise;
+    await queryPromise;
+    const queried = await api.getSnapshot();
     expect(queried.state.domain.directory.query.kind).toBe("results");
 
     const joinPromise = api.joinDirectoryRoom("#public-demo:fake.local", ["fake.local"]);
@@ -2728,7 +2748,8 @@ describe("BrowserFakeApi settings preview", () => {
       via_servers: ["fake.local"]
     });
 
-    const joined = await joinPromise;
+    await joinPromise;
+    const joined = await api.getSnapshot();
     expect(joined.state.domain.directory.join).toEqual({ kind: "idle" });
     expect(joined.state.ui.navigation.active_space_id).toBeNull();
     expect(joined.state.ui.navigation.active_room_id).toMatch(/^!joined-/);
@@ -2744,7 +2765,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("models room management settings, moderation, and permission guard substates", async () => {
     const api = createBrowserFakeApi();
 
-    const loaded = await api.loadRoomSettings("!browser-room:browser.fake");
+    const loaded = await browserCommandSnapshot(api, api.loadRoomSettings("!browser-room:browser.fake"));
     expect(loaded.state.domain.room_management).toMatchObject({
       selected_room_id: "!browser-room:browser.fake",
       settings: {
@@ -2768,26 +2789,27 @@ describe("BrowserFakeApi settings preview", () => {
       kind: "pending",
       operation: "settings"
     });
-    const updated = await updatePromise;
+    await updatePromise;
+    const updated = await api.getSnapshot();
     expect(updated.state.domain.room_management.settings?.topic).toBe("Updated topic");
     expect(updated.state.domain.room_management.operation).toEqual({ kind: "idle" });
 
-    const moderated = await api.moderateRoomMember(
+    const moderated = await browserCommandSnapshot(api, api.moderateRoomMember(
       "!browser-room:browser.fake",
       "@target:browser.fake",
       "kick",
       "Private reason"
-    );
+    ));
     expect(moderated.state.domain.room_management.operation).toEqual({ kind: "idle" });
 
-    const readonly = await api.loadRoomSettings("!readonly-room:browser.fake");
+    const readonly = await browserCommandSnapshot(api, api.loadRoomSettings("!readonly-room:browser.fake"));
     expect(readonly.state.domain.room_management.settings?.permissions.can_invite).toBe(false);
-    const guarded = await api.moderateRoomMember(
+    const guarded = await browserCommandSnapshot(api, api.moderateRoomMember(
       "!readonly-room:browser.fake",
       "@target:browser.fake",
       "kick",
       null
-    );
+    ));
     expect(guarded.state.domain.room_management.operation).toMatchObject({
       kind: "failed",
       operation: "moderation",
@@ -2810,7 +2832,7 @@ describe("BrowserFakeApi settings preview", () => {
       }
     });
 
-    const loaded = await api.loadRoomSettings(roomId);
+    const loaded = await browserCommandSnapshot(api, api.loadRoomSettings(roomId));
 
     expect(loaded.state.domain.room_management.settings?.permissions).toEqual({
       can_edit_settings: true,
@@ -2825,7 +2847,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("models room member role updates from Rust-owned power-level facts", async () => {
     const api = createBrowserFakeApi();
 
-    const loaded = await api.loadRoomSettings("!browser-room:browser.fake");
+    const loaded = await browserCommandSnapshot(api, api.loadRoomSettings("!browser-room:browser.fake"));
     const targetUserId = loaded.state.domain.room_management.settings?.members[0]?.user_id ?? "";
     expect(targetUserId).toBeTruthy();
     expect(loaded.state.domain.room_management.settings?.members[0]).toMatchObject({
@@ -2843,7 +2865,8 @@ describe("BrowserFakeApi settings preview", () => {
       operation: "roles"
     });
 
-    const updated = await updatePromise;
+    await updatePromise;
+    const updated = await api.getSnapshot();
     expect(updated.state.domain.room_management.operation).toEqual({ kind: "idle" });
     expect(updated.state.domain.room_management.settings?.members[0]).toMatchObject({
       user_id: targetUserId,
@@ -2851,12 +2874,12 @@ describe("BrowserFakeApi settings preview", () => {
       role: "moderator"
     });
 
-    await api.loadRoomSettings("!readonly-room:browser.fake");
-    const guarded = await api.updateRoomMemberRole(
+    await browserCommandSnapshot(api, api.loadRoomSettings("!readonly-room:browser.fake"));
+    const guarded = await browserCommandSnapshot(api, api.updateRoomMemberRole(
       "!readonly-room:browser.fake",
       targetUserId,
       100
-    );
+    ));
     expect(guarded.state.domain.room_management.operation).toMatchObject({
       kind: "failed",
       operation: "roles",
@@ -2867,7 +2890,7 @@ describe("BrowserFakeApi settings preview", () => {
   test("models activity recent, unread, pagination, and mark-read substates", async () => {
     const api = createBrowserFakeApi();
 
-    const opened = await api.openActivity();
+    const opened = await browserCommandSnapshot(api, api.openActivity());
     expect(opened.state.domain.activity.kind).toBe("open");
     if (opened.state.domain.activity.kind !== "open") {
       throw new Error("activity should be open");
@@ -2907,7 +2930,7 @@ describe("BrowserFakeApi settings preview", () => {
       )
     ).toBe(true);
 
-    const switched = await api.setActivityTab("unread");
+    const switched = await browserCommandSnapshot(api, api.setActivityTab("unread"));
     expect(switched.state.domain.activity.kind).toBe("open");
     if (switched.state.domain.activity.kind !== "open") {
       throw new Error("activity should stay open");
@@ -2926,14 +2949,14 @@ describe("BrowserFakeApi settings preview", () => {
       unresolved_room_count: 2,
       failure_kind: "network"
     };
-    const retried = await api.retryActivityResolution();
+    const retried = await browserCommandSnapshot(api, api.retryActivityResolution());
     expect(retried.state.domain.activity.kind).toBe("open");
     if (retried.state.domain.activity.kind !== "open") {
       throw new Error("activity should stay open after retry");
     }
     expect(retried.state.domain.activity.unread.resolution.kind).toBe("resolving");
 
-    const paged = await api.paginateActivity("recent", switched.state.domain.activity.recent.next_batch);
+    const paged = await browserCommandSnapshot(api, api.paginateActivity("recent", switched.state.domain.activity.recent.next_batch));
     expect(paged.state.domain.activity.kind).toBe("open");
     if (paged.state.domain.activity.kind !== "open") {
       throw new Error("activity should stay open after pagination");
@@ -2941,11 +2964,11 @@ describe("BrowserFakeApi settings preview", () => {
     expect(paged.state.domain.activity.recent.rows.at(-1)?.event_id).toBe("$alpha-history");
     expect(paged.state.domain.activity.recent.next_batch).toBeNull();
 
-    const markedRoom = await api.markActivityRead({
+    const markedRoom = await browserCommandSnapshot(api, api.markActivityRead({
       kind: "room",
       room_id: "!room-alpha:example.invalid",
       up_to_event_id: "$false-positive"
-    });
+    }));
     expect(markedRoom.state.domain.activity.kind).toBe("open");
     if (markedRoom.state.domain.activity.kind !== "open") {
       throw new Error("activity should stay open after mark-read");
@@ -2957,7 +2980,7 @@ describe("BrowserFakeApi settings preview", () => {
       )
     ).toBe(false);
 
-    const markedAll = await api.markActivityRead({ kind: "all" });
+    const markedAll = await browserCommandSnapshot(api, api.markActivityRead({ kind: "all" }));
     expect(markedAll.state.domain.activity.kind).toBe("open");
     if (markedAll.state.domain.activity.kind !== "open") {
       throw new Error("activity should stay open after mark-all-read");
@@ -2968,10 +2991,10 @@ describe("BrowserFakeApi settings preview", () => {
   test("removes muted rooms from activity unread rows", async () => {
     const api = createBrowserFakeApi();
 
-    await api.openActivity();
-    const muted = await api.setRoomNotificationMode("!room-alpha:example.invalid", {
+    await browserCommandSnapshot(api, api.openActivity());
+    const muted = await browserCommandSnapshot(api, api.setRoomNotificationMode("!room-alpha:example.invalid", {
       kind: "mute"
-    });
+    }));
 
     expect(muted.state.domain.activity.kind).toBe("open");
     if (muted.state.domain.activity.kind !== "open") {
@@ -2987,21 +3010,21 @@ describe("BrowserFakeApi settings preview", () => {
   test("preserves the selected activity tab across close and duplicate open", async () => {
     const api = createBrowserFakeApi();
 
-    await api.openActivity();
-    const selected = await api.setActivityTab("unread");
+    await browserCommandSnapshot(api, api.openActivity());
+    const selected = await browserCommandSnapshot(api, api.setActivityTab("unread"));
     expect(selected.state.domain.activity).toMatchObject({
       kind: "open",
       active_tab: "unread"
     });
 
-    await api.closeActivity();
-    const reopened = await api.openActivity();
+    await browserCommandSnapshot(api, api.closeActivity());
+    const reopened = await browserCommandSnapshot(api, api.openActivity());
     expect(reopened.state.domain.activity).toMatchObject({
       kind: "open",
       active_tab: "unread"
     });
 
-    const duplicate = await api.openActivity();
+    const duplicate = await browserCommandSnapshot(api, api.openActivity());
     expect(duplicate.state.domain.activity).toMatchObject({
       kind: "open",
       active_tab: "unread"
@@ -3011,10 +3034,10 @@ describe("BrowserFakeApi settings preview", () => {
   test("removes notification-only rooms from activity recent unless highlighted", async () => {
     const api = createBrowserFakeApi();
 
-    await api.openActivity();
-    const updated = await api.setRoomNotificationMode("!room-alpha:example.invalid", {
+    await browserCommandSnapshot(api, api.openActivity());
+    const updated = await browserCommandSnapshot(api, api.setRoomNotificationMode("!room-alpha:example.invalid", {
       kind: "mentions"
-    });
+    }));
 
     expect(updated.state.domain.activity.kind).toBe("open");
     if (updated.state.domain.activity.kind !== "open") {
@@ -3114,8 +3137,8 @@ describe("BrowserFakeApi settings preview", () => {
     mutable.snapshot.state.ui.threads_list = threads;
     const installed = structuredClone({ activity, threads, latestEvent });
 
-    await api.editMessage(roomId, eventId, documentFromText("locally edited"));
-    const afterEdit = await api.redactMessage(roomId, eventId);
+    await browserCommandSnapshot(api, api.editMessage(roomId, eventId, documentFromText("locally edited")));
+    const afterEdit = await browserCommandSnapshot(api, api.redactMessage(roomId, eventId));
 
     expect(afterEdit.state.domain.activity).toEqual(installed.activity);
     expect(afterEdit.state.ui.threads_list).toEqual(installed.threads);
@@ -3128,9 +3151,9 @@ describe("BrowserFakeApi settings preview", () => {
     // the edit (issue #328). A fake that cleared it here would hide the bug.
     const api = createBrowserFakeApi();
     const roomId = "!room-alpha:example.invalid";
-    await api.selectRoom(roomId);
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
 
-    const edited = await api.editMessage(roomId, "$budget-file", documentFromText("Edited caption."));
+    const edited = await browserCommandSnapshot(api, api.editMessage(roomId, "$budget-file", documentFromText("Edited caption.")));
 
     expect(
       edited.timeline.find((message) => message.event_id === "$budget-file")
@@ -3148,7 +3171,7 @@ describe("BrowserFakeApi settings preview", () => {
     const target = "@dm-target:example.invalid";
     const before = (await api.getSnapshot()).state.domain.rooms.length;
 
-    const created = await api.startDirectMessage(target);
+    const created = await browserCommandSnapshot(api, api.startDirectMessage(target));
     const createdRooms = created.state.domain.rooms.filter(
       (room) => room.is_dm && room.dm_user_ids.length === 1 && room.dm_user_ids[0] === target
     );
@@ -3156,8 +3179,8 @@ describe("BrowserFakeApi settings preview", () => {
     expect(created.state.domain.rooms).toHaveLength(before + 1);
     expect(created.state.ui.navigation.active_room_id).toBe(createdRooms[0].room_id);
 
-    await api.selectRoom("!room-alpha:example.invalid");
-    const reused = await api.startDirectMessage(target);
+    await browserCommandSnapshot(api, api.selectRoom("!room-alpha:example.invalid"));
+    const reused = await browserCommandSnapshot(api, api.startDirectMessage(target));
 
     expect(
       reused.state.domain.rooms.filter(
@@ -3179,7 +3202,8 @@ describe("BrowserFakeApi settings preview", () => {
       request_id: expect.any(Number)
     });
 
-    const snapshot = await probing;
+    await probing;
+    const snapshot = await api.getSnapshot();
     expect(snapshot.state.domain.local_encryption).toEqual({ kind: "healthy" });
   });
 
@@ -3194,7 +3218,7 @@ describe("BrowserFakeApi settings preview", () => {
       )?.link_previews
     ).toBeUndefined();
 
-    const hiddenA = await fakeA.hideLinkPreview(roomId, eventId);
+    const hiddenA = await browserCommandSnapshot(fakeA, fakeA.hideLinkPreview(roomId, eventId));
     expect(
       hiddenA.timeline.find(
         (message) => message.room_id === roomId && message.event_id === eventId
@@ -3215,8 +3239,8 @@ describe("BrowserFakeApi settings preview", () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
 
     try {
-      const first = await api.submitSearch("Alpha", "allRooms");
-      const second = await api.submitSearch("Beta", "allRooms");
+      const first = await browserCommandSnapshot(api, api.submitSearch("Alpha", "allRooms"));
+      const second = await browserCommandSnapshot(api, api.submitSearch("Beta", "allRooms"));
       const firstSearch = first.state.domain.search;
       const secondSearch = second.state.domain.search;
 
@@ -3252,8 +3276,11 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
   }
 
   async function stageMain(api: ReturnType<typeof createBrowserFakeApi>, stagedId: string, bytes = [1, 2, 3]) {
-    await api.selectRoom(roomId);
-    return api.stageUploadBytes({ kind: "main", room_id: roomId }, [item(stagedId, bytes)]);
+    await browserCommandSnapshot(api, api.selectRoom(roomId));
+    return browserCommandSnapshot(
+      api,
+      api.stageUploadBytes({ kind: "main", room_id: roomId }, [item(stagedId, bytes)])
+    );
   }
 
   test("preserves structured staged caption documents and normalizes empty ones", async () => {
@@ -3262,14 +3289,14 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
     await stageMain(api, "caption-upload");
     const document: ComposerDocument = documentFromText("**caption**");
 
-    const updated = await api.updateStagedUploadCaption(target, "caption-upload", document);
+    const updated = await browserCommandSnapshot(api, api.updateStagedUploadCaption(target, "caption-upload", document));
     expect(updated.state.ui.timeline.staged_uploads[0]?.caption).toEqual(document);
 
-    const cleared = await api.updateStagedUploadCaption(
+    const cleared = await browserCommandSnapshot(api, api.updateStagedUploadCaption(
       target,
       "caption-upload",
       documentFromText("  \n  ")
-    );
+    ));
     expect(cleared.state.ui.timeline.staged_uploads[0]?.caption).toBeNull();
   });
 
@@ -3291,18 +3318,18 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
     stagedId: string,
     bytes = [4, 5, 6]
   ) {
-    await api.openThread(roomId, root, "existingThread");
-    await api.stageUploadBytes(
+    await browserCommandSnapshot(api, api.openThread(roomId, root, "existingThread"));
+    await browserCommandSnapshot(api, api.stageUploadBytes(
       { kind: "thread", room_id: roomId, root_event_id: root },
       [item(stagedId, bytes)]
-    );
+    ));
   }
 
   test("replacing main staging removes disjoint prepared bytes", async () => {
     const api = createBrowserFakeApi();
     const target = { kind: "main" as const, room_id: roomId };
     await stageMain(api, "old", [1]);
-    await api.stageUploadBytes(target, [item("new", [2])]);
+    await browserCommandSnapshot(api, api.stageUploadBytes(target, [item("new", [2])]));
 
     await expect(api.preparedUploadPreview(target, "old", "original-keep")).resolves.toEqual([]);
     await expect(api.preparedUploadPreview(target, "new", "original-keep")).resolves.toEqual([2]);
@@ -3329,7 +3356,7 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
     const api = createBrowserFakeApi();
     const root = await rootId(api);
     await stageThread(api, root, "thread-upload");
-    await api.closeThread();
+    await browserCommandSnapshot(api, api.closeThread());
 
     await expect(
       api.preparedUploadPreview({ kind: "thread", room_id: roomId, root_event_id: root }, "thread-upload", "original-keep")
@@ -3341,7 +3368,7 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
     const rootA = await rootId(api);
     const rootB = (await api.getSnapshot()).timeline[1]!.event_id;
     await stageThread(api, rootA, "root-a");
-    await api.openThread(roomId, rootB, "existingThread");
+    await browserCommandSnapshot(api, api.openThread(roomId, rootB, "existingThread"));
 
     await expect(api.preparedUploadPreview({ kind: "thread", room_id: roomId, root_event_id: rootA }, "root-a", "original-keep")).resolves.toEqual([]);
   });
@@ -3351,9 +3378,9 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
     const root = await rootId(api);
     await stageThread(api, root, "navigation-upload");
     if (operation === "select room") {
-      await api.selectRoom(otherRoomId);
+      await browserCommandSnapshot(api, api.selectRoom(otherRoomId));
     } else {
-      await api.selectSpace(null);
+      await browserCommandSnapshot(api, api.selectSpace(null));
     }
 
     await expect(api.preparedUploadPreview({ kind: "thread", room_id: roomId, root_event_id: root }, "navigation-upload", "original-keep")).resolves.toEqual([]);
@@ -3365,7 +3392,7 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
     const staged = await stageMain(api, "cross-room");
     const variantId = firstPreparedVariantId(staged);
 
-    const selected = await api.selectRoom(otherRoomId);
+    const selected = await browserCommandSnapshot(api, api.selectRoom(otherRoomId));
 
     expect(selected.state.ui.timeline.staged_uploads).toEqual([]);
     await expect(api.preparedUploadPreview(target, "cross-room", variantId)).resolves.toEqual([]);
@@ -3377,7 +3404,7 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
     const staged = await stageMain(api, "same-room");
     const variantId = firstPreparedVariantId(staged);
 
-    const selected = await api.selectRoom(roomId);
+    const selected = await browserCommandSnapshot(api, api.selectRoom(roomId));
 
     expect(selected.state.ui.timeline.staged_uploads).toEqual(staged.state.ui.timeline.staged_uploads);
     await expect(api.preparedUploadPreview(target, "same-room", variantId)).resolves.toEqual([1, 2, 3]);
@@ -3389,7 +3416,7 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
     const staged = await stageMain(api, "space-transition");
     const variantId = firstPreparedVariantId(staged);
 
-    const selected = await api.selectSpace(null);
+    const selected = await browserCommandSnapshot(api, api.selectSpace(null));
 
     expect(selected.state.ui.navigation.active_room_id).toBeNull();
     expect(selected.state.ui.timeline.staged_uploads).toEqual([]);
@@ -3406,7 +3433,7 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
       const staged = await stageMain(api, operation);
       const variantId = firstPreparedVariantId(staged);
       const removed =
-        operation === "leaveRoom" ? await api.leaveRoom(roomId) : await api.forgetRoom(roomId);
+        operation === "leaveRoom" ? await browserCommandSnapshot(api, api.leaveRoom(roomId)) : await browserCommandSnapshot(api, api.forgetRoom(roomId));
 
       expect(removed.state.ui.timeline.staged_uploads).toEqual([]);
       await expect(api.preparedUploadPreview(target, operation, variantId)).resolves.toEqual([]);
@@ -3424,12 +3451,12 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
     const api = createBrowserFakeApi();
     const target = { kind: "main" as const, room_id: roomId };
     await stageMain(api, operation);
-    if (operation === "completeOidcLogin") await api.completeOidcLogin("https://example.invalid", "callback");
-    if (operation === "submitLogin") await api.submitLogin("https://example.invalid", "user", "password", "device", "linux");
-    if (operation === "switchAccount") await api.switchAccount((await api.listSavedSessions())[1]!);
-    if (operation === "changeHomeserver") await api.changeHomeserver();
-    if (operation === "logout") await api.logout();
-    if (operation === "resetLocalData") await api.resetLocalData();
+    if (operation === "completeOidcLogin") await browserCommandSnapshot(api, api.completeOidcLogin("https://example.invalid", "callback"));
+    if (operation === "submitLogin") await browserCommandSnapshot(api, api.submitLogin("https://example.invalid", "user", "password", "device", "linux"));
+    if (operation === "switchAccount") await browserCommandSnapshot(api, api.switchAccount((await api.listSavedSessions())[1]!));
+    if (operation === "changeHomeserver") await browserCommandSnapshot(api, api.changeHomeserver());
+    if (operation === "logout") await browserCommandSnapshot(api, api.logout());
+    if (operation === "resetLocalData") await browserCommandSnapshot(api, api.resetLocalData());
 
     await expect(api.preparedUploadPreview(target, operation, "original-keep")).resolves.toEqual([]);
   });
@@ -3441,7 +3468,7 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
     const thread = { kind: "thread" as const, room_id: roomId, root_event_id: root };
     await stageMain(api, "main");
     await stageThread(api, root, "thread");
-    await api.clearUploadStaging(thread);
+    await browserCommandSnapshot(api, api.clearUploadStaging(thread));
     await expect(
       api.preparedUploadPreview(thread, "thread", "original-keep")
     ).resolves.toEqual([]);
@@ -3449,7 +3476,7 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
       1, 2, 3
     ]);
 
-    await api.stageUploadBytes(thread, [item("thread-again", [7])]);
+    await browserCommandSnapshot(api, api.stageUploadBytes(thread, [item("thread-again", [7])]));
     const account = await readyAccount(api);
     const { generation, lease } = await beginComposerLease(api, account, thread);
     await api.sendPreparedUploads(account, lease.leaseId, generation, thread, revision("0"));
@@ -3463,9 +3490,13 @@ describe("BrowserFakeApi prepared upload lifecycle", () => {
 });
 
 describe("BrowserFakeApi async completion fences", () => {
-  async function expectSignedOut(result: Promise<DesktopSnapshot>) {
+  async function expectSignedOut(
+    api: ReturnType<typeof createBrowserFakeApi>,
+    result: Promise<CommandReceipt>
+  ) {
     const signedOut = await createBrowserFakeApi({ session: "signedOut" }).getSnapshot();
-    const snapshot = await result;
+    await result;
+    const snapshot = await api.getSnapshot();
     expect(snapshot.state.domain.session).toEqual({ kind: "signedOut" });
     expect(resetSessionViewProjection(snapshot)).toEqual(resetSessionViewProjection(signedOut));
     expect(snapshot.state.domain.profile).toEqual(signedOut.state.domain.profile);
@@ -3483,27 +3514,27 @@ describe("BrowserFakeApi async completion fences", () => {
     ["queryDirectory", async () => {}, (api: ReturnType<typeof createBrowserFakeApi>) => api.queryDirectory({ term: "synthetic", server_name: null, limit: 10, since: null })],
     ["previewJoinTarget", async () => {}, (api: ReturnType<typeof createBrowserFakeApi>) => api.previewJoinTarget("#synthetic:example.invalid")],
     ["joinDirectoryRoom", async (api: ReturnType<typeof createBrowserFakeApi>) => {
-      await api.previewJoinTarget("#synthetic:example.invalid");
+      await browserCommandSnapshot(api, api.previewJoinTarget("#synthetic:example.invalid"));
     }, (api: ReturnType<typeof createBrowserFakeApi>) => api.joinDirectoryRoom("#synthetic:example.invalid")],
     ["updateRoomSetting", async (api: ReturnType<typeof createBrowserFakeApi>) => {
-      await api.loadRoomSettings("!room-alpha:example.invalid");
+      await browserCommandSnapshot(api, api.loadRoomSettings("!room-alpha:example.invalid"));
     }, (api: ReturnType<typeof createBrowserFakeApi>) => api.updateRoomSetting("!room-alpha:example.invalid", { name: "Renamed" })],
     ["moderateRoomMember", async (api: ReturnType<typeof createBrowserFakeApi>) => {
-      await api.loadRoomSettings("!room-alpha:example.invalid");
+      await browserCommandSnapshot(api, api.loadRoomSettings("!room-alpha:example.invalid"));
     }, (api: ReturnType<typeof createBrowserFakeApi>) => api.moderateRoomMember("!room-alpha:example.invalid", "@member:example.invalid", "kick")],
     ["updateRoomMemberRole", async (api: ReturnType<typeof createBrowserFakeApi>) => {
-      await api.loadRoomSettings("!room-alpha:example.invalid");
+      await browserCommandSnapshot(api, api.loadRoomSettings("!room-alpha:example.invalid"));
     }, (api: ReturnType<typeof createBrowserFakeApi>) => api.updateRoomMemberRole("!room-alpha:example.invalid", "@member:example.invalid", 50)],
     ["openActivity", async () => {}, (api: ReturnType<typeof createBrowserFakeApi>) => api.openActivity()],
     ["markActivityRead", async (api: ReturnType<typeof createBrowserFakeApi>) => {
-      await api.openActivity();
+      await browserCommandSnapshot(api, api.openActivity());
     }, (api: ReturnType<typeof createBrowserFakeApi>) => api.markActivityRead({ kind: "all" })]
   ] as const)("does not apply stale %s completion after logout", async (_name, prepare, start) => {
     const api = createBrowserFakeApi();
     await prepare(api);
     const pending = start(api);
-    await api.logout();
-    await expectSignedOut(pending);
+    await browserCommandSnapshot(api, api.logout());
+    await expectSignedOut(api, pending);
   });
 
   test.each(["completeOidcLogin", "submitLogin", "switchAccount", "changeHomeserver", "logout"] as const)(
@@ -3512,12 +3543,13 @@ describe("BrowserFakeApi async completion fences", () => {
       const api = createBrowserFakeApi();
       const sessions = operation === "switchAccount" ? await api.listSavedSessions() : [];
       const pending = api.setLocalUserAlias("@alias:example.invalid", "Alias");
-      if (operation === "completeOidcLogin") await api.completeOidcLogin("https://example.invalid", "callback");
-      if (operation === "submitLogin") await api.submitLogin("https://example.invalid", "user", "password", "device", "linux");
-      if (operation === "switchAccount") await api.switchAccount(sessions[1]!);
-      if (operation === "changeHomeserver") await api.changeHomeserver();
-      if (operation === "logout") await api.logout();
-      const snapshot = await pending;
+      if (operation === "completeOidcLogin") await browserCommandSnapshot(api, api.completeOidcLogin("https://example.invalid", "callback"));
+      if (operation === "submitLogin") await browserCommandSnapshot(api, api.submitLogin("https://example.invalid", "user", "password", "device", "linux"));
+      if (operation === "switchAccount") await browserCommandSnapshot(api, api.switchAccount(sessions[1]!));
+      if (operation === "changeHomeserver") await browserCommandSnapshot(api, api.changeHomeserver());
+      if (operation === "logout") await browserCommandSnapshot(api, api.logout());
+      await pending;
+      const snapshot = await api.getSnapshot();
       expect(snapshot.state.domain.profile.local_aliases).toEqual({});
       expect(snapshot.state.domain.profile.local_alias_update).toEqual({ kind: "idle" });
     }
@@ -3528,7 +3560,8 @@ describe("BrowserFakeApi async completion fences", () => {
     const reset = api.resetLocalData();
     const alias = api.setLocalUserAlias("@alias:example.invalid", "Alias");
     await reset;
-    const snapshot = await alias;
+    await alias;
+    const snapshot = await api.getSnapshot();
     expect(snapshot.state.domain.session).toEqual({ kind: "signedOut" });
     expect(snapshot.state.domain.profile.local_aliases).toEqual({});
     expect(snapshot.state.domain.profile.local_alias_update).toEqual({ kind: "idle" });
@@ -3537,15 +3570,15 @@ describe("BrowserFakeApi async completion fences", () => {
   test("unignore completion cannot settle a newer account operation", async () => {
     const userId = "@ignored:example.invalid";
     const api = createBrowserFakeApi();
-    await api.ignoreUser(userId);
+    await browserCommandSnapshot(api, api.ignoreUser(userId));
     const stale = api.unignoreUser(userId);
     const replacement = api.completeOidcLogin("https://example.invalid", "callback");
     const current = api.ignoreUser(userId);
     await replacement;
 
-    const staleSnapshot = await stale;
-    expect(staleSnapshot.state.domain.profile.ignored_user_update.kind).toBe("saving");
-    const currentSnapshot = await current;
+    await stale;
+    await current;
+    const currentSnapshot = await api.getSnapshot();
     expect(currentSnapshot.state.domain.profile.ignored_user_ids).toEqual([userId]);
     expect(currentSnapshot.state.domain.profile.ignored_user_update).toEqual({ kind: "idle" });
   });
@@ -3553,8 +3586,9 @@ describe("BrowserFakeApi async completion fences", () => {
   test("resetLocalData cannot overwrite a ready OIDC replacement", async () => {
     const api = createBrowserFakeApi();
     const reset = api.resetLocalData();
-    await api.completeOidcLogin("https://example.invalid", "callback");
-    const snapshot = await reset;
+    await browserCommandSnapshot(api, api.completeOidcLogin("https://example.invalid", "callback"));
+    await reset;
+    const snapshot = await api.getSnapshot();
     expect(snapshot.state.domain.session.kind).toBe("ready");
   });
 
@@ -3563,9 +3597,9 @@ describe("BrowserFakeApi async completion fences", () => {
     const query = { term: "synthetic", server_name: null, limit: 10, since: null };
     const first = api.queryDirectory(query);
     const second = api.queryDirectory({ ...query, term: "newer" });
-    const stale = await first;
-    expect(stale.state.domain.directory.query).toMatchObject({ kind: "querying", query: { term: "newer" } });
-    const current = await second;
+    await first;
+    await second;
+    const current = await api.getSnapshot();
     expect(current.state.domain.directory.query).toMatchObject({ kind: "results", query: { term: "newer" } });
   });
 });

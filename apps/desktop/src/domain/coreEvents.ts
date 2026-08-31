@@ -30,6 +30,7 @@ import type {
   AppUiState,
   AttachmentResult,
   ComposerDocument,
+  DesktopSnapshot,
   EncryptionDebugOperationOutcome,
   SearchCrawlerFailureKind,
   SidebarModel,
@@ -1172,6 +1173,23 @@ export type StateDeltaPayload = {
   changed: StateDeltaChangedSlices;
 };
 
+export type StateUpdateSnapshotReason = "initial" | "gap" | "lag" | "settlement";
+
+export type StateUpdateEnvelope =
+  | {
+      protocol_version: 1;
+      kind: "delta";
+      generation: number;
+      changed: StateDeltaChangedSlices;
+    }
+  | {
+      protocol_version: 1;
+      kind: "snapshot";
+      generation: number;
+      snapshot: DesktopSnapshot;
+      reason: StateUpdateSnapshotReason;
+    };
+
 export type StateDeltaChangedSlices = {
   state?: {
     schema_version?: number;
@@ -1238,7 +1256,6 @@ export type IntentOutcome =
 // ---------------------------------------------------------------------------
 
 export type CoreEventPayload =
-  | ({ kind: "StateDelta" } & StateDeltaPayload)
   | { kind: "Account"; event: AccountEvent }
   | { kind: "Sync"; event: SyncEvent }
   | { kind: "Room"; event: RoomEvent }

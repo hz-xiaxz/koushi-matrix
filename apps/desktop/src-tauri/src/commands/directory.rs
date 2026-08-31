@@ -9,7 +9,7 @@ pub async fn query_directory(
     since: Option<String>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -40,8 +40,7 @@ pub async fn query_directory(
         return Err("directory query returned an invalid outcome".to_owned());
     };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
+    Ok(FrontendCommandSettlement::from_published_generation(
         snapshot.generation,
     ))
 }
@@ -52,7 +51,7 @@ pub async fn join_directory_room(
     via_servers: Vec<String>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -60,8 +59,7 @@ pub async fn join_directory_room(
     let Some(command) =
         build_join_directory_room_command(request_id, room_id_or_alias, via_servers)
     else {
-        update_qa_window_title_from_state(&app, state.inner()).await;
-        return current_snapshot(state.inner()).await;
+        return Err("directory target must not be blank".to_owned());
     };
 
     event_conn
@@ -93,8 +91,7 @@ pub async fn join_directory_room(
         .await
         .map_err(invoke_error_from_select_room_error)?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        selected_snapshot.state,
+    Ok(FrontendCommandSettlement::from_published_generation(
         selected_snapshot.generation,
     ))
 }
@@ -105,7 +102,7 @@ pub async fn preview_join_target(
     via_servers: Vec<String>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -113,8 +110,7 @@ pub async fn preview_join_target(
     let Some(command) =
         build_preview_join_target_command(request_id, room_id_or_alias, via_servers)
     else {
-        update_qa_window_title_from_state(&app, state.inner()).await;
-        return current_snapshot(state.inner()).await;
+        return Err("directory target must not be blank".to_owned());
     };
 
     event_conn
@@ -137,8 +133,7 @@ pub async fn preview_join_target(
         return Err("directory preview returned an invalid outcome".to_owned());
     };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
+    Ok(FrontendCommandSettlement::from_published_generation(
         snapshot.generation,
     ))
 }
@@ -147,15 +142,15 @@ pub async fn preview_join_target(
 pub async fn dismiss_directory_preview(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_dismiss_directory_preview_command(request_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 /// Preview and join name the same target, so they normalize it the same way.

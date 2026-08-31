@@ -596,6 +596,15 @@ pub(super) fn build_set_fully_read_command(
 const SUBMISSION_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(10);
 const COMPOSER_DRAFT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_secs(10);
 
+async fn submit_required_admission(
+    state: &CoreRuntimeState,
+    command: Option<CoreCommand>,
+    validation_error: &'static str,
+) -> Result<FrontendCommandAdmission, String> {
+    let command = command.ok_or_else(|| validation_error.to_owned())?;
+    submit_core_command_with_admission(state, command).await
+}
+
 fn composer_draft_revision(
     state: &koushi_state::AppState,
     target: &koushi_state::ComposerTarget,
@@ -853,7 +862,7 @@ async fn wait_for_submission_settlement(
         outcome,
         submission_id,
         transaction_id,
-        snapshot: FrontendDesktopSnapshot::from_versioned(snapshot.state, snapshot.generation),
+        settlement: command_settlement(snapshot),
     })
 }
 
@@ -893,17 +902,17 @@ pub async fn paginate_timeline_backwards(
     room_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
     trace_tauri_timeline_command("submit", "paginate_backwards", request_id);
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_paginate_timeline_backwards_command(request_id, account_key, room_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -914,10 +923,10 @@ pub async fn restore_timeline_anchor(
     event_count: u16,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_restore_timeline_anchor_command(
             request_id,
@@ -930,7 +939,7 @@ pub async fn restore_timeline_anchor(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -938,11 +947,11 @@ pub async fn ensure_timeline_subscribed(
     timeline_key: TimelineKey,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
     trace_tauri_timeline_command("submit", "ensure_subscribed", request_id);
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id,
@@ -955,7 +964,7 @@ pub async fn ensure_timeline_subscribed(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -964,10 +973,10 @@ pub async fn paginate_thread_timeline_backwards(
     root_event_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_paginate_thread_timeline_backwards_command(
             request_id,
@@ -978,7 +987,7 @@ pub async fn paginate_thread_timeline_backwards(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1084,38 +1093,33 @@ pub async fn schedule_send(
         &target,
     )?;
     let request_id = event_conn.next_request_id();
-    let (accepted_revision, settled_snapshot) = if let Some(command) = build_schedule_send_command(
+    let Some(command) = build_schedule_send_command(
         request_id,
         expected_account,
         target.clone(),
         body,
         send_at_ms,
         draft_revision,
-    ) {
-        event_conn
-            .command_with_composer_lease(generation, lease, command)
-            .await
-            .map_err(|error| format!("command submit failed: {error}"))?;
-        let (accepted_revision, snapshot) = wait_for_composer_draft_acceptance(
-            &mut event_conn,
-            request_id,
-            account_key,
-            target.clone(),
-            expected_revision,
-            baseline_generation,
-        )
-        .await?;
-        (Some(accepted_revision), snapshot)
-    } else {
-        (None, event_conn.versioned_snapshot())
+    ) else {
+        return Err("scheduled send body must not be blank".to_owned());
     };
+    event_conn
+        .command_with_composer_lease(generation, lease, command)
+        .await
+        .map_err(|error| format!("command submit failed: {error}"))?;
+    let (accepted_revision, settled_snapshot) = wait_for_composer_draft_acceptance(
+        &mut event_conn,
+        request_id,
+        account_key,
+        target,
+        expected_revision,
+        baseline_generation,
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(ComposerDraftAcceptanceResponse {
         accepted_revision,
-        snapshot: FrontendDesktopSnapshot::from_versioned(
-            settled_snapshot.state,
-            settled_snapshot.generation,
-        ),
+        settlement: command_settlement(settled_snapshot),
     })
 }
 
@@ -1125,7 +1129,7 @@ pub async fn stage_upload_bytes(
     items: Vec<StageUploadBytesInputItem>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let items = items
         .into_iter()
         .map(
@@ -1145,10 +1149,7 @@ pub async fn stage_upload_bytes(
         .await
         .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        settled.state,
-        settled.generation,
-    ))
+    Ok(command_settlement(settled))
 }
 
 #[tauri::command]
@@ -1157,17 +1158,14 @@ pub async fn select_staged_upload_output(
     staged_id: String,
     selection: koushi_state::StagedUploadOutputSelection,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let settled = state
         .runtime
         .attach()
         .select_staged_upload_output(target, staged_id, selection)
         .await
         .map_err(|error| error.to_string())?;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        settled.state,
-        settled.generation,
-    ))
+    Ok(command_settlement(settled))
 }
 
 #[tauri::command]
@@ -1176,7 +1174,7 @@ pub async fn retry_staged_upload_preparation(
     staged_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let settled = state
         .runtime
         .attach()
@@ -1184,10 +1182,7 @@ pub async fn retry_staged_upload_preparation(
         .await
         .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        settled.state,
-        settled.generation,
-    ))
+    Ok(command_settlement(settled))
 }
 
 #[tauri::command]
@@ -1196,7 +1191,7 @@ pub async fn use_original_staged_upload(
     staged_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let settled = state
         .runtime
         .attach()
@@ -1204,10 +1199,7 @@ pub async fn use_original_staged_upload(
         .await
         .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        settled.state,
-        settled.generation,
-    ))
+    Ok(command_settlement(settled))
 }
 
 #[tauri::command]
@@ -1251,11 +1243,8 @@ pub async fn send_prepared_uploads(
         .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(ComposerDraftAcceptanceResponse {
-        accepted_revision: Some(settled.accepted_revision),
-        snapshot: FrontendDesktopSnapshot::from_versioned(
-            settled.snapshot.state,
-            settled.snapshot.generation,
-        ),
+        accepted_revision: settled.accepted_revision,
+        settlement: command_settlement(settled.snapshot),
     })
 }
 
@@ -1266,7 +1255,7 @@ pub async fn update_staged_upload_caption(
     document: Option<ComposerDocument>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let settled = state
         .runtime
         .attach()
@@ -1274,10 +1263,7 @@ pub async fn update_staged_upload_caption(
         .await
         .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        settled.state,
-        settled.generation,
-    ))
+    Ok(command_settlement(settled))
 }
 
 #[tauri::command]
@@ -1287,7 +1273,7 @@ pub async fn update_staged_upload_compression(
     compression_choice: StagedUploadCompressionChoice,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let settled = state
         .runtime
         .attach()
@@ -1295,10 +1281,7 @@ pub async fn update_staged_upload_compression(
         .await
         .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        settled.state,
-        settled.generation,
-    ))
+    Ok(command_settlement(settled))
 }
 
 #[tauri::command]
@@ -1306,7 +1289,7 @@ pub async fn clear_upload_staging(
     target: koushi_state::ComposerTarget,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let settled = state
         .runtime
         .attach()
@@ -1314,10 +1297,7 @@ pub async fn clear_upload_staging(
         .await
         .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        settled.state,
-        settled.generation,
-    ))
+    Ok(command_settlement(settled))
 }
 
 #[tauri::command]
@@ -1325,13 +1305,14 @@ pub async fn cancel_scheduled_send(
     scheduled_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    if let Some(command) = build_cancel_scheduled_send_command(request_id, scheduled_id) {
-        submit_core_command(state.inner(), command).await?;
-    }
+    let Some(command) = build_cancel_scheduled_send_command(request_id, scheduled_id) else {
+        return Err("scheduled send id must not be blank".to_owned());
+    };
+    let admission = submit_core_command_with_admission(state.inner(), command).await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1341,15 +1322,16 @@ pub async fn reschedule_scheduled_send(
     send_at_ms: u64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    if let Some(command) =
+    let Some(command) =
         build_reschedule_scheduled_send_command(request_id, scheduled_id, body, send_at_ms)
-    {
-        submit_core_command(state.inner(), command).await?;
-    }
+    else {
+        return Err("scheduled send id and body must not be blank".to_owned());
+    };
+    let admission = submit_core_command_with_admission(state.inner(), command).await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1358,16 +1340,16 @@ pub async fn retry_send(
     transaction_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    if let Some(command) =
-        build_retry_send_command(request_id, account_key, room_id, transaction_id)
-    {
-        submit_core_command(state.inner(), command).await?;
-    }
+    let Some(command) = build_retry_send_command(request_id, account_key, room_id, transaction_id)
+    else {
+        return Err("send transaction id must not be blank".to_owned());
+    };
+    let admission = submit_core_command_with_admission(state.inner(), command).await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1376,16 +1358,16 @@ pub async fn cancel_send(
     transaction_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    if let Some(command) =
-        build_cancel_send_command(request_id, account_key, room_id, transaction_id)
-    {
-        submit_core_command(state.inner(), command).await?;
-    }
+    let Some(command) = build_cancel_send_command(request_id, account_key, room_id, transaction_id)
+    else {
+        return Err("send transaction id must not be blank".to_owned());
+    };
+    let admission = submit_core_command_with_admission(state.inner(), command).await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1394,19 +1376,20 @@ pub async fn download_media(
     event_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<(), String> {
     if event_id.trim().is_empty() {
-        return current_snapshot(state.inner()).await;
+        return Err("media event id must not be blank".to_owned());
     }
 
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    if let Some(command) = build_download_media_command(request_id, account_key, room_id, event_id)
-    {
-        submit_core_command(state.inner(), command).await?;
-    }
+    let Some(command) = build_download_media_command(request_id, account_key, room_id, event_id)
+    else {
+        return Err("media event id must not be blank".to_owned());
+    };
+    submit_core_command(state.inner(), command).await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(())
 }
 
 #[tauri::command]
@@ -1443,16 +1426,17 @@ pub async fn load_message_source(
     event_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    if let Some(command) =
-        build_load_message_source_command(request_id, account_key, room_id, event_id)
-    {
-        submit_core_command(state.inner(), command).await?;
-    }
+    let admission = submit_required_admission(
+        state.inner(),
+        build_load_message_source_command(request_id, account_key, room_id, event_id),
+        "message event id must not be blank",
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1463,24 +1447,27 @@ pub async fn request_room_key(
     timeline_key: Option<TimelineKey>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
     // Only absent origin defaults to User; unknown wire values are rejected by
     // the typed deserializer instead of being silently coerced.
     let origin = origin.unwrap_or(koushi_core::KeyRequestOrigin::User);
-    if let Some(command) = build_request_room_key_command(
-        request_id,
-        account_key,
-        room_id,
-        event_id,
-        origin,
-        timeline_key,
-    ) {
-        submit_core_command(state.inner(), command).await?;
-    }
+    let admission = submit_required_admission(
+        state.inner(),
+        build_request_room_key_command(
+            request_id,
+            account_key,
+            room_id,
+            event_id,
+            origin,
+            timeline_key,
+        ),
+        "room key event id must not be blank",
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 /// Trigger the bounded local late-decryption retry for the given room's
@@ -1492,16 +1479,17 @@ pub async fn request_late_decryption(
     timeline_key: Option<TimelineKey>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    if let Some(command) =
-        build_request_late_decryption_command(request_id, account_key, room_id, timeline_key)
-    {
-        submit_core_command(state.inner(), command).await?;
-    }
+    let admission = submit_required_admission(
+        state.inner(),
+        build_request_late_decryption_command(request_id, account_key, room_id, timeline_key),
+        "room id must not be blank",
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1510,17 +1498,18 @@ pub async fn load_link_previews(
     event_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
     trace_tauri_timeline_command("submit", "load_link_previews", request_id);
-    if let Some(command) =
-        build_load_link_previews_command(request_id, account_key, room_id, event_id)
-    {
-        submit_core_command(state.inner(), command).await?;
-    }
+    let admission = submit_required_admission(
+        state.inner(),
+        build_load_link_previews_command(request_id, account_key, room_id, event_id),
+        "link preview event id must not be blank",
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1529,16 +1518,17 @@ pub async fn hide_link_preview(
     event_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    if let Some(command) =
-        build_hide_link_preview_command(request_id, account_key, room_id, event_id)
-    {
-        submit_core_command(state.inner(), command).await?;
-    }
+    let admission = submit_required_admission(
+        state.inner(),
+        build_hide_link_preview_command(request_id, account_key, room_id, event_id),
+        "link preview event id must not be blank",
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1548,22 +1538,25 @@ pub async fn forward_message(
     destination_room_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let transaction_id = super::next_transaction_id("desktop-forward");
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    if let Some(command) = build_forward_message_command(
-        request_id,
-        account_key,
-        room_id,
-        source_event_id,
-        destination_room_id,
-        transaction_id,
-    ) {
-        submit_core_command(state.inner(), command).await?;
-    }
+    let admission = submit_required_admission(
+        state.inner(),
+        build_forward_message_command(
+            request_id,
+            account_key,
+            room_id,
+            source_event_id,
+            destination_room_id,
+            transaction_id,
+        ),
+        "forward source and destination must not be blank",
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1573,19 +1566,20 @@ pub async fn edit_message(
     document: koushi_state::ComposerDocument,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     if document.plain_body().trim().is_empty() {
-        return current_snapshot(state.inner()).await;
+        return Err("message body must not be blank".to_owned());
     }
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    if let Some(command) =
-        build_edit_message_command(request_id, account_key, room_id, event_id, document)
-    {
-        submit_core_command(state.inner(), command).await?;
-    }
+    let admission = submit_required_admission(
+        state.inner(),
+        build_edit_message_command(request_id, account_key, room_id, event_id, document),
+        "message target must not be blank",
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1594,16 +1588,16 @@ pub async fn redact_message(
     event_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_redact_message_command(request_id, account_key, room_id, event_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1613,20 +1607,21 @@ pub async fn toggle_reaction(
     reaction_key: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     if reaction_key.is_empty() {
-        return current_snapshot(state.inner()).await;
+        return Err("reaction key must not be blank".to_owned());
     }
 
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
-    if let Some(command) =
-        build_toggle_reaction_command(request_id, account_key, room_id, event_id, reaction_key)
-    {
-        submit_core_command(state.inner(), command).await?;
-    }
+    let admission = submit_required_admission(
+        state.inner(),
+        build_toggle_reaction_command(request_id, account_key, room_id, event_id, reaction_key),
+        "reaction target must not be blank",
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1636,29 +1631,29 @@ pub async fn send_reaction(
     reaction_key: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     if reaction_key.trim().is_empty() || event_id.trim().is_empty() {
-        return current_snapshot(state.inner()).await;
+        return Err("reaction key and event id must not be blank".to_owned());
     }
 
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
     let trace_started = std::time::Instant::now();
     trace_tauri_timeline_command("submit", "send_reaction", request_id);
-    if let Some(command) =
-        build_send_reaction_command(request_id, account_key, room_id, event_id, reaction_key)
-    {
-        submit_core_command(state.inner(), command).await?;
-    }
+    let admission = submit_required_admission(
+        state.inner(),
+        build_send_reaction_command(request_id, account_key, room_id, event_id, reaction_key),
+        "reaction target must not be blank",
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    let snapshot = current_snapshot(state.inner()).await;
     trace_tauri_timeline_command_elapsed(
         "done",
         "send_reaction",
         request_id,
         trace_started.elapsed().as_millis(),
     );
-    snapshot
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1669,37 +1664,39 @@ pub async fn redact_reaction(
     reaction_event_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     if reaction_key.trim().is_empty()
         || event_id.trim().is_empty()
         || reaction_event_id.trim().is_empty()
     {
-        return current_snapshot(state.inner()).await;
+        return Err("reaction target must not be blank".to_owned());
     }
 
     let account_key = account_key_from_snapshot(state.inner()).await;
     let request_id = next_request_id(state.inner()).await;
     let trace_started = std::time::Instant::now();
     trace_tauri_timeline_command("submit", "redact_reaction", request_id);
-    if let Some(command) = build_redact_reaction_command(
-        request_id,
-        account_key,
-        room_id,
-        event_id,
-        reaction_key,
-        reaction_event_id,
-    ) {
-        submit_core_command(state.inner(), command).await?;
-    }
+    let admission = submit_required_admission(
+        state.inner(),
+        build_redact_reaction_command(
+            request_id,
+            account_key,
+            room_id,
+            event_id,
+            reaction_key,
+            reaction_event_id,
+        ),
+        "reaction target must not be blank",
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    let snapshot = current_snapshot(state.inner()).await;
     trace_tauri_timeline_command_elapsed(
         "done",
         "redact_reaction",
         request_id,
         trace_started.elapsed().as_millis(),
     );
-    snapshot
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1708,9 +1705,9 @@ pub async fn set_composer_reply_target(
     event_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         CoreCommand::App(AppCommand::SetComposerReplyTarget {
             request_id,
@@ -1720,22 +1717,22 @@ pub async fn set_composer_reply_target(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
 pub async fn cancel_composer_reply(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         CoreCommand::App(AppCommand::CancelComposerReply { request_id }),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -1750,7 +1747,7 @@ pub async fn set_composer_draft(
     draft_revision: koushi_state::ComposerDraftRevision,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let (generation, lease) = parse_composer_wire_tokens(&renderer_generation, &lease_id)?;
     let event_conn = state.runtime.attach();
     let expected_account = koushi_key::SessionKeyId {
@@ -1769,8 +1766,8 @@ pub async fn set_composer_draft(
         &target,
     )?;
     let request_id = event_conn.next_request_id();
-    event_conn
-        .command_with_composer_lease(
+    let admission = event_conn
+        .command_with_composer_lease_and_admission(
             generation,
             lease,
             build_set_composer_draft_command(
@@ -1784,7 +1781,7 @@ pub async fn set_composer_draft(
         .await
         .map_err(|error| format!("command submit failed: {error}"))?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendCommandAdmission::from_core(admission))
 }
 
 #[tauri::command]
@@ -1800,7 +1797,7 @@ pub async fn set_thread_composer_draft(
     draft_revision: koushi_state::ComposerDraftRevision,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let (generation, lease) = parse_composer_wire_tokens(&renderer_generation, &lease_id)?;
     let event_conn = state.runtime.attach();
     let expected_account = koushi_key::SessionKeyId {
@@ -1820,8 +1817,8 @@ pub async fn set_thread_composer_draft(
         &target,
     )?;
     let request_id = event_conn.next_request_id();
-    event_conn
-        .command_with_composer_lease(
+    let admission = event_conn
+        .command_with_composer_lease_and_admission(
             generation,
             lease,
             build_set_thread_composer_draft_command(
@@ -1836,7 +1833,7 @@ pub async fn set_thread_composer_draft(
         .await
         .map_err(|error| format!("command submit failed: {error}"))?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendCommandAdmission::from_core(admission))
 }
 
 #[tauri::command]
@@ -1987,8 +1984,8 @@ pub async fn send_thread_reply(
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ComposerDraftAcceptanceResponse {
-    pub accepted_revision: Option<ComposerDraftRevision>,
-    pub snapshot: FrontendDesktopSnapshot,
+    pub accepted_revision: ComposerDraftRevision,
+    pub settlement: FrontendCommandSettlement,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -2016,7 +2013,7 @@ pub(crate) struct SubmissionResponse {
     pub outcome: SubmissionOutcome,
     pub submission_id: SubmissionId,
     pub transaction_id: Option<String>,
-    pub snapshot: FrontendDesktopSnapshot,
+    pub settlement: FrontendCommandSettlement,
 }
 
 #[cfg(test)]

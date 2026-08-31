@@ -1,5 +1,5 @@
 use super::*;
-use koushi_core::{CoreConnection, CoreEvent, CoreRuntime, executor};
+use koushi_core::{CoreConnection, CoreRuntime, executor};
 use koushi_state::{
     AppAction, CurrentDeviceTrustState, NativeAttentionCandidate, NativeAttentionCapabilities,
     NativeAttentionDispatchState, NativeAttentionState, NativeAttentionSummary, RoomAttentionKind,
@@ -21,11 +21,20 @@ async fn seed_ready(runtime: &CoreRuntime, connection: &mut CoreConnection) {
         .await;
     executor::timeout(Duration::from_secs(1), async {
         loop {
-            if matches!(connection.recv_event().await, Ok(CoreEvent::StateChanged(snapshot)) if matches!(snapshot.session, koushi_state::SessionState::Ready(_))) {
+            if matches!(
+                connection.snapshot().session,
+                koushi_state::SessionState::Ready(_)
+            ) {
                 break;
             }
+            connection
+                .next_versioned_snapshot()
+                .await
+                .expect("snapshot stream");
         }
-    }).await.expect("canonical Ready fixture must reach reducer");
+    })
+    .await
+    .expect("canonical Ready fixture must reach reducer");
 }
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -198,11 +207,17 @@ async fn command_helper_crosses_core_runtime_and_settles_the_matching_dispatch()
         .expect("seed native attention badge through core command");
     executor::timeout(Duration::from_secs(1), async {
         loop {
-            if matches!(observer.recv_event().await, Ok(CoreEvent::StateChanged(snapshot)) if snapshot.native_attention.summary.badge_count == 1) {
+            if observer.snapshot().native_attention.summary.badge_count == 1 {
                 break;
             }
+            observer
+                .next_versioned_snapshot()
+                .await
+                .expect("snapshot stream");
         }
-    }).await.expect("seed badge must reach reducer before dispatch");
+    })
+    .await
+    .expect("seed badge must reach reducer before dispatch");
 
     let backend = FakeBackend {
         calls: Cell::new(0),
@@ -214,17 +229,17 @@ async fn command_helper_crosses_core_runtime_and_settles_the_matching_dispatch()
 
     let snapshot = executor::timeout(Duration::from_secs(1), async {
         loop {
-            match observer.recv_event().await.expect("core event") {
-                CoreEvent::StateChanged(snapshot)
-                    if matches!(
-                        snapshot.native_attention.dispatch,
-                        NativeAttentionDispatchState::Delivered { .. }
-                    ) =>
-                {
-                    return snapshot;
-                }
-                _ => continue,
+            let snapshot = observer.snapshot();
+            if matches!(
+                snapshot.native_attention.dispatch,
+                NativeAttentionDispatchState::Delivered { .. }
+            ) {
+                return snapshot;
             }
+            observer
+                .next_versioned_snapshot()
+                .await
+                .expect("snapshot stream");
         }
     })
     .await
@@ -266,11 +281,23 @@ async fn concurrent_command_helpers_admit_only_one_native_backend_call() {
         .expect("seed candidate");
     executor::timeout(Duration::from_secs(1), async {
         loop {
-            if matches!(seeder.recv_event().await, Ok(CoreEvent::StateChanged(snapshot)) if snapshot.native_attention.summary.candidate.is_some()) {
+            if seeder
+                .snapshot()
+                .native_attention
+                .summary
+                .candidate
+                .is_some()
+            {
                 break;
             }
+            seeder
+                .next_versioned_snapshot()
+                .await
+                .expect("snapshot stream");
         }
-    }).await.expect("seed candidate must reach reducer before concurrent dispatch");
+    })
+    .await
+    .expect("seed candidate must reach reducer before concurrent dispatch");
     let backend = ControlledBackend {
         calls: AtomicU32::new(0),
         entered: Notify::new(),

@@ -61,11 +61,14 @@ const RESTORE_ANCHOR_RELAY_WAIT_TICKS: u8 = 40;
 /// budget); under normal conditions the anchor lands on tick 1.
 const RESTORE_ANCHOR_RELAY_WAIT_TICK_MS: u64 = 50;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct TimelineProjectionAcknowledgement {
-    pub accepted: bool,
-    pub item_count: u64,
-    pub target_present: bool,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct FocusedProjectionCommitted {
+    pub(crate) projection_request_id: RequestId,
+    pub(crate) key: TimelineKey,
+    pub(crate) actor_generation: u64,
+    pub(crate) timeline_generation: TimelineGeneration,
+    pub(crate) item_count: u64,
+    pub(crate) target_present: bool,
 }
 
 /// Private projection work admitted only after Rust-owned room navigation has
@@ -170,6 +173,7 @@ pub(super) struct TimelineActorGenerationGateEntry {
 pub(super) struct TimelineActorGenerationGate {
     pub(super) state: Mutex<TimelineActorGenerationGateState>,
     changes: watch::Sender<u64>,
+    focused_projection_tx: Option<mpsc::UnboundedSender<FocusedProjectionCommitted>>,
 }
 
 pub(super) struct TimelineActorGenerationActivation {
@@ -189,11 +193,30 @@ impl Default for TimelineActorGenerationGate {
         Self {
             state: Mutex::new(TimelineActorGenerationGateState::default()),
             changes,
+            focused_projection_tx: None,
         }
     }
 }
 
 impl TimelineActorGenerationGate {
+    pub(super) fn with_focused_projection_commits(
+        focused_projection_tx: Option<mpsc::UnboundedSender<FocusedProjectionCommitted>>,
+    ) -> Self {
+        Self {
+            focused_projection_tx,
+            ..Self::default()
+        }
+    }
+
+    fn publish_focused_projection_commit(&self, commit: FocusedProjectionCommitted) {
+        if let Some(tx) = self.focused_projection_tx.as_ref() {
+            // This internal lane is scoped to one AppActor tree. It is unbounded so
+            // publishing under a synchronous generation lease can neither block nor
+            // drop a commit; the sole AppActor receiver drains it for that lifetime.
+            let _ = tx.send(commit);
+        }
+    }
+
     /// Starts a new actor generation only after every old-generation replay
     /// lease has completed. No synchronous mutex is held while waiting for a
     /// watch notification.
@@ -383,50 +406,11 @@ fn next_timeline_actor_generation(_state: &mut TimelineActorGenerationGateState)
     NEXT_TIMELINE_ACTOR_GENERATION.fetch_add(1, Ordering::Relaxed)
 }
 
-pub(super) fn accept_projection_ack_for_active_actor(
-    timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
-    key: &TimelineKey,
-    actor_generation: u64,
-    expected_projection_request_id: RequestId,
-    expected_generation: TimelineGeneration,
-    projection_request_id: RequestId,
-    generation: TimelineGeneration,
-    projection_acknowledged: &mut bool,
-) -> bool {
-    if projection_request_id != expected_projection_request_id || generation != expected_generation
-    {
-        return false;
-    }
-    let Some(_lease) = timeline_actor_generations.try_acquire(key, actor_generation) else {
-        return false;
-    };
-    *projection_acknowledged = true;
-    true
-}
-
-pub(super) fn projection_acknowledgement_for_current_items(
-    key: &TimelineKey,
-    items: &[TimelineItem],
-    accepted: bool,
-) -> TimelineProjectionAcknowledgement {
-    let target_present = match &key.kind {
-        TimelineKind::Focused { event_id, .. } => items.iter().any(
-            |item| matches!(&item.id, TimelineItemId::Event { event_id: id } if id == event_id),
-        ),
-        TimelineKind::Room { .. } | TimelineKind::Thread { .. } => true,
-    };
-    TimelineProjectionAcknowledgement {
-        accepted,
-        item_count: items.len() as u64,
-        target_present,
-    }
-}
-
 pub(super) fn replay_projection_request_id(
     projection_request_id: RequestId,
-    projection_acknowledged: bool,
+    initial_projection_committed: bool,
 ) -> Option<RequestId> {
-    (!projection_acknowledged).then_some(projection_request_id)
+    (!initial_projection_committed).then_some(projection_request_id)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -445,13 +429,13 @@ impl InitialItemsRequestIdentity {
 
     pub(super) fn replay(
         projection_request_id: RequestId,
-        projection_acknowledged: bool,
+        initial_projection_committed: bool,
         cause_request_id: Option<RequestId>,
     ) -> Self {
         Self {
             projection_request_id: replay_projection_request_id(
                 projection_request_id,
-                projection_acknowledged,
+                initial_projection_committed,
             ),
             cause_request_id,
         }
@@ -517,11 +501,40 @@ async fn acquire_pagination_permit_and_emit_paginating(
 /// call; this helper deliberately does not acquire a second lease.
 pub(super) fn emit_timeline_events_with_lease(
     event_tx: &broadcast::Sender<CoreEvent>,
-    _lease: &TimelineActorGenerationLease,
+    lease: &TimelineActorGenerationLease,
     events: Vec<TimelineEvent>,
 ) {
     for event in events {
+        let focused_commit = match &event {
+            TimelineEvent::InitialItems {
+                request_id: Some(projection_request_id),
+                key,
+                actor_generation,
+                generation,
+                items,
+                ..
+            } if matches!(key.kind, TimelineKind::Focused { .. }) => {
+                let target_present = match &key.kind {
+                    TimelineKind::Focused { event_id, .. } => items
+                        .iter()
+                        .any(|item| timeline_item_event_id(item) == Some(event_id.as_str())),
+                    _ => false,
+                };
+                Some(FocusedProjectionCommitted {
+                    projection_request_id: *projection_request_id,
+                    key: key.clone(),
+                    actor_generation: *actor_generation,
+                    timeline_generation: *generation,
+                    item_count: items.len() as u64,
+                    target_present,
+                })
+            }
+            _ => None,
+        };
         let _ = event_tx.send(CoreEvent::Timeline(event));
+        if let Some(commit) = focused_commit {
+            lease.gate.publish_focused_projection_commit(commit);
+        }
     }
 }
 
@@ -973,7 +986,6 @@ impl TimelineActor {
         }
 
         if self.gap_repair.active_serial.is_some()
-            || self.gap_repair.awaiting_projection.is_some()
             || self.gap_projection_correlation.is_pending()
             || self.pending_gap_projection.is_some()
         {
@@ -1214,7 +1226,6 @@ impl TimelineActor {
             return;
         }
         if self.gap_repair.active_serial.is_some()
-            || self.gap_repair.awaiting_projection.is_some()
             || self.gap_projection_correlation.is_pending()
             || self.pending_gap_projection.is_some()
         {
@@ -1597,7 +1608,7 @@ impl TimelineActor {
             self.actor_generation,
             InitialItemsRequestIdentity::replay(
                 self.projection_request_id,
-                self.projection_acknowledged,
+                self.initial_projection_committed,
                 cause_request_id,
             ),
             self.generation,
@@ -1624,22 +1635,6 @@ impl TimelineActor {
             },
             Some(item_count),
         );
-    }
-    pub(super) fn acknowledge_projection(
-        &mut self,
-        projection_request_id: RequestId,
-        generation: TimelineGeneration,
-    ) -> bool {
-        accept_projection_ack_for_active_actor(
-            &self.timeline_actor_generations,
-            &self.key,
-            self.actor_generation,
-            self.projection_request_id,
-            self.generation,
-            projection_request_id,
-            generation,
-            &mut self.projection_acknowledged,
-        )
     }
     pub(super) fn emit_navigation_if_changed(&mut self) {
         let snapshot = derive_timeline_navigation_snapshot_with_read_state(

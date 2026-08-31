@@ -77,9 +77,6 @@ async fn committed_lifecycle_waits_for_the_matching_published_snapshot() {
     snapshot_tx
         .send(published.clone())
         .expect("publish selected snapshot");
-    event_tx
-        .send(CoreEvent::StateChanged(published.state.clone()))
-        .expect("publish state event");
     assert_eq!(waiter.await.expect("settled selection"), published);
 }
 
@@ -93,10 +90,22 @@ async fn select_room_waiter_recovers_lag_from_latest_watch_snapshot() {
     let _command = command_rx.recv().await.expect("select command");
 
     event_tx
-        .send(CoreEvent::StateChanged(AppState::default()))
+        .send(CoreEvent::OperationFailed {
+            request_id: RequestId {
+                connection_id: RuntimeConnectionId(99),
+                sequence: 1,
+            },
+            failure: crate::failure::CoreFailure::SessionRequired,
+        })
         .expect("first event");
     event_tx
-        .send(CoreEvent::StateChanged(AppState::default()))
+        .send(CoreEvent::OperationFailed {
+            request_id: RequestId {
+                connection_id: RuntimeConnectionId(99),
+                sequence: 2,
+            },
+            failure: crate::failure::CoreFailure::SessionRequired,
+        })
         .expect("overflowing event");
     let published = selected_snapshot(room_id, 23);
     snapshot_tx
@@ -200,9 +209,6 @@ async fn unrelated_request_failures_do_not_settle_room_selection() {
     snapshot_tx
         .send(published.clone())
         .expect("publish selected snapshot");
-    event_tx
-        .send(CoreEvent::StateChanged(published.state.clone()))
-        .expect("publish state event");
     assert_eq!(waiter.await.expect("settled selection"), published);
 }
 

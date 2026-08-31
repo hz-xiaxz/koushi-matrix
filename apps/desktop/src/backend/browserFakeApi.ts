@@ -8,6 +8,7 @@ import {
   compareComposerDraftRevisions,
   nextComposerDraftRevision
 } from "../domain/composerDraftRevision";
+import { emitBrowserFakeStateUpdate } from "./browserFakeStateUpdates";
 import { computeBrowserRoomListProjection } from "./roomListProjection";
 import { composeBrowserFakeSidebar, emptySidebar } from "./browser-fake/sidebar";
 import {
@@ -76,6 +77,9 @@ import type { LinkPreview, LinkPreviewImage, LinkPreviewState } from "../domain/
 import type {
   ActivityMarkReadTarget,
   ActivityRow,
+  CommandAdmission,
+  CommandResult,
+  CommandSettlement,
   ActivityStream,
   ActivityTab,
   AttachmentResult,
@@ -212,6 +216,7 @@ class BrowserFakeApi implements DesktopApi {
   private preparedUploadBytes = new Map<string, number[]>();
   private submissionLedger = new Map<string, string>();
   private viewportSyncGeneration = 0;
+  private publishedState = "";
 
   private clearPreparedUploadBytes(target: ComposerTarget): void {
     const prefix =
@@ -307,7 +312,7 @@ class BrowserFakeApi implements DesktopApi {
       outcome: "accepted",
       submissionId,
       transactionId: admitted,
-      snapshot: clone(this.snapshot)
+      settlement: this.commandSettlement()
     };
   }
 
@@ -376,11 +381,58 @@ class BrowserFakeApi implements DesktopApi {
         space_joined: spaceMembers.space_joined.map((entry) => ({ ...entry, role_options: [] }))
       };
     }
+    this.publishedState = this.stateFingerprint();
+  }
+
+  private stateFingerprint(): string {
+    const { state, sidebar, timeline, thread } = this.snapshot;
+    return JSON.stringify({ state, sidebar, timeline, thread });
+  }
+
+  private publishCommandGeneration(): number {
+    this.refreshRoomPresentation();
+    const next = this.stateFingerprint();
+    if (next !== this.publishedState) {
+      this.snapshot.state_generation = (this.snapshot.state_generation ?? 0) + 1;
+      this.publishedState = next;
+      emitBrowserFakeStateUpdate({
+        protocol_version: 1,
+        kind: "delta",
+        generation: this.snapshot.state_generation,
+        changed: {
+          state: clone(this.snapshot.state),
+          sidebar: clone(this.snapshot.sidebar),
+          timeline: clone(this.snapshot.timeline),
+          thread: clone(this.snapshot.thread)
+        }
+      });
+    }
+    return this.snapshot.state_generation ?? 0;
+  }
+
+  private commandAdmission(): CommandAdmission {
+    return { protocolVersion: 1, admittedGeneration: this.publishCommandGeneration() };
+  }
+
+  private commandSettlement(): CommandSettlement {
+    return { protocolVersion: 1, publishedGeneration: this.publishCommandGeneration() };
+  }
+
+  private commandResult<T>(result: T): CommandResult<T> {
+    return { result, settlement: this.commandSettlement() };
   }
 
   async getSnapshot(): Promise<DesktopSnapshot> {
     this.refreshRoomPresentation();
     return clone(this.snapshot);
+  }
+
+  async settlementSnapshot(): Promise<DesktopSnapshot> {
+    return this.getSnapshot();
+  }
+
+  async resyncSnapshot(): Promise<DesktopSnapshot> {
+    return this.getSnapshot();
   }
 
   async beginComposerDraftRendererGeneration(): Promise<string> {
@@ -463,7 +515,7 @@ class BrowserFakeApi implements DesktopApi {
     };
   }
 
-  async discoverLoginMethods(homeserver: string): Promise<DesktopSnapshot> {
+  async discoverLoginMethods(homeserver: string): Promise<CommandSettlement> {
     const normalizedHomeserver = normalizeHomeserver(homeserver);
     this.snapshot.state.domain.auth = {
       kind: "ready",
@@ -483,23 +535,28 @@ class BrowserFakeApi implements DesktopApi {
       delegated: defaultDelegatedAuthLinks()
     };
 
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async startOidcLogin(_homeserver: string): Promise<OidcAuthorization> {
     return {
       authorization_url: "https://auth.example.test/authorize",
-      state: "browser-fake-state"
+      state: "browser-fake-state",
+      settlement: this.commandSettlement()
     };
   }
 
   async completeOidcLogin(
     _homeserver: string,
     _callbackUrl: string
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     this.clearSessionViews();
-    this.snapshot = createReadySnapshot(savedSessions[0]);
-    return clone(this.snapshot);
+    this.snapshot = createReadySnapshot(
+      savedSessions[0],
+      undefined,
+      this.snapshot.state_generation ?? 0
+    );
+    return this.commandSettlement();
   }
 
   async submitLogin(
@@ -508,7 +565,7 @@ class BrowserFakeApi implements DesktopApi {
     password: string,
     deviceDisplayName: string,
     platform: DisplayPlatform
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     const attempt_id = this.nextRequestId();
     this.snapshot.state.domain.session = {
       kind: "authenticating",
@@ -532,12 +589,12 @@ class BrowserFakeApi implements DesktopApi {
       recoverable: true
     });
 
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async submitSoftLogoutReauth(password: string): Promise<DesktopSnapshot> {
+  async submitSoftLogoutReauth(password: string): Promise<CommandSettlement> {
     if (this.snapshot.state.domain.session.kind !== "locked") {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const requestId = this.nextRequestId();
@@ -548,23 +605,27 @@ class BrowserFakeApi implements DesktopApi {
     };
     void password;
 
-    this.snapshot = createReadySnapshot({
-      homeserver: session.homeserver ?? savedSessions[0].homeserver,
-      user_id: session.user_id ?? savedSessions[0].user_id,
-      device_id: session.device_id ?? savedSessions[0].device_id
-    });
+    this.snapshot = createReadySnapshot(
+      {
+        homeserver: session.homeserver ?? savedSessions[0].homeserver,
+        user_id: session.user_id ?? savedSessions[0].user_id,
+        device_id: session.device_id ?? savedSessions[0].device_id
+      },
+      undefined,
+      this.snapshot.state_generation ?? 0
+    );
     this.snapshot.state.domain.soft_logout_reauth = {
       kind: "succeeded",
       request_id: requestId
     };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async listSavedSessions(): Promise<SavedSessionInfo[]> {
     return clone(savedSessions);
   }
 
-  async switchAccount(session: SavedSessionInfo): Promise<DesktopSnapshot> {
+  async switchAccount(session: SavedSessionInfo): Promise<CommandSettlement> {
     const knownSession =
       savedSessions.find(
         (candidate) =>
@@ -578,35 +639,39 @@ class BrowserFakeApi implements DesktopApi {
     };
     this.snapshot.state.domain.sync = "stopped";
     this.clearSessionViews();
-    this.snapshot = createReadySnapshot(knownSession);
-    return this.getSnapshot();
+    this.snapshot = createReadySnapshot(
+      knownSession,
+      undefined,
+      this.snapshot.state_generation ?? 0
+    );
+    return this.commandSettlement();
   }
 
-  async retrySlidingSyncCapability(): Promise<DesktopSnapshot> {
-    return this.getSnapshot();
+  async retrySlidingSyncCapability(): Promise<CommandAdmission> {
+    return this.commandAdmission();
   }
 
-  async changeHomeserver(): Promise<DesktopSnapshot> {
+  async changeHomeserver(): Promise<CommandAdmission> {
     this.snapshot.state.domain.session = { kind: "signedOut" };
     this.snapshot.state.domain.session_lock_reason = null;
     this.clearSessionViews();
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async logout(): Promise<DesktopSnapshot> {
+  async logout(): Promise<CommandSettlement> {
     this.snapshot.state.domain.session = { kind: "signedOut" };
     this.snapshot.state.domain.session_lock_reason = null;
     this.clearSessionViews();
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async submitRecovery(secret: string): Promise<DesktopSnapshot> {
+  async submitRecovery(secret: string): Promise<CommandAdmission> {
     if (
       this.snapshot.state.domain.session.kind !== "awaitingVerification" &&
       this.snapshot.state.domain.session.kind !== "verifying" &&
       this.snapshot.state.domain.session.kind !== "needsRecovery"
     ) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const session = this.snapshot.state.domain.session;
@@ -633,46 +698,46 @@ class BrowserFakeApi implements DesktopApi {
     );
     void secret;
 
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async recoverSecureBackup(secret: string): Promise<DesktopSnapshot> {
+  async recoverSecureBackup(secret: string): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     void secret;
     this.snapshot.state.domain.secure_backup_gate = { kind: "ready" };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
 
-  async retrySecureBackupInspection(): Promise<DesktopSnapshot> {
+  async retrySecureBackupInspection(): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     this.refreshRoomPresentation();
-    return clone(this.snapshot);
+    return this.commandAdmission();
   }
 
-  async startDeviceCleanup(): Promise<DesktopSnapshot> {
-    return this.getSnapshot();
+  async startDeviceCleanup(): Promise<CommandAdmission> {
+    return this.commandAdmission();
   }
 
-  async submitDeviceCleanupUia(flowId: number, password: string): Promise<DesktopSnapshot> {
+  async submitDeviceCleanupUia(flowId: number, password: string): Promise<CommandAdmission> {
     void flowId;
     void password;
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async eraseLocalDataAnyway(): Promise<DesktopSnapshot> {
-    return this.getSnapshot();
+  async eraseLocalDataAnyway(): Promise<CommandAdmission> {
+    return this.commandAdmission();
   }
 
-  async selectSpace(spaceId: string | null): Promise<DesktopSnapshot> {
+  async selectSpace(spaceId: string | null): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     this.rememberActiveRoomForCurrentSpace();
@@ -713,12 +778,12 @@ class BrowserFakeApi implements DesktopApi {
     }
     this.rememberActiveRoomForCurrentSpace();
 
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async reorderSpaces(spaceIds: string[]): Promise<DesktopSnapshot> {
+  async reorderSpaces(spaceIds: string[]): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews() || !isCompleteSpaceOrder(this.snapshot.state.domain.spaces, spaceIds)) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const spaceOrder = [...(this.snapshot.state.ui.navigation.space_order ?? [])];
@@ -743,18 +808,18 @@ class BrowserFakeApi implements DesktopApi {
         (positionBySpaceId.get(right.space_id) ?? Number.MAX_SAFE_INTEGER)
     );
     this.refreshSidebar();
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async restartSync(): Promise<DesktopSnapshot> {
+  async restartSync(): Promise<CommandAdmission> {
     if (this.canRestartSync()) {
       this.snapshot.state.domain.sync = "running";
     }
 
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async updateSettings(patch: SettingsPatch): Promise<DesktopSnapshot> {
+  async updateSettings(patch: SettingsPatch): Promise<CommandAdmission> {
     this.snapshot.state.domain.settings.values = applySettingsPatch(
       this.snapshot.state.domain.settings.values,
       patch
@@ -780,16 +845,16 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.domain.rooms,
       this.snapshot.state.domain.invites
     );
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async setRoomUrlPreviewOverride(
     roomId: string,
     enabled: boolean
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     const room = this.snapshot.state.domain.rooms.find((candidate) => candidate.room_id === roomId);
     if (!room || !this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     const defaultEnabled = room.is_encrypted
       ? this.snapshot.state.domain.settings.values.display.encrypted_url_previews_enabled
@@ -810,43 +875,43 @@ class BrowserFakeApi implements DesktopApi {
     } else {
       this.snapshot.state.domain.room_preferences.rooms[roomId] = preference;
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async selectRoomListFilter(filter: RoomListFilter): Promise<DesktopSnapshot> {
+  async selectRoomListFilter(filter: RoomListFilter): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.refreshRoomListProjection(filter);
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async markRoomAsRead(roomId: string, eventId: string): Promise<DesktopSnapshot> {
+  async markRoomAsRead(roomId: string, eventId: string): Promise<CommandAdmission> {
     // Do NOT mutate unread counts. Tests seed the expected Rust-shaped snapshot.
     void roomId;
     void eventId;
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async markRoomAsUnread(roomId: string, unread: boolean): Promise<DesktopSnapshot> {
+  async markRoomAsUnread(roomId: string, unread: boolean): Promise<CommandAdmission> {
     // Do NOT mutate unread counts. Tests seed the expected Rust-shaped snapshot.
     void roomId;
     void unread;
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async setRoomNotificationMode(
     roomId: string,
     mode: RoomNotificationMode
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     const known =
       this.snapshot.state.domain.rooms.some((room) => room.room_id === roomId) ||
       this.snapshot.state.domain.invites.some((invite) => invite.room_id === roomId);
     if (!known) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.snapshot.state.domain.room_notification_settings[roomId] = {
       mode,
@@ -868,7 +933,7 @@ class BrowserFakeApi implements DesktopApi {
     }
     this.refreshSidebar();
     this.refreshActivityStreams();
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   setRoomListProjection(projection: RoomListProjection): void {
@@ -906,9 +971,9 @@ class BrowserFakeApi implements DesktopApi {
 
   async refreshCurrentSessionStatus(
     trigger: SessionStatusRefreshTrigger
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     const requestId = this.nextRequestId();
     this.snapshot.state.domain.current_session_status = {
@@ -932,32 +997,32 @@ class BrowserFakeApi implements DesktopApi {
         checked_at_ms: Date.now()
       }
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async submitAccountManagementUia(flowId: number, password: string): Promise<DesktopSnapshot> {
+  async submitAccountManagementUia(flowId: number, password: string): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     void flowId;
     void password;
     this.snapshot.state.domain.account_management = { kind: "idle" };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async loadAccountManagementCapabilities(): Promise<DesktopSnapshot> {
+  async loadAccountManagementCapabilities(): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.snapshot.state.domain.account_management_capabilities = {
       change_password: { kind: "enabled" }
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async changePassword(newPassword: string): Promise<DesktopSnapshot> {
+  async changePassword(newPassword: string): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     void newPassword;
     this.snapshot.state.domain.account_management = {
@@ -965,12 +1030,12 @@ class BrowserFakeApi implements DesktopApi {
       request_id: this.nextRequestId(),
       operation: "changePassword"
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async deactivateAccount(eraseData: boolean): Promise<DesktopSnapshot> {
+  async deactivateAccount(eraseData: boolean): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     void eraseData;
     this.snapshot.state.domain.account_management = {
@@ -978,10 +1043,10 @@ class BrowserFakeApi implements DesktopApi {
       request_id: this.nextRequestId(),
       operation: "deactivateAccount"
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async probeLocalEncryptionHealth(): Promise<DesktopSnapshot> {
+  async probeLocalEncryptionHealth(): Promise<CommandAdmission> {
     const requestId = this.nextRequestId();
     this.snapshot.state.domain.local_encryption = { kind: "probing", request_id: requestId };
     await Promise.resolve();
@@ -989,15 +1054,15 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.domain.local_encryption.kind !== "probing" ||
       this.snapshot.state.domain.local_encryption.request_id !== requestId
     ) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.snapshot.state.domain.local_encryption = { kind: "healthy" };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async resetLocalData(): Promise<DesktopSnapshot> {
+  async resetLocalData(): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const requestId = this.nextRequestId();
@@ -1010,40 +1075,40 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.domain.local_encryption.kind !== "resetting" ||
       this.snapshot.state.domain.local_encryption.request_id !== requestId
     ) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.snapshot.state.domain.session = { kind: "signedOut" };
     this.snapshot.state.domain.session_lock_reason = null;
     this.snapshot.state.domain.sync = "stopped";
     this.snapshot.state.domain.local_encryption = { kind: "unknown" };
     this.clearSessionViews();
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async bootstrapCrossSigning(): Promise<DesktopSnapshot> {
+  async bootstrapCrossSigning(): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     this.snapshot.state.domain.e2ee_trust.cross_signing = { kind: "trusted" };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async enableKeyBackup(): Promise<DesktopSnapshot> {
+  async enableKeyBackup(): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     this.snapshot.state.domain.e2ee_trust.key_backup = {
       kind: "enabled",
       version: "browser-preview"
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async exportRoomKeys(destinationPath: string, passphrase: string): Promise<DesktopSnapshot> {
+  async exportRoomKeys(destinationPath: string, passphrase: string): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     void destinationPath;
@@ -1053,12 +1118,12 @@ class BrowserFakeApi implements DesktopApi {
       request_id: this.nextRequestId(),
       exported_sessions: null
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async importRoomKeys(sourcePath: string, passphrase: string): Promise<DesktopSnapshot> {
+  async importRoomKeys(sourcePath: string, passphrase: string): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     void sourcePath;
@@ -1069,16 +1134,16 @@ class BrowserFakeApi implements DesktopApi {
       imported_count: 1,
       total_count: 1
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async bootstrapSecureBackup(
     passphrase: string | null,
     recoveryKeyDestinationPath: string | null,
     intent: import("../domain/types").SecureBackupSetupIntent
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     void passphrase;
@@ -1088,16 +1153,16 @@ class BrowserFakeApi implements DesktopApi {
       request_id: this.nextRequestId(),
       delivery: recoveryKeyDestinationPath?.trim() ? { kind: "written" } : { kind: "notWritten" }
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async changeSecureBackupPassphrase(
     oldSecret: string,
     newPassphrase: string,
     recoveryKeyDestinationPath: string | null
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     void oldSecret;
@@ -1107,12 +1172,12 @@ class BrowserFakeApi implements DesktopApi {
       request_id: this.nextRequestId(),
       delivery: recoveryKeyDestinationPath?.trim() ? { kind: "written" } : { kind: "notWritten" }
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async acceptVerification(flowId: number): Promise<DesktopSnapshot> {
+  async acceptVerification(flowId: number): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const verification = this.snapshot.state.domain.e2ee_trust.verification;
@@ -1123,10 +1188,10 @@ class BrowserFakeApi implements DesktopApi {
         target: verification.target
       };
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async startOwnUserSas(): Promise<DesktopSnapshot> {
+  async startOwnUserSas(): Promise<CommandAdmission> {
     const flowId = this.nextRequestId();
     const session = this.snapshot.state.domain.session;
     if (session.kind === "awaitingVerification") {
@@ -1141,14 +1206,14 @@ class BrowserFakeApi implements DesktopApi {
         sas_emojis: []
       };
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
-  async retryCurrentDeviceTrustDiscovery(): Promise<DesktopSnapshot> {
+  async retryCurrentDeviceTrustDiscovery(): Promise<CommandAdmission> {
     const session = this.snapshot.state.domain.session;
     if (session.kind === "awaitingVerification" || session.kind === "provisional") this.snapshot.state.domain.session = { ...session, kind: "provisional", phase: { recheckingTrust: {} } };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
-  async mismatchSasVerification(flowId: number): Promise<DesktopSnapshot> {
+  async mismatchSasVerification(flowId: number): Promise<CommandAdmission> {
     const session = this.snapshot.state.domain.session;
     if (session.kind === "verifying" && session.flow_id === flowId) {
       this.snapshot.state.domain.session = {
@@ -1159,9 +1224,9 @@ class BrowserFakeApi implements DesktopApi {
         gate: { ...session.gate, failureKind: "mismatch" }
       };
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
-  async startSessionBootstrap(passphrase: string | null, recoveryKeyDestinationPath: string): Promise<DesktopSnapshot> {
+  async startSessionBootstrap(passphrase: string | null, recoveryKeyDestinationPath: string): Promise<CommandAdmission> {
     const flowId = this.nextRequestId();
     const session = this.snapshot.state.domain.session;
     void passphrase;
@@ -1176,15 +1241,15 @@ class BrowserFakeApi implements DesktopApi {
         destination_written: true
       };
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
-  async confirmSessionBootstrapSaved(flowId: number): Promise<DesktopSnapshot> {
+  async confirmSessionBootstrapSaved(flowId: number): Promise<CommandAdmission> {
     const session = this.snapshot.state.domain.session;
     if (session.kind === "awaitingBootstrapConfirmation" && session.flow_id === flowId) this.snapshot.state.domain.session = { ...session, kind: "provisional", phase: { recheckingTrust: {} }, flow_id: undefined, destination_written: undefined };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async confirmSasVerification(flowId: number): Promise<DesktopSnapshot> {
+  async confirmSasVerification(flowId: number): Promise<CommandAdmission> {
     const session = this.snapshot.state.domain.session;
     if (
       session.kind === "verifying" &&
@@ -1200,10 +1265,10 @@ class BrowserFakeApi implements DesktopApi {
         sas_emojis: undefined
       };
       this.snapshot.state.domain.e2ee_trust.verification = { kind: "idle" };
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const verification = this.snapshot.state.domain.e2ee_trust.verification;
@@ -1217,10 +1282,10 @@ class BrowserFakeApi implements DesktopApi {
         target: verification.target
       };
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async cancelVerification(flowId: number): Promise<DesktopSnapshot> {
+  async cancelVerification(flowId: number): Promise<CommandAdmission> {
     const session = this.snapshot.state.domain.session;
     if (session.kind === "verifying" && session.flow_id === flowId) {
       this.snapshot.state.domain.session = {
@@ -1230,22 +1295,22 @@ class BrowserFakeApi implements DesktopApi {
         device_id: session.device_id,
         gate: { ...session.gate, failureKind: "cancelled" }
       };
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const verification = this.snapshot.state.domain.e2ee_trust.verification;
     if (verification.kind !== "idle" && verification.request_id === flowId) {
       this.snapshot.state.domain.e2ee_trust.verification = { kind: "idle" };
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async resetIdentity(): Promise<DesktopSnapshot> {
+  async resetIdentity(): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     this.snapshot.state.domain.e2ee_trust.identity_reset = {
@@ -1253,12 +1318,12 @@ class BrowserFakeApi implements DesktopApi {
       request_id: this.nextRequestId(),
       auth_type: "uiaa"
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async cancelIdentityReset(flowId: number): Promise<DesktopSnapshot> {
+  async cancelIdentityReset(flowId: number): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const identityReset = this.snapshot.state.domain.e2ee_trust.identity_reset;
@@ -1274,12 +1339,12 @@ class BrowserFakeApi implements DesktopApi {
         failureKind: "cancelled"
       };
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async submitIdentityResetPassword(flowId: number, password: string): Promise<DesktopSnapshot> {
+  async submitIdentityResetPassword(flowId: number, password: string): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     void password;
@@ -1287,19 +1352,19 @@ class BrowserFakeApi implements DesktopApi {
     if (identityReset.kind === "awaitingAuth" && identityReset.request_id === flowId) {
       this.completeIdentityReset();
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async submitIdentityResetOAuth(flowId: number): Promise<DesktopSnapshot> {
+  async submitIdentityResetOAuth(flowId: number): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const identityReset = this.snapshot.state.domain.e2ee_trust.identity_reset;
     if (identityReset.kind === "awaitingAuth" && identityReset.request_id === flowId) {
       this.completeIdentityReset();
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async resolveComposerKeyAction(
@@ -1315,13 +1380,13 @@ class BrowserFakeApi implements DesktopApi {
     );
   }
 
-  async selectRoom(roomId: string): Promise<DesktopSnapshot> {
+  async selectRoom(roomId: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const selectedRoom = this.snapshot.state.domain.rooms.find((room) => room.room_id === roomId);
     if (!selectedRoom) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const outgoingRoomId = this.snapshot.state.ui.navigation.active_room_id;
@@ -1367,49 +1432,41 @@ class BrowserFakeApi implements DesktopApi {
     this.snapshot.thread = null;
     this.snapshot.timeline = timelineMessages.filter((message) => message.room_id === roomId);
     this.rememberActiveRoomForCurrentSpace();
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async selectSearchResult(roomId: string, eventId: string): Promise<DesktopSnapshot> {
+  async selectSearchResult(roomId: string, eventId: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     await this.selectRoom(roomId);
     this.snapshot.state.ui.navigation.main_timeline_anchor = { event_id: eventId };
     this.snapshot.state.ui.focused_context = { kind: "closed" };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async openActivityEvent(roomId: string, eventId: string): Promise<DesktopSnapshot> {
+  async openActivityEvent(roomId: string, eventId: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     await this.selectRoom(roomId);
     this.snapshot.state.ui.navigation.main_timeline_anchor = { event_id: eventId };
     this.snapshot.state.ui.focused_context = { kind: "closed" };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async openPinnedEvent(roomId: string, eventId: string): Promise<DesktopSnapshot> {
+  async openPinnedEvent(roomId: string, eventId: string): Promise<CommandSettlement> {
     return this.openActivityEvent(roomId, eventId);
-  }
-
-  async acknowledgeTimelineProjection(): Promise<void> {
-    // Browser fakes apply snapshots synchronously and have no Core actor lease.
-  }
-
-  async acknowledgeTimelineBatchRendered(): Promise<void> {
-    // Browser fakes apply timeline batches synchronously and have no Core actor lease.
   }
 
   async openTimelineAtTimestamp(
     roomId: string,
     timestampMs: number
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     await this.selectRoom(roomId);
@@ -1424,17 +1481,17 @@ class BrowserFakeApi implements DesktopApi {
         event_id: target.event_id
       };
     }
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async closeFocusedContext(): Promise<DesktopSnapshot> {
+  async closeFocusedContext(): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     this.snapshot.state.ui.focused_context = { kind: "closed" };
     this.snapshot.state.ui.navigation.main_timeline_anchor = null;
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async sendText(
@@ -1467,7 +1524,7 @@ class BrowserFakeApi implements DesktopApi {
         outcome: { rejected: { kind: "invalid" } },
         submissionId,
         transactionId: null,
-        snapshot: await this.getSnapshot()
+        settlement: this.commandSettlement()
       };
     }
     this.preflightComposerDraftAcceptance({ kind: "main", room_id: roomId }, draftRevision);
@@ -1493,7 +1550,7 @@ class BrowserFakeApi implements DesktopApi {
       outcome: "accepted",
       submissionId,
       transactionId,
-      snapshot: await this.getSnapshot()
+      settlement: this.commandSettlement()
     };
   }
 
@@ -1515,7 +1572,7 @@ class BrowserFakeApi implements DesktopApi {
       body.trim().length === 0 ||
       !Number.isFinite(sendAtMs)
     ) {
-      return { acceptedRevision: null, snapshot: await this.getSnapshot() };
+      throw new Error("scheduled send request is invalid");
     }
     this.preflightComposerDraftAcceptance(target, draftRevision);
 
@@ -1532,13 +1589,13 @@ class BrowserFakeApi implements DesktopApi {
       }
     ];
     const acceptedRevision = this.acceptComposerDraftTarget(target, draftRevision);
-    return { acceptedRevision, snapshot: await this.getSnapshot() };
+    return { acceptedRevision, settlement: this.commandSettlement() };
   }
 
   async stageUploadBytes(
     target: ComposerTarget,
     items: StageUploadBytesRequestItem[]
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     if (items.length === 0 || items.length > MAX_PREPARATION_BATCH_SIZE) {
       throw new Error(ATTACHMENT_BATCH_ERROR);
     }
@@ -1547,7 +1604,7 @@ class BrowserFakeApi implements DesktopApi {
       throw new Error(ATTACHMENT_BATCH_ERROR);
     }
     if (!this.canUseSyncedViews() || !browserComposerTargetIsActive(this.snapshot, target)) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     this.clearPreparedUploadBytes(target);
     const staged = items.map((item, index) => {
@@ -1567,14 +1624,14 @@ class BrowserFakeApi implements DesktopApi {
     } else if (this.snapshot.state.ui.thread.kind === "open") {
       this.snapshot.state.ui.thread.staged_uploads = staged;
     }
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async selectStagedUploadOutput(
     target: ComposerTarget,
     stagedId: string,
     selection: StagedUploadOutputSelection
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     const items = browserStagedUploadsForTarget(this.snapshot, target);
     const next = items.map((item) => {
       if (item.staged_id !== stagedId || item.preparation.kind !== "ready") {
@@ -1615,7 +1672,7 @@ class BrowserFakeApi implements DesktopApi {
       };
     });
     setBrowserStagedUploadsForTarget(this.snapshot, target, next);
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async preparedUploadPreview(
@@ -1629,15 +1686,15 @@ class BrowserFakeApi implements DesktopApi {
   async retryStagedUploadPreparation(
     target: ComposerTarget,
     _stagedId: string
-  ): Promise<DesktopSnapshot> {
-    if (!browserComposerTargetIsActive(this.snapshot, target)) return this.getSnapshot();
-    return this.getSnapshot();
+  ): Promise<CommandSettlement> {
+    if (!browserComposerTargetIsActive(this.snapshot, target)) return this.commandSettlement();
+    return this.commandSettlement();
   }
 
   async useOriginalStagedUpload(
     target: ComposerTarget,
     stagedId: string
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     const items = browserStagedUploadsForTarget(this.snapshot, target).map((item) => {
       if (item.staged_id !== stagedId || item.preparation.kind !== "failed") return item;
       const variant = {
@@ -1666,7 +1723,7 @@ class BrowserFakeApi implements DesktopApi {
       };
     });
     setBrowserStagedUploadsForTarget(this.snapshot, target, items);
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async sendPreparedUploads(
@@ -1678,22 +1735,22 @@ class BrowserFakeApi implements DesktopApi {
   ): Promise<ComposerDraftAcceptanceResponse> {
     this.requireComposerLease(account, target, leaseId, rendererGeneration);
     if (!browserComposerAccountMatches(this.snapshot.state.domain.session, account)) {
-      return { acceptedRevision: null, snapshot: await this.getSnapshot() };
+      throw new Error("staged upload send account does not match session");
     }
     this.preflightComposerDraftAcceptance(target, draftRevision);
     setBrowserStagedUploadsForTarget(this.snapshot, target, []);
     this.clearPreparedUploadBytes(target);
     const acceptedRevision = this.acceptComposerDraftTarget(target, draftRevision);
-    return { acceptedRevision, snapshot: await this.getSnapshot() };
+    return { acceptedRevision, settlement: this.commandSettlement() };
   }
 
   async updateStagedUploadCaption(
     target: ComposerTarget,
     stagedId: string,
     document: ComposerDocument | null
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !browserComposerTargetIsActive(this.snapshot, target)) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const normalized = document && plainBodyFromDocument(document).trim() ? document : null;
     setBrowserStagedUploadsForTarget(this.snapshot, target, browserStagedUploadsForTarget(this.snapshot, target).map(
@@ -1705,16 +1762,16 @@ class BrowserFakeApi implements DesktopApi {
             }
           : item
     ));
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async updateStagedUploadCompression(
     target: ComposerTarget,
     stagedId: string,
     compressionChoice: StagedUploadCompressionChoice
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !browserComposerTargetIsActive(this.snapshot, target)) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     setBrowserStagedUploadsForTarget(
       this.snapshot,
@@ -1723,65 +1780,65 @@ class BrowserFakeApi implements DesktopApi {
         item.staged_id === stagedId ? { ...item, compression_choice: compressionChoice } : item
       )
     );
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async clearUploadStaging(target: ComposerTarget): Promise<DesktopSnapshot> {
+  async clearUploadStaging(target: ComposerTarget): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !browserComposerTargetIsActive(this.snapshot, target)) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     setBrowserStagedUploadsForTarget(this.snapshot, target, []);
     this.clearPreparedUploadBytes(target);
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async cancelScheduledSend(scheduledId: string): Promise<DesktopSnapshot> {
+  async cancelScheduledSend(scheduledId: string): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.snapshot.state.ui.timeline.scheduled_sends =
       this.snapshot.state.ui.timeline.scheduled_sends.filter(
         (item) => item.scheduled_id !== scheduledId
       );
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async rescheduleScheduledSend(
     scheduledId: string,
     body: string,
     sendAtMs: number
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews() || !body.trim() || !Number.isFinite(sendAtMs)) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.snapshot.state.ui.timeline.scheduled_sends =
       this.snapshot.state.ui.timeline.scheduled_sends.map((item) =>
         item.scheduled_id === scheduledId ? { ...item, body, send_at_ms: sendAtMs } : item
       );
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async retrySend(roomId: string, transactionId: string): Promise<DesktopSnapshot> {
+  async retrySend(roomId: string, transactionId: string): Promise<CommandAdmission> {
     void roomId;
     void transactionId;
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async cancelSend(roomId: string, transactionId: string): Promise<DesktopSnapshot> {
+  async cancelSend(roomId: string, transactionId: string): Promise<CommandAdmission> {
     void roomId;
     void transactionId;
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async sendReaction(
     roomId: string,
     eventId: string,
     reactionKey: string
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     void roomId;
     void eventId;
     void reactionKey;
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async redactReaction(
@@ -1789,12 +1846,12 @@ class BrowserFakeApi implements DesktopApi {
     eventId: string,
     reactionKey: string,
     reactionEventId: string
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     void roomId;
     void eventId;
     void reactionKey;
     void reactionEventId;
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async sendReadReceipt(
@@ -1835,18 +1892,18 @@ class BrowserFakeApi implements DesktopApi {
     }));
   }
 
-  async setPresence(presence: PresenceKind): Promise<DesktopSnapshot> {
+  async setPresence(presence: PresenceKind): Promise<CommandAdmission> {
     const session = this.snapshot.state.domain.session;
     if (!this.isReady() || !session.user_id) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.snapshot.state.domain.live_signals.presence[session.user_id] = presence;
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async setDisplayName(displayName: string | null): Promise<DesktopSnapshot> {
+  async setDisplayName(displayName: string | null): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     const normalized = displayName?.trim() ? displayName.trim() : null;
     const requestId = this.nextRequestId();
@@ -1857,12 +1914,12 @@ class BrowserFakeApi implements DesktopApi {
     };
     this.snapshot.state.domain.profile.own.display_name = normalized;
     this.snapshot.state.domain.profile.update = { kind: "idle" };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async setLocalUserAlias(userId: string, alias: string | null): Promise<DesktopSnapshot> {
+  async setLocalUserAlias(userId: string, alias: string | null): Promise<CommandAdmission> {
     if (!this.isReady() || userId.trim().length === 0) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const normalizedUserId = userId.trim();
@@ -1879,7 +1936,7 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.domain.profile.local_alias_update.kind !== "saving" ||
       this.snapshot.state.domain.profile.local_alias_update.request_id !== requestId
     ) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     if (normalizedAlias) {
       this.snapshot.state.domain.profile.local_aliases[normalizedUserId] = normalizedAlias;
@@ -1888,12 +1945,12 @@ class BrowserFakeApi implements DesktopApi {
     }
     this.refreshLocalAliasProjections(normalizedUserId);
     this.snapshot.state.domain.profile.local_alias_update = { kind: "idle" };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async ignoreUser(userId: string): Promise<DesktopSnapshot> {
+  async ignoreUser(userId: string): Promise<CommandAdmission> {
     if (!this.isReady() || !userId.trim()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     const normalizedUserId = userId.trim();
     const requestId = this.nextRequestId();
@@ -1906,7 +1963,7 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.domain.profile.ignored_user_update.kind !== "saving" ||
       this.snapshot.state.domain.profile.ignored_user_update.request_id !== requestId
     ) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     if (!this.snapshot.state.domain.profile.ignored_user_ids.includes(normalizedUserId)) {
       this.snapshot.state.domain.profile.ignored_user_ids = [
@@ -1915,12 +1972,12 @@ class BrowserFakeApi implements DesktopApi {
       ];
     }
     this.snapshot.state.domain.profile.ignored_user_update = { kind: "idle" };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async unignoreUser(userId: string): Promise<DesktopSnapshot> {
+  async unignoreUser(userId: string): Promise<CommandAdmission> {
     if (!this.isReady() || !userId.trim()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     const normalizedUserId = userId.trim();
     const requestId = this.nextRequestId();
@@ -1933,45 +1990,45 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.domain.profile.ignored_user_update.kind !== "saving" ||
       this.snapshot.state.domain.profile.ignored_user_update.request_id !== requestId
     ) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.snapshot.state.domain.profile.ignored_user_ids =
       this.snapshot.state.domain.profile.ignored_user_ids.filter((id) => id !== normalizedUserId);
     this.snapshot.state.domain.profile.ignored_user_update = { kind: "idle" };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async reportUser(userId: string, reason: string): Promise<DesktopSnapshot> {
+  async reportUser(userId: string, reason: string): Promise<CommandAdmission> {
     if (!this.isReady() || !userId.trim()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     void reason;
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async reportContent(
     roomId: string,
     eventId: string,
     reason: string
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews() || !roomId.trim() || !eventId.trim()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     void reason;
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async reportRoom(roomId: string, reason: string): Promise<DesktopSnapshot> {
+  async reportRoom(roomId: string, reason: string): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews() || !roomId.trim()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     void reason;
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async setAvatar(mimeType: string, bytes: number[]): Promise<DesktopSnapshot> {
+  async setAvatar(mimeType: string, bytes: number[]): Promise<CommandAdmission> {
     if (!this.isReady() || bytes.length === 0) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     const requestId = this.nextRequestId();
     this.snapshot.state.domain.profile.update = {
@@ -1985,17 +2042,17 @@ class BrowserFakeApi implements DesktopApi {
       thumbnail: { kind: "notRequested" }
     };
     this.snapshot.state.domain.profile.update = { kind: "idle" };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async editMessage(
     roomId: string,
     eventId: string,
     document: ComposerDocument
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     const body = plainBodyFromDocument(document);
     if (!this.isReady() || body.trim().length === 0) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     // An edit replaces the visible text only. Core edits a media event's caption
@@ -2006,22 +2063,22 @@ class BrowserFakeApi implements DesktopApi {
         ? { ...message, body }
         : message
     );
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async redactMessage(roomId: string, eventId: string): Promise<DesktopSnapshot> {
+  async redactMessage(roomId: string, eventId: string): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     this.snapshot.timeline = this.snapshot.timeline.filter(
       (message) => !(message.room_id === roomId && message.event_id === eventId)
     );
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async loadMessageSource(_roomId: string, _eventId: string): Promise<DesktopSnapshot> {
-    return this.getSnapshot();
+  async loadMessageSource(_roomId: string, _eventId: string): Promise<CommandAdmission> {
+    return this.commandAdmission();
   }
 
   async requestRoomKey(
@@ -2029,26 +2086,26 @@ class BrowserFakeApi implements DesktopApi {
     _eventId: string,
     _origin?: "user" | "automatic",
     _timelineKey?: import("../domain/coreEvents").TimelineKey
-  ): Promise<DesktopSnapshot> {
-    return this.getSnapshot();
+  ): Promise<CommandAdmission> {
+    return this.commandAdmission();
   }
 
   async requestLateDecryption(
     _roomId: string,
     _timelineKey?: import("../domain/coreEvents").TimelineKey
-  ): Promise<DesktopSnapshot> {
-    return this.getSnapshot();
+  ): Promise<CommandAdmission> {
+    return this.commandAdmission();
   }
 
   async forwardMessage(
     _roomId: string,
     _sourceEventId: string,
     _destinationRoomId: string
-  ): Promise<DesktopSnapshot> {
-    return this.getSnapshot();
+  ): Promise<CommandAdmission> {
+    return this.commandAdmission();
   }
 
-  async loadLinkPreviews(roomId: string, eventId: string): Promise<DesktopSnapshot> {
+  async loadLinkPreviews(roomId: string, eventId: string): Promise<CommandAdmission> {
     const message = this.findTimelineMessage(roomId, eventId);
     if (message && message.link_previews?.some((preview) => preview.state === "pending")) {
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -2065,19 +2122,19 @@ class BrowserFakeApi implements DesktopApi {
       );
       this.updateTimelineMessageLinkPreviews(roomId, eventId, readyPreviews);
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async hideLinkPreview(roomId: string, eventId: string): Promise<DesktopSnapshot> {
+  async hideLinkPreview(roomId: string, eventId: string): Promise<CommandAdmission> {
     this.updateTimelineMessageLinkPreviews(roomId, eventId, []);
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async leaveRoom(roomId: string): Promise<DesktopSnapshot> {
+  async leaveRoom(roomId: string): Promise<CommandAdmission> {
     return this.removeRoomFromFakeSnapshot(roomId);
   }
 
-  async forgetRoom(roomId: string): Promise<DesktopSnapshot> {
+  async forgetRoom(roomId: string): Promise<CommandAdmission> {
     return this.removeRoomFromFakeSnapshot(roomId);
   }
 
@@ -2085,9 +2142,9 @@ class BrowserFakeApi implements DesktopApi {
     roomId: string,
     rootEventId: string,
     intent: ThreadOpenIntent
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     this.clearPreparedThreadUploadBytesForRoom(roomId);
@@ -2137,12 +2194,12 @@ class BrowserFakeApi implements DesktopApi {
         (reply) => reply.room_id === roomId && reply.root_event_id === rootEventId
       )
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async closeThread(): Promise<DesktopSnapshot> {
+  async closeThread(): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const openThreadRoomId =
@@ -2150,19 +2207,19 @@ class BrowserFakeApi implements DesktopApi {
     if (openThreadRoomId) this.clearPreparedThreadUploadBytesForRoom(openThreadRoomId);
     this.snapshot.state.ui.thread = { kind: "closed" };
     this.snapshot.thread = null;
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async openThreadsList(scope: ThreadsListScope): Promise<DesktopSnapshot> {
+  async openThreadsList(scope: ThreadsListScope): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     const resolved = resolveThreadsListScope(scope, this.snapshot);
     if (
       scope.kind === "room" &&
       !this.snapshot.state.domain.rooms.some((room) => room.room_id === scope.room_id)
     ) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     const scopeKey = threadsListScopeKey(scope);
     this.snapshot.state.ui.threads_list = {
@@ -2173,24 +2230,24 @@ class BrowserFakeApi implements DesktopApi {
       is_paginating: false,
       end_reached: true,
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async closeThreadsList(): Promise<DesktopSnapshot> {
+  async closeThreadsList(): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.snapshot.state.ui.threads_list = { kind: "closed" };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async openFilesView(
     scope: FilesViewScope,
     filter: AttachmentFilter,
     sort: AttachmentSort
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     const resolvedScope = this.resolveFilesViewScope(scope);
     this.snapshot.state.ui.files_view = {
@@ -2202,15 +2259,15 @@ class BrowserFakeApi implements DesktopApi {
       items: attachmentResultsForScope(resolvedScope, filter, sort),
       selected_event_id: null
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async closeFilesView(): Promise<DesktopSnapshot> {
+  async closeFilesView(): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.snapshot.state.ui.files_view = { kind: "closed" };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   private resolveFilesViewScope(scope: FilesViewScope) {
@@ -2225,9 +2282,9 @@ class BrowserFakeApi implements DesktopApi {
     return scope;
   }
 
-  async paginateThreadsList(scope: ThreadsListScope): Promise<DesktopSnapshot> {
+  async paginateThreadsList(scope: ThreadsListScope): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     const list = this.snapshot.state.ui.threads_list;
     if (
@@ -2238,7 +2295,7 @@ class BrowserFakeApi implements DesktopApi {
     ) {
       list.is_paginating = true;
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async setThreadComposerDraft(
@@ -2249,7 +2306,7 @@ class BrowserFakeApi implements DesktopApi {
     rootEventId: string,
     document: ComposerDocument,
     revision: ComposerDraftRevision
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     this.requireComposerLease(
       account,
       { kind: "thread", room_id: roomId, root_event_id: rootEventId },
@@ -2263,7 +2320,7 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.domain.session.device_id !== account.deviceId ||
       !this.snapshot.state.domain.rooms.some((room) => room.room_id === roomId)
     ) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const key = browserComposerDraftTargetKey({
@@ -2277,7 +2334,7 @@ class BrowserFakeApi implements DesktopApi {
         this.threadComposerDraftRevisions.get(key) ?? COMPOSER_DRAFT_REVISION_ZERO
       ) <= 0
     ) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.threadComposerDraftRevisions.set(key, revision);
     if (document.inlines.length === 0) {
@@ -2297,7 +2354,7 @@ class BrowserFakeApi implements DesktopApi {
       thread.composer.draft = plainBodyFromDocument(document);
       thread.composer.draft_revision = revision;
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async sendThreadReply(
@@ -2336,7 +2393,7 @@ class BrowserFakeApi implements DesktopApi {
         outcome: { rejected: { kind: "invalid" } },
         submissionId,
         transactionId: null,
-        snapshot: await this.getSnapshot()
+        settlement: this.commandSettlement()
       };
     }
 
@@ -2355,13 +2412,13 @@ class BrowserFakeApi implements DesktopApi {
       outcome: "accepted",
       submissionId,
       transactionId,
-      snapshot: await this.getSnapshot()
+      settlement: this.commandSettlement()
     };
   }
 
-  async submitSearch(query: string, scope: SearchScopeKind): Promise<DesktopSnapshot> {
+  async submitSearch(query: string, scope: SearchScopeKind): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const requestId = this.nextRequestId();
@@ -2375,7 +2432,7 @@ class BrowserFakeApi implements DesktopApi {
         scope,
         min_chars: minChars
       };
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const results = search(trimmed, scope, this.snapshot);
@@ -2386,17 +2443,17 @@ class BrowserFakeApi implements DesktopApi {
       scope,
       results
     };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async closeSearch(): Promise<DesktopSnapshot> {
+  async closeSearch(): Promise<CommandSettlement> {
     this.snapshot.state.domain.search = { kind: "closed" };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async queryDirectory(query: DirectoryQuery): Promise<DesktopSnapshot> {
+  async queryDirectory(query: DirectoryQuery): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const requestId = this.nextRequestId();
@@ -2418,7 +2475,7 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.domain.directory.query.kind !== "querying" ||
       this.snapshot.state.domain.directory.query.request_id !== requestId
     ) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const alias = "#public-demo:fake.local";
     this.snapshot.state.domain.directory.query = {
@@ -2440,15 +2497,15 @@ class BrowserFakeApi implements DesktopApi {
       ],
       next_batch: null
     };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async previewJoinTarget(
     roomIdOrAlias: string,
     viaServers: string[] = []
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || roomIdOrAlias.trim().length === 0) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const requestId = this.nextRequestId();
@@ -2469,7 +2526,7 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.domain.directory.preview.kind !== "loading" ||
       this.snapshot.state.domain.directory.preview.request_id !== requestId
     ) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const label = normalizedTarget.replace(/^[#!]/, "").split(":")[0] ?? "";
     this.snapshot.state.domain.directory.preview = {
@@ -2488,17 +2545,17 @@ class BrowserFakeApi implements DesktopApi {
         membership: "none"
       }
     };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async dismissDirectoryPreview(): Promise<DesktopSnapshot> {
+  async dismissDirectoryPreview(): Promise<CommandAdmission> {
     this.snapshot.state.domain.directory.preview = { kind: "closed" };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async joinDirectoryRoom(roomIdOrAlias: string, viaServers: string[] = []): Promise<DesktopSnapshot> {
+  async joinDirectoryRoom(roomIdOrAlias: string, viaServers: string[] = []): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || roomIdOrAlias.trim().length === 0) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const requestId = this.nextRequestId();
@@ -2522,7 +2579,7 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.domain.directory.join.kind !== "joining" ||
       this.snapshot.state.domain.directory.join.request_id !== requestId
     ) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const roomId = `!joined-${this.snapshot.state.domain.rooms.length + 1}:fake.local`;
     const displayName = normalizedTarget.replace(/^[#!]/, "").split(":")[0] || "Public Room";
@@ -2548,9 +2605,9 @@ class BrowserFakeApi implements DesktopApi {
     return this.selectRoom(roomId);
   }
 
-  async joinRoom(roomId: string): Promise<DesktopSnapshot> {
+  async joinRoom(roomId: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || roomId.trim().length === 0) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const normalizedRoomId = roomId.trim();
@@ -2587,9 +2644,9 @@ class BrowserFakeApi implements DesktopApi {
     return this.selectRoom(normalizedRoomId);
   }
 
-  async loadRoomSettings(roomId: string): Promise<DesktopSnapshot> {
+  async loadRoomSettings(roomId: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !roomId.trim()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const normalizedRoomId = roomId.trim();
@@ -2598,17 +2655,17 @@ class BrowserFakeApi implements DesktopApi {
       settings: this.roomSettingsSnapshot(normalizedRoomId),
       operation: { kind: "idle" }
     };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async loadSpaceMembers(spaceId: string, generation: number): Promise<DesktopSnapshot> {
+  async loadSpaceMembers(spaceId: string, generation: number): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !spaceId.trim()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const normalizedSpaceId = spaceId.trim();
     if (this.snapshot.state.ui.navigation.active_space_id !== normalizedSpaceId) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const current = this.snapshot.state.domain.space_members;
     if (
@@ -2617,7 +2674,7 @@ class BrowserFakeApi implements DesktopApi {
       current.operation.kind === "inviting" ||
       current.operation.kind === "cancellingInvite"
     ) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const requestId = this.nextRequestId();
     this.snapshot.state.domain.space_members = {
@@ -2644,22 +2701,22 @@ class BrowserFakeApi implements DesktopApi {
       active.operation.space_id !== normalizedSpaceId ||
       active.operation.generation !== generation
     ) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     this.snapshot.state.domain.space_members = {
       ...active,
       operation: { kind: "idle" }
     };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async inviteUserToSpace(
     spaceId: string,
     userId: string,
     generation: number
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !spaceId.trim() || !userId.trim()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const normalizedSpaceId = spaceId.trim();
@@ -2675,7 +2732,7 @@ class BrowserFakeApi implements DesktopApi {
       current.operation.kind === "inviting" ||
       current.operation.kind === "cancellingInvite"
     ) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const requestId = this.nextRequestId();
@@ -2701,7 +2758,7 @@ class BrowserFakeApi implements DesktopApi {
     this.snapshot.state.domain.space_members = inviting;
 
     if (this.spaceMemberInviteOutcome === "pending") {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     if (this.spaceMemberInviteOutcome === "success") {
@@ -2737,16 +2794,16 @@ class BrowserFakeApi implements DesktopApi {
       };
     }
 
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async cancelSpaceInvite(
     spaceId: string,
     userId: string,
     generation: number
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !spaceId.trim() || !userId.trim()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const normalizedSpaceId = spaceId.trim();
@@ -2756,7 +2813,7 @@ class BrowserFakeApi implements DesktopApi {
       current.selected_space_id !== normalizedSpaceId ||
       current.generation !== generation
     ) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const cancellationContextIsRetryable =
       current.operation.kind === "idle" ||
@@ -2765,13 +2822,13 @@ class BrowserFakeApi implements DesktopApi {
         current.operation.user_id === normalizedUserId &&
         current.operation.generation === generation);
     if (!cancellationContextIsRetryable) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const invitedEntry = current.space_invited.find(
       (entry) => entry.user_id === normalizedUserId
     );
     if (!invitedEntry) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const requestId = this.nextRequestId();
@@ -2790,7 +2847,7 @@ class BrowserFakeApi implements DesktopApi {
       this.spaceMemberInviteCancellationOutcomes.shift() ??
       this.spaceMemberInviteCancellationOutcome;
     if (cancellationOutcome === "pending") {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const active = this.snapshot.state.domain.space_members;
@@ -2832,7 +2889,7 @@ class BrowserFakeApi implements DesktopApi {
       };
     }
 
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async queryMentionCandidates(
@@ -2890,34 +2947,41 @@ class BrowserFakeApi implements DesktopApi {
             candidateTarget.surface !== surface
         )
         .concat(target);
+    this.commandAdmission();
   }
 
-  async forceNewOutboundSession(_roomId: string): Promise<EncryptionDebugOperationOutcome> {
-    return "completed";
+  async forceNewOutboundSession(
+    _roomId: string
+  ): Promise<CommandResult<EncryptionDebugOperationOutcome>> {
+    return this.commandResult("completed");
   }
 
-  async shareIndex0RoomKey(_roomId: string): Promise<EncryptionDebugOperationOutcome> {
-    return "completed";
+  async shareIndex0RoomKey(
+    _roomId: string
+  ): Promise<CommandResult<EncryptionDebugOperationOutcome>> {
+    return this.commandResult("completed");
   }
 
-  async resendIndex0RoomKey(_roomId: string): Promise<EncryptionDebugOperationOutcome> {
-    return "completed";
+  async resendIndex0RoomKey(
+    _roomId: string
+  ): Promise<CommandResult<EncryptionDebugOperationOutcome>> {
+    return this.commandResult("completed");
   }
 
-  async reshareRoomKey(_roomId: string): Promise<RoomKeyReshareOutcome> {
-    return { kind: "sent", request_count: 1, recipient_count: 1 };
+  async reshareRoomKey(_roomId: string): Promise<CommandResult<RoomKeyReshareOutcome>> {
+    return this.commandResult({ kind: "sent", request_count: 1, recipient_count: 1 });
   }
 
-  async repairRoomTimeline(_roomId: string): Promise<DesktopSnapshot> {
-    return this.getSnapshot();
+  async repairRoomTimeline(_roomId: string): Promise<CommandAdmission> {
+    return this.commandAdmission();
   }
 
   async updateRoomSetting(
     roomId: string,
     change: RoomSettingChange
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !roomId.trim()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const normalizedRoomId = roomId.trim();
@@ -2939,7 +3003,7 @@ class BrowserFakeApi implements DesktopApi {
           failureKind: "forbidden"
         }
       };
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     this.snapshot.state.domain.room_management = {
@@ -2962,7 +3026,7 @@ class BrowserFakeApi implements DesktopApi {
       operation.room_id !== normalizedRoomId ||
       operation.operation !== "settings"
     ) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const updated = applyRoomSettingChange(settings, change);
     this.snapshot.state.domain.room_management = {
@@ -2981,7 +3045,7 @@ class BrowserFakeApi implements DesktopApi {
     );
     this.refreshRoomListProjection();
     this.refreshSidebar();
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async moderateRoomMember(
@@ -2989,9 +3053,9 @@ class BrowserFakeApi implements DesktopApi {
     targetUserId: string,
     action: RoomModerationAction,
     reason: string | null = null
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !roomId.trim() || !targetUserId.trim()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     void reason;
 
@@ -3014,7 +3078,7 @@ class BrowserFakeApi implements DesktopApi {
           failureKind: "forbidden"
         }
       };
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     this.snapshot.state.domain.room_management = {
@@ -3037,7 +3101,7 @@ class BrowserFakeApi implements DesktopApi {
       operation.room_id !== normalizedRoomId ||
       operation.operation !== "moderation"
     ) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const updatedSettings =
       action === "unban"
@@ -3051,16 +3115,16 @@ class BrowserFakeApi implements DesktopApi {
       settings: updatedSettings,
       operation: { kind: "idle" }
     };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async updateRoomMemberRole(
     roomId: string,
     targetUserId: string,
     powerLevel: number
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !roomId.trim() || !targetUserId.trim()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const normalizedRoomId = roomId.trim();
@@ -3083,7 +3147,7 @@ class BrowserFakeApi implements DesktopApi {
           failureKind: "forbidden"
         }
       };
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     this.snapshot.state.domain.room_management = {
@@ -3106,7 +3170,7 @@ class BrowserFakeApi implements DesktopApi {
       operation.room_id !== normalizedRoomId ||
       operation.operation !== "roles"
     ) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const updatedSettings = {
       ...settings,
@@ -3125,7 +3189,7 @@ class BrowserFakeApi implements DesktopApi {
       settings: updatedSettings,
       operation: { kind: "idle" }
     };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async updateSpaceMemberRole(
@@ -3136,9 +3200,9 @@ class BrowserFakeApi implements DesktopApi {
     expectedPowerLevel: number,
     powerLevel: number,
     confirmed: boolean
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !spaceId.trim() || !userId.trim()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const normalizedSpaceId = spaceId.trim();
@@ -3161,11 +3225,11 @@ class BrowserFakeApi implements DesktopApi {
       target.power_level !== expectedPowerLevel ||
       current.power_levels_revision !== expectedPowerLevelsRevision
     ) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const option = target.role_options.find((candidate) => candidate.power_level === powerLevel);
     if (!option || (option.requires_confirmation && !confirmed)) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const requestId = this.nextRequestId();
@@ -3187,7 +3251,7 @@ class BrowserFakeApi implements DesktopApi {
     const outcome =
       this.spaceMemberRoleUpdateOutcomes.shift() ?? this.spaceMemberRoleUpdateOutcome;
     if (outcome === "pending") {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     if (outcome !== "success") {
       this.snapshot.state.domain.space_members = {
@@ -3209,7 +3273,7 @@ class BrowserFakeApi implements DesktopApi {
           failureKind: outcome
         }
       };
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const nextRevision = `revision-${requestId}`;
@@ -3229,12 +3293,12 @@ class BrowserFakeApi implements DesktopApi {
       operation: { kind: "idle" }
     };
     this.snapshot.state.domain.space_members = nextProjection;
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async createRoom(request: CreateRoomRequest): Promise<DesktopSnapshot> {
+  async createRoom(request: CreateRoomRequest): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const count = this.snapshot.state.domain.rooms.length + 1;
@@ -3259,12 +3323,12 @@ class BrowserFakeApi implements DesktopApi {
     this.refreshRoomListProjection();
     this.refreshSidebar();
     await this.selectRoom(newRoomId);
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async createSpace(name: string): Promise<DesktopSnapshot> {
+  async createSpace(name: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const count = this.snapshot.state.domain.spaces.length + 1;
@@ -3277,12 +3341,12 @@ class BrowserFakeApi implements DesktopApi {
     };
     this.snapshot.state.domain.spaces = [...this.snapshot.state.domain.spaces, newSpace];
     await this.selectSpace(newSpaceId);
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async setSpaceChild(spaceId: string, childRoomId: string, viaServer: string): Promise<DesktopSnapshot> {
+  async setSpaceChild(spaceId: string, childRoomId: string, viaServer: string): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     void viaServer;
 
@@ -3308,17 +3372,17 @@ class BrowserFakeApi implements DesktopApi {
     );
     this.refreshRoomListProjection();
     this.refreshSidebar();
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async acceptInvite(roomId: string): Promise<DesktopSnapshot> {
+  async acceptInvite(roomId: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const invite = this.snapshot.state.domain.invites.find((candidate) => candidate.room_id === roomId);
     if (!invite) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const joinedRoom: RoomSummary = {
@@ -3342,29 +3406,29 @@ class BrowserFakeApi implements DesktopApi {
     this.refreshRoomListProjection();
     this.refreshSidebar();
     await this.selectRoom(roomId);
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async declineInvite(roomId: string): Promise<DesktopSnapshot> {
+  async declineInvite(roomId: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     this.snapshot.state.domain.invites = this.snapshot.state.domain.invites.filter(
       (candidate) => candidate.room_id !== roomId
     );
     this.refreshRoomListProjection();
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async startDirectMessage(userId: string): Promise<DesktopSnapshot> {
+  async startDirectMessage(userId: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const trimmedUserId = userId.trim();
     if (!trimmedUserId) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     // Same get-or-create-and-open contract as the real backend (#368): an
@@ -3375,7 +3439,7 @@ class BrowserFakeApi implements DesktopApi {
     );
     if (existing) {
       await this.selectRoom(existing.room_id);
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const count = this.snapshot.state.domain.rooms.filter((room) => room.is_dm).length + 1;
@@ -3398,20 +3462,20 @@ class BrowserFakeApi implements DesktopApi {
     this.refreshRoomListProjection();
     this.refreshSidebar();
     await this.selectRoom(newRoomId);
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async inviteUser(roomId: string, userId: string): Promise<DesktopSnapshot> {
+  async inviteUser(roomId: string, userId: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !roomId.trim() || !userId.trim()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async openInviteWorkflow(roomId: string): Promise<DesktopSnapshot> {
+  async openInviteWorkflow(roomId: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !roomId.trim()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const workflow = this.snapshot.state.domain.invite_workflow ?? defaultInviteWorkflowState();
     const scopePlan = buildFakeInviteScopePlan(this.snapshot, roomId);
@@ -3430,17 +3494,17 @@ class BrowserFakeApi implements DesktopApi {
       selected_scope: selectedScope,
       history_policy: buildFakeInviteHistoryPolicy(this.snapshot, roomId)
     };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async closeInviteWorkflow(): Promise<DesktopSnapshot> {
+  async closeInviteWorkflow(): Promise<CommandSettlement> {
     this.snapshot.state.domain.invite_workflow = defaultInviteWorkflowState();
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async searchInviteTargets(roomId: string, query: string): Promise<DesktopSnapshot> {
+  async searchInviteTargets(roomId: string, query: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !roomId.trim()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const workflow = this.snapshot.state.domain.invite_workflow ?? defaultInviteWorkflowState();
     const scopePlan = buildFakeInviteScopePlan(this.snapshot, roomId);
@@ -3456,12 +3520,12 @@ class BrowserFakeApi implements DesktopApi {
       selected_scope: selectedScope,
       history_policy: buildFakeInviteHistoryPolicy(this.snapshot, roomId)
     };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async setInviteScope(roomId: string, scope: InviteScopeSelection): Promise<DesktopSnapshot> {
+  async setInviteScope(roomId: string, scope: InviteScopeSelection): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !roomId.trim()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const workflow = this.snapshot.state.domain.invite_workflow ?? defaultInviteWorkflowState();
     const valid = workflow.scope_plan?.options.some(
@@ -3473,12 +3537,12 @@ class BrowserFakeApi implements DesktopApi {
         selected_scope: scope
       };
     }
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async selectInviteTarget(roomId: string, userId: string): Promise<DesktopSnapshot> {
+  async selectInviteTarget(roomId: string, userId: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !roomId.trim() || !userId.trim()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const workflow = this.snapshot.state.domain.invite_workflow ?? defaultInviteWorkflowState();
     const candidate = [
@@ -3486,7 +3550,7 @@ class BrowserFakeApi implements DesktopApi {
       ...(workflow.query.explicit_user_id ? [workflow.query.explicit_user_id] : [])
     ].find((entry) => entry.user_id === userId && entry.status === "selectable");
     if (!candidate || workflow.selected_targets.some((target) => target.user_id === userId)) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     this.snapshot.state.domain.invite_workflow = {
       ...workflow,
@@ -3500,10 +3564,10 @@ class BrowserFakeApi implements DesktopApi {
       ],
       query: buildFakeInviteTargetQuery(this.snapshot, roomId, workflow.query.query)
     };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async removeInviteTarget(userId: string): Promise<DesktopSnapshot> {
+  async removeInviteTarget(userId: string): Promise<CommandSettlement> {
     const workflow = this.snapshot.state.domain.invite_workflow ?? defaultInviteWorkflowState();
     const roomId = workflow.query.room_id;
     this.snapshot.state.domain.invite_workflow = {
@@ -3517,16 +3581,16 @@ class BrowserFakeApi implements DesktopApi {
         workflow.query.query
       );
     }
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async inviteTargets(
     roomId: string,
     userIds: string[],
     scope: InviteScopeSelection
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !roomId.trim() || userIds.length === 0) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
     const requestId = this.nextRequestId();
     const workflow = this.snapshot.state.domain.invite_workflow ?? defaultInviteWorkflowState();
@@ -3562,16 +3626,16 @@ class BrowserFakeApi implements DesktopApi {
           : null
       }
     };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
   async setRoomTag(
     roomId: string,
     tag: RoomTagKind,
     order: number | null = null
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     this.snapshot.state.domain.rooms = this.snapshot.state.domain.rooms.map((room) =>
@@ -3593,12 +3657,12 @@ class BrowserFakeApi implements DesktopApi {
     );
     this.refreshRoomListProjection();
     this.refreshSidebar();
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async removeRoomTag(roomId: string, tag: RoomTagKind): Promise<DesktopSnapshot> {
+  async removeRoomTag(roomId: string, tag: RoomTagKind): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     this.snapshot.state.domain.rooms = this.snapshot.state.domain.rooms.map((room) =>
@@ -3614,12 +3678,12 @@ class BrowserFakeApi implements DesktopApi {
     );
     this.refreshRoomListProjection();
     this.refreshSidebar();
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async pinEvent(roomId: string, eventId: string): Promise<DesktopSnapshot> {
+  async pinEvent(roomId: string, eventId: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !roomId.trim() || !eventId.trim() || !this.hasRoom(roomId)) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const entry = this.snapshot.state.domain.room_interactions[roomId] ?? {
@@ -3650,12 +3714,12 @@ class BrowserFakeApi implements DesktopApi {
         encryption_debug_operation: { state: "idle" }
       }
     };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async unpinEvent(roomId: string, eventId: string): Promise<DesktopSnapshot> {
+  async unpinEvent(roomId: string, eventId: string): Promise<CommandSettlement> {
     if (!this.canUseSyncedViews() || !roomId.trim() || !eventId.trim() || !this.hasRoom(roomId)) {
-      return this.getSnapshot();
+      return this.commandSettlement();
     }
 
     const entry = this.snapshot.state.domain.room_interactions[roomId] ?? {
@@ -3671,17 +3735,17 @@ class BrowserFakeApi implements DesktopApi {
         encryption_debug_operation: { state: "idle" }
       }
     };
-    return this.getSnapshot();
+    return this.commandSettlement();
   }
 
-  async openActivity(): Promise<DesktopSnapshot> {
+  async openActivity(): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const currentActivity = this.snapshot.state.domain.activity;
     if (currentActivity.kind !== "closed") {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     const selectedTab = currentActivity.last_selected_tab ?? "recent";
 
@@ -3698,7 +3762,7 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.domain.activity.kind !== "opening" ||
       this.snapshot.state.domain.activity.request_id !== requestId
     ) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     const streams = createActivityStreams(
       false,
@@ -3712,7 +3776,7 @@ class BrowserFakeApi implements DesktopApi {
       unread: streams.unread,
       mark_read: { kind: "idle" }
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   private refreshActivityStreams(): void {
@@ -3732,9 +3796,9 @@ class BrowserFakeApi implements DesktopApi {
     };
   }
 
-  async closeActivity(): Promise<DesktopSnapshot> {
+  async closeActivity(): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const activity = this.snapshot.state.domain.activity;
@@ -3748,29 +3812,29 @@ class BrowserFakeApi implements DesktopApi {
       kind: "closed",
       last_selected_tab: lastSelectedTab
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async setActivityTab(tab: ActivityTab): Promise<DesktopSnapshot> {
+  async setActivityTab(tab: ActivityTab): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews() || this.snapshot.state.domain.activity.kind !== "open") {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     this.snapshot.state.domain.activity.active_tab = tab;
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async paginateActivity(
     tab: ActivityTab,
     cursor: string | null = null
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews() || this.snapshot.state.domain.activity.kind !== "open") {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const normalizedCursor = cursor?.trim() ? cursor.trim() : null;
     if (tab !== "recent" || normalizedCursor === null) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const existingEventIds = new Set(
@@ -3791,21 +3855,21 @@ class BrowserFakeApi implements DesktopApi {
       next_batch: null,
       resolution: this.snapshot.state.domain.activity.recent.resolution
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async retryActivityResolution(): Promise<DesktopSnapshot> {
+  async retryActivityResolution(): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews() || this.snapshot.state.domain.activity.kind !== "open") {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     const unread = this.snapshot.state.domain.activity.unread;
     unread.resolution = { kind: "resolving", generation: this.nextRequestId(), unresolved_room_count: unread.rows.filter((row) => row.kind === "roomUnread").length };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async markActivityRead(target: ActivityMarkReadTarget): Promise<DesktopSnapshot> {
+  async markActivityRead(target: ActivityMarkReadTarget): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews() || this.snapshot.state.domain.activity.kind !== "open") {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const requestId = this.nextRequestId();
@@ -3823,7 +3887,7 @@ class BrowserFakeApi implements DesktopApi {
       activity.mark_read.kind !== "pending" ||
       activity.mark_read.request_id !== requestId
     ) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     if (target.kind === "all") {
       this.snapshot.state.domain.activity.unread = {
@@ -3847,7 +3911,7 @@ class BrowserFakeApi implements DesktopApi {
       );
     }
     this.snapshot.state.domain.activity.mark_read = { kind: "idle" };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async setComposerDraft(
@@ -3857,7 +3921,7 @@ class BrowserFakeApi implements DesktopApi {
     roomId: string,
     document: ComposerDocument,
     revision: ComposerDraftRevision
-  ): Promise<DesktopSnapshot> {
+  ): Promise<CommandAdmission> {
     this.requireComposerLease(
       account,
       { kind: "main", room_id: roomId },
@@ -3871,7 +3935,7 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.domain.session.device_id !== account.deviceId ||
       !this.snapshot.state.domain.rooms.some((room) => room.room_id === roomId)
     ) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     if (
@@ -3880,7 +3944,7 @@ class BrowserFakeApi implements DesktopApi {
         this.composerDraftRevisions.get(roomId) ?? COMPOSER_DRAFT_REVISION_ZERO
       ) <= 0
     ) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.composerDraftRevisions.set(roomId, revision);
     if (document.inlines.length === 0) {
@@ -3893,27 +3957,27 @@ class BrowserFakeApi implements DesktopApi {
       this.snapshot.state.ui.timeline.composer.draft = plainBodyFromDocument(document);
       this.snapshot.state.ui.timeline.composer.draft_revision = revision;
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async setComposerReplyTarget(roomId: string, eventId: string): Promise<DesktopSnapshot> {
+  async setComposerReplyTarget(roomId: string, eventId: string): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     if (this.snapshot.state.ui.timeline.room_id === roomId) {
       this.snapshot.state.ui.timeline.composer.mode = { Reply: { in_reply_to_event_id: eventId } };
     }
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async cancelComposerReply(): Promise<DesktopSnapshot> {
+  async cancelComposerReply(): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     this.snapshot.state.ui.timeline.composer.mode = "Plain";
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   async sendReply(
@@ -3947,7 +4011,7 @@ class BrowserFakeApi implements DesktopApi {
         outcome: { rejected: { kind: "invalid" } },
         submissionId,
         transactionId: null,
-        snapshot: await this.getSnapshot()
+        settlement: this.commandSettlement()
       };
     }
     const sender = session.user_id;
@@ -3978,13 +4042,13 @@ class BrowserFakeApi implements DesktopApi {
       outcome: "accepted",
       submissionId,
       transactionId,
-      snapshot: await this.getSnapshot()
+      settlement: this.commandSettlement()
     };
   }
 
-  async rebuildSearchIndex(): Promise<DesktopSnapshot> {
+  async rebuildSearchIndex(): Promise<CommandAdmission> {
     if (!this.canUseSyncedViews()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.snapshot.state.domain.search_crawler = {
       rooms: Object.fromEntries(
@@ -3992,13 +4056,13 @@ class BrowserFakeApi implements DesktopApi {
       ),
       last_active: null
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async startRoomCrawl(roomId: string): Promise<DesktopSnapshot> {
+  async startRoomCrawl(roomId: string): Promise<CommandAdmission> {
     // Browser fake: transition the room to running state so tests can observe state changes.
     if (!this.canUseSyncedViews() || !roomId.trim()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.snapshot.state.domain.search_crawler = {
       rooms: {
@@ -4013,14 +4077,14 @@ class BrowserFakeApi implements DesktopApi {
         indexed: 0
       }
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
-  async stopRoomCrawl(roomId: string): Promise<DesktopSnapshot> {
+  async stopRoomCrawl(roomId: string): Promise<CommandAdmission> {
     // Browser fake: transition the room to idle (matching the Rust contract) so
     // the status row stays visible with a Start button instead of disappearing.
     if (!this.canUseSyncedViews() || !roomId.trim()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
     this.snapshot.state.domain.search_crawler = {
       rooms: {
@@ -4029,7 +4093,7 @@ class BrowserFakeApi implements DesktopApi {
       },
       last_active: this.snapshot.state.domain.search_crawler.last_active
     };
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 
   private isReady() {
@@ -4442,9 +4506,9 @@ class BrowserFakeApi implements DesktopApi {
     this.snapshot.thread = null;
   }
 
-  private async removeRoomFromFakeSnapshot(roomId: string): Promise<DesktopSnapshot> {
+  private async removeRoomFromFakeSnapshot(roomId: string): Promise<CommandAdmission> {
     if (!this.isReady()) {
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const removedSpace = this.snapshot.state.domain.spaces.find((space) => space.space_id === roomId);
@@ -4484,7 +4548,7 @@ class BrowserFakeApi implements DesktopApi {
       }
       this.refreshSidebar();
       this.refreshRoomListProjection();
-      return this.getSnapshot();
+      return this.commandAdmission();
     }
 
     const wasActiveRoom = this.snapshot.state.ui.navigation.active_room_id === roomId;
@@ -4615,7 +4679,7 @@ class BrowserFakeApi implements DesktopApi {
     }
     this.refreshSidebar();
     this.refreshRoomListProjection();
-    return this.getSnapshot();
+    return this.commandAdmission();
   }
 }
 
@@ -4679,13 +4743,14 @@ function createInitialSnapshot(
 
 function createReadySnapshot(
   session: SavedSessionInfo = savedSessions[0],
-  secureBackupGate: SecureBackupGateState = { kind: "ready" }
+  secureBackupGate: SecureBackupGateState = { kind: "ready" },
+  stateGeneration = 0
 ): DesktopSnapshot {
   const active_space_id = "!space-alpha:example.invalid";
   const active_room_id = "!room-alpha:example.invalid";
   const sidebar = composeBrowserFakeSidebar(active_space_id, spaces, rooms, {}, invites.length);
   const snapshot: DesktopSnapshot = {
-    state_generation: 0,
+    state_generation: stateGeneration,
     state: {
       schema_version: 5,
       domain: {

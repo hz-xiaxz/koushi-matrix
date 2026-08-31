@@ -1,3 +1,4 @@
+import { browserCommandSnapshot, browserSubmissionResponse } from "../backend/browserFakeApi.testSupport";
 import { describe, expect, test } from "vitest";
 
 import { createBrowserFakeApi } from "../backend/browserFakeApi";
@@ -282,7 +283,7 @@ describe("desktop model", () => {
 
   test("fake API: selecting a space shows only DMs with matching dm_space_ids", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace("!space-beta:example.invalid");
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace("!space-beta:example.invalid"));
 
     const rooms = visibleRooms(snapshot);
 
@@ -654,20 +655,20 @@ describe("desktop model", () => {
 
   test("browser fake updateSettings reprojects room-list sort", async () => {
     const api = createBrowserFakeApi();
-    await api.selectSpace("!space-alpha:example.invalid");
+    await browserCommandSnapshot(api, api.selectSpace("!space-alpha:example.invalid"));
 
-    const localeSorted = await api.updateSettings({
+    const localeSorted = await browserCommandSnapshot(api, api.updateSettings({
       room_list_sort: { kind: "normalLocale" }
-    });
+    }));
     expect(localeSorted.state.ui.room_list.sort).toEqual({ kind: "normalLocale" });
     expect(localeSorted.state.ui.room_list.items?.map((item) => item.room_id)).toEqual([
       "!room-planning:example.invalid",
       "!room-alpha:example.invalid"
     ]);
 
-    const activitySorted = await api.updateSettings({
+    const activitySorted = await browserCommandSnapshot(api, api.updateSettings({
       room_list_sort: { kind: "activity" }
-    });
+    }));
     expect(activitySorted.state.ui.room_list.sort).toEqual({ kind: "activity" });
     expect(activitySorted.state.ui.room_list.items?.map((item) => item.room_id)).toEqual([
       "!room-alpha:example.invalid",
@@ -814,7 +815,7 @@ describe("desktop model", () => {
 
   test("fake search keeps exact matches and drops ngram false positives", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.submitSearch("Alpha", "allRooms");
+    const snapshot = await browserCommandSnapshot(api, api.submitSearch("Alpha", "allRooms"));
 
     const results =
       snapshot.state.domain.search.kind === "results" ? snapshot.state.domain.search.results : [];
@@ -834,14 +835,14 @@ describe("desktop model", () => {
       { kind: "main", room_id: roomId }
     );
 
-    const snapshot = await api.sendText(
+    const snapshot = await browserSubmissionResponse(api, api.sendText(
       account,
       lease.leaseId,
       rendererGeneration,
       "submission-test-send",
       roomId,
       documentFromText("Synthetic message from composer")
-    );
+    ));
 
     expect(snapshot.snapshot.timeline.at(-1)).toMatchObject({
       room_id: "!room-alpha:example.invalid",
@@ -859,39 +860,39 @@ describe("desktop model", () => {
       account,
       { kind: "main", room_id: roomId }
     );
-    const submission = await api.sendText(
+    const submission = await browserSubmissionResponse(api, api.sendText(
       account,
       lease.leaseId,
       rendererGeneration,
       "submission-test-edit",
       roomId,
       documentFromText("Synthetic message before edit")
-    );
+    ));
     let snapshot = submission.snapshot;
     const eventId = snapshot.timeline.at(-1)?.event_id;
     if (!eventId) {
       throw new Error("expected sent event id");
     }
 
-    snapshot = await api.editMessage(
+    snapshot = await browserCommandSnapshot(api, api.editMessage(
       "!room-alpha:example.invalid",
       eventId,
       documentFromText("Synthetic message after edit")
-    );
+    ));
 
     expect(snapshot.timeline.at(-1)).toMatchObject({
       event_id: eventId,
       body: "Synthetic message after edit"
     });
 
-    snapshot = await api.redactMessage("!room-alpha:example.invalid", eventId);
+    snapshot = await browserCommandSnapshot(api, api.redactMessage("!room-alpha:example.invalid", eventId));
 
     expect(snapshot.timeline.map((message) => message.event_id)).not.toContain(eventId);
   });
 
   test("fake search includes attachment filenames as a separate match field", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.submitSearch("fixture_budget.xlsx", "allRooms");
+    const snapshot = await browserCommandSnapshot(api, api.submitSearch("fixture_budget.xlsx", "allRooms"));
 
     const results =
       snapshot.state.domain.search.kind === "results" ? snapshot.state.domain.search.results : [];
@@ -910,13 +911,13 @@ describe("desktop model", () => {
     expect(snapshot.state.domain.rooms).toHaveLength(0);
     expect(snapshot.state.ui.errors).toHaveLength(0);
 
-    snapshot = await api.submitLogin(
+    snapshot = await browserCommandSnapshot(api, api.submitLogin(
       "https://matrix.example.org",
       "demo-user",
       "synthetic-password",
       "Koushi Test",
       "linux"
-    );
+    ));
 
     expect(snapshot.state.domain.session.kind).toBe("signedOut");
     expect(snapshot.state.domain.rooms).toHaveLength(0);
@@ -928,7 +929,7 @@ describe("desktop model", () => {
   test("browser fake discovers password and sso login methods", async () => {
     const api = createBrowserFakeApi({ restoreSession: false });
 
-    const snapshot = await api.discoverLoginMethods("matrix.example.org:8448");
+    const snapshot = await browserCommandSnapshot(api, api.discoverLoginMethods("matrix.example.org:8448"));
 
     expect(snapshot.state.domain.auth.kind).toBe("ready");
     if (snapshot.state.domain.auth.kind !== "ready") {
@@ -958,7 +959,7 @@ describe("desktop model", () => {
       "securityPhrase"
     ]);
 
-    snapshot = await api.submitRecovery("synthetic-recovery-secret");
+    snapshot = await browserCommandSnapshot(api, api.submitRecovery("synthetic-recovery-secret"));
 
     expect(snapshot.state.domain.session.kind).toBe("verifying");
     expect(snapshot.state.domain.sync).toBe("running");
@@ -968,7 +969,7 @@ describe("desktop model", () => {
   test("browser fake keeps synced room navigation and search available during recovery", async () => {
     const api = createBrowserFakeApi({ session: "needsRecovery" });
 
-    let snapshot = await api.selectRoom("!room-planning:example.invalid");
+    let snapshot = await browserCommandSnapshot(api, api.selectRoom("!room-planning:example.invalid"));
 
     expect(snapshot.state.domain.session.kind).toBe("needsRecovery");
     expect(snapshot.state.ui.navigation.active_room_id).toBe("!room-planning:example.invalid");
@@ -976,7 +977,7 @@ describe("desktop model", () => {
       "$late-original"
     ]);
 
-    snapshot = await api.submitSearch("Final", "allRooms");
+    snapshot = await browserCommandSnapshot(api, api.submitSearch("Final", "allRooms"));
 
     expect(snapshot.state.domain.search.kind).toBe("results");
     if (snapshot.state.domain.search.kind !== "results") {
@@ -997,7 +998,7 @@ describe("desktop model", () => {
       "@second-user:example.invalid"
     ]);
 
-    const snapshot = await api.switchAccount(sessions[1]);
+    const snapshot = await browserCommandSnapshot(api, api.switchAccount(sessions[1]));
 
     expect(snapshot.state.domain.session.kind).toBe("ready");
     expect(snapshot.state.domain.session.user_id).toBe("@second-user:example.invalid");
@@ -1010,14 +1011,14 @@ describe("desktop model", () => {
     const before = await api.getSnapshot();
     const beforeRoomCount = before.state.domain.rooms.length;
 
-    const snapshot = await api.createRoom({
+    const snapshot = await browserCommandSnapshot(api, api.createRoom({
       name: "New Test Room",
       topic: null,
       aliasLocalpart: null,
       encrypted: true,
       visibility: "private",
       parentSpace: null
-    });
+    }));
 
     expect(snapshot.state.domain.rooms).toHaveLength(beforeRoomCount + 1);
     const newRoom = snapshot.state.domain.rooms[snapshot.state.domain.rooms.length - 1];
@@ -1032,7 +1033,7 @@ describe("desktop model", () => {
     const before = await api.getSnapshot();
     const beforeSpaceCount = before.state.domain.spaces.length;
 
-    const snapshot = await api.createSpace("New Test Space");
+    const snapshot = await browserCommandSnapshot(api, api.createSpace("New Test Space"));
 
     expect(snapshot.state.domain.spaces).toHaveLength(beforeSpaceCount + 1);
     const newSpace = snapshot.state.domain.spaces[snapshot.state.domain.spaces.length - 1];
@@ -1060,7 +1061,7 @@ describe("desktop model", () => {
     }
     const childRoomId = unlinkedRoom.room_id;
 
-    const snapshot = await api.setSpaceChild(spaceId, childRoomId, "fake.local");
+    const snapshot = await browserCommandSnapshot(api, api.setSpaceChild(spaceId, childRoomId, "fake.local"));
 
     const updatedSpace = snapshot.state.domain.spaces.find((s) => s.space_id === spaceId);
     expect(updatedSpace?.child_room_ids).toContain(childRoomId);
@@ -1088,7 +1089,7 @@ describe("desktop model", () => {
       { kind: "main", room_id: roomId }
     );
 
-    const submission = await api.sendReply(
+    const submission = await browserSubmissionResponse(api, api.sendReply(
       account,
       lease.leaseId,
       rendererGeneration,
@@ -1096,7 +1097,7 @@ describe("desktop model", () => {
       roomId,
       rootEventId,
       documentFromText("Synthetic reply message")
-    );
+    ));
     const snapshot = submission.snapshot;
 
     // New reply appended at end with reply_count: 0

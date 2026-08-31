@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use koushi_core::StateDelta;
+use koushi_core::{CoreCommandAdmission, StateDelta, event::VersionedAppStateSnapshot};
 use koushi_state::{
     AccountManagementCapabilities, AccountManagementState, AccountManagementUrl, ActivityState,
     AppError, AppState, AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, ComposerState,
@@ -31,7 +31,7 @@ use koushi_state::{
 };
 use serde::{Deserialize, Serialize};
 
-/// The snapshot returned by all Tauri commands.
+/// The snapshot returned only by initial, settlement-resync, and gap-resync reads.
 ///
 /// `timeline` and `thread` are always empty / `None` in Phase 7; timeline
 /// items flow as `TimelineEvent` diffs over `koushi-desktop://event`.
@@ -76,6 +76,100 @@ impl FrontendDesktopSnapshot {
         let mut snapshot = Self::from(state);
         snapshot.state_generation = Some(generation);
         snapshot
+    }
+}
+
+pub const STATE_UPDATE_PROTOCOL_VERSION: u8 = 1;
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontendCommandAdmission {
+    protocol_version: u8,
+    admitted_generation: u64,
+}
+
+impl FrontendCommandAdmission {
+    pub(crate) fn from_core(admission: CoreCommandAdmission) -> Self {
+        Self {
+            protocol_version: STATE_UPDATE_PROTOCOL_VERSION,
+            admitted_generation: admission.admitted_generation,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontendCommandResult<T> {
+    pub result: T,
+    pub settlement: FrontendCommandSettlement,
+}
+
+impl<T> FrontendCommandResult<T> {
+    pub(crate) fn new(result: T, settlement: FrontendCommandSettlement) -> Self {
+        Self { result, settlement }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontendCommandSettlement {
+    protocol_version: u8,
+    published_generation: u64,
+}
+
+impl FrontendCommandSettlement {
+    pub(crate) fn from_published_generation(published_generation: u64) -> Self {
+        Self {
+            protocol_version: STATE_UPDATE_PROTOCOL_VERSION,
+            published_generation,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StateUpdateSnapshotReason {
+    Initial,
+    Gap,
+    Lag,
+    Settlement,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum FrontendStateUpdateEnvelope {
+    Delta {
+        protocol_version: u8,
+        generation: u64,
+        changed: FrontendDesktopSnapshotChangedSlices,
+    },
+    Snapshot {
+        protocol_version: u8,
+        generation: u64,
+        snapshot: FrontendDesktopSnapshot,
+        reason: StateUpdateSnapshotReason,
+    },
+}
+
+impl FrontendStateUpdateEnvelope {
+    pub(crate) fn delta(delta: FrontendDesktopSnapshotDelta) -> Self {
+        Self::Delta {
+            protocol_version: STATE_UPDATE_PROTOCOL_VERSION,
+            generation: delta.generation,
+            changed: delta.changed,
+        }
+    }
+
+    pub(crate) fn snapshot(
+        snapshot: VersionedAppStateSnapshot,
+        reason: StateUpdateSnapshotReason,
+    ) -> Self {
+        Self::Snapshot {
+            protocol_version: STATE_UPDATE_PROTOCOL_VERSION,
+            generation: snapshot.generation,
+            snapshot: FrontendDesktopSnapshot::from_versioned(snapshot.state, snapshot.generation),
+            reason,
+        }
     }
 }
 

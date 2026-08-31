@@ -92,7 +92,7 @@ pub(super) async fn wait_for_room_created(
     label: &str,
 ) -> Result<String, String> {
     let mut seen_total = 0usize;
-    let mut seen_state_changed = 0usize;
+    let mut seen_state_delta = 0usize;
     let mut seen_room_created_other = 0usize;
     let mut seen_operation_failed_other = 0usize;
     let mut last_event_kind = "none";
@@ -101,7 +101,7 @@ pub(super) async fn wait_for_room_created(
             .await
             .map_err(|_| {
                 format!(
-                    "{label}: timed out waiting for RoomEvent::RoomCreated request_id={}/{} seen_total={seen_total} seen_state_changed={seen_state_changed} seen_room_created_other={seen_room_created_other} seen_operation_failed_other={seen_operation_failed_other} last_event={last_event_kind}",
+                    "{label}: timed out waiting for RoomEvent::RoomCreated request_id={}/{} seen_total={seen_total} seen_state_delta={seen_state_delta} seen_room_created_other={seen_room_created_other} seen_operation_failed_other={seen_operation_failed_other} last_event={last_event_kind}",
                     request_id.connection_id.0,
                     request_id.sequence,
                 )
@@ -129,8 +129,8 @@ pub(super) async fn wait_for_room_created(
             CoreEvent::OperationFailed { .. } => {
                 seen_operation_failed_other += 1;
             }
-            CoreEvent::StateChanged(_) => {
-                seen_state_changed += 1;
+            CoreEvent::StateDelta(_) => {
+                seen_state_delta += 1;
             }
             _ => continue,
         }
@@ -140,7 +140,6 @@ pub(super) async fn wait_for_room_created(
 fn core_event_kind(event: &CoreEvent) -> &'static str {
     match event {
         CoreEvent::StateDelta(_) => "StateDelta",
-        CoreEvent::StateChanged(_) => "StateChanged",
         CoreEvent::Account(_) => "Account",
         CoreEvent::Sync(_) => "Sync",
         CoreEvent::Room(room_event) => match room_event {
@@ -175,7 +174,7 @@ pub(super) async fn wait_for_space_created(
     label: &str,
 ) -> Result<String, String> {
     let mut seen_total = 0usize;
-    let mut seen_state_changed = 0usize;
+    let mut seen_state_delta = 0usize;
     let mut seen_space_created_other = 0usize;
     let mut seen_room_created = 0usize;
     let mut seen_operation_failed_other = 0usize;
@@ -185,7 +184,7 @@ pub(super) async fn wait_for_space_created(
             .await
             .map_err(|_| {
                 format!(
-                    "{label}: timed out waiting for RoomEvent::SpaceCreated request_id={}/{} seen_total={seen_total} seen_state_changed={seen_state_changed} seen_space_created_other={seen_space_created_other} seen_room_created={seen_room_created} seen_operation_failed_other={seen_operation_failed_other} last_event={last_event_kind}",
+                    "{label}: timed out waiting for RoomEvent::SpaceCreated request_id={}/{} seen_total={seen_total} seen_state_delta={seen_state_delta} seen_space_created_other={seen_space_created_other} seen_room_created={seen_room_created} seen_operation_failed_other={seen_operation_failed_other} last_event={last_event_kind}",
                     request_id.connection_id.0,
                     request_id.sequence,
                 )
@@ -216,8 +215,8 @@ pub(super) async fn wait_for_space_created(
             CoreEvent::OperationFailed { .. } => {
                 seen_operation_failed_other += 1;
             }
-            CoreEvent::StateChanged(_) => {
-                seen_state_changed += 1;
+            CoreEvent::StateDelta(_) => {
+                seen_state_delta += 1;
             }
             _ => continue,
         }
@@ -370,7 +369,8 @@ pub(super) async fn wait_for_room_in_room_list(
                     return Ok(snapshot);
                 }
             }
-            CoreEvent::StateChanged(snapshot) => {
+            CoreEvent::StateDelta(_) => {
+                let snapshot = conn.snapshot();
                 if contains_expected(&snapshot) {
                     return Ok(snapshot);
                 }
@@ -423,8 +423,11 @@ pub(super) async fn wait_for_encrypted_room_projection_for_qa(
                     return Ok(snapshot);
                 }
             }
-            CoreEvent::StateChanged(snapshot) if contains_expected(&snapshot) => {
-                return Ok(snapshot);
+            CoreEvent::StateDelta(_) => {
+                let snapshot = conn.snapshot();
+                if contains_expected(&snapshot) {
+                    return Ok(snapshot);
+                }
             }
             _ => {}
         }
@@ -472,7 +475,8 @@ pub(super) async fn wait_for_space_in_space_list(
                     return Ok(snapshot);
                 }
             }
-            CoreEvent::StateChanged(snapshot) => {
+            CoreEvent::StateDelta(_) => {
+                let snapshot = conn.snapshot();
                 if contains_expected(&snapshot) {
                     return Ok(snapshot);
                 }
@@ -526,7 +530,8 @@ pub(super) async fn wait_for_space_child_projection(
                     return Ok(snapshot);
                 }
             }
-            CoreEvent::StateChanged(snapshot) => {
+            CoreEvent::StateDelta(_) => {
+                let snapshot = conn.snapshot();
                 if contains_expected(&snapshot) {
                     return Ok(snapshot);
                 }
@@ -592,7 +597,8 @@ pub(super) async fn wait_for_dm_room_in_room_list(
                     return Ok(snapshot);
                 }
             }
-            CoreEvent::StateChanged(snapshot) => {
+            CoreEvent::StateDelta(_) => {
+                let snapshot = conn.snapshot();
                 if contains_expected(&snapshot) {
                     return Ok(snapshot);
                 }
@@ -661,7 +667,8 @@ pub(super) async fn wait_for_invite_in_snapshot(
                     return Ok(snapshot);
                 }
             }
-            CoreEvent::StateChanged(snapshot) => {
+            CoreEvent::StateDelta(_) => {
+                let snapshot = conn.snapshot();
                 last_snapshot_sync = sync_state_diagnostic_label(&snapshot.sync);
                 last_snapshot_session = session_state_diagnostic_label(&snapshot.session);
                 if contains_expected(&snapshot) {
@@ -817,8 +824,11 @@ pub(super) async fn wait_for_sync_reconnecting(
 
         match event {
             CoreEvent::Sync(SyncEvent::Reconnecting) => return Ok(()),
-            CoreEvent::StateChanged(snapshot)
-                if matches!(snapshot.sync, koushi_state::SyncState::Reconnecting { .. }) =>
+            CoreEvent::StateDelta(_)
+                if matches!(
+                    conn.snapshot().sync,
+                    koushi_state::SyncState::Reconnecting { .. }
+                ) =>
             {
                 return Ok(());
             }
@@ -849,8 +859,8 @@ pub(super) async fn wait_for_sync_running_after_reconnect(
 
         match event {
             CoreEvent::Sync(SyncEvent::Running) => return Ok(()),
-            CoreEvent::StateChanged(snapshot)
-                if matches!(snapshot.sync, koushi_state::SyncState::Running) =>
+            CoreEvent::StateDelta(_)
+                if matches!(conn.snapshot().sync, koushi_state::SyncState::Running) =>
             {
                 return Ok(());
             }
@@ -864,7 +874,7 @@ pub(super) async fn wait_for_sync_running_after_reconnect(
     }
 }
 
-/// Wait for a `StateChanged` snapshot where `SessionState::Ready`.
+/// Wait for a versioned snapshot where `SessionState::Ready`.
 pub(super) async fn wait_for_ready_snapshot(
     conn: &mut CoreConnection,
     label: &str,
@@ -881,8 +891,8 @@ pub(super) async fn wait_for_ready_snapshot(
             .map_err(|_| format!("{label}: timed out waiting for Ready snapshot"))?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
-        if let CoreEvent::StateChanged(snapshot) = event
-            && matches!(snapshot.session, SessionState::Ready(_))
+        if matches!(event, CoreEvent::StateDelta(_))
+            && matches!(conn.snapshot().session, SessionState::Ready(_))
         {
             return Ok(());
         }
@@ -2614,13 +2624,13 @@ pub(super) async fn wait_for_settings_persisted(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
 
         match event {
-            CoreEvent::StateChanged(snapshot)
+            CoreEvent::StateDelta(_) => {
                 if settings_snapshot_matches_link_preview_policy(
-                    &snapshot,
+                    &conn.snapshot(),
                     expected_url_previews_enabled,
-                ) =>
-            {
-                return Ok(());
+                ) {
+                    return Ok(());
+                }
             }
             CoreEvent::OperationFailed {
                 request_id: ev_id,

@@ -13,11 +13,73 @@ use super::*;
 
 const INVITE_WORKFLOW_CONVERGENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
+async fn submit_invite_workflow_command(
+    state: &CoreRuntimeState,
+    request_id: RequestId,
+    command: CoreCommand,
+    room_id: Option<String>,
+    context: &'static str,
+) -> Result<FrontendCommandSettlement, String> {
+    let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
+    let room_id = room_id
+        .or_else(|| baseline.state.invite_workflow.query.room_id.clone())
+        .unwrap_or_default();
+    let query = baseline.state.invite_workflow.query.query.clone();
+    submit_core_command(state, command).await?;
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::InviteWorkflow {
+                request_id,
+                account_key,
+                room_id,
+                query,
+                closed: false,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + INVITE_WORKFLOW_CONVERGENCE_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome(context, error))?;
+    let RequestOutcome::InviteWorkflow { snapshot, .. } = outcome else {
+        return Err(format!("{context} returned an invalid outcome"));
+    };
+    Ok(command_settlement(snapshot))
+}
+
+async fn submit_room_operation(
+    state: &CoreRuntimeState,
+    request_id: RequestId,
+    command: CoreCommand,
+    room_id: String,
+    operation: RoomOperationKind,
+    context: &'static str,
+) -> Result<FrontendCommandSettlement, String> {
+    let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
+    submit_core_command(state, command).await?;
+    let snapshot = wait_for_room_operation(
+        &mut event_conn,
+        request_id,
+        baseline.generation,
+        account_key,
+        room_id,
+        operation,
+        ROOM_OPERATION_EVENT_TIMEOUT,
+        context,
+    )
+    .await?;
+    Ok(command_settlement(snapshot))
+}
+
 #[tauri::command]
 pub async fn open_invite_workflow(
     room_id: String,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -47,16 +109,13 @@ pub async fn open_invite_workflow(
     let RequestOutcome::InviteWorkflow { snapshot, .. } = outcome else {
         return Err("invite workflow open returned an invalid outcome".to_owned());
     };
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
 pub async fn close_invite_workflow(
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -83,10 +142,7 @@ pub async fn close_invite_workflow(
     let RequestOutcome::InviteWorkflow { snapshot, .. } = outcome else {
         return Err("invite workflow close returned an invalid outcome".to_owned());
     };
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -94,7 +150,7 @@ pub async fn search_invite_targets(
     room_id: String,
     query: String,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -125,10 +181,7 @@ pub async fn search_invite_targets(
     let RequestOutcome::InviteWorkflow { snapshot, .. } = outcome else {
         return Err("invite target search returned an invalid outcome".to_owned());
     };
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -136,14 +189,17 @@ pub async fn set_invite_scope(
     room_id: String,
     scope: InviteScopeSelection,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let expected_room_id = room_id.clone();
+    submit_invite_workflow_command(
         state.inner(),
+        request_id,
         build_set_invite_scope_command(request_id, room_id, scope),
+        Some(expected_room_id),
+        "invite scope update",
     )
-    .await?;
-    current_snapshot(state.inner()).await
+    .await
 }
 
 #[tauri::command]
@@ -151,42 +207,47 @@ pub async fn select_invite_target(
     room_id: String,
     user_id: String,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let expected_room_id = room_id.clone();
+    submit_invite_workflow_command(
         state.inner(),
+        request_id,
         build_select_invite_target_command(request_id, room_id, user_id),
+        Some(expected_room_id),
+        "invite target selection",
     )
-    .await?;
-    current_snapshot(state.inner()).await
+    .await
 }
 
 #[tauri::command]
 pub async fn remove_invite_target(
     user_id: String,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    submit_invite_workflow_command(
         state.inner(),
+        request_id,
         build_remove_invite_target_command(request_id, user_id),
+        None,
+        "invite target removal",
     )
-    .await?;
-    current_snapshot(state.inner()).await
+    .await
 }
 
 #[tauri::command]
 pub async fn select_room_list_filter(
     filter: RoomListFilter,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         CoreCommand::App(AppCommand::SelectRoomListFilter { request_id, filter }),
     )
     .await?;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -194,9 +255,9 @@ pub async fn mark_room_as_read(
     room_id: String,
     event_id: String,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         CoreCommand::Room(RoomCommand::MarkRoomAsRead {
             request_id,
@@ -205,7 +266,7 @@ pub async fn mark_room_as_read(
         }),
     )
     .await?;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -213,9 +274,9 @@ pub async fn mark_room_as_unread(
     room_id: String,
     unread: bool,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         CoreCommand::Room(RoomCommand::MarkRoomAsUnread {
             request_id,
@@ -224,7 +285,7 @@ pub async fn mark_room_as_unread(
         }),
     )
     .await?;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -232,9 +293,9 @@ pub async fn set_room_notification_mode(
     room_id: String,
     mode: RoomNotificationMode,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         CoreCommand::Room(RoomCommand::SetRoomNotificationMode {
             request_id,
@@ -243,7 +304,7 @@ pub async fn set_room_notification_mode(
         }),
     )
     .await?;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -251,11 +312,15 @@ pub async fn leave_room(
     room_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(state.inner(), build_leave_room_command(request_id, room_id)).await?;
+    let admission = submit_core_command_with_admission(
+        state.inner(),
+        build_leave_room_command(request_id, room_id),
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -263,15 +328,15 @@ pub async fn forget_room(
     room_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_forget_room_command(request_id, room_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -281,15 +346,19 @@ pub async fn set_room_tag(
     order: Option<f64>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let settlement = submit_room_operation(
         state.inner(),
-        build_set_room_tag_command(request_id, room_id, tag, order),
+        request_id,
+        build_set_room_tag_command(request_id, room_id.clone(), tag.clone(), order),
+        room_id,
+        RoomOperationKind::RoomTagSet { tag },
+        "room tag update",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(settlement)
 }
 
 #[tauri::command]
@@ -298,15 +367,19 @@ pub async fn remove_room_tag(
     tag: RoomTagKind,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let settlement = submit_room_operation(
         state.inner(),
-        build_remove_room_tag_command(request_id, room_id, tag),
+        request_id,
+        build_remove_room_tag_command(request_id, room_id.clone(), tag.clone()),
+        room_id,
+        RoomOperationKind::RoomTagRemoved { tag },
+        "room tag removal",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(settlement)
 }
 
 #[tauri::command]
@@ -315,15 +388,19 @@ pub async fn pin_event(
     event_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let settlement = submit_room_operation(
         state.inner(),
-        build_pin_event_command(request_id, room_id, event_id),
+        request_id,
+        build_pin_event_command(request_id, room_id.clone(), event_id),
+        room_id,
+        RoomOperationKind::PinnedEventsRefreshed,
+        "event pin",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(settlement)
 }
 
 #[tauri::command]
@@ -332,15 +409,19 @@ pub async fn unpin_event(
     event_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let settlement = submit_room_operation(
         state.inner(),
-        build_unpin_event_command(request_id, room_id, event_id),
+        request_id,
+        build_unpin_event_command(request_id, room_id.clone(), event_id),
+        room_id,
+        RoomOperationKind::PinnedEventsRefreshed,
+        "event unpin",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(settlement)
 }
 
 #[tauri::command]
@@ -348,7 +429,7 @@ pub async fn refresh_pinned_events(
     room_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -372,10 +453,7 @@ pub async fn refresh_pinned_events(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -383,7 +461,7 @@ pub async fn load_room_settings(
     room_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -407,10 +485,7 @@ pub async fn load_room_settings(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -419,7 +494,7 @@ pub async fn load_space_members(
     generation: u64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -444,10 +519,7 @@ pub async fn load_space_members(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -477,22 +549,22 @@ pub async fn repair_room_timeline(
     room_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_repair_room_timeline_command(request_id, room_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
 pub async fn reshare_room_key(
     room_id: String,
     state: State<'_, CoreRuntimeState>,
-) -> Result<RoomKeyReshareOutcome, String> {
+) -> Result<FrontendCommandResult<RoomKeyReshareOutcome>, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -514,10 +586,18 @@ pub async fn reshare_room_key(
         )
         .await
         .map_err(|error| invoke_error_from_request_outcome("room key reshare", error))?;
-    let RequestOutcome::RoomKeyReshare { outcome, .. } = outcome else {
+    let RequestOutcome::RoomKeyReshare {
+        outcome,
+        generation,
+        ..
+    } = outcome
+    else {
         return Err("room key reshare returned an invalid outcome".to_owned());
     };
-    Ok(outcome)
+    Ok(FrontendCommandResult::new(
+        outcome,
+        FrontendCommandSettlement::from_published_generation(generation),
+    ))
 }
 
 /// Temporary dangerous encryption-debug control (issue #538): rotate the
@@ -526,7 +606,7 @@ pub async fn reshare_room_key(
 pub async fn force_new_outbound_session(
     room_id: String,
     state: State<'_, CoreRuntimeState>,
-) -> Result<EncryptionDebugOperationOutcome, String> {
+) -> Result<FrontendCommandResult<EncryptionDebugOperationOutcome>, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -552,10 +632,18 @@ pub async fn force_new_outbound_session(
         )
         .await
         .map_err(|error| invoke_error_from_request_outcome("force new outbound session", error))?;
-    let RequestOutcome::EncryptionDebug { outcome, .. } = outcome else {
+    let RequestOutcome::EncryptionDebug {
+        outcome,
+        generation,
+        ..
+    } = outcome
+    else {
         return Err("force new outbound session returned an invalid outcome".to_owned());
     };
-    Ok(outcome)
+    Ok(FrontendCommandResult::new(
+        outcome,
+        FrontendCommandSettlement::from_published_generation(generation),
+    ))
 }
 
 /// Temporary dangerous encryption-debug control (issue #538): share the
@@ -565,7 +653,7 @@ pub async fn force_new_outbound_session(
 pub async fn share_index0_room_key(
     room_id: String,
     state: State<'_, CoreRuntimeState>,
-) -> Result<EncryptionDebugOperationOutcome, String> {
+) -> Result<FrontendCommandResult<EncryptionDebugOperationOutcome>, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -591,10 +679,18 @@ pub async fn share_index0_room_key(
         )
         .await
         .map_err(|error| invoke_error_from_request_outcome("index-0 room key share", error))?;
-    let RequestOutcome::EncryptionDebug { outcome, .. } = outcome else {
+    let RequestOutcome::EncryptionDebug {
+        outcome,
+        generation,
+        ..
+    } = outcome
+    else {
         return Err("index-0 room key share returned an invalid outcome".to_owned());
     };
-    Ok(outcome)
+    Ok(FrontendCommandResult::new(
+        outcome,
+        FrontendCommandSettlement::from_published_generation(generation),
+    ))
 }
 
 /// Temporary dangerous encryption-debug control (issue #541): resend the
@@ -604,7 +700,7 @@ pub async fn share_index0_room_key(
 pub async fn resend_index0_room_key(
     room_id: String,
     state: State<'_, CoreRuntimeState>,
-) -> Result<EncryptionDebugOperationOutcome, String> {
+) -> Result<FrontendCommandResult<EncryptionDebugOperationOutcome>, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -630,10 +726,18 @@ pub async fn resend_index0_room_key(
         )
         .await
         .map_err(|error| invoke_error_from_request_outcome("index-0 room key resend", error))?;
-    let RequestOutcome::EncryptionDebug { outcome, .. } = outcome else {
+    let RequestOutcome::EncryptionDebug {
+        outcome,
+        generation,
+        ..
+    } = outcome
+    else {
         return Err("index-0 room key resend returned an invalid outcome".to_owned());
     };
-    Ok(outcome)
+    Ok(FrontendCommandResult::new(
+        outcome,
+        FrontendCommandSettlement::from_published_generation(generation),
+    ))
 }
 
 #[tauri::command]
@@ -642,7 +746,7 @@ pub async fn update_room_setting(
     change: RoomSettingChange,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -667,10 +771,7 @@ pub async fn update_room_setting(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -681,7 +782,7 @@ pub async fn moderate_room_member(
     reason: Option<String>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -711,10 +812,7 @@ pub async fn moderate_room_member(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -724,7 +822,7 @@ pub async fn update_room_member_role(
     power_level: i64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -750,10 +848,7 @@ pub async fn update_room_member_role(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -761,7 +856,7 @@ pub async fn create_room(
     options: koushi_core::CreateRoomOptions,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -786,10 +881,7 @@ pub async fn create_room(
         return Err("room creation returned an invalid outcome".to_owned());
     };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -797,7 +889,7 @@ pub async fn create_space(
     name: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -822,10 +914,7 @@ pub async fn create_space(
         return Err("space creation returned an invalid outcome".to_owned());
     };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -835,15 +924,15 @@ pub async fn set_space_child(
     via_server: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_set_space_child_command(request_id, space_id, child_room_id, via_server),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -851,14 +940,13 @@ pub async fn join_room(
     room_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     let Some(command) = build_join_room_command(request_id, room_id.clone()) else {
-        update_qa_window_title_from_state(&app, state.inner()).await;
-        return current_snapshot(state.inner()).await;
+        return Err("room id must not be blank".to_owned());
     };
 
     event_conn
@@ -882,10 +970,7 @@ pub async fn join_room(
         return Err("room join returned an invalid outcome".to_owned());
     };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -893,7 +978,7 @@ pub async fn accept_invite(
     room_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -914,10 +999,7 @@ pub async fn accept_invite(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -925,7 +1007,7 @@ pub async fn decline_invite(
     room_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -946,10 +1028,7 @@ pub async fn decline_invite(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -957,7 +1036,7 @@ pub async fn start_direct_message(
     user_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -988,10 +1067,7 @@ pub async fn start_direct_message(
         .await
         .map_err(super::navigation::invoke_error_from_select_room_error)?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        selected_snapshot.state,
-        selected_snapshot.generation,
-    ))
+    Ok(command_settlement(selected_snapshot))
 }
 
 #[tauri::command]
@@ -1000,7 +1076,7 @@ pub async fn invite_user(
     user_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -1025,10 +1101,7 @@ pub async fn invite_user(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -1038,7 +1111,7 @@ pub async fn invite_user_to_space(
     generation: u64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -1067,10 +1140,7 @@ pub async fn invite_user_to_space(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -1084,7 +1154,7 @@ pub async fn update_space_member_role(
     confirmed: bool,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -1117,10 +1187,7 @@ pub async fn update_space_member_role(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -1130,7 +1197,7 @@ pub async fn cancel_space_invite(
     generation: u64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -1159,10 +1226,7 @@ pub async fn cancel_space_invite(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 #[tauri::command]
@@ -1172,7 +1236,7 @@ pub async fn invite_targets(
     scope: InviteScopeSelection,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = state.runtime.attach();
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
@@ -1198,10 +1262,7 @@ pub async fn invite_targets(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+    Ok(command_settlement(snapshot))
 }
 
 pub(super) async fn wait_for_room_operation(

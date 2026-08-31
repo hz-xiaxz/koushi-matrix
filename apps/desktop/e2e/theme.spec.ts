@@ -48,7 +48,7 @@ test("explicit Rust-owned theme selection sets the root data-theme", async ({ pa
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(
     "dark"
@@ -75,7 +75,7 @@ test("explicit Rust-owned theme selection sets the root data-theme", async ({ pa
         }
       }
     });
-    window.__harness.pushStateChanged();
+    window.__harness.pushStateUpdate();
   });
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(
     "light"

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createBrowserFakeApi } from "./backend/browserFakeApi";
 import type { DesktopApi } from "./backend/desktopApi";
-import type { DesktopSnapshot } from "./domain/types";
+import type { CommandSettlement } from "./domain/types";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -43,7 +43,7 @@ afterEach(async () => {
 describe("App search lifecycle", () => {
   test("opens the search panel while the submitted query is still pending", async () => {
     const api = createBrowserFakeApi();
-    const pending = deferred<DesktopSnapshot>();
+    const pending = deferred<CommandSettlement>();
     const submitSearch = vi
       .spyOn(api, "submitSearch")
       .mockImplementation(() => pending.promise);
@@ -72,7 +72,7 @@ describe("App search lifecycle", () => {
     });
     expect(await screen.findByText(/result[s]? for "Alpha"/)).toBeTruthy();
 
-    const pending = deferred<DesktopSnapshot>();
+    const pending = deferred<CommandSettlement>();
     const originalSubmitSearch = api.submitSearch.bind(api);
     const submitSearch = vi
       .spyOn(api, "submitSearch")

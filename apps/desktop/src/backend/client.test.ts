@@ -24,6 +24,17 @@ describe("TauriDesktopApi", () => {
     expect(invoke).toHaveBeenCalledWith("get_diagnostic_snapshot");
   });
 
+  test("uses distinct state-only and state-plus-timeline resync commands", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+
+    const api = new TauriDesktopApi();
+    await api.settlementSnapshot();
+    await api.resyncSnapshot();
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "settlement_snapshot");
+    expect(invoke).toHaveBeenNthCalledWith(2, "resync_snapshot");
+  });
+
   test("opens a thread with the Rust-owned creation intent", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
@@ -38,26 +49,6 @@ describe("TauriDesktopApi", () => {
       roomId: "!room:example.invalid",
       rootEventId: "$root:example.invalid",
       intent: "newThreadDraft"
-    });
-  });
-
-  test("acknowledges a rendered repair batch with every generation fence", async () => {
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const api = new TauriDesktopApi();
-    await api.acknowledgeTimelineBatchRendered(
-      { account_key: "account", kind: { Room: { room_id: "!room:example.invalid" } } },
-      9,
-      3,
-      11,
-      5
-    );
-
-    expect(invoke).toHaveBeenCalledWith("acknowledge_timeline_batch_rendered", {
-      key: { account_key: "account", kind: { Room: { room_id: "!room:example.invalid" } } },
-      actorGeneration: 9,
-      timelineGeneration: 3,
-      repairGeneration: 11,
-      batchId: 5
     });
   });
 

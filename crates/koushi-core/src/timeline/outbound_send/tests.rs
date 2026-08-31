@@ -123,6 +123,7 @@ async fn send_terminal_handoff_survives_origin_abort_and_delivers_exactly_once()
         None,
         AccountWorkScheduler::default(),
         None,
+        None,
     );
     let mut registration = SendCompletionRegistration::begin(
         Arc::clone(&coordinator),
@@ -666,6 +667,7 @@ async fn shutdown_acknowledges_after_timeline_children_are_dropped() {
         event_tx,
         None,
         AccountWorkScheduler::default(),
+        None,
         None,
     );
     let (acknowledged, acknowledgement) = tokio::sync::oneshot::channel();

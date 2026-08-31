@@ -1,11 +1,11 @@
 import { listen } from "@tauri-apps/api/event";
 
-import type { CoreEventPayload } from "../../domain/coreEvents";
+import type { CoreEventPayload, StateUpdateEnvelope } from "../../domain/coreEvents";
 import type { DesktopEventPort } from "../desktopEventPort";
 
 const CORE_EVENT_NAME = "koushi-desktop://event";
 const MENU_EVENT_NAME = "koushi-desktop://menu";
-const STATE_EVENT_NAME = "koushi-desktop://state";
+const STATE_UPDATE_EVENT_NAME = "koushi-desktop://state-update";
 
 export function createTauriDesktopEventPort(): DesktopEventPort {
   return {
@@ -15,8 +15,10 @@ export function createTauriDesktopEventPort(): DesktopEventPort {
     listenMenuActions(listener) {
       return listen<string>(MENU_EVENT_NAME, (event) => listener(event.payload));
     },
-    listenStateChanges(listener) {
-      return listen<string>(STATE_EVENT_NAME, () => listener());
+    listenStateUpdates(listener) {
+      return listen<StateUpdateEnvelope>(STATE_UPDATE_EVENT_NAME, (event) =>
+        listener(event.payload)
+      );
     }
   };
 }

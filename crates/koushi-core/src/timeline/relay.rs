@@ -1068,20 +1068,6 @@ impl TimelineActor {
                 return;
             }
         }
-        if let Some(fence) = self.gap_repair.awaiting_projection {
-            let trigger = self
-                .gap_repair
-                .pending_trigger
-                .unwrap_or(TimelineGapRepairTrigger::Automatic);
-            self.recover_gap_render_settlement(fence, trigger).await;
-            if self
-                .timeline_actor_generations
-                .try_acquire(&self.key, self.actor_generation)
-                .is_none()
-            {
-                return;
-            }
-        }
         let Some(finalize_lease) = self
             .timeline_actor_generations
             .try_acquire(&self.key, self.actor_generation)

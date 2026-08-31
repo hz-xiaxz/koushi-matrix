@@ -161,10 +161,10 @@ where
             if predicate(&snapshot) {
                 return snapshot;
             }
-            let _ = connection
-                .recv_event()
+            connection
+                .next_versioned_snapshot()
                 .await
-                .expect("runtime event stream must remain open");
+                .expect("runtime snapshot stream must remain open");
         }
     })
     .await

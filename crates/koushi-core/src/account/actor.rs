@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
     time::Instant,
@@ -34,9 +34,7 @@ use crate::event::{
 #[cfg(test)]
 use crate::executor;
 use crate::failure::CoreFailure;
-use crate::ids::{
-    AccountKey, RequestId, TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind,
-};
+use crate::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
 use crate::link_preview::LinkPreviewContext;
 #[cfg(feature = "test-hooks")]
 use crate::room::RoomOperationTestControl;
@@ -46,8 +44,7 @@ use crate::search::SearchActorHandle;
 use crate::store::StoreActor;
 use crate::sync::SyncActorHandle;
 use crate::timeline::{
-    NavigationProjectionIngress, NavigationProjectionIntent, TimelineManagerHandle,
-    TimelineMessage, TimelineProjectionAcknowledgement,
+    NavigationProjectionIngress, NavigationProjectionIntent, TimelineManagerHandle, TimelineMessage,
 };
 
 use super::account_management::PendingUiaOperation;
@@ -176,19 +173,6 @@ pub(crate) enum AccountMessage {
         requests: Vec<crate::activity_resolution::ActivityResolutionRequest>,
     },
     CancelActivityResolution,
-    AcknowledgeTimelineProjection {
-        projection_request_id: RequestId,
-        key: TimelineKey,
-        generation: TimelineGeneration,
-        response: oneshot::Sender<TimelineProjectionAcknowledgement>,
-    },
-    AcknowledgeTimelineBatchRendered {
-        key: TimelineKey,
-        actor_generation: u64,
-        timeline_generation: TimelineGeneration,
-        repair_generation: u64,
-        batch_id: TimelineBatchId,
-    },
     ScheduleServerDelayedSend {
         request_id: RequestId,
         expected_account: SessionKeyId,
@@ -517,6 +501,8 @@ pub(crate) enum AccountMessage {
 pub struct AccountActorHandle {
     tx: mpsc::Sender<AccountMessage>,
     navigation_projection: NavigationProjectionIngress,
+    focused_projection_rx:
+        Arc<Mutex<Option<mpsc::UnboundedReceiver<crate::timeline::FocusedProjectionCommitted>>>>,
     #[cfg(feature = "test-hooks")]
     residency_room_tx: mpsc::Sender<RoomMessage>,
     #[cfg(feature = "test-hooks")]
@@ -687,6 +673,15 @@ impl AccountActorHandle {
         self.navigation_projection.admit(intent)
     }
 
+    pub(crate) fn take_focused_projection_commits(
+        &self,
+    ) -> Option<mpsc::UnboundedReceiver<crate::timeline::FocusedProjectionCommitted>> {
+        self.focused_projection_rx
+            .lock()
+            .expect("focused projection receiver lock must not be poisoned")
+            .take()
+    }
+
     #[cfg(test)]
     pub(crate) fn for_app_actor_test(
         tx: mpsc::Sender<AccountMessage>,
@@ -695,6 +690,7 @@ impl AccountActorHandle {
         Self {
             tx,
             navigation_projection,
+            focused_projection_rx: Arc::new(Mutex::new(None)),
             #[cfg(feature = "test-hooks")]
             residency_room_tx: {
                 let (room_tx, _room_rx) = mpsc::channel(1);
@@ -821,6 +817,8 @@ pub struct AccountActor {
     /// Stable projection ingress retained across session-scoped manager
     /// replacement and cloned into the AppActor-facing handle.
     pub(super) navigation_projection: NavigationProjectionIngress,
+    pub(super) focused_projection_tx:
+        mpsc::UnboundedSender<crate::timeline::FocusedProjectionCommitted>,
     /// Account-wide gate for `/rooms/{roomId}/messages` requests. Timeline
     /// pagination has priority over background search-history crawling.
     pub(super) account_work: crate::account_work::AccountWorkScheduler,
@@ -964,6 +962,7 @@ impl AccountActor {
         );
         let (navigation_projection, navigation_projection_rx) =
             NavigationProjectionIngress::channel();
+        let (focused_projection_tx, focused_projection_rx) = mpsc::unbounded_channel();
         // Spawn TimelineManagerActor. It starts with no session; the session
         // is injected when a store-backed session is established.
         let timeline_manager = crate::timeline::TimelineManagerActor::spawn(
@@ -972,6 +971,7 @@ impl AccountActor {
             Some(data_dir.clone()),
             account_work.clone(),
             Some(navigation_projection_rx),
+            Some(focused_projection_tx.clone()),
         );
         #[cfg(feature = "test-hooks")]
         let residency_room_tx = room_actor.tx.clone();
@@ -1057,6 +1057,7 @@ impl AccountActor {
             read_persistence_task: None,
             read_persistence_session_generation: 0,
             navigation_projection: navigation_projection.clone(),
+            focused_projection_tx,
             account_work,
             activity_resolution_task: None,
             data_dir,
@@ -1101,6 +1102,7 @@ impl AccountActor {
         AccountActorHandle {
             tx,
             navigation_projection,
+            focused_projection_rx: Arc::new(Mutex::new(Some(focused_projection_rx))),
             #[cfg(feature = "test-hooks")]
             residency_room_tx,
             #[cfg(feature = "test-hooks")]
@@ -1285,43 +1287,6 @@ impl AccountActor {
                     if let Some(task) = self.activity_resolution_task.take() {
                         task.abort();
                     }
-                }
-                AccountMessage::AcknowledgeTimelineProjection {
-                    projection_request_id,
-                    key,
-                    generation,
-                    response,
-                } => {
-                    if !self
-                        .timeline_manager
-                        .send(TimelineMessage::AcknowledgeProjection {
-                            projection_request_id,
-                            key,
-                            generation,
-                            response,
-                        })
-                        .await
-                    {
-                        // Dropping the response sender settles the caller as rejected.
-                    }
-                }
-                AccountMessage::AcknowledgeTimelineBatchRendered {
-                    key,
-                    actor_generation,
-                    timeline_generation,
-                    repair_generation,
-                    batch_id,
-                } => {
-                    let _ = self
-                        .timeline_manager
-                        .send(TimelineMessage::AcknowledgeBatchRendered {
-                            key,
-                            actor_generation,
-                            timeline_generation,
-                            repair_generation,
-                            batch_id,
-                        })
-                        .await;
                 }
                 AccountMessage::ScheduleServerDelayedSend {
                     request_id,

@@ -14,10 +14,6 @@ import { api } from "./backend/appRuntime";
 import { desktopEventPort } from "./backend/desktopEventRuntime";
 import { openExternalHttpUrl } from "./backend/linkMediaRuntime";
 import { isTauriRuntime } from "./backend/runtimeEnvironment";
-import {
-  createTimelineAcknowledgementDelivery,
-  type TimelineAcknowledgementDelivery
-} from "./backend/timelineAcknowledgementDelivery";
 import { windowDialogPort } from "./backend/windowDialogRuntime";
 import { tauriTimelineTransport } from "./backend/tauriTimelineTransport";
 import {
@@ -155,6 +151,8 @@ import type {
   AttachmentScope,
   AttachmentSort,
   ComposerTarget,
+  CommandReceipt,
+  CommandResult,
   CreateRoomRequest,
   DesktopSnapshot,
   DirectoryRoomSummary,
@@ -178,6 +176,8 @@ import type {
 import { stageAttachmentFiles } from "./domain/attachmentIngestion";
 import { createLatestMutationOperationQueue } from "./domain/latestAsyncResult";
 import { createOrderedEventBatcher } from "./domain/orderedEventBatcher";
+import { createStateUpdateConsumer } from "./domain/stateUpdateConsumer";
+import { createCommandReceiptReconciler } from "./domain/commandWatermark";
 import { SNAPSHOT_SCHEMA_VERSION } from "./domain/types";
 import {
   type DisplayDensity,
@@ -191,8 +191,9 @@ import {
 } from "./app/localPresentation";
 import { createViewportSyncReporter } from "./app/viewportSyncReporter";
 import {
-  applyAppStoreDeltas,
+  applyAppStoreDelta,
   getAppStoreDeltaStats,
+  getAppStoreSnapshot,
   selectSnapshot,
   setAppStoreSnapshot,
   useAppStore
@@ -345,7 +346,6 @@ function spaceInviteCancellationAvailabilityReasonForSnapshot(
 }
 
 const DEFAULT_HOMESERVER = "https://matrix.org";
-const STATE_EVENT_REFRESH_DEBOUNCE_MS = 250;
 declare global {
   interface Window {
     __matrixDesktopQaErrorCaptureInstalled?: boolean;
@@ -677,12 +677,13 @@ function currentSessionStatusFailureLabel(kind: "sdk" | "timed_out" | "unavailab
 }
 
 export async function settleLoginTransport(
-  login: Promise<DesktopSnapshot>,
+  login: Promise<CommandReceipt>,
+  reconcile: (receipt: CommandReceipt) => Promise<void>,
   refresh: () => Promise<DesktopSnapshot>,
   apply: (snapshot: DesktopSnapshot) => void
 ): Promise<string | null> {
   try {
-    apply(await login);
+    await reconcile(await login);
     return null;
   } catch {
     try {
@@ -827,16 +828,56 @@ export function App() {
     setSchemaMismatchVersion(null);
     setAppStoreSnapshot(next);
   }, [diagnosticLogBuffer]);
+  const commandReceiptReconcilerRef = useRef<
+    ReturnType<typeof createCommandReceiptReconciler> | null
+  >(null);
+  commandReceiptReconcilerRef.current ??= createCommandReceiptReconciler({
+    currentGeneration: () => getAppStoreSnapshot()?.state_generation ?? null,
+    settlementSnapshot: () => api.settlementSnapshot(),
+    applySnapshot: setSnapshot
+  });
+
+  async function applyCommandReceipt(receipt: CommandReceipt): Promise<void> {
+    await commandReceiptReconcilerRef.current!(receipt);
+  }
+
+  async function settleCommand<T extends CommandReceipt>(operation: Promise<T>): Promise<T> {
+    const receipt = await operation;
+    await applyCommandReceipt(receipt);
+    return receipt;
+  }
+
+  function runInBackground(operation: Promise<unknown>): void {
+    void operation.catch(() => undefined);
+  }
+
+  function settleCommandInBackground(operation: Promise<CommandReceipt>): void {
+    runInBackground(settleCommand(operation));
+  }
+
+  async function settleCommandResult<T>(operation: Promise<CommandResult<T>>): Promise<T> {
+    const response = await operation;
+    await applyCommandReceipt(response.settlement);
+    return response.result;
+  }
+
+  async function settleCommandSnapshot(
+    operation: Promise<CommandReceipt>
+  ): Promise<DesktopSnapshot> {
+    await settleCommand(operation);
+    const current = getAppStoreSnapshot();
+    if (!current) throw new Error("command settled without an application snapshot");
+    return current;
+  }
+
   const latestTextMutationQueueRef = useRef(createLatestMutationOperationQueue<string>());
 
-  async function applyLatestTextMutationSnapshot(
+  async function applyLatestTextMutationReceipt(
     key: string,
-    operation: () => Promise<DesktopSnapshot>
+    operation: () => Promise<CommandReceipt>
   ): Promise<void> {
     const result = await latestTextMutationQueueRef.current.run(key, operation);
-    if (result.kind === "applied") {
-      setSnapshot(result.value);
-    }
+    if (result.kind === "applied") await applyCommandReceipt(result.value);
   }
   const [searchQuery, setSearchQuery] = useState(() => initialSearchQuery());
   const [searchScope, setSearchScope] = useState<SearchScopeKind>("currentRoom");
@@ -873,36 +914,6 @@ export function App() {
   if (submissionRegistryRef.current === null) {
     submissionRegistryRef.current = createComposerSubmissionControllerRegistry();
   }
-  const timelineAcknowledgementDeliveryRef =
-    useRef<TimelineAcknowledgementDelivery | null>(null);
-  const getTimelineAcknowledgementDelivery = useCallback(() => {
-    timelineAcknowledgementDeliveryRef.current ??= createTimelineAcknowledgementDelivery({
-      submitProjection: (projectionRequestId, key, generation, itemCount, targetPresent) =>
-        api.acknowledgeTimelineProjection(
-          projectionRequestId,
-          key,
-          generation,
-          itemCount,
-          targetPresent
-        ),
-      submitRepair: (
-        key,
-        actorGeneration,
-        timelineGeneration,
-        repairGeneration,
-        batchId
-      ) =>
-        api.acknowledgeTimelineBatchRendered(
-          key,
-          actorGeneration,
-          timelineGeneration,
-          repairGeneration,
-          batchId
-        )
-    });
-    return timelineAcknowledgementDeliveryRef.current;
-  }, []);
-
   function retireComposerRendererGeneration(): void {
     const mainOverlay = mainComposerOverlayRef.current;
     if (mainOverlay?.debounceHandle !== null && mainOverlay) {
@@ -925,7 +936,6 @@ export function App() {
     const owner = account ? composerDraftAccountOwnerKey(account) : null;
     const ownerChanged = composerDraftLifecycleOwnerRef.current !== owner;
     if (ownerChanged) {
-      timelineAcknowledgementDeliveryRef.current?.reset();
       retireComposerRendererGeneration();
     }
     submissionAccountOwnerRef.current = owner;
@@ -1087,12 +1097,12 @@ export function App() {
     useState<DisplayDensity>(readDisplayDensity);
   const viewportSyncReporter = useMemo(() => createViewportSyncReporter(api), []);
   useEffect(() => {
-    void viewportSyncReporter("density_commit", displayDensity);
+    runInBackground(viewportSyncReporter("density_commit", displayDensity));
   }, [displayDensity, viewportSyncReporter]);
   useEffect(() => {
     const reportBrowserResize = () => {
       setViewportWidth(window.innerWidth);
-      void viewportSyncReporter("browser_resize", displayDensity);
+      runInBackground(viewportSyncReporter("browser_resize", displayDensity));
     };
     window.addEventListener("resize", reportBrowserResize);
     return () => window.removeEventListener("resize", reportBrowserResize);
@@ -1159,7 +1169,6 @@ export function App() {
     setSpaceLocalOverrides(setSpaceLocalOverride(spaceId, override));
   }
   const qaSendBaselineTimelineItems = useRef(0);
-  const stateRefreshTimerRef = useRef<number | null>(null);
   const panelDiagnosticRef = useRef<string | null>(null);
   // Page-lifetime renderer intent only: Rust owns privacy-safe diagnostic content, while this
   // epoch orders overlapping requests to open the one dialog. It deliberately survives account
@@ -1200,47 +1209,14 @@ export function App() {
     }
     return {
       ...tauriTimelineTransport,
-      acknowledgeProjection(
-        projectionRequestId,
-        key,
-        actorGeneration,
-        generation,
-        itemCount,
-        targetPresent
-      ) {
-        return getTimelineAcknowledgementDelivery().acknowledgeProjection(
-          projectionRequestId,
-          key,
-          actorGeneration,
-          generation,
-          itemCount,
-          targetPresent
-        );
-      },
-      acknowledgeRenderedBatch(
-        key,
-        actorGeneration,
-        timelineGeneration,
-        repairGeneration,
-        batchId
-      ) {
-        return getTimelineAcknowledgementDelivery().acknowledgeRenderedBatch(
-          key,
-          actorGeneration,
-          timelineGeneration,
-          repairGeneration,
-          batchId
-        );
-      },
       async pinEvent(roomId: string, eventId: string) {
-        setSnapshot(await api.pinEvent(roomId, eventId));
+        await settleCommand(api.pinEvent(roomId, eventId));
       },
       async unpinEvent(roomId: string, eventId: string) {
-        setSnapshot(await api.unpinEvent(roomId, eventId));
+        await settleCommand(api.unpinEvent(roomId, eventId));
       },
       async openAtTimestamp(roomId: string, timestampMs: number) {
-        const nextSnapshot = await api.openTimelineAtTimestamp(roomId, timestampMs);
-        setSnapshot(nextSnapshot);
+        await settleCommand(api.openTimelineAtTimestamp(roomId, timestampMs));
         // #161: jump-to-date renders the focused timeline in the MAIN pane
         // (via navigation.main_timeline_anchor), not the right panel. Explicitly
         // close the right panel so an already-open focused-context/search panel
@@ -1302,19 +1278,18 @@ export function App() {
       }
 
       let demand: SpaceMembersLoadDemand;
-      const request = api
-        .loadSpaceMembers(fence.spaceId, fence.generation)
-        .then((nextSnapshot) => {
-          if (
-            spaceMembersLoadDemandRef.current !== demand ||
-            !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
-            !spaceMembersSnapshotMatches(nextSnapshot, fence)
-          ) {
-            return null;
-          }
-          setSnapshot(nextSnapshot);
-          return nextSnapshot;
-        });
+      const request = settleCommandSnapshot(
+        api.loadSpaceMembers(fence.spaceId, fence.generation)
+      ).then((nextSnapshot) => {
+        if (
+          spaceMembersLoadDemandRef.current !== demand ||
+          !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
+          !spaceMembersSnapshotMatches(nextSnapshot, fence)
+        ) {
+          return null;
+        }
+        return nextSnapshot;
+      });
       demand = { key, promise: request };
       spaceMembersLoadDemandRef.current = demand;
       request.then(
@@ -1534,13 +1509,13 @@ export function App() {
   function handleShortcutAction(shortcutId: string): boolean {
     switch (shortcutId) {
       case "showKeyboardSettings":
-        void setRightPanelModeClosingFocusedContext("keyboardSettings");
+        runInBackground(setRightPanelModeClosingFocusedContext("keyboardSettings"));
         return true;
       case "openUserSettings":
-        void setRightPanelModeClosingFocusedContext("userSettings");
+        runInBackground(setRightPanelModeClosingFocusedContext("userSettings"));
         return true;
       case "logout":
-        void requestLogout();
+        runInBackground(requestLogout());
         return true;
       case "searchInRoom":
         setSearchScope("currentRoom");
@@ -1551,14 +1526,14 @@ export function App() {
         searchInputRef.current?.focus();
         return true;
       case "toggleRightPanel":
-        void setRightPanelModeClosingFocusedContext(
-          rightPanelMode === "closed" ? "roomInfo" : "closed"
+        runInBackground(
+          setRightPanelModeClosingFocusedContext(
+            rightPanelMode === "closed" ? "roomInfo" : "closed"
+          )
         );
         return true;
       case "toggleFullscreen":
-        void (async () => {
-          await windowDialogPort.toggleFullscreen();
-        })();
+        runInBackground(windowDialogPort.toggleFullscreen());
         return true;
       default:
         return false;
@@ -1584,8 +1559,56 @@ export function App() {
   }
 
   useEffect(() => {
-    void refresh();
-  }, []);
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    const stateUpdates = createStateUpdateConsumer({
+      applySnapshot: setSnapshot,
+      applyDelta: (delta) =>
+        applyAppStoreDelta({
+          generation: delta.generation,
+          changed: delta.changed
+        }),
+      resetTimeline: () => {
+        setTimelineStore((current) =>
+          pruneTimelineStore(
+            applyGlobalResync(current),
+            retainedTimelineKeyIdsRef.current
+          )
+        );
+      },
+      resyncSnapshot: () => api.resyncSnapshot()
+    });
+    const listenerReady = desktopEventPort.listenStateUpdates(stateUpdates.receive);
+    runInBackground(
+      listenerReady.then((dispose) => {
+        if (disposed) {
+          dispose();
+        } else {
+          unlisten = dispose;
+        }
+      })
+    );
+    setIsBusy(true);
+    const initialSnapshot = isTauriRuntime()
+      ? listenerReady.then(() => api.getSnapshot())
+      : api.getSnapshot();
+    void initialSnapshot
+      .then((snapshot) => {
+        if (!disposed) stateUpdates.initialize(snapshot);
+      })
+      .catch(() => {
+        if (!disposed) stateUpdates.recoverInitial();
+      })
+      .finally(() => {
+        if (!disposed) setIsBusy(false);
+      });
+
+    return () => {
+      disposed = true;
+      stateUpdates.dispose();
+      unlisten?.();
+    };
+  }, [setSnapshot]);
 
   useEffect(() => {
     return () => {
@@ -1598,14 +1621,12 @@ export function App() {
         window.clearTimeout(threadOverlay.debounceHandle);
       }
       composerDraftLifecycleRegistryRef.current?.revokeRendererGeneration();
-      timelineAcknowledgementDeliveryRef.current?.dispose();
-      timelineAcknowledgementDeliveryRef.current = null;
     };
   }, []);
 
   useEffect(() => {
     if (rightPanelMode === "userSettings") {
-      void refreshSavedSessions();
+      runInBackground(refreshSavedSessions());
     }
   }, [rightPanelMode]);
 
@@ -1675,7 +1696,7 @@ export function App() {
     }
 
     searchTimer.current = window.setTimeout(() => {
-      void runSearch(searchQuery, searchScope);
+      runInBackground(runSearch(searchQuery, searchScope));
     }, 120);
 
     return () => {
@@ -1738,7 +1759,7 @@ export function App() {
       ) {
         if (!targetRoom && !qaSendTargetRequested.current) {
           qaSendTargetRequested.current = true;
-          void api.startDirectMessage(targetUserId).then(setSnapshot).catch(() => {
+          void api.startDirectMessage(targetUserId).then(applyCommandReceipt).catch(() => {
             qaSendPending.current = false;
             setQaSendStatus("failed");
           });
@@ -1769,7 +1790,7 @@ export function App() {
     qaSendBaselineTimelineItems.current = snapshot.timeline.length;
     qaSendPending.current = true;
     setQaSendStatus("pending");
-    void sendText(documentFromText(message));
+    runInBackground(sendText(documentFromText(message)));
   }, [snapshot]);
 
   useEffect(() => {
@@ -1802,22 +1823,26 @@ export function App() {
     // send status while a WebDriver-driven send is pending.
     let disposed = false;
     let unlisten: (() => void) | null = null;
-    void desktopEventPort.listenCoreEvents((payload) => {
-      if (!qaSendPending.current) {
-        return;
-      }
-      const eventStatus = qaSendCompletionStatusFromCoreEvent(payload);
-      if (eventStatus) {
-        qaSendPending.current = false;
-        setQaSendStatus(eventStatus);
-      }
-    }).then((dispose) => {
-      if (disposed) {
-        dispose();
-      } else {
-        unlisten = dispose;
-      }
-    });
+    runInBackground(
+      desktopEventPort
+        .listenCoreEvents((payload) => {
+          if (!qaSendPending.current) {
+            return;
+          }
+          const eventStatus = qaSendCompletionStatusFromCoreEvent(payload);
+          if (eventStatus) {
+            qaSendPending.current = false;
+            setQaSendStatus(eventStatus);
+          }
+        })
+        .then((dispose) => {
+          if (disposed) {
+            dispose();
+          } else {
+            unlisten = dispose;
+          }
+        })
+    );
 
     return () => {
       disposed = true;
@@ -1848,61 +1873,25 @@ export function App() {
 
     let disposed = false;
     let unlisten: (() => void) | null = null;
-    void desktopEventPort.listenMenuActions((payload) => {
-      const shortcutId = shortcutActionFromMenuPayload(payload);
-      if (shortcutId) {
-        handleShortcutAction(shortcutId);
-      }
-    }).then((dispose) => {
-      if (disposed) {
-        dispose();
-      } else {
-        unlisten = dispose;
-      }
-    });
+    runInBackground(
+      desktopEventPort
+        .listenMenuActions((payload) => {
+          const shortcutId = shortcutActionFromMenuPayload(payload);
+          if (shortcutId) {
+            handleShortcutAction(shortcutId);
+          }
+        })
+        .then((dispose) => {
+          if (disposed) {
+            dispose();
+          } else {
+            unlisten = dispose;
+          }
+        })
+    );
 
     return () => {
       disposed = true;
-      unlisten?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-    const deltaBatcher = createOrderedEventBatcher<
-      Extract<CoreEventPayload, { kind: "StateDelta" }>
-    >((deltas) => {
-      const applied = applyAppStoreDeltas(
-        deltas.map((delta) => ({
-          generation: delta.generation,
-          changed: delta.changed
-        }))
-      );
-      if (!applied) {
-        void refresh();
-      }
-    });
-    void desktopEventPort.listenCoreEvents((payload) => {
-      if (payload.kind !== "StateDelta") {
-        return;
-      }
-      deltaBatcher.enqueue(payload);
-    }).then((dispose) => {
-      if (disposed) {
-        dispose();
-      } else {
-        unlisten = dispose;
-      }
-    });
-
-    return () => {
-      disposed = true;
-      deltaBatcher.dispose();
       unlisten?.();
     };
   }, []);
@@ -2043,24 +2032,6 @@ export function App() {
               });
             }
           }
-          if (
-            applied.projection.kind === "applied" &&
-            ("Focused" in applied.projection.key.kind ||
-              "Thread" in applied.projection.key.kind)
-          ) {
-            // The Core command is idempotent because React may replay updater
-            // functions in development. Store application always precedes ACK.
-            void getTimelineAcknowledgementDelivery()
-              .acknowledgeProjection(
-                applied.projection.requestId,
-                applied.projection.key,
-                applied.projection.actorGeneration,
-                applied.projection.generation,
-                applied.projection.itemCount,
-                applied.projection.targetPresent
-              )
-              .catch(() => undefined);
-          }
           next = applied.store;
         }
         return next;
@@ -2079,39 +2050,6 @@ export function App() {
       unsubscribe();
     };
   }, [appTimelineTransport]);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-    void desktopEventPort.listenStateChanges(() => {
-      if (stateRefreshTimerRef.current !== null) {
-        return;
-      }
-      stateRefreshTimerRef.current = window.setTimeout(() => {
-        stateRefreshTimerRef.current = null;
-        void refresh();
-      }, STATE_EVENT_REFRESH_DEBOUNCE_MS);
-    }).then((dispose) => {
-      if (disposed) {
-        dispose();
-      } else {
-        unlisten = dispose;
-      }
-    });
-
-    return () => {
-      disposed = true;
-      if (stateRefreshTimerRef.current !== null) {
-        window.clearTimeout(stateRefreshTimerRef.current);
-        stateRefreshTimerRef.current = null;
-      }
-      unlisten?.();
-    };
-  }, []);
 
   useEffect(() => {
     if (!snapshot || rightPanelMode !== "roomInfo") {
@@ -2139,31 +2077,9 @@ export function App() {
       return;
     }
     roomSettingsLoadRef.current = activeRoomId;
-    const requestId = ++roomSettingsRequestRef.current;
-    const navigationRequestId = roomNavigationIntentEpochRef.current;
-    void api
-      .loadRoomSettings(activeRoomId)
-      .then((nextSnapshot) => {
-        if (
-          roomSettingsRequestRef.current !== requestId ||
-          roomNavigationIntentEpochRef.current !== navigationRequestId ||
-          snapshotRef.current?.state.ui.navigation.active_room_id !== activeRoomId ||
-          nextSnapshot.state.ui.navigation.active_room_id !== activeRoomId ||
-          !exactRoomSettingsForRoom(nextSnapshot, activeRoomId)
-        ) {
-          return;
-        }
-        setSnapshot(nextSnapshot);
-      })
-      .catch(() => {
-        if (
-          roomSettingsRequestRef.current === requestId &&
-          roomNavigationIntentEpochRef.current === navigationRequestId &&
-          roomSettingsLoadRef.current === activeRoomId
-        ) {
-          roomSettingsLoadRef.current = null;
-        }
-      });
+    void settleCommand(api.loadRoomSettings(activeRoomId)).catch(() => {
+      if (roomSettingsLoadRef.current === activeRoomId) roomSettingsLoadRef.current = null;
+    });
   }, [
     rightPanelMode,
     snapshot?.state.ui.navigation.active_room_id,
@@ -2198,31 +2114,9 @@ export function App() {
       return;
     }
     spaceSettingsLoadRef.current = activeSpaceId;
-    const requestId = ++spaceSettingsRequestRef.current;
-    const navigationRequestId = spaceNavigationIntentEpochRef.current;
-    void api
-      .loadRoomSettings(activeSpaceId)
-      .then((nextSnapshot) => {
-        if (
-          spaceSettingsRequestRef.current !== requestId ||
-          spaceNavigationIntentEpochRef.current !== navigationRequestId ||
-          snapshotRef.current?.state.ui.navigation.active_space_id !== activeSpaceId ||
-          nextSnapshot.state.ui.navigation.active_space_id !== activeSpaceId ||
-          !exactRoomSettingsForRoom(nextSnapshot, activeSpaceId)
-        ) {
-          return;
-        }
-        setSnapshot(nextSnapshot);
-      })
-      .catch(() => {
-        if (
-          spaceSettingsRequestRef.current === requestId &&
-          spaceNavigationIntentEpochRef.current === navigationRequestId &&
-          spaceSettingsLoadRef.current === activeSpaceId
-        ) {
-          spaceSettingsLoadRef.current = null;
-        }
-      });
+    void settleCommand(api.loadRoomSettings(activeSpaceId)).catch(() => {
+      if (spaceSettingsLoadRef.current === activeSpaceId) spaceSettingsLoadRef.current = null;
+    });
   }, [
     rightPanelMode,
     snapshot?.state.ui.navigation.active_space_id,
@@ -2254,15 +2148,6 @@ export function App() {
     snapshot?.state.ui.navigation.active_space_id
   ]);
 
-  async function refresh() {
-    setIsBusy(true);
-    try {
-      setSnapshot(await api.getSnapshot());
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
   async function refreshSavedSessions() {
     setSavedSessions(await api.listSavedSessions());
   }
@@ -2270,7 +2155,7 @@ export function App() {
   async function switchAccount(session: SavedSessionInfo) {
     setIsBusy(true);
     try {
-      setSnapshot(await api.switchAccount(session));
+      await settleCommand(api.switchAccount(session));
       setRightPanelMode("thread");
       await refreshSavedSessions();
     } finally {
@@ -2299,7 +2184,7 @@ export function App() {
   async function logout() {
     setIsBusy(true);
     try {
-      setSnapshot(await api.logout());
+      await settleCommand(api.logout());
       setRightPanelMode("thread");
       await refreshSavedSessions();
     } finally {
@@ -2310,7 +2195,7 @@ export function App() {
   async function retrySlidingSyncCapability() {
     setIsBusy(true);
     try {
-      setSnapshot(await api.retrySlidingSyncCapability());
+      await settleCommand(api.retrySlidingSyncCapability());
     } finally {
       setIsBusy(false);
     }
@@ -2319,7 +2204,7 @@ export function App() {
   async function changeCapabilityHomeserver() {
     setIsBusy(true);
     try {
-      setSnapshot(await api.changeHomeserver());
+      await settleCommand(api.changeHomeserver());
     } finally {
       setIsBusy(false);
     }
@@ -2342,7 +2227,9 @@ export function App() {
               loginDeviceName,
               snapshot?.state.domain.locale_profile.platform ?? "linux"
             );
-      setLoginTransportError(await settleLoginTransport(login, () => api.getSnapshot(), setSnapshot));
+      setLoginTransportError(
+        await settleLoginTransport(login, applyCommandReceipt, () => api.settlementSnapshot(), setSnapshot)
+      );
     } finally {
       if (loginPasswordRef.current) {
         loginPasswordRef.current.value = "";
@@ -2355,7 +2242,7 @@ export function App() {
   async function discoverLoginMethods() {
     setIsBusy(true);
     try {
-      setSnapshot(await api.discoverLoginMethods(loginHomeserver));
+      await settleCommand(api.discoverLoginMethods(loginHomeserver));
     } finally {
       setIsBusy(false);
     }
@@ -2369,6 +2256,7 @@ export function App() {
           ? snapshot.state.domain.session.homeserver
           : loginHomeserver;
       const authorization = await api.startOidcLogin(activeHomeserver);
+      await applyCommandReceipt(authorization.settlement);
       await openExternalHttpUrl(authorization.authorization_url);
     } finally {
       setIsBusy(false);
@@ -2380,7 +2268,7 @@ export function App() {
     const secret = recoverySecretRef.current?.value.trim() ?? "";
     setIsBusy(true);
     try {
-      setSnapshot(await api.submitRecovery(secret));
+      await settleCommand(api.submitRecovery(secret));
     } finally {
       if (recoverySecretRef.current) {
         recoverySecretRef.current.value = "";
@@ -2393,69 +2281,69 @@ export function App() {
   async function restartSync() {
     setIsBusy(true);
     try {
-      setSnapshot(await api.restartSync());
+      await settleCommand(api.restartSync());
     } finally {
       setIsBusy(false);
     }
   }
 
   async function updateSettings(patch: SettingsPatch) {
-    setSnapshot(await api.updateSettings(patch));
+    await settleCommand(api.updateSettings(patch));
   }
 
   async function rebuildSearchIndex() {
-    setSnapshot(await api.rebuildSearchIndex());
+    await settleCommand(api.rebuildSearchIndex());
   }
 
   async function startRoomCrawl(roomId: string) {
-    setSnapshot(await api.startRoomCrawl(roomId));
+    await settleCommand(api.startRoomCrawl(roomId));
   }
 
   async function stopRoomCrawl(roomId: string) {
-    setSnapshot(await api.stopRoomCrawl(roomId));
+    await settleCommand(api.stopRoomCrawl(roomId));
   }
 
   async function setRoomUrlPreviewOverride(roomId: string, enabled: boolean) {
-    setSnapshot(await api.setRoomUrlPreviewOverride(roomId, enabled));
+    await settleCommand(api.setRoomUrlPreviewOverride(roomId, enabled));
   }
 
   async function repairRoomTimeline(roomId: string) {
-    setSnapshot(await api.repairRoomTimeline(roomId));
+    await settleCommand(api.repairRoomTimeline(roomId));
   }
 
   async function submitAccountManagementUia(flowId: number, password: string) {
-    setSnapshot(await api.submitAccountManagementUia(flowId, password));
+    await settleCommand(api.submitAccountManagementUia(flowId, password));
   }
 
   async function loadAccountManagementCapabilities() {
-    setSnapshot(await api.loadAccountManagementCapabilities());
+    await settleCommand(api.loadAccountManagementCapabilities());
   }
 
   async function changePassword(newPassword: string) {
-    setSnapshot(await api.changePassword(newPassword));
+    await settleCommand(api.changePassword(newPassword));
   }
 
   async function deactivateAccount(eraseData: boolean) {
-    setSnapshot(await api.deactivateAccount(eraseData));
+    await settleCommand(api.deactivateAccount(eraseData));
   }
 
   async function setDisplayName(displayName: string | null) {
-    setSnapshot(await api.setDisplayName(displayName));
+    await settleCommand(api.setDisplayName(displayName));
   }
 
   // Renderer-owned autosave sequencing only: Tauri returns a pre-terminal snapshot and browser
   // results share one generation, so this bounded per-user lane preserves input/submission order.
   // Rust remains the durable alias, Saving/terminal, reconciliation and display-projection owner.
   async function setLocalUserAlias(userId: string, alias: string | null) {
-    await applyLatestTextMutationSnapshot(`alias:${userId}`, () => api.setLocalUserAlias(userId, alias));
+    await applyLatestTextMutationReceipt(`alias:${userId}`, () => api.setLocalUserAlias(userId, alias));
   }
 
   async function ignoreUser(userId: string) {
-    setSnapshot(await api.ignoreUser(userId));
+    await settleCommand(api.ignoreUser(userId));
   }
 
   async function unignoreUser(userId: string) {
-    setSnapshot(await api.unignoreUser(userId));
+    await settleCommand(api.unignoreUser(userId));
   }
 
   function openReportDialog(state: ReportDialogState) {
@@ -2492,7 +2380,7 @@ export function App() {
     secureBackupInspectionRetryInFlightRef.current = true;
     setSecureBackupInspectionRetrying(true);
     try {
-      setSnapshot(await operation());
+      await settleCommand(operation());
     } catch {
       // The gate remains closed; typed Rust state or the next inspection owns the copy.
     } finally {
@@ -2513,20 +2401,22 @@ export function App() {
     }
     switch (reportDialog.kind) {
       case "user":
-        void api.reportUser(reportDialog.userId, reason).then(setSnapshot);
+        settleCommandInBackground(api.reportUser(reportDialog.userId, reason));
         break;
       case "content":
-        void api.reportContent(reportDialog.roomId, reportDialog.eventId, reason).then(setSnapshot);
+        settleCommandInBackground(
+          api.reportContent(reportDialog.roomId, reportDialog.eventId, reason)
+        );
         break;
       case "room":
-        void api.reportRoom(reportDialog.roomId, reason).then(setSnapshot);
+        settleCommandInBackground(api.reportRoom(reportDialog.roomId, reason));
         break;
     }
     closeReportDialog();
   }
 
   async function setRoomNotificationMode(roomId: string, mode: RoomNotificationMode) {
-    setSnapshot(await api.setRoomNotificationMode(roomId, mode));
+    await settleCommand(api.setRoomNotificationMode(roomId, mode));
   }
 
   async function setAvatar(file: File) {
@@ -2534,23 +2424,23 @@ export function App() {
     if (bytes.length === 0) {
       return;
     }
-    setSnapshot(await api.setAvatar(file.type || "application/octet-stream", bytes));
+    await settleCommand(api.setAvatar(file.type || "application/octet-stream", bytes));
   }
 
   async function bootstrapCrossSigning() {
-    setSnapshot(await api.bootstrapCrossSigning());
+    await settleCommand(api.bootstrapCrossSigning());
   }
 
   async function enableKeyBackup() {
-    setSnapshot(await api.enableKeyBackup());
+    await settleCommand(api.enableKeyBackup());
   }
 
   async function exportRoomKeys(destinationPath: string, passphrase: string) {
-    setSnapshot(await api.exportRoomKeys(destinationPath, passphrase));
+    await settleCommand(api.exportRoomKeys(destinationPath, passphrase));
   }
 
   async function importRoomKeys(sourcePath: string, passphrase: string) {
-    setSnapshot(await api.importRoomKeys(sourcePath, passphrase));
+    await settleCommand(api.importRoomKeys(sourcePath, passphrase));
   }
 
   async function reshareRoomKey(roomId: string) {
@@ -2560,7 +2450,7 @@ export function App() {
       message: "operation=manual_reshare stage=request"
     });
     try {
-      const outcome = await api.reshareRoomKey(roomId);
+      const outcome = await settleCommandResult(api.reshareRoomKey(roomId));
       appendDiagnosticLog({
         timestampMs: Date.now(),
         source: "e2ee.room_key",
@@ -2577,15 +2467,15 @@ export function App() {
     }
   }
   async function forceNewOutboundSession(roomId: string) {
-    return api.forceNewOutboundSession(roomId);
+    return settleCommandResult(api.forceNewOutboundSession(roomId));
   }
 
   async function shareIndex0RoomKey(roomId: string) {
-    return api.shareIndex0RoomKey(roomId);
+    return settleCommandResult(api.shareIndex0RoomKey(roomId));
   }
 
   async function resendIndex0RoomKey(roomId: string) {
-    return api.resendIndex0RoomKey(roomId);
+    return settleCommandResult(api.resendIndex0RoomKey(roomId));
   }
 
   async function chooseRoomKeyExportDestination(): Promise<string | null> {
@@ -2635,7 +2525,7 @@ export function App() {
     recoveryKeyDestinationPath: string | null,
     intent: SecureBackupSetupIntent
   ) {
-    setSnapshot(await api.bootstrapSecureBackup(passphrase, recoveryKeyDestinationPath, intent));
+    await settleCommand(api.bootstrapSecureBackup(passphrase, recoveryKeyDestinationPath, intent));
   }
 
   async function changeSecureBackupPassphrase(
@@ -2643,17 +2533,13 @@ export function App() {
     newPassphrase: string,
     recoveryKeyDestinationPath: string | null
   ) {
-    setSnapshot(
-      await api.changeSecureBackupPassphrase(
-        oldSecret,
-        newPassphrase,
-        recoveryKeyDestinationPath
-      )
+    await settleCommand(
+      api.changeSecureBackupPassphrase(oldSecret, newPassphrase, recoveryKeyDestinationPath)
     );
   }
 
   async function probeLocalEncryptionHealth() {
-    setSnapshot(await api.probeLocalEncryptionHealth());
+    await settleCommand(api.probeLocalEncryptionHealth());
   }
 
   /** Rust-projected display label for the room in the leave confirmation. */
@@ -2672,8 +2558,7 @@ export function App() {
     setRoomLeaveInFlight(true);
     try {
       // The room stays visible and selected until the Rust snapshot drops it.
-      const nextSnapshot = await api.leaveRoom(target.roomId);
-      setSnapshot(nextSnapshot);
+      const nextSnapshot = await settleCommandSnapshot(api.leaveRoom(target.roomId));
       setPendingRoomLeave(null);
       const stillJoined = nextSnapshot.state.domain.rooms.some(
         (room) => room.room_id === target.roomId
@@ -2690,35 +2575,35 @@ export function App() {
 
   async function resetLocalData() {
     setResetLocalDataConfirmOpen(false);
-    setSnapshot(await api.resetLocalData());
+    await settleCommand(api.resetLocalData());
   }
 
   async function acceptVerification(flowId: number) {
-    setSnapshot(await api.acceptVerification(flowId));
+    await settleCommand(api.acceptVerification(flowId));
   }
 
   async function confirmSasVerification(flowId: number) {
-    setSnapshot(await api.confirmSasVerification(flowId));
+    await settleCommand(api.confirmSasVerification(flowId));
   }
 
   async function cancelVerification(flowId: number) {
-    setSnapshot(await api.cancelVerification(flowId));
+    await settleCommand(api.cancelVerification(flowId));
   }
 
   async function resetIdentity() {
-    setSnapshot(await api.resetIdentity());
+    await settleCommand(api.resetIdentity());
   }
 
   async function cancelIdentityReset(flowId: number) {
-    setSnapshot(await api.cancelIdentityReset(flowId));
+    await settleCommand(api.cancelIdentityReset(flowId));
   }
 
   async function submitIdentityResetPassword(flowId: number, password: string) {
-    setSnapshot(await api.submitIdentityResetPassword(flowId, password));
+    await settleCommand(api.submitIdentityResetPassword(flowId, password));
   }
 
   async function submitIdentityResetOAuth(flowId: number) {
-    setSnapshot(await api.submitIdentityResetOAuth(flowId));
+    await settleCommand(api.submitIdentityResetOAuth(flowId));
   }
 
   const resolveComposerKeyAction: ResolveComposerKeyAction = (
@@ -2898,7 +2783,7 @@ export function App() {
       source: "home.transition",
       message: `stage=after_composer_drain elapsed_ms=${composerDrainFinishedAt - composerDrainStartedAt} outcome=continue`
     });
-    const homeSnapshot = await api.selectSpace(null);
+    const homeSnapshot = await settleCommandSnapshot(api.selectSpace(null));
     if (spaceNavigationIntentEpochRef.current !== navigationRequestId) {
       return;
     }
@@ -2918,7 +2803,6 @@ export function App() {
       }
     }
     if (selection.kind === "explore") {
-      setSnapshot(homeSnapshot);
       setPrimaryView("explore");
       const viewAppliedAt = Date.now();
       appendDiagnosticLog({
@@ -2929,7 +2813,6 @@ export function App() {
       return;
     }
     if (selection.kind === "invites") {
-      setSnapshot(homeSnapshot);
       setPrimaryView("invites");
       const viewAppliedAt = Date.now();
       appendDiagnosticLog({
@@ -2939,7 +2822,7 @@ export function App() {
       });
       return;
     }
-    setSnapshot(await api.openActivity());
+    await settleCommand(api.openActivity());
     setPrimaryView("activity");
     const viewAppliedAt = Date.now();
     appendDiagnosticLog({
@@ -2962,13 +2845,11 @@ export function App() {
     if (!(await drainActiveComposerScopesForNavigation(true, true))) return;
     if (spaceNavigationIntentEpochRef.current !== navigationRequestId) return;
     setPrimaryView("timeline");
-    const nextSnapshot = await api.selectSpace(spaceId);
-    if (spaceNavigationIntentEpochRef.current !== navigationRequestId) return;
-    setSnapshot(nextSnapshot);
+    await settleCommand(api.selectSpace(spaceId));
   }
 
   async function reorderSpaces(spaceIds: string[]) {
-    setSnapshot(await api.reorderSpaces(spaceIds));
+    await settleCommand(api.reorderSpaces(spaceIds));
   }
 
   async function selectRoom(roomId: string): Promise<boolean> {
@@ -3029,7 +2910,7 @@ export function App() {
       source: "room.transition",
       message: `stage=before_api_select elapsed_ms_since_start=${Date.now() - transitionStartedAt}`
     });
-    const nextSnapshot = await api.selectRoom(roomId);
+    const nextSnapshot = await settleCommandSnapshot(api.selectRoom(roomId));
     if (roomNavigationIntentEpochRef.current !== navigationRequestId) {
       return false;
     }
@@ -3038,11 +2919,10 @@ export function App() {
       source: "room.transition",
       message: `stage=after_api_select elapsed_ms=${Date.now() - transitionStartedAt} committed_active=${nextSnapshot.state.ui.navigation.active_room_id === roomId} timeline_matches=${nextSnapshot.state.ui.timeline.room_id === nextSnapshot.state.ui.navigation.active_room_id}`
     });
-    setSnapshot(nextSnapshot);
     appendDiagnosticLog({
       timestampMs: Date.now(),
       source: "room.transition",
-      message: `stage=after_snapshot_apply elapsed_ms_since_start=${Date.now() - transitionStartedAt}`
+      message: `stage=after_state_reconcile elapsed_ms_since_start=${Date.now() - transitionStartedAt}`
     });
     appendDiagnosticLog({
       timestampMs: Date.now(),
@@ -3059,7 +2939,7 @@ export function App() {
     const navigationRequestId = roomNavigationIntentEpochRef.current;
     roomSettingsLoadRef.current = null;
     const settingsRequestId = ++roomSettingsRequestRef.current;
-    const next = await api.loadRoomSettings(roomId);
+    const next = await settleCommandSnapshot(api.loadRoomSettings(roomId));
     const isCurrent = () =>
       roomNavigationIntentEpochRef.current === navigationRequestId &&
       roomSettingsRequestRef.current === settingsRequestId;
@@ -3070,7 +2950,6 @@ export function App() {
     ) {
       return;
     }
-    setSnapshot(next);
     setPeoplePanelScope({ kind: "room", roomId });
     setSelectedProfileUserId(userId);
     await setRightPanelModeClosingFocusedContext("profile", isCurrent);
@@ -3103,7 +2982,7 @@ export function App() {
       return;
     }
     initialHomeSelectionApplied.current = true;
-    void openHomeSelection(homeSelection, "initial_home");
+    runInBackground(openHomeSelection(homeSelection, "initial_home"));
   }, [
     homeSelection,
     openHomeSelection,
@@ -3114,34 +2993,32 @@ export function App() {
   ]);
 
   async function openInvitesView() {
-    setSnapshot(await api.getSnapshot());
     setPrimaryView("invites");
   }
 
   async function openExploreView() {
-    setSnapshot(await api.getSnapshot());
     setPrimaryView("explore");
   }
 
   async function closeActivityView() {
-    setSnapshot(await api.closeActivity());
+    await settleCommand(api.closeActivity());
     setPrimaryView("timeline");
   }
 
   async function setActivityTab(tab: ActivityTab) {
-    setSnapshot(await api.setActivityTab(tab));
+    await settleCommand(api.setActivityTab(tab));
   }
 
   async function paginateActivity(tab: ActivityTab, cursor: string | null) {
-    setSnapshot(await api.paginateActivity(tab, cursor));
+    await settleCommand(api.paginateActivity(tab, cursor));
   }
 
   async function retryActivityResolution() {
-    setSnapshot(await api.retryActivityResolution());
+    await settleCommand(api.retryActivityResolution());
   }
 
   async function markActivityRead(target: ActivityMarkReadTarget) {
-    setSnapshot(await api.markActivityRead(target));
+    await settleCommand(api.markActivityRead(target));
   }
 
   async function queryDirectory(termOverride?: string) {
@@ -3149,8 +3026,8 @@ export function App() {
       return;
     }
     const term = (termOverride ?? directorySearchDraft).trim();
-    setSnapshot(
-      await api.queryDirectory({
+    await settleCommand(
+      api.queryDirectory({
         term: term || null,
         server_name: directoryServerDraft.trim() || null,
         limit: 20,
@@ -3234,7 +3111,7 @@ export function App() {
       await selectRoom(joined.room_id);
       return;
     }
-    setSnapshot(await api.previewJoinTarget(roomIdOrAlias, viaServers));
+    await settleCommand(api.previewJoinTarget(roomIdOrAlias, viaServers));
   }
 
   /** Join the previewed room, reusing exactly the target that resolved it. */
@@ -3254,16 +3131,14 @@ export function App() {
       await selectRoom(joined.room_id);
       return;
     }
-    const nextSnapshot = await api.joinDirectoryRoom(
-      preview.room_id_or_alias,
-      preview.via_servers
+    await settleCommand(
+      api.joinDirectoryRoom(preview.room_id_or_alias, preview.via_servers)
     );
     setPrimaryView("timeline");
-    setSnapshot(nextSnapshot);
   }
 
   async function dismissDirectoryPreview() {
-    setSnapshot(await api.dismissDirectoryPreview());
+    await settleCommand(api.dismissDirectoryPreview());
   }
 
   /**
@@ -3333,7 +3208,7 @@ export function App() {
     setInviteUserDialog({ roomId, title });
     setInviteUserDialogVisible(true);
     try {
-      const settingsSnapshot = await api.loadRoomSettings(roomId);
+      const settingsSnapshot = await settleCommandSnapshot(api.loadRoomSettings(roomId));
       if (
         inviteWorkflowLifetimeEpochRef.current !== epoch ||
         readyAccountOwnerKey(snapshotRef.current) !== accountOwnerKey ||
@@ -3341,8 +3216,7 @@ export function App() {
       ) {
         return;
       }
-      setSnapshot(settingsSnapshot);
-      const nextSnapshot = await api.openInviteWorkflow(roomId);
+      const nextSnapshot = await settleCommandSnapshot(api.openInviteWorkflow(roomId));
       if (
         inviteWorkflowLifetimeEpochRef.current !== epoch ||
         readyAccountOwnerKey(snapshotRef.current) !== accountOwnerKey ||
@@ -3352,7 +3226,6 @@ export function App() {
         return;
       }
       setInviteUserDraftQuery(nextSnapshot.state.domain.invite_workflow.query.query);
-      setSnapshot(nextSnapshot);
     } catch {
       if (
         inviteWorkflowLifetimeEpochRef.current === epoch &&
@@ -3374,14 +3247,7 @@ export function App() {
     setInviteUserDialogVisible(false);
     setInviteUserDraftQuery("");
     try {
-      const nextSnapshot = await api.closeInviteWorkflow();
-      if (
-        inviteWorkflowLifetimeEpochRef.current === epoch &&
-        readyAccountOwnerKey(snapshotRef.current) === accountOwnerKey &&
-        readyAccountOwnerKey(nextSnapshot) === accountOwnerKey
-      ) {
-        setSnapshot(nextSnapshot);
-      }
+      await settleCommand(api.closeInviteWorkflow());
     } catch {
       if (
         inviteWorkflowLifetimeEpochRef.current === epoch &&
@@ -3420,7 +3286,7 @@ export function App() {
     }
     const epoch = ++inviteWorkflowLifetimeEpochRef.current;
     try {
-      const settingsSnapshot = await api.loadRoomSettings(dialog.roomId);
+      const settingsSnapshot = await settleCommandSnapshot(api.loadRoomSettings(dialog.roomId));
       if (
         inviteWorkflowLifetimeEpochRef.current !== epoch ||
         readyAccountOwnerKey(snapshotRef.current) !== accountOwnerKey ||
@@ -3428,8 +3294,7 @@ export function App() {
       ) {
         return;
       }
-      setSnapshot(settingsSnapshot);
-      const nextSnapshot = await api.openInviteWorkflow(dialog.roomId);
+      const nextSnapshot = await settleCommandSnapshot(api.openInviteWorkflow(dialog.roomId));
       if (
         inviteWorkflowLifetimeEpochRef.current !== epoch ||
         readyAccountOwnerKey(snapshotRef.current) !== accountOwnerKey ||
@@ -3441,7 +3306,6 @@ export function App() {
       const workflow = nextSnapshot.state.domain.invite_workflow;
       setInviteUserDraftQuery(workflow.query.query);
       setInviteUserDialogVisible(true);
-      setSnapshot(nextSnapshot);
       await setRightPanelModeClosingFocusedContext("closed");
     } catch {
       if (
@@ -3466,7 +3330,7 @@ export function App() {
     }
     const epoch = ++inviteWorkflowLifetimeEpochRef.current;
     try {
-      const nextSnapshot = await api.searchInviteTargets(dialog.roomId, value);
+      const nextSnapshot = await settleCommandSnapshot(api.searchInviteTargets(dialog.roomId, value));
       const query = nextSnapshot.state.domain.invite_workflow?.query;
       if (
         inviteWorkflowLifetimeEpochRef.current !== epoch ||
@@ -3477,7 +3341,6 @@ export function App() {
       ) {
         return;
       }
-      setSnapshot(nextSnapshot);
     } catch {
       if (
         inviteWorkflowLifetimeEpochRef.current === epoch &&
@@ -3497,7 +3360,7 @@ export function App() {
     if (!dialog) {
       return;
     }
-    setSnapshot(await api.setInviteScope(dialog.roomId, scope));
+    await settleCommand(api.setInviteScope(dialog.roomId, scope));
   }
 
   async function selectInviteTarget(userId: string) {
@@ -3505,11 +3368,11 @@ export function App() {
     if (!dialog) {
       return;
     }
-    setSnapshot(await api.selectInviteTarget(dialog.roomId, userId));
+    await settleCommand(api.selectInviteTarget(dialog.roomId, userId));
   }
 
   async function removeInviteTarget(userId: string) {
-    setSnapshot(await api.removeInviteTarget(userId));
+    await settleCommand(api.removeInviteTarget(userId));
   }
 
   async function acceptInvite(roomId: string) {
@@ -3518,8 +3381,7 @@ export function App() {
     }
     setIsBusy(true);
     try {
-      const nextSnapshot = await api.acceptInvite(roomId);
-      setSnapshot(nextSnapshot);
+      const nextSnapshot = await settleCommandSnapshot(api.acceptInvite(roomId));
       if (nextSnapshot.state.domain.rooms.some((room) => room.room_id === roomId)) {
         await selectRoom(roomId);
       }
@@ -3535,7 +3397,7 @@ export function App() {
     }
     setIsBusy(true);
     try {
-      setSnapshot(await api.declineInvite(roomId));
+      await settleCommand(api.declineInvite(roomId));
     } finally {
       setIsBusy(false);
     }
@@ -3548,8 +3410,7 @@ export function App() {
     }
     setIsBusy(true);
     try {
-      const nextSnapshot = await api.joinRoom(trimmedRoomId);
-      setSnapshot(nextSnapshot);
+      const nextSnapshot = await settleCommandSnapshot(api.joinRoom(trimmedRoomId));
       if (nextSnapshot.state.domain.rooms.some((room) => room.room_id === trimmedRoomId)) {
         await selectRoom(trimmedRoomId);
       }
@@ -3566,7 +3427,7 @@ export function App() {
     }
     setIsBusy(true);
     try {
-      setSnapshot(await api.startDirectMessage(userId));
+      await settleCommand(api.startDirectMessage(userId));
       closeNewDmDialog();
       setPrimaryView("timeline");
     } finally {
@@ -3581,7 +3442,7 @@ export function App() {
     }
     setIsBusy(true);
     try {
-      setSnapshot(await api.startDirectMessage(trimmedUserId));
+      await settleCommand(api.startDirectMessage(trimmedUserId));
       setPrimaryView("timeline");
       await setRightPanelModeClosingFocusedContext("closed");
     } finally {
@@ -3599,8 +3460,7 @@ export function App() {
     setIsBusy(true);
     try {
       const scope = workflow.selected_scope ?? inviteScopeFromWorkflow(workflow);
-      const nextSnapshot = await api.inviteTargets(dialog.roomId, userIds, scope);
-      setSnapshot(nextSnapshot);
+      const nextSnapshot = await settleCommandSnapshot(api.inviteTargets(dialog.roomId, userIds, scope));
       const operation = nextSnapshot.state.domain.invite_workflow?.operation;
       const hasNotice = operation?.kind === "completed" && operation.notice;
       const hasFailedResult =
@@ -3638,9 +3498,9 @@ export function App() {
         kind === "room"
           ? createRoomRequestFromDraft(name, createRoomDraftOptions, activeSpaceIdForCreatedRoom)
           : null;
-      const nextSnapshot =
-        kind === "space" ? await api.createSpace(name) : await api.createRoom(createRoomRequest!);
-      setSnapshot(nextSnapshot);
+      await settleCommand(
+        kind === "space" ? api.createSpace(name) : api.createRoom(createRoomRequest!)
+      );
       closeCreateDialog();
     } finally {
       setIsBusy(false);
@@ -3648,11 +3508,11 @@ export function App() {
   }
 
   async function setComposerReplyTarget(roomId: string, eventId: string) {
-    setSnapshot(await api.setComposerReplyTarget(roomId, eventId));
+    await settleCommand(api.setComposerReplyTarget(roomId, eventId));
   }
 
   async function cancelComposerReply() {
-    setSnapshot(await api.cancelComposerReply());
+    await settleCommand(api.cancelComposerReply());
   }
 
   function beginComposerOperation(scope: ComposerDraftScope): {
@@ -3765,11 +3625,10 @@ export function App() {
       settleComposerOperation(admitted);
       return;
     }
+    await applyCommandReceipt(response.settlement);
     const canApply = composerOperationCanApply(admitted, draftRevision);
     if (!canApply || submissionAccountOwnerRef.current !== accountOwner) return;
-    const accepted =
-      response.acceptedRevision !== null &&
-      compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
+    const accepted = compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
     const hasNewerDraft =
       mainComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
     if (accepted && !hasNewerDraft) {
@@ -3777,7 +3636,6 @@ export function App() {
       clearLocalComposerDraft(scope);
       updateComposerTypingSignal(roomId, "");
     }
-    setSnapshot(response.snapshot);
   }
 
   async function sendText(documentOverride?: ComposerDocument) {
@@ -3893,6 +3751,8 @@ export function App() {
               captured.document,
               captured.draftRevision
             );
+      await applyCommandReceipt(nextSnapshot.settlement);
+      const settledSnapshot = getAppStoreSnapshot();
       const canApply = composerOperationCanApply(admitted, captured.draftRevision);
       if (!canApply || submissionAccountOwnerRef.current !== captured.accountOwner) {
         appendComposerSubmitDiagnostic("main", "settled", "outcome=stale_context_ignored");
@@ -3901,7 +3761,6 @@ export function App() {
       if (nextSnapshot.submissionId !== submissionId || nextSnapshot.outcome !== "accepted") {
         appendComposerSubmitDiagnostic("main", "settled", "outcome=rejected_by_backend");
         submissionController.reject(submissionId);
-        setSnapshot(nextSnapshot.snapshot);
         return;
       }
       submissionController.accept(submissionId);
@@ -3913,10 +3772,9 @@ export function App() {
         clearLocalComposerDraft(captured.scope);
         updateComposerTypingSignal(roomId, "");
       }
-      setSnapshot(nextSnapshot.snapshot);
-      if (!isTauriRuntime()) {
+      if (!isTauriRuntime() && settledSnapshot) {
         const completionStatus = qaSendSmokeCompletionStatus(
-          nextSnapshot.snapshot,
+          settledSnapshot,
           qaSendBaselineErrorCount.current,
           qaSendBaselineTimelineItems.current
         );
@@ -3980,18 +3838,16 @@ export function App() {
         sendAtMs,
         draftRevision
       );
+      await applyCommandReceipt(response.settlement);
       const canApply = composerOperationCanApply(admitted, draftRevision);
       if (!canApply || submissionAccountOwnerRef.current !== accountOwner) return;
-      const accepted =
-        response.acceptedRevision !== null &&
-        compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
+      const accepted = compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
       const hasNewerDraft = mainComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
       if (accepted && !hasNewerDraft) {
         cancelComposerDraftPersist(scope);
         clearLocalComposerDraft(scope);
         updateComposerTypingSignal(roomId, "");
       }
-      setSnapshot(response.snapshot);
     } catch {
       settleComposerOperation(admitted);
       // Command failures are surfaced through the Rust-owned error/event path.
@@ -4000,7 +3856,7 @@ export function App() {
 
   async function cancelScheduledSend(scheduledId: string) {
     try {
-      setSnapshot(await api.cancelScheduledSend(scheduledId));
+      await settleCommand(api.cancelScheduledSend(scheduledId));
     } catch {
       // Command failures are surfaced through the Rust-owned error/event path.
     }
@@ -4008,7 +3864,7 @@ export function App() {
 
   async function rescheduleScheduledSend(scheduledId: string, body: string, sendAtMs: number) {
     try {
-      setSnapshot(await api.rescheduleScheduledSend(scheduledId, body, sendAtMs));
+      await settleCommand(api.rescheduleScheduledSend(scheduledId, body, sendAtMs));
     } catch {
       // Command failures are surfaced through the Rust-owned error/event path.
     }
@@ -4081,7 +3937,8 @@ export function App() {
           document,
           revision
         )
-        .then((nextSnapshot) => {
+        .then(async (receipt) => {
+          await applyCommandReceipt(receipt);
           const canApply = composerOperationCanApply(admitted, revision);
           const currentOverlay = mainComposerOverlayRef.current;
           if (
@@ -4092,7 +3949,6 @@ export function App() {
             currentOverlay.document !== document ||
             currentOverlay.revision !== revision
           ) return;
-          setSnapshot(nextSnapshot);
         })
         .catch(() => settleComposerOperation(admitted));
     }, 350);
@@ -4116,19 +3972,15 @@ export function App() {
       return;
     }
     const target: ComposerTarget = { kind: "main", room_id: roomId };
-    let nextSnapshot: DesktopSnapshot | null = null;
     await stageAttachmentFiles(
       target,
       files,
       stagedUploads.length,
       createStagedUploadId,
       async (capturedTarget, items) => {
-        nextSnapshot = await api.stageUploadBytes(capturedTarget, items);
+        await settleCommand(api.stageUploadBytes(capturedTarget, items));
       }
     );
-    if (nextSnapshot) {
-      setSnapshot(nextSnapshot);
-    }
   }
 
   // Renderer-owned mounted-editor ordering: Tauri waits for the exact Rust projection, while this
@@ -4140,7 +3992,7 @@ export function App() {
   ): Promise<void> {
     const roomId = snapshot?.state.ui.timeline.room_id;
     if (!roomId) return;
-    await applyLatestTextMutationSnapshot(`caption:main:${roomId}:${stagedId}`, () =>
+    await applyLatestTextMutationReceipt(`caption:main:${roomId}:${stagedId}`, () =>
       api.updateStagedUploadCaption(
         { kind: "main", room_id: roomId },
         stagedId,
@@ -4155,8 +4007,8 @@ export function App() {
   ): Promise<void> {
     const roomId = snapshot?.state.ui.timeline.room_id;
     if (!roomId) return;
-    setSnapshot(
-      await api.selectStagedUploadOutput(
+    await settleCommand(
+      api.selectStagedUploadOutput(
         { kind: "main", room_id: roomId },
         stagedId,
         selection
@@ -4180,15 +4032,15 @@ export function App() {
   async function retryStagedUploadPreparation(stagedId: string) {
     const roomId = snapshot?.state.ui.timeline.room_id;
     if (!roomId) return;
-    setSnapshot(
-      await api.retryStagedUploadPreparation({ kind: "main", room_id: roomId }, stagedId)
+    await settleCommand(
+      api.retryStagedUploadPreparation({ kind: "main", room_id: roomId }, stagedId)
     );
   }
 
   async function useOriginalStagedUpload(stagedId: string) {
     const roomId = snapshot?.state.ui.timeline.room_id;
     if (!roomId) return;
-    setSnapshot(await api.useOriginalStagedUpload({ kind: "main", room_id: roomId }, stagedId));
+    await settleCommand(api.useOriginalStagedUpload({ kind: "main", room_id: roomId }, stagedId));
   }
 
   async function clearUploadStaging(): Promise<void> {
@@ -4199,7 +4051,7 @@ export function App() {
     for (const item of snapshot?.state.ui.timeline.staged_uploads ?? []) {
       latestTextMutationQueueRef.current.invalidate(`caption:main:${roomId}:${item.staged_id}`);
     }
-    setSnapshot(await api.clearUploadStaging({ kind: "main", room_id: roomId }));
+    await settleCommand(api.clearUploadStaging({ kind: "main", room_id: roomId }));
   }
 
   async function editMessage(message: { body: string | null; room_id: string; event_id: string }) {
@@ -4208,21 +4060,21 @@ export function App() {
       return;
     }
 
-    setSnapshot(
-      await api.editMessage(message.room_id, message.event_id, documentFromText(body))
+    await settleCommand(
+      api.editMessage(message.room_id, message.event_id, documentFromText(body))
     );
   }
 
   async function redactMessage(roomId: string, eventId: string) {
-    setSnapshot(await api.redactMessage(roomId, eventId));
+    await settleCommand(api.redactMessage(roomId, eventId));
   }
 
   async function unpinPinnedEvent(roomId: string, eventId: string) {
-    setSnapshot(await api.unpinEvent(roomId, eventId));
+    await settleCommand(api.unpinEvent(roomId, eventId));
   }
 
   async function updateRoomSetting(roomId: string, change: RoomSettingChange) {
-    setSnapshot(await api.updateRoomSetting(roomId, change));
+    await settleCommand(api.updateRoomSetting(roomId, change));
   }
 
   async function moderateRoomMember(
@@ -4231,7 +4083,7 @@ export function App() {
     action: RoomModerationAction,
     reason: string | null = null
   ) {
-    setSnapshot(await api.moderateRoomMember(roomId, targetUserId, action, reason));
+    await settleCommand(api.moderateRoomMember(roomId, targetUserId, action, reason));
   }
 
   async function updateRoomMemberRole(
@@ -4239,7 +4091,7 @@ export function App() {
     targetUserId: string,
     powerLevel: number
   ) {
-    setSnapshot(await api.updateRoomMemberRole(roomId, targetUserId, powerLevel));
+    await settleCommand(api.updateRoomMemberRole(roomId, targetUserId, powerLevel));
   }
 
   async function openThread(
@@ -4255,19 +4107,19 @@ export function App() {
       if (!(await drainActiveComposerScopesForNavigation(false, true))) return;
     }
     await closeFocusedContextIfHiddenBy("thread");
-    setSnapshot(await api.openThread(roomId, rootEventId, intent));
+    await settleCommand(api.openThread(roomId, rootEventId, intent));
     setRightPanelMode("thread");
   }
 
   async function closeThread() {
     if (!(await drainActiveComposerScopesForNavigation(false, true))) return;
-    setSnapshot(await api.closeThread());
+    await settleCommand(api.closeThread());
     setRightPanelMode("closed");
   }
 
   async function openThreadsListPanel(scope: ThreadsListScope) {
     await closeFocusedContextIfHiddenBy("threads");
-    setSnapshot(await api.openThreadsList(scope));
+    await settleCommand(api.openThreadsList(scope));
     setRightPanelMode("threads");
   }
 
@@ -4310,8 +4162,7 @@ export function App() {
     }
 
     try {
-      const nextSnapshot = await api.openPinnedEvent(roomId, eventId);
-      setSnapshot(nextSnapshot);
+      await settleCommand(api.openPinnedEvent(roomId, eventId));
       setPrimaryView("timeline");
       setRightPanelMode("pinned");
       setPinnedNavigation(null);
@@ -4330,28 +4181,28 @@ export function App() {
     eventId: string,
     threadRootEventId: string | null
   ) {
-    void openPinnedEvent(roomId, eventId, threadRootEventId);
+    runInBackground(openPinnedEvent(roomId, eventId, threadRootEventId));
   }
 
   async function closeThreadsListPanel() {
-    setSnapshot(await api.closeThreadsList());
+    await settleCommand(api.closeThreadsList());
     setRightPanelMode("closed");
   }
 
   async function paginateThreadsList(scope: ThreadsListScope) {
-    setSnapshot(await api.paginateThreadsList(scope));
+    await settleCommand(api.paginateThreadsList(scope));
   }
 
   async function openFilesView(scope: FilesViewScope) {
     await closeFocusedContextIfHiddenBy("files");
     const filter: AttachmentFilter = { kinds: ["image", "video", "audio", "file"], filename_query: null };
     const sort: AttachmentSort = "newestFirst";
-    setSnapshot(await api.openFilesView(scope, filter, sort));
+    await settleCommand(api.openFilesView(scope, filter, sort));
     setRightPanelMode("files");
   }
 
   async function closeFilesViewPanel() {
-    setSnapshot(await api.closeFilesView());
+    await settleCommand(api.closeFilesView());
     setRightPanelMode("closed");
   }
 
@@ -4360,7 +4211,7 @@ export function App() {
       scope.kind === "space"
         ? { kind: "space", space_id: scope.space_id }
         : scope;
-    setSnapshot(await api.openFilesView(scopeParam, filter, sort));
+    await settleCommand(api.openFilesView(scopeParam, filter, sort));
   }
 
   function updateThreadComposerDraft(
@@ -4401,17 +4252,15 @@ export function App() {
       return;
     }
     const target: ComposerTarget = { kind: "thread", room_id: roomId, root_event_id: rootEventId };
-    let nextSnapshot: DesktopSnapshot | null = null;
     await stageAttachmentFiles(
       target,
       files,
       thread.staged_uploads?.length ?? 0,
       createStagedUploadId,
       async (capturedTarget, items) => {
-        nextSnapshot = await api.stageUploadBytes(capturedTarget, items);
+        await settleCommand(api.stageUploadBytes(capturedTarget, items));
       }
     );
-    if (nextSnapshot) setSnapshot(nextSnapshot);
   }
 
   /** Sends the open thread's staged attachments only; the draft is untouched. */
@@ -4466,18 +4315,16 @@ export function App() {
       settleComposerOperation(admitted);
       return;
     }
+    await applyCommandReceipt(response.settlement);
     const canApply = composerOperationCanApply(admitted, draftRevision);
     if (!canApply || submissionAccountOwnerRef.current !== accountOwner) return;
-    const accepted =
-      response.acceptedRevision !== null &&
-      compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
+    const accepted = compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
     const hasNewerDraft =
       threadComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
     if (accepted && !hasNewerDraft) {
       cancelThreadComposerDraftPersist(scope);
       clearLocalThreadComposerDraft(scope);
     }
-    setSnapshot(response.snapshot);
   }
 
   async function sendThreadReply(
@@ -4579,6 +4426,7 @@ export function App() {
       }
       return;
     }
+    await applyCommandReceipt(response.settlement);
     const canApply = composerOperationCanApply(admitted, captured.draftRevision);
     if (!canApply || submissionAccountOwnerRef.current !== captured.accountOwner) {
       appendComposerSubmitDiagnostic("thread", "settled", "outcome=stale_context_ignored");
@@ -4587,7 +4435,6 @@ export function App() {
     if (response.submissionId !== submissionId || response.outcome !== "accepted") {
       appendComposerSubmitDiagnostic("thread", "settled", "outcome=rejected_by_backend");
       submissionController.reject(submissionId);
-      setSnapshot(response.snapshot);
       return;
     }
     submissionController.accept(submissionId);
@@ -4598,7 +4445,6 @@ export function App() {
       cancelThreadComposerDraftPersist(captured.scope);
       clearLocalThreadComposerDraft(captured.scope);
     }
-    setSnapshot(response.snapshot);
   }
 
 
@@ -4615,8 +4461,8 @@ export function App() {
         );
       }
     }
-    setSnapshot(
-      await api.clearUploadStaging({
+    await settleCommand(
+      api.clearUploadStaging({
         kind: "thread",
         room_id: roomId,
         root_event_id: rootEventId
@@ -4632,7 +4478,7 @@ export function App() {
     stagedId: string,
     document: ComposerDocument
   ) {
-    await applyLatestTextMutationSnapshot(`caption:thread:${roomId}:${rootEventId}:${stagedId}`, () =>
+    await applyLatestTextMutationReceipt(`caption:thread:${roomId}:${rootEventId}:${stagedId}`, () =>
       api.updateStagedUploadCaption(
         { kind: "thread", room_id: roomId, root_event_id: rootEventId },
         stagedId,
@@ -4647,8 +4493,8 @@ export function App() {
     stagedId: string,
     selection: StagedUploadOutputSelection
   ) {
-    setSnapshot(
-      await api.selectStagedUploadOutput(
+    await settleCommand(
+      api.selectStagedUploadOutput(
         { kind: "thread", room_id: roomId, root_event_id: rootEventId },
         stagedId,
         selection
@@ -4674,8 +4520,8 @@ export function App() {
     rootEventId: string,
     stagedId: string
   ) {
-    setSnapshot(
-      await api.retryStagedUploadPreparation(
+    await settleCommand(
+      api.retryStagedUploadPreparation(
         { kind: "thread", room_id: roomId, root_event_id: rootEventId },
         stagedId
       )
@@ -4687,8 +4533,8 @@ export function App() {
     rootEventId: string,
     stagedId: string
   ) {
-    setSnapshot(
-      await api.useOriginalStagedUpload(
+    await settleCommand(
+      api.useOriginalStagedUpload(
         { kind: "thread", room_id: roomId, root_event_id: rootEventId },
         stagedId
       )
@@ -4742,18 +4588,16 @@ export function App() {
       settleComposerOperation(admitted);
       return;
     }
+    await applyCommandReceipt(response.settlement);
     const canApply = composerOperationCanApply(admitted, draftRevision);
     if (!canApply || submissionAccountOwnerRef.current !== accountOwner) return;
-    const accepted =
-      response.acceptedRevision !== null &&
-      compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
+    const accepted = compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
     const hasNewerDraft =
       threadComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
     if (accepted && !hasNewerDraft) {
       cancelThreadComposerDraftPersist(scope);
       clearLocalThreadComposerDraft(scope);
     }
-    setSnapshot(response.snapshot);
   }
 
   function queueThreadComposerDraftPersist(
@@ -4783,7 +4627,8 @@ export function App() {
           document,
           revision
         )
-        .then((nextSnapshot) => {
+        .then(async (receipt) => {
+          await applyCommandReceipt(receipt);
           const canApply = composerOperationCanApply(admitted, revision);
           const currentOverlay = threadComposerOverlayRef.current;
           if (
@@ -4794,7 +4639,6 @@ export function App() {
             currentOverlay.revision !== revision ||
             currentOverlay.document !== document
           ) return;
-          setSnapshot(nextSnapshot);
         })
         .catch(() => settleComposerOperation(admitted));
     }, 350);
@@ -4840,7 +4684,7 @@ export function App() {
       focusedContextVisibleForMode(rightPanelMode) &&
       !focusedContextVisibleForMode(nextMode)
     ) {
-      setSnapshot(await api.closeFocusedContext());
+      await settleCommand(api.closeFocusedContext());
     }
   }
 
@@ -4896,14 +4740,13 @@ export function App() {
     }
 
     try {
-      const settingsSnapshot = await api.loadRoomSettings(fence.spaceId);
+      const settingsSnapshot = await settleCommandSnapshot(api.loadRoomSettings(fence.spaceId));
       if (
         !spaceMemberRequestStillCurrent(requestId, fence) ||
         !spaceMembersSnapshotMatches(settingsSnapshot, fence)
       ) {
         return;
       }
-      setSnapshot(settingsSnapshot);
 
       const membersSnapshot = await ensureSpaceMembersLoaded(fence);
       if (
@@ -4926,14 +4769,13 @@ export function App() {
     const fence = spaceMembersFenceForSnapshot(snapshotRef.current);
     const epoch = ++inviteWorkflowLifetimeEpochRef.current;
     try {
-      const nextSnapshot = await api.closeInviteWorkflow();
+      const nextSnapshot = await settleCommandSnapshot(api.closeInviteWorkflow());
       if (
         fence &&
         inviteWorkflowLifetimeEpochRef.current === epoch &&
         readyAccountOwnerKey(snapshotRef.current) === fence.accountOwnerKey &&
         readyAccountOwnerKey(nextSnapshot) === fence.accountOwnerKey
       ) {
-        setSnapshot(nextSnapshot);
       }
     } catch {
       if (
@@ -4957,7 +4799,7 @@ export function App() {
     }
     const epoch = ++inviteWorkflowLifetimeEpochRef.current;
     try {
-      const nextSnapshot = await api.searchInviteTargets(fence.spaceId, query);
+      const nextSnapshot = await settleCommandSnapshot(api.searchInviteTargets(fence.spaceId, query));
       const inviteQuery = nextSnapshot.state.domain.invite_workflow?.query;
       if (
         inviteWorkflowLifetimeEpochRef.current !== epoch ||
@@ -4968,7 +4810,6 @@ export function App() {
       ) {
         return [];
       }
-      setSnapshot(nextSnapshot);
       const candidates = inviteQuery.candidates;
       if (!inviteQuery.explicit_user_id) {
         return candidates;
@@ -5045,14 +4886,13 @@ export function App() {
     }
 
     try {
-      const nextSnapshot = await api.inviteUserToSpace(fence.spaceId, userId, fence.generation);
+      const nextSnapshot = await settleCommandSnapshot(api.inviteUserToSpace(fence.spaceId, userId, fence.generation));
       if (
         !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
         !spaceMembersSnapshotMatches(nextSnapshot, fence)
       ) {
         return;
       }
-      setSnapshot(nextSnapshot);
     } catch {
       if (spaceMembersSnapshotMatches(snapshotRef.current, fence)) {
         appendSpaceMembersDiagnosticLog("invite outcome=transport_rejected");
@@ -5103,7 +4943,7 @@ export function App() {
     const failureEpoch = ++spaceMembersCancelFailureEpochRef.current;
     setSpaceMembersCancelFailure(null);
     try {
-      const nextSnapshot = await api.cancelSpaceInvite(fence.spaceId, userId, fence.generation);
+      const nextSnapshot = await settleCommandSnapshot(api.cancelSpaceInvite(fence.spaceId, userId, fence.generation));
       if (
         spaceNavigationIntentEpochRef.current !== navigationEpoch ||
         !spaceMembersSnapshotMatches(snapshotRef.current, fence) ||
@@ -5121,7 +4961,6 @@ export function App() {
         spaceMembersCancelFailureEpochRef.current += 1;
       }
       setSpaceMembersCancelFailure(cancellationFailed ? fence : null);
-      setSnapshot(nextSnapshot);
       appendSpaceMembersDiagnosticLog(
         `cancel outcome=${cancellationFailed
           ? "failed"
@@ -5184,14 +5023,16 @@ export function App() {
     setSpaceMembersRoleTransportFailure(null);
     appendSpaceMembersDiagnosticLog("role trigger=select");
     try {
-      const nextSnapshot = await api.updateSpaceMemberRole(
-        fence.spaceId,
-        userId,
-        fence.generation,
-        members.power_levels_revision,
-        expectedPowerLevel,
-        option.power_level,
-        option.requires_confirmation
+      const nextSnapshot = await settleCommandSnapshot(
+        api.updateSpaceMemberRole(
+          fence.spaceId,
+          userId,
+          fence.generation,
+          members.power_levels_revision,
+          expectedPowerLevel,
+          option.power_level,
+          option.requires_confirmation
+        )
       );
       if (
         spaceNavigationIntentEpochRef.current !== navigationEpoch ||
@@ -5205,7 +5046,6 @@ export function App() {
         spaceMembersRoleFailureEpochRef.current += 1;
       }
       setSpaceMembersRoleTransportFailure(null);
-      setSnapshot(nextSnapshot);
       appendSpaceMembersDiagnosticLog(
         `role outcome=${operation.kind === "roleUpdateFailed" ? "failed" : operation.kind === "updatingRole" ? "pending" : "settled"}`
       );
@@ -5246,38 +5086,40 @@ export function App() {
       window.clearTimeout(searchTimer.current);
       searchTimer.current = null;
     }
-    setSnapshot(await api.closeSearch());
+    await settleCommand(api.closeSearch());
     setSearchQuery("");
     setRightPanelMode("closed");
   }
 
   function openActivityRow(roomId: string, eventId: string, threadRootEventId: string | null) {
     if (threadRootEventId) {
-      void (async () => {
-        setPrimaryView("timeline");
-        if (!(await drainActiveComposerScopesForNavigation(true, true))) return;
-        await selectRoom(roomId);
-        await openThread(roomId, threadRootEventId, "existingThread");
-      })();
+      runInBackground(
+        (async () => {
+          setPrimaryView("timeline");
+          if (!(await drainActiveComposerScopesForNavigation(true, true))) return;
+          await selectRoom(roomId);
+          await openThread(roomId, threadRootEventId, "existingThread");
+        })()
+      );
       return;
     }
-    void api.openActivityEvent(roomId, eventId).then((nextSnapshot) => {
-      setSnapshot(nextSnapshot);
-      setPrimaryView("timeline");
-      setRightPanelMode("closed");
-    });
+    void settleCommand(api.openActivityEvent(roomId, eventId))
+      .then(() => {
+        setPrimaryView("timeline");
+        setRightPanelMode("closed");
+      })
+      .catch(() => undefined);
   }
 
   async function openActivityRoom(roomId: string) {
     setPrimaryView("timeline");
     setRightPanelMode("closed");
 
-    const closedSnapshot = await api.closeFocusedContext();
+    const closedSnapshot = await settleCommandSnapshot(api.closeFocusedContext());
     if (
       closedSnapshot.state.ui.navigation.active_room_id === roomId &&
       closedSnapshot.state.ui.timeline.room_id === roomId
     ) {
-      setSnapshot(closedSnapshot);
       return;
     }
 
@@ -5285,11 +5127,12 @@ export function App() {
   }
 
   function selectSearchResult(roomId: string, eventId: string) {
-    void api.selectSearchResult(roomId, eventId).then((nextSnapshot) => {
-      setSnapshot(nextSnapshot);
-      setPrimaryView("timeline");
-      setRightPanelMode("search");
-    });
+    void settleCommand(api.selectSearchResult(roomId, eventId))
+      .then(() => {
+        setPrimaryView("timeline");
+        setRightPanelMode("search");
+      })
+      .catch(() => undefined);
   }
 
   function runContextMenuAction(actionId: ContextMenuActionId) {
@@ -5307,33 +5150,35 @@ export function App() {
         fence?.spaceId === target.spaceId &&
         fence.generation === target.generation
       ) {
-        void inviteUserToSpace(target.userId, "context", fence);
+        runInBackground(inviteUserToSpace(target.userId, "context", fence));
       }
       return;
     }
     if (target.kind === "message") {
       switch (actionId) {
         case "replyToMessage":
-          void setComposerReplyTarget(target.message.room_id, target.message.event_id);
+          runInBackground(setComposerReplyTarget(target.message.room_id, target.message.event_id));
           return;
         case "openThread":
-          void openThread(
-            target.message.room_id,
-            target.message.event_id,
-            target.message.reply_count > 0 ? "existingThread" : "newThreadDraft"
+          runInBackground(
+            openThread(
+              target.message.room_id,
+              target.message.event_id,
+              target.message.reply_count > 0 ? "existingThread" : "newThreadDraft"
+            )
           );
           return;
         case "editMessage":
-          void editMessage(target.message);
+          runInBackground(editMessage(target.message));
           return;
         case "redactMessage":
-          void redactMessage(target.message.room_id, target.message.event_id);
+          runInBackground(redactMessage(target.message.room_id, target.message.event_id));
           return;
         case "ignoreUser":
-          void ignoreUser(target.message.sender);
+          runInBackground(ignoreUser(target.message.sender));
           return;
         case "unignoreUser":
-          void unignoreUser(target.message.sender);
+          runInBackground(unignoreUser(target.message.sender));
           return;
         case "reportUser":
           openReportDialog({ kind: "user", userId: target.message.sender });
@@ -5354,20 +5199,20 @@ export function App() {
       switch (actionId) {
         case "openUserInfo":
           if (target.dmUserId) {
-            void openDmUserInfo(target.roomId, target.dmUserId);
+            runInBackground(openDmUserInfo(target.roomId, target.dmUserId));
           }
           return;
         case "setRoomFavourite":
-          void api.setRoomTag(target.roomId, "favourite").then(setSnapshot);
+          settleCommandInBackground(api.setRoomTag(target.roomId, "favourite"));
           return;
         case "removeRoomFavourite":
-          void api.removeRoomTag(target.roomId, "favourite").then(setSnapshot);
+          settleCommandInBackground(api.removeRoomTag(target.roomId, "favourite"));
           return;
         case "setRoomLowPriority":
-          void api.setRoomTag(target.roomId, "lowPriority").then(setSnapshot);
+          settleCommandInBackground(api.setRoomTag(target.roomId, "lowPriority"));
           return;
         case "removeRoomLowPriority":
-          void api.removeRoomTag(target.roomId, "lowPriority").then(setSnapshot);
+          settleCommandInBackground(api.removeRoomTag(target.roomId, "lowPriority"));
           return;
         case "markRoomAsRead": {
           const room = snapshot?.state.domain.rooms.find((candidate) => candidate.room_id === target.roomId);
@@ -5376,12 +5221,12 @@ export function App() {
             snapshot?.state.domain.live_signals.rooms[target.roomId]?.fully_read_event_id ??
             "";
           if (eventId.trim().length > 0) {
-            void api.markRoomAsRead(target.roomId, eventId).then(setSnapshot);
+            settleCommandInBackground(api.markRoomAsRead(target.roomId, eventId));
           }
           return;
         }
         case "markRoomAsUnread":
-          void api.markRoomAsUnread(target.roomId, true).then(setSnapshot);
+          settleCommandInBackground(api.markRoomAsUnread(target.roomId, true));
           return;
         case "reportRoom":
           openReportDialog({ kind: "room", roomId: target.roomId });
@@ -5401,12 +5246,13 @@ export function App() {
     }
 
     if (target.kind === "space" && actionId === "leaveSpace") {
-      void api.leaveRoom(target.spaceId).then((nextSnapshot) => {
-        setSnapshot(nextSnapshot);
-        if (rightPanelMode === "spaceInfo") {
-          void setRightPanelModeClosingFocusedContext("closed");
-        }
-      });
+      void settleCommand(api.leaveRoom(target.spaceId))
+        .then(() => {
+          if (rightPanelMode === "spaceInfo") {
+            runInBackground(setRightPanelModeClosingFocusedContext("closed"));
+          }
+        })
+        .catch(() => undefined);
       return;
     }
 
@@ -5429,20 +5275,16 @@ export function App() {
     };
 
     if (intent.selectRoomId) {
-      void selectRoom(intent.selectRoomId).then(() => {
-        void applyIntentMode();
-      });
+      runInBackground(selectRoom(intent.selectRoomId).then(() => applyIntentMode()));
       return;
     }
     if (intent.selectSpaceId) {
-      void selectSpace(intent.selectSpaceId).then(() => {
-        void applyIntentMode();
-      });
+      runInBackground(selectSpace(intent.selectSpaceId).then(() => applyIntentMode()));
       return;
     }
-    void applyIntentMode();
+    runInBackground(applyIntentMode());
     if (actionId === "switchAccount") {
-      void refreshSavedSessions();
+      runInBackground(refreshSavedSessions());
     }
   }
 
@@ -5450,7 +5292,7 @@ export function App() {
     const trimmed = query.trim();
     const searchMode = rightPanelModeForSearchQuery(trimmed);
     if (!trimmed) {
-      setSnapshot(await api.closeSearch());
+      await settleCommand(api.closeSearch());
       if (rightPanelMode === "search") {
         setRightPanelMode("closed");
       }
@@ -5459,7 +5301,7 @@ export function App() {
     if (searchMode) {
       setRightPanelMode(searchMode);
     }
-    setSnapshot(await api.submitSearch(trimmed, scope));
+    await settleCommand(api.submitSearch(trimmed, scope));
   }
 
   // #87 Phase 4 IPC contract guard (fail-closed): an incompatible snapshot (a stale flat v1
@@ -5517,8 +5359,8 @@ export function App() {
     return (
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={setSnapshot}
-        onSignOut={() => void requestLogout()}
+        onReceipt={applyCommandReceipt}
+        onSignOut={() => runInBackground(requestLogout())}
         operations={{
           startOwnUserSas: () => api.startOwnUserSas(),
           submitRecovery: (secret) => api.submitRecovery(secret),
@@ -5539,9 +5381,9 @@ export function App() {
       <SlidingSyncCapabilityBlockedScreen
         isBusy={isBusy}
         session={blockedSession}
-        onRetry={() => void retrySlidingSyncCapability()}
-        onSignOut={() => void requestLogout()}
-        onChangeHomeserver={() => void changeCapabilityHomeserver()}
+        onRetry={() => runInBackground(retrySlidingSyncCapability())}
+        onSignOut={() => runInBackground(requestLogout())}
+        onChangeHomeserver={() => runInBackground(changeCapabilityHomeserver())}
       />
     );
   }
@@ -5556,11 +5398,11 @@ export function App() {
         passwordInputRef={loginPasswordRef}
         snapshot={snapshot}
         username={loginUsername}
-        onDiscoverLoginMethods={discoverLoginMethods}
+        onDiscoverLoginMethods={() => runInBackground(discoverLoginMethods())}
         onDeviceNameChange={setLoginDeviceName}
         onHomeserverChange={setLoginHomeserver}
         onPasswordPresenceChange={setLoginPasswordFilled}
-        onStartOidcLogin={startOidcLogin}
+        onStartOidcLogin={() => runInBackground(startOidcLogin())}
         onSubmit={submitLogin}
         onUsernameChange={setLoginUsername}
       />{loginTransportError && <p role="alert">{loginTransportError}</p>}</>
@@ -5775,21 +5617,21 @@ export function App() {
           sync={snapshot.state.domain.sync}
           userId={snapshot.state.domain.session.user_id ?? null}
           onManageAccount={(safeExternalUrl) => {
-            void openExternalHttpUrl(safeExternalUrl);
+            runInBackground(openExternalHttpUrl(safeExternalUrl));
           }}
           onCopyDiagnostics={() => copyDiagnostics(snapshot)}
           onOpenKeyboardSettings={() => {
-            void setRightPanelModeClosingFocusedContext("keyboardSettings");
+            runInBackground(setRightPanelModeClosingFocusedContext("keyboardSettings"));
           }}
           onOpenDiagnostics={() => {
-            void openDiagnostics();
+            runInBackground(openDiagnostics());
           }}
           onRefreshCurrentSessionStatus={(trigger) => {
-            void api.refreshCurrentSessionStatus(trigger).then(setSnapshot);
+            settleCommandInBackground(api.refreshCurrentSessionStatus(trigger));
           }}
           onRetryRuntimeAlert={(kind) => {
             if (kind === "secureBackup") {
-              void retrySecureBackupInspection();
+              runInBackground(retrySecureBackupInspection());
             }
           }}
           onRestartSync={restartSync}
@@ -5809,10 +5651,10 @@ export function App() {
           onCreateSpace={() => openCreateDialog("space")}
           onOpenContextMenu={openContextMenu}
           onOpenUserSettings={() => {
-            void setRightPanelModeClosingFocusedContext("userSettings");
+            runInBackground(setRightPanelModeClosingFocusedContext("userSettings"));
           }}
           onReorderSpaces={(spaceIds) => {
-            void reorderSpaces(spaceIds);
+            runInBackground(reorderSpaces(spaceIds));
           }}
           onSelectSpace={selectSpace}
         />
@@ -5825,29 +5667,29 @@ export function App() {
           onNewDm={openNewDmDialog}
           onOpenContextMenu={openContextMenu}
           onOpenActivity={() => {
-            void openHomeActivityView();
+            runInBackground(openHomeActivityView());
           }}
           onOpenExplore={() => {
-            void (homeContextActive ? openHomeExploreView() : openExploreView());
+            runInBackground((homeContextActive ? openHomeExploreView() : openExploreView()));
           }}
           onOpenInvites={() => {
-            void (homeContextActive ? openHomeInvitesView() : openInvitesView());
+            runInBackground((homeContextActive ? openHomeInvitesView() : openInvitesView()));
           }}
           onOpenThreads={() => {
-            void openThreadsListPanel(threadsListScope);
+            runInBackground(openThreadsListPanel(threadsListScope));
           }}
           onOpenSpaceInfo={() => {
-            void setRightPanelModeClosingFocusedContext("spaceInfo");
+            runInBackground(setRightPanelModeClosingFocusedContext("spaceInfo"));
           }}
           onOpenSpaceMembers={() => {
-            void openSpaceMembers("sidebar");
+            runInBackground(openSpaceMembers("sidebar"));
           }}
           spaceMemberCounts={{
             joined: snapshot.state.domain.space_members.space_joined.length,
             childOnly: snapshot.state.domain.space_members.child_room_only.length
           }}
           onJoinRoom={(roomId) => {
-            void joinRoom(roomId);
+            runInBackground(joinRoom(roomId));
           }}
           onSelectRoom={selectRoom}
         />
@@ -5869,26 +5711,26 @@ export function App() {
           <ActivityPane
             activity={snapshot.state.domain.activity}
             onClose={() => {
-              void closeActivityView();
+              runInBackground(closeActivityView());
             }}
             onLoadMore={(tab, cursor) => {
-              void paginateActivity(tab, cursor);
+              runInBackground(paginateActivity(tab, cursor));
             }}
             onMarkRead={(target) => {
-              void markActivityRead(target);
+              runInBackground(markActivityRead(target));
             }}
             onOpenRow={(row) => {
               if (row.kind === "event" && row.event_id !== null) {
                 openActivityRow(row.room_id, row.event_id, row.thread_root_event_id);
               } else if (row.kind === "roomUnread") {
-                void openActivityRoom(row.room_id);
+                runInBackground(openActivityRoom(row.room_id));
               }
             }}
             onRetryResolution={() => {
-              void retryActivityResolution();
+              runInBackground(retryActivityResolution());
             }}
             onSetTab={(tab) => {
-              void setActivityTab(tab);
+              runInBackground(setActivityTab(tab));
             }}
           />
         ) : primaryView === "explore" ? (
@@ -5904,15 +5746,15 @@ export function App() {
               setDirectoryAddressNotice(null);
             }}
             onJoinRoom={(room) => {
-              void joinDirectoryRoom(room);
+              runInBackground(joinDirectoryRoom(room));
             }}
             onQueryChange={setDirectorySearchDraft}
             onServerChange={setDirectoryServerDraft}
             onSearch={() => {
-              void submitDirectorySearch();
+              runInBackground(submitDirectorySearch());
             }}
             onSubmitAddress={() => {
-              void submitDirectoryAddress();
+              runInBackground(submitDirectoryAddress());
             }}
           />
         ) : primaryView === "invites" ? (
@@ -5920,10 +5762,10 @@ export function App() {
             isBusy={isBusy}
             snapshot={snapshot}
             onAcceptInvite={(roomId) => {
-              void acceptInvite(roomId);
+              runInBackground(acceptInvite(roomId));
             }}
             onDeclineInvite={(roomId) => {
-              void declineInvite(roomId);
+              runInBackground(declineInvite(roomId));
             }}
             onNewDm={openNewDmDialog}
           />
@@ -5955,60 +5797,57 @@ export function App() {
               // #161: leave the anchored (jump-to-date) main-pane view. Closing
               // the focused context clears navigation.main_timeline_anchor in
               // Rust, so the main pane re-renders the live room timeline.
-              setSnapshot(await api.closeFocusedContext());
+              await settleCommand(api.closeFocusedContext());
             }}
             onCancelReply={() => {
-              void cancelComposerReply();
+              runInBackground(cancelComposerReply());
             }}
             onCancelScheduledSend={(scheduledId) => {
-              void cancelScheduledSend(scheduledId);
+              runInBackground(cancelScheduledSend(scheduledId));
             }}
             onAttachFiles={stageUploadFiles}
             onClearUploadStaging={() => {
-              void clearUploadStaging();
+              runInBackground(clearUploadStaging());
             }}
             onUpdateStagedUploadCaption={(stagedId, document) =>
               updateStagedUploadCaption(stagedId, document)
             }
             onSelectStagedUploadOutput={(stagedId, selection) => {
-              void selectStagedUploadOutput(stagedId, selection);
+              runInBackground(selectStagedUploadOutput(stagedId, selection));
             }}
             onSendStagedAttachments={() => {
-              void sendStagedAttachments();
+              runInBackground(sendStagedAttachments());
             }}
             onLoadStagedUploadPreview={loadStagedUploadPreview}
             onRetryStagedUploadPreparation={(stagedId) => {
-              void retryStagedUploadPreparation(stagedId);
+              runInBackground(retryStagedUploadPreparation(stagedId));
             }}
             onUseOriginalStagedUpload={(stagedId) => {
-              void useOriginalStagedUpload(stagedId);
+              runInBackground(useOriginalStagedUpload(stagedId));
             }}
             onComposerDocumentChange={(document) => {
-              void updateComposerDraft(document);
+              updateComposerDraft(document);
             }}
             onComposerMathModeChange={(enabled) => {
-              void updateSettings({ composer: { math_mode: enabled } });
+              runInBackground(updateSettings({ composer: { math_mode: enabled } }));
             }}
             onMentionQueryChange={(roomId, query) => {
               if (query !== null) {
-                void (async () => {
-                  await api.queryMentionCandidates(roomId, "main", query);
-                  setSnapshot(await api.getSnapshot());
-                })();
+                runInBackground(api.queryMentionCandidates(roomId, "main", query));
               }
             }}
             onOpenThread={openThread}
             onOpenMatrixTarget={(target) => {
-              void openMatrixTarget(target);
+              runInBackground(openMatrixTarget(target));
             }}
             onReply={(roomId, eventId) => {
-              void setComposerReplyTarget(roomId, eventId);
+              runInBackground(setComposerReplyTarget(roomId, eventId));
             }}
             onRescheduleScheduledSend={(scheduledId, body, sendAtMs) => {
-              void rescheduleScheduledSend(scheduledId, body, sendAtMs);
+              runInBackground(rescheduleScheduledSend(scheduledId, body, sendAtMs));
             }}
             onScheduleSend={(sendAtMs, body) => {
-              void scheduleSend(sendAtMs, body);
+              runInBackground(scheduleSend(sendAtMs, body));
             }}
             onSendText={sendText}
             onEditMessage={editMessage}
@@ -6016,12 +5855,12 @@ export function App() {
             onRedactMessage={redactMessage}
             onResultSelect={selectSearchResult}
             onSetLocalUserAlias={(userId, alias) => {
-              void setLocalUserAlias(userId, alias);
+              runInBackground(setLocalUserAlias(userId, alias));
             }}
             onOpenPinnedMessages={() => {
               const roomId = snapshot.state.ui.navigation.active_room_id;
               if (roomId) {
-                void openPinnedMessagesPanel(roomId);
+                runInBackground(openPinnedMessagesPanel(roomId));
               }
             }}
             onOpenPeople={async () => {
@@ -6030,7 +5869,7 @@ export function App() {
               const requestId = ++roomSettingsRequestRef.current;
               if (roomId) {
                 roomSettingsLoadRef.current = null;
-                const next = await api.loadRoomSettings(roomId);
+                const next = await settleCommandSnapshot(api.loadRoomSettings(roomId));
                 if (
                   roomSettingsRequestRef.current !== requestId ||
                   roomNavigationIntentEpochRef.current !== navigationRequestId ||
@@ -6040,7 +5879,6 @@ export function App() {
                 ) {
                   return;
                 }
-                setSnapshot(next);
                 setPeoplePanelScope({ kind: "room", roomId });
               } else {
                 setPeoplePanelScope(null);
@@ -6051,20 +5889,20 @@ export function App() {
             onOpenThreads={() => {
               const roomId = snapshot.state.ui.navigation.active_room_id;
               if (roomId) {
-                void openThreadsListPanel({ kind: "room", room_id: roomId });
+                runInBackground(openThreadsListPanel({ kind: "room", room_id: roomId }));
               }
             }}
             onToggleRoomInfo={() => {
               if (rightPanelOpen) {
                 if (effectiveRightPanelMode === "thread") {
-                  void closeThread();
+                  runInBackground(closeThread());
                 } else if (effectiveRightPanelMode === "roomInfo") {
-                  void setRightPanelModeClosingFocusedContext("closed");
+                  runInBackground(setRightPanelModeClosingFocusedContext("closed"));
                 } else {
-                  void setRightPanelModeClosingFocusedContext("roomInfo");
+                  runInBackground(setRightPanelModeClosingFocusedContext("roomInfo"));
                 }
               } else {
-                void setRightPanelModeClosingFocusedContext("roomInfo");
+                runInBackground(setRightPanelModeClosingFocusedContext("roomInfo"));
               }
             }}
             onTimelineDiagnosticsChange={updateTimelineDiagnostics}
@@ -6094,22 +5932,22 @@ export function App() {
           searchResults={searchResults}
           savedSessions={savedSessions}
           onCloseThread={() => {
-            void closeThread();
+            runInBackground(closeThread());
           }}
           onClosePanel={() => {
-            void closeFocusedContextPanel();
+            runInBackground(closeFocusedContextPanel());
           }}
           onOpenThread={(roomId, rootEventId, intent) => {
-            void openThread(roomId, rootEventId, intent);
+            runInBackground(openThread(roomId, rootEventId, intent));
           }}
           onOpenFiles={(scope) => {
-            void openFilesView(scope);
+            runInBackground(openFilesView(scope));
           }}
           onOpenPinnedEvent={(roomId, eventId, threadRootEventId) => {
-            void openPinnedEvent(roomId, eventId, threadRootEventId);
+            runInBackground(openPinnedEvent(roomId, eventId, threadRootEventId));
           }}
           onUnpinPinnedEvent={(roomId, eventId) => {
-            void unpinPinnedEvent(roomId, eventId);
+            runInBackground(unpinPinnedEvent(roomId, eventId));
           }}
           pinnedNavigation={pinnedNavigation}
           onRetryPinnedEvent={retryPinnedEvent}
@@ -6117,23 +5955,23 @@ export function App() {
           onOpenSpaceMembers={
             activeSpace
               ? () => {
-                  void openSpaceMembers("space_info");
+                  runInBackground(openSpaceMembers("space_info"));
                 }
               : undefined
           }
           onDiagnostic={appendSpaceMembersDiagnosticLog}
           onInviteUserToSpace={(userId) => {
-            void inviteUserToSpace(userId, "inline");
+            runInBackground(inviteUserToSpace(userId, "inline"));
           }}
           onInviteSearchCandidateToSpace={(userId) => {
-            void inviteUserToSpace(userId, "search");
+            runInBackground(inviteUserToSpace(userId, "search"));
           }}
           onSearchSpaceInviteTargets={searchSpaceInviteTargets}
           onResetSpaceInviteSearch={resetSpaceInviteSearch}
           canInviteToSpace={canInviteToSpace}
           spaceInviteAvailabilityReason={spaceInviteAvailabilityReason}
           onCancelInvite={(userId) => {
-            void cancelSpaceInvite(userId, "inline");
+            runInBackground(cancelSpaceInvite(userId, "inline"));
           }}
           canCancelInvite={canCancelInvite}
           cancelAvailabilityReason={cancelAvailabilityReason}
@@ -6143,10 +5981,10 @@ export function App() {
             spaceMembersSnapshotMatches(snapshot, spaceMembersRoleTransportFailure)
           }
           onUpdateSpaceMemberRole={(userId, option) => {
-            void updateSpaceMemberRole(userId, option);
+            runInBackground(updateSpaceMemberRole(userId, option));
           }}
           onReloadSpaceMemberRoles={() => {
-            void reloadSpaceMemberRoles();
+            runInBackground(reloadSpaceMemberRoles());
           }}
           onOpenPeople={async () => {
             const roomId = snapshotRef.current?.state.ui.navigation.active_room_id;
@@ -6154,7 +5992,7 @@ export function App() {
             const requestId = ++roomSettingsRequestRef.current;
             if (roomId) {
               roomSettingsLoadRef.current = null;
-              const next = await api.loadRoomSettings(roomId);
+              const next = await settleCommandSnapshot(api.loadRoomSettings(roomId));
               if (
                 roomSettingsRequestRef.current !== requestId ||
                 roomNavigationIntentEpochRef.current !== navigationRequestId ||
@@ -6174,51 +6012,51 @@ export function App() {
           }}
           onOpenProfile={(userId) => {
             setSelectedProfileUserId(userId);
-            void setRightPanelModeClosingFocusedContext("profile");
+            runInBackground(setRightPanelModeClosingFocusedContext("profile"));
           }}
           onBackToPeople={() => {
             setSelectedProfileUserId(null);
-            void setRightPanelModeClosingFocusedContext("people");
+            runInBackground(setRightPanelModeClosingFocusedContext("people"));
           }}
           onRefreshFilesView={(scope, filter, sort) => {
-            void refreshFilesView(scope, filter, sort);
+            runInBackground(refreshFilesView(scope, filter, sort));
           }}
           onPaginateThreadsList={(scope) => {
-            void paginateThreadsList(scope);
+            runInBackground(paginateThreadsList(scope));
           }}
           onOpenKeyboardSettings={() => {
-            void setRightPanelModeClosingFocusedContext("keyboardSettings");
+            runInBackground(setRightPanelModeClosingFocusedContext("keyboardSettings"));
           }}
           onOpenRecovery={() => {
-            void setRightPanelModeClosingFocusedContext("recovery");
+            runInBackground(setRightPanelModeClosingFocusedContext("recovery"));
           }}
           onManageAccount={() => {
             const url = snapshot.state.domain.account_management_url;
             if (url) {
-              void openExternalHttpUrl(url);
+              runInBackground(openExternalHttpUrl(url));
             }
           }}
           onRefreshCurrentSessionStatus={() => {
-            void api.refreshCurrentSessionStatus("open").then(setSnapshot);
+            settleCommandInBackground(api.refreshCurrentSessionStatus("open"));
           }}
           onProbeLocalEncryption={() => {
-            void probeLocalEncryptionHealth();
+            runInBackground(probeLocalEncryptionHealth());
           }}
           onResetLocalData={() => {
             setResetLocalDataConfirmOpen(true);
           }}
           onLogout={() => {
-            void requestLogout();
+            runInBackground(requestLogout());
           }}
           onInviteUser={openInviteUserDialog}
           onReturnToInvite={() => {
-            void returnToInviteUserDialog();
+            runInBackground(returnToInviteUserDialog());
           }}
           onModerateMember={(roomId, targetUserId, action, reason) => {
-            void moderateRoomMember(roomId, targetUserId, action, reason);
+            runInBackground(moderateRoomMember(roomId, targetUserId, action, reason));
           }}
           onSetLocalUserAlias={(userId, alias) => {
-            void setLocalUserAlias(userId, alias);
+            runInBackground(setLocalUserAlias(userId, alias));
           }}
           onRequestMemberAvatarThumbnail={
             AVATAR_THUMBNAIL_DOWNLOADS_ENABLED
@@ -6226,16 +6064,16 @@ export function App() {
               : undefined
           }
           onSetRoomNotificationMode={(roomId, mode) => {
-            void setRoomNotificationMode(roomId, mode);
+            runInBackground(setRoomNotificationMode(roomId, mode));
           }}
           onRepairRoomTimeline={(roomId) => {
-            void repairRoomTimeline(roomId);
+            runInBackground(repairRoomTimeline(roomId));
           }}
           onStartDirectMessage={(userId) => {
-            void startDirectMessage(userId);
+            runInBackground(startDirectMessage(userId));
           }}
           onUpdateMemberRole={(roomId, targetUserId, powerLevel) => {
-            void updateRoomMemberRole(roomId, targetUserId, powerLevel);
+            runInBackground(updateRoomMemberRole(roomId, targetUserId, powerLevel));
           }}
           onReshareRoomKey={reshareRoomKey}
           onForceNewOutboundSession={forceNewOutboundSession}
@@ -6243,12 +6081,12 @@ export function App() {
           onResendIndex0RoomKey={resendIndex0RoomKey}
           onRecoverySecretPresenceChange={setRecoverySecretFilled}
           onReply={(roomId, eventId) => {
-            void setComposerReplyTarget(roomId, eventId);
+            runInBackground(setComposerReplyTarget(roomId, eventId));
           }}
           onResultSelect={selectSearchResult}
-          onSubmitRecovery={submitRecovery}
+          onSubmitRecovery={(event) => runInBackground(submitRecovery(event))}
           onSwitchAccount={(session) => {
-            void switchAccount(session);
+            runInBackground(switchAccount(session));
           }}
           onThreadComposerDocumentChange={(roomId, rootEventId, document) => {
             updateThreadComposerDraft(roomId, rootEventId, document);
@@ -6269,136 +6107,135 @@ export function App() {
           }
           onThreadMentionQueryChange={(roomId, query) => {
             if (query !== null) {
-              void (async () => {
-                await api.queryMentionCandidates(roomId, "thread", query);
-                setSnapshot(await api.getSnapshot());
-              })();
+              runInBackground(api.queryMentionCandidates(roomId, "thread", query));
             }
           }}
           onThreadAttachFiles={(roomId, rootEventId, files) => {
-            void stageThreadUploadFiles(roomId, rootEventId, files);
+            runInBackground(stageThreadUploadFiles(roomId, rootEventId, files));
           }}
           onThreadClearUploadStaging={(roomId, rootEventId) => {
-            void clearThreadUploadStaging(roomId, rootEventId);
+            runInBackground(clearThreadUploadStaging(roomId, rootEventId));
           }}
           onThreadUpdateStagedUploadCaption={(roomId, rootEventId, stagedId, document) =>
             updateThreadStagedUploadCaption(roomId, rootEventId, stagedId, document)
           }
           onThreadSelectStagedUploadOutput={(roomId, rootEventId, stagedId, selection) => {
-            void selectThreadStagedUploadOutput(roomId, rootEventId, stagedId, selection);
+            runInBackground(selectThreadStagedUploadOutput(roomId, rootEventId, stagedId, selection));
           }}
           onThreadSendStagedAttachments={(roomId, rootEventId) => {
-            void sendThreadStagedAttachments(roomId, rootEventId);
+            runInBackground(sendThreadStagedAttachments(roomId, rootEventId));
           }}
           onThreadLoadStagedUploadPreview={loadThreadStagedUploadPreview}
           onThreadRetryStagedUploadPreparation={(roomId, rootEventId, stagedId) => {
-            void retryThreadStagedUploadPreparation(roomId, rootEventId, stagedId);
+            runInBackground(retryThreadStagedUploadPreparation(roomId, rootEventId, stagedId));
           }}
           onThreadUseOriginalStagedUpload={(roomId, rootEventId, stagedId) => {
-            void useOriginalThreadStagedUpload(roomId, rootEventId, stagedId);
+            runInBackground(useOriginalThreadStagedUpload(roomId, rootEventId, stagedId));
           }}
           onThreadScheduleSend={(roomId, rootEventId, sendAtMs, document) => {
-            void scheduleThreadSend(roomId, rootEventId, sendAtMs, document);
+            runInBackground(scheduleThreadSend(roomId, rootEventId, sendAtMs, document));
           }}
           onThreadReplySend={(roomId, rootEventId, document) => {
-            void sendThreadReply(roomId, rootEventId, document);
+            runInBackground(sendThreadReply(roomId, rootEventId, document));
           }}
           onTimelineDiagnosticLogEntry={appendDiagnosticLog}
           onResolveComposerKeyAction={resolveComposerKeyAction}
           onAcceptVerification={(flowId) => {
-            void acceptVerification(flowId);
+            runInBackground(acceptVerification(flowId));
           }}
           onBootstrapCrossSigning={() => {
-            void bootstrapCrossSigning();
+            runInBackground(bootstrapCrossSigning());
           }}
           onCancelVerification={(flowId) => {
-            void cancelVerification(flowId);
+            runInBackground(cancelVerification(flowId));
           }}
           onConfirmSasVerification={(flowId) => {
-            void confirmSasVerification(flowId);
+            runInBackground(confirmSasVerification(flowId));
           }}
           onChooseRoomKeyExportDestination={chooseRoomKeyExportDestination}
           onChooseRoomKeyImportSource={chooseRoomKeyImportSource}
           onChooseSecureBackupDestination={chooseSecureBackupDestination}
           onExportRoomKeys={(destinationPath, passphrase) => {
-            void exportRoomKeys(destinationPath, passphrase);
+            runInBackground(exportRoomKeys(destinationPath, passphrase));
           }}
           onImportRoomKeys={(sourcePath, passphrase) => {
-            void importRoomKeys(sourcePath, passphrase);
+            runInBackground(importRoomKeys(sourcePath, passphrase));
           }}
           onBootstrapSecureBackup={(passphrase, recoveryKeyDestinationPath, intent) => {
-            void bootstrapSecureBackup(passphrase, recoveryKeyDestinationPath, intent);
+            runInBackground(bootstrapSecureBackup(passphrase, recoveryKeyDestinationPath, intent));
           }}
           onChangeSecureBackupPassphrase={(
             oldSecret,
             newPassphrase,
             recoveryKeyDestinationPath
           ) => {
-            void changeSecureBackupPassphrase(
-              oldSecret,
-              newPassphrase,
-              recoveryKeyDestinationPath
+            runInBackground(
+              changeSecureBackupPassphrase(
+                oldSecret,
+                newPassphrase,
+                recoveryKeyDestinationPath
+              )
             );
           }}
           onEnableKeyBackup={() => {
-            void enableKeyBackup();
+            runInBackground(enableKeyBackup());
           }}
           onResetIdentity={() => {
-            void resetIdentity();
+            runInBackground(resetIdentity());
           }}
           onCancelIdentityReset={(flowId) => {
-            void cancelIdentityReset(flowId);
+            runInBackground(cancelIdentityReset(flowId));
           }}
           onSubmitIdentityResetOAuth={(flowId) => {
-            void submitIdentityResetOAuth(flowId);
+            runInBackground(submitIdentityResetOAuth(flowId));
           }}
           onSubmitIdentityResetPassword={(flowId, password) => {
-            void submitIdentityResetPassword(flowId, password);
+            runInBackground(submitIdentityResetPassword(flowId, password));
           }}
           onSetAvatar={(file) => {
-            void setAvatar(file);
+            runInBackground(setAvatar(file));
           }}
           onSetDisplayName={(displayName) => {
-            void setDisplayName(displayName);
+            runInBackground(setDisplayName(displayName));
           }}
           onUpdateSettings={(patch) => {
-            void updateSettings(patch);
+            runInBackground(updateSettings(patch));
           }}
           onSetRoomUrlPreviewOverride={(roomId, enabled) => {
-            void setRoomUrlPreviewOverride(roomId, enabled);
+            runInBackground(setRoomUrlPreviewOverride(roomId, enabled));
           }}
           onLoadAccountManagementCapabilities={() => {
-            void loadAccountManagementCapabilities();
+            runInBackground(loadAccountManagementCapabilities());
           }}
           onChangePassword={(newPassword) => {
-            void changePassword(newPassword);
+            runInBackground(changePassword(newPassword));
           }}
           onDeactivateAccount={(eraseData) => {
-            void deactivateAccount(eraseData);
+            runInBackground(deactivateAccount(eraseData));
           }}
           onSubmitAccountManagementUia={(flowId, password) => {
-            void submitAccountManagementUia(flowId, password);
+            runInBackground(submitAccountManagementUia(flowId, password));
           }}
           onUpdateRoomSetting={(roomId, change) => {
-            void updateRoomSetting(roomId, change);
+            runInBackground(updateRoomSetting(roomId, change));
           }}
           onIgnoreUser={(userId) => {
-            void ignoreUser(userId);
+            runInBackground(ignoreUser(userId));
           }}
           onUnignoreUser={(userId) => {
-            void unignoreUser(userId);
+            runInBackground(unignoreUser(userId));
           }}
           onReportUser={(userId) => {
             openReportDialog({ kind: "user", userId });
           }}
           onStartCrawlRoom={(roomId) => {
-            void startRoomCrawl(roomId);
+            runInBackground(startRoomCrawl(roomId));
           }}
           onStopCrawlRoom={(roomId) => {
-            void stopRoomCrawl(roomId);
+            runInBackground(stopRoomCrawl(roomId));
           }}
           onRebuildSearchIndex={() => {
-            void rebuildSearchIndex();
+            runInBackground(rebuildSearchIndex());
           }}
           onDisplayDensityChange={setDisplayDensity}
           onSetSpaceLocalOverride={updateSpaceLocalOverride}
@@ -6419,10 +6256,10 @@ export function App() {
           isBusy={isBusy || snapshot.state.domain.directory.join.kind === "joining"}
           preview={snapshot.state.domain.directory.preview}
           onCancel={() => {
-            void dismissDirectoryPreview();
+            runInBackground(dismissDirectoryPreview());
           }}
           onConfirm={() => {
-            void confirmDirectoryJoin();
+            runInBackground(confirmDirectoryJoin());
           }}
         />
       ) : null}
@@ -6436,7 +6273,7 @@ export function App() {
           onCancel={closeCreateDialog}
           onRoomOptionsChange={setCreateRoomDraftOptions}
           onSubmit={() => {
-            void submitCreateDialog();
+            runInBackground(submitCreateDialog());
           }}
           onValueChange={setCreateDraftName}
         />
@@ -6450,7 +6287,7 @@ export function App() {
           value={newDmDraftUserId}
           onCancel={closeNewDmDialog}
           onSubmit={() => {
-            void submitNewDmDialog();
+            runInBackground(submitNewDmDialog());
           }}
           onValueChange={setNewDmDraftUserId}
         />
@@ -6462,28 +6299,28 @@ export function App() {
           title={inviteUserDialog.title}
           workflow={snapshot?.state.domain.invite_workflow ?? DEFAULT_INVITE_WORKFLOW}
           onCancel={() => {
-            void closeInviteUserDialog();
+            runInBackground(closeInviteUserDialog());
           }}
           onOpenRecovery={() => {
-            void openRecoveryFromInvite();
+            runInBackground(openRecoveryFromInvite());
           }}
           onQueryChange={(value) => {
-            void updateInviteUserQuery(value);
+            runInBackground(updateInviteUserQuery(value));
           }}
           onRemoveTarget={(userId) => {
-            void removeInviteTarget(userId);
+            runInBackground(removeInviteTarget(userId));
           }}
           onOpenRoomInfo={() => {
-            void openRoomInfoFromInvite();
+            runInBackground(openRoomInfoFromInvite());
           }}
           onScopeChange={(scope) => {
-            void selectInviteScope(scope);
+            runInBackground(selectInviteScope(scope));
           }}
           onSelectCandidate={(userId) => {
-            void selectInviteTarget(userId);
+            runInBackground(selectInviteTarget(userId));
           }}
           onSubmit={() => {
-            void submitInviteUserDialog();
+            runInBackground(submitInviteUserDialog());
           }}
         />
       ) : null}
@@ -6501,7 +6338,7 @@ export function App() {
           isBusy={snapshot.state.domain.local_encryption.kind === "resetting"}
           onCancel={() => setResetLocalDataConfirmOpen(false)}
           onConfirm={() => {
-            void resetLocalData();
+            runInBackground(resetLocalData());
           }}
         />
       ) : null}
@@ -6521,7 +6358,7 @@ export function App() {
           )}
           onCancel={() => setPendingRoomLeave(null)}
           onConfirm={() => {
-            void leavePendingRoom();
+            runInBackground(leavePendingRoom());
           }}
         />
       ) : null}

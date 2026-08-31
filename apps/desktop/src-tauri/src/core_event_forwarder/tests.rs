@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::{
-    CORE_EVENT_NAME, ForwarderLagDisposition, STATE_EVENT_NAME,
+    CORE_EVENT_NAME, ForwarderLagDisposition, STATE_UPDATE_EVENT_NAME,
     forwarded_webview_events_for_core_event, forwarded_webview_events_for_lag_resync,
     forwarder_lag_disposition, serialize_core_event,
 };
@@ -42,22 +42,6 @@ fn timeline_items_updated_forwarding_emits_core_event_name_and_all_diffs() {
     assert_eq!(diffs[999], json!({ "Remove": { "index": 999 } }));
 }
 #[test]
-fn legacy_state_changed_forwarding_is_not_the_webview_state_path() {
-    use koushi_core::CoreEvent;
-    use koushi_state::AppState;
-
-    let timeline_items_count = AtomicUsize::new(17);
-    let event = CoreEvent::StateChanged(AppState::default());
-
-    let forwarded = forwarded_webview_events_for_core_event(&event, &timeline_items_count);
-
-    assert_eq!(timeline_items_count.load(Ordering::Relaxed), 17);
-    assert!(
-        forwarded.is_empty(),
-        "legacy full StateChanged events must not drive the normal webview state path"
-    );
-}
-#[test]
 fn state_delta_forwarding_emits_core_event_changed_slices() {
     use koushi_core::{CoreEvent, build_state_delta};
     use koushi_state::{AppState, SearchCrawlerRoomState};
@@ -80,8 +64,9 @@ fn state_delta_forwarding_emits_core_event_changed_slices() {
 
     assert_eq!(timeline_items_count.load(Ordering::Relaxed), 17);
     assert_eq!(forwarded.len(), 1);
-    assert_eq!(forwarded[0].event_name, CORE_EVENT_NAME);
-    assert_eq!(forwarded[0].payload["kind"], json!("StateDelta"));
+    assert_eq!(forwarded[0].event_name, STATE_UPDATE_EVENT_NAME);
+    assert_eq!(forwarded[0].payload["protocol_version"], json!(1));
+    assert_eq!(forwarded[0].payload["kind"], json!("delta"));
     assert_eq!(forwarded[0].payload["generation"], json!(1));
     assert_eq!(
         forwarded[0].payload["changed"]["state"]["domain"]["search_crawler"]["rooms"]["!crawler:example.invalid"]
@@ -98,7 +83,7 @@ fn state_delta_forwarding_emits_core_event_changed_slices() {
     );
 }
 #[test]
-fn session_state_delta_forwarding_also_requests_snapshot_refresh() {
+fn session_state_delta_forwarding_is_one_state_update_without_generic_duplicate() {
     use koushi_core::{CoreEvent, build_state_delta};
     use koushi_state::{AppState, ProvisionalPhase, SessionInfo, SessionState};
     use serde_json::json;
@@ -131,26 +116,36 @@ fn session_state_delta_forwarding_also_requests_snapshot_refresh() {
         &timeline_items_count,
     );
 
-    assert_eq!(forwarded.len(), 2);
-    assert_eq!(forwarded[0].event_name, CORE_EVENT_NAME);
-    assert_eq!(forwarded[0].payload["kind"], json!("StateDelta"));
+    assert_eq!(forwarded.len(), 1);
+    assert_eq!(forwarded[0].event_name, STATE_UPDATE_EVENT_NAME);
+    assert_eq!(forwarded[0].payload["protocol_version"], json!(1));
+    assert_eq!(forwarded[0].payload["kind"], json!("delta"));
     assert_eq!(
         forwarded[0].payload["changed"]["state"]["domain"]["session"]["phase"]["kind"],
         json!("discoveringMethods")
     );
-    assert_eq!(forwarded[1].event_name, STATE_EVENT_NAME);
-    assert_eq!(forwarded[1].payload, json!("stateChanged"));
 }
 #[test]
-fn lag_resync_forwarding_emits_state_then_resync_marker() {
+fn lag_resync_forwarding_emits_exact_snapshot_then_typed_resync_marker() {
+    use koushi_core::event::VersionedAppStateSnapshot;
     use koushi_state::AppState;
     use serde_json::json;
 
-    let forwarded = forwarded_webview_events_for_lag_resync(&AppState::default());
+    let forwarded = forwarded_webview_events_for_lag_resync(&VersionedAppStateSnapshot {
+        generation: 42,
+        state: AppState::default(),
+    });
 
     assert_eq!(forwarded.len(), 2);
-    assert_eq!(forwarded[0].event_name, STATE_EVENT_NAME);
-    assert_eq!(forwarded[0].payload, json!("stateChanged"));
+    assert_eq!(forwarded[0].event_name, STATE_UPDATE_EVENT_NAME);
+    assert_eq!(forwarded[0].payload["protocol_version"], json!(1));
+    assert_eq!(forwarded[0].payload["kind"], json!("snapshot"));
+    assert_eq!(forwarded[0].payload["generation"], json!(42));
+    assert_eq!(forwarded[0].payload["reason"], json!("lag"));
+    assert_eq!(
+        forwarded[0].payload["snapshot"]["state_generation"],
+        json!(42)
+    );
     assert_eq!(forwarded[1].event_name, CORE_EVENT_NAME);
     assert_eq!(forwarded[1].payload, json!({ "kind": "ResyncMarker" }));
 }

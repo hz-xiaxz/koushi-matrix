@@ -367,9 +367,27 @@ export interface DelegatedAuthLinks {
   registration_url: string | null;
 }
 
+export interface CommandAdmission {
+  protocolVersion: 1;
+  admittedGeneration: number;
+}
+
+export interface CommandSettlement {
+  protocolVersion: 1;
+  publishedGeneration: number;
+}
+
+export interface CommandResult<T> {
+  result: T;
+  settlement: CommandSettlement;
+}
+
+export type CommandReceipt = CommandAdmission | CommandSettlement;
+
 export interface OidcAuthorization {
   authorization_url: string;
   state: string;
+  settlement: CommandSettlement;
 }
 
 export interface LoginFlow {
@@ -1656,12 +1674,12 @@ export interface SubmissionResponse {
   outcome: SubmissionOutcome;
   submissionId: string;
   transactionId: string | null;
-  snapshot: DesktopSnapshot;
+  settlement: CommandSettlement;
 }
 
 export interface ComposerDraftAcceptanceResponse {
-  acceptedRevision: ComposerDraftRevision | null;
-  snapshot: DesktopSnapshot;
+  acceptedRevision: ComposerDraftRevision;
+  settlement: CommandSettlement;
 }
 
 // Rust ComposerMode has NO serde tag → externally tagged (like SyncState in this file)

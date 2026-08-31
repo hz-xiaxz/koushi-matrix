@@ -109,7 +109,6 @@ pub enum IntentOutcome {
 #[derive(Clone, Debug)]
 pub enum CoreEvent {
     StateDelta(StateDelta),
-    StateChanged(AppStateSnapshot),
     Account(AccountEvent),
     Sync(SyncEvent),
     Room(RoomEvent),
@@ -129,8 +128,8 @@ pub enum CoreEvent {
     /// Telemetry-lane event: the terminal outcome of a user-intent command.
     ///
     /// This event is on a DEDICATED TELEMETRY LANE — it must never be mixed
-    /// into product `StateDelta` or `StateChanged`, and product state must
-    /// never be derived from it. It is emitted after the reducer runs and the
+    /// into product `StateDelta` or the versioned snapshot watch, and product
+    /// state must never be derived from it. It is emitted after the reducer runs and the
     /// corresponding snapshot publication, so the AppActor can correlate the
     /// outcome with the originating `request_id` and exact state generation.
     ///

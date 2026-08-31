@@ -14,8 +14,7 @@ use crate::ids::{TimelineBatchId, TimelineGeneration};
 use super::super::item_projection::timeline_item_event_id;
 use super::super::navigation::{
     ROOM_REPLAY_INITIAL_ITEMS_MAX, RestoreSettlement, TimelineActorGenerationGate,
-    accept_projection_ack_for_active_actor, derive_timeline_navigation_snapshot,
-    publish_restore_settlement_for_generation,
+    derive_timeline_navigation_snapshot, publish_restore_settlement_for_generation,
 };
 use super::super::test_support::{
     fake_rid, focused_key, replacement_generation_fixture, room_key, thread_key, timeline_item,
@@ -1206,62 +1205,4 @@ fn display_diff_application_normalizes_duplicate_render_identities() {
     );
     apply_timeline_diffs_to_display_items(&mut display_items, &[TimelineDiff::Clear]);
     assert!(display_items.is_empty());
-}
-
-#[tokio::test]
-async fn projection_ack_requires_exact_identity_and_current_actor_generation() {
-    let key = focused_key();
-    let generations = Arc::new(TimelineActorGenerationGate::default());
-    let actor_generation = generations.activate_after_quiescence(&key).await.generation;
-    let projection_request_id = fake_rid(81);
-    let projection_generation = TimelineGeneration(4);
-    let mut acknowledged = false;
-
-    assert!(!accept_projection_ack_for_active_actor(
-        &generations,
-        &key,
-        actor_generation,
-        projection_request_id,
-        projection_generation,
-        fake_rid(80),
-        projection_generation,
-        &mut acknowledged,
-    ));
-    assert!(!acknowledged);
-    assert!(!accept_projection_ack_for_active_actor(
-        &generations,
-        &key,
-        actor_generation,
-        projection_request_id,
-        projection_generation,
-        projection_request_id,
-        TimelineGeneration(3),
-        &mut acknowledged,
-    ));
-    assert!(!acknowledged);
-
-    let replacement_generation = generations.activate_after_quiescence(&key).await.generation;
-    assert_ne!(replacement_generation, actor_generation);
-    assert!(!accept_projection_ack_for_active_actor(
-        &generations,
-        &key,
-        actor_generation,
-        projection_request_id,
-        projection_generation,
-        projection_request_id,
-        projection_generation,
-        &mut acknowledged,
-    ));
-    assert!(!acknowledged);
-    assert!(accept_projection_ack_for_active_actor(
-        &generations,
-        &key,
-        replacement_generation,
-        projection_request_id,
-        projection_generation,
-        projection_request_id,
-        projection_generation,
-        &mut acknowledged,
-    ));
-    assert!(acknowledged);
 }

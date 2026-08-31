@@ -1,3 +1,4 @@
+import { browserCommandSnapshot } from "./backend/browserFakeApi.testSupport";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, test, vi } from "vitest";
@@ -246,7 +247,8 @@ describe("ContextualRightPanel", () => {
     expect(confirmationHandler).toContain("windowDialogPort.confirm");
     expect(confirmationHandler).toContain('t("settings.signOutConfirm")');
     expect(confirmationHandler).toContain("await logout()");
-    expect(source.match(/void requestLogout\(\)/g)?.length).toBe(4);
+    expect(source).not.toContain("void requestLogout()");
+    expect(source.match(/runInBackground\(requestLogout\(\)\)/g)?.length).toBe(4);
 
     const tauriImportStatements =
       source.match(/^import\s+[^;]+from\s+["']@tauri-apps\/[^"']+["'];$/gm) ?? [];
@@ -284,7 +286,7 @@ describe("ContextualRightPanel", () => {
     expect(importSource).toContain("multiple: false");
     expect(importSource).toContain('fileAccessMode: "scoped"');
     expect(importSource).toContain('typeof selected === "string" ? selected : null');
-    expect(source).toContain("await windowDialogPort.toggleFullscreen()");
+    expect(source).toContain("runInBackground(windowDialogPort.toggleFullscreen())");
     expect(source).toContain("windowDialogPort.startDragging().catch(() => undefined)");
   });
 
@@ -877,7 +879,7 @@ describe("ContextualRightPanel", () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
     const api = createBrowserFakeApi();
-    const snapshot = await api.submitSearch("Alpha", "allRooms");
+    const snapshot = await browserCommandSnapshot(api, api.submitSearch("Alpha", "allRooms"));
     const firstSearchResult =
       snapshot.state.domain.search.kind === "results" ? snapshot.state.domain.search.results[0] : null;
 
@@ -935,7 +937,7 @@ describe("ContextualRightPanel", () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
     const api = createBrowserFakeApi();
-    const snapshot = await api.submitSearch("NoMatch", "allRooms");
+    const snapshot = await browserCommandSnapshot(api, api.submitSearch("NoMatch", "allRooms"));
 
     const markup = renderToStaticMarkup(
       <ContextualRightPanel
@@ -977,7 +979,7 @@ describe("ContextualRightPanel", () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
     const api = createBrowserFakeApi();
-    const snapshot = await api.submitSearch("Alpha", "allRooms");
+    const snapshot = await browserCommandSnapshot(api, api.submitSearch("Alpha", "allRooms"));
     snapshot.state.ui.focused_context = {
       kind: "open",
       room_id: snapshot.state.domain.search.kind === "results" ? snapshot.state.domain.search.results[0]?.room_id ?? "!room:example.invalid" : "!room:example.invalid",
@@ -1056,7 +1058,7 @@ describe("ContextualRightPanel", () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
     const api = createBrowserFakeApi();
-    const snapshot = await api.submitSearch("Alpha", "allRooms");
+    const snapshot = await browserCommandSnapshot(api, api.submitSearch("Alpha", "allRooms"));
     snapshot.state.ui.focused_context = {
       kind: "open",
       room_id: "!room-alpha:example.invalid",
@@ -1379,29 +1381,26 @@ describe("ContextualRightPanel", () => {
     expect(roomPane).not.toContain("canPaginateOlderMessages");
   });
 
-  test("App event subscriptions keep renderer-owned setup and teardown", () => {
+  test("App consumes one ordered v1 state-update lane", () => {
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-    const listenerStart = source.indexOf("// Tauri production sends complete on the CoreEvent stream");
-    const listenerEnd = source.indexOf("// App-level timeline store", listenerStart);
-    const listenerSource = source.slice(listenerStart, listenerEnd);
-    const stateStart = source.indexOf("desktopEventPort.listenStateChanges");
-    const stateEnd = source.indexOf("  }, []);", stateStart);
-    const stateSource = source.slice(stateStart, stateEnd);
 
-    expect(listenerSource.match(/desktopEventPort\.listenCoreEvents/g)).toHaveLength(2);
-    expect(listenerSource).toContain("desktopEventPort.listenMenuActions");
-    expect(listenerSource.match(/\.then\(\(dispose\)/g)).toHaveLength(3);
-    expect(listenerSource.match(/unlisten\?\.\(\)/g)).toHaveLength(3);
-    expect(listenerSource).toContain("deltaBatcher.dispose()");
-    expect(stateStart).toBeGreaterThanOrEqual(0);
-    expect(stateEnd).toBeGreaterThan(stateStart);
-    expect(stateSource).toContain("stateRefreshTimerRef.current");
-    expect(stateSource).toContain("window.clearTimeout");
-    expect(stateSource).toContain("unlisten?.()");
-    expect(source.slice(stateEnd, stateEnd + 10)).toContain("}, []);");
+    const listenerIndex = source.indexOf("desktopEventPort.listenStateUpdates");
+    const initialSnapshotIndex = source.indexOf(".then(() => api.getSnapshot())", listenerIndex);
+    expect(listenerIndex).toBeGreaterThanOrEqual(0);
+    expect(initialSnapshotIndex).toBeGreaterThan(listenerIndex);
+    expect(source).toContain("api.resyncSnapshot");
+    expect(source).toContain("applyGlobalResync");
+    expect(source).toContain("pruneTimelineStore");
+    expect(source).toContain("api.getSnapshot");
+    expect(source).not.toContain("listenStateChanges");
+    expect(source).not.toMatch(/koushi-desktop:\/\/state["']/);
+    expect(source).not.toContain("stateRefreshTimerRef");
+    expect(source).not.toContain("STATE_EVENT_REFRESH_DEBOUNCE_MS");
+    expect(source).not.toContain('payload.kind !== "StateDelta"');
+    expect(source).not.toContain('Extract<CoreEventPayload, { kind: "StateDelta" }>');
   });
 
-  test("timeline acknowledgement retry lifetime is not owned by TimelineView", () => {
+  test("renderer timeline acknowledgement routes are absent", () => {
     const source = readFileSync(new URL("./components/TimelineView.tsx", import.meta.url), "utf8");
     const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
     const transportSource = readFileSync(
@@ -1409,29 +1408,16 @@ describe("ContextualRightPanel", () => {
       "utf8"
     );
 
-    expect(source).not.toContain("projectionAcknowledgementRetryRef");
-    expect(source).not.toContain("repairAcknowledgementRetryRef");
-    expect(source).not.toContain("retry.attempts");
-    expect(source).not.toContain("50 * 2 ** (retry.attempts - 1)");
-    expect(source).toContain("projectionAcknowledgementInFlightRef.current = null");
-    expect(source).toContain("repairAcknowledgementInFlightRef.current = null");
-    expect(appSource).toContain("timelineAcknowledgementDeliveryRef");
-    expect(appSource).toContain("timelineAcknowledgementDeliveryRef.current?.reset()");
-    expect(appSource).toContain("timelineAcknowledgementDeliveryRef.current?.dispose()");
-    expect(appSource).toContain("getTimelineAcknowledgementDelivery().acknowledgeProjection");
-    expect(appSource).toContain("getTimelineAcknowledgementDelivery().acknowledgeRenderedBatch");
-    const postStoreAckStart = appSource.indexOf(
-      'applied.projection.kind === "applied"'
-    );
-    const postStoreAckEnd = appSource.indexOf("next = applied.store", postStoreAckStart);
-    const postStoreAckSource = appSource.slice(postStoreAckStart, postStoreAckEnd);
-    expect(postStoreAckSource).toContain("getTimelineAcknowledgementDelivery()");
-    expect(postStoreAckSource).toContain("applied.projection.actorGeneration");
-    expect(postStoreAckSource).toContain(".catch(() => undefined)");
-    expect(postStoreAckSource).not.toContain("api.acknowledgeTimelineProjection");
-    expect(transportSource).toMatch(
-      /acknowledgeProjection\?\([\s\S]*actorGeneration: number[\s\S]*generation: number/
-    );
+    for (const removed of [
+      "acknowledgeProjection",
+      "acknowledgeRenderedBatch",
+      "AcknowledgementInFlightRef",
+      "timelineAcknowledgementDelivery"
+    ]) {
+      expect(source).not.toContain(removed);
+      expect(appSource).not.toContain(removed);
+      expect(transportSource).not.toContain(removed);
+    }
   });
 
   test("Tauri timeline ensure waits for the webview CoreEvent listener registration", () => {
@@ -1490,11 +1476,11 @@ describe("ContextualRightPanel", () => {
     const runtimeSource = readFileSync(new URL("./backend/appRuntime.ts", import.meta.url), "utf8");
 
     expect(contractSource).toContain("export interface DesktopApi");
-    expect(contractSource).toContain("rebuildSearchIndex(): Promise<DesktopSnapshot>");
-    expect(source).toContain('invoke<DesktopSnapshot>("rebuild_search_index"');
+    expect(contractSource).toContain("rebuildSearchIndex(): Promise<CommandAdmission>");
+    expect(source).toContain('invoke<CommandAdmission>("rebuild_search_index"');
     expect(source).not.toContain("createDesktopApi");
     expect(source).not.toContain("function isTauriRuntime");
-    expect(fakeSource).toContain("async rebuildSearchIndex(): Promise<DesktopSnapshot>");
+    expect(fakeSource).toContain("async rebuildSearchIndex(): Promise<CommandAdmission>");
     expect(fakeSource).not.toContain("export interface DesktopApi");
     expect(runtimeSource).toContain("new TauriDesktopApi()");
     expect(runtimeSource).toContain("createBrowserFakeApi()");
@@ -1654,7 +1640,8 @@ describe("desktop integration source guards", () => {
     expect(confirmSource).toContain("preview.via_servers");
     expect(confirmSource).toContain("api.joinDirectoryRoom(");
     expect(confirmSource).toContain('setPrimaryView("timeline")');
-    expect(confirmSource).toContain("setSnapshot(nextSnapshot)");
+    expect(confirmSource).toContain("settleCommand(");
+    expect(confirmSource).not.toContain("setSnapshot(");
   });
 
   test("naming a room opens the Rust-owned preview instead of joining it outright", () => {
@@ -1727,7 +1714,7 @@ describe("desktop integration source guards", () => {
     expect(replyIndex).toBeGreaterThanOrEqual(0);
     expect(threadIndex).toBeGreaterThan(replyIndex);
     expect(actionSource).toContain(
-      "void setComposerReplyTarget(target.message.room_id, target.message.event_id);"
+      "runInBackground(setComposerReplyTarget(target.message.room_id, target.message.event_id));"
     );
   });
 
@@ -2054,7 +2041,7 @@ describe("desktop integration source guards", () => {
     expect(selectRoomSource).toContain("stage=after_primary_view_update");
     expect(selectRoomSource).toContain("stage=before_api_select");
     expect(selectRoomSource).toContain("stage=after_api_select");
-    expect(selectRoomSource).toContain("stage=after_snapshot_apply");
+    expect(selectRoomSource).toContain("stage=after_state_reconcile");
     expect(selectRoomSource).toContain("elapsed_ms_since_start=");
     expect(selectRoomSource).toContain("timeline_matches=");
     expect(startOffset).toBeGreaterThanOrEqual(0);
@@ -2660,9 +2647,9 @@ describe("Timeline item row rendering", () => {
     const mainSource = source.slice(mainStart, mainEnd);
     const threadSource = source.slice(threadStart, threadEnd);
 
-    expect(mainSource).toContain("applyLatestTextMutationSnapshot(`caption:main:");
+    expect(mainSource).toContain("applyLatestTextMutationReceipt(`caption:main:");
     expect(mainSource).toContain("api.updateStagedUploadCaption(");
-    expect(threadSource).toContain("applyLatestTextMutationSnapshot(`caption:thread:");
+    expect(threadSource).toContain("applyLatestTextMutationReceipt(`caption:thread:");
     expect(threadSource).toContain("api.updateStagedUploadCaption(");
     expect(source.match(/api\.updateStagedUploadCaption\(/g)).toHaveLength(2);
     expect(source.match(/`caption:main:/g)).toHaveLength(3);
@@ -2678,16 +2665,13 @@ describe("Timeline item row rendering", () => {
     const roomEffect = source.slice(roomEffectStart, spaceEffectStart);
     const spaceEffect = source.slice(spaceEffectStart, nextEffectStart);
 
-    expect(roomEffect).toContain("roomSettingsRequestRef.current !== requestId");
+    expect(roomEffect).toContain("settleCommand(api.loadRoomSettings(activeRoomId))");
+    expect(roomEffect).not.toContain("requestId");
     expect(roomEffect).toContain("roomSettingsLoadRef.current = null");
     expect(roomEffect).toContain(".catch(() => {");
-    expect(spaceEffect).toContain("spaceSettingsRequestRef.current !== requestId");
-    expect(spaceEffect).toContain(
-      "const navigationRequestId = spaceNavigationIntentEpochRef.current"
-    );
-    expect(spaceEffect).toContain(
-      "spaceNavigationIntentEpochRef.current !== navigationRequestId"
-    );
+    expect(spaceEffect).toContain("settleCommand(api.loadRoomSettings(activeSpaceId))");
+    expect(spaceEffect).not.toContain("requestId");
+    expect(spaceEffect).not.toContain("navigationRequestId");
     expect(spaceEffect).toContain("spaceSettingsLoadRef.current = null");
     expect(spaceEffect).toContain(".catch(() => {");
 
@@ -2728,7 +2712,12 @@ describe("Timeline item row rendering", () => {
     const gate = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     const apply = vi.fn();
     await expect(
-      settleLoginTransport(Promise.reject(new Error("login timeout")), async () => gate, apply)
+      settleLoginTransport(
+        Promise.reject(new Error("login timeout")),
+        async () => undefined,
+        async () => gate,
+        apply
+      )
     ).resolves.toBe("Sign-in failed. Please try again.");
     expect(apply).toHaveBeenCalledWith(gate);
   });
@@ -2738,7 +2727,12 @@ describe("Timeline item row rendering", () => {
     const { settleLoginTransport } = await import("./App");
     const failed = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     failed.state.ui.errors.push({ code: "login_failed", message: "Login failed", recoverable: true });
-    await expect(settleLoginTransport(Promise.reject(new Error("ipc")), async () => failed, () => undefined)).resolves.toBeNull();
+    await expect(settleLoginTransport(
+      Promise.reject(new Error("ipc")),
+      async () => undefined,
+      async () => failed,
+      () => undefined
+    )).resolves.toBeNull();
   });
 
   test("unrelated projected errors do not hide a rejected login transport", async () => {
@@ -2747,7 +2741,12 @@ describe("Timeline item row rendering", () => {
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     snapshot.state.ui.errors.push({ code: "media_download_failed", message: "Old media error", recoverable: true });
     await expect(
-      settleLoginTransport(Promise.reject(new Error("ipc")), async () => snapshot, () => undefined)
+      settleLoginTransport(
+        Promise.reject(new Error("ipc")),
+        async () => undefined,
+        async () => snapshot,
+        () => undefined
+      )
     ).resolves.toBe("Sign-in failed. Please try again.");
   });
 

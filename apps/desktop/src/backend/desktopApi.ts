@@ -1,9 +1,12 @@
-import type { RequestId, TimelineKey } from "../domain/coreEvents";
+import type { TimelineKey } from "../domain/coreEvents";
 import type {
   ActivityMarkReadTarget,
   ActivityTab,
   AttachmentFilter,
   AttachmentSort,
+  CommandAdmission,
+  CommandResult,
+  CommandSettlement,
   ComposerDocument,
   ComposerDraftAcceptanceResponse,
   ComposerDraftRevision,
@@ -99,100 +102,88 @@ export interface ViewportSyncReceipt {
 
 export interface DesktopApi {
   getSnapshot(): Promise<DesktopSnapshot>;
+  settlementSnapshot(): Promise<DesktopSnapshot>;
+  resyncSnapshot(): Promise<DesktopSnapshot>;
   getDiagnosticSnapshot(): Promise<DiagnosticLogSnapshot>;
   observeViewportSync(observation: ViewportSyncObservation): Promise<ViewportSyncReceipt>;
-  discoverLoginMethods(homeserver: string): Promise<DesktopSnapshot>;
+  discoverLoginMethods(homeserver: string): Promise<CommandSettlement>;
   startOidcLogin(homeserver: string): Promise<OidcAuthorization>;
-  completeOidcLogin(homeserver: string, callbackUrl: string): Promise<DesktopSnapshot>;
+  completeOidcLogin(homeserver: string, callbackUrl: string): Promise<CommandSettlement>;
   submitLogin(
     homeserver: string,
     username: string,
     password: string,
     deviceDisplayName: string,
     platform: DisplayPlatform
-  ): Promise<DesktopSnapshot>;
-  submitSoftLogoutReauth(password: string): Promise<DesktopSnapshot>;
+  ): Promise<CommandSettlement>;
+  submitSoftLogoutReauth(password: string): Promise<CommandSettlement>;
   listSavedSessions(): Promise<SavedSessionInfo[]>;
-  switchAccount(session: SavedSessionInfo): Promise<DesktopSnapshot>;
-  retrySlidingSyncCapability(): Promise<DesktopSnapshot>;
-  changeHomeserver(): Promise<DesktopSnapshot>;
-  logout(): Promise<DesktopSnapshot>;
-  submitRecovery(secret: string): Promise<DesktopSnapshot>;
+  switchAccount(session: SavedSessionInfo): Promise<CommandSettlement>;
+  retrySlidingSyncCapability(): Promise<CommandAdmission>;
+  changeHomeserver(): Promise<CommandAdmission>;
+  logout(): Promise<CommandSettlement>;
+  submitRecovery(secret: string): Promise<CommandAdmission>;
   /** Dedicated Secure Backup commands. */
-  recoverSecureBackup: (secret: string) => Promise<DesktopSnapshot>;
-  retrySecureBackupInspection: () => Promise<DesktopSnapshot>;
-  startDeviceCleanup(): Promise<DesktopSnapshot>;
-  submitDeviceCleanupUia(flowId: number, password: string): Promise<DesktopSnapshot>;
-  eraseLocalDataAnyway(): Promise<DesktopSnapshot>;
-  restartSync(): Promise<DesktopSnapshot>;
-  updateSettings(patch: SettingsPatch): Promise<DesktopSnapshot>;
-  rebuildSearchIndex(): Promise<DesktopSnapshot>;
-  setRoomUrlPreviewOverride(roomId: string, enabled: boolean): Promise<DesktopSnapshot>;
-  selectRoomListFilter(filter: RoomListFilter): Promise<DesktopSnapshot>;
-  markRoomAsRead(roomId: string, eventId: string): Promise<DesktopSnapshot>;
-  markRoomAsUnread(roomId: string, unread: boolean): Promise<DesktopSnapshot>;
-  setRoomNotificationMode(roomId: string, mode: RoomNotificationMode): Promise<DesktopSnapshot>;
-  refreshCurrentSessionStatus(trigger: SessionStatusRefreshTrigger): Promise<DesktopSnapshot>;
-  submitAccountManagementUia(flowId: number, password: string): Promise<DesktopSnapshot>;
-  loadAccountManagementCapabilities(): Promise<DesktopSnapshot>;
-  changePassword(newPassword: string): Promise<DesktopSnapshot>;
-  deactivateAccount(eraseData: boolean): Promise<DesktopSnapshot>;
-  probeLocalEncryptionHealth(): Promise<DesktopSnapshot>;
-  resetLocalData(): Promise<DesktopSnapshot>;
-  bootstrapCrossSigning(): Promise<DesktopSnapshot>;
-  enableKeyBackup(): Promise<DesktopSnapshot>;
-  exportRoomKeys(destinationPath: string, passphrase: string): Promise<DesktopSnapshot>;
-  importRoomKeys(sourcePath: string, passphrase: string): Promise<DesktopSnapshot>;
+  recoverSecureBackup: (secret: string) => Promise<CommandAdmission>;
+  retrySecureBackupInspection: () => Promise<CommandAdmission>;
+  startDeviceCleanup(): Promise<CommandAdmission>;
+  submitDeviceCleanupUia(flowId: number, password: string): Promise<CommandAdmission>;
+  eraseLocalDataAnyway(): Promise<CommandAdmission>;
+  restartSync(): Promise<CommandAdmission>;
+  updateSettings(patch: SettingsPatch): Promise<CommandAdmission>;
+  rebuildSearchIndex(): Promise<CommandAdmission>;
+  setRoomUrlPreviewOverride(roomId: string, enabled: boolean): Promise<CommandAdmission>;
+  selectRoomListFilter(filter: RoomListFilter): Promise<CommandAdmission>;
+  markRoomAsRead(roomId: string, eventId: string): Promise<CommandAdmission>;
+  markRoomAsUnread(roomId: string, unread: boolean): Promise<CommandAdmission>;
+  setRoomNotificationMode(roomId: string, mode: RoomNotificationMode): Promise<CommandAdmission>;
+  refreshCurrentSessionStatus(trigger: SessionStatusRefreshTrigger): Promise<CommandAdmission>;
+  submitAccountManagementUia(flowId: number, password: string): Promise<CommandAdmission>;
+  loadAccountManagementCapabilities(): Promise<CommandAdmission>;
+  changePassword(newPassword: string): Promise<CommandAdmission>;
+  deactivateAccount(eraseData: boolean): Promise<CommandAdmission>;
+  probeLocalEncryptionHealth(): Promise<CommandAdmission>;
+  resetLocalData(): Promise<CommandAdmission>;
+  bootstrapCrossSigning(): Promise<CommandAdmission>;
+  enableKeyBackup(): Promise<CommandAdmission>;
+  exportRoomKeys(destinationPath: string, passphrase: string): Promise<CommandAdmission>;
+  importRoomKeys(sourcePath: string, passphrase: string): Promise<CommandAdmission>;
   bootstrapSecureBackup(
     passphrase: string | null,
     recoveryKeyDestinationPath: string | null,
     intent: SecureBackupSetupIntent
-  ): Promise<DesktopSnapshot>;
+  ): Promise<CommandAdmission>;
   changeSecureBackupPassphrase(
     oldSecret: string,
     newPassphrase: string,
     recoveryKeyDestinationPath: string | null
-  ): Promise<DesktopSnapshot>;
-  acceptVerification(flowId: number): Promise<DesktopSnapshot>;
-  startOwnUserSas(): Promise<DesktopSnapshot>;
-  retryCurrentDeviceTrustDiscovery(): Promise<DesktopSnapshot>;
-  mismatchSasVerification(flowId: number): Promise<DesktopSnapshot>;
-  startSessionBootstrap(passphrase: string | null, recoveryKeyDestinationPath: string): Promise<DesktopSnapshot>;
-  confirmSessionBootstrapSaved(flowId: number): Promise<DesktopSnapshot>;
-  confirmSasVerification(flowId: number): Promise<DesktopSnapshot>;
-  cancelVerification(flowId: number): Promise<DesktopSnapshot>;
-  resetIdentity(): Promise<DesktopSnapshot>;
-  cancelIdentityReset(flowId: number): Promise<DesktopSnapshot>;
-  submitIdentityResetPassword(flowId: number, password: string): Promise<DesktopSnapshot>;
-  submitIdentityResetOAuth(flowId: number): Promise<DesktopSnapshot>;
+  ): Promise<CommandAdmission>;
+  acceptVerification(flowId: number): Promise<CommandAdmission>;
+  startOwnUserSas(): Promise<CommandAdmission>;
+  retryCurrentDeviceTrustDiscovery(): Promise<CommandAdmission>;
+  mismatchSasVerification(flowId: number): Promise<CommandAdmission>;
+  startSessionBootstrap(passphrase: string | null, recoveryKeyDestinationPath: string): Promise<CommandAdmission>;
+  confirmSessionBootstrapSaved(flowId: number): Promise<CommandAdmission>;
+  confirmSasVerification(flowId: number): Promise<CommandAdmission>;
+  cancelVerification(flowId: number): Promise<CommandAdmission>;
+  resetIdentity(): Promise<CommandAdmission>;
+  cancelIdentityReset(flowId: number): Promise<CommandAdmission>;
+  submitIdentityResetPassword(flowId: number, password: string): Promise<CommandAdmission>;
+  submitIdentityResetOAuth(flowId: number): Promise<CommandAdmission>;
   resolveComposerKeyAction(
     surface: ComposerSurface,
     keyEvent: ComposerKeyEvent,
     options: ComposerResolverOptions
   ): Promise<ComposerResolvedAction>;
-  selectSpace(spaceId: string | null): Promise<DesktopSnapshot>;
-  reorderSpaces(spaceIds: string[]): Promise<DesktopSnapshot>;
-  selectRoom(roomId: string): Promise<DesktopSnapshot>;
-  openActivityEvent(roomId: string, eventId: string): Promise<DesktopSnapshot>;
-  openPinnedEvent(roomId: string, eventId: string): Promise<DesktopSnapshot>;
-  selectSearchResult(roomId: string, eventId: string): Promise<DesktopSnapshot>;
-  acknowledgeTimelineProjection(
-    projectionRequestId: RequestId,
-    key: TimelineKey,
-    generation: number,
-    itemCount: number,
-    targetPresent: boolean
-  ): Promise<void>;
-  acknowledgeTimelineBatchRendered(
-    key: TimelineKey,
-    actorGeneration: number,
-    timelineGeneration: number,
-    repairGeneration: number,
-    batchId: number
-  ): Promise<void>;
-  openTimelineAtTimestamp(roomId: string, timestampMs: number): Promise<DesktopSnapshot>;
-  closeFocusedContext(): Promise<DesktopSnapshot>;
-  closeSearch(): Promise<DesktopSnapshot>;
+  selectSpace(spaceId: string | null): Promise<CommandAdmission>;
+  reorderSpaces(spaceIds: string[]): Promise<CommandAdmission>;
+  selectRoom(roomId: string): Promise<CommandSettlement>;
+  openActivityEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
+  openPinnedEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
+  selectSearchResult(roomId: string, eventId: string): Promise<CommandSettlement>;
+  openTimelineAtTimestamp(roomId: string, timestampMs: number): Promise<CommandSettlement>;
+  closeFocusedContext(): Promise<CommandSettlement>;
+  closeSearch(): Promise<CommandSettlement>;
   beginComposerDraftRendererGeneration(): Promise<string>;
   acquireComposerDraftLease(
     scope: ComposerDraftScope,
@@ -220,14 +211,14 @@ export interface DesktopApi {
   stageUploadBytes(
     target: ComposerTarget,
     items: StageUploadBytesRequestItem[]
-  ): Promise<DesktopSnapshot>;
+  ): Promise<CommandSettlement>;
   selectStagedUploadOutput(
     target: ComposerTarget,
     stagedId: string,
     selection: StagedUploadOutputSelection
-  ): Promise<DesktopSnapshot>;
-  retryStagedUploadPreparation(target: ComposerTarget, stagedId: string): Promise<DesktopSnapshot>;
-  useOriginalStagedUpload(target: ComposerTarget, stagedId: string): Promise<DesktopSnapshot>;
+  ): Promise<CommandSettlement>;
+  retryStagedUploadPreparation(target: ComposerTarget, stagedId: string): Promise<CommandSettlement>;
+  useOriginalStagedUpload(target: ComposerTarget, stagedId: string): Promise<CommandSettlement>;
   preparedUploadPreview(
     target: ComposerTarget,
     stagedId: string,
@@ -244,80 +235,80 @@ export interface DesktopApi {
     target: ComposerTarget,
     stagedId: string,
     document: ComposerDocument | null
-  ): Promise<DesktopSnapshot>;
+  ): Promise<CommandSettlement>;
   updateStagedUploadCompression(
     target: ComposerTarget,
     stagedId: string,
     compressionChoice: StagedUploadCompressionChoice
-  ): Promise<DesktopSnapshot>;
-  clearUploadStaging(target: ComposerTarget): Promise<DesktopSnapshot>;
-  cancelScheduledSend(scheduledId: string): Promise<DesktopSnapshot>;
+  ): Promise<CommandSettlement>;
+  clearUploadStaging(target: ComposerTarget): Promise<CommandSettlement>;
+  cancelScheduledSend(scheduledId: string): Promise<CommandAdmission>;
   rescheduleScheduledSend(
     scheduledId: string,
     body: string,
     sendAtMs: number
-  ): Promise<DesktopSnapshot>;
-  retrySend(roomId: string, transactionId: string): Promise<DesktopSnapshot>;
-  cancelSend(roomId: string, transactionId: string): Promise<DesktopSnapshot>;
-  sendReaction(roomId: string, eventId: string, reactionKey: string): Promise<DesktopSnapshot>;
+  ): Promise<CommandAdmission>;
+  retrySend(roomId: string, transactionId: string): Promise<CommandAdmission>;
+  cancelSend(roomId: string, transactionId: string): Promise<CommandAdmission>;
+  sendReaction(roomId: string, eventId: string, reactionKey: string): Promise<CommandAdmission>;
   redactReaction(
     roomId: string,
     eventId: string,
     reactionKey: string,
     reactionEventId: string
-  ): Promise<DesktopSnapshot>;
+  ): Promise<CommandAdmission>;
   sendReadReceipt(roomId: string, eventId: string, threadRootEventId?: string | null): Promise<void>;
   setFullyRead(roomId: string, eventId: string): Promise<void>;
   setTyping(roomId: string, isTyping: boolean): Promise<void>;
-  setPresence(presence: PresenceKind): Promise<DesktopSnapshot>;
-  setDisplayName(displayName: string | null): Promise<DesktopSnapshot>;
-  setLocalUserAlias(userId: string, alias: string | null): Promise<DesktopSnapshot>;
-  ignoreUser(userId: string): Promise<DesktopSnapshot>;
-  unignoreUser(userId: string): Promise<DesktopSnapshot>;
-  reportUser(userId: string, reason: string): Promise<DesktopSnapshot>;
-  reportContent(roomId: string, eventId: string, reason: string): Promise<DesktopSnapshot>;
-  reportRoom(roomId: string, reason: string): Promise<DesktopSnapshot>;
-  setAvatar(mimeType: string, bytes: number[]): Promise<DesktopSnapshot>;
+  setPresence(presence: PresenceKind): Promise<CommandAdmission>;
+  setDisplayName(displayName: string | null): Promise<CommandAdmission>;
+  setLocalUserAlias(userId: string, alias: string | null): Promise<CommandAdmission>;
+  ignoreUser(userId: string): Promise<CommandAdmission>;
+  unignoreUser(userId: string): Promise<CommandAdmission>;
+  reportUser(userId: string, reason: string): Promise<CommandAdmission>;
+  reportContent(roomId: string, eventId: string, reason: string): Promise<CommandAdmission>;
+  reportRoom(roomId: string, reason: string): Promise<CommandAdmission>;
+  setAvatar(mimeType: string, bytes: number[]): Promise<CommandAdmission>;
   editMessage(
     roomId: string,
     eventId: string,
     document: ComposerDocument
-  ): Promise<DesktopSnapshot>;
-  redactMessage(roomId: string, eventId: string): Promise<DesktopSnapshot>;
-  loadMessageSource(roomId: string, eventId: string): Promise<DesktopSnapshot>;
+  ): Promise<CommandAdmission>;
+  redactMessage(roomId: string, eventId: string): Promise<CommandAdmission>;
+  loadMessageSource(roomId: string, eventId: string): Promise<CommandAdmission>;
   requestRoomKey(
     roomId: string,
     eventId: string,
     origin?: "user" | "automatic",
     timelineKey?: TimelineKey
-  ): Promise<DesktopSnapshot>;
+  ): Promise<CommandAdmission>;
   requestLateDecryption(
     roomId: string,
     timelineKey?: TimelineKey
-  ): Promise<DesktopSnapshot>;
+  ): Promise<CommandAdmission>;
   forwardMessage(
     roomId: string,
     sourceEventId: string,
     destinationRoomId: string
-  ): Promise<DesktopSnapshot>;
-  loadLinkPreviews(roomId: string, eventId: string): Promise<DesktopSnapshot>;
-  hideLinkPreview(roomId: string, eventId: string): Promise<DesktopSnapshot>;
-  leaveRoom(roomId: string): Promise<DesktopSnapshot>;
-  forgetRoom(roomId: string): Promise<DesktopSnapshot>;
-  setRoomTag(roomId: string, tag: RoomTagKind, order?: number | null): Promise<DesktopSnapshot>;
-  removeRoomTag(roomId: string, tag: RoomTagKind): Promise<DesktopSnapshot>;
-  pinEvent(roomId: string, eventId: string): Promise<DesktopSnapshot>;
-  unpinEvent(roomId: string, eventId: string): Promise<DesktopSnapshot>;
-  reshareRoomKey(roomId: string): Promise<RoomKeyReshareOutcome>;
-  forceNewOutboundSession(roomId: string): Promise<EncryptionDebugOperationOutcome>;
-  shareIndex0RoomKey(roomId: string): Promise<EncryptionDebugOperationOutcome>;
-  resendIndex0RoomKey(roomId: string): Promise<EncryptionDebugOperationOutcome>;
-  openActivity(): Promise<DesktopSnapshot>;
-  closeActivity(): Promise<DesktopSnapshot>;
-  setActivityTab(tab: ActivityTab): Promise<DesktopSnapshot>;
-  paginateActivity(tab: ActivityTab, cursor?: string | null): Promise<DesktopSnapshot>;
-  retryActivityResolution(): Promise<DesktopSnapshot>;
-  markActivityRead(target: ActivityMarkReadTarget): Promise<DesktopSnapshot>;
+  ): Promise<CommandAdmission>;
+  loadLinkPreviews(roomId: string, eventId: string): Promise<CommandAdmission>;
+  hideLinkPreview(roomId: string, eventId: string): Promise<CommandAdmission>;
+  leaveRoom(roomId: string): Promise<CommandAdmission>;
+  forgetRoom(roomId: string): Promise<CommandAdmission>;
+  setRoomTag(roomId: string, tag: RoomTagKind, order?: number | null): Promise<CommandSettlement>;
+  removeRoomTag(roomId: string, tag: RoomTagKind): Promise<CommandSettlement>;
+  pinEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
+  unpinEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
+  reshareRoomKey(roomId: string): Promise<CommandResult<RoomKeyReshareOutcome>>;
+  forceNewOutboundSession(roomId: string): Promise<CommandResult<EncryptionDebugOperationOutcome>>;
+  shareIndex0RoomKey(roomId: string): Promise<CommandResult<EncryptionDebugOperationOutcome>>;
+  resendIndex0RoomKey(roomId: string): Promise<CommandResult<EncryptionDebugOperationOutcome>>;
+  openActivity(): Promise<CommandAdmission>;
+  closeActivity(): Promise<CommandAdmission>;
+  setActivityTab(tab: ActivityTab): Promise<CommandAdmission>;
+  paginateActivity(tab: ActivityTab, cursor?: string | null): Promise<CommandAdmission>;
+  retryActivityResolution(): Promise<CommandAdmission>;
+  markActivityRead(target: ActivityMarkReadTarget): Promise<CommandAdmission>;
   setComposerDraft(
     account: ComposerDraftAccountOwner,
     leaseId: string,
@@ -325,18 +316,18 @@ export interface DesktopApi {
     roomId: string,
     document: ComposerDocument,
     revision: ComposerDraftRevision
-  ): Promise<DesktopSnapshot>;
+  ): Promise<CommandAdmission>;
   openThread(
     roomId: string,
     rootEventId: string,
     intent: ThreadOpenIntent
-  ): Promise<DesktopSnapshot>;
-  closeThread(): Promise<DesktopSnapshot>;
-  openThreadsList(scope: ThreadsListScope): Promise<DesktopSnapshot>;
-  closeThreadsList(): Promise<DesktopSnapshot>;
-  paginateThreadsList(scope: ThreadsListScope): Promise<DesktopSnapshot>;
-  openFilesView(scope: FilesViewScope, filter: AttachmentFilter, sort: AttachmentSort): Promise<DesktopSnapshot>;
-  closeFilesView(): Promise<DesktopSnapshot>;
+  ): Promise<CommandAdmission>;
+  closeThread(): Promise<CommandAdmission>;
+  openThreadsList(scope: ThreadsListScope): Promise<CommandAdmission>;
+  closeThreadsList(): Promise<CommandAdmission>;
+  paginateThreadsList(scope: ThreadsListScope): Promise<CommandAdmission>;
+  openFilesView(scope: FilesViewScope, filter: AttachmentFilter, sort: AttachmentSort): Promise<CommandAdmission>;
+  closeFilesView(): Promise<CommandAdmission>;
   setThreadComposerDraft(
     account: ComposerDraftAccountOwner,
     leaseId: string,
@@ -345,7 +336,7 @@ export interface DesktopApi {
     rootEventId: string,
     document: ComposerDocument,
     revision: ComposerDraftRevision
-  ): Promise<DesktopSnapshot>;
+  ): Promise<CommandAdmission>;
   sendThreadReply(
     account: ComposerDraftAccountOwner,
     leaseId: string,
@@ -356,42 +347,42 @@ export interface DesktopApi {
     document: ComposerDocument,
     draftRevision?: ComposerDraftRevision
   ): Promise<SubmissionResponse>;
-  submitSearch(query: string, scope: SearchScopeKind): Promise<DesktopSnapshot>;
-  queryDirectory(query: DirectoryQuery): Promise<DesktopSnapshot>;
-  joinDirectoryRoom(roomIdOrAlias: string, viaServers?: string[]): Promise<DesktopSnapshot>;
-  previewJoinTarget(roomIdOrAlias: string, viaServers?: string[]): Promise<DesktopSnapshot>;
-  dismissDirectoryPreview(): Promise<DesktopSnapshot>;
-  joinRoom(roomId: string): Promise<DesktopSnapshot>;
-  loadRoomSettings(roomId: string): Promise<DesktopSnapshot>;
-  loadSpaceMembers(spaceId: string, generation: number): Promise<DesktopSnapshot>;
+  submitSearch(query: string, scope: SearchScopeKind): Promise<CommandSettlement>;
+  queryDirectory(query: DirectoryQuery): Promise<CommandSettlement>;
+  joinDirectoryRoom(roomIdOrAlias: string, viaServers?: string[]): Promise<CommandSettlement>;
+  previewJoinTarget(roomIdOrAlias: string, viaServers?: string[]): Promise<CommandSettlement>;
+  dismissDirectoryPreview(): Promise<CommandAdmission>;
+  joinRoom(roomId: string): Promise<CommandSettlement>;
+  loadRoomSettings(roomId: string): Promise<CommandSettlement>;
+  loadSpaceMembers(spaceId: string, generation: number): Promise<CommandSettlement>;
   inviteUserToSpace(
     spaceId: string,
     userId: string,
     generation: number
-  ): Promise<DesktopSnapshot>;
+  ): Promise<CommandSettlement>;
   cancelSpaceInvite(
     spaceId: string,
     userId: string,
     generation: number
-  ): Promise<DesktopSnapshot>;
+  ): Promise<CommandSettlement>;
   queryMentionCandidates(
     roomId: string,
     surface: MentionSurface,
     query: string
   ): Promise<void>;
-  repairRoomTimeline(roomId: string): Promise<DesktopSnapshot>;
-  updateRoomSetting(roomId: string, change: RoomSettingChange): Promise<DesktopSnapshot>;
+  repairRoomTimeline(roomId: string): Promise<CommandAdmission>;
+  updateRoomSetting(roomId: string, change: RoomSettingChange): Promise<CommandSettlement>;
   moderateRoomMember(
     roomId: string,
     targetUserId: string,
     action: RoomModerationAction,
     reason?: string | null
-  ): Promise<DesktopSnapshot>;
+  ): Promise<CommandSettlement>;
   updateRoomMemberRole(
     roomId: string,
     targetUserId: string,
     powerLevel: number
-  ): Promise<DesktopSnapshot>;
+  ): Promise<CommandSettlement>;
   updateSpaceMemberRole(
     spaceId: string,
     userId: string,
@@ -400,27 +391,27 @@ export interface DesktopApi {
     expectedPowerLevel: number,
     powerLevel: number,
     confirmed: boolean
-  ): Promise<DesktopSnapshot>;
-  createRoom(request: CreateRoomRequest): Promise<DesktopSnapshot>;
-  createSpace(name: string): Promise<DesktopSnapshot>;
-  setSpaceChild(spaceId: string, childRoomId: string, viaServer: string): Promise<DesktopSnapshot>;
-  acceptInvite(roomId: string): Promise<DesktopSnapshot>;
-  declineInvite(roomId: string): Promise<DesktopSnapshot>;
-  startDirectMessage(userId: string): Promise<DesktopSnapshot>;
-  inviteUser(roomId: string, userId: string): Promise<DesktopSnapshot>;
-  openInviteWorkflow(roomId: string): Promise<DesktopSnapshot>;
-  closeInviteWorkflow(): Promise<DesktopSnapshot>;
-  searchInviteTargets(roomId: string, query: string): Promise<DesktopSnapshot>;
-  setInviteScope(roomId: string, scope: InviteScopeSelection): Promise<DesktopSnapshot>;
-  selectInviteTarget(roomId: string, userId: string): Promise<DesktopSnapshot>;
-  removeInviteTarget(userId: string): Promise<DesktopSnapshot>;
+  ): Promise<CommandSettlement>;
+  createRoom(request: CreateRoomRequest): Promise<CommandSettlement>;
+  createSpace(name: string): Promise<CommandSettlement>;
+  setSpaceChild(spaceId: string, childRoomId: string, viaServer: string): Promise<CommandAdmission>;
+  acceptInvite(roomId: string): Promise<CommandSettlement>;
+  declineInvite(roomId: string): Promise<CommandSettlement>;
+  startDirectMessage(userId: string): Promise<CommandSettlement>;
+  inviteUser(roomId: string, userId: string): Promise<CommandSettlement>;
+  openInviteWorkflow(roomId: string): Promise<CommandSettlement>;
+  closeInviteWorkflow(): Promise<CommandSettlement>;
+  searchInviteTargets(roomId: string, query: string): Promise<CommandSettlement>;
+  setInviteScope(roomId: string, scope: InviteScopeSelection): Promise<CommandSettlement>;
+  selectInviteTarget(roomId: string, userId: string): Promise<CommandSettlement>;
+  removeInviteTarget(userId: string): Promise<CommandSettlement>;
   inviteTargets(
     roomId: string,
     userIds: string[],
     scope: InviteScopeSelection
-  ): Promise<DesktopSnapshot>;
-  setComposerReplyTarget(roomId: string, eventId: string): Promise<DesktopSnapshot>;
-  cancelComposerReply(): Promise<DesktopSnapshot>;
+  ): Promise<CommandSettlement>;
+  setComposerReplyTarget(roomId: string, eventId: string): Promise<CommandAdmission>;
+  cancelComposerReply(): Promise<CommandAdmission>;
   sendReply(
     account: ComposerDraftAccountOwner,
     leaseId: string,
@@ -432,8 +423,8 @@ export interface DesktopApi {
     draftRevision?: ComposerDraftRevision
   ): Promise<SubmissionResponse>;
   setRoomListProjection(projection: RoomListProjection): void;
-  startRoomCrawl(roomId: string): Promise<DesktopSnapshot>;
-  stopRoomCrawl(roomId: string): Promise<DesktopSnapshot>;
+  startRoomCrawl(roomId: string): Promise<CommandAdmission>;
+  stopRoomCrawl(roomId: string): Promise<CommandAdmission>;
 }
 
 export interface ComposerDraftAccountOwner {

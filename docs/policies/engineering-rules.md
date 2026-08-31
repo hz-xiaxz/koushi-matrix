@@ -503,21 +503,21 @@ Rules:
    scroll echoes are not genuine top-scroll demand. Do not add polling,
    fixed-delay retries, or a user-scroll latch to compensate for a missing
    transition.
-   Room gap repair follows the same fence: one
-   actor may own at most one unacknowledged repair projection batch, and it may
-   continue only after the SDK's final actor/repair/publication tag is mapped
-   to an exact desktop batch and receives a matching
-   actor/timeline/repair/batch post-layout ACK. A rejected ACK transport call
-   remains retryable; a gap-only cache chunk or fully filtered publication
-   creates no render fence, while aggregation-only work must publish an
-   observable tagged barrier. A resync marker suspends acknowledgements until
-   the matching `InitialItems` replay has rendered. Observable settlement
-   waits must be bounded so a lag-dropped SDK update becomes retryable failure,
-   never a permanent repair owner.
+   Room gap repair follows the same fence: one actor may own at most one
+   unsettled repair projection batch, and it may continue only after the SDK's
+   final actor/repair/publication tag is mapped to an exact desktop batch and
+   the relay returns matching actor/timeline/repair/minimum-batch
+   `GapProjectionRelayed` evidence to the TimelineActor. A stale internal signal
+   is ignored; a gap-only cache chunk or fully filtered publication creates no
+   projection fence, while aggregation-only work must publish an observable
+   tagged barrier. Renderer resync and `InitialItems` replay are independent and
+   never delay Core continuation. Internal relay settlement waits remain bounded
+   so a lag-dropped SDK update becomes retryable failure, never a permanent
+   repair owner.
    `ObserveViewport` may wake automatic gap inspection only when the selected
    projected gap candidate changes (viewport-intersecting first, otherwise
    nearest the live edge). An unchanged candidate is idle; a changed candidate
-   remains queued across active work and projection/render ACK fences.
+   remains queued across active work and internal relay-projection fences.
    Candidate-driven automatic repair keeps a zero cached-chunk budget.
    Room-entry live-edge repair is a separate bounded intent. On Simplified
    Sliding Sync it must wait for committed service-response provenance. When the
@@ -532,8 +532,8 @@ Rules:
    baseline observation for an empty response, infer omission from a timeout or
    pre-commit broadcast, or select any older persisted gap. Routing must match
    service instance epoch, room key, actor generation, and response or
-   subscription generation. Timeline build, initial projection,
-   and ACK remain non-blocking while provenance is pending. A stale descriptor
+   subscription generation. Timeline build and internal initial-projection
+   commit remain non-blocking while provenance is pending. A stale descriptor
    permits one authoritative re-inspection, then closes and clears that
    checkpoint so a later committed response can be admitted, but never permits
    arbitrary gap selection. While that bounded

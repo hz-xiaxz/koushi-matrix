@@ -1,3 +1,4 @@
+import { browserCommandSnapshot } from "../backend/browserFakeApi.testSupport";
 // @vitest-environment jsdom
 
 import { readFileSync } from "node:fs";
@@ -177,7 +178,7 @@ describe("EntityAvatar", () => {
 describe("Sidebar", () => {
   it("shows bootstrap loading without presenting an authoritative zero room list", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace(null);
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace(null));
     snapshot.state.ui.room_list.readiness = {
       kind: "loading",
       source: "live",
@@ -231,7 +232,7 @@ describe("Sidebar", () => {
 
   it("keeps the Space title and complete action group in separate rows", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace("!space-alpha:example.invalid");
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace("!space-alpha:example.invalid"));
 
     render(
       <Sidebar
@@ -260,7 +261,7 @@ describe("Sidebar", () => {
 
   it("renders Home as Activity, Explore, Invites, all Rooms, and Direct Messages", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace(null);
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace(null));
     const unspacedRoom: RoomSummary = {
       room_id: "!room-unspaced:example.invalid",
       display_name: "unspaced-room",
@@ -315,7 +316,7 @@ describe("Sidebar", () => {
 
   it("switches between DMs and Rooms and persists the selected category", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace(null);
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace(null));
 
     const renderSidebar = () =>
       render(
@@ -364,7 +365,7 @@ describe("Sidebar", () => {
 
   it("renders plain unread content as a dot and notifications as a number", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace("!space-alpha:example.invalid");
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace("!space-alpha:example.invalid"));
     const plain = snapshot.state.domain.rooms.find((room) => room.room_id === "!room-alpha:example.invalid");
     const notified = snapshot.state.domain.rooms.find(
       (room) => room.room_id === "!room-planning:example.invalid"
@@ -407,7 +408,7 @@ describe("Sidebar", () => {
 
   it("does not render unresolved child room ids as not joined rooms", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace("!space-alpha:example.invalid");
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace("!space-alpha:example.invalid"));
     const activeSpace = snapshot.state.domain.spaces.find(
       (space) => space.space_id === snapshot.state.ui.navigation.active_space_id
     );
@@ -438,7 +439,7 @@ describe("Sidebar", () => {
 
   it("sorts the selected category by active order or display name and persists the sort", async () => {
     const api = createBrowserFakeApi();
-    let snapshot = await api.selectSpace("!space-alpha:example.invalid");
+    let snapshot = await browserCommandSnapshot(api, api.selectSpace("!space-alpha:example.invalid"));
 
     const renderSidebar = () =>
       render(
@@ -486,7 +487,7 @@ describe("Sidebar", () => {
 
   it("renders Direct Messages in the Rust sidebar order for Active sort", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace(null);
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace(null));
     const dmRooms = snapshot.state.domain.rooms.filter((room) => room.is_dm).slice(0, 2);
     if (dmRooms.length < 2) {
       throw new Error("expected at least two fake direct messages");
@@ -558,7 +559,7 @@ describe("Sidebar", () => {
 
   it("keeps Rooms and Direct Messages separate inside a normal space", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace("!space-alpha:example.invalid");
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace("!space-alpha:example.invalid"));
 
     render(
       <Sidebar
@@ -586,7 +587,7 @@ describe("Sidebar", () => {
 
   it("filters direct messages by trimmed display name without changing category totals", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace(null);
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace(null));
     const dmRows = snapshot.sidebar.global_dms.slice(0, 2);
     if (dmRows.length < 2) {
       throw new Error("expected at least two fake direct messages");
@@ -622,7 +623,7 @@ describe("Sidebar", () => {
 
   it("shows a distinct no-match state and clears the query with Escape or the clear button", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace(null);
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace(null));
     snapshot.sidebar.global_dms = snapshot.sidebar.global_dms.slice(0, 2).map((room, index) => ({
       ...room,
       display_name: index === 0 ? "Alice Example" : "Bob Example"
@@ -660,7 +661,7 @@ describe("Sidebar", () => {
 
   it("clears the filter when switching categories or active spaces", async () => {
     const api = createBrowserFakeApi();
-    const homeSnapshot = await api.selectSpace(null);
+    const homeSnapshot = await browserCommandSnapshot(api, api.selectSpace(null));
     const view = render(
       <Sidebar
         activeRoomId={homeSnapshot.state.ui.navigation.active_room_id}
@@ -685,7 +686,7 @@ describe("Sidebar", () => {
     expect((roomFilter as HTMLInputElement).value).toBe("");
 
     fireEvent.change(roomFilter, { target: { value: "room" } });
-    const spaceSnapshot = await api.selectSpace("!space-alpha:example.invalid");
+    const spaceSnapshot = await browserCommandSnapshot(api, api.selectSpace("!space-alpha:example.invalid"));
     view.rerender(
       <Sidebar
         activeRoomId={spaceSnapshot.state.ui.navigation.active_room_id}
@@ -708,7 +709,7 @@ describe("Sidebar", () => {
 
   it("shows online presence only on Direct Messages rows", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace(null);
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace(null));
     const dm = snapshot.sidebar.global_dms[0];
     const dmRoom = snapshot.state.domain.rooms.find((room) => room.room_id === dm?.room_id);
     const dmUserId = dmRoom?.dm_user_ids[0];
@@ -741,7 +742,7 @@ describe("Sidebar", () => {
 
   it("passes one-to-one DM user info through the room context menu", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace(null);
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace(null));
     const dm = snapshot.sidebar.global_dms[0];
     const dmRoom = snapshot.state.domain.rooms.find((room) => room.room_id === dm?.room_id);
     const dmUserId = dmRoom?.dm_user_ids[0];
@@ -823,7 +824,7 @@ describe("WorkspaceRail", () => {
 
   it("uses Home as the only top-level system entry and does not render Activity bell", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace(null);
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace(null));
 
     render(
       <WorkspaceRail
@@ -925,7 +926,7 @@ describe("WorkspaceRail", () => {
 describe("Space Members navigation", () => {
   it("shows joined and child-only counts for an active Space and opens on click", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace("!space-alpha:example.invalid");
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace("!space-alpha:example.invalid"));
     const onOpenSpaceMembers = vi.fn();
 
     render(
@@ -961,7 +962,7 @@ describe("Space Members navigation", () => {
 
   it("shows only the joined count when there are no child-room-only users", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace("!space-alpha:example.invalid");
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace("!space-alpha:example.invalid"));
 
     render(
       <Sidebar
@@ -987,7 +988,7 @@ describe("Space Members navigation", () => {
 
   it("does not show the Space-only Members entry on account Home", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace(null);
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace(null));
 
     render(
       <Sidebar
@@ -1012,7 +1013,7 @@ describe("Space Members navigation", () => {
 
   it("does not show the entry without a real active Space", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.selectSpace("!space-alpha:example.invalid");
+    const snapshot = await browserCommandSnapshot(api, api.selectSpace("!space-alpha:example.invalid"));
     snapshot.sidebar.account_home.is_active = false;
     snapshot.sidebar.space_rail.forEach((space) => {
       space.is_active = false;

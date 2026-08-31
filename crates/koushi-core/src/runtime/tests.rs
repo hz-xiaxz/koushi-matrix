@@ -105,7 +105,7 @@ async fn wait_for_runtime_snapshot(
                 return snapshot;
             }
             connection
-                .next_versioned_snapshot_for_testing()
+                .next_versioned_snapshot()
                 .await
                 .expect("runtime snapshot stream should remain open");
         }
@@ -661,10 +661,8 @@ async fn projection_rejected_restore_emits_one_correlated_failure_without_routin
             .expect("event stream should remain open");
         if matches!(
             event,
-            CoreEvent::StateChanged(AppState {
-                session: SessionState::LoggingOut,
-                ..
-            })
+            CoreEvent::StateDelta(delta)
+                if matches!(delta.changed.session, Some(SessionState::LoggingOut))
         ) {
             break;
         }
@@ -857,7 +855,7 @@ async fn local_alias_clear_command_emits_target_display_label_update() {
                 .await
                 .expect("runtime should emit initial profile events")
                 .expect("event stream should stay open");
-        if matches!(event, CoreEvent::StateChanged(_)) {
+        if matches!(event, CoreEvent::StateDelta(_)) {
             break;
         }
     }
@@ -1003,9 +1001,11 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
     let composer_draft_leases = Arc::new(ComposerDraftLeaseRegistry::new());
     let composer_draft_lease_changes = composer_draft_leases.subscribe();
     let (composer_draft_rejected_tx, composer_draft_rejected_rx) = mpsc::unbounded_channel();
+    let (_focused_projection_tx, focused_projection_rx) = mpsc::unbounded_channel();
     let actor = AppActor {
         command_rx,
         action_rx,
+        focused_projection_rx: Some(focused_projection_rx),
         composer_draft_test_rx,
         event_tx,
         snapshot_tx,
@@ -1025,6 +1025,7 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         composer_draft_rejected_tx,
         composer_draft_rejected_rx,
         pending_composer_acceptances: HashMap::new(),
+        pending_command_admissions: Vec::new(),
         account_actor,
         activity_projection: ActivityProjection::default(),
         activity_resolution_generation: 0,
@@ -1032,6 +1033,7 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         navigation_projection_generation: 0,
         pending_select,
         pending_focused_navigation: None,
+        latest_focused_projection_generation: HashMap::new(),
         pending_date_navigation_request_id: None,
     };
     let actor_task = executor::spawn(actor.run());
@@ -1049,7 +1051,6 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         loop {
             match event_rx.recv().await.expect("event stream remains open") {
                 event @ CoreEvent::IntentLifecycle { .. } => break event,
-                CoreEvent::StateChanged(_) => {}
                 _ => {}
             }
         }
@@ -1166,9 +1167,11 @@ async fn same_batch_select_room_settles_only_final_selection() {
     let composer_draft_leases = Arc::new(ComposerDraftLeaseRegistry::new());
     let composer_draft_lease_changes = composer_draft_leases.subscribe();
     let (composer_draft_rejected_tx, composer_draft_rejected_rx) = mpsc::unbounded_channel();
+    let (_focused_projection_tx, focused_projection_rx) = mpsc::unbounded_channel();
     let actor = AppActor {
         command_rx,
         action_rx,
+        focused_projection_rx: Some(focused_projection_rx),
         composer_draft_test_rx,
         event_tx,
         snapshot_tx,
@@ -1188,6 +1191,7 @@ async fn same_batch_select_room_settles_only_final_selection() {
         composer_draft_rejected_tx,
         composer_draft_rejected_rx,
         pending_composer_acceptances: HashMap::new(),
+        pending_command_admissions: Vec::new(),
         account_actor,
         activity_projection: ActivityProjection::default(),
         activity_resolution_generation: 0,
@@ -1195,6 +1199,7 @@ async fn same_batch_select_room_settles_only_final_selection() {
         navigation_projection_generation: 0,
         pending_select,
         pending_focused_navigation: None,
+        latest_focused_projection_generation: HashMap::new(),
         pending_date_navigation_request_id: None,
     };
     let actor_task = executor::spawn(actor.run());
@@ -1280,6 +1285,21 @@ async fn same_batch_select_room_settles_only_final_selection() {
     actor_task.abort();
     drop(command_tx);
     drop(action_tx);
+}
+
+#[test]
+fn bootstrap_cross_signing_command_projects_pending_state_before_account_route() {
+    let request_id = RequestId {
+        connection_id: RuntimeConnectionId(1),
+        sequence: 6,
+    };
+    assert_eq!(
+        account_command_projected_action(&AccountCommand::BootstrapCrossSigning {
+            request_id,
+            auth: None,
+        }),
+        Some(AppAction::BootstrapCrossSigningRequested { request_id: 6 })
+    );
 }
 
 #[test]
@@ -2037,6 +2057,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
                 },
             }),
             composer_permit: None,
+            admission: None,
         })
         .await
         .expect("preceding command");
@@ -2047,6 +2068,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
                 request_id: shutdown_request_id,
             }),
             composer_permit: None,
+            admission: None,
         })
         .await
         .expect("first shutdown command");
@@ -2057,6 +2079,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
                 request_id: duplicate_shutdown_request_id,
             }),
             composer_permit: None,
+            admission: None,
         })
         .await
         .expect("duplicate shutdown command");
@@ -2071,6 +2094,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
                 },
             }),
             composer_permit: None,
+            admission: None,
         })
         .await
         .expect("later command");

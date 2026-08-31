@@ -1,3 +1,4 @@
+import { browserCommandSnapshot } from "../backend/browserFakeApi.testSupport";
 import { describe, expect, test } from "vitest";
 
 import { createBrowserFakeApi } from "../backend/browserFakeApi";
@@ -31,7 +32,7 @@ describe("qaSendSmoke", () => {
 
   test("finds the DM room for a synthetic send target without exposing room names", async () => {
     const api = createBrowserFakeApi();
-    const snapshot = await api.startDirectMessage("@hiroshi.shinaoka:matrix.org");
+    const snapshot = await browserCommandSnapshot(api, api.startDirectMessage("@hiroshi.shinaoka:matrix.org"));
 
     const room = qaSendSmokeTargetRoom(snapshot, "@hiroshi.shinaoka:matrix.org");
 
@@ -41,7 +42,7 @@ describe("qaSendSmoke", () => {
 
   test("summarizes target DM encryption without exposing identifiers", async () => {
     const api = createBrowserFakeApi();
-    const started = await api.startDirectMessage("@hiroshi.shinaoka:matrix.org");
+    const started = await browserCommandSnapshot(api, api.startDirectMessage("@hiroshi.shinaoka:matrix.org"));
     const room = qaSendSmokeTargetRoom(started, "@hiroshi.shinaoka:matrix.org");
     expect(room).not.toBeNull();
     const encryptedSnapshot = {

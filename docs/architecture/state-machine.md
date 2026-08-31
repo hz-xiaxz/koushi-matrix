@@ -34,11 +34,14 @@ Reducer state remains Rust-owned even when the desktop WebView caches it for
 selector subscriptions. The frontend projection store may retain unchanged
 snapshot slice references and memoize derived render inputs, but it must not
 create product transitions, repair state-machine state, or decide Matrix
-semantics locally. Runtime/background state updates now arrive as ordered
-Rust-owned `StateDelta` changed-slice events; full snapshots are initial,
-reset/reconnect, or explicit command-response projections only. A delta
-generation gap forces a full-snapshot reset whose `state_generation` restores
-ordering before later deltas apply.
+semantics locally. Runtime/background state updates arrive on one ordered
+Rust-owned lane as contiguous `StateDelta` changed-slice envelopes. Full
+versioned snapshots are initial attach or explicit gap, lag, and
+command-watermark resync only; normal command returns carry typed Core
+settlement/admission generations, not state. A delta generation gap forces one
+full-snapshot reset plus timeline projection reset/replay before later deltas
+apply. A command generation is a resync watermark and never renderer-delivery,
+DOM-paint, or product-progress evidence.
 
 ### Core request outcomes (Phase A, issue #755)
 
@@ -981,7 +984,7 @@ stateDiagram-v2
     Subscribed --> Projecting: CanonicalDiffBatch(N) / apply canonical once
     Projecting --> Subscribed: valid display projection / ItemsUpdated(display indices)
     Projecting --> Subscribed: ambiguous or invalid projection / display Reset + fallback counter
-    Subscribed --> Subscribed: Subscribe(request R) while active / replay InitialItems(cause R, retained projection ACK)
+    Subscribed --> Subscribed: Subscribe(request R) while active / replay InitialItems(cause R, retained Core projection identity)
     Subscribed --> Overflowed: data inbox Full / lossless Overflow(N) control
     Subscribed --> Overflowed: SDK diff stream ended / lossless StreamEnded(N) control
     Overflowed --> Resubscribing: actor stops relay N and advances to N+1
@@ -1020,10 +1023,11 @@ private-data-free fallback counter; normal focused and homeserver proofs require
 the counter delta to remain zero.
 
 An active-key Subscribe replay preserves the original projection request ID so
-the WebView can acknowledge the exact actor/generation. It also carries the
-new Subscribe request as a separate causal identity. Consumers must require
-that causal identity for command success; key equality alone cannot settle a
-later Subscribe because an older same-key replay may already be queued.
+the TimelineActor can commit the exact actor/generation through the internal
+Core route. It also carries the new Subscribe request as a separate causal
+identity. Core requires that causal identity for command success; key equality
+alone cannot settle a later Subscribe because an older same-key replay may
+already be queued. WebView delivery is not an acknowledgement path.
 
 The replacement snapshot also reconciles actor-owned auxiliary projections
 before the replacement relay becomes live: media-source cache and media gallery
@@ -1516,8 +1520,9 @@ event. It is only ever set for the active, known room.
 stateDiagram-v2
     [*] --> Live
     Live --> Projecting: OpenAnchoredTimeline [Ready, active known room]
-    Projecting --> Projecting: InitialItems lost / EnsureSubscribed replay
-    Projecting --> Anchored: AcknowledgeTimelineProjection [same owner/key/generation, active actor lease]
+    Projecting --> Projecting: actor replacement / EnsureSubscribed replay
+    Projecting --> Anchored: FocusedProjectionCommitted [same request/key/actor/timeline generation, target present]
+    Projecting --> Live: FocusedProjectionCommitted [exact projection, target absent]
     Projecting --> Live: CloseFocusedContext / replacement / room change
     Anchored --> Projecting: OpenAnchoredTimeline [other event, active room]
     Anchored --> Live: CloseFocusedContext (live-edge return)
@@ -1527,19 +1532,19 @@ stateDiagram-v2
 
 - Activity Recent/Unread, search results, and both timestamp-jump paths use one
   Focused navigation contract. Core retains the pending navigation owner while
-  the actor emits `InitialItems`; the app-level WebView store acknowledges only
-  after applying the exact key/generation projection. Core acquires the active
-  actor-generation lease and only then dispatches `EnterAnchoredTimeline`.
-  They do not open the right panel.
-- `EnsureSubscribed` reprojects the actor-owned InitialItems identity while it
-  remains unacknowledged. There is no sleep, fixed retry count, visibility
-  heuristic, or command-side event observer inside the Rust success contract.
-  Before Core acceptance, one App-lifetime adapter may retry captured renderer
-  evidence at most seven total attempts on one of four closed channels (Room,
-  Thread, Focused, repair). View unmount does not cancel that job; account
-  replacement/reset and App teardown do. Queue acceptance ends adapter retry,
-  after which actor/request/generation/render fences and repair timeout are
-  Rust-owned.
+  the actor commits `InitialItems`; TimelineActor sends the exact
+  `FocusedProjectionCommitted` fact through the reliable manager/account/AppActor
+  route. AppActor acquires the active actor-generation lease and dispatches
+  `EnterAnchoredTimeline` only for the matching request/key/actor/timeline
+  generation and target-presence result. WebView application and DOM paint are
+  not part of this transition. These paths do not open the right panel.
+- `EnsureSubscribed` may reproject actor-owned InitialItems after transport loss,
+  but the internal focused-projection commit is independently reliable. There is
+  no sleep, fixed retry count, visibility heuristic, renderer acknowledgement,
+  or command-side event observer inside the Rust success contract.
+  Renderer application evidence remains local to the App/TimelineView owner for
+  layout and diagnostics. It may disappear on unmount and has no retry/backoff
+  delivery adapter, Core command, navigation consequence, or repair timeout.
 - `EnterAnchoredTimeline` is accepted only for a Ready session when `room_id` is
   the active, known room; otherwise it is ignored.
 - `CloseFocusedContext` is the live-edge return: it clears
@@ -1607,10 +1612,8 @@ stateDiagram-v2
     Incomplete --> Repairing: RepairRequested [coalesced]
     FailedIncomplete --> Repairing: RepairRequested [coalesced]
     Repairing --> AwaitingRelay: SDK reports a final tagged repair publication
-    AwaitingRelay --> AwaitingProjection: exact tagged publication assigned a desktop batch ID
+    AwaitingRelay --> Inspecting: GapProjectionRelayed [exact actor/timeline/repair/minimum batch]
     AwaitingRelay --> Inspecting: relay overflow / settlement deadline [authoritative resync, queued intent retained]
-    AwaitingProjection --> Inspecting: matching actor/timeline/repair/batch render ACK
-    AwaitingProjection --> Inspecting: actor replacement / render deadline [obsolete fence cleared, queued intent retained]
     Repairing --> Inspecting: successful no-diff outcome
     Repairing --> FailedIncomplete: RepairFailed [matching generation]
     Repairing --> FailedIncomplete: automatic zero-budget Deferred(0)
@@ -1623,7 +1626,6 @@ stateDiagram-v2
     Incomplete --> [*]: logout / account replacement
     Repairing --> [*]: logout / account replacement
     AwaitingRelay --> [*]: unsubscribe / logout / actor replacement
-    AwaitingProjection --> [*]: unsubscribe / logout / actor replacement
     FailedIncomplete --> [*]: logout / account replacement
 ```
 
@@ -1632,8 +1634,8 @@ stateDiagram-v2
   still match.
 - On Simplified Sliding Sync, room-entry `LiveEdge` work does not acquire the
   gap scheduler until the SDK has committed the current service response to the
-  room event cache. Timeline construction, `InitialItems`, and projection
-  acknowledgement remain available while waiting. The retained committed-room
+  room event cache. Timeline construction, `InitialItems`, and internal
+  projection commit remain available while waiting. The retained committed-room
   observation is replayed when the response beats actor registration. Manager
   routing fences the service instance epoch, room key, actor generation, and
   response/subscription generation, so a queued observation from a replaced
@@ -1652,30 +1654,30 @@ stateDiagram-v2
 - `Healthy` means the SDK proved the persisted timeline complete. No gap rows,
   an empty local list, a new live event, or edge `EndReached` cannot make this
   transition.
-- `AwaitingRelay` and `AwaitingProjection` are actor-private and do not enter `AppState`; the
-  public continuity remains `Repairing`. React reports only that the matching
-  presentation work committed through layout and never decides continuity.
-- `AwaitingRelay` and `AwaitingProjection` are bounded by actor-owned,
-  generation-tagged settlement deadlines. Relay overflow or an authoritative
-  replacement snapshot that cannot contain the pending correlation clears the
-  obsolete correlation; actor/timeline generation replacement clears an old
-  render fence. Both paths retain the highest-priority queued trigger and
-  return through authoritative resync/re-inspection. A stale timer is ignored.
+- `AwaitingRelay` is actor-private and does not enter `AppState`; public
+  continuity remains `Repairing`. React may report viewport facts and settle
+  local layout, but never decides continuity.
+- `AwaitingRelay` is bounded by an actor-owned, generation-tagged internal
+  settlement deadline. Relay overflow or an authoritative replacement snapshot
+  that cannot contain the pending correlation clears the obsolete correlation.
+  Actor/timeline replacement makes a late `GapProjectionRelayed` inert. These
+  paths retain the highest-priority queued trigger and return through
+  authoritative resync/re-inspection; stale timers/signals are ignored.
 - SDK repair publications carry actor, repair, and repair-publication
   generations through the UI timeline relay. A diff-producing repair outcome
   re-inspects only after the final tagged publication receives an exact desktop
-  batch ID and React reports a matching-or-newer rendered batch ACK with the
-  same actor, timeline, and repair generations. A successful no-diff outcome
-  may re-inspect immediately. Core never closes a gap from an unverified local
-  guess.
+  batch ID and the relay returns matching-or-newer
+  `GapProjectionRelayed` actor/timeline/repair/minimum-batch evidence to the
+  TimelineActor. A successful no-diff outcome may re-inspect immediately. Core
+  never closes a gap from an unverified local or renderer guess.
 - Automatic repair uses no cached-chunk hydration. If the SDK returns
   `Deferred(0)`, Core stops instead of spinning through the repair ceiling and
   leaves the projected gap retryable through manual repair.
 - `ObserveViewport` selects a projected gap candidate by viewport intersection,
   then live-edge proximity. A candidate/relation change queues automatic
   inspection; repeating the same candidate is idle. The queue survives an
-  active inspection and `AwaitingProjection`, so projection ACK and viewport
-  event order cannot lose the wake-up.
+  active inspection and `AwaitingRelay`, so internal relay settlement and
+  viewport event order cannot lose the wake-up.
 - Manual repair coalesces with an active automatic repair. Failures preserve
   the current event projection and leave a visible retryable gap state. After
   terminal failure processing first restarts any queued candidate inspection,
