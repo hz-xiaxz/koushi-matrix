@@ -1288,6 +1288,21 @@ async fn same_batch_select_room_settles_only_final_selection() {
 }
 
 #[test]
+fn bootstrap_cross_signing_command_projects_pending_state_before_account_route() {
+    let request_id = RequestId {
+        connection_id: RuntimeConnectionId(1),
+        sequence: 6,
+    };
+    assert_eq!(
+        account_command_projected_action(&AccountCommand::BootstrapCrossSigning {
+            request_id,
+            auth: None,
+        }),
+        Some(AppAction::BootstrapCrossSigningRequested { request_id: 6 })
+    );
+}
+
+#[test]
 fn identity_reset_auth_command_projects_pending_state_before_routing() {
     let request_id = RequestId {
         connection_id: RuntimeConnectionId(1),

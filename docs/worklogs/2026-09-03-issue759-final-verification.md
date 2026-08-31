@@ -64,3 +64,9 @@ Fireworks DeepSeek V4 Flash 0731 reviewed the complete `origin/main...HEAD` inte
 - the snapshot DTO comment now documents only initial, settlement-resync, and gap-resync reads.
 
 Focused App/contract tests (88), typecheck, command ownership guard, and diff check passed after these fixes. Re-review returned `CORRECT-TO-PR`; its two non-blocking guard-robustness notes were also fixed by recursively scanning command submodules and ignoring bodyless trait async declarations without swallowing the next function.
+
+## Hosted CI triage
+
+The first hosted Browser job had two full-suite timing failures (avatar delivery and schema-mismatch replacement); both local lanes had passed. Its single evidence-backed manual rerun passed all 264 tests.
+
+The Rust job reproducibly exposed an obsolete transient-state assertion in `runtime_e2ee`: with the ordered latest snapshot watch, the account route can publish terminal SDK failure before a waiter observes the intermediate cross-signing pending snapshot. The test was split along the actual contracts: a unit test now pins the pre-route `BootstrapCrossSigningRequested` projection, while the integration test waits for the correlated terminal failure when no SDK session exists. The complete two-test `runtime_e2ee` target and focused unit test pass serially. A fresh hosted Rust run is required before merge.

@@ -156,7 +156,7 @@ async fn provisional_verification_hands_one_encryption_sync_owner_to_normal_runt
 }
 
 #[tokio::test]
-async fn e2ee_trust_account_command_projects_pending_state_before_routing() {
+async fn e2ee_trust_account_command_settles_without_an_sdk_session() {
     let runtime = CoreRuntime::start();
     let mut connection = runtime.attach();
 
@@ -181,15 +181,14 @@ async fn e2ee_trust_account_command_projects_pending_state_before_routing() {
     let snapshot = wait_for_state_event(&mut connection, |state| {
         matches!(
             state.e2ee_trust.cross_signing,
-            CrossSigningStatus::Bootstrapping { .. }
+            CrossSigningStatus::Failed { request_id: observed, .. }
+                if observed == request_id.sequence
         )
     })
     .await;
-
-    assert_eq!(
+    assert!(matches!(
         snapshot.e2ee_trust.cross_signing,
-        CrossSigningStatus::Bootstrapping {
-            request_id: request_id.sequence,
-        }
-    );
+        CrossSigningStatus::Failed { request_id: observed, .. }
+            if observed == request_id.sequence
+    ));
 }
