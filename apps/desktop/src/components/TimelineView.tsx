@@ -1611,8 +1611,16 @@ export const TimelineView = memo(function TimelineView({
     lastViewportObservationRef.current = null;
     downloadedEventIdsRef.current = new Set();
     requestedImagePreviewEventIdsRef.current = new Set();
-    requestedAvatarMxcsRef.current = new Set();
-    avatarRetryCountsRef.current = new Map();
+    requestedAvatarMxcsRef.current = new Set(
+      [...requestedAvatarMxcsRef.current].filter((mxcUri) =>
+        relevantAvatarMxcsRef.current.has(mxcUri)
+      )
+    );
+    avatarRetryCountsRef.current = new Map(
+      [...avatarRetryCountsRef.current].filter(([mxcUri]) =>
+        relevantAvatarMxcsRef.current.has(mxcUri)
+      )
+    );
     initialItemsSeenForTimelineKeyRef.current = null;
     lastDiagnosticsEmissionRef.current = null;
     initialLiveEdgeScrollAppliedRef.current = null;
