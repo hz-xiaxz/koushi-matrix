@@ -164,6 +164,13 @@ test("timeline sender avatars render after headless account thumbnail events", a
       ])
     );
 
+  // The invocation recorder observes the mock call synchronously. Real Tauri
+  // completion is asynchronous, so yield one browser task after the request
+  // effect before injecting the account-owned completion event.
+  await page.evaluate(
+    () => new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+  );
+
   await page.evaluate(async () => {
     for (const [mxcUri, sourceUrl, sequence] of [
       [

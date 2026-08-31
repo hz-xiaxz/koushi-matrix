@@ -392,9 +392,9 @@ export const TimelineView = memo(function TimelineView({
   continuity?: TimelineContinuityState;
   roomScrollAnchor?: TimelineScrollAnchor | null;
   /**
-   * Temporary #116 perf gate. Defaults to AVATAR_THUMBNAIL_DOWNLOADS_ENABLED
-   * (currently false). Set to true in tests that verify the firing path, or
-   * when re-enabling downloads behind a Rust-owned setting + cache.
+   * #116 perf gate. Defaults to the enabled
+   * AVATAR_THUMBNAIL_DOWNLOADS_ENABLED policy; tests may disable it to isolate
+   * unrelated timeline behavior.
    */
   enableAvatarThumbnailDownloads?: boolean;
   onDiagnosticsChange?: (diagnostics: TimelineDiagnostics) => void;
@@ -1611,16 +1611,9 @@ export const TimelineView = memo(function TimelineView({
     lastViewportObservationRef.current = null;
     downloadedEventIdsRef.current = new Set();
     requestedImagePreviewEventIdsRef.current = new Set();
-    requestedAvatarMxcsRef.current = new Set(
-      [...requestedAvatarMxcsRef.current].filter((mxcUri) =>
-        relevantAvatarMxcsRef.current.has(mxcUri)
-      )
-    );
-    avatarRetryCountsRef.current = new Map(
-      [...avatarRetryCountsRef.current].filter(([mxcUri]) =>
-        relevantAvatarMxcsRef.current.has(mxcUri)
-      )
-    );
+    relevantAvatarMxcsRef.current = new Set();
+    requestedAvatarMxcsRef.current = new Set();
+    avatarRetryCountsRef.current = new Map();
     initialItemsSeenForTimelineKeyRef.current = null;
     lastDiagnosticsEmissionRef.current = null;
     initialLiveEdgeScrollAppliedRef.current = null;
@@ -1691,10 +1684,9 @@ export const TimelineView = memo(function TimelineView({
     [resetActiveMeasurementDeferral]
   );
 
-  // Keep the relevance fence current during render. An effect-only update leaves
-  // a commit-to-effect gap where an already requested account thumbnail can be
-  // ignored after a timeline reset.
-  relevantAvatarMxcsRef.current = timelineAvatarMxcsForItems(items, profileUsers);
+  useEffect(() => {
+    relevantAvatarMxcsRef.current = timelineAvatarMxcsForItems(items, profileUsers);
+  }, [items, profileUsers]);
   const visibleItems = useMemo(() => items.filter((item) => !item.is_hidden), [items]);
   // The SDK-owned store stays canonical. Only these presentation rows feed
   // rendering, measuring, and virtualization for an opt-in Room projection.
