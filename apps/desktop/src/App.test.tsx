@@ -1400,7 +1400,7 @@ describe("ContextualRightPanel", () => {
     expect(source).not.toContain('Extract<CoreEventPayload, { kind: "StateDelta" }>');
   });
 
-  test("renderer projection ACK is absent while repair ACK retry remains App-owned", () => {
+  test("renderer timeline acknowledgement routes are absent", () => {
     const source = readFileSync(new URL("./components/TimelineView.tsx", import.meta.url), "utf8");
     const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
     const transportSource = readFileSync(
@@ -1408,19 +1408,16 @@ describe("ContextualRightPanel", () => {
       "utf8"
     );
 
-    expect(source).not.toContain("acknowledgeProjection");
-    expect(source).not.toContain("projectionAcknowledgementInFlightRef");
-    expect(source).not.toContain("repairAcknowledgementRetryRef");
-    expect(source).not.toContain("retry.attempts");
-    expect(source).toContain("repairAcknowledgementInFlightRef.current = null");
-    expect(appSource).toContain("timelineAcknowledgementDeliveryRef");
-    expect(appSource).toContain("timelineAcknowledgementDeliveryRef.current?.reset()");
-    expect(appSource).toContain("timelineAcknowledgementDeliveryRef.current?.dispose()");
-    expect(appSource).not.toContain("acknowledgeTimelineProjection");
-    expect(appSource).not.toContain("acknowledgeProjection");
-    expect(appSource).toContain("getTimelineAcknowledgementDelivery().acknowledgeRenderedBatch");
-    expect(transportSource).not.toContain("acknowledgeProjection");
-    expect(transportSource).toContain("acknowledgeRenderedBatch");
+    for (const removed of [
+      "acknowledgeProjection",
+      "acknowledgeRenderedBatch",
+      "AcknowledgementInFlightRef",
+      "timelineAcknowledgementDelivery"
+    ]) {
+      expect(source).not.toContain(removed);
+      expect(appSource).not.toContain(removed);
+      expect(transportSource).not.toContain(removed);
+    }
   });
 
   test("Tauri timeline ensure waits for the webview CoreEvent listener registration", () => {

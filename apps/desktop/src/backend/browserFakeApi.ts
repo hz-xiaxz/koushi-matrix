@@ -1461,10 +1461,6 @@ class BrowserFakeApi implements DesktopApi {
     return this.openActivityEvent(roomId, eventId);
   }
 
-  async acknowledgeTimelineBatchRendered(): Promise<void> {
-    // Browser fakes apply timeline batches synchronously and have no Core actor lease.
-  }
-
   async openTimelineAtTimestamp(
     roomId: string,
     timestampMs: number

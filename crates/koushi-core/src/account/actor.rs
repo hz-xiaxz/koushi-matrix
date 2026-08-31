@@ -34,9 +34,7 @@ use crate::event::{
 #[cfg(test)]
 use crate::executor;
 use crate::failure::CoreFailure;
-use crate::ids::{
-    AccountKey, RequestId, TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind,
-};
+use crate::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
 use crate::link_preview::LinkPreviewContext;
 #[cfg(feature = "test-hooks")]
 use crate::room::RoomOperationTestControl;
@@ -175,13 +173,6 @@ pub(crate) enum AccountMessage {
         requests: Vec<crate::activity_resolution::ActivityResolutionRequest>,
     },
     CancelActivityResolution,
-    AcknowledgeTimelineBatchRendered {
-        key: TimelineKey,
-        actor_generation: u64,
-        timeline_generation: TimelineGeneration,
-        repair_generation: u64,
-        batch_id: TimelineBatchId,
-    },
     ScheduleServerDelayedSend {
         request_id: RequestId,
         expected_account: SessionKeyId,
@@ -1296,24 +1287,6 @@ impl AccountActor {
                     if let Some(task) = self.activity_resolution_task.take() {
                         task.abort();
                     }
-                }
-                AccountMessage::AcknowledgeTimelineBatchRendered {
-                    key,
-                    actor_generation,
-                    timeline_generation,
-                    repair_generation,
-                    batch_id,
-                } => {
-                    let _ = self
-                        .timeline_manager
-                        .send(TimelineMessage::AcknowledgeBatchRendered {
-                            key,
-                            actor_generation,
-                            timeline_generation,
-                            repair_generation,
-                            batch_id,
-                        })
-                        .await;
                 }
                 AccountMessage::ScheduleServerDelayedSend {
                     request_id,

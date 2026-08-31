@@ -10,14 +10,6 @@ export interface TimelineTransport {
   listenCoreEvents(listener: (payload: CoreEventPayload) => void): () => void;
   /** Re/subscribe this key after the listener is active so InitialItems cannot be missed. */
   ensureSubscribed?(timelineKey: TimelineKey): Promise<void>;
-  /** Confirm that one repair-produced Room batch committed through layout. */
-  acknowledgeRenderedBatch?(
-    timelineKey: TimelineKey,
-    actorGeneration: number,
-    timelineGeneration: number,
-    repairGeneration: number,
-    batchId: number
-  ): Promise<void>;
   /** Invoke a backward-pagination command for this timeline key. */
   paginateBackwards(timelineKey: TimelineKey): Promise<void>;
   repairTimeline?(roomId: string): Promise<void>;

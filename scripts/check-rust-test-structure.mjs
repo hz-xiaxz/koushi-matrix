@@ -789,14 +789,6 @@ export function checkDesktopSpaceTraceContract() {
   return failures;
 }
 
-export function checkDesktopTimelineGenerationAckContract() {
-  const rule = "desktop.timeline.generation_ack_contract";
-  const body = rustItemBody(readTauriSource("commands/navigation.rs"), "pub async fn acknowledge_timeline_batch_rendered");
-  const failures = [];
-  for (const marker of ["key: TimelineKey", "actor_generation: u64", "timeline_generation: TimelineGeneration", "repair_generation: u64", "batch_id: TimelineBatchId", "AppCommand::AcknowledgeTimelineBatchRendered"]) if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `timeline ACK lacks ${marker}`));
-  return failures;
-}
-
 export function checkDesktopTimelineCommandContract() {
   const rule = "desktop.timeline.command_contract";
   const source = readTauriSource("commands/timeline.rs");
@@ -3792,7 +3784,6 @@ export function runSourceContractRules() {
     checkDesktopSettingsCommandContract(),
     checkDesktopNavigationContract(),
     checkDesktopSpaceTraceContract(),
-    checkDesktopTimelineGenerationAckContract(),
     checkDesktopTimelineCommandContract(),
     checkDesktopTimelineSignalContract(),
     checkDesktopScheduledSendCommandContract(),

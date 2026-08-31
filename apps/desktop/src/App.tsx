@@ -14,10 +14,6 @@ import { api } from "./backend/appRuntime";
 import { desktopEventPort } from "./backend/desktopEventRuntime";
 import { openExternalHttpUrl } from "./backend/linkMediaRuntime";
 import { isTauriRuntime } from "./backend/runtimeEnvironment";
-import {
-  createTimelineAcknowledgementDelivery,
-  type TimelineAcknowledgementDelivery
-} from "./backend/timelineAcknowledgementDelivery";
 import { windowDialogPort } from "./backend/windowDialogRuntime";
 import { tauriTimelineTransport } from "./backend/tauriTimelineTransport";
 import {
@@ -918,28 +914,6 @@ export function App() {
   if (submissionRegistryRef.current === null) {
     submissionRegistryRef.current = createComposerSubmissionControllerRegistry();
   }
-  const timelineAcknowledgementDeliveryRef =
-    useRef<TimelineAcknowledgementDelivery | null>(null);
-  const getTimelineAcknowledgementDelivery = useCallback(() => {
-    timelineAcknowledgementDeliveryRef.current ??= createTimelineAcknowledgementDelivery({
-      submitRepair: (
-        key,
-        actorGeneration,
-        timelineGeneration,
-        repairGeneration,
-        batchId
-      ) =>
-        api.acknowledgeTimelineBatchRendered(
-          key,
-          actorGeneration,
-          timelineGeneration,
-          repairGeneration,
-          batchId
-        )
-    });
-    return timelineAcknowledgementDeliveryRef.current;
-  }, []);
-
   function retireComposerRendererGeneration(): void {
     const mainOverlay = mainComposerOverlayRef.current;
     if (mainOverlay?.debounceHandle !== null && mainOverlay) {
@@ -962,7 +936,6 @@ export function App() {
     const owner = account ? composerDraftAccountOwnerKey(account) : null;
     const ownerChanged = composerDraftLifecycleOwnerRef.current !== owner;
     if (ownerChanged) {
-      timelineAcknowledgementDeliveryRef.current?.reset();
       retireComposerRendererGeneration();
     }
     submissionAccountOwnerRef.current = owner;
@@ -1236,21 +1209,6 @@ export function App() {
     }
     return {
       ...tauriTimelineTransport,
-      acknowledgeRenderedBatch(
-        key,
-        actorGeneration,
-        timelineGeneration,
-        repairGeneration,
-        batchId
-      ) {
-        return getTimelineAcknowledgementDelivery().acknowledgeRenderedBatch(
-          key,
-          actorGeneration,
-          timelineGeneration,
-          repairGeneration,
-          batchId
-        );
-      },
       async pinEvent(roomId: string, eventId: string) {
         await settleCommand(api.pinEvent(roomId, eventId));
       },
@@ -1663,8 +1621,6 @@ export function App() {
         window.clearTimeout(threadOverlay.debounceHandle);
       }
       composerDraftLifecycleRegistryRef.current?.revokeRendererGeneration();
-      timelineAcknowledgementDeliveryRef.current?.dispose();
-      timelineAcknowledgementDeliveryRef.current = null;
     };
   }, []);
 

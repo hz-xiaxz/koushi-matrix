@@ -255,52 +255,6 @@ fn focused_projection_command_redacts_matrix_identifiers() {
 }
 
 #[test]
-fn acknowledge_timeline_batch_rendered_preserves_fences_and_redacts_key() {
-    let request_id = fake_rid(30);
-    let command = AppCommand::AcknowledgeTimelineBatchRendered {
-        request_id,
-        key: TimelineKey {
-            account_key: AccountKey("@private:example.invalid".to_owned()),
-            kind: crate::ids::TimelineKind::Room {
-                room_id: "!private-room:example.invalid".to_owned(),
-            },
-        },
-        actor_generation: 9,
-        timeline_generation: TimelineGeneration(3),
-        repair_generation: 11,
-        batch_id: crate::ids::TimelineBatchId(5),
-    };
-
-    assert_eq!(CoreCommand::App(command).request_id(), request_id);
-    let debug = format!(
-        "{:?}",
-        AppCommand::AcknowledgeTimelineBatchRendered {
-            request_id,
-            key: TimelineKey {
-                account_key: AccountKey("@private:example.invalid".to_owned()),
-                kind: crate::ids::TimelineKind::Room {
-                    room_id: "!private-room:example.invalid".to_owned(),
-                },
-            },
-            actor_generation: 9,
-            timeline_generation: TimelineGeneration(3),
-            repair_generation: 11,
-            batch_id: crate::ids::TimelineBatchId(5),
-        }
-    );
-    for expected in [
-        "actor_generation: 9",
-        "repair_generation: 11",
-        "TimelineBatchId(5)",
-    ] {
-        assert!(debug.contains(expected), "{debug}");
-    }
-    assert!(debug.contains("TimelineKey(..)"), "{debug}");
-    assert!(!debug.contains("@private:example.invalid"), "{debug}");
-    assert!(!debug.contains("!private-room:example.invalid"), "{debug}");
-}
-
-#[test]
 fn native_attention_command_debug_redacts_candidate_labels() {
     let command = AppCommand::UpdateNativeAttentionState {
         request_id: fake_rid(27),

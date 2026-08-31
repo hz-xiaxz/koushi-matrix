@@ -181,13 +181,6 @@ export interface DesktopApi {
   openActivityEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
   openPinnedEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
   selectSearchResult(roomId: string, eventId: string): Promise<CommandSettlement>;
-  acknowledgeTimelineBatchRendered(
-    key: TimelineKey,
-    actorGeneration: number,
-    timelineGeneration: number,
-    repairGeneration: number,
-    batchId: number
-  ): Promise<void>;
   openTimelineAtTimestamp(roomId: string, timestampMs: number): Promise<CommandSettlement>;
   closeFocusedContext(): Promise<CommandSettlement>;
   closeSearch(): Promise<CommandSettlement>;

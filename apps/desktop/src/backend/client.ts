@@ -901,22 +901,6 @@ export class TauriDesktopApi implements DesktopApi {
     return invoke<CommandSettlement>("open_pinned_event", { roomId, eventId });
   }
 
-  async acknowledgeTimelineBatchRendered(
-    key: TimelineKey,
-    actorGeneration: number,
-    timelineGeneration: number,
-    repairGeneration: number,
-    batchId: number
-  ): Promise<void> {
-    return invoke<void>("acknowledge_timeline_batch_rendered", {
-      key,
-      actorGeneration,
-      timelineGeneration,
-      repairGeneration,
-      batchId
-    });
-  }
-
   async openTimelineAtTimestamp(
     roomId: string,
     timestampMs: number

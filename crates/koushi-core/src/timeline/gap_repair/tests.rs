@@ -43,24 +43,24 @@ use super::super::relay::TimelineRelayBatch;
 use super::super::test_support::{fake_rid, live_tail_test_manager};
 use super::super::thread_projection::ThreadAttentionBatchProvenance;
 use super::{
-    GapBoundaryPresenceCounts, GapRepairEvaluationDiagnosticSignature, GapRepairSelection,
-    GapRepairViewportWakeDecision, GlobalCommitDecision, GlobalCommitFence, GlobalResponseCommit,
-    LiveEdgeGapSelection, LiveEdgeSelectionDecision, MAX_LIVE_EDGE_GAP_REPAIR_BATCHES,
-    MAX_TIMELINE_GAP_REPAIR_BATCHES, MissingCommittedGapDecision, PendingTimelineGapProjection,
-    ProjectedGapCandidate, ProjectedGapRelation, TestGapRepairCompletionPause,
-    TimelineGapAttemptResetReason, TimelineGapObservableSettlement,
-    TimelineGapProjectionCompletion, TimelineGapProjectionCorrelation, TimelineGapRenderFence,
-    TimelineGapRepairTracker, TimelineGapRepairTrigger, UnlocatedGapAction, UnprojectedGapReason,
+    GapBoundaryPresenceCounts, GapProjectionRelayed, GapRepairEvaluationDiagnosticSignature,
+    GapRepairSelection, GapRepairViewportWakeDecision, GlobalCommitDecision, GlobalCommitFence,
+    GlobalResponseCommit, LiveEdgeGapSelection, LiveEdgeSelectionDecision,
+    MAX_LIVE_EDGE_GAP_REPAIR_BATCHES, MAX_TIMELINE_GAP_REPAIR_BATCHES, MissingCommittedGapDecision,
+    PendingTimelineGapProjection, ProjectedGapCandidate, ProjectedGapRelation,
+    TestGapRepairCompletionPause, TimelineGapAttemptResetReason, TimelineGapObservableSettlement,
+    TimelineGapProjectionCompletion, TimelineGapProjectionCorrelation, TimelineGapRepairTracker,
+    TimelineGapRepairTrigger, UnlocatedGapAction, UnprojectedGapReason,
     admit_and_record_timeline_gap_repair_attempt, evaluate_gap_repair_viewport_wake,
-    gap_repair_continuation_trigger, gap_repair_work_kind, gap_selection_diagnostic_decision,
-    global_commit_gap_selection, historical_causal_projection_operation,
-    is_global_commit_inspection_target, live_tail_completion_requires_snapshot,
-    missing_committed_gap_decision, post_diff_gap_inspection_trigger, projected_gap_id,
-    projected_gap_identity_matches_descriptor, projected_gap_insertion_index,
-    record_timeline_gap_repair_result, recover_obsolete_gap_settlement, rendered_live_edge_target,
-    select_gap_repair_candidate, select_projected_gap_candidate, select_projected_gap_id,
-    should_record_gap_repair_evaluation, summarize_gap_boundary_presence,
-    timeline_gap_repair_budget, timeline_gap_repair_made_progress,
+    gap_projection_relay_is_current, gap_repair_continuation_trigger, gap_repair_work_kind,
+    gap_selection_diagnostic_decision, global_commit_gap_selection,
+    historical_causal_projection_operation, is_global_commit_inspection_target,
+    live_tail_completion_requires_snapshot, missing_committed_gap_decision,
+    post_diff_gap_inspection_trigger, projected_gap_id, projected_gap_identity_matches_descriptor,
+    projected_gap_insertion_index, record_timeline_gap_repair_result,
+    recover_obsolete_gap_settlement, rendered_live_edge_target, select_gap_repair_candidate,
+    select_projected_gap_candidate, select_projected_gap_id, should_record_gap_repair_evaluation,
+    summarize_gap_boundary_presence, timeline_gap_repair_budget, timeline_gap_repair_made_progress,
     timeline_gap_repair_result_diagnostic, timeline_gap_repair_trigger_token, unlocated_gap_action,
     wait_for_gap_repair_projection_with_timeout,
 };
@@ -646,25 +646,46 @@ fn viewport_wake_requests_again_when_viewport_selects_another_gap() {
 }
 
 #[test]
-fn viewport_wake_preserves_pending_trigger_while_render_ack_is_outstanding() {
-    let projected = vec![(0, projected_gap_position(7, 0, 8))];
-    let mut tracker = TimelineGapRepairTracker::default();
-    tracker.await_projection(TimelineGapRenderFence {
+fn internal_gap_projection_relay_fences_actor_timeline_repair_and_batch() {
+    let expected = GapProjectionRelayed {
         actor_generation: 9,
         timeline_generation: TimelineGeneration(3),
         repair_generation: 11,
         minimum_batch_id: TimelineBatchId(5),
-    });
-
-    let decision = evaluate_gap_repair_viewport_wake(&projected, Some((5, 10)), &[], None);
-    assert!(matches!(
-        decision,
-        GapRepairViewportWakeDecision::Wake { .. }
+    };
+    assert!(gap_projection_relay_is_current(
+        expected,
+        9,
+        TimelineGeneration(3),
+        11,
+        TimelineBatchId(5),
     ));
-    tracker.queue_inspection(TimelineGapRepairTrigger::Automatic);
-
-    assert_eq!(tracker.begin_pending_inspection(true), None);
-    assert!(tracker.has_pending_inspection());
+    for stale in [
+        GapProjectionRelayed {
+            actor_generation: 8,
+            ..expected
+        },
+        GapProjectionRelayed {
+            timeline_generation: TimelineGeneration(2),
+            ..expected
+        },
+        GapProjectionRelayed {
+            repair_generation: 10,
+            ..expected
+        },
+        GapProjectionRelayed {
+            minimum_batch_id: TimelineBatchId(4),
+            ..expected
+        },
+    ] {
+        assert!(!gap_projection_relay_is_current(
+            stale,
+            9,
+            TimelineGeneration(3),
+            11,
+            TimelineBatchId(5),
+        ));
+    }
 }
 
 #[test]
@@ -694,7 +715,7 @@ fn observe_viewport_wakes_only_after_projected_candidate_changes() {
 #[test]
 fn viewport_wake_evaluation_diagnostics_are_private_safe() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    record_timeline_gap_repair_evaluation("wake", 2, 1, true, true, "awaiting_render_ack");
+    record_timeline_gap_repair_evaluation("wake", 2, 1, true, true, "awaiting_relay");
 
     let record = koushi_diagnostics::test_support::detail_snapshot()
         .records
@@ -729,7 +750,7 @@ fn viewport_wake_evaluation_diagnostics_are_private_safe() {
 }
 
 #[test]
-fn gap_repair_wake_is_retained_across_ack_and_inspection_order() {
+fn gap_repair_wake_is_retained_across_inspection_order() {
     let projected = vec![
         (0, projected_gap_position(7, 0, 3)),
         (1, projected_gap_position(7, 1, 18)),
@@ -759,26 +780,6 @@ fn gap_repair_wake_is_retained_across_ack_and_inspection_order() {
         .expect("active inspection completion releases the changed candidate");
     assert!(tracker.finish_work(second_serial));
 
-    let fence = TimelineGapRenderFence {
-        actor_generation: 9,
-        timeline_generation: TimelineGeneration(3),
-        repair_generation: 11,
-        minimum_batch_id: TimelineBatchId(5),
-    };
-    tracker.await_projection(fence);
-    assert!(matches!(
-        tracker.evaluate_viewport_wake(Some((1, 5)), &[]),
-        GapRepairViewportWakeDecision::Wake { .. }
-    ));
-    tracker.queue_inspection(TimelineGapRepairTrigger::Automatic);
-    assert_eq!(tracker.begin_pending_inspection(true), None);
-    assert!(tracker.acknowledge_projection(fence));
-    assert!(tracker.begin_pending_inspection(true).is_some());
-
-    assert!(matches!(
-        tracker.evaluate_viewport_wake(Some((1, 5)), &[]),
-        GapRepairViewportWakeDecision::IdleUnchangedCandidate { .. }
-    ));
     assert_eq!(
         timeline_gap_repair_budget(
             TimelineGapRepairTrigger::Automatic,
@@ -1195,7 +1196,7 @@ fn repaired_live_edge_does_not_continue_into_an_unrelated_historical_gap() {
 }
 
 #[test]
-fn actor_fixture_recovers_relation_bounded_live_edge_after_exact_render_ack() {
+fn actor_fixture_recovers_relation_bounded_live_edge_after_internal_relay() {
     // The raw newest boundary is an edit/reaction and therefore has no
     // standalone projected row. The rendered owner still supplies the
     // actor-private live-edge target.
@@ -1215,11 +1216,11 @@ fn actor_fixture_recovers_relation_bounded_live_edge_after_exact_render_ack() {
     assert_eq!(
         tracker.begin_pending_inspection(false),
         None,
-        "the initial projection must be acknowledged before inspection"
+        "the initial actor projection must commit before inspection"
     );
     let (inspection_serial, trigger) = tracker
         .begin_pending_inspection(true)
-        .expect("initial render ACK releases live-edge inspection");
+        .expect("initial actor projection releases live-edge inspection");
     assert_eq!(trigger, TimelineGapRepairTrigger::LiveEdge);
     assert!(tracker.finish_work(inspection_serial));
 
@@ -1291,26 +1292,22 @@ fn actor_fixture_recovers_relation_bounded_live_edge_after_exact_render_ack() {
     );
     assert_eq!(continuation, TimelineGapRepairTrigger::Automatic);
     tracker.queue_inspection(continuation);
-    let fence = TimelineGapRenderFence {
+    let relayed = GapProjectionRelayed {
         actor_generation,
         timeline_generation,
         repair_generation: repair_serial,
         minimum_batch_id: rendered_batch_id,
     };
-    tracker.await_projection(fence);
-    assert!(!tracker.acknowledge_projection(TimelineGapRenderFence {
-        minimum_batch_id: TimelineBatchId(rendered_batch_id.0 - 1),
-        ..fence
-    }));
-    assert_eq!(
-        tracker.begin_pending_inspection(true),
-        None,
-        "an unrelated or older render ACK cannot release continuation"
-    );
-    assert!(tracker.acknowledge_projection(fence));
+    assert!(gap_projection_relay_is_current(
+        relayed,
+        actor_generation,
+        timeline_generation,
+        repair_serial,
+        rendered_batch_id,
+    ));
     let (continuation_serial, continuation) = tracker
         .begin_pending_inspection(true)
-        .expect("the exact render ACK releases continuation");
+        .expect("the exact internal relay releases continuation");
     assert_eq!(
         select_gap_repair_candidate(
             continuation,
@@ -1344,7 +1341,7 @@ fn live_edge_diagnostic_trigger_is_private_safe() {
 }
 
 #[test]
-fn subscription_inspection_waits_for_initial_projection_ack() {
+fn subscription_inspection_waits_for_initial_projection_commit() {
     let mut tracker = TimelineGapRepairTracker::default();
     tracker.queue_inspection(TimelineGapRepairTrigger::Automatic);
     assert_eq!(tracker.begin_pending_inspection(false), None);
@@ -1353,50 +1350,6 @@ fn subscription_inspection_waits_for_initial_projection_ack() {
         tracker.begin_pending_inspection(true),
         Some((_, TimelineGapRepairTrigger::Automatic))
     ));
-}
-
-#[test]
-fn repair_continuation_requires_the_matching_render_fence() {
-    let mut tracker = TimelineGapRepairTracker::default();
-    let fence = TimelineGapRenderFence {
-        actor_generation: 9,
-        timeline_generation: TimelineGeneration(3),
-        repair_generation: 11,
-        minimum_batch_id: TimelineBatchId(5),
-    };
-    tracker.await_projection(fence);
-
-    assert!(!tracker.acknowledge_projection(TimelineGapRenderFence {
-        repair_generation: 10,
-        ..fence
-    }));
-    assert!(!tracker.acknowledge_projection(TimelineGapRenderFence {
-        minimum_batch_id: TimelineBatchId(4),
-        ..fence
-    }));
-    assert!(tracker.acknowledge_projection(TimelineGapRenderFence {
-        minimum_batch_id: TimelineBatchId(6),
-        ..fence
-    }));
-}
-
-#[test]
-fn render_ack_timeout_clears_fence_and_requeues_live_edge() {
-    let mut tracker = TimelineGapRepairTracker::default();
-    let fence = TimelineGapRenderFence {
-        actor_generation: 9,
-        timeline_generation: TimelineGeneration(3),
-        repair_generation: 11,
-        minimum_batch_id: TimelineBatchId(5),
-    };
-    tracker.await_projection(fence);
-
-    assert!(tracker.recover_projection_timeout(fence, TimelineGapRepairTrigger::LiveEdge,));
-    let (_, trigger) = tracker
-        .begin_pending_inspection(true)
-        .expect("the matching timeout must release and requeue LiveEdge");
-    assert_eq!(trigger, TimelineGapRepairTrigger::LiveEdge);
-    assert!(!tracker.recover_projection_timeout(fence, TimelineGapRepairTrigger::Manual,));
 }
 
 #[test]

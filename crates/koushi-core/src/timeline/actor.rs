@@ -52,10 +52,10 @@ use super::gap_repair::{
     GapRepairEvaluationDiagnosticSignature, GapRepairViewportWakeDecision, GlobalCommitDecision,
     GlobalCommitFence, GlobalResponseCommit, PendingLiveTailRefreshCompletion,
     PendingTimelineGapProjection, RestoreCausalProjectionBuffer, TimelineGapProjectionCorrelation,
-    TimelineGapRenderFence, TimelineGapRepairTracker, TimelineGapRepairTrigger,
-    historical_causal_projection_operation, projected_gaps_contain_id, rendered_live_edge_target,
-    retain_room_subscription_checkpoint, room_checkpoint_advances_global_fence,
-    should_record_gap_repair_evaluation, timeline_gap_repair_trigger_token,
+    TimelineGapRepairTracker, TimelineGapRepairTrigger, historical_causal_projection_operation,
+    projected_gaps_contain_id, rendered_live_edge_target, retain_room_subscription_checkpoint,
+    room_checkpoint_advances_global_fence, should_record_gap_repair_evaluation,
+    timeline_gap_repair_trigger_token,
 };
 use super::item_projection::{
     ReceiptObservationTarget, apply_ignored_sender_suppression, apply_link_previews_to_item,
@@ -243,10 +243,6 @@ pub(super) enum TimelineActorMessage {
         repair_generation: u64,
         trigger: TimelineGapRepairTrigger,
     },
-    TimelineGapRenderSettlementDue {
-        fence: TimelineGapRenderFence,
-        trigger: TimelineGapRepairTrigger,
-    },
     Paginate {
         request_id: RequestId,
         direction: PaginationDirection,
@@ -412,12 +408,6 @@ pub(super) enum TimelineActorMessage {
     /// its exact cause; internal recovery replay is causeless.
     ReplayInitialItems {
         cause_request_id: Option<RequestId>,
-    },
-    AcknowledgeBatchRendered {
-        actor_generation: u64,
-        timeline_generation: TimelineGeneration,
-        repair_generation: u64,
-        batch_id: TimelineBatchId,
     },
     #[cfg(test)]
     TestBeginRestore {
@@ -818,7 +808,7 @@ pub(super) struct TimelineActor {
     /// Stable identity of the actor-owned InitialItems projection. Replays
     /// preserve this id so a remounted consumer acknowledges the same owner.
     pub(super) projection_request_id: RequestId,
-    pub(super) projection_acknowledged: bool,
+    pub(super) initial_projection_committed: bool,
     pub(super) next_batch_id: TimelineBatchId,
     /// Correlates send queue completions across the enqueue / SentEvent race.
     pub(super) send_completion: SharedSendCompletionCoordinator,
@@ -936,7 +926,6 @@ pub(super) struct TimelineActor {
     )>,
     pub(super) gap_work_task: Option<executor::JoinHandle<()>>,
     pub(super) gap_relay_settlement_task: Option<executor::JoinHandle<()>>,
-    pub(super) gap_render_settlement_task: Option<executor::JoinHandle<()>>,
     #[cfg(test)]
     pub(super) test_gap_repair_completion_pause: Option<TestGapRepairCompletionPause>,
     last_gap_repair_evaluation_diagnostic: Option<GapRepairEvaluationDiagnosticSignature>,
@@ -986,9 +975,6 @@ impl Drop for TimelineActor {
             task.abort();
         }
         if let Some(task) = self.gap_relay_settlement_task.take() {
-            task.abort();
-        }
-        if let Some(task) = self.gap_render_settlement_task.take() {
             task.abort();
         }
         if let Some((_, cancellation, task)) = self.live_tail_refresh.take() {
@@ -1642,7 +1628,7 @@ impl TimelineActor {
             relay_restart_task: None,
             generation,
             projection_request_id: subscribe_request_id,
-            projection_acknowledged: initial_emitted,
+            initial_projection_committed: initial_emitted,
             next_batch_id: TimelineBatchId(0),
             send_completion: Arc::clone(&send_completion),
             send_statuses,
@@ -1701,7 +1687,6 @@ impl TimelineActor {
             live_tail_refresh: None,
             gap_work_task: None,
             gap_relay_settlement_task: None,
-            gap_render_settlement_task: None,
             #[cfg(test)]
             test_gap_repair_completion_pause: None,
             last_gap_repair_evaluation_diagnostic: None,
@@ -2033,9 +2018,6 @@ impl TimelineActor {
                 } else {
                     let _ = trigger;
                 }
-            }
-            TimelineActorMessage::TimelineGapRenderSettlementDue { fence, trigger } => {
-                self.recover_gap_render_settlement(fence, trigger).await;
             }
             TimelineActorMessage::Paginate {
                 request_id,
@@ -2461,43 +2443,6 @@ impl TimelineActor {
             TimelineActorMessage::ReplayInitialItems { cause_request_id } => {
                 self.handle_replay_initial_items(cause_request_id);
                 self.publish_current_canonical_activity().await;
-            }
-            TimelineActorMessage::AcknowledgeBatchRendered {
-                actor_generation,
-                timeline_generation,
-                repair_generation,
-                batch_id,
-            } => {
-                let accepted = self
-                    .gap_repair
-                    .acknowledge_projection(TimelineGapRenderFence {
-                        actor_generation,
-                        timeline_generation,
-                        repair_generation,
-                        minimum_batch_id: batch_id,
-                    });
-                let trigger = self
-                    .gap_repair
-                    .pending_trigger
-                    .unwrap_or(TimelineGapRepairTrigger::Automatic);
-                record_timeline_gap_repair(
-                    if accepted {
-                        "render_acknowledged"
-                    } else {
-                        "stale_render_ack"
-                    },
-                    timeline_gap_repair_trigger_token(trigger),
-                    repair_generation,
-                    self.gap_repair.gap_count,
-                    self.gap_repair.batches_processed,
-                    if accepted { "accepted" } else { "ignored" },
-                );
-                if accepted {
-                    if let Some(task) = self.gap_render_settlement_task.take() {
-                        task.abort();
-                    }
-                    self.start_pending_timeline_gap_inspection().await;
-                }
             }
             #[cfg(test)]
             TimelineActorMessage::TestBeginRestore {

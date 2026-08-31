@@ -408,9 +408,9 @@ fn next_timeline_actor_generation(_state: &mut TimelineActorGenerationGateState)
 
 pub(super) fn replay_projection_request_id(
     projection_request_id: RequestId,
-    projection_acknowledged: bool,
+    initial_projection_committed: bool,
 ) -> Option<RequestId> {
-    (!projection_acknowledged).then_some(projection_request_id)
+    (!initial_projection_committed).then_some(projection_request_id)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -429,13 +429,13 @@ impl InitialItemsRequestIdentity {
 
     pub(super) fn replay(
         projection_request_id: RequestId,
-        projection_acknowledged: bool,
+        initial_projection_committed: bool,
         cause_request_id: Option<RequestId>,
     ) -> Self {
         Self {
             projection_request_id: replay_projection_request_id(
                 projection_request_id,
-                projection_acknowledged,
+                initial_projection_committed,
             ),
             cause_request_id,
         }
@@ -986,7 +986,6 @@ impl TimelineActor {
         }
 
         if self.gap_repair.active_serial.is_some()
-            || self.gap_repair.awaiting_projection.is_some()
             || self.gap_projection_correlation.is_pending()
             || self.pending_gap_projection.is_some()
         {
@@ -1227,7 +1226,6 @@ impl TimelineActor {
             return;
         }
         if self.gap_repair.active_serial.is_some()
-            || self.gap_repair.awaiting_projection.is_some()
             || self.gap_projection_correlation.is_pending()
             || self.pending_gap_projection.is_some()
         {
@@ -1610,7 +1608,7 @@ impl TimelineActor {
             self.actor_generation,
             InitialItemsRequestIdentity::replay(
                 self.projection_request_id,
-                self.projection_acknowledged,
+                self.initial_projection_committed,
                 cause_request_id,
             ),
             self.generation,

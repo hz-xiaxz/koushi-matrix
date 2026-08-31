@@ -493,7 +493,6 @@ export const TimelineView = memo(function TimelineView({
   const rangeModelEpochRef = useRef(0);
   const virtualItemHeight = TIMELINE_ESTIMATED_ITEM_HEIGHT_PX;
   const [measuredHeightVersion, setMeasuredHeightVersion] = useState(0);
-  const [viewportEpochVersion, setViewportEpochVersion] = useState(0);
   const [, setDeferredPrependReleaseVersion] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -578,11 +577,8 @@ export const TimelineView = memo(function TimelineView({
   const viewportIntentResizeFrameRef = useRef<TimelineScheduledFrame | null>(null);
   /** Coalesces a structural display-projection correction to one frame. */
   const projectionLayoutFrameRef = useRef<TimelineScheduledFrame | null>(null);
-  const repairAcknowledgementFrameRef = useRef<TimelineScheduledFrame | null>(null);
   const pendingProjectionLayoutRef = useRef<PendingProjectionLayoutTransaction | null>(null);
   const projectionRenderStateRef = useRef<TimelineProjectionSnapshot | null>(null);
-  const lastRepairAcknowledgementSignatureRef = useRef<string | null>(null);
-  const repairAcknowledgementInFlightRef = useRef<string | null>(null);
   const scrollFollowUpFramesRef = useRef<Set<TimelineScheduledFrame>>(new Set());
   /** Accepted backward-pagination command awaiting a terminal timeline event. */
   const backfillRequestEpochRef = useRef<TimelineBackfillRequestEpoch | null>(null);
@@ -823,8 +819,6 @@ export const TimelineView = memo(function TimelineView({
     cancelScrollFollowUpFrames();
     viewportIntentResizeFrameRef.current = null;
     projectionLayoutFrameRef.current = null;
-    repairAcknowledgementFrameRef.current = null;
-    setViewportEpochVersion((current) => current + 1);
     return epoch;
   }, [cancelPendingScrollFrame, cancelScrollFollowUpFrames, timelineViewportScheduler]);
   const scheduleViewportFrame = useCallback(
@@ -1654,13 +1648,7 @@ export const TimelineView = memo(function TimelineView({
       projectionLayoutFrameRef.current.cancel();
       projectionLayoutFrameRef.current = null;
     }
-    if (repairAcknowledgementFrameRef.current !== null) {
-      repairAcknowledgementFrameRef.current.cancel();
-      repairAcknowledgementFrameRef.current = null;
-    }
     pendingProjectionLayoutRef.current = null;
-    lastRepairAcknowledgementSignatureRef.current = null;
-    repairAcknowledgementInFlightRef.current = null;
     setMeasuredHeightVersion((current) => current + 1);
     scheduleBackfillEvaluation("timeline_reset");
   }, [resetActiveMeasurementDeferral, scheduleBackfillEvaluation, timelineKeyHash]);
@@ -1691,11 +1679,6 @@ export const TimelineView = memo(function TimelineView({
         projectionLayoutFrameRef.current.cancel();
         projectionLayoutFrameRef.current = null;
       }
-      if (repairAcknowledgementFrameRef.current !== null) {
-        repairAcknowledgementFrameRef.current.cancel();
-        repairAcknowledgementFrameRef.current = null;
-      }
-      repairAcknowledgementInFlightRef.current = null;
       pendingProjectionLayoutRef.current = null;
     },
     [resetActiveMeasurementDeferral]
@@ -2813,103 +2796,6 @@ export const TimelineView = memo(function TimelineView({
     timelineInitialized,
     virtualWindow.virtualized,
     visibleRows
-  ]);
-
-  useLayoutEffect(() => {
-    if (roomTimelineRoomId === null) {
-      return;
-    }
-    const actorGeneration = timelineKeyState?.actorGeneration ?? 0;
-    const lastAppliedBatchId = timelineKeyState?.lastAppliedBatchId ?? null;
-    const repairGeneration = continuity.kind === "repairing" ? continuity.generation : -1;
-    const repairBatchesProcessed =
-      continuity.kind === "repairing" ? continuity.batches_processed : -1;
-    const renderedRepairBatchId =
-      continuity.kind === "repairing"
-        ? (lastAppliedBatchId ?? continuity.minimum_batch_id)
-        : null;
-    const repairSignature = [
-      timelineKeyHash,
-      actorGeneration,
-      generation,
-      repairGeneration,
-      repairBatchesProcessed,
-      renderedRepairBatchId ?? -1
-    ].join("\u0000");
-    const shouldAcknowledgeRepair = Boolean(
-      timelineInitialized &&
-      transport.acknowledgeRenderedBatch &&
-        continuity.kind === "repairing" &&
-        continuity.batches_processed > 0 &&
-        renderedRepairBatchId !== null &&
-        repairSignature !== lastRepairAcknowledgementSignatureRef.current &&
-        repairSignature !== repairAcknowledgementInFlightRef.current
-    );
-    if (!shouldAcknowledgeRepair) {
-      return;
-    }
-    if (repairAcknowledgementFrameRef.current !== null) {
-      repairAcknowledgementFrameRef.current.cancel();
-    }
-    repairAcknowledgementFrameRef.current = scheduleViewportFrame(() => {
-      repairAcknowledgementFrameRef.current = null;
-      if (
-        timelineKeyHashRef.current !== timelineKeyHash ||
-        pendingProjectionLayoutRef.current !== null ||
-        projectionLayoutFrameRef.current !== null ||
-        anchorRestorePendingRef.current ||
-        roomScrollAnchorRestorePendingRef.current ||
-        !virtualRangeEquals(virtualRangeRef.current, virtualRange)
-      ) {
-        return;
-      }
-      if (
-        shouldAcknowledgeRepair &&
-        renderedRepairBatchId !== null &&
-        repairSignature !== lastRepairAcknowledgementSignatureRef.current &&
-        repairSignature !== repairAcknowledgementInFlightRef.current
-      ) {
-        repairAcknowledgementInFlightRef.current = repairSignature;
-        void transport
-          .acknowledgeRenderedBatch!(
-            timelineKeyRef.current,
-            actorGeneration,
-            generation,
-            repairGeneration,
-            renderedRepairBatchId
-          )
-          .then(() => {
-            if (repairAcknowledgementInFlightRef.current === repairSignature) {
-              repairAcknowledgementInFlightRef.current = null;
-              lastRepairAcknowledgementSignatureRef.current = repairSignature;
-            }
-          })
-          .catch(() => {
-            if (repairAcknowledgementInFlightRef.current !== repairSignature) {
-              return;
-            }
-            repairAcknowledgementInFlightRef.current = null;
-          });
-      }
-    });
-    return () => {
-      if (repairAcknowledgementFrameRef.current !== null) {
-        repairAcknowledgementFrameRef.current.cancel();
-        repairAcknowledgementFrameRef.current = null;
-      }
-    };
-  }, [
-    continuity,
-    generation,
-    roomTimelineRoomId,
-    timelineKeyHash,
-    timelineInitialized,
-    timelineKeyState?.actorGeneration,
-    timelineKeyState?.lastAppliedBatchId,
-    transport,
-    virtualRange,
-    viewportEpochVersion,
-    scheduleViewportFrame
   ]);
 
   useLayoutEffect(() => {

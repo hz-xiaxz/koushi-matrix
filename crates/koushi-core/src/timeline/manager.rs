@@ -95,13 +95,6 @@ pub(crate) enum TimelineMessage {
         composer_permit: ForwardedComposerDraftPermit,
         formatting_options: ComposerFormattingOptions,
     },
-    AcknowledgeBatchRendered {
-        key: TimelineKey,
-        actor_generation: u64,
-        timeline_generation: TimelineGeneration,
-        repair_generation: u64,
-        batch_id: TimelineBatchId,
-    },
     /// Sync started: carries the one live `RoomListService`. Subscribing a timeline must also
     /// subscribe its room with the live service so the server streams that
     /// room's new timeline events (canon: TimelineActor description; without
@@ -920,22 +913,6 @@ impl TimelineManagerActor {
                     )
                     .await;
                 }
-                TimelineMessage::AcknowledgeBatchRendered {
-                    key,
-                    actor_generation,
-                    timeline_generation,
-                    repair_generation,
-                    batch_id,
-                } => {
-                    self.acknowledge_batch_rendered(
-                        &key,
-                        actor_generation,
-                        timeline_generation,
-                        repair_generation,
-                        batch_id,
-                    )
-                    .await;
-                }
             }
         }
         let room_keys = self
@@ -1608,26 +1585,6 @@ impl TimelineManagerActor {
                 })
                 .await;
         }
-    }
-    async fn acknowledge_batch_rendered(
-        &mut self,
-        key: &TimelineKey,
-        actor_generation: u64,
-        timeline_generation: TimelineGeneration,
-        repair_generation: u64,
-        batch_id: TimelineBatchId,
-    ) {
-        let Some(handle) = self.timelines.get(key) else {
-            return;
-        };
-        let _ = handle
-            .send(TimelineActorMessage::AcknowledgeBatchRendered {
-                actor_generation,
-                timeline_generation,
-                repair_generation,
-                batch_id,
-            })
-            .await;
     }
     pub(super) async fn handle_subscribe(
         &mut self,

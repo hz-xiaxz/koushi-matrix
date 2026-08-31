@@ -356,8 +356,6 @@ const TIMELINE_GAP_OBSERVABLE_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs
 
 const TIMELINE_GAP_RELAY_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(5);
 
-const TIMELINE_GAP_RENDER_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(5);
-
 pub(super) fn historical_causal_projection_operation(serial: u64) -> CausalProjectionOperationId {
     CausalProjectionOperationId::new(CausalProjectionDomain::HistoricalGap, serial)
         .expect("historical projection serial must stay within its 63-bit domain")
@@ -421,11 +419,24 @@ pub(super) enum TimelineGapRepairTrigger {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct TimelineGapRenderFence {
+pub(super) struct GapProjectionRelayed {
     pub(super) actor_generation: u64,
     pub(super) timeline_generation: TimelineGeneration,
     pub(super) repair_generation: u64,
     pub(super) minimum_batch_id: TimelineBatchId,
+}
+
+pub(super) fn gap_projection_relay_is_current(
+    actual: GapProjectionRelayed,
+    actor_generation: u64,
+    timeline_generation: TimelineGeneration,
+    repair_generation: u64,
+    minimum_batch_id: TimelineBatchId,
+) -> bool {
+    actual.actor_generation == actor_generation
+        && actual.timeline_generation == timeline_generation
+        && actual.repair_generation == repair_generation
+        && actual.minimum_batch_id >= minimum_batch_id
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1432,7 +1443,6 @@ pub(super) struct TimelineGapRepairTracker {
     next_serial: u64,
     pub(super) active_serial: Option<u64>,
     pub(super) pending_trigger: Option<TimelineGapRepairTrigger>,
-    pub(super) awaiting_projection: Option<TimelineGapRenderFence>,
     pub(super) gap_count: u32,
     attempt_gap_id: Option<TimelineGapId>,
     attempt_demand_revision: Option<u64>,
@@ -1554,12 +1564,9 @@ impl TimelineGapRepairTracker {
 
     fn begin_pending_inspection(
         &mut self,
-        projection_acknowledged: bool,
+        initial_projection_committed: bool,
     ) -> Option<(u64, TimelineGapRepairTrigger)> {
-        if !projection_acknowledged
-            || self.active_serial.is_some()
-            || self.awaiting_projection.is_some()
-        {
+        if !initial_projection_committed || self.active_serial.is_some() {
             return None;
         }
         let trigger = self.pending_trigger?;
@@ -1571,38 +1578,6 @@ impl TimelineGapRepairTracker {
     #[cfg(test)]
     fn has_pending_inspection(&self) -> bool {
         self.pending_trigger.is_some()
-    }
-
-    fn await_projection(&mut self, fence: TimelineGapRenderFence) {
-        self.awaiting_projection = Some(fence);
-    }
-
-    pub(super) fn acknowledge_projection(&mut self, actual: TimelineGapRenderFence) -> bool {
-        let Some(required) = self.awaiting_projection else {
-            return false;
-        };
-        if actual.actor_generation != required.actor_generation
-            || actual.timeline_generation != required.timeline_generation
-            || actual.repair_generation != required.repair_generation
-            || actual.minimum_batch_id < required.minimum_batch_id
-        {
-            return false;
-        }
-        self.awaiting_projection = None;
-        true
-    }
-
-    fn recover_projection_timeout(
-        &mut self,
-        expired: TimelineGapRenderFence,
-        trigger: TimelineGapRepairTrigger,
-    ) -> bool {
-        if self.awaiting_projection != Some(expired) {
-            return false;
-        }
-        self.awaiting_projection = None;
-        self.queue_inspection(trigger);
-        true
     }
 
     fn begin_work(&mut self) -> Option<u64> {
@@ -1838,8 +1813,8 @@ impl TimelineActor {
             )
     }
     pub(super) fn gap_repair_scheduler_phase(&self) -> &'static str {
-        if !self.projection_acknowledged {
-            "awaiting_projection_ack"
+        if !self.initial_projection_committed {
+            "awaiting_initial_projection"
         } else if self.pagination_task.is_some() {
             "pagination"
         } else if self.restore_anchor.is_some() {
@@ -1848,8 +1823,6 @@ impl TimelineActor {
             || self.pending_gap_projection.is_some()
         {
             "awaiting_relay"
-        } else if self.gap_repair.awaiting_projection.is_some() {
-            "awaiting_render_ack"
         } else if self.gap_repair.active_serial.is_some() {
             "active"
         } else if self.gap_repair.pending_trigger.is_some() {
@@ -1916,7 +1889,7 @@ impl TimelineActor {
         }
         let Some((serial, trigger)) = self
             .gap_repair
-            .begin_pending_inspection(self.projection_acknowledged)
+            .begin_pending_inspection(self.initial_projection_committed)
         else {
             return;
         };
@@ -2818,33 +2791,6 @@ impl TimelineActor {
         )
         .await;
     }
-    pub(super) async fn recover_gap_render_settlement(
-        &mut self,
-        fence: TimelineGapRenderFence,
-        trigger: TimelineGapRepairTrigger,
-    ) {
-        if !self.gap_repair.recover_projection_timeout(fence, trigger) {
-            return;
-        }
-        if let Some(task) = self.gap_render_settlement_task.take() {
-            task.abort();
-        }
-        record_timeline_gap_repair(
-            "render_settlement_recovered",
-            timeline_gap_repair_trigger_token(trigger),
-            fence.repair_generation,
-            self.gap_repair.gap_count,
-            self.gap_repair.batches_processed,
-            "timeout",
-        );
-        self.emit_gap_repair_failure_and_resume(
-            self.key.room_id().to_owned(),
-            fence.repair_generation,
-            self.gap_repair.gap_count,
-            TimelineGapRepairFailureKind::Timeout,
-        )
-        .await;
-    }
     async fn emit_gap_repair_failure_and_resume(
         &mut self,
         room_id: String,
@@ -2867,7 +2813,6 @@ impl TimelineActor {
     fn emit_gap_repair_released_if_idle(&self, generation: u64) {
         if self.gap_repair.active_serial.is_some()
             || self.gap_repair.pending_trigger.is_some()
-            || self.gap_repair.awaiting_projection.is_some()
             || self.gap_projection_correlation.is_pending()
             || self.pending_gap_projection.is_some()
         {
@@ -2886,32 +2831,32 @@ impl TimelineActor {
         let Some(pending) = self.pending_gap_projection.take() else {
             return;
         };
-        self.gap_repair.queue_inspection(pending.trigger);
-        let fence = TimelineGapRenderFence {
+        let relayed = GapProjectionRelayed {
             actor_generation: self.actor_generation,
             timeline_generation: self.generation,
             repair_generation: pending.repair_generation,
             minimum_batch_id: batch_id,
         };
-        self.gap_repair.await_projection(fence);
-        if let Some(task) = self.gap_render_settlement_task.take() {
-            task.abort();
+        // The load-bearing stale fence is the causal-projection correlation at
+        // the relay call site. This local assertion pins the complete signal
+        // shape before the actor advances its scheduler.
+        if !gap_projection_relay_is_current(
+            relayed,
+            self.actor_generation,
+            self.generation,
+            pending.repair_generation,
+            batch_id,
+        ) {
+            return;
         }
-        let actor_tx = self.msg_tx.clone();
-        let trigger = pending.trigger;
-        self.gap_render_settlement_task = Some(executor::spawn(async move {
-            executor::sleep(TIMELINE_GAP_RENDER_SETTLEMENT_TIMEOUT).await;
-            let _ = actor_tx
-                .send(TimelineActorMessage::TimelineGapRenderSettlementDue { fence, trigger })
-                .await;
-        }));
+        self.gap_repair.queue_inspection(pending.trigger);
         record_timeline_gap_repair(
-            "awaiting_render",
+            "projection_relayed",
             timeline_gap_repair_trigger_token(pending.trigger),
             pending.repair_generation,
             pending.gap_count,
             pending.batches_processed,
-            "pending",
+            "accepted",
         );
         let _ = self
             .emit_action_reliable(AppAction::TimelineGapRepairProgressed {
@@ -2922,6 +2867,7 @@ impl TimelineActor {
                 minimum_batch_id: Some(batch_id.0),
             })
             .await;
+        self.start_pending_timeline_gap_inspection().await;
     }
 }
 

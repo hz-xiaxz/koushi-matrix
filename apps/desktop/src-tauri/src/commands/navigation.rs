@@ -210,30 +210,6 @@ async fn open_anchored_timeline(
 }
 
 #[tauri::command]
-pub async fn acknowledge_timeline_batch_rendered(
-    key: TimelineKey,
-    actor_generation: u64,
-    timeline_generation: TimelineGeneration,
-    repair_generation: u64,
-    batch_id: TimelineBatchId,
-    state: State<'_, CoreRuntimeState>,
-) -> Result<(), String> {
-    let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
-        state.inner(),
-        CoreCommand::App(AppCommand::AcknowledgeTimelineBatchRendered {
-            request_id,
-            key,
-            actor_generation,
-            timeline_generation,
-            repair_generation,
-            batch_id,
-        }),
-    )
-    .await
-}
-
-#[tauri::command]
 pub async fn close_focused_context(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
