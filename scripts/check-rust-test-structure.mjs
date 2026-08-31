@@ -3171,14 +3171,14 @@ export function checkCoreQaReconnectEncryptionGate() {
   const stage = coreQaItemBody("bin/headless_core_qa/scenarios/timeline.rs", "async fn run_timeline_reconnect_scenario_impl");
   const helper = coreQaItemBody("bin/headless_core_qa/event_wait.rs", "async fn wait_for_encrypted_room_projection_for_qa");
   const failures = [];
-  for (const marker of ["create_room_for_qa", "wait_for_encrypted_room_projection_for_qa(", "subscribe_and_ack_active_timeline_projection_for_qa(", "TimelineCommand::SendText"]) {
+  for (const marker of ["create_room_for_qa", "wait_for_encrypted_room_projection_for_qa(", "subscribe_active_timeline_projection_for_qa(", "TimelineCommand::SendText"]) {
     if (!stage?.includes(marker)) failures.push(sourceContractFailure(rule, `reconnect stage lacks ${marker}`));
   }
   for (const marker of ["ROOM_LIST_EVENT_TIMEOUT", "room.room_id == expected_room_id && room.is_encrypted", "RoomEvent::RoomListUpdated", "CoreEvent::StateDelta(_)", "tokio::time::timeout_at(deadline, conn.recv_event())"]) {
     if (!helper?.includes(marker)) failures.push(sourceContractFailure(rule, `encrypted-room waiter lacks ${marker}`));
   }
   if (helper?.includes("tokio::time::sleep")) failures.push(sourceContractFailure(rule, "encrypted-room waiter uses a fixed sleep"));
-  const subscribe = stage?.indexOf("subscribe_and_ack_active_timeline_projection_for_qa(") ?? -1;
+  const subscribe = stage?.indexOf("subscribe_active_timeline_projection_for_qa(") ?? -1;
   const send = stage?.indexOf("TimelineCommand::SendText") ?? -1;
   const gateA = stage?.indexOf("wait_for_encrypted_room_projection_for_qa(\n            &mut conn_a") ?? -1;
   const gateB = stage?.indexOf("wait_for_encrypted_room_projection_for_qa(\n            &mut conn_b") ?? -1;
@@ -3329,7 +3329,7 @@ export function checkCoreQaStrictWaiters() {
   const waiters = [
     ["wait_for_existing_identity_gate", "participants.rs"],
     ["wait_for_room_in_room_list", "event_wait.rs"],
-    ["subscribe_and_ack_active_timeline_projection_for_qa", "scenarios/timeline.rs"],
+    ["subscribe_active_timeline_projection_for_qa", "scenarios/timeline.rs"],
     ["wait_for_verification_requested_event_only", "participants.rs"],
     ["wait_for_verification_accepted", "participants.rs"],
     ["wait_for_initial_items_from_source", "event_wait.rs"],

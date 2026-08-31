@@ -30,7 +30,12 @@ function plannedMethods(): string[] {
   );
   return table
     .split("\n")
-    .filter((line) => line.startsWith("| ") && !line.startsWith("| Category"))
+    .filter(
+      (line) =>
+        line.startsWith("| ") &&
+        !line.startsWith("| Category") &&
+        !line.startsWith("| removed renderer ACK")
+    )
     .flatMap((line) => [...(line.split("|")[2] ?? "").matchAll(/`(\w+)`/g)])
     .map((match) => match[1])
     .sort();
@@ -41,6 +46,11 @@ describe("DesktopApi command contract", () => {
     const planned = plannedMethods();
     expect(new Set(planned).size).toBe(planned.length);
     expect(planned).toEqual(apiMethods());
+  });
+
+  test("keeps deleted renderer acknowledgements out of the interface", () => {
+    expect(apiMethods()).not.toContain("acknowledgeTimelineProjection");
+    expect(apiMethods()).not.toContain("acknowledgeTimelineBatchRendered");
   });
 
   test("allows full snapshots only for initial and explicit resync reads", () => {

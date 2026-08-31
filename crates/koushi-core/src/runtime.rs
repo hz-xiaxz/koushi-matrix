@@ -562,7 +562,7 @@ impl CoreRuntime {
         let actor = AppActor {
             command_rx,
             action_rx,
-            focused_projection_rx,
+            focused_projection_rx: Some(focused_projection_rx),
             #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_test_rx,
             event_tx: event_tx.clone(),
@@ -788,7 +788,8 @@ impl CoreRuntime {
 struct AppActor {
     command_rx: mpsc::Receiver<CoreCommandEnvelope>,
     action_rx: mpsc::Receiver<Vec<AppAction>>,
-    focused_projection_rx: mpsc::UnboundedReceiver<crate::timeline::FocusedProjectionCommitted>,
+    focused_projection_rx:
+        Option<mpsc::UnboundedReceiver<crate::timeline::FocusedProjectionCommitted>>,
     #[cfg(any(test, feature = "test-hooks"))]
     composer_draft_test_rx: mpsc::Receiver<ComposerDraftTestMutation>,
     event_tx: broadcast::Sender<CoreEvent>,
@@ -845,6 +846,21 @@ fn command_disposition(envelope: CoreCommandEnvelope) -> CommandDisposition {
         CommandDisposition::Shutdown
     } else {
         CommandDisposition::Handle(envelope)
+    }
+}
+
+async fn receive_focused_projection_commit(
+    receiver: &mut Option<mpsc::UnboundedReceiver<crate::timeline::FocusedProjectionCommitted>>,
+) -> Option<crate::timeline::FocusedProjectionCommitted> {
+    let Some(active) = receiver.as_mut() else {
+        return future::pending().await;
+    };
+    match active.recv().await {
+        Some(commit) => Some(commit),
+        None => {
+            *receiver = None;
+            None
+        }
     }
 }
 
@@ -962,9 +978,12 @@ impl AppActor {
                         break;
                     }
                 }
-                focused_projection = self.focused_projection_rx.recv() => {
-                    let Some(focused_projection) = focused_projection else { break };
-                    self.handle_focused_projection_commit(focused_projection).await;
+                focused_projection = receive_focused_projection_commit(
+                    &mut self.focused_projection_rx
+                ) => {
+                    if let Some(focused_projection) = focused_projection {
+                        self.handle_focused_projection_commit(focused_projection).await;
+                    }
                 }
                 actions = self.action_rx.recv() => {
                     let Some(actions) = actions else { break };
