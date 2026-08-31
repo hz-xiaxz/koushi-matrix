@@ -36,6 +36,7 @@ import type {
   RoomListItem,
   RoomSummary,
   SearchScopeKind,
+  SettingsPatch,
   SessionStatusRefreshTrigger
 } from "../domain/types";
 import { contextMenuItems } from "../domain/contextMenus";
@@ -54,19 +55,8 @@ import {
   elementAvatarInitial,
   EMPTY_ROOM_TAGS
 } from "../app/uiShared";
-import { roomListSections } from "../domain/desktopModel";
-import {
-  readSidebarRoomCategory,
-  readSidebarRoomSort,
-  type SidebarRoomCategory,
-  type SidebarRoomSort,
-  type SpaceLocalOverrides,
-  spaceDisplayName,
-  writeSidebarRoomCategory,
-  writeSidebarRoomSort
-} from "../app/localPresentation";
-
-const ROOM_SECTION_COLLAPSE_KEY = "koushi.roomSectionCollapsed.v1";
+type SidebarRoomCategory = "dms" | "rooms";
+type SidebarRoomSort = "active" | "name";
 
 export type RuntimeAlertKind = "secureBackup" | "sync" | "session";
 
@@ -76,22 +66,6 @@ export interface RuntimeAlert {
   title: string;
   detail: string;
   retryable: boolean;
-}
-
-function sortedSidebarRooms(
-  rooms: RoomListItem[],
-  sort: SidebarRoomSort
-): RoomListItem[] {
-  if (sort === "active") {
-    return rooms;
-  }
-  return [...rooms].sort((left, right) => {
-    const nameOrder = left.display_name.localeCompare(right.display_name, undefined, {
-      numeric: true,
-      sensitivity: "base"
-    });
-    return nameOrder || left.room_id.localeCompare(right.room_id);
-  });
 }
 
 function filterSidebarRooms(rooms: RoomListItem[], query: string): RoomListItem[] {
@@ -697,7 +671,6 @@ function matrixServerLabel(homeserver: string | null | undefined): string | null
 
 export function WorkspaceRail({
   snapshot,
-  spaceOverrides = {},
   onCreateSpace,
   onOpenContextMenu,
   onOpenUserSettings,
@@ -705,7 +678,6 @@ export function WorkspaceRail({
   onSelectSpace
 }: {
   snapshot: DesktopSnapshot;
-  spaceOverrides?: SpaceLocalOverrides;
   onCreateSpace: () => void;
   onOpenContextMenu: OpenContextMenu;
   onOpenUserSettings: () => void;
@@ -760,13 +732,8 @@ export function WorkspaceRail({
         <div className="workspace-rail-separator" role="separator" aria-orientation="horizontal" />
         <div className="workspace-list workspace-space-list">
           {snapshot.sidebar.space_rail.map((space) => {
-            const displayName = spaceDisplayName(
-              space.space_id,
-              space.display_name,
-              spaceOverrides
-            );
-            const localIcon = spaceOverrides[space.space_id]?.icon?.trim();
-            const fallbackName = displayName.trim() || space.space_id || "?";
+            const localIcon = space.local_icon?.trim();
+            const fallbackName = space.display_name.trim() || space.space_id || "?";
             return (
             <Tooltip label={fallbackName} key={space.space_id}>
               {(tooltipProps) => (
@@ -851,7 +818,6 @@ export function Sidebar({
   activeRoomId,
   activeView,
   snapshot,
-  spaceOverrides = {},
   onCreateRoom,
   onNewDm,
   onOpenContextMenu,
@@ -863,12 +829,12 @@ export function Sidebar({
   onOpenSpaceMembers = () => undefined,
   spaceMemberCounts,
   onJoinRoom,
-  onSelectRoom
+  onSelectRoom,
+  onUpdateSettings = () => undefined
 }: {
   activeRoomId: string | null;
   activeView: PrimaryView;
   snapshot: DesktopSnapshot;
-  spaceOverrides?: SpaceLocalOverrides;
   onCreateRoom: () => void;
   onNewDm: () => void;
   onOpenContextMenu: OpenContextMenu;
@@ -881,42 +847,34 @@ export function Sidebar({
   spaceMemberCounts?: { joined: number; childOnly: number };
   onJoinRoom?: (roomId: string) => void;
   onSelectRoom: (roomId: string) => void;
+  onUpdateSettings?: (patch: SettingsPatch) => void;
 }) {
-  const sections = roomListSections(
-    snapshot.state.ui.room_list,
-    snapshot.state.ui.navigation.active_space_id,
-    snapshot.state.domain.spaces,
-    snapshot.state.domain.rooms,
-    snapshot.state.domain.invites,
-    snapshot.state.domain.room_notification_settings
-  );
+  const sections = snapshot.sidebar.sections;
   const roomListReadiness = snapshot.state.ui.room_list.readiness;
   const roomListReady = roomListReadiness.kind === "ready";
   const hasProvisionalRoomList =
     snapshot.sidebar.space_rooms.length > 0 ||
     snapshot.sidebar.global_dms.length > 0 ||
-    sections.notJoined.length > 0;
-  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(
-    readCollapsedSections
-  );
+    sections.not_joined.length > 0;
+  const sidebarSettings = snapshot.state.domain.settings.values.sidebar;
+  const collapsedSections = sidebarSettings.collapsed;
   const activeSpace = snapshot.sidebar.space_rail.find((space) => space.is_active);
-  const activeSpaceName = activeSpace
-    ? spaceDisplayName(activeSpace.space_id, activeSpace.display_name, spaceOverrides)
-    : snapshot.sidebar.account_home.display_name;
+  const activeSpaceName = activeSpace?.display_name ?? snapshot.sidebar.account_home.display_name;
   const accountHomeActive = snapshot.sidebar.account_home.is_active && !activeSpace;
   const roomById = new Map(snapshot.state.domain.rooms.map((room) => [room.room_id, room]));
   const presence = snapshot.state.domain.live_signals.presence;
-  const [roomCategory, setRoomCategory] = useState<SidebarRoomCategory>(readSidebarRoomCategory);
-  const [roomSort, setRoomSort] = useState<SidebarRoomSort>(readSidebarRoomSort);
+  const roomCategory: SidebarRoomCategory =
+    sidebarSettings.category === "people" ? "dms" : "rooms";
+  const roomSort: SidebarRoomSort =
+    snapshot.state.domain.settings.values.room_list_sort.kind === "normalLocale"
+      ? "name"
+      : "active";
   const [roomFilter, setRoomFilter] = useState("");
   const activeSpaceId = snapshot.state.ui.navigation.active_space_id;
-  const roomCategoryRooms = roomCategory === "dms" ? snapshot.sidebar.global_dms : sections.rooms;
-  const sortedCategoryRooms = sortedSidebarRooms(roomCategoryRooms, roomSort);
-  const visibleCategoryRooms = filterSidebarRooms(sortedCategoryRooms, roomFilter);
+  const roomCategoryRooms = roomCategory === "dms" ? sections.people : sections.rooms;
+  const visibleCategoryRooms = filterSidebarRooms(roomCategoryRooms, roomFilter);
   const visibleNotJoinedRooms =
-    accountHomeActive || roomCategory !== "rooms"
-      ? []
-      : sortedSidebarRooms(sections.notJoined, roomSort);
+    accountHomeActive || roomCategory !== "rooms" ? [] : sections.not_joined;
   const visibleCategoryLabel =
     roomCategory === "dms" ? t("workspace.people") : t("workspace.rooms");
   const visibleCategoryKind = roomCategory === "dms" ? "dm" : "room";
@@ -931,21 +889,22 @@ export function Sidebar({
   }, [activeSpaceId]);
 
   function selectRoomCategory(category: SidebarRoomCategory) {
-    setRoomCategory(category);
     setRoomFilter("");
-    writeSidebarRoomCategory(category);
+    onUpdateSettings({
+      sidebar: { ...sidebarSettings, category: category === "dms" ? "people" : "rooms" }
+    });
   }
 
   function selectRoomSort(sort: SidebarRoomSort) {
-    setRoomSort(sort);
-    writeSidebarRoomSort(sort);
+    onUpdateSettings({ room_list_sort: { kind: sort === "name" ? "normalLocale" : "activity" } });
   }
 
-  function toggleSection(sectionId: string) {
-    setCollapsedSections((current) => {
-      const next = { ...current, [sectionId]: !current[sectionId] };
-      writeCollapsedSections(next);
-      return next;
+  function toggleSection(section: keyof typeof collapsedSections) {
+    onUpdateSettings({
+      sidebar: {
+        ...sidebarSettings,
+        collapsed: { ...collapsedSections, [section]: !collapsedSections[section] }
+      }
     });
   }
 
@@ -1056,7 +1015,7 @@ export function Sidebar({
         {visibleNotJoinedRooms.length > 0 ? (
           <RoomSection
             activeRoomId={activeRoomId}
-            collapsed={Boolean(collapsedSections["not-joined"])}
+            collapsed={Boolean(collapsedSections.not_joined)}
             id="not-joined"
             kind="notJoined"
             label={t("workspace.notJoined")}
@@ -1066,7 +1025,7 @@ export function Sidebar({
             onJoinRoom={onJoinRoom}
             onOpenContextMenu={onOpenContextMenu}
             onSelectRoom={onSelectRoom}
-            onToggleCollapsed={() => toggleSection("not-joined")}
+            onToggleCollapsed={() => toggleSection("not_joined")}
           />
         ) : null}
         {roomCategoryRooms.length > 0 && visibleCategoryRooms.length === 0 ? (
@@ -1105,16 +1064,16 @@ export function Sidebar({
         ) : null}
         <RoomSection
           activeRoomId={activeRoomId}
-          collapsed={Boolean(collapsedSections["low-priority"])}
+          collapsed={Boolean(collapsedSections.low_priority)}
           id="low-priority"
           kind="room"
           label={t("workspace.lowPriority")}
           presence={presence}
           roomById={roomById}
-          rooms={sections.lowPriority}
+          rooms={sections.low_priority}
           onOpenContextMenu={onOpenContextMenu}
           onSelectRoom={onSelectRoom}
-          onToggleCollapsed={() => toggleSection("low-priority")}
+          onToggleCollapsed={() => toggleSection("low_priority")}
         />
       </div>
     </aside>
@@ -1581,26 +1540,4 @@ export function avatarColorClass(seed: string): string {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return `avatar-c${(hash % 8) + 1}`;
-}
-
-function readJsonRecord<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") {
-    return fallback;
-  }
-  try {
-    return JSON.parse(window.localStorage.getItem(key) ?? "") as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function readCollapsedSections(): Record<string, boolean> {
-  return readJsonRecord<Record<string, boolean>>(ROOM_SECTION_COLLAPSE_KEY, {});
-}
-
-function writeCollapsedSections(collapsedSections: Record<string, boolean>): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(ROOM_SECTION_COLLAPSE_KEY, JSON.stringify(collapsedSections));
 }

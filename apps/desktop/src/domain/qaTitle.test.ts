@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { createBrowserFakeApi } from "../backend/browserFakeApi";
+import { createDesktopApiFixture } from "../test/desktopApiFixture";
 import {
   qaDomDiagnosticTokens,
   qaSearchCrawlerDiagnosticTokens,
@@ -11,7 +11,7 @@ import {
 
 describe("qaWindowTitle", () => {
   test("summarizes session, sync, room, and timeline state without private names", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
 
     const title = qaWindowTitle(snapshot);
@@ -37,7 +37,7 @@ describe("qaWindowTitle", () => {
   });
 
   test("distinguishes active navigation from an opened timeline room", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     const title = qaWindowTitle({
       ...snapshot,
@@ -59,7 +59,7 @@ describe("qaWindowTitle", () => {
   });
 
   test("uses Rust-owned native attention tokens instead of room-list aggregation", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     const title = qaWindowTitle({
       ...snapshot,
@@ -105,7 +105,7 @@ describe("qaWindowTitle", () => {
   });
 
   test("includes an optional panel token when provided", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
 
     const title = qaWindowTitle(snapshot, "keyboardSettings");
@@ -114,7 +114,7 @@ describe("qaWindowTitle", () => {
   });
 
   test("includes focused context state without room or event identifiers", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
 
     const title = qaWindowTitle({
@@ -139,7 +139,7 @@ describe("qaWindowTitle", () => {
   });
 
   test("summarizes pinned state as counts without identifiers or bodies", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     const title = qaWindowTitle({
       ...snapshot,
@@ -181,7 +181,7 @@ describe("qaWindowTitle", () => {
   });
 
   test("includes an optional send smoke status token when provided", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
 
     const title = qaWindowTitle(snapshot, "closed", "sent");
@@ -191,7 +191,7 @@ describe("qaWindowTitle", () => {
   });
 
   test("includes optional private-data-free diagnostic tokens", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
 
     const title = qaWindowTitle(snapshot, "closed", "pending", [
@@ -208,7 +208,7 @@ describe("qaWindowTitle", () => {
   });
 
   test("includes the local send QA statuses when provided", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
 
     const idleTitle = qaWindowTitle(snapshot, "closed", "idle");
@@ -219,7 +219,7 @@ describe("qaWindowTitle", () => {
   });
 
   test("includes only a coarse latest error code for QA diagnostics", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     const title = qaWindowTitle({
       ...snapshot,
@@ -245,7 +245,7 @@ describe("qaWindowTitle", () => {
   });
 
   test("summarizes search crawler progress without room identifiers", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     const tokens = qaSearchCrawlerDiagnosticTokens({
       ...snapshot,

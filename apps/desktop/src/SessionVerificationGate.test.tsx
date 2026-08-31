@@ -3,7 +3,8 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { SessionVerificationGate } from "./components/SessionVerificationGate";
-import { createBrowserFakeApi } from "./backend/browserFakeApi";
+import { createDesktopApiFixture } from "./test/desktopApiFixture";
+import { defaultSnapshotResponse } from "./test/tauriIpcMock";
 import type {
   CommandReceipt,
   DesktopSnapshot,
@@ -12,6 +13,26 @@ import type {
 } from "./domain/types";
 
 const commandReceipt: CommandReceipt = { protocolVersion: 1, admittedGeneration: 1 };
+
+function sessionSnapshot(kind: "locked" | "needsRecovery"): DesktopSnapshot {
+  const snapshot = structuredClone(defaultSnapshotResponse()) as unknown as DesktopSnapshot;
+  snapshot.state.domain.session =
+    kind === "locked"
+      ? {
+          kind: "locked",
+          user_id: "@u:example.invalid",
+          homeserver: "https://example.invalid",
+          device_id: "D"
+        }
+      : {
+          kind: "awaitingVerification",
+          user_id: "@u:example.invalid",
+          homeserver: "https://example.invalid",
+          device_id: "D",
+          gate: { methods: ["existingDeviceSas", "recoveryKey"], account_kind: "existingIdentity" }
+        };
+  return snapshot;
+}
 
 const provisionalPhaseCases: Array<[ProvisionalPhase, string]> = [
   ["checkingTrust", "Checking device trust…"],
@@ -83,7 +104,7 @@ describe("SessionVerificationGate interactions", () => {
   test.each([true, false])(
     "renders authentication-specific locked copy and sign-out-only controls for soft_logout=%s",
     async (soft_logout) => {
-      const snapshot = await createBrowserFakeApi({ session: "locked" }).getSnapshot();
+      const snapshot = sessionSnapshot("locked");
       snapshot.state.domain.session_lock_reason = { kind: "unknownToken", soft_logout };
 
       render(
@@ -108,7 +129,7 @@ describe("SessionVerificationGate interactions", () => {
   );
 
   test("keeps unknown trust retryable without offering verification or cleanup", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     snapshot.state.domain.session = {
       kind: "provisional",
       user_id: "@u:example.invalid",
@@ -132,7 +153,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("production requires warning confirmation before starting device verification", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     snapshot.state.domain.session = {
       kind: "awaitingVerification",
       user_id: "@u:example.invalid",
@@ -168,7 +189,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("production renders the Rust-owned seven-emoji SAS comparison", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     snapshot.state.domain.session = {
       kind: "verifying",
       user_id: "@u:example.invalid",
@@ -205,7 +226,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("SAS-only availability is actionable instead of a no-recovery dead end", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     snapshot.state.domain.session = {
       kind: "awaitingVerification",
       user_id: "@u:example.invalid",
@@ -233,7 +254,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("explains the dead end when no verification method is available", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     snapshot.state.domain.session = {
       kind: "awaitingVerification",
       user_id: "@u:example.invalid",
@@ -260,7 +281,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test.each(provisionalPhaseCases)("renders provisional phase %j with retry once discovery begins", async (phase, copy) => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     snapshot.state.domain.session = {
       kind: "provisional",
       user_id: "@u:example.invalid",
@@ -286,7 +307,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("uses checking-trust copy for both the landmark and heading", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     snapshot.state.domain.session = {
       kind: "provisional",
       user_id: "@u:example.invalid",
@@ -310,7 +331,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("admits SAS and recovery independently and blocks duplicate promise construction", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     snapshot.state.domain.session = { kind: "awaitingVerification", user_id: "@u:example.invalid", homeserver: "https://example.invalid", device_id: "D", gate: { methods: ["existingDeviceSas", "recoveryKey"], account_kind: "existingIdentity" } };
     let releaseSas!: (value: CommandReceipt) => void;
     const sasPromise = new Promise<CommandReceipt>((resolve) => { releaseSas = resolve; });
@@ -343,7 +364,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("holds the same-kind gate until its command receipt settles", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     snapshot.state.domain.session = { kind: "awaitingVerification", user_id: "@u:example.invalid", homeserver: "https://example.invalid", device_id: "D", gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity" } };
     let releaseReceipt!: () => void;
     const receiptSettled = new Promise<void>((resolve) => { releaseReceipt = resolve; });
@@ -364,7 +385,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("rejected operation settles and permits a later attempt", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     snapshot.state.domain.session = { kind: "awaitingVerification", user_id: "@u:example.invalid", homeserver: "https://example.invalid", device_id: "D", gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity" } };
     const startOwnUserSas = vi.fn().mockRejectedValueOnce(new Error("rejected")).mockResolvedValue(commandReceipt);
     render(<SessionVerificationGate snapshot={snapshot} onReceipt={async () => undefined} onSignOut={() => undefined} operations={{ startOwnUserSas, submitRecovery: async () => commandReceipt }} />);
@@ -379,7 +400,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("does not offer recovery-key fallback when only SAS is available", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     snapshot.state.domain.session = { kind: "awaitingVerification", user_id: "@u:example.invalid", homeserver: "https://example.invalid", device_id: "D", gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity" } };
     const startOwnUserSas = vi.fn(async () => commandReceipt);
     render(<SessionVerificationGate snapshot={snapshot} onReceipt={async () => undefined} onSignOut={() => undefined} operations={{ startOwnUserSas, submitRecovery: async () => commandReceipt }} />);
@@ -393,7 +414,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("requires consequence confirmation before starting remote-first device cleanup", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     snapshot.state.domain.session = {
       kind: "awaitingVerification",
       user_id: "@u:example.invalid",
@@ -450,7 +471,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("submits legacy UIA password through the IME-safe cleanup form", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     setCleanupSurfaceSession(snapshot);
     snapshot.state.domain.device_cleanup = {
       kind: "awaitingUia",
@@ -482,7 +503,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("offers retry and separately confirms local erasure after remote cleanup fails", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     setCleanupSurfaceSession(snapshot);
     snapshot.state.domain.device_cleanup = {
       kind: "remoteFailed",
@@ -525,7 +546,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("never asks for a password on the OAuth cleanup failure path", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     setCleanupSurfaceSession(snapshot);
     snapshot.state.domain.device_cleanup = {
       kind: "remoteFailed",
@@ -546,7 +567,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("shows progress without duplicate cleanup actions while remote removal is pending", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     setCleanupSurfaceSession(snapshot);
     snapshot.state.domain.device_cleanup = {
       kind: "removingRemote",
@@ -567,7 +588,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("does not offer destructive cleanup while a recovery retry is verifying", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     snapshot.state.domain.session = {
       kind: "verifying",
       user_id: "@u:example.invalid",
@@ -603,7 +624,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("provides a primary-button-only verification window drag region", async () => {
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = sessionSnapshot("needsRecovery");
     snapshot.state.domain.session = {
       kind: "awaitingVerification",
       user_id: "@u:example.invalid",
@@ -635,7 +656,7 @@ describe("SessionVerificationGate interactions", () => {
 
   test("renders a mandatory secure-backup checking gate for an otherwise ready session", async () => {
     const snapshot = secureBackupSnapshot(
-      await createBrowserFakeApi().getSnapshot(),
+      await createDesktopApiFixture().getSnapshot(),
       { kind: "checking" }
     );
 
@@ -655,7 +676,7 @@ describe("SessionVerificationGate interactions", () => {
 
   test("masks and clears the secure-backup recovery key after submission", async () => {
     const snapshot = secureBackupSnapshot(
-      await createBrowserFakeApi().getSnapshot(),
+      await createDesktopApiFixture().getSnapshot(),
       { kind: "existingBackupNeedsRecovery", failure: "invalidRecoveryKey" }
     );
     const recoverSecureBackup = vi.fn(async () => commandReceipt);
@@ -683,7 +704,7 @@ describe("SessionVerificationGate interactions", () => {
 
   test("recovers incomplete secure storage instead of offering destructive setup", async () => {
     const snapshot = secureBackupSnapshot(
-      await createBrowserFakeApi().getSnapshot(),
+      await createDesktopApiFixture().getSnapshot(),
       { kind: "secureStorageIncomplete" }
     );
 
@@ -703,7 +724,7 @@ describe("SessionVerificationGate interactions", () => {
 
   test("submits setup passphrase and native destination selection without retaining either value", async () => {
     const snapshot = secureBackupSnapshot(
-      await createBrowserFakeApi().getSnapshot(),
+      await createDesktopApiFixture().getSnapshot(),
       { kind: "setupRequired" }
     );
     const bootstrapSecureBackup = vi.fn(async () => commandReceipt);
@@ -746,7 +767,7 @@ describe("SessionVerificationGate interactions", () => {
 
   test("requires explicit confirmation before re-enabling an account-wide disabled backup", async () => {
     const snapshot = secureBackupSnapshot(
-      await createBrowserFakeApi().getSnapshot(),
+      await createDesktopApiFixture().getSnapshot(),
       { kind: "explicitlyDisabledRequiresSetup" }
     );
     const bootstrapSecureBackup = vi.fn(async () => commandReceipt);
@@ -815,7 +836,7 @@ describe("SessionVerificationGate interactions", () => {
 
   test("renders typed upload progress without exposing a raw count or error", async () => {
     const snapshot = secureBackupSnapshot(
-      await createBrowserFakeApi().getSnapshot(),
+      await createDesktopApiFixture().getSnapshot(),
       { kind: "uploadingExistingKeys", pending: "eleven_to_one_hundred" }
     );
 
@@ -834,7 +855,7 @@ describe("SessionVerificationGate interactions", () => {
 
   test("shows typed failure, supports retry, and exposes diagnostics without raw errors", async () => {
     const snapshot = secureBackupSnapshot(
-      await createBrowserFakeApi().getSnapshot(),
+      await createDesktopApiFixture().getSnapshot(),
       { kind: "blockedFailed", failure: "rateLimited" }
     );
     const retrySecureBackupInspection = vi.fn(async () => commandReceipt);
@@ -862,7 +883,7 @@ describe("SessionVerificationGate interactions", () => {
   });
 
   test("renders verification admission phases and an actionable preparation failure", async () => {
-    const base = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const base = sessionSnapshot("needsRecovery");
     const renderGate = (snapshot: DesktopSnapshot) => renderToStaticMarkup(
       <SessionVerificationGate snapshot={snapshot} onReceipt={async () => undefined} onSignOut={() => undefined} />
     );

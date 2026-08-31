@@ -124,10 +124,10 @@ describe("TauriDesktopApi", () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
     const api = new TauriDesktopApi();
-    await api.updateSettings({ appearance: { theme: "dark" } });
+    await api.updateSettings({ appearance: { theme: "dark", density: "comfortable" } });
 
     expect(invoke).toHaveBeenCalledWith("update_settings", {
-      patch: { appearance: { theme: "dark" } }
+      patch: { appearance: { theme: "dark", density: "comfortable" } }
     });
   });
 

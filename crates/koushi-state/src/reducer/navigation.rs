@@ -55,6 +55,16 @@ pub(crate) fn handle_navigation_loaded(
     effects
 }
 
+pub(crate) fn handle_navigation_preference_updated(
+    state: &mut AppState,
+    update: crate::state::NavigationPreferenceUpdate,
+) -> Vec<AppEffect> {
+    if !is_session_ready(state) || !state.navigation.apply_preference_update(update) {
+        return Vec::new();
+    }
+    vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)]
+}
+
 pub(crate) fn handle_timeline_scroll_anchor_updated(
     state: &mut AppState,
     room_id: String,

@@ -87,7 +87,7 @@ describe("people-facing media list labels", () => {
     const props = {
       currentUserId: null,
       message,
-      query: "",
+      highlights: [],
       onEditMessage: vi.fn(),
       onOpenThread: vi.fn(),
       onRedactMessage: vi.fn(),

@@ -88,7 +88,9 @@ impl super::AppActor {
     ) -> (Vec<AppEffect>, DeferredReducerSideEffects) {
         let explicit_navigation_preference_mutation = matches!(
             &action,
-            AppAction::ReorderSpaces { .. } | AppAction::SpaceOrderPreferenceRemoved { .. }
+            AppAction::ReorderSpaces { .. }
+                | AppAction::SpaceOrderPreferenceRemoved { .. }
+                | AppAction::NavigationPreferenceUpdated { .. }
         );
         let composer_draft_transition = composer_draft_transition_policy(&action);
         let destructive_state_before = (composer_draft_transition

@@ -45,6 +45,7 @@ import {
   type E2eeTrustState,
   type LocaleDisplayProfile,
   type LocaleSettings,
+  type NavigationPreferenceUpdate,
   type RoomNotificationMode,
   type RoomNotificationSettings,
   type StageUploadBytesRequestItem,
@@ -55,9 +56,6 @@ import {
 } from "../domain/types";
 import { TauriIpcMock, type IpcInvocation } from "./tauriIpcMock";
 import { documentFromText, plainBodyFromDocument } from "../domain/composerDocument";
-import { computeBrowserRoomListProjection } from "../backend/roomListProjection";
-import { spaceMemberRoleOptionsForPowerLevel } from "../backend/browser-fake/spaceMembers";
-import { composeSidebar } from "../domain/desktopModel";
 import {
   COMPOSER_DRAFT_REVISION_ZERO,
   compareComposerDraftRevisions,
@@ -79,6 +77,15 @@ const ROOM_ID = "!harness-room:example.invalid";
 const ROOM_NAME = "Harness Room";
 const SPACE_NAME = "Harness Space";
 const SEED_EVENT_ID = "$seed-event:example.invalid";
+
+function roleOptionsForHarnessResponse(powerLevel: number) {
+  const options = [
+    { power_level: 0, role: "user" as const, requires_confirmation: powerLevel >= 100 },
+    { power_level: 50, role: "moderator" as const, requires_confirmation: powerLevel >= 100 },
+    { power_level: 100, role: "administrator" as const, requires_confirmation: true }
+  ];
+  return options.filter((option) => option.power_level !== powerLevel);
+}
 
 // The control surface exposed on window for the Playwright spec. We do NOT
 // augment the global Window interface here: src/test/harnessMain.tsx already
@@ -170,13 +177,54 @@ function readySnapshot(
       joined_members: 8
     }
   ];
-  const sidebar = {
-    ...composeSidebar(activeSpaceId, spaces, rooms),
+  const invites = [{
+    room_id: "!invite:example.invalid",
+    display_name: "Harness Invite",
+    avatar: null,
+    topic: null,
+    inviter_display_name: "Inviter",
+    inviter_user_id: "@inviter:example.invalid",
+    is_dm: false
+  }];
+  const sidebarRoom = {
+    room_id: ROOM_ID,
+    display_name: ROOM_NAME,
+    avatar: null,
+    tags: { favourite: null, low_priority: null },
+    unread_count: 0,
+    highlight_count: 0,
+    notification_count: 0,
+    display_count: 0,
+    has_unread_content: false,
+    is_attention_highlighted: false,
+    has_unread_mention: false,
+    is_muted: false
+  };
+  const sidebar: DesktopSnapshot["sidebar"] = {
+    active_space_id: activeSpaceId,
     account_home: {
-      ...composeSidebar(activeSpaceId, spaces, rooms).account_home,
-      is_active: false
+      display_name: "Home",
+      unread_count: 0,
+      highlight_count: 0,
+      invite_count: 1,
+      attention_count: 1,
+      is_active: activeSpaceId === null
     },
-    space_rail: railItems
+    space_rail: railItems,
+    space_rooms: [sidebarRoom],
+    not_joined_space_rooms: [],
+    global_dms: [],
+    space_unread_count: 0,
+    dm_unread_count: 0,
+    space_highlight_count: 0,
+    dm_highlight_count: 0,
+    sections: {
+      favourites: [],
+      rooms: [sidebarRoom],
+      people: [],
+      low_priority: [],
+      not_joined: []
+    }
   };
   return {
     state_generation: 0,
@@ -197,7 +245,7 @@ function readySnapshot(
           profile: { own: { display_name: "Harness User", avatar: null }, users: {}, room_users: {}, local_aliases: {}, local_alias_update: { kind: "idle" }, ignored_user_ids: [], ignored_user_update: { kind: "idle" }, update: { kind: "idle" } },
           space_members: { selected_space_id: activeSpaceId, generation: 1, space_joined: [], space_invited: [], child_room_only: [], child_room_count: 0, complete_child_room_count: 0, incomplete_child_room_count: 0, power_levels_revision: null, can_edit_roles: false, operation: { kind: "idle" } },
           sync: "running",
-          spaces, rooms, invites: [],
+          spaces, rooms, invites,
           invite_workflow: {
             query: { room_id: null, query: "", candidates: [], explicit_user_id: null },
             selected_targets: [],
@@ -227,8 +275,21 @@ function readySnapshot(
           cjk_text_policy: defaultCjkTextPolicyState()
         },
         ui: {
-          navigation: { active_space_id: activeSpaceId, active_room_id: ROOM_ID, space_order: spaces.map((space) => space.space_id), last_room_by_space_id: {} },
-          room_list: computeBrowserRoomListProjection({ kind: "rooms" }, { kind: "activity" }, activeSpaceId, spaces, rooms, []),
+          navigation: {
+            active_space_id: activeSpaceId,
+            active_room_id: ROOM_ID,
+            home_selection: { kind: "activity" },
+            space_local_presentations: {},
+            legacy_frontend_preferences_imported: false,
+            space_order: spaces.map((space) => space.space_id),
+            last_room_by_space_id: {}
+          },
+          room_list: {
+            readiness: { kind: "ready", source: "cache", generation: 0 },
+            active_filter: { kind: "rooms" },
+            sort: { kind: "activity" },
+            items: [{ room_id: ROOM_ID, kind: "room" }]
+          },
           timeline: { room_id: ROOM_ID, is_subscribed: true, is_paginating_backwards: false, composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", document: { version: 2, inlines: [] }, mode: composerMode }, submission_registry: { accepted_submission_ids: [], settled_submission_ids: [] }, scheduled_send_capability: "unknown", scheduled_sends: [], staged_uploads: [], media_gallery: [], media_downloads: {}, continuity: { kind: "unknown" } },
           thread: { kind: "closed" }, threads_list: { kind: "closed" }, focused_context: { kind: "closed" },
           files_view: { kind: "closed" }, errors: [], basic_operation: basicOperation
@@ -243,10 +304,10 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
   return {
     values: {
       locale: { language_tag: null, text_direction: "auto" },
-      appearance: { theme: "system" },
+      appearance: { theme: "system", density: "comfortable" },
       typography: { font: "system", emoji: "system" },
       keyboard: { composer_send_shortcut: "enter" },
-      composer: { math_mode: true },
+      composer: { math_mode: true, recent_emojis: [] },
       notifications: {
         desktop_notifications: true,
         sound: true,
@@ -281,7 +342,12 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
         include_filenames: true
       },
       thread_list_order: { kind: "latestReply" },
-      room_list_sort: { kind: "activity" }
+      room_list_sort: { kind: "activity" },
+      sidebar: {
+        category: "rooms",
+        collapsed: { favourites: false, low_priority: false, not_joined: false }
+      },
+      legacy_frontend_preferences_imported: false
     },
     persistence: { kind: "idle" }
   };
@@ -363,14 +429,16 @@ function applySettingsPatch(
     appearance: patch.appearance ?? values.appearance,
     typography: patch.typography ?? values.typography,
     keyboard: patch.keyboard ?? values.keyboard,
-    composer: patch.composer ?? values.composer ?? { math_mode: true },
+    composer: patch.composer ?? values.composer,
     notifications: patch.notifications ?? values.notifications,
     display: patch.display ?? values.display,
     media: patch.media ?? values.media,
     timeline: patch.timeline ?? values.timeline,
     search_crawler: patch.search_crawler ?? values.search_crawler,
     thread_list_order: patch.thread_list_order ?? values.thread_list_order,
-    room_list_sort: patch.room_list_sort ?? values.room_list_sort
+    room_list_sort: patch.room_list_sort ?? values.room_list_sort,
+    sidebar: patch.sidebar ?? values.sidebar,
+    legacy_frontend_preferences_imported: values.legacy_frontend_preferences_imported
   };
 }
 
@@ -573,14 +641,8 @@ function afterCreateRoomSnapshot(): DesktopSnapshot {
     unread_count: 0,
     highlight_count: 0
   });
-  snapshot.state.ui.room_list = computeBrowserRoomListProjection(
-    snapshot.state.ui.room_list.active_filter,
-    snapshot.state.ui.room_list.sort,
-    snapshot.state.ui.navigation.active_space_id,
-    snapshot.state.domain.spaces,
-    snapshot.state.domain.rooms,
-    snapshot.state.domain.invites
-  );
+  snapshot.sidebar.sections.rooms.push(snapshot.sidebar.space_rooms.at(-1)!);
+  snapshot.state.ui.room_list.items?.push({ room_id: newRoomId, kind: "room" });
   return snapshot;
 }
 
@@ -926,20 +988,28 @@ function setCurrentSnapshot(next: DesktopSnapshot): DesktopSnapshot {
       },
       ui: {
         ...next.state.ui,
-      room_list: computeBrowserRoomListProjection(
-        roomList.active_filter,
-        roomList.sort,
-        next.state.ui.navigation.active_space_id,
-        spaces,
-        rooms,
-        invites
-      )
+        room_list: roomList
       },
     }
   };
   reconcilePreparedUploadBytes(previousSnapshot, currentSnapshot);
   reconcileComposerLeases(currentSnapshot);
   return currentSnapshot;
+}
+
+function sidebarForSelection(activeSpaceId: string | null): DesktopSnapshot["sidebar"] {
+  return {
+    ...currentSnapshot.sidebar,
+    active_space_id: activeSpaceId,
+    account_home: {
+      ...currentSnapshot.sidebar.account_home,
+      is_active: activeSpaceId === null
+    },
+    space_rail: currentSnapshot.sidebar.space_rail.map((space) => ({
+      ...space,
+      is_active: space.space_id === activeSpaceId
+    }))
+  };
 }
 
 function composerCommandAccountMatches(args: {
@@ -1200,11 +1270,7 @@ mock.setCommandResponse("select_space", ({ spaceId }: { spaceId: string | null }
         }
       }
     },
-    sidebar: composeSidebar(
-      nextSpaceId,
-      currentSnapshot.state.domain.spaces,
-      currentSnapshot.state.domain.rooms
-    )
+    sidebar: sidebarForSelection(nextSpaceId)
   });
 });
 mock.setCommandResponse("select_room", ({ roomId }: { roomId: string }) => {
@@ -1250,11 +1316,7 @@ mock.setCommandResponse("select_room", ({ roomId }: { roomId: string }) => {
         focused_context: { kind: "closed" }
       }
     },
-    sidebar: composeSidebar(
-      activeSpaceId,
-      currentSnapshot.state.domain.spaces,
-      currentSnapshot.state.domain.rooms
-    ),
+    sidebar: sidebarForSelection(activeSpaceId),
     thread: null
   });
 });
@@ -1340,6 +1402,61 @@ mock.setCommandResponse("reorder_spaces", ({ spaceIds }: { spaceIds: string[] })
     }
   });
 });
+mock.setCommandResponse(
+  "update_navigation_preference",
+  ({ update }: { update: NavigationPreferenceUpdate }) => {
+    const navigation = structuredClone(currentSnapshot.state.ui.navigation);
+    if (update.kind === "setHomeSelection") {
+      navigation.home_selection = update.selection;
+    } else if (update.kind === "setSpacePresentation") {
+      if (update.presentation) {
+        navigation.space_local_presentations[update.space_id] = update.presentation;
+      } else {
+        delete navigation.space_local_presentations[update.space_id];
+      }
+    } else {
+      navigation.home_selection = update.home_selection ?? navigation.home_selection;
+      navigation.space_local_presentations = update.space_local_presentations;
+      navigation.legacy_frontend_preferences_imported = true;
+    }
+    const presentations = navigation.space_local_presentations;
+    return setCurrentSnapshot({
+      ...currentSnapshot,
+      state: {
+        ...currentSnapshot.state,
+        ui: { ...currentSnapshot.state.ui, navigation }
+      },
+      sidebar: {
+        ...currentSnapshot.sidebar,
+        space_rail: currentSnapshot.sidebar.space_rail.map((space) => ({
+          ...space,
+          display_name: presentations[space.space_id]?.name ?? space.display_name,
+          local_icon: presentations[space.space_id]?.icon ?? null
+        }))
+      }
+    });
+  }
+);
+mock.setCommandResponse("import_legacy_settings", ({ patch }: { patch: SettingsPatch }) => {
+  const values = {
+    ...applySettingsPatch(currentSnapshot.state.domain.settings.values, patch),
+    legacy_frontend_preferences_imported: true
+  };
+  return setCurrentSnapshot({
+    ...currentSnapshot,
+    state: {
+      ...currentSnapshot.state,
+      domain: {
+        ...currentSnapshot.state.domain,
+        settings: {
+          ...currentSnapshot.state.domain.settings,
+          values,
+          persistence: { kind: "idle" }
+        }
+      }
+    }
+  });
+});
 mock.setCommandResponse("update_settings", ({ patch }: { patch: SettingsPatch }) => {
   const values = applySettingsPatch(currentSnapshot.state.domain.settings.values, patch);
   return setCurrentSnapshot({
@@ -1413,17 +1530,63 @@ mock.setCommandResponse(
         ...currentSnapshot.state,
         ui: {
           ...currentSnapshot.state.ui,
-        room_list: computeBrowserRoomListProjection(
-          filter,
-          currentSnapshot.state.ui.room_list.sort,
-          currentSnapshot.state.ui.navigation.active_space_id,
-          currentSnapshot.state.domain.spaces,
-          currentSnapshot.state.domain.rooms,
-          currentSnapshot.state.domain.invites
-        )
+          room_list: {
+            ...currentSnapshot.state.ui.room_list,
+            active_filter: filter
+          }
         },
       }
     })
+);
+mock.setCommandResponse(
+  "query_directory",
+  ({ term, serverName, limit, since }: {
+    term: string;
+    serverName: string | null;
+    limit: number | null;
+    since: string | null;
+  }) => setCurrentSnapshot({
+    ...currentSnapshot,
+    state: {
+      ...currentSnapshot.state,
+      domain: {
+        ...currentSnapshot.state.domain,
+        directory: {
+          ...currentSnapshot.state.domain.directory,
+          query: {
+            kind: "results",
+            request_id: 1,
+            query: { term, server_name: serverName, limit, since },
+            rooms: [
+              {
+                room_id: "!public-room:example.invalid",
+                canonical_alias: "#public:example.invalid",
+                room_type: null,
+                name: "Public room",
+                topic: null,
+                avatar_url: null,
+                joined_members: 12,
+                world_readable: true,
+                guest_can_join: true
+              },
+              {
+                room_id: "!public-space:example.invalid",
+                canonical_alias: "#space:example.invalid",
+                room_type: "m.space",
+                name: "Public space",
+                topic: null,
+                avatar_url: null,
+                joined_members: 4,
+                world_readable: true,
+                guest_can_join: true
+              }
+            ],
+            next_batch: null
+          }
+        }
+      }
+    }
+  })
 );
 mock.setCommandResponse("mark_room_as_read", () => currentSnapshot);
 mock.setCommandResponse("mark_room_as_unread", () => currentSnapshot);
@@ -1462,14 +1625,12 @@ mock.setCommandResponse("leave_room", ({ roomId }: { roomId: string }) => {
             [],
           last_room_by_space_id: nextLastRoomBySpaceId
         },
-        room_list: computeBrowserRoomListProjection(
-          currentSnapshot.state.ui.room_list.active_filter,
-          currentSnapshot.state.ui.room_list.sort,
-          nextActiveSpaceId,
-          nextSpaces,
-          nextRooms,
-          currentSnapshot.state.domain.invites
-        )
+        room_list: {
+          ...currentSnapshot.state.ui.room_list,
+          items: removedSpace
+            ? currentSnapshot.state.ui.room_list.items
+            : (currentSnapshot.state.ui.room_list.items ?? []).filter((item) => item.room_id !== roomId)
+        }
       },
       domain: {
         ...currentSnapshot.state.domain,
@@ -1483,7 +1644,16 @@ mock.setCommandResponse("leave_room", ({ roomId }: { roomId: string }) => {
       space_rail: currentSnapshot.sidebar.space_rail.filter((space) => space.space_id !== roomId),
       space_rooms: removedSpace
         ? currentSnapshot.sidebar.space_rooms
-        : currentSnapshot.sidebar.space_rooms.filter((room) => room.room_id !== roomId)
+        : currentSnapshot.sidebar.space_rooms.filter((room) => room.room_id !== roomId),
+      sections: removedSpace
+        ? currentSnapshot.sidebar.sections
+        : {
+            favourites: currentSnapshot.sidebar.sections.favourites.filter((room) => room.room_id !== roomId),
+            rooms: currentSnapshot.sidebar.sections.rooms.filter((room) => room.room_id !== roomId),
+            people: currentSnapshot.sidebar.sections.people.filter((room) => room.room_id !== roomId),
+            low_priority: currentSnapshot.sidebar.sections.low_priority.filter((room) => room.room_id !== roomId),
+            not_joined: currentSnapshot.sidebar.sections.not_joined.filter((room) => room.room_id !== roomId)
+          }
     }
   });
 });
@@ -2622,7 +2792,7 @@ mock.setCommandResponse(
                 membership: "space_joined",
                 child_room_ids: [],
                 invite_pending: false,
-                role_options: spaceMemberRoleOptionsForPowerLevel(0)
+                role_options: roleOptionsForHarnessResponse(0)
               }
             ],
             space_invited: [
@@ -2695,7 +2865,7 @@ mock.setCommandResponse(
                     ...entry,
                     power_level: powerLevel,
                     role,
-                    role_options: spaceMemberRoleOptionsForPowerLevel(powerLevel)
+                    role_options: roleOptionsForHarnessResponse(powerLevel)
                   }
                 : entry
             ),
@@ -3195,7 +3365,24 @@ function projectAliasSnapshot(
       ),
       space_rooms: snapshot.sidebar.space_rooms.map((room) =>
         room.room_id === dmRoom?.room_id ? { ...room, display_name: displayLabel } : room
-      )
+      ),
+      sections: {
+        favourites: snapshot.sidebar.sections.favourites.map((room) =>
+          room.room_id === dmRoom?.room_id ? { ...room, display_name: displayLabel } : room
+        ),
+        rooms: snapshot.sidebar.sections.rooms.map((room) =>
+          room.room_id === dmRoom?.room_id ? { ...room, display_name: displayLabel } : room
+        ),
+        people: snapshot.sidebar.sections.people.map((room) =>
+          room.room_id === dmRoom?.room_id ? { ...room, display_name: displayLabel } : room
+        ),
+        low_priority: snapshot.sidebar.sections.low_priority.map((room) =>
+          room.room_id === dmRoom?.room_id ? { ...room, display_name: displayLabel } : room
+        ),
+        not_joined: snapshot.sidebar.sections.not_joined.map((room) =>
+          room.room_id === dmRoom?.room_id ? { ...room, display_name: displayLabel } : room
+        )
+      }
     }
   };
 }

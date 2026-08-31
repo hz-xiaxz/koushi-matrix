@@ -11,10 +11,10 @@ describe("KeyboardSettingsPanel", () => {
         settings={{
           values: {
             locale: { language_tag: null, text_direction: "auto" },
-            appearance: { theme: "system" },
+            appearance: { theme: "system", density: "comfortable" },
             typography: { font: "system", emoji: "system" },
             keyboard: { composer_send_shortcut: "enter" },
-            composer: { math_mode: true },
+            composer: { math_mode: true, recent_emojis: [] },
             notifications: {
               desktop_notifications: true,
               sound: true,
@@ -46,7 +46,12 @@ describe("KeyboardSettingsPanel", () => {
               include_filenames: true
             },
             thread_list_order: { kind: "latestReply" },
-            room_list_sort: { kind: "activity" }
+            room_list_sort: { kind: "activity" },
+    sidebar: {
+      category: "rooms",
+      collapsed: { favourites: false, low_priority: false, not_joined: false }
+    },
+    legacy_frontend_preferences_imported: false
           },
           persistence: { kind: "idle" }
         }}
@@ -70,10 +75,10 @@ describe("KeyboardSettingsPanel", () => {
         settings={{
           values: {
             locale: { language_tag: null, text_direction: "auto" },
-            appearance: { theme: "system" },
+            appearance: { theme: "system", density: "comfortable" },
             typography: { font: "system", emoji: "system" },
             keyboard: { composer_send_shortcut: "modEnter" },
-            composer: { math_mode: true },
+            composer: { math_mode: true, recent_emojis: [] },
             notifications: {
               desktop_notifications: true,
               sound: true,
@@ -105,7 +110,12 @@ describe("KeyboardSettingsPanel", () => {
               include_filenames: true
             },
             thread_list_order: { kind: "latestReply" },
-            room_list_sort: { kind: "activity" }
+            room_list_sort: { kind: "activity" },
+    sidebar: {
+      category: "rooms",
+      collapsed: { favourites: false, low_priority: false, not_joined: false }
+    },
+    legacy_frontend_preferences_imported: false
           },
           persistence: { kind: "saving", request_id: 7 }
         } as const}

@@ -41,6 +41,7 @@ pub enum CoreFailure {
         kind: ReportFailureKind,
     },
     LocalEncryptionUnavailable,
+    PreferenceRejected,
     StoreUnavailable,
     ShutdownFailed,
 }

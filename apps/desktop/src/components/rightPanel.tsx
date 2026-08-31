@@ -7,6 +7,7 @@ import type {
   AttachmentScope,
   AttachmentSort,
   DesktopSnapshot,
+  DisplayDensity,
   FilesViewScope,
   ComposerDocument,
   EncryptionDebugOperationOutcome,
@@ -19,6 +20,7 @@ import type {
   SavedSessionInfo,
   SearchResult,
   SettingsPatch,
+  SpaceLocalPresentation,
   SpaceMemberRoleOption,
   SecureBackupSetupIntent,
   PinnedEventNavigation,
@@ -40,7 +42,6 @@ import {
 } from "../app/uiShared";
 import { selectMentionCandidates } from "../domain/appStore";
 import { documentFromText } from "../domain/composerDocument";
-import type { DisplayDensity, SpaceLocalOverrides } from "../app/localPresentation";
 import {
   roomOrSpaceForPeoplePanelScope,
   type PeoplePanelScope,
@@ -338,7 +339,7 @@ export function ContextualRightPanel({
     spaceId: string,
     override: { name?: string; icon?: string } | null
   ) => void;
-  spaceLocalOverrides?: SpaceLocalOverrides;
+  spaceLocalOverrides?: Record<string, SpaceLocalPresentation>;
   onTimelineDiagnosticLogEntry?: (entry: TimelineDiagnosticLogEntry) => void;
   onUpdateRoomSetting?: (roomId: string, change: RoomSettingChange) => void;
   onIgnoreUser?: (userId: string) => void;
@@ -400,6 +401,10 @@ export function ContextualRightPanel({
   threadComposerNotice?: string | null;
   threadComposerDocumentOverride?: ComposerDocument;
 }) {
+  const composerSettings = snapshot.state.domain.settings?.values.composer ?? {
+    math_mode: true,
+    recent_emojis: []
+  };
   const mediaDownloads = snapshot.state.ui.timeline.media_downloads ?? {};
   const loadThreadPreview = useStableEvent(onThreadLoadStagedUploadPreview);
   const threadTarget = snapshot.state.ui.thread ?? { kind: "closed" as const };
@@ -415,6 +420,18 @@ export function ContextualRightPanel({
         ? loadThreadPreview(threadPreviewRoomId, threadPreviewRootEventId, stagedId, variantId)
         : Promise.resolve([]);
   }, [loadThreadPreview, threadPreviewRoomId, threadPreviewRootEventId]);
+  const searchHighlightsByEventId = useMemo(
+    () =>
+      Object.fromEntries(
+        searchResults
+          .filter((result) => result.match_field === "messageBody")
+          .map((result) => [
+            result.event_id,
+            { snippet: result.snippet, ranges: result.highlights }
+          ])
+      ),
+    [searchResults]
+  );
 
   if (mode === "closed") {
     return <aside className="thread-pane" aria-label={t("panel.context")} />;
@@ -806,7 +823,7 @@ export function ContextualRightPanel({
               onSetLocalUserAlias={onSetLocalUserAlias}
               autoLoadOlderMessages={snapshot.state.domain.settings.values.timeline.auto_load_older_messages}
               codeBlockWrap={snapshot.state.domain.settings.values.display.code_block_wrap}
-              searchQuery={searchQuery}
+              searchHighlightsByEventId={searchHighlightsByEventId}
               mediaDownloads={mediaDownloads}
             />
           </section>
@@ -898,7 +915,7 @@ export function ContextualRightPanel({
             }
             autoLoadOlderMessages={snapshot.state.domain.settings.values.timeline.auto_load_older_messages}
             codeBlockWrap={snapshot.state.domain.settings.values.display.code_block_wrap}
-            searchQuery={searchQuery}
+            searchHighlightsByEventId={searchHighlightsByEventId}
             mediaDownloads={mediaDownloads}
             mentionCandidates={threadMentionCandidates}
             mentionCandidatesLoading={threadMentionCandidatesLoading}
@@ -911,7 +928,7 @@ export function ContextualRightPanel({
               <MessageArticle
                 key={reply.event_id}
                 message={threadReplyToTimelineMessage(reply)}
-                query={searchQuery}
+                highlights={searchHighlightsByEventId[reply.event_id]?.ranges ?? []}
                 currentUserId={currentUserId}
                 onEditMessage={() => undefined}
                 onOpenThread={() => undefined}
@@ -962,8 +979,18 @@ export function ContextualRightPanel({
           onMentionQueryChange={(query) => {
             if (threadRoomId) onThreadMentionQueryChange(threadRoomId, query);
           }}
-          mathModeEnabled={snapshot.state.domain.settings.values.composer?.math_mode ?? true}
-          onMathModeChange={(enabled) => onUpdateSettings?.({ composer: { math_mode: enabled } })}
+          mathModeEnabled={composerSettings.math_mode}
+          recentEmojis={composerSettings.recent_emojis}
+          onMathModeChange={(enabled) =>
+            onUpdateSettings?.({
+              composer: { ...composerSettings, math_mode: enabled }
+            })
+          }
+          onRecentEmojisChange={(recent_emojis) =>
+            onUpdateSettings?.({
+              composer: { ...composerSettings, recent_emojis }
+            })
+          }
           roomName={t("panel.thread")}
         />
       ) : null}
@@ -982,6 +1009,18 @@ export function ContextualRightPanel({
         }
         isSending={threadSendPending}
         hasStagedUploads={threadStagedUploads.length > 0}
+        mathModeEnabled={composerSettings.math_mode}
+        recentEmojis={composerSettings.recent_emojis}
+        onMathModeChange={(enabled) =>
+          onUpdateSettings?.({
+            composer: { ...composerSettings, math_mode: enabled }
+          })
+        }
+        onRecentEmojisChange={(recent_emojis) =>
+          onUpdateSettings?.({
+            composer: { ...composerSettings, recent_emojis }
+          })
+        }
         mentionCandidates={threadMentionCandidates}
         mentionCandidatesLoading={threadMentionCandidatesLoading}
         resolveComposerKeyAction={onResolveComposerKeyAction}

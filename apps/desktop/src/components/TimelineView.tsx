@@ -196,6 +196,7 @@ RoomLatestEventSummary,
 TimelineContinuityState,
 TimelineMediaDownloadState,
 TimelineScrollAnchor,
+TextRange,
 UserProfile
 } from "../domain/types";
 import { ImeSafeForm,ImeTextField } from "./ImeTextControl";
@@ -329,7 +330,7 @@ export const TimelineView = memo(function TimelineView({
   liveLatestEventId = null,
   autoLoadOlderMessages = false,
   codeBlockWrap = true,
-  searchQuery = "",
+  searchHighlightsByEventId = {},
   mediaDownloads = {},
   continuity = { kind: "unknown" },
   roomScrollAnchor: _persistedRoomScrollAnchor = null,
@@ -387,7 +388,7 @@ export const TimelineView = memo(function TimelineView({
   liveLatestEventId?: string | null;
   autoLoadOlderMessages?: boolean;
   codeBlockWrap?: boolean;
-  searchQuery?: string;
+  searchHighlightsByEventId?: Record<string, { snippet: string; ranges: TextRange[] }>;
   mediaDownloads?: Record<string, TimelineMediaDownloadState>;
   continuity?: TimelineContinuityState;
   roomScrollAnchor?: TimelineScrollAnchor | null;
@@ -3479,7 +3480,13 @@ export const TimelineView = memo(function TimelineView({
                 keyRequestPending={pendingKeyRequests.has(`event:${timelineItemDomId(item.id)}`)}
                 presentationContext={presentationContext}
                 codeBlockWrap={codeBlockWrap}
-                searchQuery={searchQuery}
+                searchHighlights={
+                  contentEventId &&
+                  searchHighlightsByEventId[contentEventId]?.snippet ===
+                    (item.formatted?.plain_text ?? item.body)
+                    ? searchHighlightsByEventId[contentEventId]?.ranges ?? []
+                    : []
+                }
                 onReply={onReply}
                 onOpenThread={onOpenThread}
                 resolveComposerKeyAction={resolveComposerKeyAction}

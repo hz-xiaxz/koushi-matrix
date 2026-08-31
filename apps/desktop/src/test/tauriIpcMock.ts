@@ -44,11 +44,10 @@ const VOID_COMMANDS = new Set([
   "release_composer_draft_lease",
   "send_read_receipt",
   "set_fully_read",
-  "set_room_list_projection",
   "set_typing"
 ]);
 const ADMISSION_COMMANDS = new Set(
-  `retry_sliding_sync_capability change_homeserver submit_recovery start_device_cleanup submit_device_cleanup_uia erase_local_data_anyway restart_sync update_settings rebuild_search_index set_room_url_preview_override dismiss_directory_preview select_room_list_filter mark_room_as_read mark_room_as_unread set_room_notification_mode refresh_current_session_status submit_account_management_uia load_account_management_capabilities change_password deactivate_account probe_local_encryption_health reset_local_data bootstrap_cross_signing enable_key_backup export_room_keys import_room_keys bootstrap_secure_backup recover_secure_backup retry_secure_backup_inspection change_secure_backup_passphrase accept_verification start_own_user_sas retry_current_device_trust_discovery mismatch_sas_verification start_session_bootstrap confirm_session_bootstrap_saved confirm_sas_verification cancel_verification reset_identity cancel_identity_reset submit_identity_reset_password submit_identity_reset_oauth select_space reorder_spaces cancel_scheduled_send reschedule_scheduled_send retry_send cancel_send send_reaction redact_reaction set_presence set_display_name set_local_user_alias ignore_user unignore_user report_user report_content report_room set_avatar edit_message redact_message load_message_source request_room_key request_late_decryption forward_message load_link_previews hide_link_preview leave_room forget_room open_activity close_activity set_activity_tab paginate_activity retry_activity_resolution mark_activity_read set_composer_draft open_thread close_thread open_threads_list close_threads_list paginate_threads_list open_files_view close_files_view set_thread_composer_draft start_room_crawl stop_room_crawl repair_room_timeline set_space_child set_composer_reply_target cancel_composer_reply`
+  `retry_sliding_sync_capability change_homeserver submit_recovery start_device_cleanup submit_device_cleanup_uia erase_local_data_anyway restart_sync update_settings import_legacy_settings update_navigation_preference rebuild_search_index set_room_url_preview_override dismiss_directory_preview select_room_list_filter mark_room_as_read mark_room_as_unread set_room_notification_mode refresh_current_session_status submit_account_management_uia load_account_management_capabilities change_password deactivate_account probe_local_encryption_health reset_local_data bootstrap_cross_signing enable_key_backup export_room_keys import_room_keys bootstrap_secure_backup recover_secure_backup retry_secure_backup_inspection change_secure_backup_passphrase accept_verification start_own_user_sas retry_current_device_trust_discovery mismatch_sas_verification start_session_bootstrap confirm_session_bootstrap_saved confirm_sas_verification cancel_verification reset_identity cancel_identity_reset submit_identity_reset_password submit_identity_reset_oauth select_space reorder_spaces cancel_scheduled_send reschedule_scheduled_send retry_send cancel_send send_reaction redact_reaction set_presence set_display_name set_local_user_alias ignore_user unignore_user report_user report_content report_room set_avatar edit_message redact_message load_message_source request_room_key request_late_decryption forward_message load_link_previews hide_link_preview leave_room forget_room open_activity close_activity set_activity_tab paginate_activity retry_activity_resolution mark_activity_read set_composer_draft open_thread close_thread open_threads_list close_threads_list paginate_threads_list open_files_view close_files_view set_thread_composer_draft start_room_crawl stop_room_crawl repair_room_timeline set_space_child set_composer_reply_target cancel_composer_reply`
     .split(" ")
 );
 
@@ -269,7 +268,7 @@ function sanitiseArgs(args: Record<string, any>): Record<string, any> {
 // Minimal default snapshot (matches FrontendDesktopSnapshot serialisation)
 // ---------------------------------------------------------------------------
 
-function defaultSnapshotResponse() {
+export function defaultSnapshotResponse() {
   // #87 Phase 4: this fixture is returned via an `as unknown as T` cast (so typecheck
   // cannot see its shape). Keep the field values flat here, then partition into the
   // domain/ui sections at runtime so the mock matches the nested IPC contract.
@@ -283,10 +282,10 @@ function defaultSnapshotResponse() {
       settings: {
         values: {
           locale: { language_tag: null, text_direction: "auto" },
-          appearance: { theme: "system" },
+          appearance: { theme: "system", density: "comfortable" },
           typography: { font: "system", emoji: "system" },
           keyboard: { composer_send_shortcut: "enter" },
-          composer: { math_mode: true },
+          composer: { math_mode: true, recent_emojis: [] },
           notifications: {
             desktop_notifications: true,
             sound: true,
@@ -321,7 +320,12 @@ function defaultSnapshotResponse() {
             include_filenames: true
           },
           thread_list_order: { kind: "latestReply" },
-          room_list_sort: { kind: "activity" }
+          room_list_sort: { kind: "activity" },
+          sidebar: {
+            category: "rooms",
+            collapsed: { favourites: false, low_priority: false, not_joined: false }
+          },
+          legacy_frontend_preferences_imported: false
         },
         persistence: { kind: "idle" }
       },
@@ -366,7 +370,13 @@ function defaultSnapshotResponse() {
         operation: { kind: "idle" }
       },
       sync: "stopped",
-      navigation: { active_space_id: null, active_room_id: null },
+      navigation: {
+        active_space_id: null,
+        active_room_id: null,
+        home_selection: { kind: "activity" },
+        space_local_presentations: {},
+        legacy_frontend_preferences_imported: false
+      },
       spaces: [],
       rooms: [],
       invites: [],
@@ -516,7 +526,8 @@ function defaultSnapshotResponse() {
       space_unread_count: 0,
       dm_unread_count: 0,
       space_highlight_count: 0,
-      dm_highlight_count: 0
+      dm_highlight_count: 0,
+      sections: { favourites: [], rooms: [], people: [], low_priority: [], not_joined: [] }
     },
     timeline: [],
     thread: null

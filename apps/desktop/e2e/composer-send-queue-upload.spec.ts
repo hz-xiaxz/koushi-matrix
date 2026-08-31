@@ -393,7 +393,8 @@ test("main composer delayed write survives churn then rejects stale completion",
         },
         sidebar: {
           ...current.sidebar,
-          space_rooms: roomListItems
+          space_rooms: roomListItems,
+          sections: { ...current.sidebar.sections, rooms: roomListItems }
         },
         thread: null
       };

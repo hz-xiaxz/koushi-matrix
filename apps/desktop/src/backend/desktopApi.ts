@@ -23,11 +23,11 @@ import type {
   FilesViewScope,
   InviteScopeSelection,
   MentionSurface,
+  NavigationPreferenceUpdate,
   OidcAuthorization,
   PresenceKind,
   RoomKeyReshareOutcome,
   RoomListFilter,
-  RoomListProjection,
   RoomModerationAction,
   RoomNotificationMode,
   RoomSettingChange,
@@ -131,6 +131,8 @@ export interface DesktopApi {
   eraseLocalDataAnyway(): Promise<CommandAdmission>;
   restartSync(): Promise<CommandAdmission>;
   updateSettings(patch: SettingsPatch): Promise<CommandAdmission>;
+  importLegacySettings(patch: SettingsPatch): Promise<CommandAdmission>;
+  updateNavigationPreference(update: NavigationPreferenceUpdate): Promise<CommandAdmission>;
   rebuildSearchIndex(): Promise<CommandAdmission>;
   setRoomUrlPreviewOverride(roomId: string, enabled: boolean): Promise<CommandAdmission>;
   selectRoomListFilter(filter: RoomListFilter): Promise<CommandAdmission>;
@@ -422,7 +424,6 @@ export interface DesktopApi {
     document: ComposerDocument,
     draftRevision?: ComposerDraftRevision
   ): Promise<SubmissionResponse>;
-  setRoomListProjection(projection: RoomListProjection): void;
   startRoomCrawl(roomId: string): Promise<CommandAdmission>;
   stopRoomCrawl(roomId: string): Promise<CommandAdmission>;
 }

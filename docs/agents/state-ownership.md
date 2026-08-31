@@ -944,8 +944,9 @@ normal QA-title mode and cannot change product title semantics.
   validates bounds and redacts the complete navigation Debug, and Rust projects
   final Space rail/header labels/icons. React may retain only text-field drafts.
 - Legacy WebView keys are read only by the allowlisted migration module. It
-  submits typed imports and clears each key after exact Rust snapshot proof;
-  failed or stale work retains the source key.
+  submits typed imports and clears each key only after persisted import-marker
+  plus exact Rust snapshot proof. A marked replay removes the stale key without
+  applying it; failed or stale work retains the source key.
 - Notification preferences are Rust-owned `SettingsValues.notifications` product
   state and must persist through the settings store with legacy JSON backfill.
   React settings UI may dispatch typed `SettingsPatch.notifications` updates, but

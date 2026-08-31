@@ -54,13 +54,7 @@ impl From<AppState> for FrontendDesktopSnapshot {
         // silently dropped mute filtering and the invite count, so a full
         // snapshot and a delta reported different Home badge values for the
         // same state.
-        let sidebar = koushi_state::compose_sidebar_with_account_facts(
-            state.navigation.active_space_id.as_deref(),
-            &state.spaces,
-            &state.rooms,
-            &state.room_notification_settings,
-            state.invites.len() as u64,
-        );
+        let sidebar = koushi_state::compose_sidebar_for_state(&state);
         Self {
             state_generation: None,
             state: state.into(),

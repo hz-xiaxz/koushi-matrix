@@ -4180,9 +4180,12 @@ stateDiagram-v2
 ```
 
 - Settings load failure keeps safe defaults and records a private-data-free
-  recoverable error. The migration-only `ImportLegacySettings` command may
-  dispatch `SettingsUpdateRequested` after `NotFound -> defaults`, but is rejected
-  after a settings-load error so it cannot overwrite unreadable existing data.
+  recoverable error. The migration-only `ImportLegacySettings` command is
+  eligible after `NotFound -> defaults`, but is rejected after a settings-load
+  error so it cannot overwrite unreadable existing data. Admission prepares the
+  same canonical settings update, saves it with a one-time marker, and projects
+  the matching settings action only after save success; a marked replay
+  cannot overwrite a later user edit.
 - Settings updates are optimistic: the reducer applies the typed patch before
   persistence completes, records the latest saving request id, and ignores stale
   persist completions.
@@ -4217,7 +4220,7 @@ stateDiagram-v2
     [*] --> Loaded
     Loaded --> Loaded: NavigationPreferenceUpdated(SetHomeSelection)
     Loaded --> Loaded: NavigationPreferenceUpdated(SetSpacePresentation)
-    Loaded --> Loaded: NavigationPreferenceUpdated(ImportLegacy)
+    Loaded --> Loaded: NavigationPreferenceUpdated(ImportLegacy) [save marked clone before project]
     Loaded --> Loaded: stale/replaced account or invalid/oversized update ignored with typed failure
 ```
 
@@ -4225,7 +4228,9 @@ stateDiagram-v2
   only in `navigation/navigation.v1.enc`; they never enter
   `settings/settings.json`.
 - `ImportLegacy` is rejected after navigation load failure and cannot race a
-  later startup load. Direct current-user edits may use the existing explicit
+  later startup load. It saves a marked clone before projecting; persistence
+  failure leaves live state unchanged, and a marked replay never reapplies a
+  retained stale key. Direct current-user edits may use the existing explicit
   preference recovery path.
 - Unknown but bounded Space entries are retained until a later room-list
   projection can use them. Empty overrides are removed; an unavailable Home DM

@@ -1,4 +1,4 @@
-import type { DesktopApi } from "./desktopApi";
+import type { DesktopApi } from "../backend/desktopApi";
 import type {
   CommandAdmission,
   CommandReceipt,
@@ -7,7 +7,7 @@ import type {
   SubmissionResponse
 } from "../domain/types";
 
-export async function browserCommandSnapshot(
+export async function commandSnapshot(
   api: DesktopApi,
   command: Promise<CommandReceipt>
 ): Promise<DesktopSnapshot> {
@@ -15,7 +15,7 @@ export async function browserCommandSnapshot(
   return api.settlementSnapshot();
 }
 
-export async function browserSubmissionResponse(
+export async function submissionResponseSnapshot(
   api: DesktopApi,
   command: Promise<SubmissionResponse>
 ): Promise<SubmissionResponse & { snapshot: DesktopSnapshot }> {
@@ -23,33 +23,31 @@ export async function browserSubmissionResponse(
   return { ...response, snapshot: await api.settlementSnapshot() };
 }
 
-export function installLegacyCommandSnapshotBridge(api: DesktopApi) {
+export function installCommandSnapshotQueue(api: DesktopApi) {
   const original = api.settlementSnapshot.bind(api);
-  const overrides: DesktopSnapshot[] = [];
+  const queued: DesktopSnapshot[] = [];
   api.settlementSnapshot = async () => {
     const actual = await original();
-    if (overrides.length === 0) return actual;
-    const override = overrides.reduce((latest, candidate) =>
-      (candidate.state_generation ?? 0) >= (latest.state_generation ?? 0)
-        ? candidate
-        : latest
+    if (queued.length === 0) return actual;
+    const latest = queued.reduce((left, right) =>
+      (right.state_generation ?? 0) >= (left.state_generation ?? 0) ? right : left
     );
-    overrides.length = 0;
+    queued.length = 0;
     return structuredClone(
-      (override.state_generation ?? 0) >= (actual.state_generation ?? 0) ? override : actual
+      (latest.state_generation ?? 0) >= (actual.state_generation ?? 0) ? latest : actual
     );
   };
   const generation = (snapshot: DesktopSnapshot) => snapshot.state_generation ?? 0;
   return {
     settlement(command: Promise<DesktopSnapshot>): Promise<CommandSettlement> {
       return command.then((snapshot) => {
-        overrides.push(snapshot);
+        queued.push(snapshot);
         return { protocolVersion: 1, publishedGeneration: generation(snapshot) };
       });
     },
     admission(command: Promise<DesktopSnapshot>): Promise<CommandAdmission> {
       return command.then((snapshot) => {
-        overrides.push(snapshot);
+        queued.push(snapshot);
         return { protocolVersion: 1, admittedGeneration: generation(snapshot) };
       });
     }

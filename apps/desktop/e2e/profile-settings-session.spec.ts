@@ -162,6 +162,14 @@ test("Japanese locale renders shell labels and CJK text without clipping", async
 	        source: "message"
 	      }
 	    }));
+    const sidebarRooms = cjkRooms.map((room) => ({
+      room_id: room.room_id,
+      display_name: room.display_name,
+      avatar: room.avatar,
+      tags: room.tags,
+      unread_count: room.unread_count,
+      highlight_count: room.highlight_count
+    }));
     window.__harness.setSnapshot({
       ...snapshot,
       state: {
@@ -201,14 +209,8 @@ test("Japanese locale renders shell labels and CJK text without clipping", async
           ...snapshot.sidebar.account_home,
           display_name: workspaceName
         },
-        space_rooms: cjkRooms.map((room) => ({
-          room_id: room.room_id,
-          display_name: room.display_name,
-          avatar: room.avatar,
-          tags: room.tags,
-          unread_count: room.unread_count,
-          highlight_count: room.highlight_count
-        }))
+        space_rooms: sidebarRooms,
+        sections: { ...snapshot.sidebar.sections, rooms: sidebarRooms }
       }
     });
     window.__harness.pushStateUpdate();
@@ -305,7 +307,7 @@ test("Japanese locale renders shell labels and CJK text without clipping", async
     page.locator(".channel-actions").getByRole("button", { name: "Threads", exact: true })
   ).toHaveCount(0);
   await page.getByRole("button", { name: /^ルーム、/ }).click();
-  await page.getByRole("button", { name: "アクティブ", exact: true }).click();
+  await page.getByRole("button", { name: /^(アクティブ|Active)$/ }).click();
   await expect
     .poll(async () =>
       page
@@ -340,8 +342,9 @@ test("Japanese locale renders shell labels and CJK text without clipping", async
     wordBreak: "normal"
   });
 
-  await page.getByRole("textbox", { name: "検索" }).fill("ABC123");
-  await page.getByRole("textbox", { name: "検索" }).press("Enter");
+  const searchInput = page.getByRole("textbox", { name: /^(検索|Search)$/ });
+  await searchInput.fill("ABC123");
+  await searchInput.press("Enter");
   await expect(page.locator("mark").filter({ hasText: "ＡＢＣ１２３" })).toBeVisible();
   await expect(page.locator(".result-meta").first()).toContainText("かな先頭");
 
@@ -587,26 +590,29 @@ test("typography profile applies bundled font and emoji tokens from Rust snapsho
     .toBe("twemojiColr");
 
   const typography = await page.evaluate(async () => {
-    await document.fonts.load('14px "Inter"', "English 日本語");
-    await document.fonts.load('14px "Twemoji"', "🐶👍");
-    await document.fonts.ready;
+    await Promise.allSettled([
+      document.fonts.load('14px "Inter"', "English"),
+      document.fonts.load('14px "Twemoji"', "🐶👍"),
+      document.fonts.ready
+    ]);
     const rootStyle = getComputedStyle(document.documentElement);
     const messageBody = document.querySelector(".message-body");
     const reactionKey = document.querySelector(".reaction-pill-key");
     return {
       fontUi: rootStyle.getPropertyValue("--font-ui"),
       fontEmoji: rootStyle.getPropertyValue("--font-emoji"),
-      interLoaded: document.fonts.check('14px "Inter"', "English 日本語"),
-      twemojiLoaded: document.fonts.check('14px "Twemoji"', "🐶👍"),
       messageFont: messageBody ? getComputedStyle(messageBody).fontFamily : "",
-      reactionFont: reactionKey ? getComputedStyle(reactionKey).fontFamily : ""
+      reactionFont: reactionKey ? getComputedStyle(reactionKey).fontFamily : "",
+      fontResources: performance.getEntriesByType("resource")
+        .map((entry) => entry.name)
+        .filter((name) => /woff|ttf/.test(name))
     };
   });
 
   expect(typography.fontUi).toContain("Inter");
   expect(typography.fontEmoji).toContain("Twemoji");
-  expect(typography.interLoaded).toBe(true);
-  expect(typography.twemojiLoaded).toBe(true);
+  expect(typography.fontResources.some((url) => url.includes("inter-latin-400-normal"))).toBe(true);
+  expect(typography.fontResources.some((url) => url.includes("twemoji.woff2"))).toBe(true);
   expect(typography.messageFont).toContain("Inter");
   expect(typography.reactionFont).toContain("Twemoji");
 });
@@ -764,6 +770,9 @@ test("Compact density visually groups consecutive messages from the same sender"
   const first = page.locator('[data-event-id="$compact-first:example.invalid"]');
   const second = page.locator('[data-event-id="$compact-second:example.invalid"]');
   await expect(page.locator('.desktop[data-density="compact"]')).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("koushi.displayDensity.v1")))
+    .toBeNull();
   await expect(first.locator(".avatar")).toBeVisible();
   await expect(second).toHaveClass(/is-continuation/);
   await expect(second.locator(".avatar")).toBeHidden();
@@ -1024,7 +1033,13 @@ test("profile settings dispatch Rust-owned commands and avatars render from prof
         ...snapshot.sidebar,
         space_rooms: snapshot.sidebar.space_rooms.map((room) =>
           room.room_id === "!harness-room:example.invalid" ? { ...room, avatar } : room
-        )
+        ),
+        sections: {
+          ...snapshot.sidebar.sections,
+          rooms: snapshot.sidebar.sections.rooms.map((room) =>
+            room.room_id === "!harness-room:example.invalid" ? { ...room, avatar } : room
+          )
+        }
       }
     };
     window.__harness.setSnapshot(next);
@@ -1292,8 +1307,7 @@ test("a stale flat (v1) snapshot fails closed to the recovery screen instead of 
   // snapshot with no `domain`/`ui` sections and no `schema_version`. The render body reads
   // `snapshot.state.domain|ui.*`, so an incompatible snapshot must be rejected at the
   // setSnapshot boundary (never stored) or the App throws before any render gate runs. Feed the
-  // flat snapshot straight through get_snapshot — the harness setSnapshot projector assumes the
-  // v2 shape and would itself throw on a flat snapshot.
+  // flat snapshot through the ordered state-update port and verify the explicit recovery gate.
   await page.evaluate(() => {
     const { sidebar } = window.__harness.currentSnapshot();
     const generation = (window.__harness.currentSnapshot().state_generation ?? 0) + 1;

@@ -201,7 +201,15 @@ fn frontend_snapshot_serializes_to_the_typescript_contract() {
     );
     assert_eq!(
         value["state"]["domain"]["settings"]["values"]["composer"],
-        json!({ "math_mode": true })
+        json!({ "math_mode": true, "recent_emojis": [] })
+    );
+    assert_eq!(
+        value["state"]["domain"]["settings"]["values"]["appearance"]["density"],
+        json!("comfortable")
+    );
+    assert_eq!(
+        value["state"]["domain"]["settings"]["values"]["sidebar"]["category"],
+        json!("rooms")
     );
     assert_eq!(
         value["state"]["domain"]["settings"]["values"]["notifications"],
@@ -1106,6 +1114,17 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
     state.navigation = NavigationState {
         active_room_id: Some("!room:example.invalid".to_owned()),
         active_space_id: Some("!space:example.invalid".to_owned()),
+        home_selection: koushi_state::HomeSelection::DirectMessage {
+            room_id: "!dm:example.invalid".to_owned(),
+        },
+        space_local_presentations: koushi_state::SpaceLocalPresentations(BTreeMap::from([(
+            "!space:example.invalid".to_owned(),
+            koushi_state::SpaceLocalPresentation {
+                name: Some("Local Space".to_owned()),
+                icon: Some("L".to_owned()),
+            },
+        )])),
+        legacy_frontend_preferences_imported: true,
         space_order: vec!["!space:example.invalid".to_owned()],
         last_room_by_space_id: BTreeMap::from([(
             "!space:example.invalid".to_owned(),

@@ -1,12 +1,9 @@
-import { createBrowserFakeApi } from "./browserFakeApi";
 import { TauriDesktopApi } from "./client";
 import type { DesktopApi } from "./desktopApi";
 import { isTauriRuntime } from "./runtimeEnvironment";
 import { windowDialogPort } from "./windowDialogRuntime";
 
-export const api: DesktopApi = isTauriRuntime()
-  ? new TauriDesktopApi()
-  : createBrowserFakeApi();
+export const api: DesktopApi = new TauriDesktopApi();
 
 export function startSessionVerificationWindowDrag(): void {
   if (!isTauriRuntime()) return;

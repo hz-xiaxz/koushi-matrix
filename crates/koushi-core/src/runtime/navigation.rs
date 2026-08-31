@@ -3,10 +3,12 @@
 use super::{AppActor, composer_draft_session_key};
 use crate::event::{CoreEvent, IntentNoOpReason, IntentOutcome};
 use crate::executor;
+use crate::failure::CoreFailure;
 use crate::ids::{RequestId, TimelineKey, TimelineKind};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
-    AppAction, AppEffect, AppState, FocusedContextState, NavigationState, SessionState, reduce,
+    AppAction, AppEffect, AppState, FocusedContextState, HomeSelection, NavigationPreferenceUpdate,
+    NavigationState, SessionState, SpaceLocalPresentation, SpaceLocalPresentations, reduce,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -233,7 +235,7 @@ impl AppActor {
         &mut self,
         key_id: koushi_key::SessionKeyId,
         navigation: NavigationState,
-    ) {
+    ) -> bool {
         let ledger_entries = navigation.space_order.len() as u64;
         let status_key_id = key_id.clone();
         let store = self.composer_draft_store_actor.clone();
@@ -248,6 +250,7 @@ impl AppActor {
                         .field(DiagnosticField::count("ledger_entries", ledger_entries))
                         .field(DiagnosticField::token("result", "success")),
                 );
+                true
             }
             Ok(Err(_)) | Err(_) => {
                 self.navigation_persistence_status =
@@ -261,8 +264,65 @@ impl AppActor {
                     .field(DiagnosticField::count("ledger_entries", ledger_entries))
                     .field(DiagnosticField::token("result", "failure")),
                 );
+                false
             }
         }
+    }
+
+    pub(super) async fn handle_navigation_preference_command(
+        &mut self,
+        request_id: RequestId,
+        update: NavigationPreferenceUpdate,
+    ) {
+        self.load_navigation_for_current_session().await;
+        let Some(key_id) = navigation_session_key(&self.state) else {
+            self.emit(CoreEvent::OperationFailed {
+                request_id,
+                failure: CoreFailure::SessionRequired,
+            });
+            return;
+        };
+        let Ok(update) = normalize_navigation_preference_update(update) else {
+            self.emit(CoreEvent::OperationFailed {
+                request_id,
+                failure: CoreFailure::PreferenceRejected,
+            });
+            return;
+        };
+
+        if matches!(update, NavigationPreferenceUpdate::ImportLegacy { .. }) {
+            if self.navigation_persistence_status
+                != NavigationPersistenceStatus::Loaded(key_id.clone())
+            {
+                self.emit(CoreEvent::OperationFailed {
+                    request_id,
+                    failure: CoreFailure::StoreUnavailable,
+                });
+                return;
+            }
+            if self.state.navigation.legacy_frontend_preferences_imported {
+                return;
+            }
+            let mut navigation = self.state.navigation.clone();
+            navigation.apply_preference_update(update);
+            if !self.persist_navigation(key_id, navigation.clone()).await {
+                self.emit(CoreEvent::OperationFailed {
+                    request_id,
+                    failure: CoreFailure::StoreUnavailable,
+                });
+                return;
+            }
+            let effects = self
+                .reduce_app_action(AppAction::NavigationLoaded { navigation })
+                .await;
+            self.handle_app_effects(request_id, effects).await;
+            return;
+        }
+
+        let effects = self
+            .reduce_app_action(AppAction::NavigationPreferenceUpdated { update })
+            .await;
+        self.handle_app_effects(request_id, effects).await;
     }
 
     pub(super) fn current_focused_context_timeline_key(&self) -> Option<TimelineKey> {
@@ -372,6 +432,85 @@ pub(super) fn navigation_replacement_room_for_cleanup(
         AppAction::SelectSpace { .. } => None,
         _ => None,
     }
+}
+
+const MAX_LOCAL_SPACE_PRESENTATIONS: usize = 256;
+const MAX_MATRIX_ID_SCALARS: usize = 255;
+const MAX_LOCAL_SPACE_NAME_SCALARS: usize = 128;
+const MAX_LOCAL_SPACE_ICON_SCALARS: usize = 12;
+
+fn normalize_navigation_preference_update(
+    update: NavigationPreferenceUpdate,
+) -> Result<NavigationPreferenceUpdate, ()> {
+    match update {
+        NavigationPreferenceUpdate::SetHomeSelection { selection } => {
+            validate_home_selection(&selection)?;
+            Ok(NavigationPreferenceUpdate::SetHomeSelection { selection })
+        }
+        NavigationPreferenceUpdate::SetSpacePresentation {
+            space_id,
+            presentation,
+        } => {
+            validate_matrix_id(&space_id)?;
+            Ok(NavigationPreferenceUpdate::SetSpacePresentation {
+                space_id,
+                presentation: presentation.and_then(normalize_space_presentation),
+            })
+        }
+        NavigationPreferenceUpdate::ImportLegacy {
+            home_selection,
+            space_local_presentations,
+        } => {
+            if space_local_presentations.0.len() > MAX_LOCAL_SPACE_PRESENTATIONS {
+                return Err(());
+            }
+            if let Some(selection) = home_selection.as_ref() {
+                validate_home_selection(selection)?;
+            }
+            let mut normalized = std::collections::BTreeMap::new();
+            for (space_id, presentation) in space_local_presentations.0 {
+                validate_matrix_id(&space_id)?;
+                if let Some(presentation) = normalize_space_presentation(presentation) {
+                    normalized.insert(space_id, presentation);
+                }
+            }
+            Ok(NavigationPreferenceUpdate::ImportLegacy {
+                home_selection,
+                space_local_presentations: SpaceLocalPresentations(normalized),
+            })
+        }
+    }
+}
+
+fn validate_home_selection(selection: &HomeSelection) -> Result<(), ()> {
+    if let HomeSelection::DirectMessage { room_id } = selection {
+        validate_matrix_id(room_id)?;
+    }
+    Ok(())
+}
+
+fn validate_matrix_id(value: &str) -> Result<(), ()> {
+    (value.starts_with('!')
+        && value.chars().count() <= MAX_MATRIX_ID_SCALARS
+        && !value.chars().any(char::is_control))
+    .then_some(())
+    .ok_or(())
+}
+
+fn normalize_space_presentation(
+    presentation: SpaceLocalPresentation,
+) -> Option<SpaceLocalPresentation> {
+    let name = normalize_bounded_text(presentation.name, MAX_LOCAL_SPACE_NAME_SCALARS);
+    let icon = normalize_bounded_text(presentation.icon, MAX_LOCAL_SPACE_ICON_SCALARS);
+    (name.is_some() || icon.is_some()).then_some(SpaceLocalPresentation { name, icon })
+}
+
+fn normalize_bounded_text(value: Option<String>, max_scalars: usize) -> Option<String> {
+    let value = value?.trim().to_owned();
+    (!value.is_empty()
+        && value.chars().count() <= max_scalars
+        && !value.chars().any(char::is_control))
+    .then_some(value)
 }
 
 pub(super) fn navigation_session_key(state: &AppState) -> Option<koushi_key::SessionKeyId> {

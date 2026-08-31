@@ -194,7 +194,7 @@ test("Activity renders Rust-owned streams and waits for mark-read snapshots", as
 
   await page
     .getByRole("navigation", { name: t("workspace.workspaces") })
-    .getByRole("button", { name: t("workspace.home"), exact: true })
+    .getByRole("button", { name: /^Home/ })
     .click();
 
   await expect.poll(() => invocationCount(page, "open_activity")).toBeGreaterThanOrEqual(1);
@@ -376,7 +376,7 @@ test("Activity Unread replaces unresolved room placeholders with retryable statu
 
   await page
     .getByRole("navigation", { name: t("workspace.workspaces") })
-    .getByRole("button", { name: t("workspace.home"), exact: true })
+    .getByRole("button", { name: /^Home/ })
     .click();
   await expect(page.getByRole("alert")).toContainText("Unread messages could not be loaded");
   await expect(page.locator('[data-kind="roomUnread"]')).toHaveCount(0);

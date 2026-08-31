@@ -703,6 +703,7 @@ export function TimelinePane({
   onUseOriginalStagedUpload = () => undefined,
   onComposerDocumentChange,
   onComposerMathModeChange,
+  onRecentEmojisChange = () => undefined,
   onMentionQueryChange,
   onEditMessage,
   onOpenContextMenu,
@@ -750,6 +751,7 @@ export function TimelinePane({
   onUseOriginalStagedUpload?: (stagedId: string) => void | Promise<void>;
   onComposerDocumentChange: (document: ComposerDocument) => void;
   onComposerMathModeChange: (enabled: boolean) => void | Promise<void>;
+  onRecentEmojisChange?: (emojis: string[]) => void | Promise<void>;
   onMentionQueryChange?: (roomId: string, query: string | null) => void;
   onEditMessage: (message: { body: string | null; room_id: string; event_id: string }) => void;
   onOpenContextMenu: OpenContextMenu;
@@ -832,6 +834,18 @@ export function TimelinePane({
     [pinnedEvents]
   );
   const stagedUploads = snapshot.state.ui.timeline.staged_uploads ?? [];
+  const searchHighlightsByEventId = useMemo(
+    () =>
+      Object.fromEntries(
+        searchResults
+          .filter((result) => result.match_field === "messageBody")
+          .map((result) => [
+            result.event_id,
+            { snippet: result.snippet, ranges: result.highlights }
+          ])
+      ),
+    [searchResults]
+  );
   // Same guard as the staging panel's Send button: every item prepared and
   // none still recompressing (#500).
   const stagedUploadsReady = uploadStagingItemsAreSendable(stagedUploads);
@@ -860,6 +874,7 @@ export function TimelinePane({
   const onUseOriginalStagedUploadStable = useStableEvent(onUseOriginalStagedUpload);
   const onComposerDocumentChangeStable = useStableEvent(onComposerDocumentChange);
   const onComposerMathModeChangeStable = useStableEvent(onComposerMathModeChange);
+  const onRecentEmojisChangeStable = useStableEvent(onRecentEmojisChange);
   const onMentionQueryChangeStable = useStableEvent((query: string | null) => {
     if (timelineRoomId) {
       onMentionQueryChange?.(timelineRoomId, query);
@@ -1018,7 +1033,7 @@ export function TimelinePane({
               ignoredUserIds={snapshot.state.domain.profile.ignored_user_ids}
               autoLoadOlderMessages={snapshot.state.domain.settings.values.timeline.auto_load_older_messages}
               codeBlockWrap={snapshot.state.domain.settings.values.display.code_block_wrap}
-              searchQuery={searchQuery}
+              searchHighlightsByEventId={searchHighlightsByEventId}
               mediaDownloads={mediaDownloads}
               mentionCandidates={mentionCandidates}
               mentionCandidatesLoading={mentionCandidatesLoading}
@@ -1041,7 +1056,7 @@ export function TimelinePane({
                 <MessageArticle
                   key={message.event_id}
                   message={message}
-                  query={searchQuery}
+                  highlights={searchHighlightsByEventId[message.event_id]?.ranges ?? []}
                   currentUserId={currentUserId}
                   onOpenContextMenu={onOpenContextMenuStable}
                   onEditMessage={onEditMessageStable}
@@ -1076,8 +1091,10 @@ export function TimelinePane({
           mentionCandidates={mentionCandidates}
           mentionCandidatesLoading={mentionCandidatesLoading}
           onMentionQueryChange={onMentionQueryChangeStable}
-          mathModeEnabled={snapshot.state.domain.settings.values.composer?.math_mode ?? true}
+          mathModeEnabled={snapshot.state.domain.settings.values.composer.math_mode}
+          recentEmojis={snapshot.state.domain.settings.values.composer.recent_emojis}
           onMathModeChange={onComposerMathModeChangeStable}
+          onRecentEmojisChange={onRecentEmojisChangeStable}
           roomName={activeRoomName}
         />
       ) : null}
@@ -1088,7 +1105,9 @@ export function TimelinePane({
         stagedUploadsReady={stagedUploadsReady}
         onSendStagedUploads={onSendStagedAttachmentsStable}
         isSending={Boolean(snapshot.state.ui.timeline.composer.pending_transaction_id)}
-        mathModeEnabled={snapshot.state.domain.settings.values.composer?.math_mode ?? true}
+        mathModeEnabled={snapshot.state.domain.settings.values.composer.math_mode}
+        recentEmojis={snapshot.state.domain.settings.values.composer.recent_emojis}
+        onRecentEmojisChange={onRecentEmojisChangeStable}
         mentionCandidates={mentionCandidates}
         mentionCandidatesLoading={mentionCandidatesLoading}
         resolveComposerKeyAction={resolveComposerKeyActionStable}

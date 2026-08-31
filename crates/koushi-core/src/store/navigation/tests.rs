@@ -12,6 +12,19 @@ fn navigation_state_is_encrypted_and_rejects_corruption() {
     let navigation = NavigationState {
         active_space_id: Some("!space:test.example.com".to_owned()),
         active_room_id: Some("!room:test.example.com".to_owned()),
+        home_selection: koushi_state::HomeSelection::DirectMessage {
+            room_id: "!remembered-dm:test.example.com".to_owned(),
+        },
+        space_local_presentations: koushi_state::SpaceLocalPresentations(
+            std::collections::BTreeMap::from([(
+                "!private-space:test.example.com".to_owned(),
+                koushi_state::SpaceLocalPresentation {
+                    name: Some("Private local name".to_owned()),
+                    icon: Some("🧪".to_owned()),
+                },
+            )]),
+        ),
+        legacy_frontend_preferences_imported: true,
         space_order: vec!["!space:test.example.com".to_owned()],
         last_room_by_space_id: std::collections::BTreeMap::from([(
             "!space:test.example.com".to_owned(),
@@ -35,7 +48,14 @@ fn navigation_state_is_encrypted_and_rejects_corruption() {
     let path = actor.account_navigation_file(&key_id);
     let bytes = std::fs::read(&path).expect("read encrypted navigation");
     assert!(!path.with_extension("tmp").exists());
-    for plaintext in ["!space:test.example.com", "!room:test.example.com"] {
+    for plaintext in [
+        "!space:test.example.com",
+        "!room:test.example.com",
+        "!remembered-dm:test.example.com",
+        "!private-space:test.example.com",
+        "Private local name",
+        "🧪",
+    ] {
         assert!(
             !bytes
                 .windows(plaintext.len())
@@ -69,6 +89,9 @@ fn legacy_navigation_json_loads_and_next_save_migrates_to_encrypted_file() {
     let navigation = NavigationState {
         active_space_id: Some("!space:test.example.com".to_owned()),
         active_room_id: Some("!room:test.example.com".to_owned()),
+        home_selection: koushi_state::HomeSelection::default(),
+        space_local_presentations: koushi_state::SpaceLocalPresentations::default(),
+        legacy_frontend_preferences_imported: false,
         space_order: vec!["!space:test.example.com".to_owned()],
         last_room_by_space_id: std::collections::BTreeMap::from([(
             "!space:test.example.com".to_owned(),
@@ -123,6 +146,9 @@ fn default_navigation_removes_encrypted_and_legacy_files() {
     let navigation = NavigationState {
         active_space_id: None,
         active_room_id: Some("!room:test.example.com".to_owned()),
+        home_selection: koushi_state::HomeSelection::default(),
+        space_local_presentations: koushi_state::SpaceLocalPresentations::default(),
+        legacy_frontend_preferences_imported: false,
         space_order: Vec::new(),
         last_room_by_space_id: std::collections::BTreeMap::new(),
         last_selection_by_space_id: std::collections::BTreeMap::new(),
@@ -164,6 +190,9 @@ fn encrypted_navigation_state_preserves_room_scroll_anchor() {
     let navigation = NavigationState {
         active_space_id: Some("!space:test.example.com".to_owned()),
         active_room_id: Some("!room:test.example.com".to_owned()),
+        home_selection: koushi_state::HomeSelection::default(),
+        space_local_presentations: koushi_state::SpaceLocalPresentations::default(),
+        legacy_frontend_preferences_imported: false,
         space_order: vec!["!space:test.example.com".to_owned()],
         last_room_by_space_id: std::collections::BTreeMap::from([(
             "!space:test.example.com".to_owned(),

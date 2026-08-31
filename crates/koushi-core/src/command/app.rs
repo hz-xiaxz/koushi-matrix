@@ -4,8 +4,8 @@ use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentSort, ComposerDocument,
     ComposerDraftRevision, FilesViewScope, InviteScopeSelection, JapaneseCatalogProfile,
     LocalEncryptionHealth, NativeAttentionDispatchId, NativeAttentionSoundOutcome,
-    NativeAttentionState, RoomListFilter, SettingsPatch, StagedUploadCompressionChoice,
-    StagedUploadItem, TimelineScrollAnchor,
+    NativeAttentionState, NavigationPreferenceUpdate, RoomListFilter, SettingsPatch,
+    StagedUploadCompressionChoice, StagedUploadItem, TimelineScrollAnchor,
 };
 
 use crate::ids::{RequestId, TimelineKey};
@@ -165,6 +165,14 @@ pub enum AppCommand {
     UpdateSettings {
         request_id: RequestId,
         patch: SettingsPatch,
+    },
+    ImportLegacySettings {
+        request_id: RequestId,
+        patch: SettingsPatch,
+    },
+    UpdateNavigationPreference {
+        request_id: RequestId,
+        update: NavigationPreferenceUpdate,
     },
     RebuildSearchIndex {
         request_id: RequestId,
@@ -475,6 +483,16 @@ impl fmt::Debug for AppCommand {
                 .field("request_id", request_id)
                 .field("patch_fields", &settings_patch_field_names(patch))
                 .finish(),
+            Self::ImportLegacySettings { request_id, patch } => formatter
+                .debug_struct("ImportLegacySettings")
+                .field("request_id", request_id)
+                .field("patch_fields", &settings_patch_field_names(patch))
+                .finish(),
+            Self::UpdateNavigationPreference { request_id, update } => formatter
+                .debug_struct("UpdateNavigationPreference")
+                .field("request_id", request_id)
+                .field("update", update)
+                .finish(),
             Self::RebuildSearchIndex { request_id } => formatter
                 .debug_struct("RebuildSearchIndex")
                 .field("request_id", request_id)
@@ -644,6 +662,24 @@ fn settings_patch_field_names(patch: &SettingsPatch) -> Vec<&'static str> {
     }
     if patch.display.is_some() {
         fields.push("display");
+    }
+    if patch.media.is_some() {
+        fields.push("media");
+    }
+    if patch.timeline.is_some() {
+        fields.push("timeline");
+    }
+    if patch.thread_list_order.is_some() {
+        fields.push("thread_list_order");
+    }
+    if patch.room_list_sort.is_some() {
+        fields.push("room_list_sort");
+    }
+    if patch.search_crawler.is_some() {
+        fields.push("search_crawler");
+    }
+    if patch.sidebar.is_some() {
+        fields.push("sidebar");
     }
     fields
 }

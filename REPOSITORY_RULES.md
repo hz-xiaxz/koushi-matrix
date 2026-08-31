@@ -147,7 +147,8 @@ conflict is being resolved.
 - WebView `localStorage` is not a product-state or preference store. Production
   frontend code may access it only in an explicitly allowlisted, bounded legacy
   migration reader that submits typed Rust commands and deletes each old key only
-  after the authoritative Rust snapshot proves persistence. Device-global typed
+  after a persisted one-time import marker plus the authoritative Rust snapshot
+  prove persistence. A retained stale key must never overwrite a later Rust edit. Device-global typed
   preferences use `SettingsValues`; preferences containing Matrix identifiers or
   free-form account data use a privacy-reviewed account-scoped encrypted store.
 - Browser and component tests use explicit Rust-shaped snapshots/events plus

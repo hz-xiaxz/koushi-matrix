@@ -167,6 +167,9 @@ import type {
   SavedSessionInfo,
   SearchScopeKind,
   SecureBackupSetupIntent,
+  DisplayDensity,
+  HomeSelection,
+  SpaceLocalPresentation,
   SettingsPatch,
   SpaceMemberRoleOption,
   ThreadOpenIntent,
@@ -179,17 +182,17 @@ import { createOrderedEventBatcher } from "./domain/orderedEventBatcher";
 import { createStateUpdateConsumer } from "./domain/stateUpdateConsumer";
 import { createCommandReceiptReconciler } from "./domain/commandWatermark";
 import { SNAPSHOT_SCHEMA_VERSION } from "./domain/types";
-import {
-  type DisplayDensity,
-  type SpaceLocalOverrides,
-  readDisplayDensity,
-  readSpaceLocalOverrides,
-  setSpaceLocalOverride,
-  spaceDisplayName,
-  SPACE_OVERRIDES_CHANGED_EVENT,
-  writeDisplayDensity
-} from "./app/localPresentation";
 import { createViewportSyncReporter } from "./app/viewportSyncReporter";
+import { EMOJI_BY_CATEGORY, EMOJI_CATEGORIES } from "./components/emojiData";
+import {
+  LEGACY_NAVIGATION_KEYS,
+  LEGACY_SETTINGS_KEYS,
+  keysPresentInMigration,
+  legacyNavigationImportMatches,
+  legacySettingsPatchMatches,
+  readBrowserLegacyPreferenceMigration,
+  removeBrowserLegacyPreferenceKeys
+} from "./app/legacyPreferenceMigration";
 import {
   applyAppStoreDelta,
   getAppStoreDeltaStats,
@@ -407,45 +410,12 @@ const INLINE_RIGHT_PANEL_MIN_WIDTH = 1200;
 const WIDE_RAIL_WIDTH = 72;
 const OVERLAY_TIMELINE_MIN_WIDTH = 360;
 const INLINE_TIMELINE_MIN_WIDTH = 420;
-const HOME_SELECTION_KEY = "koushi.homeSelection.v1";
-type HomeSelection =
-  | { kind: "activity" }
-  | { kind: "explore" }
-  | { kind: "invites" }
-  | { kind: "dm"; roomId: string };
 const DEFAULT_HOME_SELECTION: HomeSelection = { kind: "activity" };
-
-function readHomeSelection(): HomeSelection {
-  if (typeof window === "undefined" || !("localStorage" in window)) {
-    return DEFAULT_HOME_SELECTION;
-  }
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(HOME_SELECTION_KEY) ?? "");
-    if (!parsed || typeof parsed !== "object" || !("kind" in parsed)) {
-      return DEFAULT_HOME_SELECTION;
-    }
-    if (
-      parsed.kind === "activity" ||
-      parsed.kind === "explore" ||
-      parsed.kind === "invites"
-    ) {
-      return { kind: parsed.kind };
-    }
-    if (parsed.kind === "dm" && typeof parsed.roomId === "string") {
-      return { kind: "dm", roomId: parsed.roomId };
-    }
-  } catch {
-    return DEFAULT_HOME_SELECTION;
-  }
-  return DEFAULT_HOME_SELECTION;
-}
-
-function writeHomeSelection(selection: HomeSelection): void {
-  if (typeof window === "undefined" || !("localStorage" in window)) {
-    return;
-  }
-  window.localStorage.setItem(HOME_SELECTION_KEY, JSON.stringify(selection));
-}
+const VALID_EMOJIS = new Set(
+  EMOJI_CATEGORIES.flatMap((category) =>
+    EMOJI_BY_CATEGORY[category].map((entry) => entry.emoji)
+  )
+);
 
 function defaultCreateRoomDialogOptions(): CreateRoomDialogOptions {
   return { ...DEFAULT_CREATE_ROOM_OPTIONS };
@@ -1073,8 +1043,8 @@ export function App() {
       setRightPanelMode("closed");
     }
   }, [mainTimelineAnchorEventId, rightPanelMode]);
-  const [homeSelection, setHomeSelectionState] =
-    useState<HomeSelection>(readHomeSelection);
+  const homeSelection =
+    snapshot?.state.ui.navigation.home_selection ?? DEFAULT_HOME_SELECTION;
   const [directorySearchDraft, setDirectorySearchDraft] = useState("");
   // Blank means the user's own homeserver directory.
   const [directoryServerDraft, setDirectoryServerDraft] = useState("");
@@ -1093,8 +1063,8 @@ export function App() {
   const secureBackupInspectionRetryInFlightRef = useRef(false);
   const [runtimeDiagnosticSnapshot, setRuntimeDiagnosticSnapshot] =
     useState<DiagnosticLogSnapshot>({ entries: [], droppedEntries: 0 });
-  const [displayDensity, setDisplayDensityState] =
-    useState<DisplayDensity>(readDisplayDensity);
+  const displayDensity: DisplayDensity =
+    snapshot?.state.domain.settings.values.appearance.density ?? "comfortable";
   const viewportSyncReporter = useMemo(() => createViewportSyncReporter(api), []);
   useEffect(() => {
     runInBackground(viewportSyncReporter("density_commit", displayDensity));
@@ -1107,8 +1077,8 @@ export function App() {
     window.addEventListener("resize", reportBrowserResize);
     return () => window.removeEventListener("resize", reportBrowserResize);
   }, [displayDensity, viewportSyncReporter]);
-  const [spaceLocalOverrides, setSpaceLocalOverrides] =
-    useState<SpaceLocalOverrides>(readSpaceLocalOverrides);
+  const spaceLocalOverrides =
+    snapshot?.state.ui.navigation.space_local_presentations ?? {};
   const [newDmDraftUserId, setNewDmDraftUserId] = useState("");
   const [inviteUserDialog, setInviteUserDialog] = useState<InviteUserDialogState>(null);
   const [inviteUserDialogVisible, setInviteUserDialogVisible] = useState(false);
@@ -1144,29 +1114,83 @@ export function App() {
   const avatarRetryCountsRef = useRef<Map<string, number>>(new Map());
   const requestedMemberAvatarMxcsRef = useRef<Set<string>>(new Set());
   const memberAvatarRetryCountsRef = useRef<Map<string, number>>(new Map());
+  const settingsMigrationInFlightRef = useRef(false);
+  const navigationMigrationInFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    const refreshOverrides = () => setSpaceLocalOverrides(readSpaceLocalOverrides());
-    window.addEventListener(SPACE_OVERRIDES_CHANGED_EVENT, refreshOverrides);
-    window.addEventListener("storage", refreshOverrides);
-    return () => {
-      window.removeEventListener(SPACE_OVERRIDES_CHANGED_EVENT, refreshOverrides);
-      window.removeEventListener("storage", refreshOverrides);
-    };
-  }, []);
+    if (!snapshot) return;
+    const values = snapshot.state.domain.settings.values;
+    const navigation = snapshot.state.ui.navigation;
+    const migration = readBrowserLegacyPreferenceMigration(VALID_EMOJIS, values);
+    if (!migration) return;
 
+    if (values.legacy_frontend_preferences_imported) {
+      removeBrowserLegacyPreferenceKeys(LEGACY_SETTINGS_KEYS);
+    } else {
+      const keys = keysPresentInMigration(migration, LEGACY_SETTINGS_KEYS);
+      if (keys.length > 0 && !settingsMigrationInFlightRef.current) {
+        settingsMigrationInFlightRef.current = true;
+        void settleCommandSnapshot(api.importLegacySettings(migration.settingsPatch))
+          .then((next) => {
+            const confirmed = next.state.domain.settings.values;
+            if (
+              confirmed.legacy_frontend_preferences_imported &&
+              legacySettingsPatchMatches(confirmed, migration.settingsPatch)
+            ) {
+              removeBrowserLegacyPreferenceKeys(keys);
+            }
+          })
+          .finally(() => {
+            settingsMigrationInFlightRef.current = false;
+          });
+      }
+    }
 
+    const account = readyComposerDraftAccountOwner(snapshot);
+    if (!account) return;
+    const accountKey = composerDraftAccountOwnerKey(account);
+    if (navigation.legacy_frontend_preferences_imported) {
+      removeBrowserLegacyPreferenceKeys(LEGACY_NAVIGATION_KEYS);
+    } else if (
+      migration.navigationImport &&
+      !navigationMigrationInFlightRef.current.has(accountKey)
+    ) {
+      const keys = keysPresentInMigration(migration, LEGACY_NAVIGATION_KEYS);
+      if (keys.length === 0) return;
+      navigationMigrationInFlightRef.current.add(accountKey);
+      void settleCommandSnapshot(api.updateNavigationPreference(migration.navigationImport))
+        .then((next) => {
+          const confirmed = next.state.ui.navigation;
+          if (
+            confirmed.legacy_frontend_preferences_imported &&
+            legacyNavigationImportMatches(confirmed, migration.navigationImport!)
+          ) {
+            removeBrowserLegacyPreferenceKeys(keys);
+          }
+        })
+        .finally(() => {
+          navigationMigrationInFlightRef.current.delete(accountKey);
+        });
+    }
+  }, [snapshot]);
 
   function setDisplayDensity(density: DisplayDensity) {
-    setDisplayDensityState(density);
-    writeDisplayDensity(density);
+    const appearance = snapshotRef.current?.state.domain.settings.values.appearance;
+    if (!appearance) return;
+    settleCommandInBackground(api.updateSettings({ appearance: { ...appearance, density } }));
   }
 
   function updateSpaceLocalOverride(
     spaceId: string,
-    override: { name?: string; icon?: string } | null
+    presentation: SpaceLocalPresentation | null
   ) {
-    setSpaceLocalOverrides(setSpaceLocalOverride(spaceId, override));
+    settleCommandInBackground(
+      api.updateNavigationPreference({
+        kind: "setSpacePresentation",
+        space_id: spaceId,
+        presentation
+      })
+    );
   }
   const qaSendBaselineTimelineItems = useRef(0);
   const panelDiagnosticRef = useRef<string | null>(null);
@@ -2613,8 +2637,9 @@ export function App() {
   ) => api.resolveComposerKeyAction(surface, keyEvent, options);
 
   function setHomeSelection(selection: HomeSelection) {
-    setHomeSelectionState(selection);
-    writeHomeSelection(selection);
+    settleCommandInBackground(
+      api.updateNavigationPreference({ kind: "setHomeSelection", selection })
+    );
   }
 
   async function deactivateComposerScopeForNavigation(
@@ -2793,12 +2818,12 @@ export function App() {
       source: "home.transition",
       message: `stage=after_select_space elapsed_ms_since_start=${selectSpaceFinishedAt - transitionStartedAt} active_room_present=${Boolean(homeSnapshot.state.ui.navigation.active_room_id)} timeline_present=${Boolean(homeSnapshot.state.ui.timeline.room_id)}`
     });
-    if (selection.kind === "dm") {
+    if (selection.kind === "directMessage") {
       const room = homeSnapshot.state.domain.rooms.find(
-        (candidate) => candidate.room_id === selection.roomId && candidate.is_dm
+        (candidate) => candidate.room_id === selection.room_id && candidate.is_dm
       );
       if (room) {
-        await selectRoom(selection.roomId);
+        await selectRoom(selection.room_id);
         return;
       }
     }
@@ -2867,7 +2892,7 @@ export function App() {
       message: `stage=select_start current_active=${Boolean(previousActiveRoomId)} target_known=${Boolean(selectedRoom)} same_active=${previousActiveRoomId === roomId}`
     });
     if (snapshot?.sidebar.account_home.is_active && selectedRoom?.is_dm) {
-      setHomeSelection({ kind: "dm", roomId });
+      setHomeSelection({ kind: "directMessage", room_id: roomId });
     }
     if (previousActiveRoomId !== roomId) {
       const composerDrainStartedAt = Date.now();
@@ -5474,7 +5499,7 @@ export function App() {
   );
   const homeContextActive = snapshot.sidebar.account_home.is_active && !activeSpace;
   const activeSpaceName = activeSpace
-    ? spaceDisplayName(activeSpace.space_id, activeSpace.display_name, spaceLocalOverrides)
+    ? spaceLocalOverrides[activeSpace.space_id]?.name?.trim() || activeSpace.display_name
     : snapshot.sidebar.account_home.display_name;
   const threadsListScope: ThreadsListScope = activeSpace
     ? { kind: "space", space_id: activeSpace.space_id }
@@ -5647,7 +5672,6 @@ export function App() {
       >
         <WorkspaceRail
           snapshot={snapshot}
-          spaceOverrides={spaceLocalOverrides}
           onCreateSpace={() => openCreateDialog("space")}
           onOpenContextMenu={openContextMenu}
           onOpenUserSettings={() => {
@@ -5662,7 +5686,6 @@ export function App() {
           activeRoomId={snapshot.state.ui.navigation.active_room_id}
           activeView={primaryView}
           snapshot={snapshot}
-          spaceOverrides={spaceLocalOverrides}
           onCreateRoom={() => openCreateDialog("room")}
           onNewDm={openNewDmDialog}
           onOpenContextMenu={openContextMenu}
@@ -5692,6 +5715,9 @@ export function App() {
             runInBackground(joinRoom(roomId));
           }}
           onSelectRoom={selectRoom}
+          onUpdateSettings={(patch) => {
+            runInBackground(updateSettings(patch));
+          }}
         />
         <button
           className="app-grid-resizer"
@@ -5829,7 +5855,24 @@ export function App() {
               updateComposerDraft(document);
             }}
             onComposerMathModeChange={(enabled) => {
-              runInBackground(updateSettings({ composer: { math_mode: enabled } }));
+              runInBackground(
+                updateSettings({
+                  composer: {
+                    ...snapshot.state.domain.settings.values.composer,
+                    math_mode: enabled
+                  }
+                })
+              );
+            }}
+            onRecentEmojisChange={(recent_emojis) => {
+              runInBackground(
+                updateSettings({
+                  composer: {
+                    ...snapshot.state.domain.settings.values.composer,
+                    recent_emojis
+                  }
+                })
+              );
             }}
             onMentionQueryChange={(roomId, query) => {
               if (query !== null) {

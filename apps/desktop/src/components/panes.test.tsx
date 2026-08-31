@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createBrowserFakeApi } from "../backend/browserFakeApi";
+import { createDesktopApiFixture } from "../test/desktopApiFixture";
 import { ActivityPane, ExplorePane } from "./panes";
 import { setActiveLocaleProfile } from "../i18n/messages";
 import type {
@@ -201,7 +201,7 @@ function directoryEntry(overrides: Partial<DirectoryRoomSummary>): DirectoryRoom
 async function snapshotWithDirectoryResults(
   rooms: DirectoryRoomSummary[]
 ): Promise<DesktopSnapshot> {
-  const snapshot = await createBrowserFakeApi().getSnapshot();
+  const snapshot = await createDesktopApiFixture().getSnapshot();
   snapshot.state.domain.directory.query = {
     kind: "results",
     request_id: 1,

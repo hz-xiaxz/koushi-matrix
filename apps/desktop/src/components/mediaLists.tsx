@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -23,6 +23,7 @@ import type {
   TimelineMediaDownloadState,
   TimelineMediaGalleryItem,
   TimelineMessage,
+  TextRange,
   UserProfile
 } from "../domain/types";
 import { contextMenuItems } from "../domain/contextMenus";
@@ -589,7 +590,7 @@ function SearchResults({
 function MessageArticle({
   currentUserId,
   message,
-  query,
+  highlights,
   onOpenContextMenu,
   onEditMessage,
   onOpenThread,
@@ -599,7 +600,7 @@ function MessageArticle({
 }: {
   currentUserId: string | null;
   message: TimelineMessage;
-  query: string;
+  highlights: TextRange[];
   onOpenContextMenu?: OpenContextMenu;
   onEditMessage: (message: { body: string | null; room_id: string; event_id: string }) => void;
   onOpenThread: TimelineRowActionHandlers["onOpenThread"];
@@ -669,12 +670,12 @@ function MessageArticle({
           ) : null}
         </div>
         <div className="message-body" dir="auto">
-          {renderTimelineMessageText(message.body, query, profileUsers)}
+          {renderTimelineMessageText(message.body, highlights, profileUsers)}
         </div>
         {message.attachment_filename ? (
           <div className="attachment">
             <Paperclip size={ICON_SIZE.small} />
-            <span dir="auto">{highlightQueryLines(message.attachment_filename, query)}</span>
+            <span dir="auto">{message.attachment_filename}</span>
           </div>
         ) : null}
         {message.reply_count ? (
@@ -693,67 +694,29 @@ function MessageArticle({
   );
 }
 
-// ===== Search-result helpers (moved from App.tsx, used by SearchResults and MessageArticle) =====
-
-function highlightQueryLines(text: string, query: string) {
-  if (!query.trim()) {
-    return text.split("\n").map((line, index) => (
-      <span key={`${line}:${index}`}>
-        {index > 0 ? <br /> : null}
-        {line}
-      </span>
-    ));
-  }
-
-  return text.split("\n").map((line, index) => (
-    <span key={`${line}:${index}`}>
-      {index > 0 ? <br /> : null}
-      {highlightString(line, query)}
-    </span>
-  ));
-}
-
-function highlightString(text: string, query: string) {
-  const index = text.indexOf(query);
-  if (index < 0 || query.length === 0) {
-    return text;
-  }
-  return (
-    <>
-      {text.slice(0, index)}
-      <mark>{text.slice(index, index + query.length)}</mark>
-      {text.slice(index + query.length)}
-    </>
-  );
-}
-
 function highlight(text: string, ranges: SearchResult["highlights"]) {
-  if (!ranges.length) {
-    return text;
-  }
+  const valid = ranges
+    .filter(
+      ({ start_utf16, end_utf16 }) =>
+        start_utf16 >= 0 && end_utf16 > start_utf16 && end_utf16 <= text.length
+    )
+    .sort((left, right) => left.start_utf16 - right.start_utf16);
+  if (!valid.length) return text;
 
-  const range = ranges[0];
-  const chars = Array.from(text);
-  const start = utf16OffsetToCodePointIndex(text, range.start_utf16);
-  const end = utf16OffsetToCodePointIndex(text, range.end_utf16);
-  return (
-    <>
-      {chars.slice(0, start).join("")}
-      <mark>{chars.slice(start, end).join("")}</mark>
-      {chars.slice(end).join("")}
-    </>
-  );
-}
-
-function utf16OffsetToCodePointIndex(value: string, offset: number): number {
-  let utf16Count = 0;
-  for (const [index, char] of Array.from(value).entries()) {
-    if (utf16Count >= offset) {
-      return index;
-    }
-    utf16Count += char.length;
-  }
-  return Array.from(value).length;
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  valid.forEach(({ start_utf16, end_utf16 }, index) => {
+    if (start_utf16 < cursor) return;
+    nodes.push(text.slice(cursor, start_utf16));
+    nodes.push(
+      <mark key={`${start_utf16}:${end_utf16}:${index}`}>
+        {text.slice(start_utf16, end_utf16)}
+      </mark>
+    );
+    cursor = end_utf16;
+  });
+  nodes.push(text.slice(cursor));
+  return nodes;
 }
 
 function matchFieldLabel(field: SearchResult["match_field"]): string {

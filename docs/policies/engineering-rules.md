@@ -128,9 +128,10 @@ Rules:
    errors, or credentials.
    WebView `localStorage` is legacy migration input only. The migration reader
    has a closed key allowlist, strict bounds and typed parsing; it removes no key
-   until the corresponding authoritative Rust snapshot proves persistence, and
-   it retains the key on rejection, load/persist failure, account replacement or
-   shutdown.
+   until a persisted one-time import marker and the corresponding authoritative
+   Rust snapshot prove persistence. An already-marked replay removes a stale key
+   without reapplying its value, while rejection, load/persist failure, account
+   replacement or shutdown retains every unconfirmed key.
    Notification preferences live in Rust-owned `SettingsValues.notifications`
    and are persisted through the settings store. Older settings JSON files that
    predate notification preferences must deserialize with safe defaults instead

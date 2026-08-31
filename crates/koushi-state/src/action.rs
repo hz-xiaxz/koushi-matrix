@@ -16,19 +16,20 @@ use crate::state::{
     InviteDestinationResult, InviteScopeSelection, JapaneseCatalogProfile, LiveEventReceipts,
     LocalEncryptionHealth, LoginAttemptId, LoginFlow, MentionCandidate,
     MentionCandidatesCompleteness, MentionCandidatesFailureKind, MentionSurface,
-    NativeAttentionDispatchId, NativeAttentionSoundOutcome, NativeAttentionState, NavigationState,
-    OperationFailureKind, OwnProfile, PinnedEvent, PresenceKind, ProfileUpdateRequest,
-    RecoveryKeyDeliveryState, RecoveryMethod, RoomListFailureKind, RoomListFilter,
-    RoomListProjection, RoomListSource, RoomMentionPermission, RoomModerationAction,
-    RoomPreferencesState, RoomSettingChange, RoomSettingsSnapshot, RoomSummary, RoomTagInfo,
-    RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability, ScheduledSendHandle,
-    ScheduledSendItem, SearchResult, SearchScope, SessionInfo, SessionStatusRefreshTrigger,
-    SettingsPatch, SettingsValues, SpaceMemberInviteOutcome, SpaceMemberRoleUpdateOutcome,
-    SpaceMembersProjection, SpaceSummary, StagedUploadCompressionChoice, StagedUploadItem,
-    StagedUploadOutputSelection, SyncLifecycleStatus, TimelineContinuityInspection,
-    TimelineGapRepairFailureKind, TimelineMediaDownloadState, TimelineMediaGalleryItem,
-    TimelineScrollAnchor, TrustOperationFailureKind, UserProfile, VerificationCancelReason,
-    VerificationGateFailureKind, VerificationGateState, VerificationMethod, VerificationTarget,
+    NativeAttentionDispatchId, NativeAttentionSoundOutcome, NativeAttentionState,
+    NavigationPreferenceUpdate, NavigationState, OperationFailureKind, OwnProfile, PinnedEvent,
+    PresenceKind, ProfileUpdateRequest, RecoveryKeyDeliveryState, RecoveryMethod,
+    RoomListFailureKind, RoomListFilter, RoomListProjection, RoomListSource, RoomMentionPermission,
+    RoomModerationAction, RoomPreferencesState, RoomSettingChange, RoomSettingsSnapshot,
+    RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability,
+    ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope, SessionInfo,
+    SessionStatusRefreshTrigger, SettingsPatch, SettingsValues, SpaceMemberInviteOutcome,
+    SpaceMemberRoleUpdateOutcome, SpaceMembersProjection, SpaceSummary,
+    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadOutputSelection,
+    SyncLifecycleStatus, TimelineContinuityInspection, TimelineGapRepairFailureKind,
+    TimelineMediaDownloadState, TimelineMediaGalleryItem, TimelineScrollAnchor,
+    TrustOperationFailureKind, UserProfile, VerificationCancelReason, VerificationGateFailureKind,
+    VerificationGateState, VerificationMethod, VerificationTarget,
 };
 use crate::state::{SlidingSyncAdmission, SlidingSyncCapabilityResult};
 
@@ -979,6 +980,9 @@ pub enum AppAction {
     NavigationLoaded {
         navigation: NavigationState,
     },
+    NavigationPreferenceUpdated {
+        update: NavigationPreferenceUpdate,
+    },
     TimelineScrollAnchorUpdated {
         room_id: String,
         anchor: TimelineScrollAnchor,
@@ -1807,6 +1811,10 @@ impl fmt::Debug for AppAction {
                 .debug_struct("FilesViewQueryFailed")
                 .field("request_id", request_id)
                 .field("message", message)
+                .finish(),
+            Self::NavigationPreferenceUpdated { update } => formatter
+                .debug_struct("NavigationPreferenceUpdated")
+                .field("update", update)
                 .finish(),
             Self::FilesViewSelectionChanged { event_id } => formatter
                 .debug_struct("FilesViewSelectionChanged")

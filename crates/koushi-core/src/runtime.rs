@@ -529,11 +529,17 @@ impl CoreRuntime {
         let (composer_draft_rejected_tx, composer_draft_rejected_rx) = mpsc::unbounded_channel();
 
         let mut initial_state = AppState::default();
-        let settings_action = match settings_store.load() {
-            Ok(values) => AppAction::SettingsLoaded { values },
-            Err(_) => AppAction::SettingsLoadFailed {
-                message: "settings could not be loaded".to_owned(),
-            },
+        let (settings_action, settings_load_status) = match settings_store.load() {
+            Ok(values) => (
+                AppAction::SettingsLoaded { values },
+                SettingsLoadStatus::Loaded,
+            ),
+            Err(_) => (
+                AppAction::SettingsLoadFailed {
+                    message: "settings could not be loaded".to_owned(),
+                },
+                SettingsLoadStatus::Failed,
+            ),
         };
         let _ = reduce(&mut initial_state, settings_action);
         let (snapshot_tx, snapshot_rx) = watch::channel(VersionedAppStateSnapshot {
@@ -569,6 +575,7 @@ impl CoreRuntime {
             snapshot_tx,
             state: initial_state,
             settings_store,
+            settings_load_status,
             composer_draft_store_actor,
             composer_draft_load_status: ComposerDraftLoadStatus::Unloaded,
             composer_draft_reload_required: false,
@@ -785,6 +792,12 @@ impl CoreRuntime {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SettingsLoadStatus {
+    Loaded,
+    Failed,
+}
+
 struct AppActor {
     command_rx: mpsc::Receiver<CoreCommandEnvelope>,
     action_rx: mpsc::Receiver<Vec<AppAction>>,
@@ -796,6 +809,7 @@ struct AppActor {
     snapshot_tx: watch::Sender<VersionedAppStateSnapshot>,
     state: AppState,
     settings_store: SettingsStore,
+    settings_load_status: SettingsLoadStatus,
     composer_draft_store_actor: StoreActor,
     composer_draft_load_status: ComposerDraftLoadStatus,
     /// A lock/unlock can retain the same account key but still requires a
@@ -2435,6 +2449,51 @@ impl AppActor {
                         })
                         .await;
                     self.handle_app_effects(request_id, effects).await;
+                    true
+                }
+                AppCommand::ImportLegacySettings { request_id, patch } => {
+                    if self.settings_load_status == SettingsLoadStatus::Failed {
+                        self.emit(CoreEvent::OperationFailed {
+                            request_id,
+                            failure: CoreFailure::StoreUnavailable,
+                        });
+                        true
+                    } else if self
+                        .state
+                        .settings
+                        .values
+                        .legacy_frontend_preferences_imported
+                    {
+                        true
+                    } else {
+                        let mut values = self.state.settings.values.clone();
+                        values.apply_patch(patch);
+                        values.legacy_frontend_preferences_imported = true;
+                        let projected_values = values.clone();
+                        let store = self.settings_store.clone();
+                        let saved = executor::spawn_blocking(move || store.save(&values)).await;
+                        match saved {
+                            Ok(Ok(())) => {
+                                let effects = self
+                                    .reduce_app_action(AppAction::SettingsLoaded {
+                                        values: projected_values,
+                                    })
+                                    .await;
+                                self.handle_app_effects(request_id, effects).await;
+                            }
+                            Ok(Err(_)) | Err(_) => {
+                                self.emit(CoreEvent::OperationFailed {
+                                    request_id,
+                                    failure: CoreFailure::StoreUnavailable,
+                                });
+                            }
+                        }
+                        true
+                    }
+                }
+                AppCommand::UpdateNavigationPreference { request_id, update } => {
+                    self.handle_navigation_preference_command(request_id, update)
+                        .await;
                     true
                 }
                 AppCommand::RebuildSearchIndex { request_id } => {

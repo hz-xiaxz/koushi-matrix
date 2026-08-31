@@ -92,6 +92,7 @@ SettingsValues {
     ...,
     sidebar: SidebarSettings,
     room_list_sort: RoomListSort,
+    legacy_frontend_preferences_imported: bool,
 }
 ```
 
@@ -106,9 +107,12 @@ migration-only `ImportLegacySettings` command accepts the same typed patch but
 is rejected only for the `SettingsStore::load` error / `SettingsLoadFailed`
 branch, preventing a corrupt/unreadable existing file from being overwritten by
 browser defaults. `NotFound -> Ok(SettingsValues::default())` remains eligible
-for a fresh-install legacy import. AppActor
-retains only a private load-status enum; no second settings state machine enters
-the snapshot. Sidebar sort maps old `active` to `Activity` and old `name` to
+for a fresh-install legacy import. AppActor retains only a private load-status
+enum; no second settings state machine enters the snapshot. Import clones the
+current values, applies/canonicalizes the patch, sets the persisted import marker,
+saves that clone first, and projects it only after save success. If the marker is
+already true, the command is a benign no-op and never reapplies stale WebView
+values. Sidebar sort maps old `active` to `Activity` and old `name` to
 `NormalLocale`.
 
 ### Account-private navigation preferences
@@ -116,6 +120,10 @@ the snapshot. Sidebar sort maps old `active` to `Activity` and old `name` to
 Extend `NavigationState`, which already uses the account-keyed encrypted store:
 
 ```rust
+NavigationState {
+    ...,
+    legacy_frontend_preferences_imported: bool,
+}
 HomeSelection = Activity | Explore | Invites | DirectMessage { room_id }
 SpaceLocalPresentation { name: Option<String>, icon: Option<String> }
 SpaceLocalPresentations(BTreeMap<String, SpaceLocalPresentation>)
@@ -144,12 +152,15 @@ It is Ready-session/account scoped. AppActor first calls the existing
 `load_navigation_for_current_session` barrier and verifies that
 `navigation_loaded_for` plus `NavigationPersistenceStatus` match the current
 `SessionKeyId`; therefore an import can never be overwritten by a later startup
-load. It then projects one reducer action, persists through the existing deferred
-navigation-store path before terminal settlement, and uses custom redacted
-`Debug` for identifiers and free-form values. A load failure rejects the import
-without deleting legacy keys. A later direct user edit may use the existing
-explicit-mutation recovery rule, but migration import itself never overwrites a
-store whose prior contents could not be loaded.
+load. Direct user edits project one reducer action and persist through the
+existing deferred path. Import instead works on a clone, sets its persisted
+marker, saves the encrypted clone first, and only then projects it through
+`NavigationLoaded`; persistence failure leaves both live state and marker
+unchanged. An already-set marker makes replay a benign no-op. All variants use
+custom redacted `Debug` for identifiers and free-form values. A load failure
+rejects the import without deleting legacy keys. A later direct user edit may
+use the existing explicit-mutation recovery rule, but migration import itself
+never overwrites a store whose prior contents could not be loaded.
 
 ### Sidebar projection
 
@@ -215,14 +226,18 @@ Ordering:
    the current Ready account and loaded navigation state;
 2. submit settings through `ImportLegacySettings` and navigation through its
    typed import variant;
-3. wait for the command watermark and exact authoritative snapshot values;
-4. remove each corresponding old key only after its value is proven in Rust;
-5. retain every unconfirmed key on rejection, persistence failure, account
-   replacement, shutdown or crash, making retry idempotent.
+3. wait for the command watermark, persisted import marker and exact authoritative
+   snapshot values;
+4. remove each corresponding old key only after both marker and value proof;
+5. when a marker is already true after a prior crash/remove failure, never
+   reapply the old value; remove the stale key after marker proof;
+6. retain every unconfirmed key on rejection, persistence failure, account
+   replacement or shutdown.
 
-A crash after persistence but before key removal merely reapplies the same
-canonical value on restart. A failed `removeItem` leaves the key and fixed
-private-data-free diagnostic; it never deletes Rust data. The compatibility
+A crash after persistence but before key removal finds the persisted marker and
+never reapplies the legacy value, so later Rust edits cannot be overwritten. A
+failed `removeItem` leaves the key and fixed private-data-free diagnostic; the
+next startup removes it after marker proof without changing Rust data. The compatibility
 reader exists only for users upgrading from the localStorage-owning release.
 Remove it only after a separately recorded supported-upgrade-window decision;
 its structural allowlist and migration tests make that live consumer explicit.

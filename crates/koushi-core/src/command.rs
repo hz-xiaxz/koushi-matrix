@@ -50,6 +50,8 @@ impl CoreCommand {
                 | AppCommand::SelectInviteTarget { request_id, .. }
                 | AppCommand::RemoveInviteTarget { request_id, .. }
                 | AppCommand::UpdateSettings { request_id, .. }
+                | AppCommand::ImportLegacySettings { request_id, .. }
+                | AppCommand::UpdateNavigationPreference { request_id, .. }
                 | AppCommand::RebuildSearchIndex { request_id }
                 | AppCommand::SetRoomUrlPreviewOverride { request_id, .. }
                 | AppCommand::OpenActivity { request_id }

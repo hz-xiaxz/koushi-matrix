@@ -7,6 +7,22 @@ use super::timeline::{
 };
 use super::*;
 #[tauri::command]
+pub async fn update_navigation_preference(
+    update: koushi_state::NavigationPreferenceUpdate,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id(state.inner()).await;
+    let admission = submit_core_command_with_admission(
+        state.inner(),
+        build_update_navigation_preference_command(request_id, update),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(admission)
+}
+
+#[tauri::command]
 pub async fn select_space(
     space_id: Option<String>,
     app: AppHandle,
@@ -453,6 +469,13 @@ async fn wait_for_main_timeline_anchor(
         RequestOutcome::MainTimelineAnchor { snapshot } => Ok(snapshot),
         _ => Err("main timeline anchor returned an invalid outcome".to_owned()),
     }
+}
+
+pub(super) fn build_update_navigation_preference_command(
+    request_id: koushi_core::RequestId,
+    update: koushi_state::NavigationPreferenceUpdate,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::UpdateNavigationPreference { request_id, update })
 }
 
 pub(super) fn build_select_space_command(

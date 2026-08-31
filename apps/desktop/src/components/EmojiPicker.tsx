@@ -25,7 +25,6 @@ import {
   type EmojiEntry,
 } from "./emojiData";
 
-const RECENT_EMOJIS_KEY = "koushi-recent-emojis";
 const MAX_RECENT = 24;
 const EMOJI_CATEGORY_ICONS: Record<EmojiCategory, string> = {
   people: "😀",
@@ -37,42 +36,6 @@ const EMOJI_CATEGORY_ICONS: Record<EmojiCategory, string> = {
   symbols: "⁉️",
   flags: "🏁",
 };
-
-function readRecentEmojis(): string[] {
-  try {
-    const raw = localStorage.getItem(RECENT_EMOJIS_KEY);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw);
-    if (
-      Array.isArray(parsed) &&
-      parsed.every((item) => typeof item === "string")
-    ) {
-      return parsed.slice(0, MAX_RECENT);
-    }
-  } catch {
-    // ignore corrupt storage
-  }
-  return [];
-}
-
-function writeRecentEmojis(emojis: string[]) {
-  try {
-    localStorage.setItem(
-      RECENT_EMOJIS_KEY,
-      JSON.stringify(emojis.slice(0, MAX_RECENT)),
-    );
-  } catch {
-    // ignore storage errors
-  }
-}
-
-function pushRecentEmoji(emoji: string) {
-  const current = readRecentEmojis();
-  const next = [emoji, ...current.filter((item) => item !== emoji)];
-  writeRecentEmojis(next);
-}
 
 /**
  * Number of emoji columns in the grid. Single source of truth: it drives both
@@ -94,6 +57,8 @@ const EMOJI_PICKER_COMFORTABLE_BLOCK_SIZE_PX = 360;
 interface EmojiPickerProps {
   onSelect: (emoji: string) => void;
   onClose: () => void;
+  recentEmojis?: string[];
+  onRecentEmojisChange?: (emojis: string[]) => void;
   /** Element that triggered the picker; excluded from outside-click detection
    * so the trigger button can handle its own toggle without the picker
    * re-opening after the outside-click handler fires. It is also the anchor
@@ -113,6 +78,8 @@ interface EmojiPickerProps {
 export function EmojiPicker({
   onSelect,
   onClose,
+  recentEmojis = [],
+  onRecentEmojisChange,
   anchorRef,
   resolveBoundaryElement,
   placement = "above",
@@ -123,9 +90,6 @@ export function EmojiPicker({
   const [activeCategory, setActiveCategory] = useState<
     EmojiCategory | "recent"
   >("people");
-  const [recentEmojis, setRecentEmojis] = useState<string[]>(() =>
-    readRecentEmojis(),
-  );
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const categoryRefs = useRef<Record<EmojiCategory, HTMLDivElement | null>>({
@@ -210,12 +174,13 @@ export function EmojiPicker({
 
   const handleSelect = useCallback(
     (emoji: string) => {
-      pushRecentEmoji(emoji);
-      setRecentEmojis(readRecentEmojis());
+      onRecentEmojisChange?.(
+        [emoji, ...recentEmojis.filter((item) => item !== emoji)].slice(0, MAX_RECENT)
+      );
       onSelect(emoji);
       onClose();
     },
-    [onSelect, onClose],
+    [onSelect, onClose, onRecentEmojisChange, recentEmojis],
   );
 
   const scrollToCategory = useCallback((category: EmojiCategory | "recent") => {

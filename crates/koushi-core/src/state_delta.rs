@@ -13,7 +13,7 @@ use koushi_state::{
     SearchCrawlerState, SearchState, SecureBackupGateState, SessionState, SettingsState,
     SidebarModel, SoftLogoutReauthState, SpaceMembersState, SpaceSummary, SyncState,
     ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
-    compose_sidebar_with_account_facts,
+    compose_sidebar_for_state,
 };
 use serde::{Deserialize, Serialize};
 
@@ -142,24 +142,17 @@ pub fn build_state_delta(
     changed_slice!(errors);
 
     if previous.navigation.active_space_id != next.navigation.active_space_id
+        || previous.navigation.space_order != next.navigation.space_order
+        || previous.navigation.space_local_presentations
+            != next.navigation.space_local_presentations
+        || previous.settings.values.room_list_sort != next.settings.values.room_list_sort
         || previous.spaces != next.spaces
         || previous.rooms != next.rooms
+        || previous.invites != next.invites
         || previous.room_notification_settings != next.room_notification_settings
     {
-        let previous_sidebar = compose_sidebar_with_account_facts(
-            previous.navigation.active_space_id.as_deref(),
-            &previous.spaces,
-            &previous.rooms,
-            &previous.room_notification_settings,
-            previous.invites.len() as u64,
-        );
-        let next_sidebar = compose_sidebar_with_account_facts(
-            next.navigation.active_space_id.as_deref(),
-            &next.spaces,
-            &next.rooms,
-            &next.room_notification_settings,
-            next.invites.len() as u64,
-        );
+        let previous_sidebar = compose_sidebar_for_state(previous);
+        let next_sidebar = compose_sidebar_for_state(next);
         if previous_sidebar != next_sidebar {
             changed.sidebar = Some(next_sidebar);
         }
