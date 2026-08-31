@@ -7,7 +7,7 @@ build gates. AGENTS.md remains the operational how-to (permissions, install
 caveats, recovery steps); durable rules discovered there are promoted to
 REPOSITORY_RULES.md or this document.
 
-Last amended: 2026-08-30.
+Last amended: 2026-09-04.
 
 ## Design Simplicity
 
@@ -114,11 +114,23 @@ Rules:
    local unlock secrets, SDK/search keys, raw Matrix session JSON,
    room/event/user IDs, message bodies, attachment filenames, search queries,
    or raw SDK errors.
+   Desktop density, sidebar category/collapse/sort and a bounded recent-emoji
+   MRU are typed settings under this same owner. Recent emoji stores at most 24
+   canonical non-empty tokens, never arbitrary unbounded input, and must not be
+   printed in diagnostics. Home DM selection and per-Space local name/icon
+   presentation are excluded from this non-secret file because they contain
+   Matrix identifiers or free-form account data; they use the existing
+   per-account encrypted navigation store and redacted Debug instead.
    Derived display profiles for these settings, including
    `LocaleDisplayProfile` and `TypographyDisplayProfile`, are also
    non-secret profile data only. They may carry platform/capability and
    asset-status tokens, but not account identifiers, content, local paths, raw
    errors, or credentials.
+   WebView `localStorage` is legacy migration input only. The migration reader
+   has a closed key allowlist, strict bounds and typed parsing; it removes no key
+   until the corresponding authoritative Rust snapshot proves persistence, and
+   it retains the key on rejection, load/persist failure, account replacement or
+   shutdown.
    Notification preferences live in Rust-owned `SettingsValues.notifications`
    and are persisted through the settings store. Older settings JSON files that
    predate notification preferences must deserialize with safe defaults instead
@@ -857,6 +869,13 @@ GUI automation is a thin smoke layer, never the primary correctness gate.
    reaches the DOM root (`lang`, `dir`, catalog, pseudo mode), remote/user text
    keeps `dir="auto"`, pseudo/CJK/RTL samples do not overflow the shell, and
    raw user-facing strings/logical-CSS contracts are covered by headless tests.
+   Browser/component tests install explicit transport responses and later
+   Rust-shaped snapshots/events. A broad frontend fake that computes reducer,
+   navigation, sidebar, search matching/highlights, composer resolution,
+   operation settlement or retry semantics is prohibited; tests for those
+   contracts belong in Rust. Browser tests assert the typed command first, prove
+   command acceptance alone does not repair the view, then inject the Rust-owned
+   result.
    Headless helpers that seed fake event-driven timeline rows must wait for the
    resulting DOM identity (`data-item-id`) and fail if the CoreEvent was not
    applied; fixed-count fire-and-forget event emission is not valid evidence.

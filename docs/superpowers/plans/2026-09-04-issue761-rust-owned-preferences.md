@@ -310,6 +310,10 @@ Source guards supplement but never replace behavioral tests.
 
 - Inject Tauri invoke, migrate tests to explicit transport fixtures, delete
   BrowserFakeApi and dead DesktopApi members.
+- Update `docs/architecture/tauri-react-shell.md`,
+  `docs/architecture/frontend-ownership-inventory.md`, and the BrowserFake
+  entries in `docs/agents/state-ownership.md` in the same deletion phase; no
+  sibling doc may retain the old composition root or semantic-owner claim.
 - Keep the browser harness and all user-facing coverage green.
 
 ### Phase F — Audit and merge

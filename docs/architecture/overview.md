@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-08-30.
+Last amended: 2026-09-04.
 
 The evidence-based classification of remaining frontend-owned resources and
 semantic migration candidates is maintained in
@@ -102,9 +102,17 @@ Crate responsibilities:
   only apply the resulting font, emoji, and asset-status tokens to root
   attributes/CSS. Inter and Twemoji COLR are bundled-preferred choices with
   system fallbacks; React must not choose fallback semantics per component.
-  Display preferences such as code-block line wrapping live under
-  `SettingsValues.display`; React may map the snapshot value to presentation
-  CSS but must not keep an independent display-policy store.
+  Display preferences such as code-block line wrapping and desktop density live
+  under `SettingsValues`; sidebar category, section collapse and room-list sort
+  are likewise Rust-owned settings, and recent emoji is a bounded canonical MRU
+  projected from `SettingsValues.composer`. React may map these snapshot values
+  to presentation CSS/visibility and dispatch typed updates, but it must not keep
+  an independent display, sidebar or recent-emoji product store.
+  Home subsection/DM memory and per-Space local name/icon presentation contain
+  Matrix identifiers or free-form account data, so they live in the existing
+  per-account encrypted navigation store rather than the non-secret settings
+  JSON. Rust projects the final Space label/icon and complete sidebar section
+  membership/order; React never joins, classifies or sorts those product facts.
   Composer key handling uses the pure Rust-owned resolver in
   `koushi-state`; GUI code supplies typed key facts and
   renders/dispatches the resolved action. Because the resolver may cross an
@@ -636,7 +644,10 @@ CoreCommand -> actor side effect -> CoreEvent -> AppAction
 subscriptions, and keys live in actor-owned runtime state.
 
 Desktop WebViews consume `AppState` through a selector-subscribed projection
-cache, not as React-owned product state. Runtime/background state updates use
+cache, not as React-owned product state. Browser tests consume explicit
+Rust-shaped snapshots/events through a transport mock; no production or test
+`BrowserFakeApi` may reproduce reducers, actor transitions, sidebar/search
+semantics or composer resolution in TypeScript. Runtime/background state updates use
 one ordered Rust-owned state-update lane: contiguous `StateDelta` envelopes
 replace only changed top-level `AppState` slices and carry a monotonic
 generation. Versioned full snapshots are limited to initial attach and explicit
