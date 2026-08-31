@@ -19,7 +19,9 @@ function sourceFiles(directory) {
 }
 
 function functions(source) {
-  const matches = [...source.matchAll(/pub async fn ([a-z0-9_]+)[\s\S]*?\{/g)];
+  const matches = [
+    ...source.matchAll(/(?:pub(?:\([^)]*\))?\s+)?async fn ([a-z0-9_]+)[\s\S]*?\{/g)
+  ];
   return matches.map((match) => {
     let depth = 1;
     let end = match.index + match[0].length;
@@ -35,10 +37,6 @@ function functions(source) {
 for (const name of readdirSync(commands).filter((name) => name.endsWith(".rs"))) {
   const path = join(commands, name);
   const source = readFileSync(path, "utf8");
-  if (name !== "session.rs" && forbidden.test(source)) {
-    violations.push(relative(root, path));
-    continue;
-  }
   for (const fn of functions(source)) {
     if (!allowed.has(fn.name) && forbidden.test(fn.text)) {
       violations.push(`${relative(root, path)}:${source.slice(0, fn.start).split("\n").length} ${fn.name}`);

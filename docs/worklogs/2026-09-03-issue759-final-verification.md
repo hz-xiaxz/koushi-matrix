@@ -55,4 +55,12 @@ This is the same variable-height scrollback failure class already reproduced on 
 - Phase C diff: Fireworks — `CORRECT-TO-CONTINUE`; stale ledger comment fixed. The reviewer classified the missing AppActor-level integration proof as minor/non-blocking; focused decision tests, dropped-consumer delivery proof, and the final full Core suite cover the implemented seams.
 - Phase D diff: Fireworks — `CORRECT-TO-CONTINUE`; local signal-shape comment added for the review's minor clarity finding.
 
-A final exact-HEAD different-model review is still required before PR creation.
+## Final exact-HEAD review
+
+Fireworks DeepSeek V4 Flash 0731 reviewed the complete `origin/main...HEAD` integration and returned `CORRECT-TO-PR`. It found no Critical or Important issue. All three new Minor findings were fixed before PR creation:
+
+- async login discovery/OIDC/recovery UI handlers now enter the existing terminal-catch wrapper;
+- the command contract scans every async helper rather than exempting `session.rs` at file scope;
+- the snapshot DTO comment now documents only initial, settlement-resync, and gap-resync reads.
+
+Focused App/contract tests (88), typecheck, command ownership guard, and diff check passed after these fixes. A final read-only re-review is required for the amended HEAD.

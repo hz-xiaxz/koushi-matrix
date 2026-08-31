@@ -5398,11 +5398,11 @@ export function App() {
         passwordInputRef={loginPasswordRef}
         snapshot={snapshot}
         username={loginUsername}
-        onDiscoverLoginMethods={discoverLoginMethods}
+        onDiscoverLoginMethods={() => runInBackground(discoverLoginMethods())}
         onDeviceNameChange={setLoginDeviceName}
         onHomeserverChange={setLoginHomeserver}
         onPasswordPresenceChange={setLoginPasswordFilled}
-        onStartOidcLogin={startOidcLogin}
+        onStartOidcLogin={() => runInBackground(startOidcLogin())}
         onSubmit={submitLogin}
         onUsernameChange={setLoginUsername}
       />{loginTransportError && <p role="alert">{loginTransportError}</p>}</>
@@ -6084,7 +6084,7 @@ export function App() {
             runInBackground(setComposerReplyTarget(roomId, eventId));
           }}
           onResultSelect={selectSearchResult}
-          onSubmitRecovery={submitRecovery}
+          onSubmitRecovery={(event) => runInBackground(submitRecovery(event))}
           onSwitchAccount={(session) => {
             runInBackground(switchAccount(session));
           }}

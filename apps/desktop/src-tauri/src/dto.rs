@@ -31,7 +31,7 @@ use koushi_state::{
 };
 use serde::{Deserialize, Serialize};
 
-/// The snapshot returned by all Tauri commands.
+/// The snapshot returned only by initial, settlement-resync, and gap-resync reads.
 ///
 /// `timeline` and `thread` are always empty / `None` in Phase 7; timeline
 /// items flow as `TimelineEvent` diffs over `koushi-desktop://event`.
