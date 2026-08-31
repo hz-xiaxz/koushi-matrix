@@ -405,17 +405,41 @@ export function renderFormattedBody(
       : parseFormattedHtml(formatted.html);
   const codeBlockIndexRef = { current: 0 };
   const textOffsetRef = { current: 0 };
+  const projectedHighlightRanges = formattedTextOffsetsProject(nodes, formatted.plain_text)
+    ? highlightRanges
+    : [];
   return renderFormattedNodes(
     nodes,
     formatted,
     codeBlockWrap,
     codeBlockIndexRef,
     onCopyText,
-    highlightRanges,
+    projectedHighlightRanges,
     textOffsetRef,
     spoilerState,
     onOpenMatrixTarget
   );
+}
+
+function formattedTextOffsetsProject(nodes: FormattedNode[], plainText: string): boolean {
+  const cursor = { current: 0 };
+  const visit = (candidates: FormattedNode[], parentTagName: string | null): boolean => {
+    const rendered =
+      parentTagName === "ul" || parentTagName === "ol"
+        ? candidates.filter((node) => node.kind !== "text" || node.value.trim().length > 0)
+        : candidates;
+    for (const node of rendered) {
+      if (node.kind === "text") {
+        const projectedOffset = plainText.indexOf(node.value, cursor.current);
+        if (projectedOffset < 0) return false;
+        cursor.current = projectedOffset + node.value.length;
+      } else if (!visit(node.children, node.tagName)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  return visit(nodes, null);
 }
 
 function parseFormattedHtml(html: string): FormattedNode[] {

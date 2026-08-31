@@ -1585,13 +1585,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
     };
 
     // Serialize
-    let sidebar = koushi_state::compose_sidebar_with_account_facts(
-        state.navigation.active_space_id.as_deref(),
-        &state.spaces,
-        &state.rooms,
-        &state.room_notification_settings,
-        state.invites.len() as u64,
-    );
+    let sidebar = koushi_state::compose_sidebar_for_state(&state);
     let value = serde_json::to_value(FrontendDesktopSnapshot {
         state_generation: None,
         state: super::frontend_app_state_for_platform(state, koushi_state::DisplayPlatform::Linux),

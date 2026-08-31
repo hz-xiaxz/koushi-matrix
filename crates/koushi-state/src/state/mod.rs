@@ -139,10 +139,10 @@ pub use room_interactions::{
 
 // ── Re-exports: navigation ──────────────────────────────────────────────────
 pub use navigation::{
-    FocusedContextState, HomeSelection, MainTimelineAnchor, NavigationPreferenceUpdate,
-    NavigationState, RoomListEntryKind, RoomListFailureKind, RoomListFilter, RoomListProjection,
-    RoomListProjectionItem, RoomListReadiness, RoomListSort, RoomListSource,
-    SpaceConversationSurface, SpaceLocalPresentation, SpaceLocalPresentations,
+    FocusedContextState, HomeSelection, MAX_SPACE_LOCAL_PRESENTATIONS, MainTimelineAnchor,
+    NavigationPreferenceUpdate, NavigationState, RoomListEntryKind, RoomListFailureKind,
+    RoomListFilter, RoomListProjection, RoomListProjectionItem, RoomListReadiness, RoomListSort,
+    RoomListSource, SpaceConversationSurface, SpaceLocalPresentation, SpaceLocalPresentations,
     SpaceNavigationSelection, TimelineScrollAnchor, TimelineScrollAnchorEdge,
     compute_room_list_projection,
 };

@@ -1124,7 +1124,10 @@ export function App() {
     const migration = readBrowserLegacyPreferenceMigration(VALID_EMOJIS, values);
     if (!migration) return;
 
-    if (values.legacy_frontend_preferences_imported) {
+    if (
+      values.legacy_frontend_preferences_imported &&
+      !settingsMigrationInFlightRef.current
+    ) {
       removeBrowserLegacyPreferenceKeys(LEGACY_SETTINGS_KEYS);
     } else {
       const keys = keysPresentInMigration(migration, LEGACY_SETTINGS_KEYS);
@@ -1149,7 +1152,10 @@ export function App() {
     const account = readyComposerDraftAccountOwner(snapshot);
     if (!account) return;
     const accountKey = composerDraftAccountOwnerKey(account);
-    if (navigation.legacy_frontend_preferences_imported) {
+    if (
+      navigation.legacy_frontend_preferences_imported &&
+      !navigationMigrationInFlightRef.current.has(accountKey)
+    ) {
       removeBrowserLegacyPreferenceKeys(LEGACY_NAVIGATION_KEYS);
     } else if (
       migration.navigationImport &&

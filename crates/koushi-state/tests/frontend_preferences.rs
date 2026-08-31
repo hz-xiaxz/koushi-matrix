@@ -92,6 +92,15 @@ fn recent_emoji_patch_is_canonical_distinct_and_bounded() {
 }
 
 #[test]
+fn settings_debug_redacts_recent_emoji_values() {
+    let mut values = SettingsValues::default();
+    values.composer.recent_emojis = vec!["private-emoji-value".to_owned()];
+    let debug = format!("{values:?}");
+    assert!(!debug.contains("private-emoji-value"), "{debug}");
+    assert!(debug.contains("recent_emoji_count"), "{debug}");
+}
+
+#[test]
 fn navigation_debug_redacts_every_identifier_and_local_presentation_value() {
     let navigation = NavigationState {
         active_space_id: Some("!active-space:example.invalid".to_owned()),

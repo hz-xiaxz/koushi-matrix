@@ -1056,7 +1056,11 @@ export function TimelinePane({
                 <MessageArticle
                   key={message.event_id}
                   message={message}
-                  highlights={searchHighlightsByEventId[message.event_id]?.ranges ?? []}
+                  highlights={
+                    searchHighlightsByEventId[message.event_id]?.snippet === message.body
+                      ? searchHighlightsByEventId[message.event_id]?.ranges ?? []
+                      : []
+                  }
                   currentUserId={currentUserId}
                   onOpenContextMenu={onOpenContextMenuStable}
                   onEditMessage={onEditMessageStable}

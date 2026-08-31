@@ -176,6 +176,8 @@ impl fmt::Debug for SpaceLocalPresentation {
     }
 }
 
+pub const MAX_SPACE_LOCAL_PRESENTATIONS: usize = 256;
+
 #[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SpaceLocalPresentations(pub BTreeMap<String, SpaceLocalPresentation>);
@@ -223,6 +225,10 @@ impl NavigationState {
             } => match presentation {
                 Some(presentation) => {
                     if self.space_local_presentations.0.get(&space_id) == Some(&presentation) {
+                        false
+                    } else if !self.space_local_presentations.0.contains_key(&space_id)
+                        && self.space_local_presentations.0.len() >= MAX_SPACE_LOCAL_PRESENTATIONS
+                    {
                         false
                     } else {
                         self.space_local_presentations

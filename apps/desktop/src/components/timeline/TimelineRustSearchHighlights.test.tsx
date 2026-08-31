@@ -49,6 +49,26 @@ describe("Rust-owned timeline search highlights", () => {
     expect(html).toContain("<mark> Be</mark>ta");
   });
 
+  test("formatted text drops ranges when sanitized nodes cannot map to the Rust snippet", () => {
+    const html = renderToStaticMarkup(
+      <>{renderFormattedBody(
+        {
+          html: "<strong>A&amp;B</strong>",
+          plain_text: "A and B",
+          code_blocks: []
+        },
+        [],
+        true,
+        vi.fn(),
+        ranges([2, 5]),
+        hiddenSpoilers,
+        undefined
+      )}</>
+    );
+
+    expect(html).not.toContain("<mark>");
+  });
+
   test("no Rust range means no inline highlight even when text contains a query-like word", () => {
     const html = renderToStaticMarkup(
       <>{renderPlainTextBody(

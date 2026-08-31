@@ -250,7 +250,7 @@ fn navigation_preference_boundary_rejects_invalid_and_oversized_imports() {
         .is_err()
     );
 
-    let oversized = (0..=MAX_LOCAL_SPACE_PRESENTATIONS)
+    let oversized = (0..=MAX_SPACE_LOCAL_PRESENTATIONS)
         .map(|index| {
             (
                 format!("!space-{index}:example.invalid"),
@@ -268,6 +268,33 @@ fn navigation_preference_boundary_rejects_invalid_and_oversized_imports() {
         })
         .is_err()
     );
+
+    let full = NavigationState {
+        space_local_presentations: SpaceLocalPresentations(
+            (0..MAX_SPACE_LOCAL_PRESENTATIONS)
+                .map(|index| {
+                    (
+                        format!("!space-{index}:example.invalid"),
+                        SpaceLocalPresentation {
+                            name: Some(format!("Space {index}")),
+                            icon: None,
+                        },
+                    )
+                })
+                .collect(),
+        ),
+        ..NavigationState::default()
+    };
+    assert!(navigation_preference_exceeds_capacity(
+        &full,
+        &NavigationPreferenceUpdate::SetSpacePresentation {
+            space_id: "!one-more:example.invalid".to_owned(),
+            presentation: Some(SpaceLocalPresentation {
+                name: Some("One more".to_owned()),
+                icon: None,
+            }),
+        }
+    ));
 }
 
 #[test]

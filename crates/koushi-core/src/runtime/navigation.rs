@@ -7,8 +7,9 @@ use crate::failure::CoreFailure;
 use crate::ids::{RequestId, TimelineKey, TimelineKind};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
-    AppAction, AppEffect, AppState, FocusedContextState, HomeSelection, NavigationPreferenceUpdate,
-    NavigationState, SessionState, SpaceLocalPresentation, SpaceLocalPresentations, reduce,
+    AppAction, AppEffect, AppState, FocusedContextState, HomeSelection,
+    MAX_SPACE_LOCAL_PRESENTATIONS, NavigationPreferenceUpdate, NavigationState, SessionState,
+    SpaceLocalPresentation, SpaceLocalPresentations, reduce,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -282,6 +283,13 @@ impl AppActor {
             });
             return;
         };
+        if navigation_preference_exceeds_capacity(&self.state.navigation, &update) {
+            self.emit(CoreEvent::OperationFailed {
+                request_id,
+                failure: CoreFailure::PreferenceRejected,
+            });
+            return;
+        }
         let Ok(update) = normalize_navigation_preference_update(update) else {
             self.emit(CoreEvent::OperationFailed {
                 request_id,
@@ -434,10 +442,23 @@ pub(super) fn navigation_replacement_room_for_cleanup(
     }
 }
 
-const MAX_LOCAL_SPACE_PRESENTATIONS: usize = 256;
 const MAX_MATRIX_ID_SCALARS: usize = 255;
 const MAX_LOCAL_SPACE_NAME_SCALARS: usize = 128;
 const MAX_LOCAL_SPACE_ICON_SCALARS: usize = 12;
+
+fn navigation_preference_exceeds_capacity(
+    navigation: &NavigationState,
+    update: &NavigationPreferenceUpdate,
+) -> bool {
+    matches!(
+        update,
+        NavigationPreferenceUpdate::SetSpacePresentation {
+            space_id,
+            presentation: Some(_),
+        } if !navigation.space_local_presentations.0.contains_key(space_id)
+            && navigation.space_local_presentations.0.len() >= MAX_SPACE_LOCAL_PRESENTATIONS
+    )
+}
 
 fn normalize_navigation_preference_update(
     update: NavigationPreferenceUpdate,
@@ -461,7 +482,7 @@ fn normalize_navigation_preference_update(
             home_selection,
             space_local_presentations,
         } => {
-            if space_local_presentations.0.len() > MAX_LOCAL_SPACE_PRESENTATIONS {
+            if space_local_presentations.0.len() > MAX_SPACE_LOCAL_PRESENTATIONS {
                 return Err(());
             }
             if let Some(selection) = home_selection.as_ref() {

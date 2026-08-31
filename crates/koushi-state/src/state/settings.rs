@@ -356,7 +356,7 @@ pub enum ComposerSendShortcut {
     ModEnter,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ComposerSettings {
     #[serde(default = "default_true")]
     pub math_mode: bool,
@@ -369,6 +369,16 @@ impl ComposerSettings {
         ComposerFormattingOptions {
             math_mode: self.math_mode,
         }
+    }
+}
+
+impl std::fmt::Debug for ComposerSettings {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ComposerSettings")
+            .field("math_mode", &self.math_mode)
+            .field("recent_emoji_count", &self.recent_emojis.len())
+            .finish()
     }
 }
 

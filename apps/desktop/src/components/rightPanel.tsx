@@ -928,7 +928,11 @@ export function ContextualRightPanel({
               <MessageArticle
                 key={reply.event_id}
                 message={threadReplyToTimelineMessage(reply)}
-                highlights={searchHighlightsByEventId[reply.event_id]?.ranges ?? []}
+                highlights={
+                  searchHighlightsByEventId[reply.event_id]?.snippet === reply.body
+                    ? searchHighlightsByEventId[reply.event_id]?.ranges ?? []
+                    : []
+                }
                 currentUserId={currentUserId}
                 onEditMessage={() => undefined}
                 onOpenThread={() => undefined}
