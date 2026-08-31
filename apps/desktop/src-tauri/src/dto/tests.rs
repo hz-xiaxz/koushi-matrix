@@ -1,8 +1,8 @@
 use serde_json::json;
 
 use super::{
-    FrontendDesktopSnapshot, FrontendDesktopSnapshotDelta, FrontendSyncState,
-    frontend_display_platform,
+    FrontendCommandAdmission, FrontendCommandSettlement, FrontendDesktopSnapshot,
+    FrontendDesktopSnapshotDelta, FrontendSyncState, frontend_display_platform,
 };
 use koushi_state::{
     AppState, AvatarImage, AvatarThumbnailState, EmojiPreference, FontPreference, InvitePreview,
@@ -1645,4 +1645,38 @@ fn state_update_envelope_serializes_the_v1_delta_and_snapshot_shapes() {
     assert_eq!(value["generation"], json!(11));
     assert_eq!(value["reason"], json!("gap"));
     assert_eq!(value["snapshot"]["state_generation"], json!(11));
+}
+
+#[test]
+fn command_admission_serializes_as_v1_camel_case_dto() {
+    let value = serde_json::to_value(FrontendCommandAdmission {
+        protocol_version: 1,
+        admitted_generation: 42,
+    })
+    .expect("command admission should serialize");
+
+    assert_eq!(
+        value,
+        json!({
+            "protocolVersion": 1,
+            "admittedGeneration": 42,
+        })
+    );
+}
+
+#[test]
+fn command_settlement_serializes_as_v1_camel_case_dto() {
+    let value = serde_json::to_value(FrontendCommandSettlement {
+        protocol_version: 1,
+        published_generation: 43,
+    })
+    .expect("command settlement should serialize");
+
+    assert_eq!(
+        value,
+        json!({
+            "protocolVersion": 1,
+            "publishedGeneration": 43,
+        })
+    );
 }

@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use koushi_core::{StateDelta, event::VersionedAppStateSnapshot};
+use koushi_core::{CoreCommandAdmission, StateDelta, event::VersionedAppStateSnapshot};
 use koushi_state::{
     AccountManagementCapabilities, AccountManagementState, AccountManagementUrl, ActivityState,
     AppError, AppState, AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, ComposerState,
@@ -80,6 +80,38 @@ impl FrontendDesktopSnapshot {
 }
 
 pub const STATE_UPDATE_PROTOCOL_VERSION: u8 = 1;
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontendCommandAdmission {
+    protocol_version: u8,
+    admitted_generation: u64,
+}
+
+impl FrontendCommandAdmission {
+    pub(crate) fn from_core(admission: CoreCommandAdmission) -> Self {
+        Self {
+            protocol_version: STATE_UPDATE_PROTOCOL_VERSION,
+            admitted_generation: admission.admitted_generation,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontendCommandSettlement {
+    protocol_version: u8,
+    published_generation: u64,
+}
+
+impl FrontendCommandSettlement {
+    pub(crate) fn from_published_generation(published_generation: u64) -> Self {
+        Self {
+            protocol_version: STATE_UPDATE_PROTOCOL_VERSION,
+            published_generation,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]

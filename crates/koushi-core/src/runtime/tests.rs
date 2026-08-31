@@ -1023,6 +1023,7 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         composer_draft_rejected_tx,
         composer_draft_rejected_rx,
         pending_composer_acceptances: HashMap::new(),
+        pending_command_admissions: Vec::new(),
         account_actor,
         activity_projection: ActivityProjection::default(),
         activity_resolution_generation: 0,
@@ -1185,6 +1186,7 @@ async fn same_batch_select_room_settles_only_final_selection() {
         composer_draft_rejected_tx,
         composer_draft_rejected_rx,
         pending_composer_acceptances: HashMap::new(),
+        pending_command_admissions: Vec::new(),
         account_actor,
         activity_projection: ActivityProjection::default(),
         activity_resolution_generation: 0,
@@ -2034,6 +2036,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
                 },
             }),
             composer_permit: None,
+            admission: None,
         })
         .await
         .expect("preceding command");
@@ -2044,6 +2047,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
                 request_id: shutdown_request_id,
             }),
             composer_permit: None,
+            admission: None,
         })
         .await
         .expect("first shutdown command");
@@ -2054,6 +2058,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
                 request_id: duplicate_shutdown_request_id,
             }),
             composer_permit: None,
+            admission: None,
         })
         .await
         .expect("duplicate shutdown command");
@@ -2068,6 +2073,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
                 },
             }),
             composer_permit: None,
+            admission: None,
         })
         .await
         .expect("later command");

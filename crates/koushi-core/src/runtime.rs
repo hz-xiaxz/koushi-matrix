@@ -38,7 +38,8 @@ use scheduled_send::scheduled_send_id;
 #[cfg(any(test, feature = "test-hooks"))]
 pub use connection::CoreConnectionTestControl;
 pub use connection::{
-    CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag, SelectRoomError,
+    CommandSubmitError, CoreCommandAdmission, CoreCommandHandle, CoreConnection, EventStreamLag,
+    SelectRoomError,
 };
 pub use request_outcome::{
     OutcomeCorrelation, RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation,
@@ -296,6 +297,7 @@ pub(crate) fn space_member_forward_failure_action(
 struct CoreCommandEnvelope {
     command: CoreCommand,
     composer_permit: Option<ComposerDraftCommandPermit>,
+    admission: Option<oneshot::Sender<CoreCommandAdmission>>,
 }
 
 /// A task handle that is aborted if its owner is dropped without an orderly
@@ -576,6 +578,7 @@ impl CoreRuntime {
             composer_draft_rejected_tx,
             composer_draft_rejected_rx,
             pending_composer_acceptances: HashMap::new(),
+            pending_command_admissions: Vec::new(),
             account_actor,
             activity_projection: ActivityProjection::default(),
             activity_resolution_generation: 0,
@@ -801,6 +804,7 @@ struct AppActor {
     composer_draft_rejected_tx: mpsc::UnboundedSender<RequestId>,
     composer_draft_rejected_rx: mpsc::UnboundedReceiver<RequestId>,
     pending_composer_acceptances: HashMap<RequestId, PendingComposerAcceptance>,
+    pending_command_admissions: Vec<oneshot::Sender<CoreCommandAdmission>>,
     account_actor: AccountActorHandle,
     activity_projection: ActivityProjection,
     activity_resolution_generation: u64,
@@ -944,6 +948,7 @@ impl AppActor {
                         let published_state = self.snapshot_tx.borrow().state.clone();
                         self.publish_state_change(&published_state);
                     }
+                    self.settle_command_admissions();
                     app_loop_trace("command", handled, clone_ms, loop_started.elapsed());
                     if shutdown {
                         break;
@@ -1555,7 +1560,11 @@ impl AppActor {
         let CoreCommandEnvelope {
             command,
             composer_permit,
+            admission,
         } = envelope;
+        if let Some(admission) = admission {
+            self.pending_command_admissions.push(admission);
+        }
         debug_assert_eq!(
             command.composer_draft_scope().is_some(),
             composer_permit.is_some(),
@@ -4118,6 +4127,15 @@ impl AppActor {
     fn emit(&self, event: CoreEvent) {
         // A send error only means no consumer is currently attached.
         let _ = self.event_tx.send(event);
+    }
+
+    fn settle_command_admissions(&mut self) {
+        let generation = self.state_generation;
+        for admission in self.pending_command_admissions.drain(..) {
+            let _ = admission.send(CoreCommandAdmission {
+                admitted_generation: generation,
+            });
+        }
     }
 
     fn publish_state_change(&mut self, before_state: &AppState) -> u64 {

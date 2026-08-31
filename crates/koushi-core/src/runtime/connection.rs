@@ -70,6 +70,13 @@ pub struct EventStreamLag {
     pub skipped: u64,
 }
 
+/// Generation at which Core has handled a command and published its
+/// synchronous admission state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CoreCommandAdmission {
+    pub admitted_generation: u64,
+}
+
 /// One attached consumer: allocates request ids, submits commands, and
 /// observes the shared event stream plus the latest snapshot.
 pub struct CoreConnection {
@@ -123,7 +130,32 @@ impl CoreCommandHandle {
             .send(CoreCommandEnvelope {
                 command,
                 composer_permit: None,
+                admission: None,
             })
+            .await
+            .map_err(|_| CommandSubmitError::RuntimeClosed)
+    }
+
+    /// Submit a command and wait until AppActor has handled it and published
+    /// the synchronous state it owns. This is admission, not terminal outcome.
+    pub async fn command_with_admission(
+        &self,
+        command: CoreCommand,
+    ) -> Result<CoreCommandAdmission, CommandSubmitError> {
+        self.validate_request_id(&command)?;
+        if command.composer_draft_scope().is_some() {
+            return Err(CommandSubmitError::ComposerLeaseRequired);
+        }
+        let (admission_tx, admission_rx) = oneshot::channel();
+        self.command_tx
+            .send(CoreCommandEnvelope {
+                command,
+                composer_permit: None,
+                admission: Some(admission_tx),
+            })
+            .await
+            .map_err(|_| CommandSubmitError::RuntimeClosed)?;
+        admission_rx
             .await
             .map_err(|_| CommandSubmitError::RuntimeClosed)
     }
@@ -215,6 +247,7 @@ impl CoreCommandHandle {
         Ok(CoreCommandEnvelope {
             command,
             composer_permit: Some(composer_permit),
+            admission: None,
         })
     }
 }
@@ -489,6 +522,13 @@ impl CoreConnection {
     ) -> Result<ComposerDraftCommandPermit, ComposerDraftLeaseFailure> {
         self.command_handle()
             .acquire_composer_draft_command_permit(generation, lease_id, scope)
+    }
+
+    pub async fn command_with_admission(
+        &self,
+        command: CoreCommand,
+    ) -> Result<CoreCommandAdmission, CommandSubmitError> {
+        self.command_handle().command_with_admission(command).await
     }
 
     pub async fn command_with_composer_lease(
