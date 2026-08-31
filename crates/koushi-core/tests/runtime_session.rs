@@ -516,6 +516,7 @@ async fn authoritative_trust_loss_publishes_one_atomic_reset_delta_after_setup_q
     })
     .await;
     assert!(matches!(setup_state.session, SessionState::Ready(_)));
+    let setup_generation = connection.versioned_snapshot().generation;
 
     runtime
         .inject_actions(vec![AppAction::AuthoritativeDeviceTrustChanged {
@@ -534,6 +535,9 @@ async fn authoritative_trust_loss_publishes_one_atomic_reset_delta_after_setup_q
             let CoreEvent::StateDelta(delta) = event else {
                 continue;
             };
+            if delta.generation <= setup_generation {
+                continue;
+            }
             let changed = &delta.changed;
             if changed.session.is_some()
                 && changed.current_session_status.is_some()

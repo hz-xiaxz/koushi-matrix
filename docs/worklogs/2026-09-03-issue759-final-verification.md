@@ -67,6 +67,13 @@ Focused App/contract tests (88), typecheck, command ownership guard, and diff ch
 
 ## Hosted CI triage
 
-The first hosted Browser job had two full-suite timing failures (avatar delivery and schema-mismatch replacement); both local lanes had passed. Its single evidence-backed manual rerun passed all 264 tests.
+The first hosted Browser job had two full-suite timing failures (avatar delivery and schema-mismatch replacement); both local lanes had passed. Its single evidence-backed manual rerun passed all 264 tests, while the next fresh run reproduced both races. Triage found two exact causes:
 
-The Rust job reproducibly exposed an obsolete transient-state assertion in `runtime_e2ee`: with the ordered latest snapshot watch, the account route can publish terminal SDK failure before a waiter observes the intermediate cross-signing pending snapshot. The test was split along the actual contracts: a unit test now pins the pre-route `BootstrapCrossSigningRequested` projection, while the integration test waits for the correlated terminal failure when no SDK session exists. The complete two-test `runtime_e2ee` target and focused unit test pass serially. A fresh hosted Rust run is required before merge.
+- avatar relevance was updated only in a post-commit effect, leaving a reset commit-to-effect interval where an already-requested account completion could be ignored; the fence is now derived synchronously from current render items and still rejects unrelated MXCs;
+- schema recovery is intentionally self-healing on a later compatible update, so sequential alert then hidden-main assertions could observe two different renders; the same assertions now run concurrently against the incompatible render.
+
+The exact Browser regressions pass 2/2 locally; relevant TimelineView/App Vitest passes 111 tests, and typecheck/lint pass.
+
+The Rust job first exposed an obsolete transient-state assertion in `runtime_e2ee`: with the ordered latest snapshot watch, the account route can publish terminal SDK failure before a waiter observes the intermediate cross-signing pending snapshot. The test was split along the actual contracts: a unit test pins the pre-route `BootstrapCrossSigningRequested` projection, while the integration test waits for the correlated terminal failure when no SDK session exists. The next fresh run exposed a queued setup `StateDelta` being mistaken for the later trust-loss reset in `runtime_session`; that waiter now requires `generation > setup_generation` before asserting the atomic four-slice reset. `runtime_e2ee` passes 2/2, `runtime_session` passes 9/9, and the focused mapping test passes in serial runs.
+
+Fireworks reviewed the complete hosted-CI fix diff and returned `CORRECT-TO-MERGE`. A fresh hosted Browser and Rust run is required before merge.

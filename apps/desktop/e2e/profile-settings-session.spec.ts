@@ -1313,9 +1313,11 @@ test("a stale flat (v1) snapshot fails closed to the recovery screen instead of 
     });
   });
 
-  await expect(page.getByRole("alert")).toContainText(t("app.versionMismatch.title"));
-  await expect(page.getByRole("alert")).toContainText(t("app.versionMismatch.detail"));
-  await expect(page.getByRole("main", { name: "Conversation timeline" })).toBeHidden();
+  await Promise.all([
+    expect(page.getByRole("alert")).toContainText(t("app.versionMismatch.title")),
+    expect(page.getByRole("alert")).toContainText(t("app.versionMismatch.detail")),
+    expect(page.getByRole("main", { name: "Conversation timeline" })).toBeHidden()
+  ]);
 });
 
 test("a future snapshot schema_version is also rejected to the recovery screen", async ({
@@ -1340,6 +1342,8 @@ test("a future snapshot schema_version is also rejected to the recovery screen",
     });
   });
 
-  await expect(page.getByRole("alert")).toContainText(t("app.versionMismatch.title"));
-  await expect(page.getByRole("main", { name: "Conversation timeline" })).toBeHidden();
+  await Promise.all([
+    expect(page.getByRole("alert")).toContainText(t("app.versionMismatch.title")),
+    expect(page.getByRole("main", { name: "Conversation timeline" })).toBeHidden()
+  ]);
 });

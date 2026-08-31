@@ -1611,7 +1611,6 @@ export const TimelineView = memo(function TimelineView({
     lastViewportObservationRef.current = null;
     downloadedEventIdsRef.current = new Set();
     requestedImagePreviewEventIdsRef.current = new Set();
-    relevantAvatarMxcsRef.current = new Set();
     requestedAvatarMxcsRef.current = new Set();
     avatarRetryCountsRef.current = new Map();
     initialItemsSeenForTimelineKeyRef.current = null;
@@ -1684,9 +1683,10 @@ export const TimelineView = memo(function TimelineView({
     [resetActiveMeasurementDeferral]
   );
 
-  useEffect(() => {
-    relevantAvatarMxcsRef.current = timelineAvatarMxcsForItems(items, profileUsers);
-  }, [items, profileUsers]);
+  // Keep the relevance fence current during render. An effect-only update leaves
+  // a commit-to-effect gap where an already requested account thumbnail can be
+  // ignored after a timeline reset.
+  relevantAvatarMxcsRef.current = timelineAvatarMxcsForItems(items, profileUsers);
   const visibleItems = useMemo(() => items.filter((item) => !item.is_hidden), [items]);
   // The SDK-owned store stays canonical. Only these presentation rows feed
   // rendering, measuring, and virtualization for an opt-in Room projection.
