@@ -28,10 +28,9 @@ use composer::{
 };
 use navigation::{
     NavigationPersistenceStatus, NavigationReplacementRoomForCleanup, PendingFocusedNavigation,
-    anchored_action_after_projection_ack, cancel_replaced_room_timeline_link_previews_key,
-    cancel_replaced_room_timeline_pagination_key, effects_open_focused_timeline,
-    focused_navigation_outcome_after_reduce, navigation_replacement_room_for_cleanup,
-    unsubscribe_replaced_timeline_key,
+    cancel_replaced_room_timeline_link_previews_key, cancel_replaced_room_timeline_pagination_key,
+    effects_open_focused_timeline, focused_navigation_outcome_after_reduce,
+    navigation_replacement_room_for_cleanup, unsubscribe_replaced_timeline_key,
 };
 use scheduled_send::scheduled_send_id;
 
@@ -86,7 +85,9 @@ use activity::{
 
 use crate::executor;
 use crate::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
-use crate::ids::{AccountKey, RequestId, RuntimeConnectionId, TimelineKey, TimelineKind};
+use crate::ids::{
+    AccountKey, RequestId, RuntimeConnectionId, TimelineGeneration, TimelineKey, TimelineKind,
+};
 use crate::settings::SettingsStore;
 use crate::state_delta::build_state_delta;
 use crate::store::{StoreActor, session_key_id_from_info};
@@ -551,6 +552,9 @@ impl CoreRuntime {
             sliding_sync_diagnostics.clone(),
         );
 
+        let focused_projection_rx = account_actor
+            .take_focused_projection_commits()
+            .expect("AppActor must own the focused projection commit receiver");
         #[cfg(any(test, feature = "test-hooks"))]
         let account_actor_test_handle = account_actor.clone();
         #[cfg(any(test, feature = "test-hooks"))]
@@ -558,6 +562,7 @@ impl CoreRuntime {
         let actor = AppActor {
             command_rx,
             action_rx,
+            focused_projection_rx,
             #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_test_rx,
             event_tx: event_tx.clone(),
@@ -586,6 +591,7 @@ impl CoreRuntime {
             navigation_projection_generation: 0,
             pending_select: HashMap::new(),
             pending_focused_navigation: None,
+            latest_focused_projection_generation: HashMap::new(),
             pending_date_navigation_request_id: None,
         };
         let actor = executor::spawn(actor.run());
@@ -782,6 +788,7 @@ impl CoreRuntime {
 struct AppActor {
     command_rx: mpsc::Receiver<CoreCommandEnvelope>,
     action_rx: mpsc::Receiver<Vec<AppAction>>,
+    focused_projection_rx: mpsc::UnboundedReceiver<crate::timeline::FocusedProjectionCommitted>,
     #[cfg(any(test, feature = "test-hooks"))]
     composer_draft_test_rx: mpsc::Receiver<ComposerDraftTestMutation>,
     event_tx: broadcast::Sender<CoreEvent>,
@@ -821,6 +828,7 @@ struct AppActor {
     /// Main-pane Focused navigation awaiting proof that the WebView canonical
     /// store applied the actor-owned InitialItems projection.
     pending_focused_navigation: Option<PendingFocusedNavigation>,
+    latest_focused_projection_generation: HashMap<TimelineKey, (u64, TimelineGeneration)>,
     pending_date_navigation_request_id: Option<RequestId>,
 }
 
@@ -953,6 +961,10 @@ impl AppActor {
                     if shutdown {
                         break;
                     }
+                }
+                focused_projection = self.focused_projection_rx.recv() => {
+                    let Some(focused_projection) = focused_projection else { break };
+                    self.handle_focused_projection_commit(focused_projection).await;
                 }
                 actions = self.action_rx.recv() => {
                     let Some(actions) = actions else { break };
@@ -2207,129 +2219,6 @@ impl AppActor {
                         self.pending_focused_navigation = None;
                     }
                     self.handle_app_effects(request_id, effects).await;
-                    true
-                }
-                AppCommand::AcknowledgeTimelineProjection {
-                    request_id: _,
-                    projection_request_id,
-                    key,
-                    generation,
-                    item_count,
-                    target_present,
-                } => {
-                    let pending_navigation = self
-                        .pending_focused_navigation
-                        .as_ref()
-                        .filter(|pending| {
-                            pending.projection_request_id == projection_request_id
-                                && pending.key == key
-                        })
-                        .cloned();
-                    let pending_matches = pending_navigation.is_some();
-                    let (response, accepted) = oneshot::channel();
-                    let routed = self
-                        .account_actor
-                        .send(AccountMessage::AcknowledgeTimelineProjection {
-                            projection_request_id,
-                            key: key.clone(),
-                            generation,
-                            response,
-                        })
-                        .await;
-                    let actor_acknowledgement = if routed {
-                        accepted.await.unwrap_or_default()
-                    } else {
-                        crate::timeline::TimelineProjectionAcknowledgement::default()
-                    };
-                    record(
-                        DiagnosticEvent::new(
-                            DiagnosticLevel::Debug,
-                            "core.activity_navigation",
-                            "projection_acknowledged",
-                        )
-                        .field(DiagnosticField::count("item_count", item_count))
-                        .field(DiagnosticField::boolean(
-                            "frontend_target_present",
-                            target_present,
-                        ))
-                        .field(DiagnosticField::count(
-                            "actor_item_count",
-                            actor_acknowledgement.item_count,
-                        ))
-                        .field(DiagnosticField::boolean(
-                            "actor_target_present",
-                            actor_acknowledgement.target_present,
-                        ))
-                        .field(DiagnosticField::boolean(
-                            "evidence_matches",
-                            target_present == actor_acknowledgement.target_present
-                                && item_count == actor_acknowledgement.item_count,
-                        ))
-                        .field(DiagnosticField::boolean(
-                            "actor_accepted",
-                            actor_acknowledgement.accepted,
-                        )),
-                    );
-                    if pending_matches
-                        && let Some(action) = anchored_action_after_projection_ack(
-                            &mut self.pending_focused_navigation,
-                            projection_request_id,
-                            &key,
-                            actor_acknowledgement.accepted,
-                            target_present,
-                            actor_acknowledgement.target_present,
-                        )
-                    {
-                        let navigation = pending_navigation
-                            .expect("matching focused navigation must remain available");
-                        let target_found =
-                            matches!(action, AppAction::EnterAnchoredTimeline { .. });
-                        let outcome = if target_found {
-                            "anchor_committed"
-                        } else {
-                            "live_fallback"
-                        };
-                        record(DiagnosticEvent::new(
-                            DiagnosticLevel::Debug,
-                            "core.activity_navigation",
-                            outcome,
-                        ));
-                        let focused_key = (!target_found)
-                            .then(|| self.current_focused_context_timeline_key())
-                            .flatten();
-                        // Include any earlier coalesced command mutations that have
-                        // not yet reached the watch snapshot in this commit point.
-                        let before_state = self.snapshot_tx.borrow().state.clone();
-                        let (effects, deferred_reducer_side_effects) =
-                            self.reduce_app_action_state(action);
-                        let published_generation = self
-                            .publish_state_delta(&before_state)
-                            .unwrap_or(self.state_generation);
-                        let lifecycle_outcome = focused_navigation_outcome_after_reduce(
-                            &self.state,
-                            &navigation,
-                            target_found,
-                        );
-                        self.emit(CoreEvent::IntentLifecycle {
-                            request_id: projection_request_id,
-                            outcome: lifecycle_outcome,
-                            published_generation,
-                        });
-                        self.apply_deferred_reducer_side_effects(deferred_reducer_side_effects)
-                            .await;
-                        if let Some(key) = focused_key {
-                            self.send_timeline_command_or_fail(
-                                projection_request_id,
-                                TimelineCommand::Unsubscribe {
-                                    request_id: projection_request_id,
-                                    key,
-                                },
-                            )
-                            .await;
-                        }
-                        self.handle_app_effects(projection_request_id, effects)
-                            .await;
-                    }
                     true
                 }
                 AppCommand::AcknowledgeTimelineBatchRendered {

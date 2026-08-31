@@ -103,24 +103,13 @@ pub enum AppCommand {
         room_id: String,
         event_id: String,
     },
-    /// Starts a main-pane Focused navigation whose anchor is withheld until
-    /// the WebView acknowledges applying the matching actor projection.
+    /// Starts a main-pane Focused navigation settled by the matching
+    /// actor-owned projection commit.
     OpenAnchoredTimeline {
         request_id: RequestId,
         room_id: String,
         event_id: String,
         allow_live_fallback: bool,
-    },
-    /// Confirms that the canonical WebView timeline store applied one exact
-    /// InitialItems projection. The projection request id remains stable when
-    /// the active actor reprojects after a consumer remount.
-    AcknowledgeTimelineProjection {
-        request_id: RequestId,
-        projection_request_id: RequestId,
-        key: TimelineKey,
-        generation: TimelineGeneration,
-        item_count: u64,
-        target_present: bool,
     },
     /// Confirms that the WebView committed a repair-produced timeline batch
     /// through layout. Every generation fence is required so a stale actor,
@@ -416,22 +405,6 @@ impl fmt::Debug for AppCommand {
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
                 .field("event_id", &"EventId(..)")
-                .finish(),
-            Self::AcknowledgeTimelineProjection {
-                request_id,
-                projection_request_id,
-                generation,
-                item_count,
-                target_present,
-                ..
-            } => formatter
-                .debug_struct("AcknowledgeTimelineProjection")
-                .field("request_id", request_id)
-                .field("projection_request_id", projection_request_id)
-                .field("key", &"TimelineKey(..)")
-                .field("generation", generation)
-                .field("item_count", item_count)
-                .field("target_present", target_present)
                 .finish(),
             Self::AcknowledgeTimelineBatchRendered {
                 request_id,

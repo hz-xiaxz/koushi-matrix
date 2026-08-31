@@ -922,14 +922,6 @@ export function App() {
     useRef<TimelineAcknowledgementDelivery | null>(null);
   const getTimelineAcknowledgementDelivery = useCallback(() => {
     timelineAcknowledgementDeliveryRef.current ??= createTimelineAcknowledgementDelivery({
-      submitProjection: (projectionRequestId, key, generation, itemCount, targetPresent) =>
-        api.acknowledgeTimelineProjection(
-          projectionRequestId,
-          key,
-          generation,
-          itemCount,
-          targetPresent
-        ),
       submitRepair: (
         key,
         actorGeneration,
@@ -1244,23 +1236,6 @@ export function App() {
     }
     return {
       ...tauriTimelineTransport,
-      acknowledgeProjection(
-        projectionRequestId,
-        key,
-        actorGeneration,
-        generation,
-        itemCount,
-        targetPresent
-      ) {
-        return getTimelineAcknowledgementDelivery().acknowledgeProjection(
-          projectionRequestId,
-          key,
-          actorGeneration,
-          generation,
-          itemCount,
-          targetPresent
-        );
-      },
       acknowledgeRenderedBatch(
         key,
         actorGeneration,
@@ -2100,24 +2075,6 @@ export function App() {
                 message
               });
             }
-          }
-          if (
-            applied.projection.kind === "applied" &&
-            ("Focused" in applied.projection.key.kind ||
-              "Thread" in applied.projection.key.kind)
-          ) {
-            // The Core command is idempotent because React may replay updater
-            // functions in development. Store application always precedes ACK.
-            void getTimelineAcknowledgementDelivery()
-              .acknowledgeProjection(
-                applied.projection.requestId,
-                applied.projection.key,
-                applied.projection.actorGeneration,
-                applied.projection.generation,
-                applied.projection.itemCount,
-                applied.projection.targetPresent
-              )
-              .catch(() => undefined);
           }
           next = applied.store;
         }

@@ -2112,51 +2112,31 @@ async fn gap_repair_room_switch_cancels_completion() {
         )
         .await;
 
-    let (old_actor_generation, timeline_generation) =
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if let CoreEvent::Timeline(TimelineEvent::InitialItems {
-                    request_id: Some(request_id),
-                    key: emitted_key,
-                    actor_generation,
-                    generation,
-                    ..
-                }) = event_rx.recv().await.expect("initial actor event")
-                    && request_id == projection_request_id
-                    && emitted_key == key
-                {
-                    break (actor_generation, generation);
-                }
+    let old_actor_generation = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let CoreEvent::Timeline(TimelineEvent::InitialItems {
+                request_id: Some(request_id),
+                key: emitted_key,
+                actor_generation,
+                generation,
+                ..
+            }) = event_rx.recv().await.expect("initial actor event")
+                && request_id == projection_request_id
+                && emitted_key == key
+            {
+                let _ = generation;
+                break actor_generation;
             }
-        })
-        .await
-        .expect("real actor initial projection");
+        }
+    })
+    .await
+    .expect("real actor initial projection");
     let old_actor_tx = manager
         .timelines
         .get(&key)
         .expect("old room actor")
         .tx
         .clone();
-
-    let (projection_ack_tx, projection_ack_rx) = oneshot::channel();
-    assert!(
-        manager
-            .timelines
-            .get(&key)
-            .expect("old room actor")
-            .send(TimelineActorMessage::AcknowledgeProjection {
-                projection_request_id,
-                generation: timeline_generation,
-                response: projection_ack_tx,
-            })
-            .await
-    );
-    assert!(
-        projection_ack_rx
-            .await
-            .expect("initial projection acknowledgement")
-            .accepted
-    );
 
     let (reached_tx, reached_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();

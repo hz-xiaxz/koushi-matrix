@@ -210,30 +210,6 @@ async fn open_anchored_timeline(
 }
 
 #[tauri::command]
-pub async fn acknowledge_timeline_projection(
-    projection_request_id: RequestId,
-    key: TimelineKey,
-    generation: TimelineGeneration,
-    item_count: u64,
-    target_present: bool,
-    state: State<'_, CoreRuntimeState>,
-) -> Result<(), String> {
-    let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
-        state.inner(),
-        CoreCommand::App(AppCommand::AcknowledgeTimelineProjection {
-            request_id,
-            projection_request_id,
-            key,
-            generation,
-            item_count,
-            target_present,
-        }),
-    )
-    .await
-}
-
-#[tauri::command]
 pub async fn acknowledge_timeline_batch_rendered(
     key: TimelineKey,
     actor_generation: u64,

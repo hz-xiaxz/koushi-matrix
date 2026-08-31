@@ -439,7 +439,7 @@ pub(super) fn strict_e2ee_waiter_inventory() -> &'static [(&'static str, &'stati
         ("wait_for_ready_snapshot", "\nasync fn wait_for_logged_in"),
         ("wait_for_logged_in", "\nasync fn wait_for_session_restored"),
         (
-            "subscribe_and_ack_active_timeline_projection_for_qa",
+            "subscribe_active_timeline_projection_for_qa",
             "\nfn thread_initial_items_need_paginate_backfill",
         ),
         (

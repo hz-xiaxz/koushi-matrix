@@ -37,7 +37,6 @@ impl CoreCommand {
                 | AppCommand::CloseThread { request_id }
                 | AppCommand::OpenFocusedContext { request_id, .. }
                 | AppCommand::OpenAnchoredTimeline { request_id, .. }
-                | AppCommand::AcknowledgeTimelineProjection { request_id, .. }
                 | AppCommand::AcknowledgeTimelineBatchRendered { request_id, .. }
                 | AppCommand::EnterAnchoredTimeline { request_id, .. }
                 | AppCommand::OpenTimelineAtTimestamp { request_id, .. }

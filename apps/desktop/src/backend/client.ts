@@ -50,7 +50,7 @@ import type {
   EncryptionDebugOperationOutcome
 } from "../domain/types";
 import type { DiagnosticLogSnapshot } from "../domain/diagnostics";
-import type { RequestId, TimelineKey } from "../domain/coreEvents";
+import type { TimelineKey } from "../domain/coreEvents";
 import type {
   ComposerDraftLeaseSnapshot,
   ComposerDraftScope
@@ -899,22 +899,6 @@ export class TauriDesktopApi implements DesktopApi {
 
   async openPinnedEvent(roomId: string, eventId: string): Promise<CommandSettlement> {
     return invoke<CommandSettlement>("open_pinned_event", { roomId, eventId });
-  }
-
-  async acknowledgeTimelineProjection(
-    projectionRequestId: RequestId,
-    key: TimelineKey,
-    generation: number,
-    itemCount: number,
-    targetPresent: boolean
-  ): Promise<void> {
-    return invoke<void>("acknowledge_timeline_projection", {
-      projectionRequestId,
-      key,
-      generation,
-      itemCount,
-      targetPresent
-    });
   }
 
   async acknowledgeTimelineBatchRendered(

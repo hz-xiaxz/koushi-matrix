@@ -945,7 +945,6 @@ function sourceContractFailure(rule, message) {
 // koushi_core::runtime::tests::opening_focused_context_repairs_target_event_cache_before_subscribe | 1 | core.runtime.focused_cache_repair | 1
 // koushi_core::runtime::tests::selecting_a_replacement_room_cancels_previous_room_pagination_before_subscribe | 2 | core.runtime.room_switch_pagination | 2
 // koushi_core::runtime::tests::selecting_a_replacement_room_cancels_previous_room_link_previews_before_subscribe | 2 | core.runtime.room_switch_link_previews | 2
-// koushi_core::runtime::tests::focused_ack_and_command_coalescer_share_the_latest_published_baseline | 2 | core.runtime.coalescer_baseline | 2
 // koushi_core::runtime::tests::timestamp_jump_uses_local_activity_projection_before_homeserver_fallback | 2 | core.runtime.timestamp_activity_projection | 2
 // koushi_core::runtime::connection::tests::core_connection_command_handle_clones_submit_path | 4 | core.runtime.connection_command_handle | 8
 // koushi_core::executor::tests::executor_exposes_blocking_task_port | 2 | core.runtime.executor_blocking_port | 2
@@ -1594,10 +1593,9 @@ export function checkCoreRuntimeConnectionCommandHandle() {
 export function checkCoreRuntimeCoalescerBaseline() {
   const rule = "core.runtime.coalescer_baseline";
   const source = coreSource("runtime.rs");
-  const command = sourceSection(source, "command = self.command_rx.recv()", "actions = self.action_rx.recv()");
-  const ack = sourceSection(source, "AppCommand::AcknowledgeTimelineProjection", "AppCommand::OpenTimelineAtTimestamp");
+  const command = sourceSection(source, "command = self.command_rx.recv()", "focused_projection = self.focused_projection_rx.recv()");
   const failures = [];
-  for (const section of [command, ack]) if (!section?.includes("self.snapshot_tx.borrow().state.clone()")) failures.push(sourceContractFailure(rule, "coalescer path does not publish the latest unpublished baseline"));
+  if (!command?.includes("self.snapshot_tx.borrow().state.clone()")) failures.push(sourceContractFailure(rule, "coalescer path does not publish the latest unpublished baseline"));
   return failures;
 }
 

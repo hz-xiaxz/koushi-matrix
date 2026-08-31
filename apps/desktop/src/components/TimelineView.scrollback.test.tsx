@@ -1786,72 +1786,6 @@ describe("TimelineView", () => {
     ).toEqual(expect.arrayContaining([expect.stringContaining("trigger=setting_changed")]));
   });
 
-  it("acknowledges a Room initial projection only after the layout frame", () => {
-    let emit: (payload: CoreEventPayload) => void = () => undefined;
-    const acknowledgeProjection = vi.fn(async () => undefined);
-    const frames = new Map<number, FrameRequestCallback>();
-    let nextFrameId = 0;
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-      nextFrameId += 1;
-      frames.set(nextFrameId, callback);
-      return nextFrameId;
-    });
-    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((frameId) => {
-      frames.delete(frameId);
-    });
-    const flushFrames = () => {
-      for (let pass = 0; pass < 10 && frames.size > 0; pass += 1) {
-        const queued = [...frames.values()];
-        frames.clear();
-        for (const callback of queued) {
-          callback(0);
-        }
-      }
-    };
-    const transport = baseTransport({
-      listenCoreEvents(nextListener) {
-        emit = nextListener;
-        return () => undefined;
-      },
-      acknowledgeProjection
-    });
-
-    render(
-      <TimelineView
-        timelineKey={KEY}
-        roomId="!room:example.invalid"
-        transport={transport}
-        onReply={vi.fn()}
-      />
-    );
-    act(() => {
-      emit({
-        kind: "Timeline",
-        event: {
-          InitialItems: {
-            request_id: { connection_id: 4, sequence: 8 },
-            key: KEY,
-            actor_generation: 9,
-            generation: 1,
-            items: [message("$latest", "Latest")]
-          }
-        }
-      });
-    });
-
-    expect(acknowledgeProjection).not.toHaveBeenCalled();
-    act(() => flushFrames());
-    expect(acknowledgeProjection).toHaveBeenCalledWith(
-      { connection_id: 4, sequence: 8 },
-      KEY,
-      9,
-      1,
-      1,
-      true
-    );
-    expect(acknowledgeProjection).toHaveBeenCalledTimes(1);
-  });
-
   it("acknowledges each settled Room repair projection signature once", () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const acknowledgeRenderedBatch = vi.fn(async () => undefined);
@@ -2058,10 +1992,7 @@ describe("TimelineView", () => {
         .fn<() => Promise<void>>()
         .mockRejectedValueOnce(new Error("queue timeout"))
         .mockResolvedValue(undefined);
-      const delivery = createTimelineAcknowledgementDelivery({
-        submitProjection: vi.fn(async () => undefined),
-        submitRepair
-      });
+      const delivery = createTimelineAcknowledgementDelivery({ submitRepair });
       const frames: FrameRequestCallback[] = [];
       vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
         frames.push(callback);
@@ -2130,10 +2061,7 @@ describe("TimelineView", () => {
       .fn<() => Promise<void>>()
       .mockReturnValueOnce(oldSubmission)
       .mockResolvedValue(undefined);
-    const delivery = createTimelineAcknowledgementDelivery({
-      submitProjection: vi.fn(async () => undefined),
-      submitRepair
-    });
+    const delivery = createTimelineAcknowledgementDelivery({ submitRepair });
     const frames: FrameRequestCallback[] = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       frames.push(callback);
@@ -2227,10 +2155,7 @@ describe("TimelineView", () => {
         .fn<() => Promise<void>>()
         .mockRejectedValueOnce(new Error("queue timeout"))
         .mockResolvedValue(undefined);
-      const delivery = createTimelineAcknowledgementDelivery({
-        submitProjection: vi.fn(async () => undefined),
-        submitRepair
-      });
+      const delivery = createTimelineAcknowledgementDelivery({ submitRepair });
       const frames: FrameRequestCallback[] = [];
       vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
         frames.push(callback);

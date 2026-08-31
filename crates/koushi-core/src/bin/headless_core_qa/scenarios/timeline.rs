@@ -2198,13 +2198,13 @@ pub(super) async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> R
 
     let key_a = TimelineKey::room(account_key_a.clone(), room_id.clone());
     let key_b = TimelineKey::room(account_key_b.clone(), room_id);
-    subscribe_and_ack_active_timeline_projection_for_qa(
+    subscribe_active_timeline_projection_for_qa(
         &mut conn_a,
         &key_a,
         "timeline_reconnect subscribe A",
     )
     .await?;
-    subscribe_and_ack_active_timeline_projection_for_qa(
+    subscribe_active_timeline_projection_for_qa(
         &mut conn_b,
         &key_b,
         "timeline_reconnect subscribe B",
@@ -2572,7 +2572,7 @@ pub(super) async fn run_timeline_reconnect_scenario_impl(config: &QaConfig) -> R
             qa_detached_live_tail_events(&user_b_full_id),
             detached_end_token.clone(),
         )?;
-        let detached_items = subscribe_and_ack_active_timeline_projection_for_qa(
+        let detached_items = subscribe_active_timeline_projection_for_qa(
             &mut detached_conn,
             &key_a,
             "timeline legacy persisted gap detached live tail subscription",
@@ -3307,7 +3307,7 @@ pub(super) async fn run_activity_stage(
     Ok(())
 }
 
-pub(super) async fn subscribe_and_ack_active_timeline_projection_for_qa(
+pub(super) async fn subscribe_active_timeline_projection_for_qa(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     label: &str,
@@ -3330,27 +3330,10 @@ pub(super) async fn subscribe_and_ack_active_timeline_projection_for_qa(
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
         match event {
             CoreEvent::Timeline(TimelineEvent::InitialItems {
-                request_id: Some(projection_request_id),
                 key: ref event_key,
-                generation,
                 items,
                 ..
-            }) if event_key == key => {
-                let acknowledgement_request_id = conn.next_request_id();
-                conn.command(CoreCommand::App(
-                    koushi_core::command::AppCommand::AcknowledgeTimelineProjection {
-                        request_id: acknowledgement_request_id,
-                        projection_request_id,
-                        key: key.clone(),
-                        generation,
-                        item_count: items.len() as u64,
-                        target_present: true,
-                    },
-                ))
-                .await
-                .map_err(|e| format!("{label}: submit projection acknowledgement failed: {e}"))?;
-                return Ok(items);
-            }
+            }) if event_key == key => return Ok(items),
             CoreEvent::OperationFailed {
                 request_id,
                 failure,

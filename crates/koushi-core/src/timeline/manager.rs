@@ -50,7 +50,7 @@ use super::gap_repair::{
 };
 use super::navigation::{
     INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT, NavigationProjectionIntent,
-    TimelineActorGenerationGate, TimelineProjectionAcknowledgement, receive_navigation_projection,
+    TimelineActorGenerationGate, receive_navigation_projection,
 };
 use super::outbound_send::{
     GlobalSendCompletionObserverFuture, SendComposerProjection, SendEnqueueWorkerSupervisor,
@@ -94,12 +94,6 @@ pub(crate) enum TimelineMessage {
         command: TimelineCommand,
         composer_permit: ForwardedComposerDraftPermit,
         formatting_options: ComposerFormattingOptions,
-    },
-    AcknowledgeProjection {
-        projection_request_id: RequestId,
-        key: TimelineKey,
-        generation: TimelineGeneration,
-        response: oneshot::Sender<TimelineProjectionAcknowledgement>,
     },
     AcknowledgeBatchRendered {
         key: TimelineKey,
@@ -432,6 +426,7 @@ impl TimelineManagerActor {
         data_dir: Option<std::path::PathBuf>,
         account_work: AccountWorkScheduler,
         navigation_projection_rx: Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
+        focused_projection_tx: Option<mpsc::UnboundedSender<super::FocusedProjectionCommitted>>,
     ) -> TimelineManagerHandle {
         let (tx, msg_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
         let (control_tx, control_rx) = mpsc::channel(1);
@@ -481,7 +476,9 @@ impl TimelineManagerActor {
                 ThreadRootProjectionService::default(),
             )),
             thread_root_projection_fetches: ThreadRootProjectionFetchRegistry::default(),
-            timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
+            timeline_actor_generations: Arc::new(
+                TimelineActorGenerationGate::with_focused_projection_commits(focused_projection_tx),
+            ),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
             #[cfg(any(test, feature = "test-hooks"))]
             test_session_available: false,
@@ -510,6 +507,7 @@ impl TimelineManagerActor {
         link_preview_policy: LinkPreviewContext,
         account_work: AccountWorkScheduler,
         navigation_projection_rx: Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
+        focused_projection_tx: Option<mpsc::UnboundedSender<super::FocusedProjectionCommitted>>,
     ) -> TimelineManagerHandle {
         let (tx, msg_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
         let (control_tx, control_rx) = mpsc::channel(1);
@@ -572,7 +570,9 @@ impl TimelineManagerActor {
                 ThreadRootProjectionService::default(),
             )),
             thread_root_projection_fetches: ThreadRootProjectionFetchRegistry::default(),
-            timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
+            timeline_actor_generations: Arc::new(
+                TimelineActorGenerationGate::with_focused_projection_commits(focused_projection_tx),
+            ),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
             #[cfg(any(test, feature = "test-hooks"))]
             test_session_available: false,
@@ -919,17 +919,6 @@ impl TimelineManagerActor {
                         formatting_options,
                     )
                     .await;
-                }
-                TimelineMessage::AcknowledgeProjection {
-                    projection_request_id,
-                    key,
-                    generation,
-                    response,
-                } => {
-                    let accepted = self
-                        .acknowledge_projection(projection_request_id, &key, generation)
-                        .await;
-                    let _ = response.send(accepted);
                 }
                 TimelineMessage::AcknowledgeBatchRendered {
                     key,
@@ -1619,28 +1608,6 @@ impl TimelineManagerActor {
                 })
                 .await;
         }
-    }
-    async fn acknowledge_projection(
-        &mut self,
-        projection_request_id: RequestId,
-        key: &TimelineKey,
-        generation: TimelineGeneration,
-    ) -> TimelineProjectionAcknowledgement {
-        let Some(handle) = self.timelines.get(key) else {
-            return TimelineProjectionAcknowledgement::default();
-        };
-        let (response, accepted) = oneshot::channel();
-        if !handle
-            .send(TimelineActorMessage::AcknowledgeProjection {
-                projection_request_id,
-                generation,
-                response,
-            })
-            .await
-        {
-            return TimelineProjectionAcknowledgement::default();
-        }
-        accepted.await.unwrap_or_default()
     }
     async fn acknowledge_batch_rendered(
         &mut self,

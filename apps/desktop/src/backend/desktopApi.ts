@@ -1,4 +1,4 @@
-import type { RequestId, TimelineKey } from "../domain/coreEvents";
+import type { TimelineKey } from "../domain/coreEvents";
 import type {
   ActivityMarkReadTarget,
   ActivityTab,
@@ -181,13 +181,6 @@ export interface DesktopApi {
   openActivityEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
   openPinnedEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
   selectSearchResult(roomId: string, eventId: string): Promise<CommandSettlement>;
-  acknowledgeTimelineProjection(
-    projectionRequestId: RequestId,
-    key: TimelineKey,
-    generation: number,
-    itemCount: number,
-    targetPresent: boolean
-  ): Promise<void>;
   acknowledgeTimelineBatchRendered(
     key: TimelineKey,
     actorGeneration: number,

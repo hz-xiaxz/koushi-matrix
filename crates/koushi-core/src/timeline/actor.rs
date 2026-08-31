@@ -71,9 +71,8 @@ use super::media::{
 use super::navigation::{
     ActivePaginationTask, INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT, InitialItemsRequestIdentity,
     PaginationCompletion, RestoreTimelineAnchorState, TimelineActorGenerationGate,
-    TimelineProjectionAcknowledgement, activity_rows_from_timeline_items,
-    emit_initial_items_for_generation, emit_timeline_events_for_generation,
-    projection_acknowledgement_for_current_items, send_generation_fenced,
+    activity_rows_from_timeline_items, emit_initial_items_for_generation,
+    emit_timeline_events_for_generation, send_generation_fenced,
     should_hydrate_empty_initial_room_timeline,
 };
 use super::outbound_send::{
@@ -413,11 +412,6 @@ pub(super) enum TimelineActorMessage {
     /// its exact cause; internal recovery replay is causeless.
     ReplayInitialItems {
         cause_request_id: Option<RequestId>,
-    },
-    AcknowledgeProjection {
-        projection_request_id: RequestId,
-        generation: TimelineGeneration,
-        response: oneshot::Sender<TimelineProjectionAcknowledgement>,
     },
     AcknowledgeBatchRendered {
         actor_generation: u64,
@@ -1648,7 +1642,7 @@ impl TimelineActor {
             relay_restart_task: None,
             generation,
             projection_request_id: subscribe_request_id,
-            projection_acknowledged: false,
+            projection_acknowledged: initial_emitted,
             next_batch_id: TimelineBatchId(0),
             send_completion: Arc::clone(&send_completion),
             send_statuses,
@@ -2467,23 +2461,6 @@ impl TimelineActor {
             TimelineActorMessage::ReplayInitialItems { cause_request_id } => {
                 self.handle_replay_initial_items(cause_request_id);
                 self.publish_current_canonical_activity().await;
-            }
-            TimelineActorMessage::AcknowledgeProjection {
-                projection_request_id,
-                generation,
-                response,
-            } => {
-                let was_acknowledged = self.projection_acknowledged;
-                let accepted = self.acknowledge_projection(projection_request_id, generation);
-                let acknowledgement = projection_acknowledgement_for_current_items(
-                    &self.key,
-                    self.display_projection.display_items(),
-                    accepted,
-                );
-                let _ = response.send(acknowledgement);
-                if accepted && !was_acknowledged {
-                    self.start_pending_timeline_gap_inspection().await;
-                }
             }
             TimelineActorMessage::AcknowledgeBatchRendered {
                 actor_generation,

@@ -1,4 +1,4 @@
-import type { RequestId, TimelineKey } from "../domain/coreEvents";
+import type { TimelineKey } from "../domain/coreEvents";
 import { timelineStoreKeyId } from "../domain/timelineStore";
 
 const MAX_DELIVERY_ATTEMPTS = 7;
@@ -8,14 +8,6 @@ export interface TimelineAcknowledgementScheduler {
   schedule(delayMs: number, callback: () => void): number;
   cancel(handle: number): void;
 }
-
-type ProjectionSubmission = (
-  projectionRequestId: RequestId,
-  key: TimelineKey,
-  generation: number,
-  itemCount: number,
-  targetPresent: boolean
-) => Promise<void>;
 
 type RepairSubmission = (
   key: TimelineKey,
@@ -43,14 +35,6 @@ type DeliveryChannel = {
 };
 
 export interface TimelineAcknowledgementDelivery {
-  acknowledgeProjection(
-    projectionRequestId: RequestId,
-    key: TimelineKey,
-    actorGeneration: number,
-    generation: number,
-    itemCount: number,
-    targetPresent: boolean
-  ): Promise<void>;
   acknowledgeRenderedBatch(
     key: TimelineKey,
     actorGeneration: number,
@@ -63,11 +47,9 @@ export interface TimelineAcknowledgementDelivery {
 }
 
 export function createTimelineAcknowledgementDelivery({
-  submitProjection,
   submitRepair,
   scheduler = browserScheduler
 }: {
-  submitProjection: ProjectionSubmission;
   submitRepair: RepairSubmission;
   scheduler?: TimelineAcknowledgementScheduler;
 }): TimelineAcknowledgementDelivery {
@@ -76,18 +58,9 @@ export function createTimelineAcknowledgementDelivery({
     acceptedIdentity: null,
     exhaustedIdentity: null
   });
-  const roomProjection = channel();
-  const threadProjection = channel();
-  const focusedProjection = channel();
   const repair = channel();
-  const channels = [roomProjection, threadProjection, focusedProjection, repair];
+  const channels = [repair];
   let disposed = false;
-
-  function projectionChannel(key: TimelineKey): DeliveryChannel {
-    if ("Room" in key.kind) return roomProjection;
-    if ("Thread" in key.kind) return threadProjection;
-    return focusedProjection;
-  }
 
   function cancelJob(channel: DeliveryChannel, reason: "superseded" | "reset" | "disposed") {
     const job = channel.active;
@@ -189,27 +162,6 @@ export function createTimelineAcknowledgementDelivery({
   }
 
   return {
-    acknowledgeProjection(
-      projectionRequestId,
-      key,
-      actorGeneration,
-      generation,
-      itemCount,
-      targetPresent
-    ) {
-      const identity = [
-        timelineStoreKeyId(key),
-        actorGeneration,
-        projectionRequestId.connection_id,
-        projectionRequestId.sequence,
-        generation,
-        itemCount,
-        targetPresent ? 1 : 0
-      ].join("\u0000");
-      return deliver(projectionChannel(key), identity, () =>
-        submitProjection(projectionRequestId, key, generation, itemCount, targetPresent)
-      );
-    },
     acknowledgeRenderedBatch(
       key,
       actorGeneration,

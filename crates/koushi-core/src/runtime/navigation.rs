@@ -1,7 +1,7 @@
 //! Runtime navigation persistence and projection helpers.
 
 use super::{AppActor, composer_draft_session_key};
-use crate::event::{IntentNoOpReason, IntentOutcome};
+use crate::event::{CoreEvent, IntentNoOpReason, IntentOutcome};
 use crate::executor;
 use crate::ids::{RequestId, TimelineKey, TimelineKind};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
@@ -25,13 +25,13 @@ pub(super) struct PendingFocusedNavigation {
     pub(super) allow_live_fallback: bool,
 }
 
-fn take_acknowledged_focused_navigation(
+fn take_committed_focused_navigation(
     pending: &mut Option<PendingFocusedNavigation>,
-    projection_request_id: RequestId,
-    key: &TimelineKey,
+    commit: &crate::timeline::FocusedProjectionCommitted,
 ) -> Option<PendingFocusedNavigation> {
     let matches = pending.as_ref().is_some_and(|candidate| {
-        candidate.projection_request_id == projection_request_id && candidate.key == *key
+        candidate.projection_request_id == commit.projection_request_id
+            && candidate.key == commit.key
     });
     matches.then(|| {
         pending
@@ -40,19 +40,27 @@ fn take_acknowledged_focused_navigation(
     })
 }
 
-pub(super) fn anchored_action_after_projection_ack(
-    pending: &mut Option<PendingFocusedNavigation>,
-    projection_request_id: RequestId,
-    key: &TimelineKey,
-    actor_accepted: bool,
-    frontend_target_present: bool,
-    actor_target_present: bool,
-) -> Option<AppAction> {
-    if !actor_accepted {
-        return None;
+pub(super) fn admit_focused_projection_generation(
+    latest: &mut std::collections::HashMap<TimelineKey, (u64, crate::TimelineGeneration)>,
+    commit: &crate::timeline::FocusedProjectionCommitted,
+) -> bool {
+    let generation = (commit.actor_generation, commit.timeline_generation);
+    if latest
+        .get(&commit.key)
+        .is_some_and(|current| generation < *current)
+    {
+        return false;
     }
-    let accepted = take_acknowledged_focused_navigation(pending, projection_request_id, key)?;
-    if frontend_target_present && actor_target_present {
+    latest.insert(commit.key.clone(), generation);
+    true
+}
+
+pub(super) fn focused_navigation_action_after_projection_commit(
+    pending: &mut Option<PendingFocusedNavigation>,
+    commit: &crate::timeline::FocusedProjectionCommitted,
+) -> Option<AppAction> {
+    let accepted = take_committed_focused_navigation(pending, commit)?;
+    if commit.target_present {
         Some(AppAction::EnterAnchoredTimeline {
             room_id: accepted.room_id,
             event_id: accepted.event_id,
@@ -97,6 +105,87 @@ pub(super) fn focused_navigation_outcome_after_reduce(
 }
 
 impl AppActor {
+    pub(super) async fn handle_focused_projection_commit(
+        &mut self,
+        commit: crate::timeline::FocusedProjectionCommitted,
+    ) {
+        if !admit_focused_projection_generation(
+            &mut self.latest_focused_projection_generation,
+            &commit,
+        ) {
+            return;
+        }
+
+        let Some(navigation) = self
+            .pending_focused_navigation
+            .as_ref()
+            .filter(|pending| {
+                pending.projection_request_id == commit.projection_request_id
+                    && pending.key == commit.key
+            })
+            .cloned()
+        else {
+            return;
+        };
+        let Some(action) = focused_navigation_action_after_projection_commit(
+            &mut self.pending_focused_navigation,
+            &commit,
+        ) else {
+            return;
+        };
+        let target_found = commit.target_present;
+        record(
+            DiagnosticEvent::new(
+                DiagnosticLevel::Debug,
+                "core.activity_navigation",
+                if target_found {
+                    "anchor_committed"
+                } else {
+                    "live_fallback"
+                },
+            )
+            .field(DiagnosticField::count("item_count", commit.item_count))
+            .field(DiagnosticField::count(
+                "actor_generation",
+                commit.actor_generation,
+            ))
+            .field(DiagnosticField::count(
+                "timeline_generation",
+                commit.timeline_generation.0,
+            )),
+        );
+
+        let focused_key = (!target_found)
+            .then(|| self.current_focused_context_timeline_key())
+            .flatten();
+        let before_state = self.snapshot_tx.borrow().state.clone();
+        let (effects, deferred_reducer_side_effects) = self.reduce_app_action_state(action);
+        let published_generation = self
+            .publish_state_delta(&before_state)
+            .unwrap_or(self.state_generation);
+        let lifecycle_outcome =
+            focused_navigation_outcome_after_reduce(&self.state, &navigation, target_found);
+        self.emit(CoreEvent::IntentLifecycle {
+            request_id: commit.projection_request_id,
+            outcome: lifecycle_outcome,
+            published_generation,
+        });
+        self.apply_deferred_reducer_side_effects(deferred_reducer_side_effects)
+            .await;
+        if let Some(key) = focused_key {
+            self.send_timeline_command_or_fail(
+                commit.projection_request_id,
+                crate::command::TimelineCommand::Unsubscribe {
+                    request_id: commit.projection_request_id,
+                    key,
+                },
+            )
+            .await;
+        }
+        self.handle_app_effects(commit.projection_request_id, effects)
+            .await;
+    }
+
     pub(super) async fn load_navigation_for_current_session(&mut self) {
         let Some(key_id) = navigation_session_key(&self.state) else {
             self.navigation_loaded_for = None;

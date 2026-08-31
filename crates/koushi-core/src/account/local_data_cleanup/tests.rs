@@ -381,12 +381,14 @@ async fn reset_local_data_clears_current_account_persistence_and_signs_out_local
         account_work.clone(),
     );
     let (navigation_projection, navigation_projection_rx) = NavigationProjectionIngress::channel();
+    let (focused_projection_tx, _focused_projection_rx) = mpsc::unbounded_channel();
     let timeline_manager = crate::timeline::TimelineManagerActor::spawn(
         action_tx.clone(),
         event_tx.clone(),
         Some(data_dir_path.clone()),
         account_work.clone(),
         Some(navigation_projection_rx),
+        Some(focused_projection_tx.clone()),
     );
     let mut actor = AccountActor {
         session: None,
@@ -458,6 +460,7 @@ async fn reset_local_data_clears_current_account_persistence_and_signs_out_local
         read_persistence_task: None,
         read_persistence_session_generation: 0,
         navigation_projection,
+        focused_projection_tx,
         account_work,
         activity_resolution_task: None,
         data_dir: data_dir_path,

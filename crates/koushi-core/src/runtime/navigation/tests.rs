@@ -1,5 +1,6 @@
 use super::*;
-use crate::ids::{AccountKey, RuntimeConnectionId};
+use crate::ids::{AccountKey, RuntimeConnectionId, TimelineGeneration};
+use crate::timeline::FocusedProjectionCommitted;
 use koushi_state::SessionInfo;
 
 fn focused_projection_fixture(sequence: u64) -> PendingFocusedNavigation {
@@ -20,133 +21,89 @@ fn focused_projection_fixture(sequence: u64) -> PendingFocusedNavigation {
         allow_live_fallback: true,
     }
 }
-#[test]
-fn focused_projection_ack_requires_same_owner_and_key_and_is_idempotent() {
-    let expected = focused_projection_fixture(9);
-    let mut pending = Some(expected.clone());
-    let stale_id = RequestId {
-        connection_id: RuntimeConnectionId(3),
-        sequence: 8,
-    };
-    assert!(take_acknowledged_focused_navigation(&mut pending, stale_id, &expected.key).is_none());
-    assert_eq!(pending, Some(expected.clone()));
 
-    let wrong_key = TimelineKey::room(
-        AccountKey("@qa:example.invalid".to_owned()),
-        "!room:example.invalid",
-    );
-    assert!(
-        take_acknowledged_focused_navigation(
-            &mut pending,
-            expected.projection_request_id,
-            &wrong_key,
-        )
-        .is_none()
-    );
-    assert_eq!(pending, Some(expected.clone()));
+fn focused_projection_commit(
+    pending: &PendingFocusedNavigation,
+    actor_generation: u64,
+    target_present: bool,
+) -> FocusedProjectionCommitted {
+    FocusedProjectionCommitted {
+        projection_request_id: pending.projection_request_id,
+        key: pending.key.clone(),
+        actor_generation,
+        timeline_generation: TimelineGeneration(0),
+        item_count: u64::from(target_present),
+        target_present,
+    }
+}
+
+#[test]
+fn focused_projection_commit_settles_without_renderer_evidence() {
+    let expected = focused_projection_fixture(20);
+    let mut pending = Some(expected.clone());
+    let commit = focused_projection_commit(&expected, 41, true);
 
     assert_eq!(
-        take_acknowledged_focused_navigation(
-            &mut pending,
-            expected.projection_request_id,
-            &expected.key,
-        ),
-        Some(expected.clone())
+        focused_navigation_action_after_projection_commit(&mut pending, &commit),
+        Some(AppAction::EnterAnchoredTimeline {
+            room_id: expected.room_id,
+            event_id: expected.event_id,
+        })
     );
     assert!(pending.is_none());
-    assert!(
-        take_acknowledged_focused_navigation(
-            &mut pending,
-            expected.projection_request_id,
-            &expected.key,
-        )
-        .is_none()
+}
+
+#[test]
+fn focused_projection_commit_missing_target_uses_live_fallback_policy() {
+    let expected = focused_projection_fixture(21);
+    let mut pending = Some(expected.clone());
+    let commit = focused_projection_commit(&expected, 41, false);
+
+    assert_eq!(
+        focused_navigation_action_after_projection_commit(&mut pending, &commit),
+        Some(AppAction::CloseFocusedContext)
+    );
+    assert!(pending.is_none());
+
+    let mut pinned = expected.clone();
+    pinned.allow_live_fallback = false;
+    let mut pending = Some(pinned.clone());
+    let commit = focused_projection_commit(&pinned, 41, false);
+    assert_eq!(
+        focused_navigation_action_after_projection_commit(&mut pending, &commit),
+        Some(AppAction::CloseFocusedContext)
     );
 }
+
 #[test]
-fn focused_anchor_action_is_impossible_before_actor_acceptance() {
-    let expected = focused_projection_fixture(12);
+fn stale_or_reordered_focused_projection_commits_are_inert() {
+    let expected = focused_projection_fixture(22);
     let mut pending = Some(expected.clone());
+
+    let mut latest =
+        std::collections::HashMap::from([(expected.key.clone(), (41, TimelineGeneration(0)))]);
+    let mut stale_generation = focused_projection_commit(&expected, 40, true);
+    assert!(!admit_focused_projection_generation(
+        &mut latest,
+        &stale_generation
+    ));
+    assert_eq!(pending, Some(expected.clone()));
+
+    stale_generation.key =
+        TimelineKey::room(expected.key.account_key.clone(), "!other:example.invalid");
     assert!(
-        anchored_action_after_projection_ack(
-            &mut pending,
-            expected.projection_request_id,
-            &expected.key,
-            false,
-            true,
-            true,
-        )
-        .is_none()
+        focused_navigation_action_after_projection_commit(&mut pending, &stale_generation)
+            .is_none()
     );
     assert_eq!(pending, Some(expected.clone()));
 
-    let action = anchored_action_after_projection_ack(
-        &mut pending,
-        expected.projection_request_id,
-        &expected.key,
-        true,
-        true,
-        true,
-    )
-    .expect("accepted exact projection advances the anchor");
-    assert!(matches!(
-        action,
-        AppAction::EnterAnchoredTimeline { room_id, event_id }
-            if room_id == expected.room_id && event_id == expected.event_id
-    ));
+    let newer = focused_projection_commit(&expected, 41, true);
+    assert!(admit_focused_projection_generation(&mut latest, &newer));
+    assert!(focused_navigation_action_after_projection_commit(&mut pending, &newer).is_some());
     assert!(pending.is_none());
-
-    let mut target_missing = Some(expected.clone());
-    assert_eq!(
-        anchored_action_after_projection_ack(
-            &mut target_missing,
-            expected.projection_request_id,
-            &expected.key,
-            true,
-            false,
-            true,
-        ),
-        Some(AppAction::CloseFocusedContext)
-    );
     assert!(
-        target_missing.is_none(),
-        "an accepted target-missing projection must terminate the focused attempt"
-    );
-
-    let mut actor_missing = Some(expected.clone());
-    assert_eq!(
-        anchored_action_after_projection_ack(
-            &mut actor_missing,
-            expected.projection_request_id,
-            &expected.key,
-            true,
-            true,
-            false,
-        ),
-        Some(AppAction::CloseFocusedContext)
-    );
-    assert!(
-        actor_missing.is_none(),
-        "the frontend and actor must both prove that the target is present"
-    );
-
-    let thread_key = TimelineKey {
-        account_key: expected.key.account_key.clone(),
-        kind: TimelineKind::Thread {
-            room_id: expected.room_id,
-            root_event_id: "$thread-root".to_owned(),
-        },
-    };
-    assert!(
-        anchored_action_after_projection_ack(
-            &mut pending,
-            expected.projection_request_id,
-            &thread_key,
-            true,
-            true,
-            true,
-        )
-        .is_none()
+        focused_navigation_action_after_projection_commit(&mut pending, &stale_generation)
+            .is_none()
     );
 }
 #[test]

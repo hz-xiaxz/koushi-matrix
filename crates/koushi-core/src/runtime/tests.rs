@@ -1004,6 +1004,7 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
     let actor = AppActor {
         command_rx,
         action_rx,
+        focused_projection_rx: mpsc::unbounded_channel().1,
         composer_draft_test_rx,
         event_tx,
         snapshot_tx,
@@ -1031,6 +1032,7 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         navigation_projection_generation: 0,
         pending_select,
         pending_focused_navigation: None,
+        latest_focused_projection_generation: HashMap::new(),
         pending_date_navigation_request_id: None,
     };
     let actor_task = executor::spawn(actor.run());
@@ -1167,6 +1169,7 @@ async fn same_batch_select_room_settles_only_final_selection() {
     let actor = AppActor {
         command_rx,
         action_rx,
+        focused_projection_rx: mpsc::unbounded_channel().1,
         composer_draft_test_rx,
         event_tx,
         snapshot_tx,
@@ -1194,6 +1197,7 @@ async fn same_batch_select_room_settles_only_final_selection() {
         navigation_projection_generation: 0,
         pending_select,
         pending_focused_navigation: None,
+        latest_focused_projection_generation: HashMap::new(),
         pending_date_navigation_request_id: None,
     };
     let actor_task = executor::spawn(actor.run());
