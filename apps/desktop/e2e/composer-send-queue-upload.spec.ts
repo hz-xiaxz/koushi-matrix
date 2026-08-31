@@ -750,37 +750,14 @@ test("account switch revokes unresolved composer lifecycle", async ({
     (window as AccountRaceControls).__resolvePreviousAccountSend = resolveSend;
     window.__harness.setCommandResponse(
       "send_text",
-      async ({
-        submissionId,
-        draftRevision
-      }: {
-        submissionId: string;
-        draftRevision: string;
-      }) => {
-        const previousAccountSnapshot = window.__harness.currentSnapshot();
+      async ({ submissionId }: { submissionId: string }) => {
         await sendGate;
+        const currentSnapshot = window.__harness.currentSnapshot();
         return {
           outcome: "accepted",
           submissionId,
           transactionId: "previous-account-transaction",
-          snapshot: {
-            ...previousAccountSnapshot,
-            state: {
-              ...previousAccountSnapshot.state,
-              ui: {
-                ...previousAccountSnapshot.state.ui,
-                timeline: {
-                  ...previousAccountSnapshot.state.ui.timeline,
-                  composer: {
-                    ...previousAccountSnapshot.state.ui.timeline.composer,
-                    draft: "",
-                    document: { version: 2, inlines: [] },
-                    draft_revision: (BigInt(draftRevision) + 1n).toString()
-                  }
-                }
-              }
-            }
-          }
+          snapshot: currentSnapshot
         };
       }
     );

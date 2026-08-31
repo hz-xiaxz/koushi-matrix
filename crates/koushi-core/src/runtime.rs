@@ -926,7 +926,7 @@ impl AppActor {
                     let mut handled = 1u32;
                     let mut shutdown = false;
                     // Coalesce: drain whatever is already queued before
-                    // emitting a single StateChanged for the batch. Shutdown is
+                    // emitting a single StateDelta for the batch. Shutdown is
                     // an ordered barrier: publish preceding changes, then stop
                     // without handling duplicate or later commands.
                     while let Ok(next) = self.command_rx.try_recv() {

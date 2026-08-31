@@ -6,9 +6,9 @@ use crate::commands::contracts::fake_request_id;
 pub async fn refresh_current_session_status(
     trigger: koushi_state::SessionStatusRefreshTrigger,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         CoreCommand::Account(AccountCommand::RefreshCurrentSessionStatus {
             request_id,
@@ -16,29 +16,29 @@ pub async fn refresh_current_session_status(
         }),
     )
     .await?;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
 pub async fn load_account_management_capabilities(
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         CoreCommand::Account(AccountCommand::LoadAccountManagementCapabilities { request_id }),
     )
     .await?;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
 pub async fn change_password(
     new_password: String,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         CoreCommand::Account(AccountCommand::ChangePassword {
             request_id,
@@ -46,16 +46,16 @@ pub async fn change_password(
         }),
     )
     .await?;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
 pub async fn deactivate_account(
     erase_data: bool,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         CoreCommand::Account(AccountCommand::DeactivateAccount {
             request_id,
@@ -63,7 +63,7 @@ pub async fn deactivate_account(
         }),
     )
     .await?;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -72,15 +72,15 @@ pub async fn submit_account_management_uia(
     password: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         build_submit_account_management_uia_command(request_id, flow_id, AuthSecret::new(password)),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 pub(super) fn build_start_device_cleanup_command(

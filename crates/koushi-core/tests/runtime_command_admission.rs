@@ -1,9 +1,10 @@
 mod support;
 
 use futures_util::FutureExt;
+use koushi_core::composer_draft_lifecycle::ComposerDraftScope;
 use koushi_core::{AppCommand, CommandSubmitError, CoreCommand, CoreConnection};
-use koushi_state::ComposerMode;
-use support::ready_room_conn;
+use koushi_state::{ComposerDraftRevision, ComposerMode, ComposerTarget};
+use support::{ready_room_conn, session_key};
 
 fn set_reply_target(connection: &CoreConnection, room_id: &str, event_id: &str) -> CoreCommand {
     CoreCommand::App(AppCommand::SetComposerReplyTarget {
@@ -106,6 +107,47 @@ async fn no_delta_routing_returns_the_current_published_generation() {
 
     assert_eq!(admission.admitted_generation, before);
     assert_eq!(connection.versioned_snapshot().generation, before);
+}
+
+#[tokio::test]
+async fn composer_lease_command_admission_settles_after_publication() {
+    let room_id = "!composer-admission:example.invalid";
+    let (_runtime, connection, _, _data_dir, _credential_dir) = ready_room_conn(room_id).await;
+    let account = session_key();
+    let generation = connection
+        .begin_composer_draft_renderer_generation()
+        .expect("renderer generation");
+    let lease = connection
+        .acquire_composer_draft_lease(
+            generation,
+            ComposerDraftScope {
+                account: account.clone(),
+                target: ComposerTarget::Main {
+                    room_id: room_id.to_owned(),
+                },
+            },
+        )
+        .expect("composer lease");
+
+    let admission = connection
+        .command_with_composer_lease_and_admission(
+            generation,
+            lease,
+            CoreCommand::App(AppCommand::SetComposerDraft {
+                request_id: connection.next_request_id(),
+                expected_account: account,
+                room_id: room_id.to_owned(),
+                document: "admitted body".into(),
+                revision: ComposerDraftRevision::from_u64(0),
+            }),
+        )
+        .await
+        .expect("composer command admission");
+
+    assert_eq!(
+        admission.admitted_generation,
+        connection.versioned_snapshot().generation
+    );
 }
 
 #[tokio::test]

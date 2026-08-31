@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createBrowserFakeApi } from "./backend/browserFakeApi";
+import { installLegacyCommandSnapshotBridge } from "./backend/browserFakeApi.testSupport";
 import type { DesktopApi } from "./backend/desktopApi";
 import { setInlineMentionEditorSelection } from "./components/ImeTextControl";
 import type { DesktopSnapshot, MentionSurface } from "./domain/types";
@@ -31,6 +32,19 @@ vi.mock("@tauri-apps/api/window", () => ({
     startDragging: async () => undefined
   })
 }));
+
+const commandBridges = new WeakMap<
+  DesktopApi,
+  ReturnType<typeof installLegacyCommandSnapshotBridge>
+>();
+
+function commandBridge(api: DesktopApi) {
+  const existing = commandBridges.get(api);
+  if (existing) return existing;
+  const bridge = installLegacyCommandSnapshotBridge(api);
+  commandBridges.set(api, bridge);
+  return bridge;
+}
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -198,7 +212,7 @@ describe("App query ownership leaf", () => {
         throw new Error(`unexpected invite query ${query}`);
       }
       dispatched.push(query);
-      return next.deferred.promise;
+      return commandBridge(api).settlement(next.deferred.promise);
     });
 
     await openInviteDialog(api);
@@ -239,7 +253,9 @@ describe("App query ownership leaf", () => {
     const baseline = await api.getSnapshot();
     const pending = deferred<DesktopSnapshot>();
     const stale = inviteSnapshot(baseline, 10, "old", "Stale invite projection");
-    vi.spyOn(api, "searchInviteTargets").mockImplementation(() => pending.promise);
+    vi.spyOn(api, "searchInviteTargets").mockImplementation(() =>
+      commandBridge(api).settlement(pending.promise)
+    );
 
     await openInviteDialog(api);
     const input = screen.getByRole("textbox", { name: "Name, alias, or Matrix ID" });
@@ -249,7 +265,9 @@ describe("App query ownership leaf", () => {
     await waitFor(() => expect(api.searchInviteTargets).toHaveBeenCalledTimes(1));
 
     const replacement = snapshotWithGeneration(baseline, 40);
-    vi.spyOn(api, "closeInviteWorkflow").mockResolvedValue(replacement);
+    vi.spyOn(api, "closeInviteWorkflow").mockImplementationOnce(() =>
+      commandBridge(api).settlement(Promise.resolve(replacement))
+    );
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     });
@@ -272,7 +290,9 @@ describe("App query ownership leaf", () => {
     const baseline = await api.getSnapshot();
     const pending = deferred<DesktopSnapshot>();
     const stale = inviteSnapshot(baseline, 50, "old", "Old account invite");
-    vi.spyOn(api, "searchInviteTargets").mockReturnValueOnce(pending.promise);
+    vi.spyOn(api, "searchInviteTargets").mockReturnValueOnce(
+      commandBridge(api).settlement(pending.promise)
+    );
 
     await openInviteDialog(api);
     const input = screen.getByRole("textbox", { name: "Name, alias, or Matrix ID" });
@@ -490,7 +510,9 @@ describe("App query ownership leaf", () => {
     replacement.state.ui.navigation.active_room_id = "!room-planning:example.invalid";
     replacement.state.ui.timeline.room_id = "!room-planning:example.invalid";
     replacement.state.domain.mention_candidates.targets = [];
-    vi.spyOn(api, "selectRoom").mockResolvedValue(replacement);
+    vi.spyOn(api, "selectRoom").mockImplementationOnce(() =>
+      commandBridge(api).settlement(Promise.resolve(replacement))
+    );
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "planning-room" }));
     });

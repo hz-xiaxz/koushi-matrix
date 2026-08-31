@@ -1,3 +1,4 @@
+import { browserCommandSnapshot } from "./backend/browserFakeApi.testSupport";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, test, vi } from "vitest";
@@ -246,7 +247,8 @@ describe("ContextualRightPanel", () => {
     expect(confirmationHandler).toContain("windowDialogPort.confirm");
     expect(confirmationHandler).toContain('t("settings.signOutConfirm")');
     expect(confirmationHandler).toContain("await logout()");
-    expect(source.match(/void requestLogout\(\)/g)?.length).toBe(4);
+    expect(source).not.toContain("void requestLogout()");
+    expect(source.match(/runInBackground\(requestLogout\(\)\)/g)?.length).toBe(4);
 
     const tauriImportStatements =
       source.match(/^import\s+[^;]+from\s+["']@tauri-apps\/[^"']+["'];$/gm) ?? [];
@@ -284,7 +286,7 @@ describe("ContextualRightPanel", () => {
     expect(importSource).toContain("multiple: false");
     expect(importSource).toContain('fileAccessMode: "scoped"');
     expect(importSource).toContain('typeof selected === "string" ? selected : null');
-    expect(source).toContain("await windowDialogPort.toggleFullscreen()");
+    expect(source).toContain("runInBackground(windowDialogPort.toggleFullscreen())");
     expect(source).toContain("windowDialogPort.startDragging().catch(() => undefined)");
   });
 
@@ -877,7 +879,7 @@ describe("ContextualRightPanel", () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
     const api = createBrowserFakeApi();
-    const snapshot = await api.submitSearch("Alpha", "allRooms");
+    const snapshot = await browserCommandSnapshot(api, api.submitSearch("Alpha", "allRooms"));
     const firstSearchResult =
       snapshot.state.domain.search.kind === "results" ? snapshot.state.domain.search.results[0] : null;
 
@@ -935,7 +937,7 @@ describe("ContextualRightPanel", () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
     const api = createBrowserFakeApi();
-    const snapshot = await api.submitSearch("NoMatch", "allRooms");
+    const snapshot = await browserCommandSnapshot(api, api.submitSearch("NoMatch", "allRooms"));
 
     const markup = renderToStaticMarkup(
       <ContextualRightPanel
@@ -977,7 +979,7 @@ describe("ContextualRightPanel", () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
     const api = createBrowserFakeApi();
-    const snapshot = await api.submitSearch("Alpha", "allRooms");
+    const snapshot = await browserCommandSnapshot(api, api.submitSearch("Alpha", "allRooms"));
     snapshot.state.ui.focused_context = {
       kind: "open",
       room_id: snapshot.state.domain.search.kind === "results" ? snapshot.state.domain.search.results[0]?.room_id ?? "!room:example.invalid" : "!room:example.invalid",
@@ -1056,7 +1058,7 @@ describe("ContextualRightPanel", () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
     const api = createBrowserFakeApi();
-    const snapshot = await api.submitSearch("Alpha", "allRooms");
+    const snapshot = await browserCommandSnapshot(api, api.submitSearch("Alpha", "allRooms"));
     snapshot.state.ui.focused_context = {
       kind: "open",
       room_id: "!room-alpha:example.invalid",
@@ -1487,11 +1489,11 @@ describe("ContextualRightPanel", () => {
     const runtimeSource = readFileSync(new URL("./backend/appRuntime.ts", import.meta.url), "utf8");
 
     expect(contractSource).toContain("export interface DesktopApi");
-    expect(contractSource).toContain("rebuildSearchIndex(): Promise<DesktopSnapshot>");
-    expect(source).toContain('invoke<DesktopSnapshot>("rebuild_search_index"');
+    expect(contractSource).toContain("rebuildSearchIndex(): Promise<CommandAdmission>");
+    expect(source).toContain('invoke<CommandAdmission>("rebuild_search_index"');
     expect(source).not.toContain("createDesktopApi");
     expect(source).not.toContain("function isTauriRuntime");
-    expect(fakeSource).toContain("async rebuildSearchIndex(): Promise<DesktopSnapshot>");
+    expect(fakeSource).toContain("async rebuildSearchIndex(): Promise<CommandAdmission>");
     expect(fakeSource).not.toContain("export interface DesktopApi");
     expect(runtimeSource).toContain("new TauriDesktopApi()");
     expect(runtimeSource).toContain("createBrowserFakeApi()");
@@ -1651,7 +1653,8 @@ describe("desktop integration source guards", () => {
     expect(confirmSource).toContain("preview.via_servers");
     expect(confirmSource).toContain("api.joinDirectoryRoom(");
     expect(confirmSource).toContain('setPrimaryView("timeline")');
-    expect(confirmSource).toContain("setSnapshot(nextSnapshot)");
+    expect(confirmSource).toContain("settleCommand(");
+    expect(confirmSource).not.toContain("setSnapshot(");
   });
 
   test("naming a room opens the Rust-owned preview instead of joining it outright", () => {
@@ -1724,7 +1727,7 @@ describe("desktop integration source guards", () => {
     expect(replyIndex).toBeGreaterThanOrEqual(0);
     expect(threadIndex).toBeGreaterThan(replyIndex);
     expect(actionSource).toContain(
-      "void setComposerReplyTarget(target.message.room_id, target.message.event_id);"
+      "runInBackground(setComposerReplyTarget(target.message.room_id, target.message.event_id));"
     );
   });
 
@@ -2051,7 +2054,7 @@ describe("desktop integration source guards", () => {
     expect(selectRoomSource).toContain("stage=after_primary_view_update");
     expect(selectRoomSource).toContain("stage=before_api_select");
     expect(selectRoomSource).toContain("stage=after_api_select");
-    expect(selectRoomSource).toContain("stage=after_snapshot_apply");
+    expect(selectRoomSource).toContain("stage=after_state_reconcile");
     expect(selectRoomSource).toContain("elapsed_ms_since_start=");
     expect(selectRoomSource).toContain("timeline_matches=");
     expect(startOffset).toBeGreaterThanOrEqual(0);
@@ -2657,9 +2660,9 @@ describe("Timeline item row rendering", () => {
     const mainSource = source.slice(mainStart, mainEnd);
     const threadSource = source.slice(threadStart, threadEnd);
 
-    expect(mainSource).toContain("applyLatestTextMutationSnapshot(`caption:main:");
+    expect(mainSource).toContain("applyLatestTextMutationReceipt(`caption:main:");
     expect(mainSource).toContain("api.updateStagedUploadCaption(");
-    expect(threadSource).toContain("applyLatestTextMutationSnapshot(`caption:thread:");
+    expect(threadSource).toContain("applyLatestTextMutationReceipt(`caption:thread:");
     expect(threadSource).toContain("api.updateStagedUploadCaption(");
     expect(source.match(/api\.updateStagedUploadCaption\(/g)).toHaveLength(2);
     expect(source.match(/`caption:main:/g)).toHaveLength(3);
@@ -2675,16 +2678,13 @@ describe("Timeline item row rendering", () => {
     const roomEffect = source.slice(roomEffectStart, spaceEffectStart);
     const spaceEffect = source.slice(spaceEffectStart, nextEffectStart);
 
-    expect(roomEffect).toContain("roomSettingsRequestRef.current !== requestId");
+    expect(roomEffect).toContain("settleCommand(api.loadRoomSettings(activeRoomId))");
+    expect(roomEffect).not.toContain("requestId");
     expect(roomEffect).toContain("roomSettingsLoadRef.current = null");
     expect(roomEffect).toContain(".catch(() => {");
-    expect(spaceEffect).toContain("spaceSettingsRequestRef.current !== requestId");
-    expect(spaceEffect).toContain(
-      "const navigationRequestId = spaceNavigationIntentEpochRef.current"
-    );
-    expect(spaceEffect).toContain(
-      "spaceNavigationIntentEpochRef.current !== navigationRequestId"
-    );
+    expect(spaceEffect).toContain("settleCommand(api.loadRoomSettings(activeSpaceId))");
+    expect(spaceEffect).not.toContain("requestId");
+    expect(spaceEffect).not.toContain("navigationRequestId");
     expect(spaceEffect).toContain("spaceSettingsLoadRef.current = null");
     expect(spaceEffect).toContain(".catch(() => {");
 
@@ -2725,7 +2725,12 @@ describe("Timeline item row rendering", () => {
     const gate = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     const apply = vi.fn();
     await expect(
-      settleLoginTransport(Promise.reject(new Error("login timeout")), async () => gate, apply)
+      settleLoginTransport(
+        Promise.reject(new Error("login timeout")),
+        async () => undefined,
+        async () => gate,
+        apply
+      )
     ).resolves.toBe("Sign-in failed. Please try again.");
     expect(apply).toHaveBeenCalledWith(gate);
   });
@@ -2735,7 +2740,12 @@ describe("Timeline item row rendering", () => {
     const { settleLoginTransport } = await import("./App");
     const failed = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     failed.state.ui.errors.push({ code: "login_failed", message: "Login failed", recoverable: true });
-    await expect(settleLoginTransport(Promise.reject(new Error("ipc")), async () => failed, () => undefined)).resolves.toBeNull();
+    await expect(settleLoginTransport(
+      Promise.reject(new Error("ipc")),
+      async () => undefined,
+      async () => failed,
+      () => undefined
+    )).resolves.toBeNull();
   });
 
   test("unrelated projected errors do not hide a rejected login transport", async () => {
@@ -2744,7 +2754,12 @@ describe("Timeline item row rendering", () => {
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     snapshot.state.ui.errors.push({ code: "media_download_failed", message: "Old media error", recoverable: true });
     await expect(
-      settleLoginTransport(Promise.reject(new Error("ipc")), async () => snapshot, () => undefined)
+      settleLoginTransport(
+        Promise.reject(new Error("ipc")),
+        async () => undefined,
+        async () => snapshot,
+        () => undefined
+      )
     ).resolves.toBe("Sign-in failed. Please try again.");
   });
 

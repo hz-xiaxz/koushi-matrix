@@ -6,8 +6,22 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createBrowserFakeApi } from "./backend/browserFakeApi";
+import { browserCommandSnapshot, installLegacyCommandSnapshotBridge } from "./backend/browserFakeApi.testSupport";
 import type { DesktopApi } from "./backend/desktopApi";
 import type { DesktopSnapshot } from "./domain/types";
+
+const commandBridges = new WeakMap<
+  DesktopApi,
+  ReturnType<typeof installLegacyCommandSnapshotBridge>
+>();
+
+function commandBridge(api: DesktopApi) {
+  const existing = commandBridges.get(api);
+  if (existing) return existing;
+  const bridge = installLegacyCommandSnapshotBridge(api);
+  commandBridges.set(api, bridge);
+  return bridge;
+}
 
 const tauriEventListeners = vi.hoisted(
   () => new Map<string, (event: { payload: unknown }) => void>()
@@ -105,8 +119,8 @@ describe("App Space Members integration", () => {
     const second = deferred<DesktopSnapshot>();
     const loadSpaceMembers = vi
       .spyOn(api, "loadSpaceMembers")
-      .mockReturnValueOnce(first.promise)
-      .mockReturnValueOnce(second.promise);
+      .mockReturnValueOnce(commandBridge(api).settlement(first.promise))
+      .mockReturnValueOnce(commandBridge(api).settlement(second.promise));
     const replacement = structuredClone(initial);
     const resultGeneration = (initial.state_generation ?? 0) + 1;
     replacement.state_generation = resultGeneration;
@@ -121,6 +135,7 @@ describe("App Space Members integration", () => {
       device_id: "SECONDDEVICE"
     };
     const replacementResult = structuredClone(replacement);
+    replacementResult.state_generation = resultGeneration + 1;
     const oldResult = structuredClone(initial);
     oldResult.state_generation = resultGeneration;
     const replacementMember = replacementResult.state.domain.space_members.space_joined[0];
@@ -210,7 +225,7 @@ describe("App Space Members integration", () => {
     const aliasStart = source.indexOf("async function setLocalUserAlias(");
     const aliasEnd = source.indexOf("async function setRoomNotificationMode(", aliasStart);
     const aliasSource = source.slice(aliasStart, aliasEnd);
-    expect(aliasSource).toContain("applyLatestTextMutationSnapshot(`alias:${userId}`");
+    expect(aliasSource).toContain("applyLatestTextMutationReceipt(`alias:${userId}`");
     expect(aliasSource).toContain("api.setLocalUserAlias(userId, alias)");
     expect(source.match(/api\.setLocalUserAlias\(/g)).toHaveLength(1);
     expect(source).toContain("Renderer-owned autosave sequencing only");
@@ -218,7 +233,7 @@ describe("App Space Members integration", () => {
 
   test("serializes alias autosaves and applies only the latest returned snapshot", async () => {
     const api = createBrowserFakeApi();
-    const loaded = await api.loadRoomSettings("!room-alpha:example.invalid");
+    const loaded = await browserCommandSnapshot(api, api.loadRoomSettings("!room-alpha:example.invalid"));
     const target = loaded.state.domain.room_management.settings?.members.find(
       (member) => member.user_id !== loaded.state.domain.session.user_id
     );
@@ -229,12 +244,12 @@ describe("App Space Members integration", () => {
     const latest = deferred<DesktopSnapshot>();
     const setLocalUserAlias = vi
       .spyOn(api, "setLocalUserAlias")
-      .mockReturnValueOnce(first.promise)
-      .mockReturnValueOnce(latest.promise);
+      .mockReturnValueOnce(commandBridge(api).admission(first.promise))
+      .mockReturnValueOnce(commandBridge(api).admission(latest.promise));
     const resultApi = createBrowserFakeApi();
-    await resultApi.loadRoomSettings("!room-alpha:example.invalid");
-    const firstResult = await resultApi.setLocalUserAlias(target.user_id, "First alias");
-    const latestResult = await resultApi.setLocalUserAlias(target.user_id, "Latest alias");
+    await browserCommandSnapshot(resultApi, resultApi.loadRoomSettings("!room-alpha:example.invalid"));
+    const firstResult = await browserCommandSnapshot(resultApi, resultApi.setLocalUserAlias(target.user_id, "First alias"));
+    const latestResult = await browserCommandSnapshot(resultApi, resultApi.setLocalUserAlias(target.user_id, "Latest alias"));
 
     await renderAppWithApi(api);
     const peopleButton = screen
@@ -265,8 +280,8 @@ describe("App Space Members integration", () => {
 
     const { getAppStoreSnapshot } = await import("./domain/appStore");
     const generation = getAppStoreSnapshot()?.state_generation ?? 0;
-    firstResult.state_generation = generation;
-    latestResult.state_generation = generation;
+    firstResult.state_generation = generation + 1;
+    latestResult.state_generation = generation + 2;
     await act(async () => {
       first.resolve(firstResult);
       await first.promise;
@@ -300,10 +315,10 @@ describe("App Space Members integration", () => {
     const loadSpaceMembers = vi.spyOn(api, "loadSpaceMembers").mockImplementation(
       (spaceId) => {
         if (spaceId !== "!space-beta:example.invalid") {
-          return Promise.resolve(api.getSnapshot());
+          return commandBridge(api).settlement(api.getSnapshot());
         }
         betaCalls += 1;
-        return betaCalls === 1 ? first.promise : second.promise;
+        return commandBridge(api).settlement(betaCalls === 1 ? first.promise : second.promise);
       }
     );
 
@@ -447,10 +462,10 @@ describe("App Space Members integration", () => {
     const api = createBrowserFakeApi();
     const pending = deferred<DesktopSnapshot>();
     const settingsApi = createBrowserFakeApi();
-    const loaded = await settingsApi.loadRoomSettings("!room-alpha:example.invalid");
+    const loaded = await browserCommandSnapshot(settingsApi, settingsApi.loadRoomSettings("!room-alpha:example.invalid"));
     const loadRoomSettings = vi
       .spyOn(api, "loadRoomSettings")
-      .mockReturnValue(pending.promise);
+      .mockReturnValue(commandBridge(api).settlement(pending.promise));
 
     await renderAppWithApi(api);
     await act(async () => {
@@ -481,7 +496,7 @@ describe("App Space Members integration", () => {
     const api = createBrowserFakeApi();
     const pending = deferred<DesktopSnapshot>();
     const settingsApi = createBrowserFakeApi();
-    const staleResult = await settingsApi.loadRoomSettings("!space-alpha:example.invalid");
+    const staleResult = await browserCommandSnapshot(settingsApi, settingsApi.loadRoomSettings("!space-alpha:example.invalid"));
     const staleMember = staleResult.state.domain.room_management.settings?.members[0];
     if (!staleMember) {
       throw new Error("expected a synthetic Space settings member");
@@ -492,7 +507,7 @@ describe("App Space Members integration", () => {
     let spaceSettingsCalls = 0;
     vi.spyOn(api, "loadRoomSettings").mockImplementation((roomId) => {
       if (roomId === "!space-alpha:example.invalid" && ++spaceSettingsCalls === 1) {
-        return pending.promise;
+        return commandBridge(api).settlement(pending.promise);
       }
       return originalLoadRoomSettings(roomId);
     });
@@ -528,7 +543,7 @@ describe("App Space Members integration", () => {
     const pending = deferred<DesktopSnapshot>();
     const loadSpaceMembers = vi
       .spyOn(api, "loadSpaceMembers")
-      .mockReturnValueOnce(pending.promise);
+      .mockReturnValueOnce(commandBridge(api).settlement(pending.promise));
 
     await renderAppWithApi(api);
     const membersButton = await screen.findByRole("button", {
@@ -583,7 +598,7 @@ describe("App Space Members integration", () => {
     );
   });
 
-  test("rejects a mismatched Space invite-search snapshot", async () => {
+  test("does not render candidates from a mismatched Space invite-search settlement", async () => {
     const api = createBrowserFakeApi();
     const mismatched = await api.getSnapshot();
     mismatched.state_generation = (mismatched.state_generation ?? 0) + 10;
@@ -598,7 +613,9 @@ describe("App Space Members integration", () => {
       candidates: [],
       explicit_user_id: null
     };
-    vi.spyOn(api, "searchInviteTargets").mockResolvedValueOnce(mismatched);
+    vi.spyOn(api, "searchInviteTargets").mockImplementationOnce(() =>
+      commandBridge(api).settlement(Promise.resolve(mismatched))
+    );
 
     await renderAppWithApi(api);
     await openSpaceMembersFromSidebar();
@@ -614,7 +631,8 @@ describe("App Space Members integration", () => {
     await waitFor(() => expect(screen.queryByText("Loading activity")).toBeNull());
 
     const { getAppStoreSnapshot } = await import("./domain/appStore");
-    expect(getAppStoreSnapshot()?.state.domain.invite_workflow?.query.query ?? "").toBe("");
+    expect(getAppStoreSnapshot()?.state.domain.invite_workflow?.query.query).toBe("other");
+    expect(screen.queryByText("other")).toBeNull();
   });
 
   test("uses the shared inline invite command and moves a child-only user to pending", async () => {
@@ -646,19 +664,19 @@ describe("App Space Members integration", () => {
     const second = deferred<DesktopSnapshot>();
     const inviteUserToSpace = vi
       .spyOn(api, "inviteUserToSpace")
-      .mockReturnValueOnce(first.promise)
-      .mockReturnValueOnce(second.promise);
+      .mockReturnValueOnce(commandBridge(api).settlement(first.promise))
+      .mockReturnValueOnce(commandBridge(api).settlement(second.promise));
     const resultApi = createBrowserFakeApi();
-    const success = await resultApi.inviteUserToSpace(
+    const success = await browserCommandSnapshot(resultApi, resultApi.inviteUserToSpace(
       "!space-alpha:example.invalid",
       "@child-only:example.invalid",
       1
-    );
+    ));
 
     await renderAppWithApi(api);
     await openSpaceMembersFromSidebar();
     const { getAppStoreSnapshot } = await import("./domain/appStore");
-    success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    success.state_generation = (getAppStoreSnapshot()?.state_generation ?? 0) + 1;
     const button = screen.getByRole("button", { name: "Invite to Space" });
     await act(async () => {
       fireEvent.click(button);
@@ -693,14 +711,14 @@ describe("App Space Members integration", () => {
       const loadRoomSettings = vi.spyOn(api, "loadRoomSettings");
       const cancelSpaceInvite = vi
         .spyOn(api, "cancelSpaceInvite")
-        .mockReturnValueOnce(first.promise)
-        .mockReturnValueOnce(second.promise);
+        .mockReturnValueOnce(commandBridge(api).settlement(first.promise))
+        .mockReturnValueOnce(commandBridge(api).settlement(second.promise));
       const resultApi = createBrowserFakeApi();
-      const success = await resultApi.cancelSpaceInvite(
+      const success = await browserCommandSnapshot(resultApi, resultApi.cancelSpaceInvite(
         "!space-alpha:example.invalid",
         "@invited:example.invalid",
         1
-      );
+      ));
 
       await renderAppWithApi(api);
       await openSpaceMembersFromSidebar();
@@ -721,7 +739,7 @@ describe("App Space Members integration", () => {
         );
         expect(getAppStoreSnapshot()?.state.domain.space_members.operation.kind).toBe("idle");
       });
-      success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+      success.state_generation = (getAppStoreSnapshot()?.state_generation ?? 0) + 1;
       const button = screen.getByRole("button", { name: "Cancel invitation" });
       await act(async () => {
         fireEvent.click(button);
@@ -758,12 +776,12 @@ describe("App Space Members integration", () => {
     const api = createBrowserFakeApi();
     const pending = deferred<DesktopSnapshot>();
     const resultApi = createBrowserFakeApi();
-    const success = await resultApi.cancelSpaceInvite(
+    const success = await browserCommandSnapshot(resultApi, resultApi.cancelSpaceInvite(
       "!space-alpha:example.invalid",
       "@invited:example.invalid",
       1
-    );
-    vi.spyOn(api, "cancelSpaceInvite").mockReturnValueOnce(pending.promise);
+    ));
+    vi.spyOn(api, "cancelSpaceInvite").mockReturnValueOnce(commandBridge(api).settlement(pending.promise));
 
     await renderAppWithApi(api);
     await openSpaceMembersFromSidebar();
@@ -773,7 +791,7 @@ describe("App Space Members integration", () => {
     });
     await openSpaceMembersFromSidebar();
     const { getAppStoreSnapshot } = await import("./domain/appStore");
-    success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    success.state_generation = (getAppStoreSnapshot()?.state_generation ?? 0) + 1;
     await act(async () => {
       pending.resolve(success);
       await pending.promise;
@@ -789,11 +807,11 @@ describe("App Space Members integration", () => {
     const api = createBrowserFakeApi({
       spaceMemberInviteCancellationOutcome: "pending"
     });
-    await api.cancelSpaceInvite(
+    await browserCommandSnapshot(api, api.cancelSpaceInvite(
       "!space-alpha:example.invalid",
       "@invited:example.invalid",
       1
-    );
+    ));
 
     await renderAppWithApi(api);
     await openSpaceMembersFromSidebar();
@@ -903,7 +921,7 @@ describe("App Space Members integration", () => {
     const pending = deferred<DesktopSnapshot>();
     const cancelSpaceInvite = vi
       .spyOn(api, "cancelSpaceInvite")
-      .mockReturnValueOnce(pending.promise);
+      .mockReturnValueOnce(commandBridge(api).settlement(pending.promise));
 
     await renderAppWithApi(api);
     await openSpaceMembersFromSidebar();
@@ -944,7 +962,7 @@ describe("App Space Members integration", () => {
     const pending = deferred<DesktopSnapshot>();
     const cancelSpaceInvite = vi
       .spyOn(api, "cancelSpaceInvite")
-      .mockReturnValueOnce(pending.promise);
+      .mockReturnValueOnce(commandBridge(api).settlement(pending.promise));
 
     await renderAppWithApi(api);
     await openSpaceMembersFromSidebar();
@@ -986,7 +1004,7 @@ describe("App Space Members integration", () => {
     const pending = deferred<DesktopSnapshot>();
     const cancelSpaceInvite = vi
       .spyOn(api, "cancelSpaceInvite")
-      .mockReturnValueOnce(pending.promise);
+      .mockReturnValueOnce(commandBridge(api).settlement(pending.promise));
 
     await renderAppWithApi(api);
     await openSpaceMembersFromSidebar();
@@ -1072,7 +1090,7 @@ describe("App Space Members integration", () => {
     const staleResult = structuredClone(initial);
     const loadRoomSettings = vi
       .spyOn(api, "loadRoomSettings")
-      .mockReturnValueOnce(pending.promise);
+      .mockReturnValueOnce(commandBridge(api).settlement(pending.promise));
 
     await renderAppWithApi(api);
     await act(async () => {
@@ -1105,17 +1123,17 @@ describe("App Space Members integration", () => {
     const second = deferred<DesktopSnapshot>();
     const selectRoom = vi
       .spyOn(api, "selectRoom")
-      .mockReturnValueOnce(first.promise)
-      .mockReturnValueOnce(second.promise);
+      .mockReturnValueOnce(commandBridge(api).settlement(first.promise))
+      .mockReturnValueOnce(commandBridge(api).settlement(second.promise));
     const resultApi = createBrowserFakeApi();
-    const firstResult = await resultApi.selectRoom("!room-alpha:example.invalid");
-    const secondResult = await resultApi.selectRoom("!room-planning:example.invalid");
+    const firstResult = await browserCommandSnapshot(resultApi, resultApi.selectRoom("!room-alpha:example.invalid"));
+    const secondResult = await browserCommandSnapshot(resultApi, resultApi.selectRoom("!room-planning:example.invalid"));
 
     await renderAppWithApi(api);
     const { getAppStoreSnapshot } = await import("./domain/appStore");
     const generation = getAppStoreSnapshot()?.state_generation ?? 0;
-    firstResult.state_generation = generation;
-    secondResult.state_generation = generation;
+    firstResult.state_generation = generation + 1;
+    secondResult.state_generation = generation + 2;
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "synthetic-room" }));
       fireEvent.click(screen.getByRole("button", { name: "planning-room" }));
@@ -1139,13 +1157,13 @@ describe("App Space Members integration", () => {
   test("submits only the latest rapid Space intent after renderer drains", async () => {
     const api = createBrowserFakeApi();
     const pending = deferred<DesktopSnapshot>();
-    const selectSpace = vi.spyOn(api, "selectSpace").mockReturnValueOnce(pending.promise);
+    const selectSpace = vi.spyOn(api, "selectSpace").mockReturnValueOnce(commandBridge(api).admission(pending.promise));
     const resultApi = createBrowserFakeApi();
-    const result = await resultApi.selectSpace("!space-beta:example.invalid");
+    const result = await browserCommandSnapshot(resultApi, resultApi.selectSpace("!space-beta:example.invalid"));
 
     await renderAppWithApi(api);
     const { getAppStoreSnapshot } = await import("./domain/appStore");
-    result.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    result.state_generation = (getAppStoreSnapshot()?.state_generation ?? 0) + 1;
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Synthetic Workspace" }));
       fireEvent.click(screen.getByRole("button", { name: "Synthetic Lab" }));
@@ -1171,7 +1189,7 @@ describe("App Space Members integration", () => {
     const api = createBrowserFakeApi();
     const pending = deferred<DesktopSnapshot>();
     const staleResult = structuredClone(await api.getSnapshot());
-    const selectRoom = vi.spyOn(api, "selectRoom").mockReturnValueOnce(pending.promise);
+    const selectRoom = vi.spyOn(api, "selectRoom").mockReturnValueOnce(commandBridge(api).settlement(pending.promise));
 
     await renderAppWithApi(api);
     await act(async () => {
@@ -1200,7 +1218,7 @@ describe("App Space Members integration", () => {
     const api = createBrowserFakeApi();
     const pending = deferred<DesktopSnapshot>();
     const staleResult = structuredClone(await api.getSnapshot());
-    const selectRoom = vi.spyOn(api, "selectRoom").mockReturnValueOnce(pending.promise);
+    const selectRoom = vi.spyOn(api, "selectRoom").mockReturnValueOnce(commandBridge(api).settlement(pending.promise));
 
     await renderAppWithApi(api);
     await act(async () => {
@@ -1229,11 +1247,11 @@ describe("App Space Members integration", () => {
 
   test("does not apply late DM settings or profile scope after a newer room navigation", async () => {
     const api = createBrowserFakeApi();
-    await api.selectSpace(null);
+    await browserCommandSnapshot(api, api.selectSpace(null));
     const settingsApi = createBrowserFakeApi();
-    await settingsApi.selectSpace(null);
-    await settingsApi.selectRoom("!dm-member-1:example.invalid");
-    const staleResult = await settingsApi.loadRoomSettings("!dm-member-1:example.invalid");
+    await browserCommandSnapshot(settingsApi, settingsApi.selectSpace(null));
+    await browserCommandSnapshot(settingsApi, settingsApi.selectRoom("!dm-member-1:example.invalid"));
+    const staleResult = await browserCommandSnapshot(settingsApi, settingsApi.loadRoomSettings("!dm-member-1:example.invalid"));
     const staleMember = staleResult.state.domain.room_management.settings?.members[0];
     if (!staleMember) {
       throw new Error("expected a synthetic DM member");
@@ -1241,7 +1259,7 @@ describe("App Space Members integration", () => {
     staleMember.display_label = "Stale DM profile";
     staleMember.original_display_label = "Stale DM profile";
     const pending = deferred<DesktopSnapshot>();
-    const loadRoomSettings = vi.spyOn(api, "loadRoomSettings").mockReturnValueOnce(pending.promise);
+    const loadRoomSettings = vi.spyOn(api, "loadRoomSettings").mockReturnValueOnce(commandBridge(api).settlement(pending.promise));
 
     await renderAppWithApi(api);
     await act(async () => {
@@ -1270,19 +1288,19 @@ describe("App Space Members integration", () => {
 
   test("does not let a superseded Room Info People load replace the newer result", async () => {
     const api = createBrowserFakeApi();
-    await api.selectSpace(null);
-    await api.selectRoom("!room-alpha:example.invalid");
+    await browserCommandSnapshot(api, api.selectSpace(null));
+    await browserCommandSnapshot(api, api.selectRoom("!room-alpha:example.invalid"));
     const settingsApi = createBrowserFakeApi();
-    await settingsApi.selectSpace(null);
-    await settingsApi.selectRoom("!room-alpha:example.invalid");
-    const settingsSnapshot = await settingsApi.loadRoomSettings("!room-alpha:example.invalid");
+    await browserCommandSnapshot(settingsApi, settingsApi.selectSpace(null));
+    await browserCommandSnapshot(settingsApi, settingsApi.selectRoom("!room-alpha:example.invalid"));
+    const settingsSnapshot = await browserCommandSnapshot(settingsApi, settingsApi.loadRoomSettings("!room-alpha:example.invalid"));
     const first = deferred<DesktopSnapshot>();
     const second = deferred<DesktopSnapshot>();
     const firstResult = structuredClone(settingsSnapshot);
     const secondResult = structuredClone(settingsSnapshot);
     const resultGeneration = (settingsSnapshot.state_generation ?? 0) + 1;
     firstResult.state_generation = resultGeneration;
-    secondResult.state_generation = resultGeneration;
+    secondResult.state_generation = resultGeneration + 1;
     const firstMember = firstResult.state.domain.room_management.settings?.members[0];
     const secondMember = secondResult.state.domain.room_management.settings?.members[0];
     if (firstMember && secondMember) {
@@ -1317,7 +1335,9 @@ describe("App Space Members integration", () => {
     let supersessionCallCount = 0;
     loadRoomSettings.mockImplementation(() => {
       supersessionCallCount += 1;
-      return supersessionCallCount === 1 ? first.promise : second.promise;
+      return commandBridge(api).settlement(
+        supersessionCallCount === 1 ? first.promise : second.promise
+      );
     });
 
     const peopleButton = screen
@@ -1463,10 +1483,10 @@ describe("App Space Members integration", () => {
       const second = deferred<DesktopSnapshot>();
       const updateSpaceMemberRole = vi
         .spyOn(api, "updateSpaceMemberRole")
-        .mockReturnValueOnce(first.promise)
-        .mockReturnValueOnce(second.promise);
+        .mockReturnValueOnce(commandBridge(api).settlement(first.promise))
+        .mockReturnValueOnce(commandBridge(api).settlement(second.promise));
       const resultApi = createBrowserFakeApi();
-      const success = await resultApi.updateSpaceMemberRole(
+      const success = await browserCommandSnapshot(resultApi, resultApi.updateSpaceMemberRole(
         "!space-alpha:example.invalid",
         "@joined:example.invalid",
         1,
@@ -1474,12 +1494,12 @@ describe("App Space Members integration", () => {
         0,
         50,
         false
-      );
+      ));
 
       await renderAppWithApi(api);
       await openSpaceMembersFromSidebar();
       const { getAppStoreSnapshot } = await import("./domain/appStore");
-      success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+      success.state_generation = (getAppStoreSnapshot()?.state_generation ?? 0) + 1;
       const select = screen.getByRole("combobox", { name: "Role for Joined Member" });
       await act(async () => {
         fireEvent.change(select, { target: { value: "50" } });
@@ -1519,7 +1539,7 @@ describe("App Space Members integration", () => {
     const api = createBrowserFakeApi();
     const pending = deferred<DesktopSnapshot>();
     const resultApi = createBrowserFakeApi();
-    const success = await resultApi.updateSpaceMemberRole(
+    const success = await browserCommandSnapshot(resultApi, resultApi.updateSpaceMemberRole(
       "!space-alpha:example.invalid",
       "@joined:example.invalid",
       1,
@@ -1527,8 +1547,8 @@ describe("App Space Members integration", () => {
       0,
       50,
       false
-    );
-    vi.spyOn(api, "updateSpaceMemberRole").mockReturnValueOnce(pending.promise);
+    ));
+    vi.spyOn(api, "updateSpaceMemberRole").mockReturnValueOnce(commandBridge(api).settlement(pending.promise));
 
     await renderAppWithApi(api);
     await openSpaceMembersFromSidebar();
@@ -1540,7 +1560,7 @@ describe("App Space Members integration", () => {
     });
     await openSpaceMembersFromSidebar();
     const { getAppStoreSnapshot } = await import("./domain/appStore");
-    success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+    success.state_generation = (getAppStoreSnapshot()?.state_generation ?? 0) + 1;
     await act(async () => {
       pending.resolve(success);
       await pending.promise;
@@ -1556,15 +1576,15 @@ describe("App Space Members integration", () => {
   });
 
   test.each(["completion", "rejection"] as const)(
-    "ignores a late role %s after same-Space room navigation",
+    "handles a late role %s after same-Space room navigation",
     async (outcome) => {
       const api = createBrowserFakeApi();
       const pending = deferred<DesktopSnapshot>();
       const updateSpaceMemberRole = vi
         .spyOn(api, "updateSpaceMemberRole")
-        .mockReturnValueOnce(pending.promise);
+        .mockReturnValueOnce(commandBridge(api).settlement(pending.promise));
       const resultApi = createBrowserFakeApi();
-      const success = await resultApi.updateSpaceMemberRole(
+      const success = await browserCommandSnapshot(resultApi, resultApi.updateSpaceMemberRole(
         "!space-alpha:example.invalid",
         "@joined:example.invalid",
         1,
@@ -1572,7 +1592,7 @@ describe("App Space Members integration", () => {
         0,
         50,
         false
-      );
+      ));
 
       await renderAppWithApi(api);
       await openSpaceMembersFromSidebar();
@@ -1595,7 +1615,7 @@ describe("App Space Members integration", () => {
       });
 
       const { getAppStoreSnapshot } = await import("./domain/appStore");
-      success.state_generation = getAppStoreSnapshot()?.state_generation ?? 0;
+      success.state_generation = (getAppStoreSnapshot()?.state_generation ?? 0) + 1;
       await act(async () => {
         if (outcome === "completion") {
           pending.resolve(success);
@@ -1610,7 +1630,7 @@ describe("App Space Members integration", () => {
       expect(
         (screen.getByRole("combobox", { name: "Role for Joined Member" }) as HTMLSelectElement)
           .value
-      ).toBe("0");
+      ).toBe(outcome === "completion" ? "50" : "0");
       expect(screen.queryByRole("alert")).toBeNull();
       await act(async () => {
         fireEvent.click(await screen.findByRole("button", { name: "Open diagnostics" }));

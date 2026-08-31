@@ -56,11 +56,12 @@ pub async fn submit_search(
     scope: SearchScopeKind,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let search_scope = resolve_search_scope(scope, state.inner()).await;
-    submit_search_production_path(query, scope, search_scope, state.inner()).await?;
+    let settlement =
+        submit_search_production_path(query, scope, search_scope, state.inner()).await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(settlement)
 }
 
 /// Command-body boundary used by `submit_search` so the IPC handler remains a
@@ -70,7 +71,7 @@ pub(crate) async fn submit_search_production_path(
     scope: SearchScopeKind,
     search_scope: SearchScope,
     state: &CoreRuntimeState,
-) -> Result<(), String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut wait_conn = state.runtime.attach();
     let baseline_snapshot = wait_conn.versioned_snapshot();
     let baseline_generation = baseline_snapshot.generation;
@@ -110,7 +111,9 @@ pub(crate) async fn submit_search_production_path(
         .await
         .map_err(|error| invoke_error_from_request_outcome("search", error))?;
     match outcome {
-        RequestOutcome::Search { .. } => Ok(()),
+        RequestOutcome::Search { snapshot, .. } => Ok(
+            FrontendCommandSettlement::from_published_generation(snapshot.generation),
+        ),
         _ => Err("search returned an invalid outcome".to_owned()),
     }
 }
@@ -119,7 +122,7 @@ pub(crate) async fn submit_search_production_path(
 pub async fn close_search(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandSettlement, String> {
     let mut wait_conn = state.inner().runtime.attach();
     let baseline_snapshot = wait_conn.versioned_snapshot();
     let baseline_generation = baseline_snapshot.generation;
@@ -141,12 +144,13 @@ pub async fn close_search(
         )
         .await
         .map_err(|error| invoke_error_from_request_outcome("search close", error))?;
-    match outcome {
-        RequestOutcome::Search { .. } => {}
-        _ => return Err("search close returned an invalid outcome".to_owned()),
-    }
+    let RequestOutcome::Search { snapshot, .. } = outcome else {
+        return Err("search close returned an invalid outcome".to_owned());
+    };
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(FrontendCommandSettlement::from_published_generation(
+        snapshot.generation,
+    ))
 }
 
 #[tauri::command]
@@ -154,7 +158,7 @@ pub async fn start_room_crawl(
     room_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
     // Read current crawler settings from the Rust-owned snapshot so this
     // command doesn't duplicate settings state in the TypeScript layer.
@@ -167,7 +171,7 @@ pub async fn start_room_crawl(
         .values
         .search_crawler
         .clone();
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         CoreCommand::Search(SearchCommand::StartHistoryCrawl {
             request_id,
@@ -177,7 +181,7 @@ pub async fn start_room_crawl(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 #[tauri::command]
@@ -185,9 +189,9 @@ pub async fn stop_room_crawl(
     room_id: String,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendDesktopSnapshot, String> {
+) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    submit_core_command(
+    let admission = submit_core_command_with_admission(
         state.inner(),
         CoreCommand::Search(SearchCommand::StopHistoryCrawl {
             request_id,
@@ -196,7 +200,7 @@ pub async fn stop_room_crawl(
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    current_snapshot(state.inner()).await
+    Ok(admission)
 }
 
 const SEARCH_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);

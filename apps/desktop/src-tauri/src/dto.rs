@@ -97,6 +97,19 @@ impl FrontendCommandAdmission {
     }
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontendCommandResult<T> {
+    pub result: T,
+    pub settlement: FrontendCommandSettlement,
+}
+
+impl<T> FrontendCommandResult<T> {
+    pub(crate) fn new(result: T, settlement: FrontendCommandSettlement) -> Self {
+        Self { result, settlement }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrontendCommandSettlement {

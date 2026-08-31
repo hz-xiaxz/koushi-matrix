@@ -109,7 +109,7 @@ test("workspace rail space and Home clicks apply returned navigation snapshots",
   await expect(space).not.toHaveClass(/is-active/);
 });
 
-test("workspace rail keeps a newer state delta when the command returns a stale snapshot", async ({
+test("workspace rail keeps a delta that arrives before its command receipt", async ({
   page
 }) => {
   await gotoReadyShell(page);
@@ -146,10 +146,12 @@ test("workspace rail keeps a newer state delta when the command returns a stale 
     window.__harness.setCommandResponse(
       "select_space",
       async ({ spaceId }: { spaceId: string | null }) => {
+        const generation =
+          (window.__harness.currentSnapshot().state_generation ?? 0) + 1;
         await window.__harness.pushStateUpdate({
           protocol_version: 1,
           kind: "delta",
-          generation: 2,
+          generation,
           changed: {
             state: {
               ui: {
@@ -173,7 +175,7 @@ test("workspace rail keeps a newer state delta when the command returns a stale 
             }
           }
         });
-        return staleSnapshot;
+        return { protocolVersion: 1, admittedGeneration: generation };
       }
     );
     window.__harness.pushStateUpdate();
@@ -2104,7 +2106,7 @@ test("Home rail tooltip is absent while Space rail tooltip remains on hover and 
   await expect(spaceButton).not.toHaveAttribute("aria-describedby", /.+/);
 });
 
-test("room selection keeps a newer state delta when the command returns a stale snapshot", async ({
+test("room selection keeps a delta that arrives before its command receipt", async ({
   page
 }) => {
   await gotoReadyShell(page);
@@ -2190,10 +2192,12 @@ test("room selection keeps a newer state delta when the command returns a stale 
     window.__harness.setSnapshot(staleSnapshot);
     window.__harness.setCommandResponse("select_room", async ({ roomId }: { roomId: string }) => {
       const targetRoomId = String(roomId);
+      const generation =
+        (window.__harness.currentSnapshot().state_generation ?? 0) + 1;
       await window.__harness.pushStateUpdate({
         protocol_version: 1,
         kind: "delta",
-        generation: 2,
+        generation,
         changed: {
           state: {
             ui: {
@@ -2218,7 +2222,7 @@ test("room selection keeps a newer state delta when the command returns a stale 
           thread: null
         }
       });
-      return staleSnapshot;
+      return { protocolVersion: 1, publishedGeneration: generation };
     });
     window.__harness.pushStateUpdate();
     window.__harness.clearInvocations();

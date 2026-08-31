@@ -30,6 +30,7 @@ import type {
   TimelineItem
 } from "../domain/coreEvents";
 import { roomTimelineKey } from "../domain/coreEvents";
+import { applyDeltaToState } from "../domain/appStore";
 import {
   SNAPSHOT_SCHEMA_VERSION,
   type ActivityTab,
@@ -616,6 +617,10 @@ const mock = new TauriIpcMock();
 mock.setCommandResponse("plugin:dialog|message", "Ok");
 let currentSnapshot = readySnapshot();
 let lastStateUpdateGeneration = currentSnapshot.state_generation ?? 0;
+mock.setCommandResponse(
+  "settlement_snapshot",
+  () => new Promise((resolve) => setTimeout(() => resolve(currentSnapshot), 0))
+);
 mock.setCommandResponse("resync_snapshot", () => currentSnapshot);
 let nextGateFlowId = 80;
 const preparedUploadBytes = new Map<string, number[]>();
@@ -875,6 +880,23 @@ function reconcileComposerLeases(snapshot: DesktopSnapshot): void {
   }
 }
 
+function canProjectHarnessSnapshot(value: unknown): value is DesktopSnapshot {
+  const candidate = value as {
+    state?: {
+      domain?: { rooms?: unknown; spaces?: unknown; session?: unknown };
+      ui?: { navigation?: unknown };
+    };
+  };
+  return (
+    Array.isArray(candidate?.state?.domain?.rooms) &&
+    Array.isArray(candidate.state.domain.spaces) &&
+    candidate.state.domain.session !== null &&
+    typeof candidate.state.domain.session === "object" &&
+    candidate.state.ui?.navigation !== null &&
+    typeof candidate.state.ui?.navigation === "object"
+  );
+}
+
 function setCurrentSnapshot(next: DesktopSnapshot): DesktopSnapshot {
   const previousSnapshot = currentSnapshot;
   const rooms = next.state.domain.rooms.map(normalizeHarnessRoomSummary);
@@ -966,6 +988,12 @@ function normalizeHarnessCommandResponse(value: unknown): unknown {
   }
   if (isDesktopSnapshotLike(value)) {
     return setCurrentSnapshot(value);
+  }
+  if (value && typeof value === "object" && "snapshot" in value) {
+    const response = value as Record<string, unknown> & { snapshot: unknown };
+    if (isDesktopSnapshotLike(response.snapshot)) {
+      return { ...response, snapshot: setCurrentSnapshot(response.snapshot) };
+    }
   }
   return value;
 }
@@ -3257,6 +3285,19 @@ const harnessControl: AppHarnessControl = {
       };
     }
     lastStateUpdateGeneration = Math.max(lastStateUpdateGeneration, update.generation);
+    if (update.kind === "snapshot") {
+      if (canProjectHarnessSnapshot(update.snapshot)) {
+        setCurrentSnapshot(update.snapshot);
+      }
+    } else if (
+      update.generation === (currentSnapshot.state_generation ?? 0) + 1
+    ) {
+      const next = applyDeltaToState(currentSnapshot, {
+        generation: update.generation,
+        changed: update.changed
+      });
+      if (next) setCurrentSnapshot(next);
+    }
     void emit(STATE_UPDATE_EVENT_NAME, update);
   },
   currentSnapshot: () => currentSnapshot,

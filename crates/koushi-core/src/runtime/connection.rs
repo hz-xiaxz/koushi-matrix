@@ -205,6 +205,24 @@ impl CoreCommandHandle {
             .map_err(|_| CommandSubmitError::RuntimeClosed)
     }
 
+    pub async fn command_with_composer_lease_and_admission(
+        &self,
+        generation: ComposerRendererGeneration,
+        lease_id: ComposerDraftLeaseId,
+        command: CoreCommand,
+    ) -> Result<CoreCommandAdmission, CommandSubmitError> {
+        let mut envelope = self.admit_composer_command(generation, lease_id, command)?;
+        let (admission_tx, admission_rx) = oneshot::channel();
+        envelope.admission = Some(admission_tx);
+        self.command_tx
+            .send(envelope)
+            .await
+            .map_err(|_| CommandSubmitError::RuntimeClosed)?;
+        admission_rx
+            .await
+            .map_err(|_| CommandSubmitError::RuntimeClosed)
+    }
+
     #[cfg(any(test, feature = "test-hooks"))]
     pub async fn command_with_composer_lease_after_admission(
         &self,
@@ -539,6 +557,17 @@ impl CoreConnection {
     ) -> Result<(), CommandSubmitError> {
         self.command_handle()
             .command_with_composer_lease(generation, lease_id, command)
+            .await
+    }
+
+    pub async fn command_with_composer_lease_and_admission(
+        &self,
+        generation: ComposerRendererGeneration,
+        lease_id: ComposerDraftLeaseId,
+        command: CoreCommand,
+    ) -> Result<CoreCommandAdmission, CommandSubmitError> {
+        self.command_handle()
+            .command_with_composer_lease_and_admission(generation, lease_id, command)
             .await
     }
 

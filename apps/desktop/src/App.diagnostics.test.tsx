@@ -445,7 +445,10 @@ describe("App diagnostics lifecycle", () => {
       "access_token=private-token"
     ].join(" ");
     vi.spyOn(api, "getSnapshot").mockResolvedValue(encryptedSnapshot);
-    vi.spyOn(api, "loadRoomSettings").mockResolvedValue(encryptedSnapshot);
+    vi.spyOn(api, "loadRoomSettings").mockResolvedValue({
+      protocolVersion: 1,
+      publishedGeneration: encryptedSnapshot.state_generation ?? 0
+    });
     const reshareRoomKey = vi
       .spyOn(api, "reshareRoomKey")
       .mockRejectedValue(new Error(rawError));

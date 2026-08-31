@@ -321,12 +321,14 @@ pub enum RequestOutcome {
         request_id: RequestId,
         room_id: String,
         outcome: crate::event::RoomKeyReshareOutcome,
+        generation: u64,
     },
     EncryptionDebug {
         request_id: RequestId,
         room_id: String,
         kind: koushi_state::EncryptionDebugOperationKind,
         outcome: koushi_state::EncryptionDebugOperationOutcome,
+        generation: u64,
     },
 }
 
@@ -873,6 +875,7 @@ impl EventProgress {
                     request_id: *request_id,
                     room_id: room_id.clone(),
                     outcome: *outcome,
+                    generation: snapshot.generation,
                 })
             }
             (
@@ -898,6 +901,7 @@ impl EventProgress {
                     room_id: room_id.clone(),
                     kind: *kind,
                     outcome: *outcome,
+                    generation: snapshot.generation,
                 })
             }
             (

@@ -5,10 +5,13 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { SessionVerificationGate } from "./components/SessionVerificationGate";
 import { createBrowserFakeApi } from "./backend/browserFakeApi";
 import type {
+  CommandReceipt,
   DesktopSnapshot,
   ProvisionalPhase,
   SecureBackupGateState
 } from "./domain/types";
+
+const commandReceipt: CommandReceipt = { protocolVersion: 1, admittedGeneration: 1 };
 
 const provisionalPhaseCases: Array<[ProvisionalPhase, string]> = [
   ["checkingTrust", "Checking device trust…"],
@@ -36,26 +39,26 @@ describe("SessionVerificationGate interactions", () => {
   }
 
   function secureBackupOperations(
-    snapshot: DesktopSnapshot,
+    _snapshot: DesktopSnapshot,
     overrides: Partial<{
-      recoverSecureBackup: (secret: string) => Promise<DesktopSnapshot>;
+      recoverSecureBackup: (secret: string) => Promise<CommandReceipt>;
       bootstrapSecureBackup: (
         passphrase: string | null,
         recoveryKeyDestinationPath: string | null,
         intent: { kind: "initialSetup" } | { kind: "reenable"; confirmed: boolean }
-      ) => Promise<DesktopSnapshot>;
+      ) => Promise<CommandReceipt>;
       chooseSecureBackupDestination: () => Promise<string | null>;
-      retrySecureBackupInspection: () => Promise<DesktopSnapshot>;
+      retrySecureBackupInspection: () => Promise<CommandReceipt>;
       openSecureBackupDiagnostics: () => Promise<void>;
     }> = {}
   ) {
     return {
-      startOwnUserSas: async () => snapshot,
-      submitRecovery: async () => snapshot,
-      recoverSecureBackup: async () => snapshot,
-      bootstrapSecureBackup: async () => snapshot,
+      startOwnUserSas: async () => commandReceipt,
+      submitRecovery: async () => commandReceipt,
+      recoverSecureBackup: async () => commandReceipt,
+      bootstrapSecureBackup: async () => commandReceipt,
       chooseSecureBackupDestination: async () => "/tmp/recovery-key.txt",
-      retrySecureBackupInspection: async () => snapshot,
+      retrySecureBackupInspection: async () => commandReceipt,
       openSecureBackupDiagnostics: async () => undefined,
       ...overrides
     };
@@ -86,7 +89,7 @@ describe("SessionVerificationGate interactions", () => {
       render(
         <SessionVerificationGate
           snapshot={snapshot}
-          onSnapshot={() => undefined}
+          onReceipt={async () => undefined}
           onSignOut={() => undefined}
         />
       );
@@ -118,7 +121,7 @@ describe("SessionVerificationGate interactions", () => {
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
       />
     );
@@ -137,13 +140,13 @@ describe("SessionVerificationGate interactions", () => {
       device_id: "D",
       gate: { methods: ["existingDeviceSas", "recoveryKey"], account_kind: "existingIdentity" }
     };
-    const startOwnUserSas = vi.fn(async () => snapshot);
+    const startOwnUserSas = vi.fn(async () => commandReceipt);
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
-        operations={{ startOwnUserSas, submitRecovery: async () => snapshot }}
+        operations={{ startOwnUserSas, submitRecovery: async () => commandReceipt }}
       />
     );
 
@@ -186,11 +189,11 @@ describe("SessionVerificationGate interactions", () => {
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
         operations={{
-          startOwnUserSas: async () => snapshot,
-          submitRecovery: async () => snapshot
+          startOwnUserSas: async () => commandReceipt,
+          submitRecovery: async () => commandReceipt
         }}
       />
     );
@@ -213,11 +216,11 @@ describe("SessionVerificationGate interactions", () => {
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
         operations={{
-          startOwnUserSas: async () => snapshot,
-          submitRecovery: async () => snapshot
+          startOwnUserSas: async () => commandReceipt,
+          submitRecovery: async () => commandReceipt
         }}
       />
     );
@@ -241,11 +244,11 @@ describe("SessionVerificationGate interactions", () => {
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
         operations={{
-          startOwnUserSas: async () => snapshot,
-          submitRecovery: async () => snapshot
+          startOwnUserSas: async () => commandReceipt,
+          submitRecovery: async () => commandReceipt
         }}
       />
     );
@@ -268,9 +271,9 @@ describe("SessionVerificationGate interactions", () => {
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
-        operations={{ startOwnUserSas: async () => snapshot, submitRecovery: async () => snapshot }}
+        operations={{ startOwnUserSas: async () => commandReceipt, submitRecovery: async () => commandReceipt }}
       />
     );
 
@@ -294,7 +297,7 @@ describe("SessionVerificationGate interactions", () => {
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
       />
     );
@@ -309,11 +312,11 @@ describe("SessionVerificationGate interactions", () => {
   test("admits SAS and recovery independently and blocks duplicate promise construction", async () => {
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     snapshot.state.domain.session = { kind: "awaitingVerification", user_id: "@u:example.invalid", homeserver: "https://example.invalid", device_id: "D", gate: { methods: ["existingDeviceSas", "recoveryKey"], account_kind: "existingIdentity" } };
-    let releaseSas!: (value: typeof snapshot) => void;
-    const sasPromise = new Promise<typeof snapshot>((resolve) => { releaseSas = resolve; });
+    let releaseSas!: (value: CommandReceipt) => void;
+    const sasPromise = new Promise<CommandReceipt>((resolve) => { releaseSas = resolve; });
     const startOwnUserSas = vi.fn(() => sasPromise);
-    const submitRecovery = vi.fn(async () => snapshot);
-    render(<SessionVerificationGate snapshot={snapshot} onSnapshot={() => undefined} onSignOut={() => undefined} operations={{ startOwnUserSas, submitRecovery }} />);
+    const submitRecovery = vi.fn(async () => commandReceipt);
+    render(<SessionVerificationGate snapshot={snapshot} onReceipt={async () => undefined} onSignOut={() => undefined} operations={{ startOwnUserSas, submitRecovery }} />);
 
     const sas = screen.getByRole("button", { name: "Verify with another device" });
     const recovery = screen.getByRole("button", { name: "Verify with recovery key" });
@@ -332,15 +335,39 @@ describe("SessionVerificationGate interactions", () => {
 
     fireEvent.change(screen.getByLabelText("Recovery secret"), { target: { value: "fixture-secret" } });
     fireEvent.click(screen.getByRole("button", { name: "Verify with recovery key" }));
-    expect(submitRecovery).toHaveBeenCalledTimes(1);
-    releaseSas(snapshot);
+    await vi.waitFor(() => expect(submitRecovery).toHaveBeenCalledTimes(1));
+    expect((sas as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(sas);
+    expect(startOwnUserSas).toHaveBeenCalledTimes(1);
+    releaseSas(commandReceipt);
+  });
+
+  test("holds the same-kind gate until its command receipt settles", async () => {
+    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    snapshot.state.domain.session = { kind: "awaitingVerification", user_id: "@u:example.invalid", homeserver: "https://example.invalid", device_id: "D", gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity" } };
+    let releaseReceipt!: () => void;
+    const receiptSettled = new Promise<void>((resolve) => { releaseReceipt = resolve; });
+    const onReceipt = vi.fn(() => receiptSettled);
+    const startOwnUserSas = vi.fn(async () => commandReceipt);
+    render(<SessionVerificationGate snapshot={snapshot} onReceipt={onReceipt} onSignOut={() => undefined} operations={{ startOwnUserSas, submitRecovery: async () => commandReceipt }} />);
+
+    const button = screen.getByRole("button", { name: "Verify with another device" });
+    fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: "Try device verification anyway" }));
+    await vi.waitFor(() => expect(onReceipt).toHaveBeenCalledOnce());
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button);
+    expect(startOwnUserSas).toHaveBeenCalledOnce();
+
+    releaseReceipt();
+    await vi.waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
   });
 
   test("rejected operation settles and permits a later attempt", async () => {
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     snapshot.state.domain.session = { kind: "awaitingVerification", user_id: "@u:example.invalid", homeserver: "https://example.invalid", device_id: "D", gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity" } };
-    const startOwnUserSas = vi.fn().mockRejectedValueOnce(new Error("rejected")).mockResolvedValue(snapshot);
-    render(<SessionVerificationGate snapshot={snapshot} onSnapshot={() => undefined} onSignOut={() => undefined} operations={{ startOwnUserSas, submitRecovery: async () => snapshot }} />);
+    const startOwnUserSas = vi.fn().mockRejectedValueOnce(new Error("rejected")).mockResolvedValue(commandReceipt);
+    render(<SessionVerificationGate snapshot={snapshot} onReceipt={async () => undefined} onSignOut={() => undefined} operations={{ startOwnUserSas, submitRecovery: async () => commandReceipt }} />);
     const button = screen.getByRole("button", { name: "Verify with another device" });
     fireEvent.click(button);
     fireEvent.click(screen.getByRole("button", { name: "Try device verification anyway" }));
@@ -354,8 +381,8 @@ describe("SessionVerificationGate interactions", () => {
   test("does not offer recovery-key fallback when only SAS is available", async () => {
     const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     snapshot.state.domain.session = { kind: "awaitingVerification", user_id: "@u:example.invalid", homeserver: "https://example.invalid", device_id: "D", gate: { methods: ["existingDeviceSas"], account_kind: "existingIdentity" } };
-    const startOwnUserSas = vi.fn(async () => snapshot);
-    render(<SessionVerificationGate snapshot={snapshot} onSnapshot={() => undefined} onSignOut={() => undefined} operations={{ startOwnUserSas, submitRecovery: async () => snapshot }} />);
+    const startOwnUserSas = vi.fn(async () => commandReceipt);
+    render(<SessionVerificationGate snapshot={snapshot} onReceipt={async () => undefined} onSignOut={() => undefined} operations={{ startOwnUserSas, submitRecovery: async () => commandReceipt }} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Verify with another device" }));
 
@@ -382,22 +409,17 @@ describe("SessionVerificationGate interactions", () => {
       kind: "offered",
       reason: "recoveryFailed"
     };
-    const resolvingSnapshot = structuredClone(snapshot);
-    resolvingSnapshot.state.domain.device_cleanup = {
-      kind: "resolvingRemote",
-      request_id: 370
-    };
-    const startDeviceCleanup = vi.fn(async () => resolvingSnapshot);
-    const onSnapshot = vi.fn();
+    const startDeviceCleanup = vi.fn(async () => commandReceipt);
+    const onReceipt = vi.fn(async () => undefined);
 
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={onSnapshot}
+        onReceipt={onReceipt}
         onSignOut={() => undefined}
         operations={{
-          startOwnUserSas: async () => snapshot,
-          submitRecovery: async () => snapshot,
+          startOwnUserSas: async () => commandReceipt,
+          submitRecovery: async () => commandReceipt,
           startDeviceCleanup
         }}
       />
@@ -424,7 +446,7 @@ describe("SessionVerificationGate interactions", () => {
     );
 
     await vi.waitFor(() => expect(startDeviceCleanup).toHaveBeenCalledTimes(1));
-    expect(onSnapshot).toHaveBeenCalledWith(resolvingSnapshot);
+    expect(onReceipt).toHaveBeenCalledWith(commandReceipt);
   });
 
   test("submits legacy UIA password through the IME-safe cleanup form", async () => {
@@ -435,15 +457,15 @@ describe("SessionVerificationGate interactions", () => {
       request_id: 371,
       flow_id: 41
     };
-    const submitDeviceCleanupUia = vi.fn(async () => snapshot);
+    const submitDeviceCleanupUia = vi.fn(async () => commandReceipt);
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
         operations={{
-          startOwnUserSas: async () => snapshot,
-          submitRecovery: async () => snapshot,
+          startOwnUserSas: async () => commandReceipt,
+          submitRecovery: async () => commandReceipt,
           submitDeviceCleanupUia
         }}
       />
@@ -468,16 +490,16 @@ describe("SessionVerificationGate interactions", () => {
       auth_mode: "legacy",
       failureKind: "network"
     };
-    const startDeviceCleanup = vi.fn(async () => snapshot);
-    const eraseLocalDataAnyway = vi.fn(async () => snapshot);
+    const startDeviceCleanup = vi.fn(async () => commandReceipt);
+    const eraseLocalDataAnyway = vi.fn(async () => commandReceipt);
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
         operations={{
-          startOwnUserSas: async () => snapshot,
-          submitRecovery: async () => snapshot,
+          startOwnUserSas: async () => commandReceipt,
+          submitRecovery: async () => commandReceipt,
           startDeviceCleanup,
           eraseLocalDataAnyway
         }}
@@ -514,7 +536,7 @@ describe("SessionVerificationGate interactions", () => {
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
       />
     );
@@ -534,7 +556,7 @@ describe("SessionVerificationGate interactions", () => {
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
       />
     );
@@ -568,7 +590,7 @@ describe("SessionVerificationGate interactions", () => {
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
       />
     );
@@ -593,12 +615,12 @@ describe("SessionVerificationGate interactions", () => {
     const { container } = render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
         onStartWindowDrag={onStartWindowDrag}
         operations={{
-          startOwnUserSas: async () => snapshot,
-          submitRecovery: async () => snapshot,
+          startOwnUserSas: async () => commandReceipt,
+          submitRecovery: async () => commandReceipt,
         }}
       />
     );
@@ -620,7 +642,7 @@ describe("SessionVerificationGate interactions", () => {
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
         operations={secureBackupOperations(snapshot)}
       />
@@ -636,12 +658,12 @@ describe("SessionVerificationGate interactions", () => {
       await createBrowserFakeApi().getSnapshot(),
       { kind: "existingBackupNeedsRecovery", failure: "invalidRecoveryKey" }
     );
-    const recoverSecureBackup = vi.fn(async () => snapshot);
+    const recoverSecureBackup = vi.fn(async () => commandReceipt);
 
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
         operations={secureBackupOperations(snapshot, { recoverSecureBackup })}
       />
@@ -668,7 +690,7 @@ describe("SessionVerificationGate interactions", () => {
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
         operations={secureBackupOperations(snapshot)}
       />
@@ -684,13 +706,13 @@ describe("SessionVerificationGate interactions", () => {
       await createBrowserFakeApi().getSnapshot(),
       { kind: "setupRequired" }
     );
-    const bootstrapSecureBackup = vi.fn(async () => snapshot);
+    const bootstrapSecureBackup = vi.fn(async () => commandReceipt);
     const chooseSecureBackupDestination = vi.fn(async () => "/tmp/recovery-key.txt");
 
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
         operations={secureBackupOperations(snapshot, {
           bootstrapSecureBackup,
@@ -727,13 +749,13 @@ describe("SessionVerificationGate interactions", () => {
       await createBrowserFakeApi().getSnapshot(),
       { kind: "explicitlyDisabledRequiresSetup" }
     );
-    const bootstrapSecureBackup = vi.fn(async () => snapshot);
+    const bootstrapSecureBackup = vi.fn(async () => commandReceipt);
     const chooseSecureBackupDestination = vi.fn(async () => "/tmp/reenable-recovery-key.txt");
 
     const renderGate = (nextSnapshot = snapshot) => (
       <SessionVerificationGate
         snapshot={nextSnapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
         operations={secureBackupOperations(nextSnapshot, {
           bootstrapSecureBackup,
@@ -800,7 +822,7 @@ describe("SessionVerificationGate interactions", () => {
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
         operations={secureBackupOperations(snapshot)}
       />
@@ -815,13 +837,13 @@ describe("SessionVerificationGate interactions", () => {
       await createBrowserFakeApi().getSnapshot(),
       { kind: "blockedFailed", failure: "rateLimited" }
     );
-    const retrySecureBackupInspection = vi.fn(async () => snapshot);
+    const retrySecureBackupInspection = vi.fn(async () => commandReceipt);
     const openSecureBackupDiagnostics = vi.fn(async () => undefined);
 
     render(
       <SessionVerificationGate
         snapshot={snapshot}
-        onSnapshot={() => undefined}
+        onReceipt={async () => undefined}
         onSignOut={() => undefined}
         operations={secureBackupOperations(snapshot, {
           retrySecureBackupInspection,
@@ -842,7 +864,7 @@ describe("SessionVerificationGate interactions", () => {
   test("renders verification admission phases and an actionable preparation failure", async () => {
     const base = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
     const renderGate = (snapshot: DesktopSnapshot) => renderToStaticMarkup(
-      <SessionVerificationGate snapshot={snapshot} onSnapshot={() => undefined} onSignOut={() => undefined} />
+      <SessionVerificationGate snapshot={snapshot} onReceipt={async () => undefined} onSignOut={() => undefined} />
     );
     expect(renderGate(base)).toContain("Verify this session");
 

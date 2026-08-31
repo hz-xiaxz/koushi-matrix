@@ -1,10 +1,11 @@
 //! Tauri command handlers: transport adapter only.
 //!
 //! Each handler allocates a `RequestId` and submits a `CoreCommand`.
-//! Handlers return the current `FrontendDesktopSnapshot` only when the React
-//! caller actually applies it; high-frequency fire-and-forget commands return
-//! a tiny acknowledgement. Side-effects (state changes, timeline diffs) flow
-//! back to the webview as Tauri events — not as command return values.
+//! Initial/resync reads return the full snapshot DTO; command handlers
+//! return typed admission or terminal results, while high-frequency
+//! fire-and-forget commands return a tiny acknowledgement. Side-effects (state
+//! changes, timeline diffs) flow back to the webview as Tauri events — not as
+//! command return values.
 //!
 //! No Matrix semantics live here. No SDK types. No `koushi_sdk` calls.
 //! (Secret-bearing QA helpers remain behind `#[cfg(any(debug_assertions, test))]`.)
@@ -46,7 +47,9 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::{
     CoreRuntimeState,
-    dto::{FrontendDesktopSnapshot, SearchScopeKind},
+    dto::{
+        FrontendCommandAdmission, FrontendCommandResult, FrontendCommandSettlement, SearchScopeKind,
+    },
 };
 
 static NEXT_TRANSACTION_ID: AtomicU64 = AtomicU64::new(1);
@@ -120,18 +123,33 @@ pub(crate) async fn submit_core_command(
     }
 }
 
+pub(crate) async fn submit_core_command_with_admission(
+    state: &CoreRuntimeState,
+    command: CoreCommand,
+) -> Result<FrontendCommandAdmission, String> {
+    let command_handle = { state.connection.lock().await.command_handle() };
+
+    match tokio::time::timeout(
+        CORE_COMMAND_SUBMIT_TIMEOUT,
+        command_handle.command_with_admission(command),
+    )
+    .await
+    {
+        Ok(Ok(admission)) => Ok(FrontendCommandAdmission::from_core(admission)),
+        Ok(Err(error)) => Err(format!("command submit failed: {error}")),
+        Err(_) => Err("command submit timed out".to_owned()),
+    }
+}
+
 /// Allocate a `RequestId` from the command-dispatch connection.
 async fn next_request_id(state: &CoreRuntimeState) -> koushi_core::RequestId {
     state.connection.lock().await.next_request_id()
 }
 
-/// Read the latest `AppStateSnapshot` and convert to `FrontendDesktopSnapshot`.
-async fn current_snapshot(state: &CoreRuntimeState) -> Result<FrontendDesktopSnapshot, String> {
-    let snapshot = state.connection.lock().await.versioned_snapshot();
-    Ok(FrontendDesktopSnapshot::from_versioned(
-        snapshot.state,
-        snapshot.generation,
-    ))
+pub(crate) fn command_settlement(
+    snapshot: koushi_core::event::VersionedAppStateSnapshot,
+) -> FrontendCommandSettlement {
+    FrontendCommandSettlement::from_published_generation(snapshot.generation)
 }
 
 pub(crate) fn invoke_error_from_core_failure(context: &str, failure: CoreFailure) -> String {

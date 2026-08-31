@@ -874,7 +874,7 @@ pub(super) async fn wait_for_sync_running_after_reconnect(
     }
 }
 
-/// Wait for a `StateChanged` snapshot where `SessionState::Ready`.
+/// Wait for a versioned snapshot where `SessionState::Ready`.
 pub(super) async fn wait_for_ready_snapshot(
     conn: &mut CoreConnection,
     label: &str,

@@ -106,13 +106,14 @@ describe("App composer draft lifecycle", () => {
       });
       await waitFor(() => expect(capturedArgs).not.toBeNull());
       const accepted = await originalSend(...capturedArgs!);
-      expect(accepted.snapshot.state.ui.timeline.composer.last_accepted_clear_revision).toBe(
+      const acceptedSnapshot = await api.settlementSnapshot();
+      expect(acceptedSnapshot.state.ui.timeline.composer.last_accepted_clear_revision).toBe(
         "9007199254740994"
       );
 
       if (order === "accepted-clear-first") {
         const { setAppStoreSnapshot } = await import("./domain/appStore");
-        await act(async () => setAppStoreSnapshot(accepted.snapshot));
+        await act(async () => setAppStoreSnapshot(acceptedSnapshot));
       }
       await act(async () => {
         changeInlineEditorText(composer, "9007199254740994");

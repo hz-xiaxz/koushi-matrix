@@ -9,6 +9,9 @@ import type {
 import { COMPOSER_DRAFT_REVISION_ZERO } from "../domain/composerDraftRevision";
 import type {
   ActivityMarkReadTarget,
+  CommandAdmission,
+  CommandResult,
+  CommandSettlement,
   ActivityTab,
   DesktopSnapshot,
   ComposerKeyEvent,
@@ -59,6 +62,10 @@ export class TauriDesktopApi implements DesktopApi {
     return invoke<DesktopSnapshot>("get_snapshot");
   }
 
+  async settlementSnapshot(): Promise<DesktopSnapshot> {
+    return invoke<DesktopSnapshot>("settlement_snapshot");
+  }
+
   async resyncSnapshot(): Promise<DesktopSnapshot> {
     return invoke<DesktopSnapshot>("resync_snapshot");
   }
@@ -73,8 +80,8 @@ export class TauriDesktopApi implements DesktopApi {
     return invoke<ViewportSyncReceipt>("observe_viewport_sync", { observation });
   }
 
-  async discoverLoginMethods(homeserver: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("discover_login_methods", { homeserver });
+  async discoverLoginMethods(homeserver: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("discover_login_methods", { homeserver });
   }
 
   async startOidcLogin(homeserver: string): Promise<OidcAuthorization> {
@@ -84,8 +91,8 @@ export class TauriDesktopApi implements DesktopApi {
   async completeOidcLogin(
     homeserver: string,
     callbackUrl: string
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("complete_oidc_login", { homeserver, callbackUrl });
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("complete_oidc_login", { homeserver, callbackUrl });
   }
 
   async submitLogin(
@@ -94,8 +101,8 @@ export class TauriDesktopApi implements DesktopApi {
     password: string,
     deviceDisplayName: string,
     platform: DisplayPlatform
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("submit_login", {
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("submit_login", {
       homeserver,
       username,
       password,
@@ -106,205 +113,205 @@ export class TauriDesktopApi implements DesktopApi {
     });
   }
 
-  async submitSoftLogoutReauth(password: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("submit_soft_logout_reauth", { password });
+  async submitSoftLogoutReauth(password: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("submit_soft_logout_reauth", { password });
   }
 
   async listSavedSessions(): Promise<SavedSessionInfo[]> {
     return invoke<SavedSessionInfo[]>("list_saved_sessions");
   }
 
-  async switchAccount(session: SavedSessionInfo): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("switch_account", {
+  async switchAccount(session: SavedSessionInfo): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("switch_account", {
       homeserver: session.homeserver,
       userId: session.user_id,
       deviceId: session.device_id
     });
   }
 
-  async retrySlidingSyncCapability(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("retry_sliding_sync_capability");
+  async retrySlidingSyncCapability(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("retry_sliding_sync_capability");
   }
 
-  async changeHomeserver(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("change_homeserver");
+  async changeHomeserver(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("change_homeserver");
   }
 
-  async logout(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("logout");
+  async logout(): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("logout");
   }
 
-  async submitRecovery(secret: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("submit_recovery", { secret });
+  async submitRecovery(secret: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("submit_recovery", { secret });
   }
 
-  async recoverSecureBackup(secret: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("recover_secure_backup", { secret });
+  async recoverSecureBackup(secret: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("recover_secure_backup", { secret });
   }
 
-  async startDeviceCleanup(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("start_device_cleanup");
+  async startDeviceCleanup(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("start_device_cleanup");
   }
 
-  async submitDeviceCleanupUia(flowId: number, password: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("submit_device_cleanup_uia", { flowId, password });
+  async submitDeviceCleanupUia(flowId: number, password: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("submit_device_cleanup_uia", { flowId, password });
   }
 
-  async eraseLocalDataAnyway(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("erase_local_data_anyway");
+  async eraseLocalDataAnyway(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("erase_local_data_anyway");
   }
 
-  async restartSync(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("restart_sync");
+  async restartSync(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("restart_sync");
   }
 
-  async updateSettings(patch: SettingsPatch): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("update_settings", { patch });
+  async updateSettings(patch: SettingsPatch): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("update_settings", { patch });
   }
 
-  async rebuildSearchIndex(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("rebuild_search_index");
+  async rebuildSearchIndex(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("rebuild_search_index");
   }
 
   async setRoomUrlPreviewOverride(
     roomId: string,
     enabled: boolean
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("set_room_url_preview_override", { roomId, enabled });
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("set_room_url_preview_override", { roomId, enabled });
   }
 
-  async selectRoomListFilter(filter: RoomListFilter): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("select_room_list_filter", { filter });
+  async selectRoomListFilter(filter: RoomListFilter): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("select_room_list_filter", { filter });
   }
 
   setRoomListProjection(): void {
     // No-op in Tauri runtime; helper exists only for browser fakes/tests.
   }
 
-  async markRoomAsRead(roomId: string, eventId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("mark_room_as_read", { roomId, eventId });
+  async markRoomAsRead(roomId: string, eventId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("mark_room_as_read", { roomId, eventId });
   }
 
-  async markRoomAsUnread(roomId: string, unread: boolean): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("mark_room_as_unread", { roomId, unread });
+  async markRoomAsUnread(roomId: string, unread: boolean): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("mark_room_as_unread", { roomId, unread });
   }
 
   async setRoomNotificationMode(
     roomId: string,
     mode: RoomNotificationMode
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("set_room_notification_mode", { roomId, mode });
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("set_room_notification_mode", { roomId, mode });
   }
 
   async refreshCurrentSessionStatus(
     trigger: SessionStatusRefreshTrigger
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("refresh_current_session_status", { trigger });
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("refresh_current_session_status", { trigger });
   }
 
-  async submitAccountManagementUia(flowId: number, password: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("submit_account_management_uia", { flowId, password });
+  async submitAccountManagementUia(flowId: number, password: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("submit_account_management_uia", { flowId, password });
   }
 
-  async loadAccountManagementCapabilities(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("load_account_management_capabilities");
+  async loadAccountManagementCapabilities(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("load_account_management_capabilities");
   }
 
-  async changePassword(newPassword: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("change_password", { newPassword });
+  async changePassword(newPassword: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("change_password", { newPassword });
   }
 
-  async deactivateAccount(eraseData: boolean): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("deactivate_account", { eraseData });
+  async deactivateAccount(eraseData: boolean): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("deactivate_account", { eraseData });
   }
 
-  async probeLocalEncryptionHealth(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("probe_local_encryption_health");
+  async probeLocalEncryptionHealth(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("probe_local_encryption_health");
   }
 
-  async resetLocalData(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("reset_local_data");
+  async resetLocalData(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("reset_local_data");
   }
 
-  async bootstrapCrossSigning(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("bootstrap_cross_signing");
+  async bootstrapCrossSigning(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("bootstrap_cross_signing");
   }
 
-  async enableKeyBackup(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("enable_key_backup");
+  async enableKeyBackup(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("enable_key_backup");
   }
 
-  async exportRoomKeys(destinationPath: string, passphrase: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("export_room_keys", { destinationPath, passphrase });
+  async exportRoomKeys(destinationPath: string, passphrase: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("export_room_keys", { destinationPath, passphrase });
   }
 
-  async importRoomKeys(sourcePath: string, passphrase: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("import_room_keys", { sourcePath, passphrase });
+  async importRoomKeys(sourcePath: string, passphrase: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("import_room_keys", { sourcePath, passphrase });
   }
 
   async bootstrapSecureBackup(
     passphrase: string | null,
     recoveryKeyDestinationPath: string | null,
     intent: import("../domain/types").SecureBackupSetupIntent
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("bootstrap_secure_backup", {
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("bootstrap_secure_backup", {
       passphrase,
       recoveryKeyDestinationPath,
       intent
     });
   }
 
-  async retrySecureBackupInspection(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("retry_secure_backup_inspection");
+  async retrySecureBackupInspection(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("retry_secure_backup_inspection");
   }
 
   async changeSecureBackupPassphrase(
     oldSecret: string,
     newPassphrase: string,
     recoveryKeyDestinationPath: string | null
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("change_secure_backup_passphrase", {
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("change_secure_backup_passphrase", {
       oldSecret,
       newPassphrase,
       recoveryKeyDestinationPath
     });
   }
 
-  async acceptVerification(flowId: number): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("accept_verification", { flowId });
+  async acceptVerification(flowId: number): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("accept_verification", { flowId });
   }
 
-  async startOwnUserSas(): Promise<DesktopSnapshot> { return invoke("start_own_user_sas"); }
-  async retryCurrentDeviceTrustDiscovery(): Promise<DesktopSnapshot> { return invoke("retry_current_device_trust_discovery"); }
-  async mismatchSasVerification(flowId: number): Promise<DesktopSnapshot> { return invoke("mismatch_sas_verification", { flowId }); }
-  async startSessionBootstrap(passphrase: string | null, recoveryKeyDestinationPath: string): Promise<DesktopSnapshot> { return invoke("start_session_bootstrap", { passphrase, recoveryKeyDestinationPath }); }
-  async confirmSessionBootstrapSaved(flowId: number): Promise<DesktopSnapshot> { return invoke("confirm_session_bootstrap_saved", { flowId }); }
+  async startOwnUserSas(): Promise<CommandAdmission> { return invoke("start_own_user_sas"); }
+  async retryCurrentDeviceTrustDiscovery(): Promise<CommandAdmission> { return invoke("retry_current_device_trust_discovery"); }
+  async mismatchSasVerification(flowId: number): Promise<CommandAdmission> { return invoke("mismatch_sas_verification", { flowId }); }
+  async startSessionBootstrap(passphrase: string | null, recoveryKeyDestinationPath: string): Promise<CommandAdmission> { return invoke("start_session_bootstrap", { passphrase, recoveryKeyDestinationPath }); }
+  async confirmSessionBootstrapSaved(flowId: number): Promise<CommandAdmission> { return invoke("confirm_session_bootstrap_saved", { flowId }); }
 
-  async confirmSasVerification(flowId: number): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("confirm_sas_verification", { flowId });
+  async confirmSasVerification(flowId: number): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("confirm_sas_verification", { flowId });
   }
 
-  async cancelVerification(flowId: number): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("cancel_verification", { flowId });
+  async cancelVerification(flowId: number): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("cancel_verification", { flowId });
   }
 
-  async resetIdentity(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("reset_identity");
+  async resetIdentity(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("reset_identity");
   }
 
-  async cancelIdentityReset(flowId: number): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("cancel_identity_reset", { flowId });
+  async cancelIdentityReset(flowId: number): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("cancel_identity_reset", { flowId });
   }
 
   async submitIdentityResetPassword(
     flowId: number,
     password: string
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("submit_identity_reset_password", { flowId, password });
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("submit_identity_reset_password", { flowId, password });
   }
 
-  async submitIdentityResetOAuth(flowId: number): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("submit_identity_reset_oauth", { flowId });
+  async submitIdentityResetOAuth(flowId: number): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("submit_identity_reset_oauth", { flowId });
   }
 
   async resolveComposerKeyAction(
@@ -320,16 +327,16 @@ export class TauriDesktopApi implements DesktopApi {
     });
   }
 
-  async selectSpace(spaceId: string | null): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("select_space", { spaceId });
+  async selectSpace(spaceId: string | null): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("select_space", { spaceId });
   }
 
-  async reorderSpaces(spaceIds: string[]): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("reorder_spaces", { spaceIds });
+  async reorderSpaces(spaceIds: string[]): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("reorder_spaces", { spaceIds });
   }
 
-  async selectRoom(roomId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("select_room", { roomId });
+  async selectRoom(roomId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("select_room", { roomId });
   }
 
   async beginComposerDraftRendererGeneration(): Promise<string> {
@@ -406,16 +413,16 @@ export class TauriDesktopApi implements DesktopApi {
   async stageUploadBytes(
     target: ComposerTarget,
     items: StageUploadBytesRequestItem[]
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("stage_upload_bytes", { target, items });
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("stage_upload_bytes", { target, items });
   }
 
   async selectStagedUploadOutput(
     target: ComposerTarget,
     stagedId: string,
     selection: StagedUploadOutputSelection
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("select_staged_upload_output", {
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("select_staged_upload_output", {
       target,
       stagedId,
       selection
@@ -433,15 +440,15 @@ export class TauriDesktopApi implements DesktopApi {
   async retryStagedUploadPreparation(
     target: ComposerTarget,
     stagedId: string
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("retry_staged_upload_preparation", { target, stagedId });
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("retry_staged_upload_preparation", { target, stagedId });
   }
 
   async useOriginalStagedUpload(
     target: ComposerTarget,
     stagedId: string
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("use_original_staged_upload", { target, stagedId });
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("use_original_staged_upload", { target, stagedId });
   }
 
   async sendPreparedUploads(
@@ -466,52 +473,52 @@ export class TauriDesktopApi implements DesktopApi {
     target: ComposerTarget,
     stagedId: string,
     document: ComposerDocument | null
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("update_staged_upload_caption", { target, stagedId, document });
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("update_staged_upload_caption", { target, stagedId, document });
   }
 
   async updateStagedUploadCompression(
     target: ComposerTarget,
     stagedId: string,
     compressionChoice: StagedUploadCompressionChoice
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("update_staged_upload_compression", {
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("update_staged_upload_compression", {
       target,
       stagedId,
       compressionChoice
     });
   }
 
-  async clearUploadStaging(target: ComposerTarget): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("clear_upload_staging", { target });
+  async clearUploadStaging(target: ComposerTarget): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("clear_upload_staging", { target });
   }
 
-  async cancelScheduledSend(scheduledId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("cancel_scheduled_send", { scheduledId });
+  async cancelScheduledSend(scheduledId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("cancel_scheduled_send", { scheduledId });
   }
 
   async rescheduleScheduledSend(
     scheduledId: string,
     body: string,
     sendAtMs: number
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("reschedule_scheduled_send", { scheduledId, body, sendAtMs });
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("reschedule_scheduled_send", { scheduledId, body, sendAtMs });
   }
 
-  async retrySend(roomId: string, transactionId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("retry_send", { roomId, transactionId });
+  async retrySend(roomId: string, transactionId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("retry_send", { roomId, transactionId });
   }
 
-  async cancelSend(roomId: string, transactionId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("cancel_send", { roomId, transactionId });
+  async cancelSend(roomId: string, transactionId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("cancel_send", { roomId, transactionId });
   }
 
   async sendReaction(
     roomId: string,
     eventId: string,
     reactionKey: string
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("send_reaction", { roomId, eventId, reactionKey });
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("send_reaction", { roomId, eventId, reactionKey });
   }
 
   async redactReaction(
@@ -519,8 +526,8 @@ export class TauriDesktopApi implements DesktopApi {
     eventId: string,
     reactionKey: string,
     reactionEventId: string
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("redact_reaction", {
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("redact_reaction", {
       roomId,
       eventId,
       reactionKey,
@@ -544,60 +551,60 @@ export class TauriDesktopApi implements DesktopApi {
     return invoke<void>("set_typing", { roomId, isTyping });
   }
 
-  async setPresence(presence: PresenceKind): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("set_presence", { presence });
+  async setPresence(presence: PresenceKind): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("set_presence", { presence });
   }
 
-  async setDisplayName(displayName: string | null): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("set_display_name", { displayName });
+  async setDisplayName(displayName: string | null): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("set_display_name", { displayName });
   }
 
-  async setLocalUserAlias(userId: string, alias: string | null): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("set_local_user_alias", { userId, alias });
+  async setLocalUserAlias(userId: string, alias: string | null): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("set_local_user_alias", { userId, alias });
   }
 
-  async ignoreUser(userId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("ignore_user", { userId });
+  async ignoreUser(userId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("ignore_user", { userId });
   }
 
-  async unignoreUser(userId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("unignore_user", { userId });
+  async unignoreUser(userId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("unignore_user", { userId });
   }
 
-  async reportUser(userId: string, reason: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("report_user", { userId, reason });
+  async reportUser(userId: string, reason: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("report_user", { userId, reason });
   }
 
   async reportContent(
     roomId: string,
     eventId: string,
     reason: string
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("report_content", { roomId, eventId, reason });
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("report_content", { roomId, eventId, reason });
   }
 
-  async reportRoom(roomId: string, reason: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("report_room", { roomId, reason });
+  async reportRoom(roomId: string, reason: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("report_room", { roomId, reason });
   }
 
-  async setAvatar(mimeType: string, bytes: number[]): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("set_avatar", { mimeType, bytes });
+  async setAvatar(mimeType: string, bytes: number[]): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("set_avatar", { mimeType, bytes });
   }
 
   async editMessage(
     roomId: string,
     eventId: string,
     document: ComposerDocument
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("edit_message", { roomId, eventId, document });
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("edit_message", { roomId, eventId, document });
   }
 
-  async redactMessage(roomId: string, eventId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("redact_message", { roomId, eventId });
+  async redactMessage(roomId: string, eventId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("redact_message", { roomId, eventId });
   }
 
-  async loadMessageSource(roomId: string, eventId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("load_message_source", { roomId, eventId });
+  async loadMessageSource(roomId: string, eventId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("load_message_source", { roomId, eventId });
   }
 
   async requestRoomKey(
@@ -605,87 +612,87 @@ export class TauriDesktopApi implements DesktopApi {
     eventId: string,
     origin?: "user" | "automatic",
     timelineKey?: TimelineKey
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("request_room_key", { roomId, eventId, origin, timelineKey });
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("request_room_key", { roomId, eventId, origin, timelineKey });
   }
 
   async requestLateDecryption(
     roomId: string,
     timelineKey?: TimelineKey
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("request_late_decryption", { roomId, timelineKey });
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("request_late_decryption", { roomId, timelineKey });
   }
 
   async forwardMessage(
     roomId: string,
     sourceEventId: string,
     destinationRoomId: string
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("forward_message", {
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("forward_message", {
       roomId,
       sourceEventId,
       destinationRoomId
     });
   }
 
-  async loadLinkPreviews(roomId: string, eventId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("load_link_previews", { roomId, eventId });
+  async loadLinkPreviews(roomId: string, eventId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("load_link_previews", { roomId, eventId });
   }
 
-  async hideLinkPreview(roomId: string, eventId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("hide_link_preview", { roomId, eventId });
+  async hideLinkPreview(roomId: string, eventId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("hide_link_preview", { roomId, eventId });
   }
 
-  async leaveRoom(roomId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("leave_room", { roomId });
+  async leaveRoom(roomId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("leave_room", { roomId });
   }
 
-  async forgetRoom(roomId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("forget_room", { roomId });
+  async forgetRoom(roomId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("forget_room", { roomId });
   }
 
   async setRoomTag(
     roomId: string,
     tag: RoomTagKind,
     order: number | null = null
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("set_room_tag", { roomId, tag, order });
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("set_room_tag", { roomId, tag, order });
   }
 
-  async removeRoomTag(roomId: string, tag: RoomTagKind): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("remove_room_tag", { roomId, tag });
+  async removeRoomTag(roomId: string, tag: RoomTagKind): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("remove_room_tag", { roomId, tag });
   }
 
-  async pinEvent(roomId: string, eventId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("pin_event", { roomId, eventId });
+  async pinEvent(roomId: string, eventId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("pin_event", { roomId, eventId });
   }
 
-  async unpinEvent(roomId: string, eventId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("unpin_event", { roomId, eventId });
+  async unpinEvent(roomId: string, eventId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("unpin_event", { roomId, eventId });
   }
 
-  async reshareRoomKey(roomId: string): Promise<RoomKeyReshareOutcome> {
-    return invoke<RoomKeyReshareOutcome>("reshare_room_key", { roomId });
+  async reshareRoomKey(roomId: string): Promise<CommandResult<RoomKeyReshareOutcome>> {
+    return invoke<CommandResult<RoomKeyReshareOutcome>>("reshare_room_key", { roomId });
   }
 
-  async forceNewOutboundSession(roomId: string): Promise<EncryptionDebugOperationOutcome> {
-    return invoke<EncryptionDebugOperationOutcome>("force_new_outbound_session", { roomId });
+  async forceNewOutboundSession(roomId: string): Promise<CommandResult<EncryptionDebugOperationOutcome>> {
+    return invoke<CommandResult<EncryptionDebugOperationOutcome>>("force_new_outbound_session", { roomId });
   }
 
-  async shareIndex0RoomKey(roomId: string): Promise<EncryptionDebugOperationOutcome> {
-    return invoke<EncryptionDebugOperationOutcome>("share_index0_room_key", { roomId });
+  async shareIndex0RoomKey(roomId: string): Promise<CommandResult<EncryptionDebugOperationOutcome>> {
+    return invoke<CommandResult<EncryptionDebugOperationOutcome>>("share_index0_room_key", { roomId });
   }
 
-  async resendIndex0RoomKey(roomId: string): Promise<EncryptionDebugOperationOutcome> {
-    return invoke<EncryptionDebugOperationOutcome>("resend_index0_room_key", { roomId });
+  async resendIndex0RoomKey(roomId: string): Promise<CommandResult<EncryptionDebugOperationOutcome>> {
+    return invoke<CommandResult<EncryptionDebugOperationOutcome>>("resend_index0_room_key", { roomId });
   }
 
-  async loadRoomSettings(roomId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("load_room_settings", { roomId });
+  async loadRoomSettings(roomId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("load_room_settings", { roomId });
   }
 
-  async loadSpaceMembers(spaceId: string, generation: number): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("load_space_members", { spaceId, generation });
+  async loadSpaceMembers(spaceId: string, generation: number): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("load_space_members", { spaceId, generation });
   }
 
   async queryMentionCandidates(
@@ -696,15 +703,15 @@ export class TauriDesktopApi implements DesktopApi {
     return invoke<void>("query_mention_candidates", { roomId, surface, query });
   }
 
-  async repairRoomTimeline(roomId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("repair_room_timeline", { roomId });
+  async repairRoomTimeline(roomId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("repair_room_timeline", { roomId });
   }
 
   async updateRoomSetting(
     roomId: string,
     change: RoomSettingChange
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("update_room_setting", { roomId, change });
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("update_room_setting", { roomId, change });
   }
 
   async moderateRoomMember(
@@ -712,8 +719,8 @@ export class TauriDesktopApi implements DesktopApi {
     targetUserId: string,
     action: RoomModerationAction,
     reason: string | null = null
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("moderate_room_member", {
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("moderate_room_member", {
       roomId,
       targetUserId,
       action,
@@ -725,8 +732,8 @@ export class TauriDesktopApi implements DesktopApi {
     roomId: string,
     targetUserId: string,
     powerLevel: number
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("update_room_member_role", {
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("update_room_member_role", {
       roomId,
       targetUserId,
       powerLevel
@@ -741,8 +748,8 @@ export class TauriDesktopApi implements DesktopApi {
     expectedPowerLevel: number,
     powerLevel: number,
     confirmed: boolean
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("update_space_member_role", {
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("update_space_member_role", {
       spaceId,
       userId,
       generation,
@@ -753,31 +760,31 @@ export class TauriDesktopApi implements DesktopApi {
     });
   }
 
-  async openActivity(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("open_activity");
+  async openActivity(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("open_activity");
   }
 
-  async closeActivity(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("close_activity");
+  async closeActivity(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("close_activity");
   }
 
-  async setActivityTab(tab: ActivityTab): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("set_activity_tab", { tab });
+  async setActivityTab(tab: ActivityTab): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("set_activity_tab", { tab });
   }
 
   async paginateActivity(
     tab: ActivityTab,
     cursor: string | null = null
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("paginate_activity", { tab, cursor });
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("paginate_activity", { tab, cursor });
   }
 
-  async retryActivityResolution(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("retry_activity_resolution");
+  async retryActivityResolution(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("retry_activity_resolution");
   }
 
-  async markActivityRead(target: ActivityMarkReadTarget): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("mark_activity_read", { target });
+  async markActivityRead(target: ActivityMarkReadTarget): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("mark_activity_read", { target });
   }
 
   async setComposerDraft(
@@ -787,8 +794,8 @@ export class TauriDesktopApi implements DesktopApi {
     roomId: string,
     document: ComposerDocument,
     revision: ComposerDraftRevision
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("set_composer_draft", {
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("set_composer_draft", {
       accountHomeserver: account.homeserver,
       accountUserId: account.userId,
       accountDeviceId: account.deviceId,
@@ -804,36 +811,36 @@ export class TauriDesktopApi implements DesktopApi {
     roomId: string,
     rootEventId: string,
     intent: ThreadOpenIntent
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("open_thread", { roomId, rootEventId, intent });
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("open_thread", { roomId, rootEventId, intent });
   }
 
-  async closeThread(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("close_thread");
+  async closeThread(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("close_thread");
   }
 
-  async openThreadsList(scope: ThreadsListScope): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("open_threads_list", { scope });
+  async openThreadsList(scope: ThreadsListScope): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("open_threads_list", { scope });
   }
 
-  async closeThreadsList(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("close_threads_list");
+  async closeThreadsList(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("close_threads_list");
   }
 
   async openFilesView(
     scope: FilesViewScope,
     filter: AttachmentFilter,
     sort: AttachmentSort
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("open_files_view", { scope, filter, sort });
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("open_files_view", { scope, filter, sort });
   }
 
-  async closeFilesView(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("close_files_view");
+  async closeFilesView(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("close_files_view");
   }
 
-  async paginateThreadsList(scope: ThreadsListScope): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("paginate_threads_list", { scope });
+  async paginateThreadsList(scope: ThreadsListScope): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("paginate_threads_list", { scope });
   }
 
   async setThreadComposerDraft(
@@ -844,8 +851,8 @@ export class TauriDesktopApi implements DesktopApi {
     rootEventId: string,
     document: ComposerDocument,
     revision: ComposerDraftRevision
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("set_thread_composer_draft", {
+  ): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("set_thread_composer_draft", {
       accountHomeserver: account.homeserver,
       accountUserId: account.userId,
       accountDeviceId: account.deviceId,
@@ -882,16 +889,16 @@ export class TauriDesktopApi implements DesktopApi {
     });
   }
 
-  async selectSearchResult(roomId: string, eventId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("select_search_result", { roomId, eventId });
+  async selectSearchResult(roomId: string, eventId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("select_search_result", { roomId, eventId });
   }
 
-  async openActivityEvent(roomId: string, eventId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("open_activity_event", { roomId, eventId });
+  async openActivityEvent(roomId: string, eventId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("open_activity_event", { roomId, eventId });
   }
 
-  async openPinnedEvent(roomId: string, eventId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("open_pinned_event", { roomId, eventId });
+  async openPinnedEvent(roomId: string, eventId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("open_pinned_event", { roomId, eventId });
   }
 
   async acknowledgeTimelineProjection(
@@ -929,24 +936,24 @@ export class TauriDesktopApi implements DesktopApi {
   async openTimelineAtTimestamp(
     roomId: string,
     timestampMs: number
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("open_timeline_at_timestamp", { roomId, timestampMs });
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("open_timeline_at_timestamp", { roomId, timestampMs });
   }
 
-  async closeFocusedContext(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("close_focused_context");
+  async closeFocusedContext(): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("close_focused_context");
   }
 
-  async closeSearch(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("close_search");
+  async closeSearch(): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("close_search");
   }
 
-  async submitSearch(query: string, scope: SearchScopeKind): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("submit_search", { query, scope });
+  async submitSearch(query: string, scope: SearchScopeKind): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("submit_search", { query, scope });
   }
 
-  async queryDirectory(query: DirectoryQuery): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("query_directory", {
+  async queryDirectory(query: DirectoryQuery): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("query_directory", {
       term: query.term,
       serverName: query.server_name,
       limit: query.limit,
@@ -957,8 +964,8 @@ export class TauriDesktopApi implements DesktopApi {
   async joinDirectoryRoom(
     roomIdOrAlias: string,
     viaServers: string[] = []
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("join_directory_room", {
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("join_directory_room", {
       roomIdOrAlias,
       viaServers
     });
@@ -967,55 +974,55 @@ export class TauriDesktopApi implements DesktopApi {
   async previewJoinTarget(
     roomIdOrAlias: string,
     viaServers: string[] = []
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("preview_join_target", {
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("preview_join_target", {
       roomIdOrAlias,
       viaServers
     });
   }
 
-  async dismissDirectoryPreview(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("dismiss_directory_preview", {});
+  async dismissDirectoryPreview(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("dismiss_directory_preview", {});
   }
 
-  async joinRoom(roomId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("join_room", { roomId });
+  async joinRoom(roomId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("join_room", { roomId });
   }
 
-  async createRoom(request: CreateRoomRequest): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("create_room", { options: request });
+  async createRoom(request: CreateRoomRequest): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("create_room", { options: request });
   }
 
-  async createSpace(name: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("create_space", { name });
+  async createSpace(name: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("create_space", { name });
   }
 
-  async setSpaceChild(spaceId: string, childRoomId: string, viaServer: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("set_space_child", { spaceId, childRoomId, viaServer });
+  async setSpaceChild(spaceId: string, childRoomId: string, viaServer: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("set_space_child", { spaceId, childRoomId, viaServer });
   }
 
-  async acceptInvite(roomId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("accept_invite", { roomId });
+  async acceptInvite(roomId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("accept_invite", { roomId });
   }
 
-  async declineInvite(roomId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("decline_invite", { roomId });
+  async declineInvite(roomId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("decline_invite", { roomId });
   }
 
-  async startDirectMessage(userId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("start_direct_message", { userId });
+  async startDirectMessage(userId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("start_direct_message", { userId });
   }
 
-  async inviteUser(roomId: string, userId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("invite_user", { roomId, userId });
+  async inviteUser(roomId: string, userId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("invite_user", { roomId, userId });
   }
 
   async inviteUserToSpace(
     spaceId: string,
     userId: string,
     generation: number
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("invite_user_to_space", {
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("invite_user_to_space", {
       spaceId,
       userId,
       generation
@@ -1026,52 +1033,52 @@ export class TauriDesktopApi implements DesktopApi {
     spaceId: string,
     userId: string,
     generation: number
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("cancel_space_invite", {
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("cancel_space_invite", {
       spaceId,
       userId,
       generation
     });
   }
 
-  async openInviteWorkflow(roomId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("open_invite_workflow", { roomId });
+  async openInviteWorkflow(roomId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("open_invite_workflow", { roomId });
   }
 
-  async closeInviteWorkflow(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("close_invite_workflow");
+  async closeInviteWorkflow(): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("close_invite_workflow");
   }
 
-  async searchInviteTargets(roomId: string, query: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("search_invite_targets", { roomId, query });
+  async searchInviteTargets(roomId: string, query: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("search_invite_targets", { roomId, query });
   }
 
-  async setInviteScope(roomId: string, scope: InviteScopeSelection): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("set_invite_scope", { roomId, scope });
+  async setInviteScope(roomId: string, scope: InviteScopeSelection): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("set_invite_scope", { roomId, scope });
   }
 
-  async selectInviteTarget(roomId: string, userId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("select_invite_target", { roomId, userId });
+  async selectInviteTarget(roomId: string, userId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("select_invite_target", { roomId, userId });
   }
 
-  async removeInviteTarget(userId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("remove_invite_target", { userId });
+  async removeInviteTarget(userId: string): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("remove_invite_target", { userId });
   }
 
   async inviteTargets(
     roomId: string,
     userIds: string[],
     scope: InviteScopeSelection
-  ): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("invite_targets", { roomId, userIds, scope });
+  ): Promise<CommandSettlement> {
+    return invoke<CommandSettlement>("invite_targets", { roomId, userIds, scope });
   }
 
-  async setComposerReplyTarget(roomId: string, eventId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("set_composer_reply_target", { roomId, eventId });
+  async setComposerReplyTarget(roomId: string, eventId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("set_composer_reply_target", { roomId, eventId });
   }
 
-  async cancelComposerReply(): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("cancel_composer_reply");
+  async cancelComposerReply(): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("cancel_composer_reply");
   }
 
   async sendReply(
@@ -1098,11 +1105,11 @@ export class TauriDesktopApi implements DesktopApi {
     });
   }
 
-  async startRoomCrawl(roomId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("start_room_crawl", { roomId });
+  async startRoomCrawl(roomId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("start_room_crawl", { roomId });
   }
 
-  async stopRoomCrawl(roomId: string): Promise<DesktopSnapshot> {
-    return invoke<DesktopSnapshot>("stop_room_crawl", { roomId });
+  async stopRoomCrawl(roomId: string): Promise<CommandAdmission> {
+    return invoke<CommandAdmission>("stop_room_crawl", { roomId });
   }
 }
