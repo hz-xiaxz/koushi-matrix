@@ -20,22 +20,25 @@ function sourceFiles(directory) {
 
 function functions(source) {
   const matches = [
-    ...source.matchAll(/(?:pub(?:\([^)]*\))?\s+)?async fn ([a-z0-9_]+)[\s\S]*?\{/g)
+    ...source.matchAll(/(?:pub(?:\([^)]*\))?\s+)?async fn ([a-z0-9_]+)\b/g)
   ];
-  return matches.map((match) => {
+  return matches.flatMap((match) => {
+    let bodyStart = match.index + match[0].length;
+    while (bodyStart < source.length && !"{;".includes(source[bodyStart])) bodyStart++;
+    if (source[bodyStart] !== "{") return [];
     let depth = 1;
-    let end = match.index + match[0].length;
+    let end = bodyStart + 1;
     while (end < source.length && depth) {
       if (source[end] === "{") depth++;
       if (source[end] === "}") depth--;
       end++;
     }
-    return { name: match[1], start: match.index, text: source.slice(match.index, end) };
+    return [{ name: match[1], start: match.index, text: source.slice(match.index, end) }];
   });
 }
 
-for (const name of readdirSync(commands).filter((name) => name.endsWith(".rs"))) {
-  const path = join(commands, name);
+for (const path of sourceFiles(commands)) {
+  const name = relative(commands, path);
   const source = readFileSync(path, "utf8");
   for (const fn of functions(source)) {
     if (!allowed.has(fn.name) && forbidden.test(fn.text)) {

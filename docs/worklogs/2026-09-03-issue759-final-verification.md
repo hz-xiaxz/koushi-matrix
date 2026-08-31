@@ -63,4 +63,4 @@ Fireworks DeepSeek V4 Flash 0731 reviewed the complete `origin/main...HEAD` inte
 - the command contract scans every async helper rather than exempting `session.rs` at file scope;
 - the snapshot DTO comment now documents only initial, settlement-resync, and gap-resync reads.
 
-Focused App/contract tests (88), typecheck, command ownership guard, and diff check passed after these fixes. A final read-only re-review is required for the amended HEAD.
+Focused App/contract tests (88), typecheck, command ownership guard, and diff check passed after these fixes. Re-review returned `CORRECT-TO-PR`; its two non-blocking guard-robustness notes were also fixed by recursively scanning command submodules and ignoring bodyless trait async declarations without swallowing the next function.
