@@ -18,7 +18,6 @@ required-features = ["qa-bin"]
 [dependencies]
 koushi-core = { path = "../koushi-core" }
 koushi-diagnostics = { path = "../koushi-diagnostics" }
-koushi-key = { path = "../koushi-key" }
 koushi-protocol = { path = "../koushi-protocol" }
 koushi-sdk = { path = "../koushi-sdk" }
 koushi-state = { path = "../koushi-state" }

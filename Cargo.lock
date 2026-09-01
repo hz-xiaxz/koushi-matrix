@@ -3136,7 +3136,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "tracing-subscriber",
  "url",
  "vodozemac",
  "wiremock",
@@ -3217,7 +3216,6 @@ version = "0.1.0"
 dependencies = [
  "koushi-core",
  "koushi-diagnostics",
- "koushi-key",
  "koushi-protocol",
  "koushi-sdk",
  "koushi-state",
