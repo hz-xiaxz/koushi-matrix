@@ -22,8 +22,8 @@ At base `9f4b4284de8731b0f047ec00933f564660647b77`:
 
 - no `koushi-store` or `koushi-core-testkit` package exists;
 - `koushi-core` owns `credential_vault.rs`,
-  `store/credential_backend.rs`, and six copies of the same XChaCha20-Poly1305
-  magic/nonce/ciphertext envelope;
+  `store/credential_backend.rs`, and six copies of the same ChaCha20-Poly1305
+  12-byte-nonce magic/nonce/ciphertext envelope;
 - `StoreActor` is Core's only store actor and owns account path selection,
   unlock-secret acquisition, SDK store/search configuration, generation fences,
   migration order and coarse Core failures;
@@ -81,12 +81,16 @@ enables Core's `test-hooks` for moved integration tests.
 
 1. Add default production package `koushi-store`.
 2. Move the credential-vault file/data implementation and complete credential
-   backend (OS-port wrapper, in-memory backend, debug/test file backend, fault
-   probes and existing tests) from Core without changing constants, credential
-   names, file formats, cfg gates, diagnostics or error classification.
+   backend (OS-port wrapper, in-memory backend, debug/test file backend and fault
+   probes) from Core without changing constants, credential names, file formats,
+   cfg gates, diagnostics or error classification. Move backend/vault-internal
+   tests with their owner; keep StoreActor-mediated lifecycle/migration tests in
+   Core and update imports only.
 3. Add one closed encrypted-envelope helper in `koushi-store` for
    `magic || 12-byte nonce || ciphertext`, parameterized by exact magic, 32-byte
-   derived key and maximum payload size.
+   derived key and maximum payload size. Move the existing atomic-replace helper
+   to `koushi-store` as the one native persistence primitive and repoint its Core
+   settings/store consumers; leave no Core compatibility copy.
 4. Replace the six Core-local encrypt/decrypt copies for composer drafts,
    navigation, room preferences, scheduled sends and read-state V1/V2 with that
    helper. Keep each schema version, magic, maximum, JSON shape and migration
@@ -94,10 +98,12 @@ enables Core's `test-hooks` for moved integration tests.
 5. Keep `StoreActor` in Core. It alone selects paths, loads/creates account
    secrets, derives purpose-specific keys, maps failures to `CoreFailure`, owns
    generation fences and supplies SDK store/search configuration.
-6. Propagate Core `test-hooks` to `koushi-store/test-hooks`; move vault/backend
-   unit tests with their owner and expose only the existing test-only fault/file
-   controls behind that feature.
-7. Update the macOS QA source guard to inspect the new credential owner.
+6. Propagate Core `test-hooks` to `koushi-store/test-hooks`; expose only the
+   existing test-only vault fault/file controls behind that feature. Make
+   `koushi-qa` consume the moved debug/test credential-backend probe directly
+   under its `qa-bin` feature rather than through a Core compatibility export.
+7. Update the macOS QA and Rust structure source guards to inspect the new
+   credential owner.
 
 ### Do not
 
@@ -129,7 +135,9 @@ behavioral byte/round-trip/corruption/migration evidence.
 3. Keep Core unit-only `account/test_support`, `timeline/test_support`,
    `store/test_support` and single-owner fixtures beside their private owners.
 4. Make the testkit depend on Core with `features = ["test-hooks"]`; remove the
-   Core self-dev-dependency. Keep workspace CI running all moved test targets.
+   Core self-dev-dependency. Add an explicit CI
+   `cargo test -p koushi-core-testkit` step because the package is intentionally
+   excluded from default members.
 5. Update Rust test-structure/path guards to the authoritative package.
 
 ### Do not
