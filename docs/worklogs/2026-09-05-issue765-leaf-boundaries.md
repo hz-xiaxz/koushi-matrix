@@ -246,4 +246,6 @@ Fireworks exact-diff review at
 `CORRECT-TO-MERGE` and identified one pre-existing, non-actor
 `media_staging -> runtime` qualification. The service now consumes the existing
 crate-root runtime API re-exports, removing that residual edge without changing
-any type or behavior. Exact-delta re-review remains required.
+any type or behavior. Fireworks re-reviewed exact fix head
+`9c4166c7bc67afa8066078896a4dbe66bb94944a` and returned
+`CORRECT-TO-MERGE`.
