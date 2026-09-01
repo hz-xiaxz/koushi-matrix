@@ -158,32 +158,23 @@ async fn submit_core_command_with_native_artifact(
     if path.trim().is_empty() {
         return Err("native artifact path is empty".to_owned());
     }
-    let command_handle = {
-        let connection = state.connection.lock().await;
-        connection
-            .register_native_artifact(request_id, kind, PathBuf::from(path))
-            .map_err(|error| format!("native artifact registration failed: {error}"))?;
-        connection.command_handle()
-    };
+    if command.request_id() != request_id {
+        return Err("native artifact request correlation mismatch".to_owned());
+    }
+    let command_handle = { state.connection.lock().await.command_handle() };
 
     match tokio::time::timeout(
         CORE_COMMAND_SUBMIT_TIMEOUT,
-        command_handle.command_with_admission(command),
+        command_handle.command_with_native_artifact_and_admission(
+            command,
+            kind,
+            PathBuf::from(path),
+        ),
     )
     .await
     {
         Ok(Ok(admission)) => Ok(FrontendCommandAdmission::from_core(admission)),
-        Ok(Err(error)) => {
-            state
-                .connection
-                .lock()
-                .await
-                .unregister_native_artifact(request_id, kind);
-            Err(format!("command submit failed: {error}"))
-        }
-        // Acceptance is ambiguous after the local deadline. Keep the
-        // registration so an already-enqueued command can still consume it;
-        // actor rejection or runtime teardown removes the entry.
+        Ok(Err(error)) => Err(format!("command submit failed: {error}")),
         Err(_) => Err("command submit timed out".to_owned()),
     }
 }

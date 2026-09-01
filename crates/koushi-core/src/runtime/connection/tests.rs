@@ -44,6 +44,42 @@ fn scripted_connection(
     )
 }
 
+#[tokio::test]
+async fn cancelled_native_artifact_enqueue_releases_the_registered_path() {
+    let (mut connection, _command_rx, _event_tx, _snapshot_tx) = scripted_connection(4);
+    let registry = Arc::new(crate::native_artifact::NativeArtifactRegistry::new());
+    connection.native_artifacts = registry.clone();
+
+    for _ in 0..4 {
+        let request_id = connection.next_request_id();
+        connection
+            .command(CoreCommand::App(
+                koushi_protocol::AppCommand::UpdateSettings {
+                    request_id,
+                    patch: koushi_state::SettingsPatch::default(),
+                },
+            ))
+            .await
+            .expect("fill command queue");
+    }
+
+    let request_id = connection.next_request_id();
+    let command_handle = connection.command_handle();
+    let mut submission = Box::pin(command_handle.command_with_native_artifact_and_admission(
+        CoreCommand::Account(koushi_protocol::AccountCommand::ExportRoomKeys {
+            request_id,
+            request: koushi_protocol::RoomKeyExportRequest {
+                passphrase: koushi_state::AuthSecret::new("synthetic-passphrase"),
+            },
+        }),
+        crate::native_artifact::NativeArtifactKind::RoomKeyExportDestination,
+        std::path::PathBuf::from("synthetic-path"),
+    ));
+    assert!(submission.as_mut().now_or_never().is_none());
+    drop(submission);
+    assert!(registry.is_empty());
+}
+
 fn selected_snapshot(room_id: &str, generation: u64) -> VersionedAppStateSnapshot {
     let mut state = AppState::default();
     state.navigation.active_room_id = Some(room_id.to_owned());
@@ -254,6 +290,7 @@ fn standalone_composer_command_permit_outlives_activation_lease() {
         connection_id: RuntimeConnectionId(1),
         command_tx,
         composer_draft_leases: Arc::clone(&composer_draft_leases),
+        native_artifacts: Arc::new(crate::native_artifact::RejectingNativeArtifactPort),
     };
     let account = koushi_protocol::SessionKeyId {
         homeserver: "https://example.invalid".to_owned(),

@@ -40,6 +40,8 @@ pub enum CommandSubmitError {
     ComposerLeaseNotRequired,
     #[error("composer draft lease admission failed")]
     ComposerLease(ComposerDraftLeaseFailure),
+    #[error("native artifact registration failed")]
+    NativeArtifact(NativeArtifactError),
 }
 
 /// Typed terminal failures returned by [`CoreConnection::select_room_and_wait`].
@@ -95,6 +97,28 @@ pub struct CoreCommandHandle {
     connection_id: RuntimeConnectionId,
     command_tx: mpsc::Sender<CoreCommandEnvelope>,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
+    native_artifacts: Arc<dyn NativeArtifactPort>,
+}
+
+struct NativeArtifactRegistrationGuard {
+    port: Arc<dyn NativeArtifactPort>,
+    request_id: RequestId,
+    kind: NativeArtifactKind,
+    armed: bool,
+}
+
+impl NativeArtifactRegistrationGuard {
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for NativeArtifactRegistrationGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.port.unregister(self.request_id, self.kind);
+        }
+    }
 }
 
 impl CoreRuntime {
@@ -155,6 +179,44 @@ impl CoreCommandHandle {
             })
             .await
             .map_err(|_| CommandSubmitError::RuntimeClosed)?;
+        admission_rx
+            .await
+            .map_err(|_| CommandSubmitError::RuntimeClosed)
+    }
+
+    /// Register one native path and transfer its ownership atomically with
+    /// command enqueue. Cancellation before enqueue removes the registration;
+    /// after enqueue, Core owns consumption or rejection cleanup.
+    pub async fn command_with_native_artifact_and_admission(
+        &self,
+        command: CoreCommand,
+        kind: NativeArtifactKind,
+        path: std::path::PathBuf,
+    ) -> Result<CoreCommandAdmission, CommandSubmitError> {
+        self.validate_request_id(&command)?;
+        if command.composer_draft_scope().is_some() {
+            return Err(CommandSubmitError::ComposerLeaseRequired);
+        }
+        let request_id = command.request_id();
+        self.native_artifacts
+            .register(request_id, kind, path)
+            .map_err(CommandSubmitError::NativeArtifact)?;
+        let mut registration = NativeArtifactRegistrationGuard {
+            port: Arc::clone(&self.native_artifacts),
+            request_id,
+            kind,
+            armed: true,
+        };
+        let (admission_tx, admission_rx) = oneshot::channel();
+        self.command_tx
+            .send(CoreCommandEnvelope::Public {
+                command,
+                composer_permit: None,
+                admission: Some(admission_tx),
+            })
+            .await
+            .map_err(|_| CommandSubmitError::RuntimeClosed)?;
+        registration.disarm();
         admission_rx
             .await
             .map_err(|_| CommandSubmitError::RuntimeClosed)
@@ -411,6 +473,7 @@ impl CoreConnection {
             connection_id: self.connection_id,
             command_tx: self.command_tx.clone(),
             composer_draft_leases: Arc::clone(&self.composer_draft_leases),
+            native_artifacts: Arc::clone(&self.native_artifacts),
         }
     }
 
