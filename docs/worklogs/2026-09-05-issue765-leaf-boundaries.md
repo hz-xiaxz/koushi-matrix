@@ -99,5 +99,28 @@ Focused post-integration evidence:
 Fireworks exact-diff review at `bececb93fa8ad68f982a59e0b78e04a08071c12a`
 returned `CORRECT-TO-MERGE` with one cosmetic finding: the macOS QA test title
 and comment still named Core as the credential mechanism owner. The wording was
-corrected to `koushi-store`; a focused exact-delta re-review is required before
-merge.
+corrected to `koushi-store`; Fireworks re-reviewed exact head
+`c1eeda78e53e76a74e00bf64171ad87741c5225a` and returned
+`CORRECT-TO-MERGE`.
+
+PR #789 passed all eight hosted jobs and merged as
+`d3982a84d1b98c9bb73cc2b22f9a0465233c8892`.
+
+The broad local `qa:headless-basic:local` attempt passed Tuwunel login and
+directory, then the unrelated timeline-reconnect oracle rejected a pagination
+terminal arriving before `Paginating`. Exact base `cfa56c1e` reproduced the same
+failure. The affected credential/login/restore scenarios passed for Tuwunel and
+Synapse; #738 remains the separate settlement issue.
+
+## PR2 verify-first evidence
+
+Commit `97293b54dbbc3b44559724c706ca1c61fec8fba0` extended the leaf
+checker before the test move.
+
+- checker self-tests: 4 passed;
+- current-tree checker: RED for the absent non-default testkit, Core
+  self-dev-dependency, shared support/32 hook-consuming targets still in Core,
+  and missing explicit CI testkit gate;
+- four self-contained Core integration targets are intentionally retained:
+  `link_preview`, `media_save`, `native_artifact_boundary`, and
+  `sliding_sync_diagnostics`.
