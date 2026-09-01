@@ -141,7 +141,7 @@ test("detects testkit default or production leakage, self-dependency, and missin
   );
   fs.writeFileSync(
     path.join(root, "crates/koushi-core-testkit/Cargo.toml"),
-    '[package]\nname = "koushi-core-testkit"\npublish = true\n[dev-dependencies]\nkoushi-core = { path = "../koushi-core" }\n'
+    '[package]\nname = "koushi-core-testkit"\npublish = true\n[dependencies]\nkoushi-qa = { path = "../koushi-qa" }\n[dev-dependencies]\nkoushi-core = { path = "../koushi-core" }\n'
   );
   fs.rmSync(path.join(root, "crates/koushi-core-testkit/tests/support"), {
     recursive: true,
@@ -167,6 +167,7 @@ test("detects testkit default or production leakage, self-dependency, and missin
   const violations = findLeafCrateBoundaryViolations(root);
   assert(violations.includes("koushi-core-testkit must not be a default workspace member"));
   assert(violations.includes("koushi-core-testkit must be publish-disabled"));
+  assert(violations.includes("koushi-core-testkit must use dev-dependencies only"));
   assert(violations.includes("koushi-core-testkit must enable koushi-core/test-hooks"));
   assert(violations.includes("koushi-core must not self-depend for test hooks"));
   assert(violations.includes("koushi-core must not depend on koushi-core-testkit"));

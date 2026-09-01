@@ -147,3 +147,10 @@ Focused PR2 evidence:
 - Core: 912 passed / 8 ignored plus 22 tests across the four retained targets;
 - release Core check, leaf checker/self-tests, Rust structure/self-tests and
   cargo-machete: green.
+
+Fireworks exact-diff review at
+`5a2a3778ab199871170dcc70f94ccfeb1245fcaa` returned
+`CORRECT-TO-MERGE` with one actionable guard-hardening Minor and one deliberate
+plan-mandated CI duplication note. The checker was strengthened to reject any
+normal `[dependencies]` table in the testkit; the explicit CI test remains
+because the approved plan requires it. Exact-delta re-review remains required.
