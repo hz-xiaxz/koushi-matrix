@@ -189,3 +189,10 @@ The SDK/state DTO audit found no field-for-field duplicate safe to collapse:
 Those mappings remain intentional trust/privacy/semantic boundaries. PR3 moves
 only the five-format image byte classifier to `koushi-media`; cache lifecycle,
 opaque refs, diagnostics, DTO projection and adapter delivery remain unchanged.
+
+Fireworks exact-diff review at
+`9619a3cbb8dbbc757ecdf2a9e304693d6dc21c00` returned
+`CORRECT-TO-MERGE` with three coverage/guard Minors. All were fixed: GIF87a and
+`avis` plus truncated signatures are tested; the checker rejects any Core
+`*image_kind` function; and a Core cache test proves PNG/JPEG MIME projection
+through the moved helper. Exact-delta re-review remains required.

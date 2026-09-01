@@ -201,6 +201,11 @@ export function findLeafCrateBoundaryViolations(root) {
   if (fs.existsSync(path.join(root, "crates/koushi-core/src/cached_image.rs"))) {
     violations.push("cached image classifier remains in koushi-core");
   }
+  for (const [relativePath, source] of coreSources) {
+    if (/\bfn\s+\w*image_kind\s*\(/u.test(source)) {
+      violations.push(`image kind classifier function remains in Core: ${relativePath}`);
+    }
+  }
   const renderableThumbnail = read(root, "crates/koushi-core/src/renderable_thumbnail.rs") ?? "";
   if (!renderableThumbnail.includes("koushi_media::image_kind")) {
     violations.push("Core renderable thumbnails must use koushi-media image_kind");

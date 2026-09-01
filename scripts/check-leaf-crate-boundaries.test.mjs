@@ -156,6 +156,7 @@ test("detects pure search/media dependency and classifier ownership violations",
   assert(violations.includes("koushi-media definition missing: pub struct ImageKind"));
   assert(violations.includes("koushi-media definition missing: pub fn image_kind"));
   assert(violations.includes("cached image classifier remains in koushi-core"));
+  assert(violations.some((item) => item.includes("image kind classifier function remains in Core")));
   assert(violations.includes("Core renderable thumbnails must use koushi-media image_kind"));
 });
 

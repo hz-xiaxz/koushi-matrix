@@ -67,12 +67,21 @@ mod tests {
     #[test]
     fn image_kind_detects_gif_webp_and_avif() {
         for (bytes, extension, mime_type) in [
+            (&b"GIF87arest"[..], "gif", "image/gif"),
             (&b"GIF89arest"[..], "gif", "image/gif"),
             (&b"RIFFxxxxWEBPrest"[..], "webp", "image/webp"),
             (&b"\0\0\0\0ftypavifrest"[..], "avif", "image/avif"),
+            (&b"\0\0\0\0ftypavisrest"[..], "avif", "image/avif"),
         ] {
             let kind = image_kind(bytes).expect("image kind");
             assert_eq!((kind.extension, kind.mime_type), (extension, mime_type));
         }
+    }
+
+    #[test]
+    fn image_kind_rejects_truncated_signatures() {
+        assert_eq!(image_kind(b"\xff\xd8"), None);
+        assert_eq!(image_kind(b"RIFFWEBP"), None);
+        assert_eq!(image_kind(b"ftypavif"), None);
     }
 }
