@@ -195,11 +195,23 @@ conflict is being resolved.
   smoke binaries and private-data-free smoke reports for adapter integration;
   product state, actor lifecycle, and product opinions stay in `koushi-core`
   and `koushi-state`.
+- `koushi-store` owns native credential/vault and shared encrypted-file
+  mechanics. It has no Matrix SDK, Tauri, async-runtime, Core, QA, or concrete
+  OS-keyring dependency. Core's `StoreActor` remains the sole account/path/key,
+  migration, generation-fence, SDK-store-configuration and coarse-failure policy
+  owner; extracting persistence must never make the store fail open.
+- `koushi-search` and `koushi-media` own only pure search/image algorithms.
+  Actor/cache lifecycle, SDK queries, diagnostics, state projection and platform
+  delivery remain in Core/adapters rather than moving to a leaf to reduce LOC.
 - `koushi-qa` owns authoritative headless and real-homeserver product QA
   binaries/orchestration. It consumes `koushi-protocol` DTOs and narrow
   `koushi-core` test hooks, is not a default production package, and must not
   become a second product runtime or move QA-only channels into the public
   protocol.
+- `koushi-core-testkit` is non-default, publish-disabled and test-only. It may
+  enable Core `test-hooks` for shared integration targets, but production and QA
+  code must not depend on it and private actor APIs must not be widened merely
+  to make a fixture reusable.
 - UI code must not import SDK types. SDK data is mapped to app-owned Rust DTOs
   before it crosses the command/event/snapshot boundary.
 
