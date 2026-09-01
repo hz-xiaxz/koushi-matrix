@@ -129,6 +129,19 @@ test("detects missing test-hook propagation and stale QA probe routing", () => {
   assert(violations.some((item) => item.includes("removed Core credential probe")));
 });
 
+test("detects target-specific normal testkit dependencies", () => {
+  const root = fixture();
+  fs.writeFileSync(
+    path.join(root, "crates/koushi-core-testkit/Cargo.toml"),
+    '[package]\nname = "koushi-core-testkit"\npublish = false\n[target.\'cfg(unix)\'.dependencies]\nkoushi-qa = { path = "../koushi-qa" }\n[dev-dependencies]\nkoushi-core = { path = "../koushi-core", features = ["test-hooks"] }\n'
+  );
+  assert(
+    findLeafCrateBoundaryViolations(root).includes(
+      "koushi-core-testkit must use dev-dependencies only"
+    )
+  );
+});
+
 test("detects testkit default or production leakage, self-dependency, and missing targets", () => {
   const root = fixture();
   fs.appendFileSync(
@@ -141,7 +154,7 @@ test("detects testkit default or production leakage, self-dependency, and missin
   );
   fs.writeFileSync(
     path.join(root, "crates/koushi-core-testkit/Cargo.toml"),
-    '[package]\nname = "koushi-core-testkit"\npublish = true\n  [dependencies] # forbidden normal edge\nkoushi-qa = { path = "../koushi-qa" }\n[dev-dependencies]\nkoushi-core = { path = "../koushi-core" }\n'
+    '[package]\nname = "koushi-core-testkit"\npublish = true\n  [dependencies.koushi-qa] # forbidden normal edge\npath = "../koushi-qa"\n[dev-dependencies]\nkoushi-core = { path = "../koushi-core" }\n'
   );
   fs.rmSync(path.join(root, "crates/koushi-core-testkit/tests/support"), {
     recursive: true,

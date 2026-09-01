@@ -144,7 +144,11 @@ export function findLeafCrateBoundaryViolations(root) {
     if (!/^publish\s*=\s*false$/mu.test(testkitManifest)) {
       violations.push("koushi-core-testkit must be publish-disabled");
     }
-    if (/^\s*\[dependencies\]\s*(?:#.*)?$/mu.test(testkitManifest)) {
+    if (
+      /^\s*\[(?:dependencies(?:\.[^\]]+)?|target\.[^\]]+\.dependencies)\]\s*(?:#.*)?$/mu.test(
+        testkitManifest
+      )
+    ) {
       violations.push("koushi-core-testkit must use dev-dependencies only");
     }
     if (
