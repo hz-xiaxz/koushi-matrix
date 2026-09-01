@@ -513,12 +513,17 @@ impl CoreRuntime {
     pub fn start_with_data_dir(data_dir: PathBuf) -> Self {
         let account_store_actor = StoreActor::new(data_dir.clone());
         let composer_draft_store_actor = StoreActor::new(data_dir.clone());
+        #[cfg(any(test, feature = "test-hooks"))]
+        let native_artifacts: Arc<dyn NativeArtifactPort> =
+            Arc::new(crate::native_artifact::NativeArtifactRegistry::new());
+        #[cfg(not(any(test, feature = "test-hooks")))]
+        let native_artifacts: Arc<dyn NativeArtifactPort> = Arc::new(RejectingNativeArtifactPort);
         Self::start_inner(
             EVENT_QUEUE_CAPACITY,
             data_dir,
             account_store_actor,
             composer_draft_store_actor,
-            Arc::new(RejectingNativeArtifactPort),
+            native_artifacts,
         )
     }
 
