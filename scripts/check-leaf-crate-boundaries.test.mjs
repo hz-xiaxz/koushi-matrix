@@ -141,7 +141,7 @@ test("detects testkit default or production leakage, self-dependency, and missin
   );
   fs.writeFileSync(
     path.join(root, "crates/koushi-core-testkit/Cargo.toml"),
-    '[package]\nname = "koushi-core-testkit"\npublish = true\n[dependencies]\nkoushi-qa = { path = "../koushi-qa" }\n[dev-dependencies]\nkoushi-core = { path = "../koushi-core" }\n'
+    '[package]\nname = "koushi-core-testkit"\npublish = true\n  [dependencies] # forbidden normal edge\nkoushi-qa = { path = "../koushi-qa" }\n[dev-dependencies]\nkoushi-core = { path = "../koushi-core" }\n'
   );
   fs.rmSync(path.join(root, "crates/koushi-core-testkit/tests/support"), {
     recursive: true,
