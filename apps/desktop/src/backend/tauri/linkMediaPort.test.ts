@@ -58,6 +58,21 @@ describe("Tauri link/media port", () => {
     );
   });
 
+  it("mints the desktop thumbnail URI only for a validated opaque Core reference", () => {
+    expect(tauriLinkMediaPort.renderableThumbnailSourceUrl("avatar/abc123")).toBe(
+      "koushi-thumbnail://localhost/avatar/abc123"
+    );
+    expect(tauriLinkMediaPort.renderableThumbnailSourceUrl("link-preview/deadbeef")).toBe(
+      "koushi-thumbnail://localhost/link-preview/deadbeef"
+    );
+    expect(tauriLinkMediaPort.renderableThumbnailSourceUrl("../private.bin")).toBeNull();
+    expect(
+      tauriLinkMediaPort.renderableThumbnailSourceUrl(
+        "koushi-thumbnail://localhost/avatar/already-minted"
+      )
+    ).toBeNull();
+  });
+
   it("preserves the default-path, dialog and save command contract", async () => {
     await tauriLinkMediaPort.saveMediaFile("asset://media", ' report:*?.png ');
 
