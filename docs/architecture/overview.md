@@ -29,7 +29,10 @@ with an Element Desktop/Web-like three-pane desktop UX:
   member of that Space's room (any counterpart for group DMs). A DM matching no
   Space appears only in Home. DMs are never assigned to Spaces via
   `m.space.child`/`m.space.parent`; the association is by counterpart space-room
-  membership, computed Rust-side as `RoomSummary.dm_space_ids`.
+  membership, computed Rust-side as `RoomSummary.dm_space_ids`. Direct Space
+  membership completeness is explicit Rust-owned projection input. A partial
+  observation may add known-positive associations but must preserve prior
+  positives; only a complete direct-member observation may remove one.
 - Threads are linear. The thread pane's composer sends ordinary thread messages,
   and thread events expose no reply-composition affordance: no per-event Reply,
   no Reply in thread, no nested thread. Rich replies authored by Element or
@@ -375,8 +378,14 @@ An in-process actor system in `koushi-core`:
   `RoomSummary.tags` by the same Rust-owned room-list normalization path, and
   sidebar unread/mention affordances consume Rust-owned unread/highlight counts
   from `SidebarModel`. React must not derive favourite, low-priority, unread,
-  or mention membership from local UI state. Room-list bootstrap readiness is
-  separate from `SyncState::Running`: the actor retains the last usable
+  or mention membership from local UI state. Selecting a Space demands direct
+  Space-member hydration through the existing SDK member API and the same live
+  room-list observer; the members panel consumes that source and is never the
+  hydration trigger. Partial direct-member snapshots preserve last-known
+  positive `dm_space_ids`, while a complete snapshot may remove stale
+  associations. The sidebar and Rust `People` projection use the same scope
+  predicate. Room-list bootstrap readiness is separate from `SyncState::Running`:
+  the actor retains the last usable
   snapshot while the current engine is unproven/loading, holds an unproven
   empty SyncService Reset, accepts an authoritative zero only after the current
   engine generation proves connectivity, and ignores delayed projections from

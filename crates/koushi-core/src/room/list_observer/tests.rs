@@ -65,7 +65,7 @@ struct LiveObserverTestHarness {
     test_event_rx: mpsc::UnboundedReceiver<LiveObserverTestEvent>,
     direct_event_tx:
         Option<mpsc::UnboundedSender<matrix_sdk::ruma::events::direct::DirectEventContent>>,
-    _command_tx: mpsc::Sender<RoomListObservationCommand>,
+    command_tx: mpsc::Sender<RoomListObservationCommand>,
     stop_tx: oneshot::Sender<()>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -96,6 +96,15 @@ impl LiveObserverTestHarness {
 
     fn close_direct_event_source(&mut self) {
         self.direct_event_tx.take();
+    }
+
+    async fn hydrate_space_members(&self, space_id: &str) {
+        self.command_tx
+            .send(RoomListObservationCommand::HydrateSpaceMembers {
+                space_id: space_id.to_owned(),
+            })
+            .await
+            .expect("observer command channel");
     }
 
     async fn stop(self) {
@@ -141,6 +150,7 @@ async fn spawn_live_observer_test_harness(
         session,
         service,
         known_room_ids,
+        Arc::new(RwLock::new(Vec::new())),
         room_tx,
         action_tx,
         event_tx,
@@ -165,7 +175,7 @@ async fn spawn_live_observer_test_harness(
         action_rx,
         test_event_rx,
         direct_event_tx: Some(direct_event_tx),
-        _command_tx: command_tx,
+        command_tx,
         stop_tx,
         task,
     }
@@ -251,6 +261,7 @@ async fn project_room_list_snapshot_updates_user_profiles() {
     let (action_tx, mut action_rx) = mpsc::channel(16);
     let (event_tx, _event_rx) = broadcast::channel(16);
     let known_room_ids = Arc::new(RwLock::new(BTreeSet::new()));
+    let known_dm_rooms = Arc::new(RwLock::new(Vec::new()));
     let snapshot = MatrixRoomListSnapshot {
         user_profiles: vec![koushi_sdk::MatrixUserProfile {
             user_id: "@alice:example.test".to_owned(),
@@ -263,6 +274,7 @@ async fn project_room_list_snapshot_updates_user_profiles() {
     project_room_list_snapshot(
         &snapshot,
         &known_room_ids,
+        &known_dm_rooms,
         None,
         &action_tx,
         &event_tx,
@@ -303,10 +315,12 @@ async fn project_room_list_snapshot_holds_unproven_empty_and_preserves_known_roo
         "!cached:example.test".to_owned()
     ])));
     let snapshot = MatrixRoomListSnapshot::default();
+    let known_dm_rooms = Arc::new(RwLock::new(Vec::new()));
 
     project_room_list_snapshot(
         &snapshot,
         &known_room_ids,
+        &known_dm_rooms,
         None,
         &action_tx,
         &event_tx,
@@ -398,6 +412,60 @@ async fn live_room_list_observer_projects_rooms_and_invites_from_service_entries
             },
         )
         .await;
+
+    harness.stop().await;
+}
+
+#[tokio::test]
+async fn selected_space_hydration_completes_members_before_reprojection() {
+    use matrix_sdk::{
+        ruma::{RoomVersionId, events::AnySyncStateEvent, room_id, serde::Raw, user_id},
+        test_utils::mocks::MatrixMockServer,
+    };
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let inspect_client = client.clone();
+    let space_id = room_id!("!hydrated-space:example.invalid");
+    let own_user_id = user_id!("@observer:example.invalid");
+    let factory = EventFactory::new().room(space_id).sender(own_user_id);
+    let create: Raw<AnySyncStateEvent> = factory
+        .create(own_user_id, RoomVersionId::V10)
+        .with_space_type()
+        .into();
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(space_id).add_state_event(create),
+        )
+        .await;
+    server
+        .mock_get_members()
+        .ok(vec![factory.member(own_user_id).into()])
+        .mock_once()
+        .mount()
+        .await;
+
+    let room_updates_rx = client.subscribe_to_all_room_updates();
+    let mut harness = spawn_live_observer_test_harness(
+        client,
+        server.uri(),
+        2,
+        room_updates_rx,
+        LiveDirectEventTestSource::SdkAndInjected,
+        None,
+    )
+    .await;
+    let _ = harness
+        .next_actions("initial partial Space projection")
+        .await;
+    let space = inspect_client.get_room(space_id).expect("Space room");
+    assert!(!space.are_members_synced());
+
+    harness.hydrate_space_members(space_id.as_str()).await;
+    let _ = harness.next_actions("hydrated Space projection").await;
+    assert!(space.are_members_synced());
 
     harness.stop().await;
 }
@@ -712,6 +780,7 @@ async fn normalize_and_project_entries_uses_cached_direct_map_before_timeline_up
         &current,
         direct_state.authoritative_targets(),
         &known_room_ids,
+        &Arc::new(RwLock::new(Vec::new())),
         &room_tx,
         &action_tx,
         &event_tx,
@@ -805,6 +874,7 @@ async fn live_projection_does_not_import_base_client_only_invites() {
         &current,
         None,
         &known_room_ids,
+        &Arc::new(RwLock::new(Vec::new())),
         &room_tx,
         &action_tx,
         &event_tx,
@@ -1022,6 +1092,7 @@ async fn project_room_list_snapshot_updates_known_rooms_before_action_delivery()
     project_room_list_snapshot(
         &snapshot,
         &known_room_ids,
+        &Arc::new(RwLock::new(Vec::new())),
         None,
         &action_tx,
         &event_tx,

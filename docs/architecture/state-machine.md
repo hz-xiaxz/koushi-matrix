@@ -677,7 +677,12 @@ code without a matching command-success correlation.
   Space's room (any counterpart for group DMs); a DM matching no Space appears
   only in Home. The association is counterpart space-room membership, computed
   Rust-side as `RoomSummary.dm_space_ids` (DMs are never assigned to Spaces via
-  `m.space.child`/`m.space.parent`).
+  `m.space.child`/`m.space.parent`). Direct-member observations are partial until
+  the SDK marks that Space's members synchronized. Partial observations retain
+  prior positive associations; only a complete observation may remove one.
+  Selecting a Space starts hydration through the room-list owner, independent of
+  opening the Space members panel. The sidebar and `People` room-list projection
+  apply the same active-Space predicate.
 - If no active Space is selected, the room list shows non-DM rooms with no parent
   Space, plus all DMs (Home shows DMs in full).
 - Navigation remembers the last non-DM room selected inside each Space. Selecting

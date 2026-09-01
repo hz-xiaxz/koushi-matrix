@@ -409,6 +409,7 @@ pub struct RoomActor {
     room_list_source: Option<RoomListSource>,
     room_list_backend_generation: Option<u64>,
     pub(super) known_room_ids: Arc<RwLock<BTreeSet<String>>>,
+    pub(super) known_dm_rooms: Arc<RwLock<Vec<koushi_state::RoomSummary>>>,
     pub(super) attempted_space_child_repairs: Arc<RwLock<BTreeSet<SpaceChildLinkKey>>>,
     pub(super) mention_demands: HashMap<(String, MentionSurface), MentionDemand>,
     pub(super) mention_member_snapshots: HashMap<String, MatrixJoinedMemberSnapshot>,
@@ -487,6 +488,7 @@ impl RoomActor {
             room_list_source: None,
             room_list_backend_generation: None,
             known_room_ids: Arc::new(RwLock::new(BTreeSet::new())),
+            known_dm_rooms: Arc::new(RwLock::new(Vec::new())),
             attempted_space_child_repairs: Arc::new(RwLock::new(BTreeSet::new())),
             mention_demands: HashMap::new(),
             mention_member_snapshots: HashMap::new(),
@@ -1103,11 +1105,19 @@ impl RoomActor {
                 request_id: _,
                 space_id,
             } => {
-                // Pure navigation: project to reducer; no domain event.
-                // request_id correlation via StateChanged is implicit per spec.
-                // One-shot navigation MUST be delivered reliably (see reduce_reliable).
+                // Navigation commits before membership hydration; the room-list
+                // observer owns the SDK await and subsequent reprojection.
+                let hydration_space_id = space_id.clone();
                 self.reduce_reliable(vec![AppAction::SelectSpace { space_id }])
                     .await;
+                if let Some(space_id) = hydration_space_id
+                    && let Some(observation) = &self.observation
+                {
+                    let _ = observation
+                        .command_tx
+                        .send(RoomListObservationCommand::HydrateSpaceMembers { space_id })
+                        .await;
+                }
             }
             RoomCommand::ReorderSpaces {
                 request_id: _,
@@ -1176,6 +1186,9 @@ impl RoomActor {
     fn clear_known_rooms(&self) {
         if let Ok(mut known_room_ids) = self.known_room_ids.write() {
             known_room_ids.clear();
+        }
+        if let Ok(mut known_dm_rooms) = self.known_dm_rooms.write() {
+            known_dm_rooms.clear();
         }
     }
 

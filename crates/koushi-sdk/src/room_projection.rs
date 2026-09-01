@@ -36,6 +36,8 @@ use thiserror::Error;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MatrixRoomListSnapshot {
     pub spaces: Vec<MatrixRoomListSpace>,
+    /// Space IDs whose direct JOIN-member input is authoritative.
+    pub complete_space_member_ids: BTreeSet<String>,
     pub rooms: Vec<MatrixRoomListRoom>,
     pub invites: Vec<MatrixInvitePreview>,
     pub user_profiles: Vec<MatrixUserProfile>,
@@ -2091,12 +2093,15 @@ async fn matrix_room_list_snapshot_from_rooms(
         if room.is_space() {
             let child_room_ids = matrix_space_child_room_ids(&room).await;
             let member_user_ids = matrix_space_member_user_ids_no_sync(&room).await;
+            if member_user_ids.is_some() && room.are_members_synced() {
+                snapshot.complete_space_member_ids.insert(room_id.clone());
+            }
             snapshot.spaces.push(MatrixRoomListSpace {
                 space_id: room_id,
                 display_name,
                 avatar_mxc_uri: room.avatar_url().map(|uri| uri.to_string()),
                 child_room_ids,
-                member_user_ids,
+                member_user_ids: member_user_ids.unwrap_or_default(),
             });
             continue;
         }
@@ -2278,20 +2283,18 @@ async fn matrix_room_list_dm_user_ids(
     dm_user_ids
 }
 
-async fn matrix_space_member_user_ids_no_sync(room: &matrix_sdk::Room) -> Vec<String> {
-    let Ok(members) = room
+async fn matrix_space_member_user_ids_no_sync(room: &matrix_sdk::Room) -> Option<Vec<String>> {
+    let members = room
         .members_no_sync(matrix_sdk::RoomMemberships::JOIN)
         .await
-    else {
-        return Vec::new();
-    };
+        .ok()?;
     let mut user_ids: Vec<String> = members
         .into_iter()
         .map(|member| member.user_id().to_string())
         .collect();
     user_ids.sort();
     user_ids.dedup();
-    user_ids
+    Some(user_ids)
 }
 
 async fn matrix_invite_previews_from_rooms(

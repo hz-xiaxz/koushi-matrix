@@ -500,7 +500,10 @@ fn room_visible_in_active_space(
         return true;
     };
     if room.is_dm {
-        return true;
+        return room
+            .dm_space_ids
+            .iter()
+            .any(|space_id| space_id == active_space_id);
     }
     room.parent_space_ids
         .iter()
