@@ -19,11 +19,11 @@ use crate::account::test_support::{
 use crate::account::verification::incoming_verification_request_id;
 use crate::command::AccountCommand;
 
-use crate::event::CoreEvent;
 use crate::executor;
+use koushi_protocol::event::CoreEvent;
 
-use crate::failure::CoreFailure;
-use crate::ids::{AccountKey, RequestId, RuntimeConnectionId};
+use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::ids::{AccountKey, RequestId, RuntimeConnectionId};
 
 use tempfile::tempdir;
 
@@ -416,7 +416,7 @@ fn recovery_error_classification_invalid_key() {
     let err = koushi_sdk::E2eeRecoveryError::Sdk("invalid recovery key".to_owned());
     assert_eq!(
         classify_recovery_error(&err),
-        crate::failure::RecoveryFailureKind::InvalidRecoveryKey,
+        koushi_protocol::failure::RecoveryFailureKind::InvalidRecoveryKey,
         "SDK 'invalid' text must map to InvalidRecoveryKey"
     );
 }
@@ -426,7 +426,7 @@ fn recovery_error_classification_network() {
     let err = koushi_sdk::E2eeRecoveryError::Runtime("runtime error".to_owned());
     assert_eq!(
         classify_recovery_error(&err),
-        crate::failure::RecoveryFailureKind::Network,
+        koushi_protocol::failure::RecoveryFailureKind::Network,
         "Runtime error must map to Network"
     );
 }
@@ -436,7 +436,7 @@ fn recovery_error_classification_server_fallback() {
     let err = koushi_sdk::E2eeRecoveryError::Sdk("unexpected server error".to_owned());
     assert_eq!(
         classify_recovery_error(&err),
-        crate::failure::RecoveryFailureKind::Server,
+        koushi_protocol::failure::RecoveryFailureKind::Server,
         "Unknown SDK error must map to Server (conservative)"
     );
 }
@@ -579,7 +579,7 @@ fn e2ee_trust_sdk_results_project_actions_and_typed_events() {
     assert!(matches!(
         events.as_slice(),
         [CoreEvent::E2eeTrust(
-            crate::event::E2eeTrustEvent::CrossSigningChanged {
+            koushi_protocol::event::E2eeTrustEvent::CrossSigningChanged {
                 status: koushi_state::CrossSigningStatus::Trusted,
                 ..
             }
@@ -603,7 +603,7 @@ fn e2ee_trust_sdk_results_project_actions_and_typed_events() {
     assert!(matches!(
         events.as_slice(),
         [CoreEvent::E2eeTrust(
-            crate::event::E2eeTrustEvent::CrossSigningChanged {
+            koushi_protocol::event::E2eeTrustEvent::CrossSigningChanged {
                 status: koushi_state::CrossSigningStatus::Failed {
                     kind: koushi_state::TrustOperationFailureKind::Timeout,
                     ..
@@ -633,7 +633,7 @@ fn e2ee_trust_sdk_results_project_actions_and_typed_events() {
     assert!(matches!(
         events.as_slice(),
         [CoreEvent::E2eeTrust(
-            crate::event::E2eeTrustEvent::KeyBackupChanged {
+            koushi_protocol::event::E2eeTrustEvent::KeyBackupChanged {
                 status: koushi_state::KeyBackupStatus::Enabled { .. },
                 ..
             }
@@ -667,7 +667,7 @@ fn e2ee_trust_sdk_results_project_actions_and_typed_events() {
     assert!(matches!(
         events.as_slice(),
         [
-            CoreEvent::E2eeTrust(crate::event::E2eeTrustEvent::KeyBackupChanged {
+            CoreEvent::E2eeTrust(koushi_protocol::event::E2eeTrustEvent::KeyBackupChanged {
                 status: koushi_state::KeyBackupStatus::Restoring {
                     restored_rooms: 2,
                     total_rooms: Some(3),
@@ -675,7 +675,7 @@ fn e2ee_trust_sdk_results_project_actions_and_typed_events() {
                 },
                 ..
             }),
-            CoreEvent::E2eeTrust(crate::event::E2eeTrustEvent::KeyBackupChanged {
+            CoreEvent::E2eeTrust(koushi_protocol::event::E2eeTrustEvent::KeyBackupChanged {
                 status: koushi_state::KeyBackupStatus::Enabled { .. },
                 ..
             })
@@ -698,7 +698,7 @@ fn identity_reset_sdk_results_project_actions_and_typed_events() {
     assert!(matches!(
         events.as_slice(),
         [CoreEvent::E2eeTrust(
-            crate::event::E2eeTrustEvent::IdentityResetChanged {
+            koushi_protocol::event::E2eeTrustEvent::IdentityResetChanged {
                 state: koushi_state::IdentityResetState::Idle,
                 ..
             }
@@ -720,7 +720,7 @@ fn identity_reset_sdk_results_project_actions_and_typed_events() {
     assert!(matches!(
         events.as_slice(),
         [CoreEvent::E2eeTrust(
-            crate::event::E2eeTrustEvent::IdentityResetChanged {
+            koushi_protocol::event::E2eeTrustEvent::IdentityResetChanged {
                 state: koushi_state::IdentityResetState::AwaitingAuth {
                     auth_type: koushi_state::IdentityResetAuthType::Uiaa,
                     ..

@@ -7,9 +7,9 @@ use koushi_state::{
 use super::composer_draft_session_key;
 
 use crate::account::AccountMessage;
-use crate::event::CoreEvent;
 use crate::executor;
-use crate::failure::CoreFailure;
+use koushi_protocol::event::CoreEvent;
+use koushi_protocol::failure::CoreFailure;
 
 pub(super) enum DeferredScheduledSendPersist {
     ClearLoadedMarker,

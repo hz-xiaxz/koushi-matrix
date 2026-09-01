@@ -3122,6 +3122,7 @@ dependencies = [
  "koushi-diagnostics",
  "koushi-key",
  "koushi-media",
+ "koushi-protocol",
  "koushi-sdk",
  "koushi-search",
  "koushi-state",
@@ -3151,6 +3152,7 @@ dependencies = [
  "koushi-core",
  "koushi-diagnostics",
  "koushi-key",
+ "koushi-protocol",
  "koushi-state",
  "objc2",
  "objc2-app-kit",
@@ -3197,6 +3199,15 @@ dependencies = [
  "image",
  "png 0.18.1",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "koushi-protocol"
+version = "0.1.0"
+dependencies = [
+ "koushi-state",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

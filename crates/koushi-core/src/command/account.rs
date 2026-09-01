@@ -1,6 +1,6 @@
 use std::{fmt, path::PathBuf};
 
-use crate::ids::{AccountKey, RequestId};
+use koushi_protocol::ids::{AccountKey, RequestId};
 use koushi_state::{
     DisplayPlatform, IdentityResetAuthRequest, LoginRequest, PresenceKind, RecoveryRequest,
     VerificationCancelReason, VerificationTarget,

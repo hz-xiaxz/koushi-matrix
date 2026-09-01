@@ -11,10 +11,10 @@ use koushi_state::{
 };
 use tokio::sync::{mpsc, oneshot};
 
-use crate::event::{CoreEvent, E2eeTrustEvent};
 use crate::executor;
-use crate::failure::{CoreFailure, RecoveryFailureKind};
-use crate::ids::{AccountKey, RequestId, RuntimeConnectionId};
+use koushi_protocol::event::{CoreEvent, E2eeTrustEvent};
+use koushi_protocol::failure::{CoreFailure, RecoveryFailureKind};
+use koushi_protocol::ids::{AccountKey, RequestId, RuntimeConnectionId};
 
 use super::actor::{AccountActor, AccountMessage};
 use super::local_data_cleanup::record_device_cleanup_offer;

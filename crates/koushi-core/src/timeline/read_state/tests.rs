@@ -17,12 +17,12 @@ use matrix_sdk_ui::timeline::TimelineFocus;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::command::TimelineCommand;
-use crate::event::{CoreEvent, LiveSignalsEvent, TimelineReadStateSync};
 use crate::executor;
-use crate::failure::{CoreFailure, ReadStateFailureKind, TimelineFailureKind};
+use koushi_protocol::event::{CoreEvent, LiveSignalsEvent, TimelineReadStateSync};
+use koushi_protocol::failure::{CoreFailure, ReadStateFailureKind, TimelineFailureKind};
 #[cfg(any(test, feature = "test-hooks"))]
-use crate::ids::AccountKey;
-use crate::ids::{TimelineKey, TimelineKind};
+use koushi_protocol::ids::AccountKey;
+use koushi_protocol::ids::{TimelineKey, TimelineKind};
 
 use crate::read_state::{
     ReadPersistenceSnapshot, ReadStateEngine, ReadStateKey, ReadTarget, ReadWaiterId,

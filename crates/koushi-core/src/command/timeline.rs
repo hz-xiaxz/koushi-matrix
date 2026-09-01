@@ -2,8 +2,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::event::TimelineViewportObservation;
-use crate::ids::{RequestId, TimelineKey};
+use koushi_protocol::event::TimelineViewportObservation;
+use koushi_protocol::ids::{RequestId, TimelineKey};
 use koushi_state::{
     ComposerDocument, ComposerDraftRevision, FormattedMessageDraft, ImageUploadCompressionMode,
     SubmissionId,
@@ -239,7 +239,7 @@ pub enum TimelineCommand {
     Paginate {
         request_id: RequestId,
         key: TimelineKey,
-        direction: crate::event::PaginationDirection,
+        direction: koushi_protocol::event::PaginationDirection,
         event_count: u16,
     },
     CancelPagination {

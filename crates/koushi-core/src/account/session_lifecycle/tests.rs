@@ -24,12 +24,12 @@ use crate::account::test_support::{
 };
 use crate::command::AccountCommand;
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
-use crate::event::{AccountEvent, CoreEvent};
 use crate::executor;
+use koushi_protocol::event::{AccountEvent, CoreEvent};
 
-use crate::failure::CoreFailure;
-use crate::ids::{AccountKey, RequestId, RuntimeConnectionId};
 use crate::link_preview::LinkPreviewContext;
+use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::ids::{AccountKey, RequestId, RuntimeConnectionId};
 
 use crate::store::CredentialStoreBackend;
 use crate::store::{StoreActor, session_key_id_from_info};
@@ -59,7 +59,7 @@ async fn restore_and_switch_of_unknown_account_emit_not_found() {
     );
 
     let request_id = RequestId {
-        connection_id: crate::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 1,
     };
     let account_key = AccountKey("@nobody:example.test".to_owned());
@@ -136,7 +136,7 @@ async fn hard_logout_cleanup_is_bounded_and_deletes_account_persistence() {
     assert!(files_before_logout > baseline_files);
 
     let request_id = RequestId {
-        connection_id: crate::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 2,
     };
     handle
@@ -406,7 +406,7 @@ async fn oidc_completion_installs_only_a_provisional_quarantined_session() {
             .await
     );
     let completion_request_id = RequestId {
-        connection_id: crate::ids::RuntimeConnectionId(41),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(41),
         sequence: 7,
     };
     assert!(
@@ -865,7 +865,7 @@ async fn teardown_close_failure_retries_without_early_ack_and_preserves_request_
     assert_no_logout_finished(&mut action_rx);
 
     let later = RequestId {
-        connection_id: crate::ids::RuntimeConnectionId(77),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(77),
         sequence: 2,
     };
     handle
@@ -1041,7 +1041,7 @@ async fn replacement_close_failure_holds_incoming_until_generation_retry_succeed
         })
         .await;
     let replacement_request = RequestId {
-        connection_id: crate::ids::RuntimeConnectionId(2),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(2),
         sequence: 2,
     };
     handle
@@ -1070,7 +1070,7 @@ async fn replacement_close_failure_holds_incoming_until_generation_retry_succeed
     );
 
     let later = RequestId {
-        connection_id: crate::ids::RuntimeConnectionId(3),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(3),
         sequence: 3,
     };
     handle
@@ -1132,7 +1132,7 @@ async fn real_store_switch_a_to_b_preserves_both_accounts_and_switches_back() {
     for (sequence, homeserver) in [(1, server_a.clone()), (2, server_b.clone())] {
         configure_verified_trust(&handle).await;
         let request_id = RequestId {
-            connection_id: crate::ids::RuntimeConnectionId(9),
+            connection_id: koushi_protocol::ids::RuntimeConnectionId(9),
             sequence,
         };
         handle
@@ -1174,7 +1174,7 @@ async fn real_store_switch_a_to_b_preserves_both_accounts_and_switches_back() {
         handle
             .send(AccountMessage::Command(AccountCommand::SwitchAccount {
                 request_id: RequestId {
-                    connection_id: crate::ids::RuntimeConnectionId(9),
+                    connection_id: koushi_protocol::ids::RuntimeConnectionId(9),
                     sequence,
                 },
                 account_key: AccountKey(user_id.to_owned()),
@@ -1212,7 +1212,7 @@ async fn same_key_replacement_preserves_open_store_and_restores_again_once() {
         handle
             .send(AccountMessage::Command(AccountCommand::LoginPassword {
                 request_id: RequestId {
-                    connection_id: crate::ids::RuntimeConnectionId(11),
+                    connection_id: koushi_protocol::ids::RuntimeConnectionId(11),
                     sequence,
                 },
                 request: LoginRequest {
@@ -1238,7 +1238,7 @@ async fn same_key_replacement_preserves_open_store_and_restores_again_once() {
     handle
         .send(AccountMessage::Command(AccountCommand::SwitchAccount {
             request_id: RequestId {
-                connection_id: crate::ids::RuntimeConnectionId(11),
+                connection_id: koushi_protocol::ids::RuntimeConnectionId(11),
                 sequence: 3,
             },
             account_key: AccountKey("@same-key:example.invalid".to_owned()),
@@ -1909,7 +1909,7 @@ async fn soft_logout_reauth_quiesces_old_runtime_before_installing_replacement()
     ) {}
 
     let request_id = RequestId {
-        connection_id: crate::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 2,
     };
     assert!(

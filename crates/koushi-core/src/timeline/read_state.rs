@@ -14,15 +14,15 @@ use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk_ui::timeline::TimelineItem as SdkTimelineItem;
 use tokio::sync::{mpsc, oneshot, watch};
 
-use crate::event::{CoreEvent, LiveSignalsEvent, TimelineReadStateSync};
 use crate::executor;
-use crate::failure::{CoreFailure, ReadStateFailureKind, TimelineFailureKind};
-use crate::ids::{RequestId, TimelineKey, TimelineKind};
 use crate::read_state::{
     ReadAdmissionStatus, ReadCompletionDisposition, ReadNetworkFailure, ReadNetworkOutcome,
     ReadOperation, ReadOperationFence, ReadPersistenceSnapshot, ReadStateEngine, ReadStateKey,
     ReadTarget, ReadWaiterId, ReadWaiterTerminal, ReadWakeResult,
 };
+use koushi_protocol::event::{CoreEvent, LiveSignalsEvent, TimelineReadStateSync};
+use koushi_protocol::failure::{CoreFailure, ReadStateFailureKind, TimelineFailureKind};
+use koushi_protocol::ids::{RequestId, TimelineKey, TimelineKind};
 
 // BEGIN GENERATED SIBLING IMPORTS
 use super::actor::{
@@ -1928,7 +1928,7 @@ impl TimelineActor {
             .enumerate()
             .rev()
             .find(|(_, item)| is_attention_eligible_event(item))?;
-        let crate::event::TimelineItemId::Event { event_id } = &target_item.id else {
+        let koushi_protocol::event::TimelineItemId::Event { event_id } = &target_item.id else {
             return None;
         };
         if event_id != last_visible_event_id {

@@ -1274,7 +1274,7 @@ pub(super) async fn wait_for_room_operation(
     operation: RoomOperationKind,
     timeout: std::time::Duration,
     context: &'static str,
-) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
+) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, String> {
     let outcome = event_conn
         .wait_for_request_outcome(
             OutcomeCorrelation::Request(operation_request_id),

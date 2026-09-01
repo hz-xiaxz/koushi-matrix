@@ -18,10 +18,10 @@ use matrix_sdk_ui::timeline::thread_list_service::{
 use matrix_sdk_ui::timeline::{ThreadListPaginationState, ThreadListService, TimelineDetails};
 use tokio::sync::{broadcast, mpsc};
 
-use crate::event::{CoreEvent, ThreadsListEvent, TimelineItem, TimelineItemId};
 use crate::executor;
-use crate::ids::RequestId;
 use crate::timeline::record_thread_summary_reconciliation;
+use koushi_protocol::event::{CoreEvent, ThreadsListEvent, TimelineItem, TimelineItemId};
+use koushi_protocol::ids::RequestId;
 
 pub(crate) const THREAD_SUMMARY_PROJECTION_MAX_ROOTS: usize = 120;
 

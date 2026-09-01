@@ -11,16 +11,18 @@ use matrix_sdk_ui::timeline::Timeline;
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::account_work::{AccountWorkKind, AccountWorkPermit, AccountWorkScheduler};
-use crate::event::{
+use crate::executor;
+use crate::live_tail_freshness::LiveTailSchedulerAction;
+use crate::startup_trace::{self};
+use koushi_protocol::event::{
     CoreEvent, PaginationDirection, PaginationState, TimelineAnchorRestoreStatus, TimelineDiff,
     TimelineEvent, TimelineItem, TimelineItemId, TimelineNavigationSnapshot, TimelineReadStateSync,
     TimelineUnreadPosition, TimelineViewportObservation,
 };
-use crate::executor;
-use crate::failure::{CoreFailure, TimelineFailureKind};
-use crate::ids::{RequestId, TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
-use crate::live_tail_freshness::LiveTailSchedulerAction;
-use crate::startup_trace::{self};
+use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
+use koushi_protocol::ids::{
+    RequestId, TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind,
+};
 use koushi_sdk::MatrixLiveTailRefreshOutcome as LiveTailRefreshOutcome;
 
 // BEGIN GENERATED SIBLING IMPORTS

@@ -62,11 +62,11 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::account_work::AccountWorkScheduler;
 use crate::command::{SearchCommand, SearchScope};
-use crate::event::{CoreEvent, SearchEvent, SearchResultItem};
 use crate::executor;
-use crate::failure::SearchFailureKind;
-use crate::ids::RequestId;
 use crate::search_crawler::{HistoryCrawlCheckpoint, HistoryCrawlPageResult};
+use koushi_protocol::event::{CoreEvent, SearchEvent, SearchResultItem};
+use koushi_protocol::failure::SearchFailureKind;
+use koushi_protocol::ids::RequestId;
 
 /// Maximum number of candidates requested from the SDK ngram index.
 /// Verification filters this down; the final result set may be smaller.

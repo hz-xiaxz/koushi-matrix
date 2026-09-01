@@ -16,13 +16,13 @@ use koushi_state::AppAction;
 use matrix_sdk_ui::timeline::TimelineItem as SdkTimelineItem;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::event::{
+use crate::executor;
+use koushi_protocol::event::{
     CoreEvent, TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId, TimelineResyncReason,
     TimelineSendState,
 };
-use crate::executor;
 
-use crate::ids::{TimelineBatchId, TimelineGeneration};
+use koushi_protocol::ids::{TimelineBatchId, TimelineGeneration};
 
 use crate::search::SearchIndexMessage;
 

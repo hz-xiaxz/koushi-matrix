@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use koushi_core::CoreCommand;
 use koushi_core::executor;
-use koushi_core::ids::{RequestId, RuntimeConnectionId};
 use koushi_core::runtime::{CommandSubmitError, CoreConnection, CoreRuntime};
+use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 use koushi_state::{
     ActivityRow, AppAction, AppearanceSettings, CurrentDeviceTrustState, RoomSummary, RoomTags,
     SessionInfo, SettingsPatch, ThemePreference,

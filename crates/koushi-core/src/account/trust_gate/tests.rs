@@ -34,10 +34,10 @@ use crate::account::test_support::{
     spawn_named_quarantine_password_server_with_controls,
 };
 
-use crate::event::{AccountEvent, CoreEvent};
 use crate::executor;
+use koushi_protocol::event::{AccountEvent, CoreEvent};
 
-use crate::ids::AccountKey;
+use koushi_protocol::ids::AccountKey;
 
 use futures_util::stream;
 

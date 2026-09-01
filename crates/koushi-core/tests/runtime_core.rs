@@ -4,9 +4,9 @@
 use std::time::Duration;
 
 use koushi_core::command::{AppCommand, CoreCommand, RoomCommand};
-use koushi_core::event::CoreEvent;
 use koushi_core::executor;
 use koushi_core::runtime::{CommandSubmitError, CoreRuntime};
+use koushi_protocol::event::CoreEvent;
 use koushi_state::{
     AppAction, AuthDiscoveryState, ComposerDraftStore, SessionState, SettingsPatch, ThreadListOrder,
 };

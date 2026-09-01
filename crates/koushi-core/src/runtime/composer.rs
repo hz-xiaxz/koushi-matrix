@@ -14,13 +14,13 @@ use super::AppActor;
 use crate::command::TimelineCommand;
 use crate::composer_draft_lifecycle::{ComposerDraftCommandPermit, ComposerDraftPersistencePermit};
 use crate::executor;
-use crate::ids::{RequestId, TimelineKey, TimelineKind};
 use crate::store::{
     composer_drafts::{
         PersistedComposerDraftStoreV3, persisted_projection as persisted_composer_draft_projection,
     },
     session_key_id_from_info,
 };
+use koushi_protocol::ids::{RequestId, TimelineKey, TimelineKind};
 
 pub const COMPOSER_DRAFT_PERSIST_DEBOUNCE: Duration = Duration::from_millis(150);
 
@@ -480,7 +480,7 @@ pub(super) fn composer_acceptance_identity_for_action(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::{AccountKey, RuntimeConnectionId};
+    use koushi_protocol::ids::{AccountKey, RuntimeConnectionId};
     use koushi_state::SessionInfo;
 
     #[test]

@@ -1,7 +1,9 @@
 use super::*;
-use crate::event::{ThreadSummaryDto, TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId};
-use crate::ids::{AccountKey, TimelineKey, TimelineKind};
 use futures_util::FutureExt;
+use koushi_protocol::event::{
+    ThreadSummaryDto, TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId,
+};
+use koushi_protocol::ids::{AccountKey, TimelineKey, TimelineKind};
 use koushi_state::{
     AppAction, AppState, ComposerTarget, LocalUserAliasUpdateState, OwnProfile, ProfileState,
     SessionInfo, UserProfile, reduce,
@@ -95,7 +97,7 @@ async fn select_room_waiter_recovers_lag_from_latest_watch_snapshot() {
                 connection_id: RuntimeConnectionId(99),
                 sequence: 1,
             },
-            failure: crate::failure::CoreFailure::SessionRequired,
+            failure: koushi_protocol::failure::CoreFailure::SessionRequired,
         })
         .expect("first event");
     event_tx
@@ -104,7 +106,7 @@ async fn select_room_waiter_recovers_lag_from_latest_watch_snapshot() {
                 connection_id: RuntimeConnectionId(99),
                 sequence: 2,
             },
-            failure: crate::failure::CoreFailure::SessionRequired,
+            failure: koushi_protocol::failure::CoreFailure::SessionRequired,
         })
         .expect("overflowing event");
     let published = selected_snapshot(room_id, 23);
@@ -133,13 +135,13 @@ async fn matching_operation_failure_returns_the_typed_core_failure() {
     event_tx
         .send(CoreEvent::OperationFailed {
             request_id,
-            failure: crate::failure::CoreFailure::SessionRequired,
+            failure: koushi_protocol::failure::CoreFailure::SessionRequired,
         })
         .expect("matching failure");
     assert_eq!(
         waiter.await,
         Err(SelectRoomError::OperationFailed(
-            crate::failure::CoreFailure::SessionRequired
+            koushi_protocol::failure::CoreFailure::SessionRequired
         ))
     );
 }
@@ -193,7 +195,7 @@ async fn unrelated_request_failures_do_not_settle_room_selection() {
     event_tx
         .send(CoreEvent::OperationFailed {
             request_id: unrelated_request_id,
-            failure: crate::failure::CoreFailure::SessionRequired,
+            failure: koushi_protocol::failure::CoreFailure::SessionRequired,
         })
         .expect("unrelated failure");
     event_tx
@@ -389,7 +391,7 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
         cause_request_id: None,
         key,
         actor_generation: 0,
-        generation: crate::ids::TimelineGeneration(0),
+        generation: koushi_protocol::ids::TimelineGeneration(0),
         items: vec![TimelineItem {
             request_state: None,
             id: TimelineItemId::Event {
@@ -425,12 +427,12 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
             media: None,
             link_previews: None,
             link_ranges: Vec::new(),
-            reactions: vec![crate::event::ReactionGroup {
+            reactions: vec![koushi_protocol::event::ReactionGroup {
                 key: "👍".to_owned(),
                 count: 1,
                 reacted_by_me: false,
                 my_reaction_event_id: None,
-                sender_preview: vec![crate::event::ReactionSender {
+                sender_preview: vec![koushi_protocol::event::ReactionSender {
                     user_id: "@bob:example.invalid".to_owned(),
                     display_label: Some("Bob Room Name".to_owned()),
                 }],
@@ -478,8 +480,8 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
     };
     let _ = event_tx.send(CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
         key,
-        generation: crate::ids::TimelineGeneration(0),
-        batch_id: crate::ids::TimelineBatchId(1),
+        generation: koushi_protocol::ids::TimelineGeneration(0),
+        batch_id: koushi_protocol::ids::TimelineBatchId(1),
         diffs: vec![TimelineDiff::PushBack {
             item: TimelineItem {
                 request_state: None,

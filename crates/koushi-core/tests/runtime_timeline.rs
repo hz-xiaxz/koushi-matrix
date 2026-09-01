@@ -1,12 +1,12 @@
 //! Runtime timeline / composer integration tests.
 
 use koushi_core::command::{AppCommand, CoreCommand, TimelineCommand};
-use koushi_core::event::CoreEvent;
 use koushi_core::executor;
-use koushi_core::failure::{CoreFailure, TimelineFailureKind};
-use koushi_core::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
 use koushi_core::runtime::{COMPOSER_DRAFT_PERSIST_DEBOUNCE, CoreRuntime};
 use koushi_key::SessionKeyId;
+use koushi_protocol::event::CoreEvent;
+use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
+use koushi_protocol::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
 use koushi_state::{
     AppAction, ComposerDocument, ComposerDraftRevision, ComposerDraftStore, ComposerMode,
     ComposerTarget, CurrentDeviceTrustState, PreparedUploadFormat, PreparedUploadVariant,
@@ -423,7 +423,7 @@ async fn composer_revision_exhaustion_blocks_prepared_plain_reply_and_thread_acc
             loop {
                 match conn.recv_event().await.expect("runtime event stream") {
                     event @ CoreEvent::Timeline(
-                        koushi_core::event::TimelineEvent::SubmissionRejected {
+                        koushi_protocol::event::TimelineEvent::SubmissionRejected {
                             request_id: rejected_request_id,
                             ..
                         },
@@ -436,7 +436,7 @@ async fn composer_revision_exhaustion_blocks_prepared_plain_reply_and_thread_acc
         .expect("maximum revision rejection should be correlated");
         assert!(matches!(
             event,
-            CoreEvent::Timeline(koushi_core::event::TimelineEvent::SubmissionRejected {
+            CoreEvent::Timeline(koushi_protocol::event::TimelineEvent::SubmissionRejected {
                 kind: TimelineFailureKind::ComposerRevisionExhausted,
                 ..
             })

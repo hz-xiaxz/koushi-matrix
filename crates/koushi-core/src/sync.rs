@@ -30,12 +30,7 @@ use matrix_sdk_ui::room_list_service::RoomListService;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::command::SyncCommand;
-use crate::event::{CoreEvent, SyncEvent};
 use crate::executor;
-#[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
-use crate::failure::CoreFailure;
-use crate::failure::SyncFailureKind;
-use crate::ids::RequestId;
 use crate::room::{RoomListReconcileAck, RoomMessage};
 use crate::{
     SlidingSyncDiagnostics, SlidingSyncFailureDiagnostic, SlidingSyncFailureKind,
@@ -43,6 +38,11 @@ use crate::{
     SlidingSyncHttpErrorSource, SlidingSyncHttpStatus, SlidingSyncMatrixErrorKind,
     SlidingSyncSdkVersion,
 };
+use koushi_protocol::event::{CoreEvent, SyncEvent};
+#[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::failure::SyncFailureKind;
+use koushi_protocol::ids::RequestId;
 
 const SYNC_ACTOR_SHUTDOWN_SEND_TIMEOUT: Duration = Duration::from_secs(1);
 const SYNC_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(10);

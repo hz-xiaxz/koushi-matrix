@@ -21,17 +21,17 @@ use crate::causal_projection::{
     next_causal_projection_serial,
 };
 use crate::command::TimelineCommand;
-use crate::event::{
+use crate::executor;
+use crate::link_preview::LinkPreviewContext;
+use koushi_protocol::event::{
     CoreEvent, PaginationDirection, PaginationState, ThreadSummaryDto, TimelineEvent,
     TimelineFormattedBody, TimelineItemId, TimelineReadStateSync, TimelineUnreadPosition,
     TimelineViewportObservation,
 };
-use crate::executor;
-use crate::failure::{CoreFailure, TimelineFailureKind};
+use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
 #[cfg(any(test, feature = "test-hooks"))]
-use crate::ids::AccountKey;
-use crate::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
-use crate::link_preview::LinkPreviewContext;
+use koushi_protocol::ids::AccountKey;
+use koushi_protocol::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 
 use crate::live_tail_freshness::{
     FOREGROUND_LIVE_TAIL_LIMIT, LiveTailFreshnessState, LiveTailRefreshCoordinator,
@@ -1383,7 +1383,7 @@ async fn room_actor_hydrates_a_historical_sender_without_a_live_event() {
                     ..
                 }) if event_key == key && saw_unavailable_initial => {
                     if let Some(item) = diffs.iter().find_map(|diff| match diff {
-                        crate::event::TimelineDiff::Set { item, .. }
+                        koushi_protocol::event::TimelineDiff::Set { item, .. }
                             if timeline_item_event_id(item) == Some(event_id.as_str()) =>
                         {
                             Some(item)

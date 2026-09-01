@@ -19,14 +19,14 @@ use crate::account_work::AccountWorkScheduler;
 use crate::command::TimelineCommand;
 use crate::executor;
 #[cfg(any(test, feature = "test-hooks"))]
-use crate::ids::AccountKey;
-use crate::ids::{TimelineKey, TimelineKind};
-#[cfg(any(test, feature = "test-hooks"))]
 use crate::link_preview::LinkPreviewContext;
 #[cfg(any(test, feature = "test-hooks"))]
 use crate::live_tail_freshness::LiveTailRefreshCoordinator;
 #[cfg(any(test, feature = "test-hooks"))]
 use crate::threads_list::ThreadRootProjectionService;
+#[cfg(any(test, feature = "test-hooks"))]
+use koushi_protocol::ids::AccountKey;
+use koushi_protocol::ids::{TimelineKey, TimelineKind};
 
 // BEGIN GENERATED SIBLING IMPORTS
 #[cfg(any(test, feature = "test-hooks"))]

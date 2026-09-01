@@ -127,7 +127,7 @@ fn session_state_delta_forwarding_is_one_state_update_without_generic_duplicate(
 }
 #[test]
 fn lag_resync_forwarding_emits_exact_snapshot_then_typed_resync_marker() {
-    use koushi_core::event::VersionedAppStateSnapshot;
+    use koushi_protocol::state_update::VersionedAppStateSnapshot;
     use koushi_state::AppState;
     use serde_json::json;
 
@@ -1003,7 +1003,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
     let account_report_completed =
         serialize_core_event(&CoreEvent::Account(AccountEvent::ReportCompleted {
             request_id,
-            kind: koushi_core::event::ReportKind::User,
+            kind: koushi_protocol::event::ReportKind::User,
         }))
         .expect("serialize account report completed event");
     let account_oidc_authorization_created = serialize_core_event(&CoreEvent::Account(
@@ -1109,7 +1109,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
     let room_report_completed =
         serialize_core_event(&CoreEvent::Room(RoomEvent::ReportCompleted {
             request_id,
-            kind: koushi_core::event::ReportKind::Event,
+            kind: koushi_protocol::event::ReportKind::Event,
         }))
         .expect("serialize room report completed event");
     let sync_started = serialize_core_event(&CoreEvent::Sync(SyncEvent::Started {

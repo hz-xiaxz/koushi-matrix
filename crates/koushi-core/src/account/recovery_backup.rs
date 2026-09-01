@@ -17,10 +17,10 @@ use crate::command::{
     RoomKeyExportRequest, RoomKeyImportRequest, SecureBackupPassphraseChangeRequest,
     SecureBackupSetupRequest,
 };
-use crate::event::{AccountEvent, CoreEvent, E2eeTrustEvent};
 use crate::executor;
-use crate::failure::{CoreFailure, RecoveryFailureKind};
-use crate::ids::{AccountKey, RequestId};
+use koushi_protocol::event::{AccountEvent, CoreEvent, E2eeTrustEvent};
+use koushi_protocol::failure::{CoreFailure, RecoveryFailureKind};
+use koushi_protocol::ids::{AccountKey, RequestId};
 
 use super::actor::{AccountActor, AccountMessage};
 use super::local_data_cleanup::record_device_cleanup_offer;
@@ -137,8 +137,8 @@ fn recovery_result_is_current(
 /// errors, Network for network errors, Server for anything else.
 fn classify_recovery_error(
     error: &koushi_sdk::E2eeRecoveryError,
-) -> crate::failure::RecoveryFailureKind {
-    use crate::failure::RecoveryFailureKind;
+) -> koushi_protocol::failure::RecoveryFailureKind {
+    use koushi_protocol::failure::RecoveryFailureKind;
     use koushi_sdk::E2eeRecoveryError;
     match error {
         E2eeRecoveryError::Runtime(_) => RecoveryFailureKind::Network,

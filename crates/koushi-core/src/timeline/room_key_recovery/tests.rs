@@ -13,15 +13,15 @@ use tokio::sync::{mpsc, oneshot};
 use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
 
 use crate::command::TimelineCommand;
-use crate::event::{
+use crate::executor;
+use koushi_protocol::event::{
     CoreEvent, RoomKeyRequestStage, RoomKeyRequestStateDto, RoomKeyRequestWithheldCode,
     TimelineEvent,
 };
-use crate::executor;
 
 #[cfg(any(test, feature = "test-hooks"))]
-use crate::ids::AccountKey;
-use crate::ids::TimelineKey;
+use koushi_protocol::ids::AccountKey;
+use koushi_protocol::ids::TimelineKey;
 
 use koushi_diagnostics::DiagnosticValue;
 
@@ -862,16 +862,18 @@ fn withheld_update_guard_allows_typed_code_and_never_regresses_terminal_stages()
 
 #[test]
 fn room_key_request_state_changed_debug_redacts_identifiers() {
-    let event = CoreEvent::Room(crate::event::RoomEvent::RoomKeyRequestStateChanged {
-        key: TimelineKey::room(
-            crate::ids::AccountKey("@secret-account:example.invalid".to_owned()),
-            "!secret-room:example.invalid",
-        ),
-        event_id: "$secret-event:example.invalid".to_owned(),
-        request_id: None,
-        stage: RoomKeyRequestStage::Withheld,
-        withheld_code: Some(RoomKeyRequestWithheldCode::Unverified),
-    });
+    let event = CoreEvent::Room(
+        koushi_protocol::event::RoomEvent::RoomKeyRequestStateChanged {
+            key: TimelineKey::room(
+                koushi_protocol::ids::AccountKey("@secret-account:example.invalid".to_owned()),
+                "!secret-room:example.invalid",
+            ),
+            event_id: "$secret-event:example.invalid".to_owned(),
+            request_id: None,
+            stage: RoomKeyRequestStage::Withheld,
+            withheld_code: Some(RoomKeyRequestWithheldCode::Unverified),
+        },
+    );
     let rendered = format!("{event:?}");
     assert!(!rendered.contains("secret-account"));
     assert!(!rendered.contains("secret-room"));

@@ -377,7 +377,7 @@ async fn wait_for_focused_context_closed(
     room_id: Option<String>,
     baseline_generation: u64,
     deadline: tokio::time::Instant,
-) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
+) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, String> {
     let outcome = event_conn
         .wait_for_request_outcome(
             OutcomeCorrelation::Request(request_id),
@@ -411,7 +411,7 @@ async fn wait_for_focused_context(
     event_id: Option<String>,
     baseline_generation: u64,
     deadline: tokio::time::Instant,
-) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
+) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, String> {
     let outcome = event_conn
         .wait_for_request_outcome(
             OutcomeCorrelation::Request(request_id),
@@ -445,7 +445,7 @@ async fn wait_for_main_timeline_anchor(
     allow_live_fallback: bool,
     baseline_generation: u64,
     deadline: tokio::time::Instant,
-) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
+) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, String> {
     let outcome = event_conn
         .wait_for_request_outcome(
             OutcomeCorrelation::Request(request_id),
@@ -681,7 +681,7 @@ mod tests {
             outcome: IntentOutcome::Committed,
             published_generation: 1,
         });
-        control.send_snapshot(koushi_core::event::VersionedAppStateSnapshot {
+        control.send_snapshot(koushi_protocol::state_update::VersionedAppStateSnapshot {
             generation: 1,
             state,
         });

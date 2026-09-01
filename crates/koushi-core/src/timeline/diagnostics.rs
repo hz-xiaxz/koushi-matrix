@@ -8,11 +8,13 @@ use koushi_sdk::{
 use koushi_state::AppAction;
 
 use crate::causal_projection::{CausalProjectionDomain, CausalProjectionOperationId};
-use crate::event::{PaginationDirection, TimelineDiff, TimelineItem, TimelineItemId};
-use crate::ids::{RequestId, TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 use crate::live_catchup::LiveCatchupGate;
 use crate::live_tail_freshness::{LiveTailFreshnessState, LiveTailSchedulerAction};
 use crate::read_state::{ReadAdmissionDiagnostic, ReadCompletionDiagnostic, ReadStateKey};
+use koushi_protocol::event::{PaginationDirection, TimelineDiff, TimelineItem, TimelineItemId};
+use koushi_protocol::ids::{
+    RequestId, TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind,
+};
 use koushi_sdk::MatrixLiveTailRefreshOutcome as LiveTailRefreshOutcome;
 
 // BEGIN GENERATED SIBLING IMPORTS
@@ -454,7 +456,7 @@ fn record_read_state_diagnostic(
     waiter_count: usize,
     related_count: usize,
     source: Option<&'static str>,
-    failure_kind: Option<crate::failure::ReadStateFailureKind>,
+    failure_kind: Option<koushi_protocol::failure::ReadStateFailureKind>,
 ) {
     let level = if failure_kind.is_some() {
         DiagnosticLevel::Error

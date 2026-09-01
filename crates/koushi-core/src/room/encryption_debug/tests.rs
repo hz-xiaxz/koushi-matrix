@@ -2,7 +2,7 @@ use super::EncryptionDebugTestControl;
 
 use crate::command::RoomCommand;
 
-use crate::event::{
+use koushi_protocol::event::{
     CoreEvent, EncryptionDebugOperationOutcome as CoreEncryptionDebugOutcome, RoomEvent,
 };
 

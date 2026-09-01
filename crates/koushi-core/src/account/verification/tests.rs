@@ -37,12 +37,12 @@ use crate::account::test_support::{
 };
 use crate::command::AccountCommand;
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
-use crate::event::CoreEvent;
 use crate::executor;
+use koushi_protocol::event::CoreEvent;
 
-use crate::failure::{CoreFailure, RecoveryFailureKind};
-use crate::ids::RuntimeConnectionId;
 use crate::link_preview::LinkPreviewContext;
+use koushi_protocol::failure::{CoreFailure, RecoveryFailureKind};
+use koushi_protocol::ids::RuntimeConnectionId;
 
 use crate::store::CredentialStoreBackend;
 use crate::store::StoreActor;

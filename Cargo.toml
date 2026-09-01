@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/koushi-state",
+    "crates/koushi-protocol",
     "crates/koushi-search",
     "crates/koushi-key",
     "crates/koushi-sdk",
@@ -14,6 +15,7 @@ members = [
 ]
 default-members = [
     "crates/koushi-state",
+    "crates/koushi-protocol",
     "crates/koushi-search",
     "crates/koushi-key",
     "crates/koushi-sdk",

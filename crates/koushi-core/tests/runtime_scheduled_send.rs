@@ -3,10 +3,10 @@
 use std::time::Duration;
 
 use koushi_core::command::{AppCommand, CoreCommand};
-use koushi_core::event::CoreEvent;
 use koushi_core::executor;
-use koushi_core::failure::{CoreFailure, TimelineFailureKind};
 use koushi_core::runtime::CoreRuntime;
+use koushi_protocol::event::CoreEvent;
+use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
 use koushi_state::{
     AppAction, ComposerDraftRevision, ScheduledSendCapability, ScheduledSendHandle,
     ScheduledSendItem, SessionState,
@@ -733,7 +733,7 @@ async fn scheduled_recognized_unavailable_command_is_rejected_before_acceptance(
         loop {
             match conn.recv_event().await.expect("runtime event stream") {
                 event @ CoreEvent::Room(
-                    koushi_core::event::RoomEvent::ComposerSlashCommandRejected { .. },
+                    koushi_protocol::event::RoomEvent::ComposerSlashCommandRejected { .. },
                 ) => {
                     break event;
                 }
@@ -748,7 +748,7 @@ async fn scheduled_recognized_unavailable_command_is_rejected_before_acceptance(
     .await
     .expect("scheduled rejection should be correlated");
     let (rejected_key, rejected_request_id) = match &event {
-        CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
+        CoreEvent::Room(koushi_protocol::event::RoomEvent::ComposerSlashCommandRejected {
             key,
             request_id,
         }) => (key, *request_id),
@@ -843,7 +843,7 @@ async fn rescheduling_to_a_recognized_unavailable_command_is_rejected_and_preser
         loop {
             match conn.recv_event().await.expect("runtime event stream") {
                 event @ CoreEvent::Room(
-                    koushi_core::event::RoomEvent::ComposerSlashCommandRejected { .. },
+                    koushi_protocol::event::RoomEvent::ComposerSlashCommandRejected { .. },
                 ) => {
                     break event;
                 }
@@ -858,7 +858,7 @@ async fn rescheduling_to_a_recognized_unavailable_command_is_rejected_and_preser
     .await
     .expect("reschedule rejection should be correlated");
     let (rejected_key, rejected_request_id) = match &event {
-        CoreEvent::Room(koushi_core::event::RoomEvent::ComposerSlashCommandRejected {
+        CoreEvent::Room(koushi_protocol::event::RoomEvent::ComposerSlashCommandRejected {
             key,
             request_id,
         }) => (key, *request_id),

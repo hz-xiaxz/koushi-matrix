@@ -1,11 +1,11 @@
 //! Runtime navigation persistence and projection helpers.
 
 use super::{AppActor, composer_draft_session_key};
-use crate::event::{CoreEvent, IntentNoOpReason, IntentOutcome};
 use crate::executor;
-use crate::failure::CoreFailure;
-use crate::ids::{RequestId, TimelineKey, TimelineKind};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_protocol::event::{CoreEvent, IntentNoOpReason, IntentOutcome};
+use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::ids::{RequestId, TimelineKey, TimelineKind};
 use koushi_state::{
     AppAction, AppEffect, AppState, FocusedContextState, HomeSelection,
     MAX_SPACE_LOCAL_PRESENTATIONS, NavigationPreferenceUpdate, NavigationState, SessionState,

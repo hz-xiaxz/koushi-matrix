@@ -4,8 +4,8 @@ mod support;
 
 use std::time::Duration;
 
-use koushi_core::event::{ActivityEvent, CoreEvent};
 use koushi_core::{AppCommand, CoreCommand, CoreRuntime};
+use koushi_protocol::event::{ActivityEvent, CoreEvent};
 use koushi_state::{
     ActivityMarkReadState, ActivityMarkReadTarget, ActivityRowKind, ActivityState, AppAction,
     AvatarImage, AvatarThumbnailState, RoomLatestEventSummary, RoomNotificationMode, RoomSummary,

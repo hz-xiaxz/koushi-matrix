@@ -20,14 +20,14 @@ use crate::account_work::AccountWorkKind;
 use crate::causal_projection::CAUSAL_PROJECTION_SERIAL_MAX;
 use crate::causal_projection::CausalProjectionId;
 use crate::command::TimelineCommand;
-use crate::event::{
+use koushi_protocol::event::{
     CoreEvent, TimelineDiff, TimelineEvent, TimelineGapId, TimelineGapPosition, TimelineItem,
     TimelineItemId, TimelineMessageActions,
 };
 
 #[cfg(any(test, feature = "test-hooks"))]
-use crate::ids::AccountKey;
-use crate::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
+use koushi_protocol::ids::AccountKey;
+use koushi_protocol::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 
 use koushi_state::SessionInfo;
 

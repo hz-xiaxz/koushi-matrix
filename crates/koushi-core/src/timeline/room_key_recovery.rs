@@ -20,10 +20,10 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
 use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
-use crate::event::{CoreEvent, TimelineEvent};
 use crate::executor;
-use crate::failure::TimelineFailureKind;
-use crate::ids::{RequestId, TimelineKey, TimelineKind};
+use koushi_protocol::event::{CoreEvent, TimelineEvent};
+use koushi_protocol::failure::TimelineFailureKind;
+use koushi_protocol::ids::{RequestId, TimelineKey, TimelineKind};
 
 // BEGIN GENERATED SIBLING IMPORTS
 use super::actor::{TimelineActor, TimelineActorMessage};
@@ -918,7 +918,7 @@ impl TimelineActor {
             return;
         };
         let _ = self.event_tx.send(CoreEvent::Room(
-            crate::event::RoomEvent::RoomKeyRequestStateChanged {
+            koushi_protocol::event::RoomEvent::RoomKeyRequestStateChanged {
                 key: self.key.clone(),
                 event_id: event_id.to_owned(),
                 request_id: state.request_id.clone(),

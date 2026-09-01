@@ -1,6 +1,6 @@
 use super::super::{CoreCommand, test_support::fake_rid};
 use super::*;
-use crate::ids::AccountKey;
+use koushi_protocol::ids::AccountKey;
 use koushi_state::{ImageUploadCompressionMode, MentionIntent, MentionTarget};
 
 fn test_session_key() -> koushi_key::SessionKeyId {

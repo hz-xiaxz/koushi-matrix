@@ -5,14 +5,17 @@ use crate::composer_draft_lifecycle::{
     ComposerDraftLeaseFailure, ComposerDraftLeaseId, ComposerDraftLeaseRegistry,
     ComposerDraftScope, ComposerRendererGeneration,
 };
-#[cfg(test)]
-use crate::event::IntentOutcome;
-use crate::event::{
-    AppStateSnapshot, CoreEvent, IntentNoOpReason, VersionedAppStateSnapshot,
+use crate::event_projection::{
     project_room_event_display_labels, project_timeline_event_display_labels,
 };
-use crate::ids::{RequestId, RuntimeConnectionId};
 use crate::media_staging::MediaStagingService;
+#[cfg(test)]
+use koushi_protocol::event::IntentOutcome;
+use koushi_protocol::event::{CoreEvent, IntentNoOpReason};
+use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
+use koushi_protocol::state_update::{
+    AppStateSnapshot, CoreCommandAdmission, VersionedAppStateSnapshot,
+};
 use koushi_state::ComposerDraftRevision;
 use std::{
     sync::{
@@ -54,7 +57,7 @@ pub enum SelectRoomError {
     #[error("room selection failed without a state change: {0:?}")]
     FailedNoOp(IntentNoOpReason),
     #[error("room selection operation failed: {0:?}")]
-    OperationFailed(crate::failure::CoreFailure),
+    OperationFailed(koushi_protocol::failure::CoreFailure),
     #[error("core event stream closed")]
     EventStreamClosed,
     #[error("room selection timed out")]
@@ -68,13 +71,6 @@ pub enum SelectRoomError {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EventStreamLag {
     pub skipped: u64,
-}
-
-/// Generation at which Core has handled a command and published its
-/// synchronous admission state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CoreCommandAdmission {
-    pub admitted_generation: u64,
 }
 
 /// One attached consumer: allocates request ids, submits commands, and

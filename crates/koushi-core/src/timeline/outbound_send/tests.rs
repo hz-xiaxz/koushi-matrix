@@ -19,13 +19,13 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use crate::account_work::AccountWorkScheduler;
 
 use crate::command::TimelineCommand;
-use crate::event::{CoreEvent, TimelineEvent};
 use crate::executor;
-use crate::failure::{CoreFailure, TimelineFailureKind};
-#[cfg(any(test, feature = "test-hooks"))]
-use crate::ids::AccountKey;
-use crate::ids::{TimelineKey, TimelineKind};
 use crate::link_preview::LinkPreviewContext;
+use koushi_protocol::event::{CoreEvent, TimelineEvent};
+use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
+#[cfg(any(test, feature = "test-hooks"))]
+use koushi_protocol::ids::AccountKey;
+use koushi_protocol::ids::{TimelineKey, TimelineKind};
 
 use crate::live_tail_freshness::LiveTailRefreshCoordinator;
 

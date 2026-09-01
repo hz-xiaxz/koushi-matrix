@@ -38,10 +38,10 @@ use koushi_sdk::{
 };
 use koushi_state::LocalEncryptionHealth;
 
-use crate::failure::CoreFailure;
 pub use credential_backend::{CredentialStoreBackend, OsCredentialStore};
 #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
 pub use credential_backend::{FileCredentialStore, resolved_credential_backend_is_file_dir};
+use koushi_protocol::failure::CoreFailure;
 
 use composer_drafts::{
     decode_payload_json as decode_composer_draft_payload_json,
@@ -969,6 +969,6 @@ pub fn session_key_id_from_info(info: &koushi_state::SessionInfo) -> SessionKeyI
 
 /// Derive a canonical `AccountKey` string for a session. The account key is
 /// the user's Matrix ID — e.g. `@alice:example.com`.
-pub fn account_key_from_info(info: &koushi_state::SessionInfo) -> crate::ids::AccountKey {
-    crate::ids::AccountKey(info.user_id.clone())
+pub fn account_key_from_info(info: &koushi_state::SessionInfo) -> koushi_protocol::ids::AccountKey {
+    koushi_protocol::ids::AccountKey(info.user_id.clone())
 }

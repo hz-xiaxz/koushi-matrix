@@ -12,10 +12,10 @@ use crate::dto::{
     FrontendDesktopSnapshotDelta, FrontendStateUpdateEnvelope, StateUpdateSnapshotReason,
 };
 use koushi_core::{
-    CoreCommand, CoreCommandHandle, CoreConnection, CoreEvent, EventStreamLag, SearchEvent,
-    TimelineCommand, TimelineEvent, event::VersionedAppStateSnapshot,
+    CoreCommand, CoreCommandHandle, CoreConnection, EventStreamLag, TimelineCommand,
 };
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_protocol::{CoreEvent, SearchEvent, TimelineEvent, VersionedAppStateSnapshot};
 
 /// Tauri event for serialized CoreEvent payloads (discrete events + diff batches).
 pub(crate) const CORE_EVENT_NAME: &str = "koushi-desktop://event";

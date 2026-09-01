@@ -7,8 +7,8 @@ use tokio::sync::mpsc;
 use crate::command::TimelineCommand;
 
 #[cfg(any(test, feature = "test-hooks"))]
-use crate::ids::AccountKey;
-use crate::ids::{TimelineKey, TimelineKind};
+use koushi_protocol::ids::AccountKey;
+use koushi_protocol::ids::{TimelineKey, TimelineKind};
 
 use super::super::actor::{TimelineActorHandle, TimelineActorMessage};
 use super::super::test_support::{fake_rid, live_tail_test_manager};

@@ -147,7 +147,7 @@ async fn next_request_id(state: &CoreRuntimeState) -> koushi_core::RequestId {
 }
 
 pub(crate) fn command_settlement(
-    snapshot: koushi_core::event::VersionedAppStateSnapshot,
+    snapshot: koushi_protocol::state_update::VersionedAppStateSnapshot,
 ) -> FrontendCommandSettlement {
     FrontendCommandSettlement::from_published_generation(snapshot.generation)
 }

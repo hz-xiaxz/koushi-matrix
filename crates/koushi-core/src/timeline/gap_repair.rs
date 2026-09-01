@@ -20,15 +20,15 @@ use crate::causal_projection::{
     CausalProjectionDomain, CausalProjectionId, CausalProjectionOperationId,
     next_causal_projection_serial,
 };
-use crate::event::{
-    CoreEvent, TimelineEvent, TimelineGapId, TimelineGapPosition, TimelineItem, TimelineItemId,
-};
 use crate::executor;
-use crate::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 use crate::live_catchup::{LiveCatchupGate, classify_live_catchup_gate};
 use crate::live_tail_freshness::{
     FOREGROUND_LIVE_TAIL_LIMIT, LiveTailFreshnessState, LiveTailSchedulerAction,
 };
+use koushi_protocol::event::{
+    CoreEvent, TimelineEvent, TimelineGapId, TimelineGapPosition, TimelineItem, TimelineItemId,
+};
+use koushi_protocol::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 
 // BEGIN GENERATED SIBLING IMPORTS
 use super::actor::{TimelineActor, TimelineActorControl, TimelineActorMessage};

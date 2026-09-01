@@ -21,8 +21,8 @@ use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
 
 use crate::executor;
 
-use crate::ids::{RequestId, RuntimeConnectionId};
 use crate::link_preview::LinkPreviewContext;
+use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 
 use crate::store::CredentialStoreBackend;
 use crate::store::StoreActor;

@@ -1,8 +1,19 @@
 const FULL_RANGE_TOPOLOGY_REVISION: u64 = 14_695_981_039_346_656_037;
-use super::super::test_support::fake_rid;
+
 use super::*;
-use crate::ids::AccountKey;
+use koushi_protocol::event::*;
+use koushi_protocol::ids::{
+    AccountKey, RequestId, RuntimeConnectionId, TimelineGeneration, TimelineKey,
+};
+use koushi_state::*;
 use serde_json::json;
+
+fn fake_rid(sequence: u64) -> RequestId {
+    RequestId {
+        connection_id: RuntimeConnectionId(7),
+        sequence,
+    }
+}
 fn timeline_item_fixture(event_id: &str, is_redacted: bool) -> TimelineItem {
     TimelineItem {
         request_state: None,
@@ -651,7 +662,7 @@ fn timeline_item_serializes_media_metadata_without_encryption_secrets() {
         thread_root: None,
         thread_summary: None,
         media: Some(TimelineMedia {
-            kind: TimelineMediaKind::Image,
+            kind: koushi_protocol::event::TimelineMediaKind::Image,
             filename: "synthetic-image.png".to_owned(),
             source: TimelineMediaSource {
                 mxc_uri: "mxc://example.invalid/media".to_owned(),

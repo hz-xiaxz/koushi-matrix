@@ -2,7 +2,7 @@
 //! `RequestId`. Secret-bearing payloads redact `Debug`.
 
 use crate::composer_draft_lifecycle::ComposerDraftScope;
-use crate::ids::{RequestId, RuntimeConnectionId};
+use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 
 #[derive(Debug)]
 pub enum CoreCommand {
@@ -295,13 +295,13 @@ impl CoreCommand {
             ) => Some(ComposerDraftScope {
                 account: expected_account.clone(),
                 target: match &key.kind {
-                    crate::ids::TimelineKind::Room { room_id }
-                    | crate::ids::TimelineKind::Focused { room_id, .. } => {
+                    koushi_protocol::ids::TimelineKind::Room { room_id }
+                    | koushi_protocol::ids::TimelineKind::Focused { room_id, .. } => {
                         koushi_state::ComposerTarget::Main {
                             room_id: room_id.clone(),
                         }
                     }
-                    crate::ids::TimelineKind::Thread {
+                    koushi_protocol::ids::TimelineKind::Thread {
                         room_id,
                         root_event_id,
                     } => koushi_state::ComposerTarget::Thread {

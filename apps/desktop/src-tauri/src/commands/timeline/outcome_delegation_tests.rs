@@ -31,7 +31,7 @@ async fn timeline_wait_wrappers_delegate_to_core_outcome_service() {
             3.into(),
         )
         .expect("revision");
-    control.send_snapshot(koushi_core::event::VersionedAppStateSnapshot {
+    control.send_snapshot(koushi_protocol::state_update::VersionedAppStateSnapshot {
         generation: 2,
         state: accepted_state,
     });
@@ -51,7 +51,7 @@ async fn timeline_wait_wrappers_delegate_to_core_outcome_service() {
     let (mut connection, control) = CoreConnection::new_for_testing(8);
     let request_id = connection.next_request_id();
     let submission_id = SubmissionId::new("submission");
-    control.send_snapshot(koushi_core::event::VersionedAppStateSnapshot {
+    control.send_snapshot(koushi_protocol::state_update::VersionedAppStateSnapshot {
         generation: 2,
         state: ready_state(room_id),
     });

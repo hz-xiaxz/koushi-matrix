@@ -8,7 +8,7 @@ use koushi_state::{
     StagedUploadCompressionChoice, StagedUploadItem, TimelineScrollAnchor,
 };
 
-use crate::ids::{RequestId, TimelineKey};
+use koushi_protocol::ids::{RequestId, TimelineKey};
 
 pub enum AppCommand {
     Shutdown {

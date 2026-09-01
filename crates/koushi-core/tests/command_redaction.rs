@@ -5,9 +5,9 @@ use koushi_core::command::{
     RoomKeyImportRequest, SearchCommand, SearchScope, SecureBackupPassphraseChangeRequest,
     SecureBackupSetupRequest, SyncCommand, TimelineCommand,
 };
-use koushi_core::event::{AccountEvent, CoreEvent};
-use koushi_core::ids::{AccountKey, TimelineKey};
 use koushi_key::SessionKeyId;
+use koushi_protocol::event::{AccountEvent, CoreEvent};
+use koushi_protocol::ids::{AccountKey, TimelineKey};
 use koushi_state::{
     AuthSecret, ComposerDocument, ComposerInline, DisplayPlatform, IdentityResetAuthRequest,
     LoginRequest, MentionTarget, PresenceKind, RecoveryRequest, RoomTagKind, TimelineScrollAnchor,

@@ -25,9 +25,9 @@ use support::*;
 /// 5ms`.
 async fn recv_intent_lifecycle_for(
     conn: &mut koushi_core::runtime::CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     attempts: usize,
-) -> Option<koushi_core::event::IntentOutcome> {
+) -> Option<koushi_protocol::event::IntentOutcome> {
     for _ in 0..attempts {
         // Poll for a pending event with a short timeout.
         match tokio::time::timeout(Duration::from_millis(5), conn.recv_event()).await {
@@ -50,9 +50,9 @@ async fn recv_intent_lifecycle_for(
 
 async fn recv_intent_lifecycle_within(
     conn: &mut koushi_core::runtime::CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     timeout: Duration,
-) -> Option<koushi_core::event::IntentOutcome> {
+) -> Option<koushi_protocol::event::IntentOutcome> {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -162,7 +162,7 @@ fn background_flood_batch(batch_index: usize, kept_room_ids: &[&str]) -> Vec<App
 /// emit `IntentLifecycle { outcome: Committed }` for the matching request_id.
 #[tokio::test]
 async fn select_room_present_emits_committed() {
-    use koushi_core::event::IntentOutcome;
+    use koushi_protocol::event::IntentOutcome;
 
     let runtime = CoreRuntime::start();
     let mut conn = runtime.attach();
@@ -292,7 +292,7 @@ async fn select_room_and_wait_returns_typed_missing_room_failure() {
 /// room-list, crawl-progress, profile, and avatar updates are already queued.
 #[tokio::test]
 async fn select_room_commits_within_one_second_during_background_action_flood() {
-    use koushi_core::event::IntentOutcome;
+    use koushi_protocol::event::IntentOutcome;
 
     let runtime = CoreRuntime::start();
     let mut conn = runtime.attach();
@@ -369,7 +369,7 @@ async fn select_room_commits_within_one_second_during_background_action_flood() 
 /// for the matching request_id. This is the primary Slice 1 invariant.
 #[tokio::test]
 async fn select_room_missing_from_state_emits_failed_noop_room_not_in_state() {
-    use koushi_core::event::{IntentNoOpReason, IntentOutcome};
+    use koushi_protocol::event::{IntentNoOpReason, IntentOutcome};
 
     let runtime = CoreRuntime::start();
     let mut conn = runtime.attach();
@@ -420,7 +420,7 @@ async fn select_room_missing_from_state_emits_failed_noop_room_not_in_state() {
 /// the first command to never get a correlated outcome and silently time out.
 #[tokio::test]
 async fn two_concurrent_select_room_for_same_room_both_receive_terminal_outcome() {
-    use koushi_core::event::{IntentNoOpReason, IntentOutcome};
+    use koushi_protocol::event::{IntentNoOpReason, IntentOutcome};
     use std::collections::HashMap;
 
     let runtime = CoreRuntime::start();
@@ -460,7 +460,7 @@ async fn two_concurrent_select_room_for_same_room_both_receive_terminal_outcome(
 
     // Collect IntentLifecycle events until both request_ids are observed or
     // attempts are exhausted. Both must arrive immediately — no rounds needed.
-    let mut outcomes: HashMap<koushi_core::ids::RequestId, IntentOutcome> = HashMap::new();
+    let mut outcomes: HashMap<koushi_protocol::ids::RequestId, IntentOutcome> = HashMap::new();
     for _ in 0..400 {
         match tokio::time::timeout(Duration::from_millis(5), conn.recv_event()).await {
             Ok(Ok(CoreEvent::IntentLifecycle {

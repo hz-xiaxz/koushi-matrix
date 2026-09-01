@@ -28,13 +28,8 @@ use crate::command::{
     AccountCommand, RoomCommand, SearchCommand, SyncCommand, ThreadsListCommand, TimelineCommand,
 };
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
-use crate::event::{
-    CoreEvent, EventCacheFailureReasonClass, EventCacheSubscribeStatus, LocalEncryptionEvent,
-};
 #[cfg(test)]
 use crate::executor;
-use crate::failure::CoreFailure;
-use crate::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
 use crate::link_preview::LinkPreviewContext;
 #[cfg(feature = "test-hooks")]
 use crate::room::RoomOperationTestControl;
@@ -46,6 +41,11 @@ use crate::sync::SyncActorHandle;
 use crate::timeline::{
     NavigationProjectionIngress, NavigationProjectionIntent, TimelineManagerHandle, TimelineMessage,
 };
+use koushi_protocol::event::{
+    CoreEvent, EventCacheFailureReasonClass, EventCacheSubscribeStatus, LocalEncryptionEvent,
+};
+use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
 
 use super::account_management::PendingUiaOperation;
 use super::local_data_cleanup::{PendingDeviceCleanup, record_device_cleanup_offer};
@@ -2496,7 +2496,7 @@ mod tests {
 
     use super::trace_account_request;
 
-    use crate::ids::{RequestId, RuntimeConnectionId};
+    use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 
     #[test]
     fn account_trace_preserves_typed_request_fields_without_environment_switch() {

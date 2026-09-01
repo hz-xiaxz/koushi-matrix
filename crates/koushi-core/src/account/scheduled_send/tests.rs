@@ -18,7 +18,7 @@ use crate::account::test_support::{
 use crate::command::AccountCommand;
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
 
-use crate::ids::{RequestId, RuntimeConnectionId};
+use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 
 use crate::runtime::ForwardedComposerDraftPermit;
 

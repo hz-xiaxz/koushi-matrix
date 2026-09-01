@@ -18,11 +18,9 @@ pub mod command;
 pub mod composer_draft_lifecycle;
 mod credential_vault;
 mod direct_message_classification;
-pub mod event;
+mod event_projection;
 pub mod executor;
-pub mod failure;
 mod file;
-pub mod ids;
 pub mod link_preview;
 mod live_catchup;
 mod live_tail_freshness;
@@ -65,36 +63,16 @@ pub use command::{
     SyncCommand, TimelineCommand, UploadMediaKind, UploadMediaRequest, UploadMediaThumbnail,
 };
 pub use direct_message_classification::DirectAccountDataSource;
-pub use event::{
-    AccountEvent, ActivityEvent, AppStateSnapshot, CjkTextPolicyEvent, CoreEvent, E2eeTrustEvent,
-    EncryptionDebugOperationOutcome, IntentNoOpReason, IntentOutcome, LinkPreview,
-    LinkPreviewImage, LinkPreviewState, LocalEncryptionEvent, NativeAttentionEvent,
-    PaginationDirection, PaginationState, ReactionGroup, ReactionSender, RoomEvent,
-    RoomKeyReshareOutcome, SearchEvent, SearchResultItem, SyncEvent, TimelineDiff, TimelineEvent,
-    TimelineGapId, TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMedia,
-    TimelineMediaKind, TimelineMediaSource, TimelineMediaThumbnail, TimelineMessageKind,
-    TimelineNavigationSnapshot, TimelineReadStateSync, TimelineResyncReason,
-    TimelineSendFailureReason, TimelineSendState, TimelineSpoilerSpan, TimelineUnreadPosition,
-    TimelineViewportObservation,
-};
-pub use failure::{
-    CoreFailure, LoginFailureKind, ProfileFailureKind, ReadStateFailureKind, RecoveryFailureKind,
-    RoomFailureKind, SearchFailureKind, SyncFailureKind, TimelineFailureKind,
-};
-pub use ids::{
-    AccountKey, RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration, TimelineKey,
-    TimelineKind,
-};
+pub use koushi_protocol::*;
 pub use koushi_state::{EncryptionDebugOperationKind, MediaTransferProgress};
 pub use media_save::{
     MediaSaveError, MediaSaveFilesystem, MediaSaveIoError, default_media_save_path,
     safe_media_save_filename, save_downloaded_media,
 };
 pub use runtime::{
-    COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandAdmission, CoreCommandHandle,
-    CoreConnection, CoreRuntime, EVENT_QUEUE_CAPACITY, EventStreamLag, OutcomeCorrelation,
-    RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation, RoomOperationKind,
-    SelectRoomError,
+    COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandHandle, CoreConnection, CoreRuntime,
+    EVENT_QUEUE_CAPACITY, EventStreamLag, OutcomeCorrelation, RequestOutcome, RequestOutcomeError,
+    RequestOutcomeExpectation, RoomOperationKind, SelectRoomError,
 };
 pub use sliding_sync_diagnostics::{
     DiagnosticAgeBucket, SlidingSyncDiagnostics, SlidingSyncDiagnosticsSnapshot,
@@ -105,4 +83,4 @@ pub use sliding_sync_diagnostics::{
     SlidingSyncLifecycle, SlidingSyncMatrixErrorKind, SlidingSyncProvisionalHandoffBucket,
     SlidingSyncRequestSchema, SlidingSyncSdkVersion,
 };
-pub use state_delta::{StateDelta, StateDeltaChangedSlices, build_state_delta};
+pub use state_delta::build_state_delta;

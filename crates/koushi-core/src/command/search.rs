@@ -2,7 +2,7 @@ use std::fmt;
 
 use koushi_state::{AttachmentFilter, AttachmentScope, AttachmentSort, SearchRoomFilter};
 
-use crate::ids::RequestId;
+use koushi_protocol::ids::RequestId;
 
 pub enum SearchCommand {
     Query {

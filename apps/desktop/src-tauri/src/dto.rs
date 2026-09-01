@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use koushi_core::{CoreCommandAdmission, StateDelta, event::VersionedAppStateSnapshot};
+use koushi_protocol::{CoreCommandAdmission, StateDelta, VersionedAppStateSnapshot};
 use koushi_state::{
     AccountManagementCapabilities, AccountManagementState, AccountManagementUrl, ActivityState,
     AppError, AppState, AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, ComposerState,

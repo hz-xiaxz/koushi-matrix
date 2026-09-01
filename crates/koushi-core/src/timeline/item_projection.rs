@@ -37,7 +37,13 @@ use tokio::sync::mpsc;
 
 use crate::account_work::AccountWorkKind;
 use crate::command::{MediaDownloadSelection, UploadMediaKind, UploadMediaRequest};
-use crate::event::{
+use crate::event_projection::{
+    message_actions_for_timeline_item, message_source_for_timeline_item,
+};
+use crate::executor;
+use crate::link_preview::{LinkPreviewContext, extract_link_ranges};
+use crate::search::SearchIndexMessage;
+use koushi_protocol::event::{
     CoreEvent, LinkPreview, LinkPreviewState, ReactionSender, RoomKeyRequestStage,
     RoomKeyRequestStateDto, RoomKeyRequestWithheldCode, ThreadSummaryDto, TimelineDiff,
     TimelineEvent, TimelineItem, TimelineItemId, TimelineMedia, TimelineMediaKind,
@@ -45,13 +51,9 @@ use crate::event::{
     TimelineMessageActions, TimelineMessageKind, TimelineMessageSource, TimelineNoticeI18n,
     TimelineNoticeI18nKey, TimelineSendFailureReason, TimelineSendState, TimelineSpoilerSpan,
     TimelineUnableToDecrypt, TimelineUnableToDecryptReason, TimelineViewportObservation,
-    message_actions_for_timeline_item, message_source_for_timeline_item,
 };
-use crate::executor;
-use crate::failure::{CoreFailure, TimelineFailureKind};
-use crate::ids::{RequestId, TimelineKey, TimelineKind};
-use crate::link_preview::{LinkPreviewContext, extract_link_ranges};
-use crate::search::SearchIndexMessage;
+use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
+use koushi_protocol::ids::{RequestId, TimelineKey, TimelineKind};
 
 // BEGIN GENERATED SIBLING IMPORTS
 use super::actor::{
@@ -1107,17 +1109,17 @@ impl TimelineActor {
         message: &matrix_sdk_ui::timeline::Message,
     ) -> Option<AttachmentDocument> {
         let kind = match media.kind {
-            crate::event::TimelineMediaKind::Image => AttachmentKind::Image,
-            crate::event::TimelineMediaKind::Video => AttachmentKind::Video,
-            crate::event::TimelineMediaKind::Audio => AttachmentKind::Audio,
-            crate::event::TimelineMediaKind::File => AttachmentKind::File,
+            koushi_protocol::event::TimelineMediaKind::Image => AttachmentKind::Image,
+            koushi_protocol::event::TimelineMediaKind::Video => AttachmentKind::Video,
+            koushi_protocol::event::TimelineMediaKind::Audio => AttachmentKind::Audio,
+            koushi_protocol::event::TimelineMediaKind::File => AttachmentKind::File,
         };
 
         let msgtype = match media.kind {
-            crate::event::TimelineMediaKind::Image => "m.image",
-            crate::event::TimelineMediaKind::Video => "m.video",
-            crate::event::TimelineMediaKind::Audio => "m.audio",
-            crate::event::TimelineMediaKind::File => "m.file",
+            koushi_protocol::event::TimelineMediaKind::Image => "m.image",
+            koushi_protocol::event::TimelineMediaKind::Video => "m.video",
+            koushi_protocol::event::TimelineMediaKind::Audio => "m.audio",
+            koushi_protocol::event::TimelineMediaKind::File => "m.file",
         };
 
         let thread_root = event_item.content().thread_root().map(|id| id.to_string());
@@ -1457,7 +1459,7 @@ pub(super) fn has_user_visible_content(item: &TimelineItem) -> bool {
 pub(super) fn timeline_content_is_renderable(
     body: Option<&str>,
     media: Option<&TimelineMedia>,
-    formatted: Option<&crate::event::TimelineFormattedBody>,
+    formatted: Option<&koushi_protocol::event::TimelineFormattedBody>,
 ) -> bool {
     body.is_some_and(|body| !body.trim().is_empty())
         || media.is_some()
@@ -1465,7 +1467,7 @@ pub(super) fn timeline_content_is_renderable(
 }
 
 pub(super) fn timeline_formatted_body_is_renderable(
-    formatted: &crate::event::TimelineFormattedBody,
+    formatted: &koushi_protocol::event::TimelineFormattedBody,
 ) -> bool {
     !formatted.plain_text.trim().is_empty()
         || formatted
@@ -2526,13 +2528,13 @@ pub(super) struct MessageProjection {
     pub(super) message_kind: TimelineMessageKind,
     pub(super) spoiler_spans: Vec<TimelineSpoilerSpan>,
     pub(super) media: Option<TimelineMedia>,
-    pub(super) formatted: Option<crate::event::TimelineFormattedBody>,
+    pub(super) formatted: Option<koushi_protocol::event::TimelineFormattedBody>,
 }
 
 pub(super) fn link_ranges_for_message_projection(
     body: Option<&str>,
-    formatted: Option<&crate::event::TimelineFormattedBody>,
-) -> Vec<crate::event::TimelineLinkRange> {
+    formatted: Option<&koushi_protocol::event::TimelineFormattedBody>,
+) -> Vec<koushi_protocol::event::TimelineLinkRange> {
     let source = formatted
         .map(|formatted_body| formatted_body.plain_text.as_str())
         .or(body)
@@ -2608,7 +2610,7 @@ fn reply_quote_from_message_projection(
 }
 
 fn reply_quote_formatted_body_from_timeline(
-    formatted: &crate::event::TimelineFormattedBody,
+    formatted: &koushi_protocol::event::TimelineFormattedBody,
 ) -> ReplyQuoteFormattedBody {
     ReplyQuoteFormattedBody {
         html: formatted.html.clone(),
@@ -3016,7 +3018,7 @@ fn project_plain_body_with_spoilers(body: &str) -> PlainBodyProjection {
 }
 
 struct FormattedBodyProjection {
-    formatted: crate::event::TimelineFormattedBody,
+    formatted: koushi_protocol::event::TimelineFormattedBody,
     spoiler_spans: Vec<TimelineSpoilerSpan>,
 }
 
@@ -3047,7 +3049,7 @@ fn project_formatted_body(formatted_body: &FormattedBody) -> Option<FormattedBod
     let spoiler_spans = spoiler_spans_from_html(&html);
 
     Some(FormattedBodyProjection {
-        formatted: crate::event::TimelineFormattedBody {
+        formatted: koushi_protocol::event::TimelineFormattedBody {
             html: sanitized_body,
             plain_text,
             code_blocks,
@@ -3122,7 +3124,7 @@ fn collect_spoiler_spans_from_nodes(
     }
 }
 
-fn code_blocks_from_html(html: &Html) -> Vec<crate::event::TimelineCodeBlock> {
+fn code_blocks_from_html(html: &Html) -> Vec<koushi_protocol::event::TimelineCodeBlock> {
     let mut blocks = Vec::new();
     collect_code_blocks_from_nodes(html.children(), &mut blocks);
     blocks
@@ -3130,7 +3132,7 @@ fn code_blocks_from_html(html: &Html) -> Vec<crate::event::TimelineCodeBlock> {
 
 fn collect_code_blocks_from_nodes(
     nodes: impl Iterator<Item = matrix_sdk::ruma::html::NodeRef>,
-    out: &mut Vec<crate::event::TimelineCodeBlock>,
+    out: &mut Vec<koushi_protocol::event::TimelineCodeBlock>,
 ) {
     for node in nodes {
         let Some(element) = node.as_element() else {
@@ -3162,7 +3164,7 @@ fn collect_code_blocks_from_nodes(
             let mut body = String::new();
             collect_plain_text_from_nodes(child.children(), &mut body);
 
-            out.push(crate::event::TimelineCodeBlock { language, body });
+            out.push(koushi_protocol::event::TimelineCodeBlock { language, body });
             break;
         }
 
@@ -3877,10 +3879,10 @@ pub(crate) fn validate_cancel_send(
 pub(crate) fn reaction_groups_from_sdk(
     reactions: &ReactionsByKeyBySender,
     own_user_id: Option<&matrix_sdk::ruma::UserId>,
-) -> Vec<crate::event::ReactionGroup> {
+) -> Vec<koushi_protocol::event::ReactionGroup> {
     reactions
         .iter()
-        .map(|(key, senders)| crate::event::ReactionGroup {
+        .map(|(key, senders)| koushi_protocol::event::ReactionGroup {
             key: key.clone(),
             count: senders.len().min(u32::MAX as usize) as u32,
             reacted_by_me: own_user_id

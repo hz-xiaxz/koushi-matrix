@@ -796,7 +796,7 @@ async fn wait_for_composer_draft_acceptance(
 ) -> Result<
     (
         koushi_state::ComposerDraftRevision,
-        koushi_core::event::VersionedAppStateSnapshot,
+        koushi_protocol::state_update::VersionedAppStateSnapshot,
     ),
     String,
 > {

@@ -15,10 +15,10 @@ use crate::account::test_support::{
 };
 use crate::command::AccountCommand;
 
-use crate::event::{AccountEvent, CoreEvent};
 use crate::executor;
+use koushi_protocol::event::{AccountEvent, CoreEvent};
 
-use crate::ids::RequestId;
+use koushi_protocol::ids::RequestId;
 
 use crate::store::CredentialStoreBackend;
 use crate::store::StoreActor;
@@ -143,7 +143,7 @@ async fn shutdown_aborts_pending_teardown_retry_and_releases_held_sessions_witho
     handle
         .send(AccountMessage::Command(AccountCommand::LoginPassword {
             request_id: RequestId {
-                connection_id: crate::ids::RuntimeConnectionId(4),
+                connection_id: koushi_protocol::ids::RuntimeConnectionId(4),
                 sequence: 2,
             },
             request: LoginRequest {

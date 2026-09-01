@@ -1,11 +1,11 @@
 use super::actor::{RoomActor, RoomMessage};
 use super::normalization::avatar_from_mxc_uri;
 use super::operations::{classify_room_error, operation_failure_kind};
-use crate::event::{CoreEvent, RoomEvent};
 use crate::executor;
-use crate::failure::CoreFailure;
-use crate::ids::{RequestId, RuntimeConnectionId};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_protocol::event::{CoreEvent, RoomEvent};
+use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 use koushi_sdk::{
     MatrixClientSession, MatrixRoomOperationError, MatrixSpaceMemberEntry,
     MatrixSpaceMembersProjection,

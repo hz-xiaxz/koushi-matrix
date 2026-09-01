@@ -3,12 +3,12 @@ use std::sync::{Arc, atomic::Ordering};
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
 
-use crate::event::{
+use crate::threads_list::ThreadRootDisplayData;
+use koushi_protocol::event::{
     TimelineDiff, TimelineDisplayKind, TimelineDisplayMetadata, TimelineItem, TimelineItemId,
     TimelineViewportObservation,
 };
-use crate::ids::{TimelineKey, TimelineKind};
-use crate::threads_list::ThreadRootDisplayData;
+use koushi_protocol::ids::{TimelineKey, TimelineKind};
 use koushi_state::TimelineThreadRootOrder;
 
 // BEGIN GENERATED SIBLING IMPORTS
@@ -978,16 +978,16 @@ fn root_display_item(
     display_timestamp_ms: Option<u64>,
 ) -> TimelineItem {
     let mut item = root.item.clone().unwrap_or_else(|| fallback.clone());
-    let summary = item
-        .thread_summary
-        .get_or_insert_with(|| crate::event::ThreadSummaryDto {
-            reply_count: 0,
-            latest_event_id: None,
-            latest_sender: None,
-            latest_sender_label: None,
-            latest_body_preview: None,
-            latest_timestamp_ms: None,
-        });
+    let summary =
+        item.thread_summary
+            .get_or_insert_with(|| koushi_protocol::event::ThreadSummaryDto {
+                reply_count: 0,
+                latest_event_id: None,
+                latest_sender: None,
+                latest_sender_label: None,
+                latest_body_preview: None,
+                latest_timestamp_ms: None,
+            });
     summary.reply_count = root.aggregate.reply_count;
     summary.latest_event_id = root.aggregate.latest_event_id.clone();
     summary.latest_sender = root.aggregate.latest_sender.clone();
@@ -1044,7 +1044,7 @@ fn root_placeholder_item(root: &ThreadRootDisplayData) -> TimelineItem {
         send_state: None,
         display_metadata: None,
     };
-    let summary = crate::event::ThreadSummaryDto {
+    let summary = koushi_protocol::event::ThreadSummaryDto {
         reply_count: root.aggregate.reply_count,
         latest_event_id: root.aggregate.latest_event_id.clone(),
         latest_sender: root.aggregate.latest_sender.clone(),

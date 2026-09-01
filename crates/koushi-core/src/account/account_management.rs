@@ -2,8 +2,8 @@
 
 use koushi_state::{AccountManagementOperation, AppAction, AuthFailureKind};
 
-use crate::failure::CoreFailure;
-use crate::ids::RequestId;
+use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::ids::RequestId;
 
 use super::actor::AccountActor;
 

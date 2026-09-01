@@ -4,12 +4,12 @@ use koushi_state::{AppAction, TimelineThreadRootOrder};
 
 use tokio::sync::{broadcast, mpsc};
 
-use crate::event::{
+use koushi_protocol::event::{
     CoreEvent, TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent, TimelineItem,
     TimelineItemId, TimelineMediaKind, TimelineViewportObservation,
 };
 
-use crate::ids::{TimelineBatchId, TimelineGeneration};
+use koushi_protocol::ids::{TimelineBatchId, TimelineGeneration};
 
 use super::super::item_projection::timeline_item_event_id;
 use super::super::navigation::{

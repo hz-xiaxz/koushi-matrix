@@ -7,15 +7,15 @@ use koushi_state::{AppAction, OperationFailureKind};
 use crate::command::{
     RoomCommand, SearchCommand, SyncCommand, ThreadsListCommand, TimelineCommand,
 };
-use crate::event::{CoreEvent, TimelineEvent};
-#[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
-use crate::failure::SyncFailureKind;
-use crate::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
-use crate::ids::{RequestId, TimelineKey, TimelineKind};
 use crate::room::RoomMessage;
 use crate::runtime::ForwardedComposerDraftPermit;
 use crate::sync::SyncMessage;
 use crate::timeline::TimelineMessage;
+use koushi_protocol::event::{CoreEvent, TimelineEvent};
+#[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+use koushi_protocol::failure::SyncFailureKind;
+use koushi_protocol::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
+use koushi_protocol::ids::{RequestId, TimelineKey, TimelineKind};
 
 use super::actor::{AccountActor, trace_restore};
 use super::scheduled_send::admit_secure_backup_user_content;
@@ -709,7 +709,7 @@ mod tests {
     use crate::account::test_support::{spawn_actor_with_dirs, test_request_id};
     use crate::command::{SyncCommand, TimelineCommand};
 
-    use crate::ids::{AccountKey, RequestId, RuntimeConnectionId, TimelineKey};
+    use koushi_protocol::ids::{AccountKey, RequestId, RuntimeConnectionId, TimelineKey};
 
     use tempfile::tempdir;
 

@@ -13,18 +13,19 @@ use matrix_sdk_ui::timeline::{
 use tokio::sync::mpsc;
 
 use crate::causal_projection::CausalProjectionId;
-use crate::event::{
-    ReactionGroup, ReactionSender, ThreadSummaryDto, TimelineItem, TimelineItemId,
-    TimelineUnableToDecrypt, TimelineUnableToDecryptReason, message_actions_for_timeline_item,
-};
+use crate::event_projection::message_actions_for_timeline_item;
 use crate::executor;
-use crate::ids::{TimelineKey, TimelineKind};
 use crate::threads_list::{
     AggregateRefresh, AggregateRefreshCause, ThreadRootProjectionActivity,
     ThreadRootProjectionDecision, ThreadRootProjectionRecord, ThreadRootProjectionRefreshResult,
     ThreadRootProjectionService, activity_is_newer, authoritative_thread_aggregate_from_sdk,
     classify_thread_list_error,
 };
+use koushi_protocol::event::{
+    ReactionGroup, ReactionSender, ThreadSummaryDto, TimelineItem, TimelineItemId,
+    TimelineUnableToDecrypt, TimelineUnableToDecryptReason,
+};
+use koushi_protocol::ids::{TimelineKey, TimelineKind};
 
 // BEGIN GENERATED SIBLING IMPORTS
 use super::actor::{ThreadSummaryProjectionWake, TimelineActor};
@@ -821,23 +822,23 @@ pub(super) fn seed_thread_summary_item(
 pub(super) fn seed_thread_summary_diff(
     service: &Arc<Mutex<ThreadRootProjectionService>>,
     key: &TimelineKey,
-    diff: &crate::event::TimelineDiff,
+    diff: &koushi_protocol::event::TimelineDiff,
 ) {
     match diff {
-        crate::event::TimelineDiff::PushFront { item }
-        | crate::event::TimelineDiff::PushBack { item }
-        | crate::event::TimelineDiff::Insert { item, .. }
-        | crate::event::TimelineDiff::Set { item, .. } => {
+        koushi_protocol::event::TimelineDiff::PushFront { item }
+        | koushi_protocol::event::TimelineDiff::PushBack { item }
+        | koushi_protocol::event::TimelineDiff::Insert { item, .. }
+        | koushi_protocol::event::TimelineDiff::Set { item, .. } => {
             seed_thread_summary_item(service, key, item);
         }
-        crate::event::TimelineDiff::Reset { items } => {
+        koushi_protocol::event::TimelineDiff::Reset { items } => {
             for item in items {
                 seed_thread_summary_item(service, key, item);
             }
         }
-        crate::event::TimelineDiff::Remove { .. }
-        | crate::event::TimelineDiff::Truncate { .. }
-        | crate::event::TimelineDiff::Clear => {}
+        koushi_protocol::event::TimelineDiff::Remove { .. }
+        | koushi_protocol::event::TimelineDiff::Truncate { .. }
+        | koushi_protocol::event::TimelineDiff::Clear => {}
     }
 }
 
@@ -865,23 +866,23 @@ pub(super) fn overlay_thread_summary_item(
 pub(super) fn overlay_thread_summary_diff(
     service: &Arc<Mutex<ThreadRootProjectionService>>,
     key: &TimelineKey,
-    diff: &mut crate::event::TimelineDiff,
+    diff: &mut koushi_protocol::event::TimelineDiff,
 ) {
     match diff {
-        crate::event::TimelineDiff::PushFront { item }
-        | crate::event::TimelineDiff::PushBack { item }
-        | crate::event::TimelineDiff::Insert { item, .. }
-        | crate::event::TimelineDiff::Set { item, .. } => {
+        koushi_protocol::event::TimelineDiff::PushFront { item }
+        | koushi_protocol::event::TimelineDiff::PushBack { item }
+        | koushi_protocol::event::TimelineDiff::Insert { item, .. }
+        | koushi_protocol::event::TimelineDiff::Set { item, .. } => {
             *item = overlay_thread_summary_item(service, key, item);
         }
-        crate::event::TimelineDiff::Reset { items } => {
+        koushi_protocol::event::TimelineDiff::Reset { items } => {
             for item in items {
                 *item = overlay_thread_summary_item(service, key, item);
             }
         }
-        crate::event::TimelineDiff::Remove { .. }
-        | crate::event::TimelineDiff::Truncate { .. }
-        | crate::event::TimelineDiff::Clear => {}
+        koushi_protocol::event::TimelineDiff::Remove { .. }
+        | koushi_protocol::event::TimelineDiff::Truncate { .. }
+        | koushi_protocol::event::TimelineDiff::Clear => {}
     }
 }
 
@@ -1837,7 +1838,7 @@ impl TimelineActor {
                     batch_id,
                     display_diffs,
                 ) {
-                    self.next_batch_id = crate::ids::TimelineBatchId(batch_id.0 + 1);
+                    self.next_batch_id = koushi_protocol::ids::TimelineBatchId(batch_id.0 + 1);
                 }
             }
         }

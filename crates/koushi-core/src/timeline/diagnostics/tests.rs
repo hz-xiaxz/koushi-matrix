@@ -11,13 +11,13 @@ use tokio::sync::{broadcast, mpsc};
 use crate::account_work::AccountWorkScheduler;
 
 use crate::command::TimelineCommand;
-use crate::event::{PaginationDirection, TimelineDiff};
 use crate::executor;
-use crate::failure::{CoreFailure, TimelineFailureKind};
-#[cfg(any(test, feature = "test-hooks"))]
-use crate::ids::AccountKey;
-use crate::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 use crate::link_preview::LinkPreviewContext;
+use koushi_protocol::event::{PaginationDirection, TimelineDiff};
+use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
+#[cfg(any(test, feature = "test-hooks"))]
+use koushi_protocol::ids::AccountKey;
+use koushi_protocol::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 
 use crate::live_tail_freshness::LiveTailRefreshCoordinator;
 use crate::read_state::ReadStateKey;

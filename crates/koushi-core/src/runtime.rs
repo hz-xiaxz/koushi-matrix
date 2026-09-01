@@ -37,9 +37,9 @@ use scheduled_send::scheduled_send_id;
 #[cfg(any(test, feature = "test-hooks"))]
 pub use connection::CoreConnectionTestControl;
 pub use connection::{
-    CommandSubmitError, CoreCommandAdmission, CoreCommandHandle, CoreConnection, EventStreamLag,
-    SelectRoomError,
+    CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag, SelectRoomError,
 };
+pub use koushi_protocol::state_update::CoreCommandAdmission;
 pub use request_outcome::{
     OutcomeCorrelation, RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation,
     RoomOperationKind,
@@ -72,25 +72,25 @@ use crate::command::{
     TimelineCommand,
 };
 use crate::composer_draft_lifecycle::{ComposerDraftCommandPermit, ComposerDraftLeaseRegistry};
-use crate::event::{
-    ActivityEvent, CoreEvent, IntentNoOpReason, IntentOutcome, NativeAttentionEvent, TimelineEvent,
-    VersionedAppStateSnapshot,
-};
 pub use activity::ACTIVITY_RECENT_MAX_ROWS;
 use activity::{
     ActivityProjection, activity_tab_token, cap_activity_resolution_requests,
     guard_activity_resolution_completion, normalize_activity_resolution_action,
     record_activity_transition,
 };
+use koushi_protocol::event::{
+    ActivityEvent, CoreEvent, IntentNoOpReason, IntentOutcome, NativeAttentionEvent, TimelineEvent,
+};
+use koushi_protocol::state_update::VersionedAppStateSnapshot;
 
 use crate::executor;
-use crate::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
-use crate::ids::{
-    AccountKey, RequestId, RuntimeConnectionId, TimelineGeneration, TimelineKey, TimelineKind,
-};
 use crate::settings::SettingsStore;
 use crate::state_delta::build_state_delta;
 use crate::store::{StoreActor, session_key_id_from_info};
+use koushi_protocol::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
+use koushi_protocol::ids::{
+    AccountKey, RequestId, RuntimeConnectionId, TimelineGeneration, TimelineKey, TimelineKind,
+};
 
 pub const COMMAND_INBOX_CAPACITY: usize = 256;
 /// Per-consumer broadcast capacity. On large accounts (100+ rooms) initial and
@@ -892,7 +892,7 @@ impl AppActor {
         account: &koushi_key::SessionKeyId,
         target: &ComposerTarget,
     ) -> Option<TimelineKey> {
-        let account_key = crate::ids::AccountKey(account.user_id.clone());
+        let account_key = koushi_protocol::ids::AccountKey(account.user_id.clone());
         match target {
             ComposerTarget::Main { room_id } => {
                 Some(TimelineKey::room(account_key, room_id.clone()))
@@ -902,7 +902,7 @@ impl AppActor {
                 root_event_id,
             } => Some(TimelineKey {
                 account_key,
-                kind: crate::ids::TimelineKind::Thread {
+                kind: koushi_protocol::ids::TimelineKind::Thread {
                     room_id: room_id.clone(),
                     root_event_id: root_event_id.clone(),
                 },
@@ -1945,7 +1945,7 @@ impl AppActor {
                                 self.composer_target_notice_key(&expected_account, &target)
                         {
                             self.emit(CoreEvent::Room(
-                                crate::event::RoomEvent::ComposerSlashCommandRejected {
+                                koushi_protocol::event::RoomEvent::ComposerSlashCommandRejected {
                                     key,
                                     request_id,
                                 },
@@ -2090,7 +2090,7 @@ impl AppActor {
                             && let Some(key) = notice_key
                         {
                             self.emit(CoreEvent::Room(
-                                crate::event::RoomEvent::ComposerSlashCommandRejected {
+                                koushi_protocol::event::RoomEvent::ComposerSlashCommandRejected {
                                     key,
                                     request_id,
                                 },
@@ -3948,8 +3948,8 @@ impl AppActor {
     }
 
     fn emit_timeline_display_label_updates(&self, additional_user_ids: &[&str]) {
-        let own_user_id = crate::event::timeline_projection_own_user_id(&self.state);
-        let labels = crate::event::derive_display_label_updates_for_user_ids(
+        let own_user_id = crate::event_projection::timeline_projection_own_user_id(&self.state);
+        let labels = crate::event_projection::derive_display_label_updates_for_user_ids(
             &self.state.profile,
             own_user_id,
             additional_user_ids.iter().copied(),

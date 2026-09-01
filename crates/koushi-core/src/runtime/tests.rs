@@ -1,7 +1,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-use crate::event::{AccountEvent, RoomEvent, TimelineEvent};
+use koushi_protocol::event::{AccountEvent, RoomEvent, TimelineEvent};
 use koushi_state::{
     DisplaySettings, RoomSummary, RoomTags, SessionInfo, SettingsPatch, SpaceMemberEntry,
     SpaceMemberMembership, SpaceMembersProjection, UserProfile,
@@ -623,7 +623,7 @@ async fn rejected_space_invites_are_fenced_before_room_actor_route() {
         assert_eq!(
             failure,
             CoreFailure::RoomOperationFailed {
-                kind: crate::failure::RoomFailureKind::Sdk,
+                kind: koushi_protocol::failure::RoomFailureKind::Sdk,
             }
         );
         assert_eq!(connection.snapshot(), expected_state);

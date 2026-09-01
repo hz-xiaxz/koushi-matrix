@@ -1631,7 +1631,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
 #[test]
 fn state_update_envelope_serializes_the_v1_delta_and_snapshot_shapes() {
     use super::{FrontendStateUpdateEnvelope, StateUpdateSnapshotReason};
-    use koushi_core::event::VersionedAppStateSnapshot;
+    use koushi_protocol::state_update::VersionedAppStateSnapshot;
 
     let delta = FrontendStateUpdateEnvelope::delta(FrontendDesktopSnapshotDelta {
         generation: 7,
