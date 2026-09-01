@@ -149,6 +149,9 @@ test("timeline sender avatars render after headless account thumbnail events", a
     }
   ]);
 
+  const firstRow = page.locator('[data-event-id="$headless-avatar-a:example.invalid"]');
+  const secondRow = page.locator('[data-event-id="$headless-avatar-b:example.invalid"]');
+
   await expect
     .poll(async () =>
       page.evaluate(() =>
@@ -164,12 +167,12 @@ test("timeline sender avatars render after headless account thumbnail events", a
       ])
     );
 
-  // The invocation recorder observes the mock call synchronously. Real Tauri
-  // completion is asynchronous, so yield one browser task after the request
-  // effect before injecting the account-owned completion event.
-  await page.evaluate(
-    () => new Promise<void>((resolve) => window.setTimeout(resolve, 0))
-  );
+  // The invocation recorder observes the mock call synchronously. Wait for the
+  // corresponding timeline commit before injecting the account-owned
+  // completion event so the relevance fence is deterministic under full-suite
+  // load.
+  await expect(firstRow.getByText("Avatar headless row A")).toBeVisible();
+  await expect(secondRow.getByText("Avatar headless row B")).toBeVisible();
 
   await page.evaluate(async () => {
     for (const [mxcUri, sourceUrl, sequence] of [
@@ -204,10 +207,6 @@ test("timeline sender avatars render after headless account thumbnail events", a
     }
   });
 
-  const firstRow = page.locator('[data-event-id="$headless-avatar-a:example.invalid"]');
-  const secondRow = page.locator('[data-event-id="$headless-avatar-b:example.invalid"]');
-  await expect(firstRow.getByText("Avatar headless row A")).toBeVisible();
-  await expect(secondRow.getByText("Avatar headless row B")).toBeVisible();
   await expect(firstRow.locator(".avatar img")).toHaveAttribute("src", /data:image\/gif;base64/);
   await expect(secondRow.locator(".avatar img")).toHaveAttribute("src", /data:image\/gif;base64/);
 });
