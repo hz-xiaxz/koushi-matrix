@@ -95,3 +95,9 @@ Focused post-integration evidence:
 - macOS QA source-contract Vitest: 47 tests;
 - release checks for `koushi-store` and `koushi-core`: green with no new store
   warning.
+
+Fireworks exact-diff review at `bececb93fa8ad68f982a59e0b78e04a08071c12a`
+returned `CORRECT-TO-MERGE` with one cosmetic finding: the macOS QA test title
+and comment still named Core as the credential mechanism owner. The wording was
+corrected to `koushi-store`; a focused exact-delta re-review is required before
+merge.
