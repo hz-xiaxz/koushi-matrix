@@ -155,6 +155,11 @@ fn native_artifact_for_account_command(
         AccountCommand::BootstrapSecureBackup {
             request_id,
             request,
+        }
+        | AccountCommand::StartSessionBootstrap {
+            request_id,
+            request,
+            ..
         } if request.recovery_key_destination_requested => {
             Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
         }
