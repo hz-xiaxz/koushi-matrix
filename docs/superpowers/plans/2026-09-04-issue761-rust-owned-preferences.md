@@ -388,8 +388,11 @@ separate, independently reviewable slice:
    bounded concurrency, performs at most two network attempts inside the owned
    fetch task, caches both Ready and terminal Failed results for the session,
    and serves later duplicate requests from that cache without another SDK call.
-   Session clear aborts tasks and resets the cache as today. RED tests cover the
-   retry policy, success-after-retry, terminal exhaustion and failed-cache reuse.
+   Session clear aborts tasks and resets the cache as today. Delete
+   `MAX_AVATAR_THUMBNAIL_ATTEMPTS`, retryability helpers and retry-count refs from
+   both `avatarThumbnails.ts` and `TimelineView.tsx`; add a source guard against
+   their return. RED tests cover the retry policy, success-after-retry, terminal
+   exhaustion and failed-cache reuse.
 2. **Desktop notification sound remains an explicit platform-adapter exception.**
    Rust continues to own the authoritative badge count, attention candidate,
    capability facts and user settings. The renderer adapter may retain only the
@@ -397,15 +400,20 @@ separate, independently reviewable slice:
    sound port. This exception remains covered by `desktopAttention.test.ts` and
    ends when a native Core-owned notification dispatcher replaces that port; it
    must not expand into Matrix attention classification.
-3. **Room role choices are already Rust-owned and are pinned as such.**
-   Room/Space member DTOs carry `role_options`, including arbitrary current
-   power levels; React renders those options and dispatches the selected numeric
-   level. Production React must not synthesize `[0, 50, 100]`. Existing
-   reducer/panel tests and the semantic-owner checker pin this boundary.
+3. **Room and Space role choices become uniformly Rust-owned.**
+   Space-member DTOs already carry `role_options`; extend regular
+   `RoomMemberSummary` with the same Rust-owned option shape, including arbitrary
+   current power levels and permission-aware allowed targets. `PeoplePanel`
+   renders those options and dispatches the selected numeric level. Delete its
+   production `[100, 50, 0]` ladder. Reducer/projection/panel tests and the
+   semantic-owner checker pin both room and Space boundaries.
 
-Verification adds focused avatar Core tests, removes frontend retry/count tests,
-keeps the notification exception tests, checks no production role constants,
-and reruns the full Rust/frontend/browser matrix before final review.
+Update `docs/architecture/frontend-ownership-inventory.md` so its avatar row
+moves retry/release ownership from renderer to Core and records only visibility
+as renderer-owned. Verification adds focused avatar Core tests, removes frontend
+retry/count tests, keeps the notification exception tests, checks no production
+role constants, and reruns the full Rust/frontend/browser matrix before final
+review.
 
 ## Non-Goals
 
