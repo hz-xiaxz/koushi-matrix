@@ -46,7 +46,15 @@ fn normalize_space_child_room_ids(
 }
 
 /// Convert `MatrixRoomListSnapshot` rooms into `RoomSummary` values.
+#[cfg(test)]
 pub(super) fn normalize_rooms(snapshot: &koushi_sdk::MatrixRoomListSnapshot) -> Vec<RoomSummary> {
+    normalize_rooms_with_previous(snapshot, &[])
+}
+
+pub(super) fn normalize_rooms_with_previous(
+    snapshot: &koushi_sdk::MatrixRoomListSnapshot,
+    previous_rooms: &[RoomSummary],
+) -> Vec<RoomSummary> {
     let mut rooms: Vec<RoomSummary> = snapshot
         .rooms
         .iter()
@@ -119,6 +127,34 @@ pub(super) fn normalize_rooms(snapshot: &koushi_sdk::MatrixRoomListSnapshot) -> 
             })
             .collect();
     assign_dm_space_ids(&mut rooms, &space_members);
+
+    let previous_dm_spaces: std::collections::BTreeMap<&str, BTreeSet<&str>> = previous_rooms
+        .iter()
+        .filter(|room| room.is_dm)
+        .map(|room| {
+            (
+                room.room_id.as_str(),
+                room.dm_space_ids.iter().map(String::as_str).collect(),
+            )
+        })
+        .collect();
+    for room in rooms.iter_mut().filter(|room| room.is_dm) {
+        let Some(previous) = previous_dm_spaces.get(room.room_id.as_str()) else {
+            continue;
+        };
+        room.dm_space_ids.extend(
+            snapshot
+                .spaces
+                .iter()
+                .filter(|space| {
+                    !snapshot.complete_space_member_ids.contains(&space.space_id)
+                        && previous.contains(space.space_id.as_str())
+                })
+                .map(|space| space.space_id.clone()),
+        );
+        room.dm_space_ids.sort();
+        room.dm_space_ids.dedup();
+    }
     rooms
 }
 

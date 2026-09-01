@@ -1,4 +1,7 @@
-use super::{normalize_invites, normalize_rooms, normalize_spaces, normalize_user_profiles};
+use super::{
+    normalize_invites, normalize_rooms, normalize_rooms_with_previous, normalize_spaces,
+    normalize_user_profiles,
+};
 
 use koushi_sdk::{
     MatrixConversationActivity, MatrixConversationActivitySource, MatrixInvitePreview,
@@ -7,6 +10,7 @@ use koushi_sdk::{
 use koushi_sdk::{MatrixRoomListRoom, MatrixRoomListSnapshot, MatrixRoomListSpace, MatrixRoomTags};
 
 use koushi_state::{AvatarImage, AvatarThumbnailState, RoomTagInfo, UserProfile};
+use std::collections::BTreeSet;
 
 #[test]
 fn normalize_rooms_preserves_typed_conversation_activity_and_opaque_recency() {
@@ -331,6 +335,49 @@ fn normalize_rooms_uses_direct_space_child_state_as_parent() {
 }
 
 #[test]
+fn partial_space_membership_preserves_known_dm_association_until_complete() {
+    let snapshot = |members_complete: bool, member_user_ids: Vec<String>| MatrixRoomListSnapshot {
+        spaces: vec![MatrixRoomListSpace {
+            space_id: "space-a".to_owned(),
+            display_name: "Space A".to_owned(),
+            avatar_mxc_uri: None,
+            child_room_ids: Vec::new(),
+            member_user_ids,
+        }],
+        complete_space_member_ids: members_complete
+            .then(|| "space-a".to_owned())
+            .into_iter()
+            .collect(),
+        rooms: vec![MatrixRoomListRoom {
+            room_id: "dm-alice".to_owned(),
+            display_name: "Alice".to_owned(),
+            avatar_mxc_uri: None,
+            is_dm: true,
+            dm_user_ids: vec!["@alice".to_owned()],
+            tags: MatrixRoomTags::default(),
+            unread_count: 0,
+            notification_count: 0,
+            highlight_count: 0,
+            marked_unread: false,
+            recency_stamp: None,
+            conversation_activity: None,
+            latest_event: None,
+            parent_space_ids: Vec::new(),
+            is_encrypted: false,
+            joined_members: 0,
+        }],
+        ..MatrixRoomListSnapshot::default()
+    };
+
+    let known = normalize_rooms(&snapshot(true, vec!["@alice".to_owned()]));
+    let partial = normalize_rooms_with_previous(&snapshot(false, Vec::new()), &known);
+    assert_eq!(partial[0].dm_space_ids, vec!["space-a"]);
+
+    let complete = normalize_rooms_with_previous(&snapshot(true, Vec::new()), &partial);
+    assert!(complete[0].dm_space_ids.is_empty());
+}
+
+#[test]
 fn normalize_rooms_assigns_dm_space_ids_by_counterpart_membership() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: vec![MatrixRoomListSpace {
@@ -495,6 +542,7 @@ fn normalize_user_profiles_preserves_member_profile_fields() {
 fn normalize_rooms_carries_sdk_room_tags() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: vec![],
+        complete_space_member_ids: BTreeSet::new(),
         rooms: vec![MatrixRoomListRoom {
             room_id: "!room1:example.test".to_owned(),
             display_name: "Room 1".to_owned(),

@@ -3,7 +3,7 @@ use super::actor::{
     RoomMessage,
 };
 use super::normalization::{
-    normalize_invites, normalize_rooms, normalize_spaces, normalize_user_profiles,
+    normalize_invites, normalize_rooms_with_previous, normalize_spaces, normalize_user_profiles,
     replace_known_room_ids,
 };
 use crate::direct_message_classification::{DirectAccountDataSource, DirectClassificationState};
@@ -18,7 +18,7 @@ use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, reco
 use koushi_sdk::{
     MatrixClientSession, MatrixRoomListRoom, MatrixRoomListSnapshot, MatrixRoomListSpace,
 };
-use koushi_state::{AppAction, RoomListSource};
+use koushi_state::{AppAction, RoomListSource, RoomSummary};
 use matrix_sdk::ruma::events::direct::DirectEvent;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -46,6 +46,9 @@ pub(super) enum RoomListObservationCommand {
     Refresh,
     RefreshRoom {
         room_id: String,
+    },
+    HydrateSpaceMembers {
+        space_id: String,
     },
     Reconcile {
         backend_generation: u64,
@@ -227,6 +230,7 @@ async fn project_live_entries_and_ack_if_reconciled(
     current: &eyeball_im::Vector<matrix_sdk_ui::room_list_service::RoomListItem>,
     direct_state: &DirectClassificationState,
     known_room_ids: &Arc<RwLock<BTreeSet<String>>>,
+    known_dm_rooms: &Arc<RwLock<Vec<RoomSummary>>>,
     room_tx: &mpsc::Sender<RoomMessage>,
     action_tx: &mpsc::Sender<Vec<AppAction>>,
     event_tx: &broadcast::Sender<CoreEvent>,
@@ -268,6 +272,7 @@ async fn project_live_entries_and_ack_if_reconciled(
         current,
         direct_state.authoritative_targets(),
         known_room_ids,
+        known_dm_rooms,
         room_tx,
         action_tx,
         event_tx,
@@ -382,6 +387,7 @@ fn projected_direct_room_count(
 async fn project_room_list_snapshot(
     snapshot: &koushi_sdk::MatrixRoomListSnapshot,
     known_room_ids: &Arc<RwLock<BTreeSet<String>>>,
+    known_dm_rooms: &Arc<RwLock<Vec<RoomSummary>>>,
     room_tx: Option<&mpsc::Sender<RoomMessage>>,
     action_tx: &mpsc::Sender<Vec<AppAction>>,
     event_tx: &broadcast::Sender<CoreEvent>,
@@ -390,7 +396,11 @@ async fn project_room_list_snapshot(
     authoritative: bool,
 ) -> bool {
     let spaces = normalize_spaces(snapshot);
-    let rooms = normalize_rooms(snapshot);
+    let previous_dm_rooms = known_dm_rooms
+        .read()
+        .map(|rooms| rooms.clone())
+        .unwrap_or_default();
+    let rooms = normalize_rooms_with_previous(snapshot, &previous_dm_rooms);
     let invites = normalize_invites(snapshot);
     let user_profiles = normalize_user_profiles(snapshot);
     unread_trace::trace_room_list_snapshot(&rooms);
@@ -404,6 +414,18 @@ async fn project_room_list_snapshot(
             .field(DiagnosticField::boolean("authoritative", authoritative))
             .field(DiagnosticField::count("rooms_count", rooms.len() as u64))
             .field(DiagnosticField::count("spaces_count", spaces.len() as u64))
+            .field(DiagnosticField::count(
+                "complete_space_membership_count",
+                snapshot.complete_space_member_ids.len() as u64,
+            ))
+            .field(DiagnosticField::count(
+                "partial_space_membership_count",
+                snapshot
+                    .spaces
+                    .len()
+                    .saturating_sub(snapshot.complete_space_member_ids.len())
+                    as u64,
+            ))
             .field(DiagnosticField::count(
                 "invites_count",
                 invites.len() as u64,
@@ -464,8 +486,17 @@ async fn project_room_list_snapshot(
         .is_ok();
     let has_payload =
         !projected_rooms.is_empty() || !snapshot.spaces.is_empty() || !snapshot.invites.is_empty();
-    if delivered && (authoritative || has_payload) {
-        let _ = event_tx.send(CoreEvent::Room(RoomEvent::RoomListUpdated));
+    if delivered {
+        if let Ok(mut known) = known_dm_rooms.write() {
+            *known = projected_rooms
+                .iter()
+                .filter(|room| room.is_dm)
+                .cloned()
+                .collect();
+        }
+        if authoritative || has_payload {
+            let _ = event_tx.send(CoreEvent::Room(RoomEvent::RoomListUpdated));
+        }
     }
     delivered
 }
@@ -568,6 +599,7 @@ async fn run_live_room_list_observation(
     session: Arc<MatrixClientSession>,
     service: Arc<matrix_sdk_ui::room_list_service::RoomListService>,
     known_room_ids: Arc<RwLock<BTreeSet<String>>>,
+    known_dm_rooms: Arc<RwLock<Vec<RoomSummary>>>,
     room_tx: mpsc::Sender<RoomMessage>,
     action_tx: mpsc::Sender<Vec<AppAction>>,
     event_tx: broadcast::Sender<CoreEvent>,
@@ -603,6 +635,7 @@ async fn run_live_room_list_observation(
         session,
         service,
         known_room_ids,
+        known_dm_rooms,
         room_tx,
         action_tx,
         event_tx,
@@ -629,6 +662,7 @@ async fn run_live_room_list_observation(
         session,
         service,
         known_room_ids,
+        known_dm_rooms,
         room_tx,
         action_tx,
         event_tx,
@@ -653,6 +687,7 @@ async fn run_live_room_list_observation_with_sources(
     session: Arc<MatrixClientSession>,
     service: Arc<matrix_sdk_ui::room_list_service::RoomListService>,
     known_room_ids: Arc<RwLock<BTreeSet<String>>>,
+    known_dm_rooms: Arc<RwLock<Vec<RoomSummary>>>,
     room_tx: mpsc::Sender<RoomMessage>,
     action_tx: mpsc::Sender<Vec<AppAction>>,
     event_tx: broadcast::Sender<CoreEvent>,
@@ -835,6 +870,47 @@ async fn run_live_room_list_observation_with_sources(
                         // vanishing from the sidebar.
                         observed_snapshot = Some(snapshot.into_entries());
                     }
+                    RoomListObservationCommand::HydrateSpaceMembers { space_id } => {
+                        let mut attempted = false;
+                        let mut succeeded = false;
+                        let mut complete = false;
+                        if let Ok(space_id) = matrix_sdk::ruma::OwnedRoomId::try_from(space_id)
+                            && let Some(room) = session.client().get_room(&space_id)
+                            && room.is_space()
+                        {
+                            complete = room.are_members_synced();
+                            if !complete {
+                                attempted = true;
+                                succeeded = executor::timeout(
+                                    Duration::from_secs(10),
+                                    room.members(matrix_sdk::RoomMemberships::JOIN),
+                                )
+                                .await
+                                .is_ok_and(|result| result.is_ok());
+                                complete = room.are_members_synced();
+                            }
+                        }
+                        record(
+                            DiagnosticEvent::new(
+                                if attempted && !succeeded {
+                                    DiagnosticLevel::Warn
+                                } else {
+                                    DiagnosticLevel::Debug
+                                },
+                                "core.room",
+                                "dm_space_membership_hydration",
+                            )
+                            .field(DiagnosticField::boolean("attempted", attempted))
+                            .field(DiagnosticField::boolean("succeeded", succeeded))
+                            .field(DiagnosticField::boolean("complete", complete)),
+                        );
+                        let snapshot = all_rooms.current_entries_snapshot();
+                        reconciliation.report_maximum(snapshot.maximum_number_of_rooms());
+                        if let Some(range_fully_loaded) = snapshot.range_fully_loaded() {
+                            reconciliation.report_range_fully_loaded(range_fully_loaded);
+                        }
+                        observed_snapshot = Some(snapshot.into_entries());
+                    }
                     RoomListObservationCommand::RefreshRoom { room_id } => {
                         let requested_room_id =
                             matrix_sdk::ruma::OwnedRoomId::try_from(room_id.as_str()).ok();
@@ -934,6 +1010,7 @@ async fn run_live_room_list_observation_with_sources(
                     observed_snapshot.as_ref().unwrap_or(&current),
                     &direct_state,
                     &known_room_ids,
+                    &known_dm_rooms,
                     &room_tx,
                     &action_tx,
                     &event_tx,
@@ -969,6 +1046,7 @@ async fn run_live_room_list_observation_with_sources(
                             &current,
                             &direct_state,
                             &known_room_ids,
+                            &known_dm_rooms,
                             &room_tx,
                             &action_tx,
                             &event_tx,
@@ -1002,6 +1080,7 @@ async fn run_live_room_list_observation_with_sources(
                         &current,
                         &direct_state,
                         &known_room_ids,
+                        &known_dm_rooms,
                         &room_tx,
                         &action_tx,
                         &event_tx,
@@ -1047,6 +1126,7 @@ async fn run_live_room_list_observation_with_sources(
                         &current,
                         &direct_state,
                         &known_room_ids,
+                        &known_dm_rooms,
                         &room_tx,
                         &action_tx,
                         &event_tx,
@@ -1181,6 +1261,7 @@ async fn run_live_room_list_observation_with_sources(
                         &current,
                         &direct_state,
                         &known_room_ids,
+                        &known_dm_rooms,
                         &room_tx,
                         &action_tx,
                         &event_tx,
@@ -1256,6 +1337,7 @@ async fn run_live_room_list_observation_with_sources(
                                 &current,
                                 &direct_state,
                                 &known_room_ids,
+                                &known_dm_rooms,
                                 &room_tx,
                                 &action_tx,
                                 &event_tx,
@@ -1426,6 +1508,7 @@ async fn normalize_and_project_entries(
     current: &eyeball_im::Vector<matrix_sdk_ui::room_list_service::RoomListItem>,
     direct_targets_by_room: Option<&koushi_sdk::MatrixDirectTargetsByRoom>,
     known_room_ids: &Arc<RwLock<BTreeSet<String>>>,
+    known_dm_rooms: &Arc<RwLock<Vec<RoomSummary>>>,
     room_tx: &mpsc::Sender<RoomMessage>,
     action_tx: &mpsc::Sender<Vec<AppAction>>,
     event_tx: &broadcast::Sender<CoreEvent>,
@@ -1539,6 +1622,7 @@ async fn normalize_and_project_entries(
     project_room_list_snapshot(
         &snapshot,
         known_room_ids,
+        known_dm_rooms,
         Some(room_tx),
         action_tx,
         event_tx,
@@ -1736,6 +1820,7 @@ impl RoomActor {
             session,
             service,
             self.known_room_ids.clone(),
+            self.known_dm_rooms.clone(),
             self.self_tx.clone(),
             self.action_tx.clone(),
             self.event_tx.clone(),
@@ -1799,7 +1884,8 @@ impl RoomActor {
             let retry_room_id = match &command {
                 RoomListObservationCommand::Refresh => None,
                 RoomListObservationCommand::RefreshRoom { room_id } => Some(room_id.clone()),
-                RoomListObservationCommand::Reconcile { .. } => return,
+                RoomListObservationCommand::HydrateSpaceMembers { .. }
+                | RoomListObservationCommand::Reconcile { .. } => return,
             };
             let command_tx = observation.command_tx.clone();
             let _ = command_tx.try_send(command);

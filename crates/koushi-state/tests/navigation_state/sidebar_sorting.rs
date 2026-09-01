@@ -856,6 +856,42 @@ fn room_list_activity_sort_keeps_a_messaged_dm_ahead_of_a_newer_join_only_dm() {
 }
 
 #[test]
+fn active_space_people_projection_matches_sidebar_dm_scope() {
+    let rooms = vec![
+        active_sort_room("matching", true, &[], &["space-a"], None),
+        active_sort_room("outside", true, &[], &[], None),
+    ];
+
+    let projection = compute_room_list_projection(
+        RoomListFilter::People,
+        RoomListSort::Activity,
+        Some("space-a"),
+        &[],
+        &rooms,
+        &HashMap::new(),
+        &[],
+    );
+    let sidebar = compose_sidebar(Some("space-a"), &[], &rooms);
+
+    assert_eq!(
+        projection
+            .items
+            .iter()
+            .map(|item| item.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["matching"]
+    );
+    assert_eq!(
+        sidebar
+            .global_dms
+            .iter()
+            .map(|item| item.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["matching"]
+    );
+}
+
+#[test]
 fn room_list_activity_sort_uses_labels_then_room_ids_as_a_stable_fallback() {
     let rooms = vec![
         dm_room_for_activity("room-z", "alpha", None),
