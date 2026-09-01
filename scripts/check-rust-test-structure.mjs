@@ -1804,7 +1804,7 @@ export function checkCoreRoomSpaceInviteCancellationOrder() {
 
 export function checkCoreStoreFileCredentialCfg() {
   const rule = "core.store.file_credential_cfg";
-  const source = coreSource("store/credential_backend.rs");
+  const source = readRustSource("crates/koushi-store/src/credential_backend.rs");
   const failures = [];
   for (const marker of [
     'cfg(any(debug_assertions, test, feature = "test-hooks"))',

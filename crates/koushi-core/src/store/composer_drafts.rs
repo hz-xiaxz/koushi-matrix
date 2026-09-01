@@ -4,12 +4,8 @@ use std::path::PathBuf;
 #[cfg(any(test, feature = "test-hooks"))]
 use super::ComposerDraftIoProbe;
 use super::{
-    COMPOSER_DRAFTS_FILE_MAGIC, COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, StoreActor,
-    decode_composer_draft_payload_json, encode_composer_draft_payload_json,
-};
-use chacha20poly1305::{
-    ChaCha20Poly1305, Key, KeyInit, Nonce,
-    aead::{Aead, OsRng, rand_core::RngCore},
+    COMPOSER_DRAFTS_FILE_MAGIC, CoreFailure, StoreActor, decode_composer_draft_payload_json,
+    encode_composer_draft_payload_json,
 };
 use koushi_key::LocalUnlockSecret;
 use koushi_protocol::SessionKeyId;
@@ -461,7 +457,7 @@ impl StoreActor {
             .swap(false, std::sync::atomic::Ordering::AcqRel);
         #[cfg(not(test))]
         let fail_before_persist = false;
-        crate::file::atomic_replace_file(&path, &payload, fail_before_persist)
+        koushi_store::atomic_replace_file(&path, &payload, fail_before_persist)
             .map_err(|_| CoreFailure::StoreUnavailable)
     }
 
@@ -581,19 +577,13 @@ fn encrypt_composer_drafts_plaintext(
     plaintext: &[u8],
 ) -> Result<Vec<u8>, CoreFailure> {
     let key = secret.derive_composer_drafts_key();
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_bytes()));
-    let mut nonce_bytes = [0_u8; COMPOSER_DRAFTS_NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce_bytes);
-    let ciphertext = cipher
-        .encrypt(Nonce::from_slice(&nonce_bytes), plaintext.as_ref())
-        .map_err(|_| CoreFailure::StoreUnavailable)?;
-    let mut payload = Vec::with_capacity(
-        COMPOSER_DRAFTS_FILE_MAGIC.len() + COMPOSER_DRAFTS_NONCE_LEN + ciphertext.len(),
-    );
-    payload.extend_from_slice(COMPOSER_DRAFTS_FILE_MAGIC);
-    payload.extend_from_slice(&nonce_bytes);
-    payload.extend_from_slice(&ciphertext);
-    Ok(payload)
+    koushi_store::encrypt_envelope(
+        COMPOSER_DRAFTS_FILE_MAGIC,
+        key.as_bytes(),
+        plaintext,
+        usize::MAX,
+    )
+    .map_err(|_| CoreFailure::StoreUnavailable)
 }
 
 #[cfg(test)]
@@ -608,18 +598,14 @@ fn decrypt_composer_drafts_payload(
     secret: &LocalUnlockSecret,
     payload: &[u8],
 ) -> Result<ComposerDraftStore, CoreFailure> {
-    let header_len = COMPOSER_DRAFTS_FILE_MAGIC.len() + COMPOSER_DRAFTS_NONCE_LEN;
-    if payload.len() < header_len || !payload.starts_with(COMPOSER_DRAFTS_FILE_MAGIC) {
-        return Err(CoreFailure::StoreUnavailable);
-    }
-    let nonce_start = COMPOSER_DRAFTS_FILE_MAGIC.len();
-    let nonce_end = nonce_start + COMPOSER_DRAFTS_NONCE_LEN;
-    let nonce = Nonce::from_slice(&payload[nonce_start..nonce_end]);
     let key = secret.derive_composer_drafts_key();
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_bytes()));
-    let plaintext = cipher
-        .decrypt(nonce, &payload[nonce_end..])
-        .map_err(|_| CoreFailure::StoreUnavailable)?;
+    let plaintext = koushi_store::decrypt_envelope(
+        COMPOSER_DRAFTS_FILE_MAGIC,
+        key.as_bytes(),
+        payload,
+        usize::MAX,
+    )
+    .map_err(|_| CoreFailure::StoreUnavailable)?;
     decode_composer_draft_payload_json(&plaintext).map_err(|_| CoreFailure::StoreUnavailable)
 }
 

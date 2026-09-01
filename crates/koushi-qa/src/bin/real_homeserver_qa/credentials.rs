@@ -78,7 +78,7 @@ pub(super) fn assert_file_credential_store_active() -> Result<(), String> {
              {ENV_FILE_CREDENTIAL_STORE_DIR} is not set"
         ));
     }
-    if !koushi_core::store::resolved_credential_backend_is_file_dir() {
+    if !koushi_store::resolved_credential_backend_is_file_dir() {
         return Err(
             "real-homeserver-qa refuses to run against the OS keychain: \
              resolved credential store backend is not the file-dir backend"

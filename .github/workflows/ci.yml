@@ -112,12 +112,14 @@ jobs:
         run: node --test scripts/check-diagnostic-test-isolation.test.mjs
       - name: Diagnostic test isolation guard
         run: node scripts/check-diagnostic-test-isolation.mjs
-      - name: Protocol and QA boundary checker tests
-        run: node --test scripts/check-protocol-qa-boundaries.test.mjs scripts/check-domain-crate-platform-deps.test.mjs
+      - name: Protocol, QA, domain, and leaf boundary checker tests
+        run: node --test scripts/check-protocol-qa-boundaries.test.mjs scripts/check-domain-crate-platform-deps.test.mjs scripts/check-leaf-crate-boundaries.test.mjs
       - name: Protocol and QA boundary guard
         run: node scripts/check-protocol-qa-boundaries.mjs
       - name: Domain and protocol dependency guard
         run: node scripts/check-domain-crate-platform-deps.mjs
+      - name: Leaf crate boundary guard
+        run: node scripts/check-leaf-crate-boundaries.mjs
       - name: Rust test structure checker tests
         run: node --test scripts/check-rust-test-structure.test.mjs
       - name: Rust test structure checker

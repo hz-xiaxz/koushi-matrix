@@ -25,8 +25,8 @@ use crate::executor;
 use crate::link_preview::LinkPreviewContext;
 use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 
-use crate::store::CredentialStoreBackend;
 use crate::store::StoreActor;
+use koushi_store::CredentialStoreBackend;
 
 use crate::timeline::NavigationProjectionIngress;
 
@@ -323,7 +323,7 @@ async fn reset_local_data_clears_current_account_persistence_and_signs_out_local
         device_id: "RESETDEVICE".to_owned(),
     };
     let store = StoreActor::with_backend(
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path())),
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path())),
         data_dir.path(),
     );
     let store_config = store
@@ -526,7 +526,7 @@ async fn reset_local_data_clears_current_account_persistence_and_signs_out_local
     );
 
     let check_backend =
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path()));
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path()));
     assert!(koushi_key::is_missing_credential_error(
         &check_backend
             .load_matrix_session(&key_id)
@@ -546,7 +546,7 @@ async fn reset_local_data_clears_current_account_persistence_and_signs_out_local
         None
     );
     let check_store = StoreActor::with_backend(
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path())),
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path())),
         data_dir.path(),
     );
     assert_eq!(

@@ -44,8 +44,8 @@ use crate::link_preview::LinkPreviewContext;
 use koushi_protocol::failure::{CoreFailure, RecoveryFailureKind};
 use koushi_protocol::ids::RuntimeConnectionId;
 
-use crate::store::CredentialStoreBackend;
 use crate::store::StoreActor;
+use koushi_store::CredentialStoreBackend;
 
 use tempfile::tempdir;
 
@@ -301,7 +301,7 @@ async fn actor_sas_settlement_emits_exactly_one_terminal_and_clears_runtime() {
     let cred_dir = tempdir().expect("credential tempdir");
     let data_dir = tempdir().expect("data tempdir");
     let store = StoreActor::with_backend(
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path())),
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path())),
         data_dir.path(),
     );
     let (action_tx, mut action_rx) = mpsc::channel(16);

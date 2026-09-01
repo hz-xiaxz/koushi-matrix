@@ -92,6 +92,9 @@ test("CI and npm scripts use the unified workspace contracts", () => {
   assert.match(ci, /cargo test -p koushi-desktop/);
   assert.match(ci, /node --test scripts\/check-rust-test-structure\.test\.mjs/);
   assert.match(ci, /node scripts\/check-rust-test-structure\.mjs/);
+  assert.match(ci, /node --test[^\n]*check-leaf-crate-boundaries\.test\.mjs/);
+  assert.match(ci, /node scripts\/check-leaf-crate-boundaries\.mjs/);
+  assert.match(packageJson, /"lint:domain-deps": "[^"]*check-leaf-crate-boundaries\.mjs"/);
   assert.match(packageJson, /"lint:rust-test-structure": "node \.\.\/\.\.\/scripts\/check-rust-test-structure\.mjs"/);
   assert.match(releaseGate, /cargo check[\s\S]*-p[\s\S]*koushi-desktop/);
 });

@@ -562,12 +562,11 @@ describe("desktop release scripts", () => {
     ]);
   });
 
-  test("QA file credential store is gated to debug, test, and test-hooks builds in core", () => {
-    // The credential store moved into koushi-core (StoreActor) when
-    // src-tauri became a pure transport adapter; the compile-time gate lives
-    // there now.
+  test("QA file credential store is gated to debug, test, and test-hooks builds in koushi-store", () => {
+    // StoreActor remains Core's policy owner while the credential mechanism
+    // and its compile-time gate live in the persistence leaf.
     const credentialStore = readFileSync(
-      new URL("../../../../crates/koushi-core/src/store/credential_backend.rs", import.meta.url),
+      new URL("../../../../crates/koushi-store/src/credential_backend.rs", import.meta.url),
       "utf8"
     );
 

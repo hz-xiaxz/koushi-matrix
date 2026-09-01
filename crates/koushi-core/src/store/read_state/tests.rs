@@ -9,8 +9,8 @@ fn atomic_read_state_outbox_replace_overwrites_an_existing_file() {
     let directory = tempdir().expect("tempdir");
     let path = directory.path().join("outbox.enc");
 
-    crate::file::atomic_replace_file(&path, b"first", false).expect("first atomic write");
-    crate::file::atomic_replace_file(&path, b"second", false).expect("replacement atomic write");
+    koushi_store::atomic_replace_file(&path, b"first", false).expect("first atomic write");
+    koushi_store::atomic_replace_file(&path, b"second", false).expect("replacement atomic write");
 
     assert_eq!(std::fs::read(path).expect("read replacement"), b"second");
 }
@@ -146,7 +146,7 @@ fn write_legacy_read_state_outbox(
         ReadPersistenceV1Snapshot { entries },
     ))
     .expect("legacy outbox payload");
-    let payload = encrypt_read_state_outbox_payload(&secret, READ_STATE_OUTBOX_V1_MAGIC, plaintext)
+    let payload = encrypt_read_state_payload(&secret, READ_STATE_OUTBOX_V1_MAGIC, plaintext)
         .expect("legacy outbox encryption");
     let path = actor.account_read_state_outbox_v1_file(key_id);
     std::fs::create_dir_all(path.parent().expect("legacy outbox parent"))

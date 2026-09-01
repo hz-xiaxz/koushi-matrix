@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use koushi_state::SettingsValues;
+use koushi_store::atomic_replace_file;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SettingsStoreErrorKind {
@@ -52,10 +53,10 @@ impl SettingsStore {
         let json = serde_json::to_string_pretty(values).map_err(|_| SettingsStoreError {
             kind: SettingsStoreErrorKind::Corrupt,
         })?;
-        crate::file::atomic_replace_file(&self.path, format!("{json}\n").as_bytes(), false).map_err(
-            |_| SettingsStoreError {
+        atomic_replace_file(&self.path, format!("{json}\n").as_bytes(), false).map_err(|_| {
+            SettingsStoreError {
                 kind: SettingsStoreErrorKind::Io,
-            },
-        )
+            }
+        })
     }
 }

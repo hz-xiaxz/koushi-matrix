@@ -1,8 +1,4 @@
-use super::{COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, StoreActor};
-use chacha20poly1305::{
-    ChaCha20Poly1305, Key, KeyInit, Nonce,
-    aead::{Aead, OsRng, rand_core::RngCore},
-};
+use super::{CoreFailure, StoreActor};
 use koushi_key::LocalUnlockSecret;
 use koushi_protocol::SessionKeyId;
 use koushi_state::RoomPreferencesState;
@@ -62,37 +58,27 @@ fn encrypt_room_preferences_payload(
 ) -> Result<Vec<u8>, CoreFailure> {
     let plaintext = serde_json::to_vec(preferences).map_err(|_| CoreFailure::StoreUnavailable)?;
     let key = secret.derive_room_preferences_key();
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_bytes()));
-    let mut nonce_bytes = [0_u8; COMPOSER_DRAFTS_NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce_bytes);
-    let ciphertext = cipher
-        .encrypt(Nonce::from_slice(&nonce_bytes), plaintext.as_ref())
-        .map_err(|_| CoreFailure::StoreUnavailable)?;
-    let mut payload = Vec::with_capacity(
-        ROOM_PREFERENCES_FILE_MAGIC.len() + COMPOSER_DRAFTS_NONCE_LEN + ciphertext.len(),
-    );
-    payload.extend_from_slice(ROOM_PREFERENCES_FILE_MAGIC);
-    payload.extend_from_slice(&nonce_bytes);
-    payload.extend_from_slice(&ciphertext);
-    Ok(payload)
+    koushi_store::encrypt_envelope(
+        ROOM_PREFERENCES_FILE_MAGIC,
+        key.as_bytes(),
+        &plaintext,
+        usize::MAX,
+    )
+    .map_err(|_| CoreFailure::StoreUnavailable)
 }
 
 fn decrypt_room_preferences_payload(
     secret: &LocalUnlockSecret,
     payload: &[u8],
 ) -> Result<RoomPreferencesState, CoreFailure> {
-    let header_len = ROOM_PREFERENCES_FILE_MAGIC.len() + COMPOSER_DRAFTS_NONCE_LEN;
-    if payload.len() < header_len || !payload.starts_with(ROOM_PREFERENCES_FILE_MAGIC) {
-        return Err(CoreFailure::StoreUnavailable);
-    }
-    let nonce_start = ROOM_PREFERENCES_FILE_MAGIC.len();
-    let nonce_end = nonce_start + COMPOSER_DRAFTS_NONCE_LEN;
-    let nonce = Nonce::from_slice(&payload[nonce_start..nonce_end]);
     let key = secret.derive_room_preferences_key();
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_bytes()));
-    let plaintext = cipher
-        .decrypt(nonce, &payload[nonce_end..])
-        .map_err(|_| CoreFailure::StoreUnavailable)?;
+    let plaintext = koushi_store::decrypt_envelope(
+        ROOM_PREFERENCES_FILE_MAGIC,
+        key.as_bytes(),
+        payload,
+        usize::MAX,
+    )
+    .map_err(|_| CoreFailure::StoreUnavailable)?;
     serde_json::from_slice(&plaintext).map_err(|_| CoreFailure::StoreUnavailable)
 }
 

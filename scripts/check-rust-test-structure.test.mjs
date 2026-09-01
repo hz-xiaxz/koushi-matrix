@@ -205,7 +205,7 @@ test("timeline sources contain no Rust-source include embeddings", () => {
 
 test("room and credential source contracts have direct checker rules and no embeddings", () => {
   const scopedFiles = [
-    "crates/koushi-core/src/store/credential_backend.rs",
+    "crates/koushi-store/src/credential_backend.rs",
     ...scanRepository().files
       .filter((file) => file.startsWith("crates/koushi-core/src/room/"))
   ];

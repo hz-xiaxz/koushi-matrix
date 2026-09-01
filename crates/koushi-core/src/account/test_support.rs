@@ -10,11 +10,11 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use crate::account::actor::{AccountActor, AccountActorHandle, AccountMessage};
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
 use crate::link_preview::LinkPreviewContext;
-use crate::store::CredentialStoreBackend;
 use crate::store::StoreActor;
 use koushi_protocol::command::AccountCommand;
 use koushi_protocol::event::CoreEvent;
 use koushi_protocol::ids::RequestId;
+use koushi_store::CredentialStoreBackend;
 use tempfile::tempdir;
 
 pub(super) fn test_request_id() -> RequestId {
@@ -424,7 +424,7 @@ pub(super) fn spawn_actor_with_dirs_and_registry(
     broadcast::Receiver<CoreEvent>,
 ) {
     let store = StoreActor::with_backend(
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir)),
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir)),
         data_dir,
     );
     let (action_tx, action_rx) = mpsc::channel(16);
