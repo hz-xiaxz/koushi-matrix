@@ -205,7 +205,7 @@ describe("desktop release scripts", () => {
 
   test("redact/edit convergence QA is registered with its closed token", () => {
     const registry = readFileSync(
-      new URL("../../../../crates/koushi-core/src/bin/headless_core_qa/registry.rs", import.meta.url),
+      new URL("../../../../crates/koushi-qa/src/bin/headless_core_qa/registry.rs", import.meta.url),
       "utf8"
     );
     const runner = readFileSync(

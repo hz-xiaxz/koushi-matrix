@@ -1386,10 +1386,15 @@ function coreItemBody(relativePath, marker) {
   return rustItemBody(coreSource(relativePath), marker);
 }
 
+function protocolSource(relativePath) {
+  const fileName = `crates/koushi-protocol/src/${relativePath}`;
+  return productionOnly(readRustSource(fileName), fileName);
+}
+
 export function checkCoreRuntimeRoleCommandPendingRoute() {
   const rule = "core.runtime.role_command_pending_route";
   const source = coreSource("runtime.rs");
-  const branch = sourceSection(source, "crate::command::RoomCommand::UpdateSpaceMemberRole {\n                        request_id", "CoreCommand::Timeline(timeline_command)");
+  const branch = sourceSection(source, "RoomCommand::UpdateSpaceMemberRole {\n                        request_id", "CoreCommand::Timeline(timeline_command)");
   const routeMarker = ".account_actor\n                    .send";
   const pending = branch?.indexOf("SpaceMemberRoleUpdateRequested") ?? -1;
   const route = branch?.indexOf(routeMarker) ?? -1;
@@ -1802,8 +1807,8 @@ export function checkCoreStoreFileCredentialCfg() {
   const source = coreSource("store/credential_backend.rs");
   const failures = [];
   for (const marker of [
-    'cfg(any(debug_assertions, test, feature = "qa-bin"))',
-    "// --- File-based credential store (debug/test/qa-bin only) ---"
+    'cfg(any(debug_assertions, test, feature = "test-hooks"))',
+    "// --- File-based credential store (debug/test/test-hooks only) ---"
   ])
     if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `file credential backend lacks ${marker}`));
   return failures;
@@ -2799,8 +2804,8 @@ export function checkCoreAccountE2eeTypedFailureClassification() {
   const failures = [];
   for (const marker of ["async fn handle_export_room_keys", "async fn handle_import_room_keys", "async fn handle_bootstrap_secure_backup", "async fn handle_change_secure_backup_passphrase"]) {
     const body = accountItemBody("recovery_backup.rs", marker);
-    if (!body?.includes("classify_e2ee_trust_error(&error)")) failures.push(sourceContractFailure(rule, `${marker} does not preserve typed failure classification`));
-    if (body?.includes("Err(_)")) failures.push(sourceContractFailure(rule, `${marker} erases typed errors before classification`));
+    if (!body?.includes("classify_e2ee_trust_error(&error)")) failures.push(sourceContractFailure(rule, `${marker} does not preserve typed SDK failure classification`));
+    if (!body?.includes("native_artifacts")) failures.push(sourceContractFailure(rule, `${marker} bypasses the native artifact port`));
   }
   if (!recovery.includes("InvalidPassphrase")) failures.push(sourceContractFailure(rule, "recovery source lacks InvalidPassphrase classification"));
   return failures;
@@ -2842,14 +2847,11 @@ export function checkCoreAccountSyncStopRouting() {
 
 export function checkCoreAccountManualSyncOnceGuard() {
   const rule = "core.account.manual_sync_once_guard";
-  const body = accountItemBody("routing.rs", "async fn route_sync_command");
+  const productionRoute = accountItemBody("routing.rs", "async fn route_sync_command");
+  const qaRoute = accountItemBody("routing.rs", "async fn route_sync_once_for_qa");
   const failures = [];
-  const guard = body?.indexOf("is_manual_sync_once(") ?? -1;
-  const spawn = body?.indexOf("self.spawn_sync_actor(") ?? -1;
-  const send = body?.indexOf("handle.send(SyncMessage::Command(command))") ?? -1;
-  if (guard < 0 || spawn < 0 || send < 0 || !(guard < spawn && guard < send)) failures.push(sourceContractFailure(rule, "manual SyncOnce guard does not precede actor routing"));
-  const guarded = guard >= 0 && spawn >= 0 ? body.slice(guard, spawn) : "";
-  for (const marker of ["CoreFailure::SyncFailed", "SyncFailureKind::Internal", "return;"]) if (!guarded.includes(marker)) failures.push(sourceContractFailure(rule, `manual SyncOnce rejection lacks ${marker}`));
+  if (productionRoute?.includes("SyncCommand::SyncOnce")) failures.push(sourceContractFailure(rule, "public Sync command routing still exposes SyncOnce"));
+  for (const marker of ["sync_once_for_qa", "CoreFailure::SyncFailed", "SyncFailureKind::Internal"]) if (!qaRoute?.includes(marker)) failures.push(sourceContractFailure(rule, `private SyncOnce QA route lacks ${marker}`));
   return failures;
 }
 
@@ -3149,7 +3151,7 @@ const coreQaSourcePaths = [
 ];
 
 function coreQaSource(relativePath) {
-  const file = `crates/koushi-core/src/${relativePath}`;
+  const file = `crates/koushi-qa/src/${relativePath}`;
   return productionOnly(readRustSource(file), file);
 }
 
@@ -3220,13 +3222,13 @@ export function checkCoreQaMultiDeviceOrder() {
   const rule = "core.qa.multi_device_order";
   const stage = coreQaItemBody("bin/headless_core_qa/scenarios/identity.rs", "async fn verify_multi_user_multi_device_room_key_delivery_for_qa");
   const failures = [];
-  const ordered = ["refresh_device_keys_and_assert_known_for_qa(", "TimelineCommand::SendText", "let blacklist_id", "let blocked_send"];
+  const ordered = ["refresh_device_keys_and_assert_known_for_qa(", "TimelineCommand::SendText", "qa_set_local_device_blacklisted(", "let blocked_send"];
   const positions = ordered.map((marker) => stage?.indexOf(marker) ?? -1);
   if (positions.some((position) => position < 0) || positions.some((position, index) => index > 0 && positions[index - 1] >= position)) failures.push(sourceContractFailure(rule, "multi-device verification checkpoints are out of order"));
-  for (const marker of ["wait_for_send_flow_completion_with_timeout(", "E2EE_EVENT_TIMEOUT", "wait_for_withheld_event_projection_from_source(", "room_id: room_id.clone()", "blocked QA promote B3"]) if (!stage?.includes(marker)) failures.push(sourceContractFailure(rule, `multi-device stage lacks ${marker}`));
+  for (const marker of ["wait_for_send_flow_completion_with_timeout(", "E2EE_EVENT_TIMEOUT", "wait_for_withheld_event_projection_from_source(", "room_id.clone()", "blocked QA promote B3"]) if (!stage?.includes(marker)) failures.push(sourceContractFailure(rule, `multi-device stage lacks ${marker}`));
   for (const marker of ["AccountCommand::RequestVerification", "SyncCommand::SyncOnce"]) if (stage?.includes(marker)) failures.push(sourceContractFailure(rule, `multi-device stage contains forbidden ${marker}`));
   const helper = coreQaItemBody("bin/headless_core_qa/participants.rs", "async fn refresh_device_keys_and_assert_known_for_qa");
-  for (const marker of ["AccountCommand::QaRefreshDeviceKeysAndAssertKnown", "tokio::time::timeout(E2EE_EVENT_TIMEOUT, ack)"]) if (!helper?.includes(marker)) failures.push(sourceContractFailure(rule, `device refresh helper lacks ${marker}`));
+  for (const marker of ["qa_refresh_device_keys_and_assert_known", "tokio::time::timeout(", "E2EE_EVENT_TIMEOUT"]) if (!helper?.includes(marker)) failures.push(sourceContractFailure(rule, `device refresh helper lacks ${marker}`));
   for (const marker of ["AccountCommand::RequestVerification", "tokio::time::sleep"]) if (helper?.includes(marker)) failures.push(sourceContractFailure(rule, `device refresh helper contains forbidden ${marker}`));
   return failures;
 }
@@ -3472,7 +3474,7 @@ export function checkCoreQaNoObsoleteVerificationCascade() {
 export function checkCoreIntegrationSelectRoomRouting() {
   const rule = "core.integration.select_room_routing";
   const runtime = coreSource("runtime.rs");
-  const room = coreSource("command/room.rs");
+  const room = protocolSource("command/room.rs");
   const failures = [];
   for (const marker of ["User-intent lane: for SelectRoom, record the request_id→room_id", "terminal IntentLifecycle outcome", "AccountMessage::RoomCommand(room_command)", ".await;"]) if (!runtime.includes(marker)) failures.push(sourceContractFailure(rule, `SelectRoom route lacks ${marker}`));
   if (runtime.includes("try_send(crate::account::AccountMessage::RoomCommand")) failures.push(sourceContractFailure(rule, "SelectRoom uses lossy routing"));
@@ -3491,7 +3493,10 @@ export function checkCoreIntegrationRoomListReadiness() {
 
 export function checkCoreIntegrationNoLegacyModeVocabulary() {
   const rule = "core.integration.no_legacy_mode_vocabulary";
-  const source = ["event.rs", "state_delta.rs", "sync.rs", "room.rs"].map(coreSource).join("\n");
+  const source = [
+    protocolSource("event.rs"),
+    ...["state_delta.rs", "sync.rs", "room.rs"].map(coreSource)
+  ].join("\n");
   const failures = [];
   for (const marker of ["SyncBackendKind", "LegacySync", "ModeChanged", "SyncMode", "sync_mode", "RoomListSource::Legacy", "RoomListSource::SyncService"]) if (source.includes(marker)) failures.push(sourceContractFailure(rule, `legacy sync vocabulary remains: ${marker}`));
   return failures;

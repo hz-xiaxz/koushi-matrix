@@ -39,7 +39,7 @@ use crate::{
 };
 use koushi_protocol::command::SyncCommand;
 use koushi_protocol::event::{CoreEvent, SyncEvent};
-#[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+#[cfg(any(test, feature = "test-hooks"))]
 use koushi_protocol::failure::CoreFailure;
 use koushi_protocol::failure::SyncFailureKind;
 use koushi_protocol::ids::RequestId;
@@ -170,7 +170,7 @@ fn internal_observer_failure_at(reason: &'static str, ever_connected: bool) -> S
     internal_observer_failure(ever_connected)
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+#[cfg(any(test, feature = "test-hooks"))]
 fn sync_once_admitted(
     lifecycle: SyncLifecycle,
     sync_task_active: bool,
@@ -647,7 +647,7 @@ impl SyncActor {
         self.ignored_user_list_handler = Some(handle);
     }
 
-    #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+    #[cfg(any(test, feature = "test-hooks"))]
     async fn handle_sync_once(&self, request_id: RequestId) {
         if !sync_once_admitted(
             self.lifecycle,

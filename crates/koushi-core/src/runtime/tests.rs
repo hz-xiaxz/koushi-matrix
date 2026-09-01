@@ -1569,7 +1569,7 @@ fn verification_followup_commands_project_flow_id_without_speculative_cancel() {
     );
 }
 
-#[cfg(feature = "qa-bin")]
+#[cfg(feature = "test-hooks")]
 #[test]
 fn qa_device_key_refresh_has_no_speculative_app_projection() {
     let (acknowledged, _ack) = tokio::sync::oneshot::channel();

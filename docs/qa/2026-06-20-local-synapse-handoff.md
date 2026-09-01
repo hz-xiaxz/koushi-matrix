@@ -38,7 +38,7 @@ Commands run successfully after the final changes:
 ```bash
 npm --prefix apps/desktop run typecheck
 cargo fmt --check
-cargo test -p koushi-core --features qa-bin --bin headless-core-qa send_queue_proxy_forces_connection_close_per_request -- --nocapture
+cargo test -p koushi-qa --features qa-bin --bin headless-core-qa send_queue_proxy_forces_connection_close_per_request -- --nocapture
 cd apps/desktop && npx playwright test
 npm --prefix apps/desktop run qa:headless-local -- --run --server=synapse --scenario=all --core --core-backend=probed --timeout-ms=240000
 KOUSHI_QA_STRESS_SPACES=5 KOUSHI_QA_STRESS_ROOMS_PER_SPACE=8 KOUSHI_QA_STRESS_MESSAGES_PER_ROOM=30 npm --prefix apps/desktop run qa:headless-local -- --run --server=synapse --scenario=timeline_stress --core --core-backend=probed --timeout-ms=180000

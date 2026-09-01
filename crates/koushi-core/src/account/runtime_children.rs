@@ -427,7 +427,7 @@ impl AccountActor {
         let Some(handle) = self.sync_actor.take() else {
             return;
         };
-        #[cfg(feature = "qa-bin")]
+        #[cfg(feature = "test-hooks")]
         record(DiagnosticEvent::new(
             DiagnosticLevel::Debug,
             "core.account",

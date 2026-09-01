@@ -413,7 +413,7 @@ function runCoreHeadlessQa({
       "--quiet",
       ...cargoProfileArgs(),
       "-p",
-      "koushi-core",
+      "koushi-qa",
       "--features",
       "qa-bin",
       "--bin",

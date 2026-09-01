@@ -265,7 +265,7 @@ jobs:
         # `cargo test --workspace` skips them because both bin targets set
         # `required-features = ["qa-bin"]`, which is how a broken
         # `RoomCommand::SetSpaceChild` call sat on main undetected.
-        run: cargo test -p koushi-core --features qa-bin --bin headless-core-qa
+        run: cargo test -p koushi-qa --features qa-bin --bin headless-core-qa
       - name: Upload QA logs on failure
         if: failure()
         uses: actions/upload-artifact@v4

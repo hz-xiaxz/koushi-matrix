@@ -3212,6 +3212,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "koushi-qa"
+version = "0.1.0"
+dependencies = [
+ "koushi-core",
+ "koushi-diagnostics",
+ "koushi-key",
+ "koushi-protocol",
+ "koushi-sdk",
+ "koushi-state",
+ "matrix-sdk",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "koushi-sdk"
 version = "0.1.0"
 dependencies = [

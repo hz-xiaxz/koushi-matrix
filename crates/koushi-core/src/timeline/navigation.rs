@@ -161,7 +161,7 @@ pub(super) static DISPLAY_PROJECTION_RESET_FALLBACKS: AtomicU64 = AtomicU64::new
 
 /// QA/test observation point for the process-global projection reset fallback
 /// counter. Product behavior never branches on this diagnostic value.
-#[cfg(any(test, feature = "qa-bin"))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub fn display_projection_reset_fallback_count() -> u64 {
     DISPLAY_PROJECTION_RESET_FALLBACKS.load(Ordering::Relaxed)
 }

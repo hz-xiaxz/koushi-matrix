@@ -173,7 +173,7 @@ mod event_source;
 #[cfg(any(debug_assertions, test))]
 #[path = "real_homeserver_qa/startup_latency.rs"]
 mod startup_latency;
-#[cfg(all(test, feature = "test-hooks"))]
+#[cfg(all(test, feature = "qa-bin"))]
 #[path = "real_homeserver_qa/tests.rs"]
 mod tests;
 #[cfg(any(debug_assertions, test))]

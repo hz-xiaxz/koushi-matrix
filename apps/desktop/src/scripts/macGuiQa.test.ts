@@ -319,8 +319,10 @@ describe("desktop release scripts", () => {
 
     expect(source).toContain("KOUSHI_SKIP_KEYCHAIN_PERSISTENCE");
     expect(source).toContain("keychain_persistence_disabled_from_env");
-    expect(source).toContain("CoreRuntime::start_with_data_dir(data_dir.clone())");
-    expect(source).toContain("CoreRuntime::start_with_data_dir_and_os_backend");
+    expect(source).toContain("CoreRuntime::start_with_data_dir_and_native_artifact_port");
+    expect(source).toContain(
+      "CoreRuntime::start_with_data_dir_and_os_backend_and_native_artifact_port"
+    );
   });
 
   test("Tauri production adapter does not depend on the fixture backend crate", () => {
@@ -372,19 +374,19 @@ describe("desktop release scripts", () => {
       "crates/koushi-core/src/store.rs",
       "crates/koushi-core/src/runtime.rs",
       "crates/koushi-core/src/sync.rs",
-      "crates/koushi-core/src/bin/headless-core-qa.rs",
-      "crates/koushi-core/src/bin/headless_core_qa/registry.rs",
-      "crates/koushi-core/src/bin/headless_core_qa/event_wait.rs",
-      "crates/koushi-core/src/bin/headless_core_qa/participants.rs",
-      "crates/koushi-core/src/bin/headless_core_qa/fixtures.rs",
-      "crates/koushi-core/src/bin/headless_core_qa/cleanup.rs",
-      "crates/koushi-core/src/bin/headless_core_qa/diagnostics.rs",
-      "crates/koushi-core/src/bin/headless_core_qa/orchestrator.rs",
-      "crates/koushi-core/src/bin/headless_core_qa/scenarios/identity.rs",
-      "crates/koushi-core/src/bin/headless_core_qa/scenarios/rooms.rs",
-      "crates/koushi-core/src/bin/headless_core_qa/scenarios/timeline.rs",
-      "crates/koushi-core/src/bin/headless_core_qa/scenarios/search.rs",
-      "crates/koushi-core/src/bin/real-homeserver-qa.rs",
+      "crates/koushi-qa/src/bin/headless-core-qa.rs",
+      "crates/koushi-qa/src/bin/headless_core_qa/registry.rs",
+      "crates/koushi-qa/src/bin/headless_core_qa/event_wait.rs",
+      "crates/koushi-qa/src/bin/headless_core_qa/participants.rs",
+      "crates/koushi-qa/src/bin/headless_core_qa/fixtures.rs",
+      "crates/koushi-qa/src/bin/headless_core_qa/cleanup.rs",
+      "crates/koushi-qa/src/bin/headless_core_qa/diagnostics.rs",
+      "crates/koushi-qa/src/bin/headless_core_qa/orchestrator.rs",
+      "crates/koushi-qa/src/bin/headless_core_qa/scenarios/identity.rs",
+      "crates/koushi-qa/src/bin/headless_core_qa/scenarios/rooms.rs",
+      "crates/koushi-qa/src/bin/headless_core_qa/scenarios/timeline.rs",
+      "crates/koushi-qa/src/bin/headless_core_qa/scenarios/search.rs",
+      "crates/koushi-qa/src/bin/real-homeserver-qa.rs",
       "crates/koushi-sdk/src/lib.rs",
       "crates/koushi-key/src/lib.rs",
       "scripts/desktop-build-dmg.mjs",
@@ -560,7 +562,7 @@ describe("desktop release scripts", () => {
     ]);
   });
 
-  test("QA file credential store is gated to debug, test, and qa-bin builds in core", () => {
+  test("QA file credential store is gated to debug, test, and test-hooks builds in core", () => {
     // The credential store moved into koushi-core (StoreActor) when
     // src-tauri became a pure transport adapter; the compile-time gate lives
     // there now.
@@ -571,10 +573,10 @@ describe("desktop release scripts", () => {
 
     expect(credentialStore).toContain("const ENV_FILE_CREDENTIAL_STORE_DIR");
     expect(credentialStore).toMatch(
-      /#\[cfg\(any\(debug_assertions, test, feature = "qa-bin"\)\)\]\nconst ENV_FILE_CREDENTIAL_STORE_DIR/
+      /#\[cfg\(any\(debug_assertions, test, feature = "test-hooks"\)\)\]\nconst ENV_FILE_CREDENTIAL_STORE_DIR/
     );
     expect(credentialStore).toMatch(
-      /#\[cfg\(any\(debug_assertions, test, feature = "qa-bin"\)\)\]\n(?:#\[derive\([^\n]+\)\]\n)?pub struct FileCredentialStore/
+      /#\[cfg\(any\(debug_assertions, test, feature = "test-hooks"\)\)\]\n(?:#\[derive\([^\n]+\)\]\n)?pub struct FileCredentialStore/
     );
 
     // The transport adapter must not read the credential store at all — not

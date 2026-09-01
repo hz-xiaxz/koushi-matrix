@@ -13,7 +13,7 @@ use koushi_protocol::command::{
     RoomCommand, SearchCommand, SyncCommand, ThreadsListCommand, TimelineCommand,
 };
 use koushi_protocol::event::{CoreEvent, TimelineEvent};
-#[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+#[cfg(any(test, feature = "test-hooks"))]
 use koushi_protocol::failure::SyncFailureKind;
 use koushi_protocol::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
 use koushi_protocol::ids::{RequestId, TimelineKey, TimelineKind};

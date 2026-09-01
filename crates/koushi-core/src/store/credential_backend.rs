@@ -12,24 +12,24 @@ use koushi_state::LocalEncryptionHealth;
 use super::CREDENTIAL_STORE_SERVICE_NAME;
 
 /// Env var for QA/debug file-based credential store override.
-/// Only honored in debug/test/qa-bin builds; production release builds ignore it.
-#[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+/// Only honored in debug/test/test-hooks builds; production release builds ignore it.
+#[cfg(any(debug_assertions, test, feature = "test-hooks"))]
 const ENV_FILE_CREDENTIAL_STORE_DIR: &str = "KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR";
 
 /// Credential store backend. Production = either OS keychain (injected from
-/// the platform layer) or in-memory; debug/test/qa-bin may use a file dir
+/// the platform layer) or in-memory; debug/test/test-hooks may use a file dir
 /// override when `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR` is set.
 #[derive(Clone)]
 pub enum CredentialStoreBackend {
     OsKeychain(OsCredentialStore),
-    #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+    #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
     FileDir(FileCredentialStore),
     InMemory(CredentialStore<koushi_key::InMemoryCredentialBackend>),
 }
 
 impl CredentialStoreBackend {
     pub(super) fn resolve() -> Self {
-        #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+        #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
         if let Ok(dir) = std::env::var(ENV_FILE_CREDENTIAL_STORE_DIR) {
             let dir = PathBuf::from(dir);
             record_file_credential_store_active();
@@ -45,7 +45,7 @@ impl CredentialStoreBackend {
         data_dir: PathBuf,
         os_backend: Arc<dyn koushi_key::CredentialBackend>,
     ) -> Self {
-        #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+        #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
         if let Ok(dir) = std::env::var(ENV_FILE_CREDENTIAL_STORE_DIR) {
             let dir = PathBuf::from(dir);
             record_file_credential_store_active();
@@ -60,7 +60,7 @@ impl CredentialStoreBackend {
     ) -> Result<LocalUnlockSecret, koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.load(key_id),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => store.load(key_id),
             Self::InMemory(store) => store.load(key_id),
         }
@@ -73,7 +73,7 @@ impl CredentialStoreBackend {
     ) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.save(key_id, secret),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => store.save(key_id, secret),
             Self::InMemory(store) => store.save(key_id, secret),
         }
@@ -82,7 +82,7 @@ impl CredentialStoreBackend {
     pub(super) fn delete(&self, key_id: &SessionKeyId) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.delete(key_id),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => store.delete(key_id),
             Self::InMemory(store) => store.delete(key_id),
         }
@@ -99,7 +99,7 @@ impl CredentialStoreBackend {
     ) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.save_matrix_session(key_id, session),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => {
                 store.save_named(&key_id.matrix_session_account_name(), session.as_str())
             }
@@ -113,7 +113,7 @@ impl CredentialStoreBackend {
     ) -> Result<koushi_key::StoredMatrixSession, koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.load_matrix_session(key_id),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => {
                 let value = store.load_named(&key_id.matrix_session_account_name())?;
                 Ok(koushi_key::StoredMatrixSession::new(value))
@@ -129,7 +129,7 @@ impl CredentialStoreBackend {
     ) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.save_local_store_id(key_id, store_id),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => store.save_named(
                 &format!("local-store|{}", key_id.local_unlock_account_name()),
                 store_id.as_str(),
@@ -144,7 +144,7 @@ impl CredentialStoreBackend {
     ) -> Result<koushi_key::LocalStoreId, koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.load_local_store_id(key_id),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => koushi_key::LocalStoreId::parse(&store.load_named(
                 &format!("local-store|{}", key_id.local_unlock_account_name()),
             )?),
@@ -158,7 +158,7 @@ impl CredentialStoreBackend {
     ) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.delete_local_store_id(key_id),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => store.delete_named(&format!(
                 "local-store|{}",
                 key_id.local_unlock_account_name()
@@ -175,7 +175,7 @@ impl CredentialStoreBackend {
     ) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.save_pending_login_journal(value),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => {
                 store.save_named(koushi_key::pending_login_journal_account_name(), value)
             }
@@ -188,7 +188,7 @@ impl CredentialStoreBackend {
     ) -> Result<Option<String>, koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.load_pending_login_journal(),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => {
                 match store.load_named(koushi_key::pending_login_journal_account_name()) {
                     Ok(value) => Ok(Some(value)),
@@ -207,7 +207,7 @@ impl CredentialStoreBackend {
     pub fn delete_pending_login_journal(&self) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.delete_pending_login_journal(),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => {
                 store.delete_named(koushi_key::pending_login_journal_account_name())
             }
@@ -221,7 +221,7 @@ impl CredentialStoreBackend {
     ) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.save_local_store_migration(value),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => {
                 store.save_named(koushi_key::local_store_migration_account_name(), value)
             }
@@ -234,7 +234,7 @@ impl CredentialStoreBackend {
     ) -> Result<Option<String>, koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.load_local_store_migration(),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => {
                 match store.load_named(koushi_key::local_store_migration_account_name()) {
                     Ok(value) => Ok(Some(value)),
@@ -253,7 +253,7 @@ impl CredentialStoreBackend {
     pub fn delete_local_store_migration(&self) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.delete_local_store_migration(),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => {
                 store.delete_named(koushi_key::local_store_migration_account_name())
             }
@@ -267,7 +267,7 @@ impl CredentialStoreBackend {
     ) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.delete_matrix_session(key_id),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => store.delete_named(&key_id.matrix_session_account_name()),
             Self::InMemory(store) => store.delete_matrix_session(key_id),
         }
@@ -279,7 +279,7 @@ impl CredentialStoreBackend {
     ) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.save_last_session(key_id),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => {
                 let pointer = koushi_key::LastSessionPointer::new(key_id.clone());
                 let json = pointer.to_json()?;
@@ -292,7 +292,7 @@ impl CredentialStoreBackend {
     pub fn load_last_session(&self) -> Result<Option<SessionKeyId>, koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.load_last_session(),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => {
                 match store.load_named(koushi_key::last_session_account_name()) {
                     Ok(json) => Ok(Some(
@@ -311,7 +311,7 @@ impl CredentialStoreBackend {
     pub fn delete_last_session(&self) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.delete_last_session(),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => store.delete_named(koushi_key::last_session_account_name()),
             Self::InMemory(store) => store.delete_last_session(),
         }
@@ -322,7 +322,7 @@ impl CredentialStoreBackend {
     ) -> Result<koushi_key::SavedSessionIndex, koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.load_saved_sessions(),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => {
                 match store.load_named(koushi_key::saved_sessions_account_name()) {
                     Ok(json) => koushi_key::SavedSessionIndex::from_json(&json),
@@ -342,7 +342,7 @@ impl CredentialStoreBackend {
     ) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.remember_saved_session(key_id),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => {
                 let mut index = self.load_saved_sessions()?;
                 index.upsert(key_id.clone());
@@ -358,7 +358,7 @@ impl CredentialStoreBackend {
     ) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.forget_saved_session(key_id),
-            #[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => {
                 let mut index = self.load_saved_sessions()?;
                 index.remove(key_id);
@@ -800,21 +800,21 @@ pub(super) fn local_secret_error_health(
     }
 }
 
-// --- File-based credential store (debug/test/qa-bin only) ---
+// --- File-based credential store (debug/test/test-hooks only) ---
 
 /// A trivial file-based credential store used in unattended QA runs that
 /// cannot prompt macOS Keychain. Stored as plain files under `dir`; each
 /// entry is a separate file named after the account.
 ///
-/// COMPILE-TIME GATE: only present in debug/test/qa-bin builds.
+/// COMPILE-TIME GATE: only present in debug/test/test-hooks builds.
 /// Production release builds must not include this type.
-#[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+#[cfg(any(debug_assertions, test, feature = "test-hooks"))]
 #[derive(Clone)]
 pub struct FileCredentialStore {
     dir: PathBuf,
 }
 
-#[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+#[cfg(any(debug_assertions, test, feature = "test-hooks"))]
 impl FileCredentialStore {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
         Self { dir: dir.into() }
@@ -908,7 +908,7 @@ impl FileCredentialStore {
 }
 
 /// Make a name filesystem-safe by replacing all non-alphanumeric chars with `_`.
-#[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+#[cfg(any(debug_assertions, test, feature = "test-hooks"))]
 fn safe_filename(name: String) -> String {
     name.chars()
         .map(|c| {
@@ -921,10 +921,10 @@ fn safe_filename(name: String) -> String {
         .collect()
 }
 
-/// Debug/test/qa-bin-only diagnostic helper. Compiled out of production release
+/// Debug/test/test-hooks-only diagnostic helper. Compiled out of production release
 /// builds along with its only call site (the file credential store branch in
 /// `CredentialStoreBackend::resolve`).
-#[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+#[cfg(any(debug_assertions, test, feature = "test-hooks"))]
 fn record_file_credential_store_active() {
     record(
         DiagnosticEvent::new(DiagnosticLevel::Debug, "core.store", "credential_store")
@@ -970,14 +970,14 @@ fn credential_vault_failure_outcome(error: &koushi_key::LocalSecretError) -> &'s
 
 /// QA/debug structural guard: true only when the env-resolved credential
 /// store backend is the file-dir backend (i.e.
-/// `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR` is set in a debug/test/qa-bin
+/// `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR` is set in a debug/test/test-hooks
 /// build). Headless QA binaries call this BEFORE any login so unattended runs
 /// are structurally unable to reach the OS keychain (engineering-rules
 /// Secrets rule: keychain prompts during automation are failures).
 ///
 /// Production release builds have no file backend, so this symbol does not
 /// exist there and an app release cannot silently opt into file credentials.
-#[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+#[cfg(any(debug_assertions, test, feature = "test-hooks"))]
 pub fn resolved_credential_backend_is_file_dir() -> bool {
     matches!(
         CredentialStoreBackend::resolve(),

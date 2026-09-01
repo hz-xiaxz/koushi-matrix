@@ -6,6 +6,7 @@ members = [
     "crates/koushi-key",
     "crates/koushi-sdk",
     "crates/koushi-core",
+    "crates/koushi-qa",
     "crates/koushi-diagnostics",
     "crates/koushi-media",
     "apps/desktop/src-tauri",

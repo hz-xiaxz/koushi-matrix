@@ -6,7 +6,7 @@
 //! - If credential store or encryption cannot be initialized for an account,
 //!   `LocalEncryptionUnavailable` is returned (fail-closed).
 //! - The file-based credential store override is behind a compile-time gate:
-//!   `#[cfg(any(debug_assertions, test, feature = "qa-bin"))]` only.
+//!   `#[cfg(any(debug_assertions, test, feature = "test-hooks"))]` only.
 //!
 //! Architecture: overview.md Platform Portability rule 3 — platform
 //! capabilities live here behind a port. StoreActor is the only actor allowed
@@ -40,7 +40,7 @@ use koushi_sdk::{
 use koushi_state::LocalEncryptionHealth;
 
 pub use credential_backend::{CredentialStoreBackend, OsCredentialStore};
-#[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+#[cfg(any(debug_assertions, test, feature = "test-hooks"))]
 pub use credential_backend::{FileCredentialStore, resolved_credential_backend_is_file_dir};
 use koushi_protocol::failure::CoreFailure;
 
@@ -693,7 +693,7 @@ impl StoreActor {
     /// QA/test constructor with an explicit credential backend. This avoids the
     /// env-global `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR` race between unit tests
     /// and lets the headless QA binary isolate same-user device fixtures.
-    #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) fn with_backend(
         credential_store: CredentialStoreBackend,
         data_dir: impl Into<PathBuf>,
