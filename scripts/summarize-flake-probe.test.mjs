@@ -120,12 +120,12 @@ test("probe whitelist names non-vacuous exact Rust and Vitest tests", () => {
   const rustProbes = PROBES.filter((probe) => probe.probe_id === "rust_commit_point");
   const vitestProbes = PROBES.filter((probe) => probe.command === "npm");
 
-  const runtimeSource = readFileSync(
-    new URL("../crates/koushi-core/src/runtime.rs", import.meta.url),
+  const runtimeTestsSource = readFileSync(
+    new URL("../crates/koushi-core/src/runtime/tests.rs", import.meta.url),
     "utf8"
   );
   assert.match(
-    runtimeSource,
+    runtimeTestsSource,
     /async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox\(\)/
   );
 
