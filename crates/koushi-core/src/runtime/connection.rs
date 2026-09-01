@@ -1,5 +1,5 @@
 use super::{CoreCommandEnvelope, CoreRuntime};
-use crate::command_policy::CoreCommandPolicy;
+use crate::command_policy::{CoreCommandPolicy, native_artifact_for_command};
 use crate::composer_draft_lifecycle::{
     ComposerDraftCommandPermit, ComposerDraftLeaseAdmission, ComposerDraftLeaseAdmissionFailure,
     ComposerDraftLeaseFailure, ComposerDraftLeaseId, ComposerDraftLeaseRegistry,
@@ -198,6 +198,11 @@ impl CoreCommandHandle {
             return Err(CommandSubmitError::ComposerLeaseRequired);
         }
         let request_id = command.request_id();
+        if native_artifact_for_command(&command) != Some((request_id, kind)) {
+            return Err(CommandSubmitError::NativeArtifact(
+                NativeArtifactError::Missing,
+            ));
+        }
         self.native_artifacts
             .register(request_id, kind, path)
             .map_err(CommandSubmitError::NativeArtifact)?;

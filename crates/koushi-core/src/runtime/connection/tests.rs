@@ -45,6 +45,38 @@ fn scripted_connection(
 }
 
 #[tokio::test]
+async fn unrelated_command_cannot_claim_a_native_artifact_registration() {
+    let (mut connection, mut command_rx, _event_tx, _snapshot_tx) = scripted_connection(1);
+    let registry = Arc::new(crate::native_artifact::NativeArtifactRegistry::new());
+    connection.native_artifacts = registry.clone();
+    let request_id = connection.next_request_id();
+
+    let result = connection
+        .command_handle()
+        .command_with_native_artifact_and_admission(
+            CoreCommand::App(koushi_protocol::AppCommand::UpdateSettings {
+                request_id,
+                patch: koushi_state::SettingsPatch::default(),
+            }),
+            crate::native_artifact::NativeArtifactKind::RoomKeyExportDestination,
+            std::path::PathBuf::from("synthetic-path"),
+        )
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(CommandSubmitError::NativeArtifact(
+            crate::native_artifact::NativeArtifactError::Missing
+        ))
+    ));
+    assert!(registry.is_empty());
+    assert!(matches!(
+        command_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test]
 async fn cancelled_native_artifact_enqueue_releases_the_registered_path() {
     let (mut connection, _command_rx, _event_tx, _snapshot_tx) = scripted_connection(4);
     let registry = Arc::new(crate::native_artifact::NativeArtifactRegistry::new());

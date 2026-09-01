@@ -68,7 +68,8 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use crate::account::{AccountActorHandle, AccountMessage};
 use crate::activity_resolution::ActivityResolutionRequest;
 use crate::command_policy::{
-    CoreCommandPolicy, search_scope_to_state, timeline_composer_account_fence,
+    CoreCommandPolicy, native_artifact_for_account_command, native_artifact_for_command,
+    search_scope_to_state, timeline_composer_account_fence,
 };
 use crate::composer_draft_lifecycle::{ComposerDraftCommandPermit, ComposerDraftLeaseRegistry};
 pub use activity::ACTIVITY_RECENT_MAX_ROWS;
@@ -140,44 +141,6 @@ macro_rules! trace_runtime_sync {
         )$(.field($field))*;
         record(event);
     }};
-}
-
-fn native_artifact_for_account_command(
-    command: &AccountCommand,
-) -> Option<(RequestId, NativeArtifactKind)> {
-    match command {
-        AccountCommand::ExportRoomKeys { request_id, .. } => {
-            Some((*request_id, NativeArtifactKind::RoomKeyExportDestination))
-        }
-        AccountCommand::ImportRoomKeys { request_id, .. } => {
-            Some((*request_id, NativeArtifactKind::RoomKeyImportSource))
-        }
-        AccountCommand::BootstrapSecureBackup {
-            request_id,
-            request,
-        }
-        | AccountCommand::StartSessionBootstrap {
-            request_id,
-            request,
-            ..
-        } if request.recovery_key_destination_requested => {
-            Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
-        }
-        AccountCommand::ChangeSecureBackupPassphrase {
-            request_id,
-            request,
-        } if request.recovery_key_destination_requested => {
-            Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
-        }
-        _ => None,
-    }
-}
-
-fn native_artifact_for_command(command: &CoreCommand) -> Option<(RequestId, NativeArtifactKind)> {
-    match command {
-        CoreCommand::Account(command) => native_artifact_for_account_command(command),
-        _ => None,
-    }
 }
 
 fn intent_outcome_token(outcome: &IntentOutcome) -> &'static str {

@@ -1,8 +1,49 @@
 use crate::composer_draft_lifecycle::ComposerDraftScope;
+use crate::native_artifact::NativeArtifactKind;
 use koushi_protocol::command::{
     AccountCommand, AppCommand, CoreCommand, SearchScope, TimelineCommand,
 };
 use koushi_protocol::ids::{RequestId, TimelineKind};
+
+pub(crate) fn native_artifact_for_command(
+    command: &CoreCommand,
+) -> Option<(RequestId, NativeArtifactKind)> {
+    match command {
+        CoreCommand::Account(command) => native_artifact_for_account_command(command),
+        _ => None,
+    }
+}
+
+pub(crate) fn native_artifact_for_account_command(
+    command: &AccountCommand,
+) -> Option<(RequestId, NativeArtifactKind)> {
+    match command {
+        AccountCommand::ExportRoomKeys { request_id, .. } => {
+            Some((*request_id, NativeArtifactKind::RoomKeyExportDestination))
+        }
+        AccountCommand::ImportRoomKeys { request_id, .. } => {
+            Some((*request_id, NativeArtifactKind::RoomKeyImportSource))
+        }
+        AccountCommand::BootstrapSecureBackup {
+            request_id,
+            request,
+        }
+        | AccountCommand::StartSessionBootstrap {
+            request_id,
+            request,
+            ..
+        } if request.recovery_key_destination_requested => {
+            Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
+        }
+        AccountCommand::ChangeSecureBackupPassphrase {
+            request_id,
+            request,
+        } if request.recovery_key_destination_requested => {
+            Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
+        }
+        _ => None,
+    }
+}
 
 /// Core-owned admission policy over transport-neutral protocol commands.
 pub trait CoreCommandPolicy {
