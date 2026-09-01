@@ -1,6 +1,6 @@
 # Issue #763 — Frontend-Neutral Protocol And QA Isolation
 
-Status: proposed; implementation blocked on independent design approval.
+Status: implemented and locally verified; pending exact-final-diff review and hosted CI.
 
 Base: `origin/main` `941f7f40eaf53a55f6aaedb8829b073e9ea5c795`.
 
