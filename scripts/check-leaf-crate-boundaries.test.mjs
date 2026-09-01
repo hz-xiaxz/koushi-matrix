@@ -129,6 +129,24 @@ test("detects missing test-hook propagation and stale QA probe routing", () => {
   assert(violations.some((item) => item.includes("removed Core credential probe")));
 });
 
+test("detects direct and target-specific testkit build dependencies", () => {
+  for (const header of [
+    "[build-dependencies.helper]",
+    "[target.'cfg(unix)'.build-dependencies]"
+  ]) {
+    const root = fixture();
+    fs.writeFileSync(
+      path.join(root, "crates/koushi-core-testkit/Cargo.toml"),
+      `[package]\nname = "koushi-core-testkit"\npublish = false\n${header}\npath = "../helper"\n[dev-dependencies]\nkoushi-core = { path = "../koushi-core", features = ["test-hooks"] }\n`
+    );
+    assert(
+      findLeafCrateBoundaryViolations(root).includes(
+        "koushi-core-testkit must use dev-dependencies only"
+      )
+    );
+  }
+});
+
 test("detects target-specific normal testkit dependencies", () => {
   const root = fixture();
   fs.writeFileSync(
