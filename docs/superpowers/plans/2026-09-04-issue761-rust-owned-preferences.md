@@ -17,7 +17,7 @@ Complete #761 in one independently mergeable PR:
 5. Browser tests use explicit Rust-shaped snapshots/events and a transport mock. `BrowserFakeApi` and its broad product state machine are deleted.
 6. The production `DesktopApi` loses fake-only methods; no generic command framework replaces the deleted code.
 
-DOM focus, unacknowledged text, popover/dialog state, sidebar filter draft, emoji-picker category/roving focus, viewport measurement, and visual collapse animation remain renderer-owned.
+DOM focus, unacknowledged text, popover/dialog state, sidebar filter draft, emoji-picker category/roving focus, viewport measurement, and visual collapse animation remain renderer-owned. Name sorting for presentation-only collections, mounted text filtering, date/gap row construction, enum-to-label rendering, and visibility-demand detection may also remain in TypeScript; none may reclassify Matrix/product semantics or reorder Rust-authoritative sidebar vectors.
 
 ## Recon Evidence
 
