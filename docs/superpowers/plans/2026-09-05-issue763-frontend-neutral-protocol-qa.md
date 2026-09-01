@@ -27,7 +27,7 @@ At the pinned base:
 - Identity and failure DTOs use only serde plus `koushi-state::AuthFailureKind`.
 - Event DTOs use only `koushi-state`, serde, protocol-local identities/failures and `serde_json::Value`; Core-only display-label/action/source helpers are mixed into the same files.
 - `StateDelta` and `StateDeltaChangedSlices` are DTOs, while `build_state_delta`, slice auditing and sidebar composition are Core projection logic.
-- Command DTOs depend on `koushi-state` and the pure `koushi-key::SessionKeyId`, but four native-artifact request structs contain `PathBuf`. Two QA-only Account variants (`QaSetLocalDeviceBlacklisted`, `QaRefreshDeviceKeysAndAssertKnown`) contain Tokio oneshot senders; the separate test-gated `SyncOnce` variant carries only `RequestId`.
+- Command DTOs originally depended on `koushi-key::SessionKeyId`, but a focused wasm check proved that depending on the complete key crate pulls `rand/getrandom` and fails `wasm32-unknown-unknown`. `SessionKeyId` therefore moves with the other protocol identities; credential account-name derivation remains a `koushi-key` extension trait. Four native-artifact request structs contain `PathBuf`. Two QA-only Account variants (`QaSetLocalDeviceBlacklisted`, `QaRefreshDeviceKeysAndAssertKnown`) contain Tokio oneshot senders; the separate test-gated `SyncOnce` variant carries only `RequestId`.
 - `CoreCommand::{composer_draft_scope,requires_ready_session}` and `AccountCommand::requires_ready_session` are Core admission policy, not protocol shape.
 - `CommandSubmitError`, `EventStreamLag`, request-outcome services, composer lease registries and actor messages are runtime types and must not move.
 - Core currently stores a `koushi-thumbnail://localhost/<kind>/<hash>` string in `AvatarThumbnailState::Ready.source_url`; Tauri only looks bytes up after receiving that Core-minted URL.
@@ -54,14 +54,13 @@ Update `REPOSITORY_RULES.md`, `docs/architecture/overview.md`, `docs/policies/en
 Allowed direct dependencies:
 
 - `koushi-state`
-- `koushi-key` only for the existing pure `SessionKeyId` identity
 - `serde`, `serde_json`, and `thiserror` where already required by moved DTOs
 
-`koushi-key` currently has no platform dependency, so this creates no SDK/Tauri/platform edge and no cycle. Do not move credential-name derivation or cryptography into protocol. Because `SessionKeyId` becomes a protocol field, replace its derived `Debug` with a custom redacted implementation and add a full-value synthetic leak test; homeserver, user and device identifiers must not become artifact-facing output.
+Move `SessionKeyId` from `koushi-key` into protocol identities with a custom redacted `Debug` and full-value synthetic leak test; homeserver, user and device identifiers must not become artifact-facing output. `koushi-key` depends on protocol and implements a `SessionKeyIdCredentialNames` extension trait for `account_name`, `local_unlock_account_name`, and `matrix_session_account_name`, preserving their exact URL-safe-base64 storage contract. No credential naming, random generation, key derivation, cryptography, `rand`, or `getrandom` moves into protocol, and no compatibility re-export remains in `koushi-key`. This dependency direction is acyclic and keeps protocol wasm-clean.
 
 Move these DTO families:
 
-- `ids`: `RuntimeConnectionId`, `RequestId`, `AccountKey`, `TimelineKey`, `TimelineKind`, `TimelineGeneration`, `TimelineBatchId`;
+- `ids`: `RuntimeConnectionId`, `RequestId`, `AccountKey`, `SessionKeyId`, `TimelineKey`, `TimelineKind`, `TimelineGeneration`, `TimelineBatchId`;
 - `failure`: all public `CoreFailure` and typed failure-kind enums;
 - `command`: `CoreCommand`, `AccountCommand`, `AppCommand`, `SyncCommand`, `RoomCommand`, `SearchCommand`, `ThreadsListCommand`, `TimelineCommand`, and their payload/value types;
 - `event`: `CoreEvent` and every public nested account/activity/attention/live-signal/room/search/timeline event/value DTO;
@@ -219,6 +218,10 @@ No implementation starts until Fireworks `reviewer-flash` returns `CORRECT-TO-IM
 - Existing QA commands/tokens/scripts/CI continue: same binary names/npm commands/scenario registry, moved binary tests, focused local server smoke and hosted jobs.
 - Core does not mint a Tauri custom URI: opaque-ref behavior test and source checker; only Tauri adapter/CSP contains the scheme.
 - Existing behavior/privacy remains: redaction tests, exact wire goldens, runtime tests, full workspace/frontend/browser/CI gates.
+
+## Implementation Discovery Amendment
+
+The first command-extraction wasm check failed before landing because the initially approved `koushi-protocol -> koushi-key` edge transitively compiled `rand/getrandom`, whose default backend rejects `wasm32-unknown-unknown`. Do not enable a JavaScript RNG feature merely to make a DTO crate compile. The dependency correction above moves only `SessionKeyId` into protocol and inverts the edge; all credential naming and crypto remain in `koushi-key`. Implementation resumes only after the same independent reviewer approves this amendment.
 
 ## Non-Goals
 
