@@ -22,5 +22,5 @@ pub use actor::{
 pub use normalization::assign_dm_space_ids;
 
 pub(crate) use operations::RoomOperationKind;
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 pub(crate) use operations::RoomOperationTestControl;

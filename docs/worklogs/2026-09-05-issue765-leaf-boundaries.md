@@ -124,3 +124,26 @@ checker before the test move.
 - four self-contained Core integration targets are intentionally retained:
   `link_preview`, `media_save`, `native_artifact_boundary`, and
   `sliding_sync_diagnostics`.
+
+The exact 32/4 partition was added to the design and Fireworks returned
+`CORRECT-TO-IMPLEMENT` at `45de4b8decc2508a0a9efb250d95265b9e381c60`
+before the stashed partial implementation resumed. Two non-blocking checker
+coverage findings were fixed by enforcing exact directory target sets and
+mutating both duplicate/misplaced branches.
+
+Removing the self-dev-dependency exposed why it had existed: Core unit-test
+items used feature-only `test-hooks` cfgs. These were changed mechanically to
+`cfg(any(test, feature = "test-hooks"))`, with the three inverse branches changed
+to the exact negation. Normal/release production cfg remains byte-equivalent;
+bare `cargo test -p koushi-core` now compiles the same hooks under `cfg(test)`
+without feature unification. A leaf guard rejects future feature-only unit-test
+hooks.
+
+Focused PR2 evidence:
+
+- exact move verifier: support + 32 moved target bodies byte-identical to
+  `d3982a84`; four retained Core targets byte-identical;
+- testkit: 32 targets / 228 tests;
+- Core: 912 passed / 8 ignored plus 22 tests across the four retained targets;
+- release Core check, leaf checker/self-tests, Rust structure/self-tests and
+  cargo-machete: green.

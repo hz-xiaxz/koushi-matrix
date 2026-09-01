@@ -542,7 +542,7 @@ async fn subscribe_replay_path_records_subscribed_done_stage() {
         room_subscription_service_epoch: 0,
         current_core_generation: None,
         room_leave_states: BTreeMap::new(),
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         restored_room_subscription_probe: None,
         session_subscribed_rooms: BTreeSet::new(),
         subscribed_room_leases: BTreeMap::new(),
@@ -754,7 +754,7 @@ async fn diagnostics_producer_paths_run_without_trace_environment() {
         room_subscription_service_epoch: 0,
         current_core_generation: None,
         room_leave_states: BTreeMap::new(),
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         restored_room_subscription_probe: None,
         session_subscribed_rooms: BTreeSet::new(),
         subscribed_room_leases: BTreeMap::new(),

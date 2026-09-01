@@ -1745,7 +1745,7 @@ pub(super) fn state_contains_pinned_events(state: &matrix_sdk_base::sync::State)
 }
 
 impl RoomActor {
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(super) async fn handle_test_visible_rooms_observed(
         &mut self,
         core_generation: u64,
@@ -1780,7 +1780,7 @@ impl RoomActor {
         let _ = forwarded.send(forwarded_result);
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(super) async fn handle_test_membership_observed(
         &mut self,
         core_generation: u64,

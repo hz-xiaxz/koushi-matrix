@@ -1,12 +1,12 @@
 use super::encryption_debug::{EncryptionDebugCompletion, EncryptionDebugFence};
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 use super::encryption_debug::{EncryptionDebugTestControl, EncryptionDebugTestControlSlot};
 use super::list_observer::{
     RoomListObservation, RoomListObservationCommand, room_stop_matches_generation,
 };
 use super::mentions::MentionDemand;
 use super::operations::SpaceChildLinkKey;
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 use super::operations::{RoomOperationTestControl, RoomOperationTestControlSlot};
 use super::space_members::{SpaceMemberDemand, SpaceMemberRefreshFence};
 use crate::account_work::AccountWorkScheduler;
@@ -25,7 +25,7 @@ use koushi_sdk::{
     MatrixSpaceMembersProjection,
 };
 use koushi_state::{AppAction, MentionSurface, RoomListFailureKind, RoomListSource};
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 use std::sync::{Mutex, atomic::AtomicUsize};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -51,7 +51,7 @@ pub struct MissingSpaceChildLink {
 pub enum RoomMessage {
     /// Route a `RoomCommand` to the actor.
     Command(RoomCommand),
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     TestCommand {
         command: RoomCommand,
         processed: oneshot::Sender<()>,
@@ -143,20 +143,20 @@ pub enum RoomMessage {
     /// The actor reloads only the affected rooms so external pin/unpin actions
     /// become visible without polling every room.
     PinnedEventsChanged { room_ids: BTreeSet<String> },
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     TestVisibleRoomsObserved {
         core_generation: u64,
         reconciliation_is_complete: bool,
         room_ids: Vec<VisibleRoomObservation>,
         forwarded: oneshot::Sender<bool>,
     },
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     TestMembershipObserved {
         core_generation: u64,
         transitions: Vec<RoomMembershipTransition>,
         forwarded: oneshot::Sender<bool>,
     },
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     TestKnownRooms {
         room_ids: BTreeSet<String>,
         forwarded: oneshot::Sender<()>,
@@ -180,11 +180,11 @@ pub struct RoomActorHandle {
     pub(crate) tx: mpsc::Sender<RoomMessage>,
     timeline_residency: watch::Sender<Option<TimelineResidencyBinding>>,
     session: watch::Sender<Option<Arc<MatrixClientSession>>>,
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     room_operation_test_control: RoomOperationTestControlSlot,
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     room_operation_test_reached_count: Arc<AtomicUsize>,
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     encryption_debug_test_control: EncryptionDebugTestControlSlot,
     task: Option<executor::JoinHandle<()>>,
 }
@@ -203,12 +203,12 @@ impl RoomActorHandle {
         self.timeline_residency.send_replace(None);
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) fn operation_test_reached_count(&self) -> Arc<AtomicUsize> {
         Arc::clone(&self.room_operation_test_reached_count)
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) fn install_room_operation_test_control(
         &self,
         control: RoomOperationTestControl,
@@ -224,7 +224,7 @@ impl RoomActorHandle {
         true
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) fn install_encryption_debug_test_control(
         &self,
         control: EncryptionDebugTestControl,
@@ -240,7 +240,7 @@ impl RoomActorHandle {
         true
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) async fn install_known_rooms_for_test(&self, room_ids: BTreeSet<String>) -> bool {
         let (forwarded_tx, forwarded_rx) = oneshot::channel();
         if !self
@@ -255,7 +255,7 @@ impl RoomActorHandle {
         forwarded_rx.await.is_ok()
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) fn timeline_residency_snapshot(
         &self,
     ) -> Option<(
@@ -268,12 +268,12 @@ impl RoomActorHandle {
             .map(|binding| (binding.session.clone(), binding.handle.clone()))
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) fn session_snapshot(&self) -> Option<Arc<MatrixClientSession>> {
         self.session.borrow().clone()
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) async fn wait_for_session(&self, expected: &Arc<MatrixClientSession>) -> bool {
         let mut session = self.session.subscribe();
         session
@@ -286,7 +286,7 @@ impl RoomActorHandle {
             .is_ok()
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) async fn room_subscription_residency_test_observe_visible(
         &self,
         core_generation: u64,
@@ -308,7 +308,7 @@ impl RoomActorHandle {
         forwarded_rx.await.unwrap_or(false)
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) async fn room_subscription_residency_test_observe_membership(
         &self,
         core_generation: u64,
@@ -328,7 +328,7 @@ impl RoomActorHandle {
         forwarded_rx.await.unwrap_or(false)
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) fn clear_room_operation_test_control(&self) {
         self.room_operation_test_control
             .lock()
@@ -398,11 +398,11 @@ pub struct RoomActor {
     pub(super) session: Option<Arc<MatrixClientSession>>,
     pub(super) timeline_residency: watch::Receiver<Option<TimelineResidencyBinding>>,
     session_slot: watch::Sender<Option<Arc<MatrixClientSession>>>,
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(super) room_operation_test_control: RoomOperationTestControlSlot,
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(super) room_operation_test_reached_count: Arc<AtomicUsize>,
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(super) encryption_debug_test_control: EncryptionDebugTestControlSlot,
     pub(super) observation: Option<RoomListObservation>,
     room_list_generation: u64,
@@ -467,21 +467,21 @@ impl RoomActor {
             mpsc::unbounded_channel::<EncryptionDebugCompletion>();
         let (timeline_residency, timeline_residency_rx) = watch::channel(None);
         let (session_slot, _session_rx) = watch::channel(None);
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         let room_operation_test_control = Arc::new(Mutex::new(None));
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         let room_operation_test_reached_count = Arc::new(AtomicUsize::new(0));
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         let encryption_debug_test_control = Arc::new(Mutex::new(None));
         let actor = RoomActor {
             session: None,
             timeline_residency: timeline_residency_rx,
             session_slot: session_slot.clone(),
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             room_operation_test_control: room_operation_test_control.clone(),
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             room_operation_test_reached_count: room_operation_test_reached_count.clone(),
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             encryption_debug_test_control: encryption_debug_test_control.clone(),
             observation: None,
             room_list_generation: 0,
@@ -517,11 +517,11 @@ impl RoomActor {
             tx,
             timeline_residency,
             session: session_slot,
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             room_operation_test_control,
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             room_operation_test_reached_count,
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             encryption_debug_test_control,
             task: Some(task),
         }
@@ -559,7 +559,7 @@ impl RoomActor {
                 RoomMessage::Command(command) => {
                     self.handle_command(command).await;
                 }
-                #[cfg(feature = "test-hooks")]
+                #[cfg(any(test, feature = "test-hooks"))]
                 RoomMessage::TestCommand { command, processed } => {
                     self.handle_command(command).await;
                     let _ = processed.send(());
@@ -786,7 +786,7 @@ impl RoomActor {
                 RoomMessage::PinnedEventsChanged { room_ids } => {
                     self.handle_pinned_events_changed(room_ids).await;
                 }
-                #[cfg(feature = "test-hooks")]
+                #[cfg(any(test, feature = "test-hooks"))]
                 RoomMessage::TestVisibleRoomsObserved {
                     core_generation,
                     reconciliation_is_complete,
@@ -801,7 +801,7 @@ impl RoomActor {
                     )
                     .await;
                 }
-                #[cfg(feature = "test-hooks")]
+                #[cfg(any(test, feature = "test-hooks"))]
                 RoomMessage::TestMembershipObserved {
                     core_generation,
                     transitions,
@@ -810,7 +810,7 @@ impl RoomActor {
                     self.handle_test_membership_observed(core_generation, transitions, forwarded)
                         .await;
                 }
-                #[cfg(feature = "test-hooks")]
+                #[cfg(any(test, feature = "test-hooks"))]
                 RoomMessage::TestKnownRooms {
                     room_ids,
                     forwarded,

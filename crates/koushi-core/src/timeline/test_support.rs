@@ -163,7 +163,7 @@ pub(super) fn live_tail_test_manager(
         room_subscription_service_epoch: 0,
         current_core_generation: None,
         room_leave_states: BTreeMap::new(),
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         restored_room_subscription_probe: None,
         session_subscribed_rooms: BTreeSet::new(),
         subscribed_room_leases: BTreeMap::new(),

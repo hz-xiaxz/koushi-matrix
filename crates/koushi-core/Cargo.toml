@@ -35,12 +35,8 @@ tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 test-hooks = ["koushi-sdk/test-hooks", "koushi-store/test-hooks"]
 
 [dev-dependencies]
-# Self-reference so integration tests under tests/ automatically enable the
-# test-hooks feature (needed for CoreRuntime::inject_actions and test-only
-# constructors). Unit tests in src/ already have cfg(test), so this is a
-# no-op for them.
-koushi-core = { path = ".", features = ["test-hooks"] }
 koushi-sdk = { path = "../koushi-sdk", features = ["test-hooks"] }
+koushi-store = { path = "../koushi-store", features = ["test-hooks"] }
 # Decodable PNG fixtures for upload-output preparation tests. Already a
 # workspace dependency: koushi-media encodes with it in production.
 image.workspace = true

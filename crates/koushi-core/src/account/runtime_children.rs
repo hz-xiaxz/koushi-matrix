@@ -204,9 +204,9 @@ impl AccountActor {
         self.stop_search_actor().await;
         self.record_lifecycle_probe("shutdown_stop_sync_actor");
         self.stop_sync_actor().await;
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         let clear_room_session = !self.residency_preserve_room_session;
-        #[cfg(not(feature = "test-hooks"))]
+        #[cfg(not(any(test, feature = "test-hooks")))]
         let clear_room_session = true;
         let mut teardown_ok = true;
         if clear_room_session {
@@ -238,7 +238,7 @@ impl AccountActor {
     /// sequence per Async rule 12 — timelines before search/room/sync).
     async fn stop_timeline_actor(&mut self) {
         self.room_actor.clear_timeline_residency();
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         if let Some((reached, release)) = self.residency_teardown_gap.take() {
             let _ = reached.send(self.room_actor.timeline_residency_snapshot().is_none());
             let _ = release.await;
@@ -390,7 +390,7 @@ impl AccountActor {
         );
         self.room_actor
             .bind_timeline_residency(session.clone(), self.timeline_manager.residency_handle());
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         if let Some((reached, release)) = self.residency_install_gap.take() {
             let _ = reached.send((
                 self.room_actor.session_snapshot(),
@@ -427,7 +427,7 @@ impl AccountActor {
         let Some(handle) = self.sync_actor.take() else {
             return;
         };
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         record(DiagnosticEvent::new(
             DiagnosticLevel::Debug,
             "core.account",

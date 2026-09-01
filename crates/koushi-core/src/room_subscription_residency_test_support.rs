@@ -4,7 +4,7 @@
 //! filled in with production actor probes as each RED check is admitted; it
 //! never contains a second residency policy.
 
-#![cfg(feature = "test-hooks")]
+#![cfg(any(test, feature = "test-hooks"))]
 
 use std::sync::Arc;
 use std::time::Duration;

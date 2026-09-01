@@ -94,7 +94,7 @@ test("detects missing packages, dependency leaks, and retained Core crypto", () 
   );
   fs.appendFileSync(
     path.join(root, "crates/koushi-core/src/lib.rs"),
-    "use chacha20poly1305::ChaCha20Poly1305;\npub enum CredentialStoreBackend {}\n"
+    'use chacha20poly1305::ChaCha20Poly1305;\npub enum CredentialStoreBackend {}\n#[cfg(feature = "test-hooks")]\npub fn unit_test_hidden() {}\n'
   );
 
   const violations = findLeafCrateBoundaryViolations(root);
@@ -104,6 +104,7 @@ test("detects missing packages, dependency leaks, and retained Core crypto", () 
   assert(violations.includes("koushi-core still depends on chacha20poly1305"));
   assert(violations.some((item) => item.includes("CredentialStoreBackend")));
   assert(violations.some((item) => item.includes("use chacha20poly1305")));
+  assert(violations.some((item) => item.includes("Core test-hook cfg excludes unit tests")));
 });
 
 test("detects missing test-hook propagation and stale QA probe routing", () => {

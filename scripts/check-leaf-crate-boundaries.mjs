@@ -225,6 +225,15 @@ export function findLeafCrateBoundaryViolations(root) {
         violations.push(`moved persistence implementation remains in Core (${token}): ${relativePath}`);
       }
     }
+    for (const token of [
+      '#[cfg(feature = "test-hooks")]',
+      '#[cfg(not(feature = "test-hooks"))]',
+      '#[cfg(all(test, feature = "test-hooks"))]'
+    ]) {
+      if (source.includes(token)) {
+        violations.push(`Core test-hook cfg excludes unit tests (${token}): ${relativePath}`);
+      }
+    }
   }
 
   if (!manifestHasDependency(qaManifest, "koushi-store")) {

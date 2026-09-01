@@ -25,7 +25,7 @@ use std::{
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::MatrixClientSession;
 use koushi_state::{AppAction, RoomListSource, SyncLifecycleStatus};
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 use matrix_sdk_ui::room_list_service::RoomListService;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -714,7 +714,7 @@ async fn start_timeline_observation(
         .await;
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 pub(crate) async fn room_subscription_residency_start_order_for_testing(
     session: Arc<MatrixClientSession>,
     service: Arc<RoomListService>,

@@ -18,7 +18,7 @@ use koushi_state::{
     InviteDestinationResult, InviteDestinationResultKind, InviteScopeSelection,
     OperationFailureKind, RoomNotificationMode, RoomTagInfo, RoomTagKind,
 };
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 use std::sync::Mutex;
 use std::{
     collections::BTreeSet,
@@ -48,14 +48,14 @@ pub(crate) enum RoomOperationKind {
     JoinDirectoryRoom,
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 pub(crate) struct RoomOperationTestControl {
     pub(crate) kind: RoomOperationKind,
     pub(crate) reached: oneshot::Sender<()>,
     pub(crate) completion: oneshot::Receiver<Result<String, MatrixRoomOperationError>>,
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 fn take_matching_room_operation_test_control(
     control: &mut Option<RoomOperationTestControl>,
     kind: RoomOperationKind,
@@ -67,10 +67,10 @@ fn take_matching_room_operation_test_control(
     }
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 pub(super) type RoomOperationTestControlSlot = Arc<Mutex<Option<RoomOperationTestControl>>>;
 
-#[cfg(all(test, feature = "test-hooks"))]
+#[cfg(test)]
 #[test]
 fn room_operation_test_control_matches_and_consumes_once() {
     let (reached, _reached_rx) = oneshot::channel();
@@ -616,10 +616,10 @@ impl RoomActor {
     where
         F: Future<Output = Result<String, MatrixRoomOperationError>>,
     {
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         self.room_operation_test_reached_count
             .fetch_add(1, Ordering::SeqCst);
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         let control = take_matching_room_operation_test_control(
             &mut *self
                 .room_operation_test_control
@@ -627,7 +627,7 @@ impl RoomActor {
                 .expect("room operation test control lock"),
             kind,
         );
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         if let Some(control) = control {
             let _ = control.reached.send(());
             return match control.completion.await {

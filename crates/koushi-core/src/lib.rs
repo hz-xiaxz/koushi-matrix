@@ -35,7 +35,7 @@ mod report;
 pub mod room;
 mod room_key_receive;
 mod room_key_recovery;
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 pub mod room_subscription_residency_test_support;
 pub mod runtime;
 pub(crate) mod scheduled_send;

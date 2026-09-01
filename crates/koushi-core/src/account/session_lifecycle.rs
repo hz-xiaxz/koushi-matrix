@@ -346,7 +346,7 @@ fn classify_auth_error(error: &koushi_sdk::PasswordLoginError) -> AuthFailureKin
 }
 
 impl AccountActor {
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(super) async fn install_residency_test_session(
         &mut self,
         session: Arc<MatrixClientSession>,

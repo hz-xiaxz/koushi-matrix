@@ -9,7 +9,7 @@ use std::{
     time::Instant,
 };
 
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 use std::sync::atomic::AtomicUsize;
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
@@ -29,7 +29,7 @@ use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
 use crate::executor;
 use crate::link_preview::LinkPreviewContext;
 use crate::native_artifact::{NativeArtifactKind, NativeArtifactPort};
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 use crate::room::RoomOperationTestControl;
 use crate::room::{RoomActorHandle, RoomMessage};
 use crate::runtime::ForwardedComposerDraftPermit;
@@ -366,7 +366,7 @@ pub(crate) enum AccountMessage {
     SetCurrentDeviceTrustForTesting {
         trust: koushi_state::CurrentDeviceTrustState,
     },
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     ResidencyTestConfigureInstallGap {
         reached: oneshot::Sender<(
             Option<Arc<MatrixClientSession>>,
@@ -375,36 +375,36 @@ pub(crate) enum AccountMessage {
         release: oneshot::Receiver<()>,
         configured: oneshot::Sender<()>,
     },
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     ResidencyTestConfigureTeardownGap {
         reached: oneshot::Sender<bool>,
         release: oneshot::Receiver<()>,
         configured: oneshot::Sender<()>,
     },
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     ResidencyTestInstallSession {
         session: Arc<MatrixClientSession>,
         completed: oneshot::Sender<()>,
     },
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     ResidencyTestRoomCommand {
         command: RoomCommand,
         accepted: oneshot::Sender<()>,
     },
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     ResidencyTestConfigureRoomOperation {
         control: RoomOperationTestControl,
         configured: oneshot::Sender<bool>,
     },
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     ResidencyTestTimelineSnapshot {
         response: oneshot::Sender<(Vec<String>, Vec<String>)>,
     },
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     ResidencyTestTimelineGateSnapshot {
         response: oneshot::Sender<(bool, usize)>,
     },
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     ResidencyTestShutdown {
         acknowledged: oneshot::Sender<()>,
     },
@@ -521,9 +521,9 @@ pub struct AccountActorHandle {
     navigation_projection: NavigationProjectionIngress,
     focused_projection_rx:
         Arc<Mutex<Option<mpsc::UnboundedReceiver<crate::timeline::FocusedProjectionCommitted>>>>,
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     residency_room_tx: mpsc::Sender<RoomMessage>,
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     residency_room_operation_reached_count: Arc<AtomicUsize>,
     native_artifacts: Arc<dyn NativeArtifactPort>,
 }
@@ -541,7 +541,7 @@ impl AccountActorHandle {
         self.native_artifacts.unregister(request_id, kind);
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub async fn configure_residency_install_gap(
         &self,
         reached: oneshot::Sender<(
@@ -564,7 +564,7 @@ impl AccountActorHandle {
         acknowledged.await.is_ok()
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub async fn configure_residency_teardown_gap(
         &self,
         reached: oneshot::Sender<bool>,
@@ -584,7 +584,7 @@ impl AccountActorHandle {
         acknowledged.await.is_ok()
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub async fn install_residency_test_session(&self, session: Arc<MatrixClientSession>) -> bool {
         let (completed, acknowledged) = oneshot::channel();
         if !self
@@ -596,7 +596,7 @@ impl AccountActorHandle {
         acknowledged.await.is_ok()
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub async fn residency_test_room_command(&self, command: RoomCommand) -> bool {
         let (accepted, acknowledged) = oneshot::channel();
         if !self
@@ -608,7 +608,7 @@ impl AccountActorHandle {
         acknowledged.await.is_ok()
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) async fn configure_room_operation_test_control(
         &self,
         control: RoomOperationTestControl,
@@ -629,7 +629,7 @@ impl AccountActorHandle {
     /// Send a room command directly to the real RoomActor without routing it
     /// through AccountActor. Test-only lifecycle probes use this while the
     /// account actor is blocked at a teardown barrier.
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub async fn residency_test_room_command_direct(&self, command: RoomCommand) -> bool {
         self.residency_room_tx
             .send(RoomMessage::Command(command))
@@ -640,7 +640,7 @@ impl AccountActorHandle {
     /// Send a room command directly to the real RoomActor while the account
     /// actor is held at the install-gap barrier. This is only needed to probe
     /// the deliberate install→SessionEstablished window.
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub async fn residency_test_room_command_at_install_gap(&self, command: RoomCommand) -> bool {
         let (processed, acknowledged) = oneshot::channel();
         if self
@@ -654,13 +654,13 @@ impl AccountActorHandle {
         acknowledged.await.is_ok()
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub fn residency_test_room_operation_reached_count(&self) -> usize {
         self.residency_room_operation_reached_count
             .load(Ordering::SeqCst)
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub async fn residency_test_timeline_snapshot(&self) -> Option<(Vec<String>, Vec<String>)> {
         let (response, acknowledged) = oneshot::channel();
         if !self
@@ -672,7 +672,7 @@ impl AccountActorHandle {
         acknowledged.await.ok()
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub async fn residency_test_timeline_gate_snapshot(&self) -> Option<(bool, usize)> {
         let (response, acknowledged) = oneshot::channel();
         if !self
@@ -684,7 +684,7 @@ impl AccountActorHandle {
         acknowledged.await.ok()
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub async fn shutdown_for_testing(&self) -> bool {
         let (acknowledged, completion) = oneshot::channel();
         if !self
@@ -719,12 +719,12 @@ impl AccountActorHandle {
             navigation_projection,
             focused_projection_rx: Arc::new(Mutex::new(None)),
             native_artifacts: Arc::new(crate::native_artifact::RejectingNativeArtifactPort),
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             residency_room_tx: {
                 let (room_tx, _room_rx) = mpsc::channel(1);
                 room_tx
             },
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             residency_room_operation_reached_count: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -785,7 +785,7 @@ pub struct AccountActor {
     pub(super) teardown_retry_task: Option<crate::executor::JoinHandle<()>>,
     #[cfg(test)]
     pub(super) lifecycle_probe: Option<mpsc::UnboundedSender<&'static str>>,
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(super) residency_install_gap: Option<(
         oneshot::Sender<(
             Option<Arc<MatrixClientSession>>,
@@ -793,9 +793,9 @@ pub struct AccountActor {
         )>,
         oneshot::Receiver<()>,
     )>,
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(super) residency_teardown_gap: Option<(oneshot::Sender<bool>, oneshot::Receiver<()>)>,
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(super) residency_preserve_room_session: bool,
     #[cfg(any(test, feature = "test-hooks"))]
     pub(super) trust_observation_override:
@@ -1024,9 +1024,9 @@ impl AccountActor {
             Some(navigation_projection_rx),
             Some(focused_projection_tx.clone()),
         );
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         let residency_room_tx = room_actor.tx.clone();
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         let residency_room_operation_reached_count = room_actor.operation_test_reached_count();
         let actor = AccountActor {
             session: None,
@@ -1077,11 +1077,11 @@ impl AccountActor {
             teardown_retry_task: None,
             #[cfg(test)]
             lifecycle_probe: None,
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             residency_install_gap: None,
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             residency_teardown_gap: None,
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             residency_preserve_room_session: false,
             #[cfg(any(test, feature = "test-hooks"))]
             trust_observation_override: std::sync::Mutex::new(None),
@@ -1155,9 +1155,9 @@ impl AccountActor {
             tx,
             navigation_projection,
             focused_projection_rx: Arc::new(Mutex::new(Some(focused_projection_rx))),
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             residency_room_tx,
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             residency_room_operation_reached_count,
             native_artifacts,
         }
@@ -1939,7 +1939,7 @@ impl AccountActor {
                     self.handle_current_device_trust(self.trust_generation, trust)
                         .await;
                 }
-                #[cfg(feature = "test-hooks")]
+                #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::ResidencyTestConfigureInstallGap {
                     reached,
                     release,
@@ -1948,7 +1948,7 @@ impl AccountActor {
                     self.residency_install_gap = Some((reached, release));
                     let _ = configured.send(());
                 }
-                #[cfg(feature = "test-hooks")]
+                #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::ResidencyTestConfigureTeardownGap {
                     reached,
                     release,
@@ -1957,17 +1957,17 @@ impl AccountActor {
                     self.residency_teardown_gap = Some((reached, release));
                     let _ = configured.send(());
                 }
-                #[cfg(feature = "test-hooks")]
+                #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::ResidencyTestInstallSession { session, completed } => {
                     self.install_residency_test_session(session).await;
                     let _ = completed.send(());
                 }
-                #[cfg(feature = "test-hooks")]
+                #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::ResidencyTestRoomCommand { command, accepted } => {
                     self.route_room_command(command).await;
                     let _ = accepted.send(());
                 }
-                #[cfg(feature = "test-hooks")]
+                #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::ResidencyTestConfigureRoomOperation {
                     control,
                     configured,
@@ -1975,19 +1975,19 @@ impl AccountActor {
                     let _ = configured
                         .send(self.room_actor.install_room_operation_test_control(control));
                 }
-                #[cfg(feature = "test-hooks")]
+                #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::ResidencyTestTimelineSnapshot { response } => {
                     let _ = self
                         .timeline_manager
                         .residency_snapshot_for_testing(response)
                         .await;
                 }
-                #[cfg(feature = "test-hooks")]
+                #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::ResidencyTestTimelineGateSnapshot { response } => {
                     let _ =
                         response.send(self.timeline_manager.residency_gate_snapshot_for_testing());
                 }
-                #[cfg(feature = "test-hooks")]
+                #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::ResidencyTestShutdown { acknowledged } => {
                     shutdown_ack = Some(acknowledged);
                     break;
