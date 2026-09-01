@@ -150,7 +150,42 @@ Focused PR2 evidence:
 
 Fireworks exact-diff review at
 `5a2a3778ab199871170dcc70f94ccfeb1245fcaa` returned
-`CORRECT-TO-MERGE` with one actionable guard-hardening Minor and one deliberate
-plan-mandated CI duplication note. The checker was strengthened to reject any
-normal `[dependencies]` table in the testkit; the explicit CI test remains
-because the approved plan requires it. Exact-delta re-review remains required.
+`CORRECT-TO-MERGE`. Every checker-hardening observation was fixed and re-reviewed;
+Fireworks returned `CORRECT-TO-MERGE` with no remaining findings for exact final
+head `e87abf2d9c94e7a7847e00716c1d9d80d540fd27`.
+
+PR #790 passed all eight hosted jobs and merged as
+`9e9fcaada6b3231b8aa37ad664dcb53e752e4f9c`.
+
+## PR3 verify-first and no-op audit
+
+Commit `28c1b97076f8911077c85dba1f78b59f61165063` extended the leaf
+checker before implementation.
+
+- checker self-tests: 7 passed;
+- current-tree checker: RED because the byte classifier still lived in Core and
+  `koushi-media::ImageKind/image_kind` did not exist;
+- pure search/media dependency and source-token mutations fail closed.
+
+Search requires no code move: Core already delegates document mutation,
+attachment queries, CJK variants and exact candidate verification to
+`koushi-search::SearchDocumentStore`; its remaining channel ownership, query
+coalescing/generation cancellation, SDK supplement, crawler scheduling,
+diagnostics and `AppAction`/`CoreEvent` publication are runtime orchestration.
+Moving them would make the pure crate an actor/runtime owner.
+
+The SDK/state DTO audit found no field-for-field duplicate safe to collapse:
+
+- SDK room-latest data carries conversion/thread/reply/reaction facts while State
+  keeps the display projection; Core normalization applies label fallback,
+  Space-link reconciliation and incomplete-DM-membership preservation;
+- member mapping owns blank-label fallback, role options, permission facts and
+  SDK-trust-to-app-trust conversion;
+- secure-backup SDK summaries retain private-redacted version/scope facts while
+  Core maps outcomes into request-correlated reducer events/state;
+- Debug contracts redact different identifier/name/avatar/preview fields at the
+  SDK and State boundaries.
+
+Those mappings remain intentional trust/privacy/semantic boundaries. PR3 moves
+only the five-format image byte classifier to `koushi-media`; cache lifecycle,
+opaque refs, diagnostics, DTO projection and adapter delivery remain unchanged.

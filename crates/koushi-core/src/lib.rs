@@ -12,7 +12,6 @@
 pub mod account;
 pub(crate) mod account_work;
 mod activity_resolution;
-pub(crate) mod cached_image;
 mod causal_projection;
 mod command_policy;
 pub mod composer_draft_lifecycle;

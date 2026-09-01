@@ -6,8 +6,8 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use crate::cached_image::cached_image_kind;
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_media::image_kind;
 use koushi_state::AvatarThumbnailState;
 
 pub(crate) const MAX_RENDERABLE_THUMBNAIL_ENTRIES: usize = 256;
@@ -240,7 +240,7 @@ fn renderable_thumbnail_cache() -> &'static Mutex<RenderableThumbnailCache> {
 }
 
 fn mime_type_from_bytes(bytes: &[u8]) -> String {
-    cached_image_kind(bytes)
+    image_kind(bytes)
         .map(|kind| kind.mime_type.to_owned())
         .unwrap_or_else(|| "application/octet-stream".to_owned())
 }
