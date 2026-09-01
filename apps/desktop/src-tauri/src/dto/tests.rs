@@ -1202,6 +1202,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
                 avatar_url: None,
                 power_level: Some(100),
                 role: RoomMemberRole::Administrator,
+                role_options: Vec::new(),
                 user_trust: None,
             }],
         }),

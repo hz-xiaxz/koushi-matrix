@@ -1299,30 +1299,26 @@ test("room URL preview toggle invokes the per-room command instead of update_set
   await expect(toggle).toHaveAttribute("aria-checked", "false");
 });
 
-test("a stale flat (v1) snapshot fails closed to the recovery screen instead of crashing", async ({
+test("a stale schema-v1 snapshot fails closed to the recovery screen instead of crashing", async ({
   page
 }) => {
   await gotoReadyShell(page);
-  // #87 Phase 4 IPC contract guard: a mismatched Rust/TS build can return a PRE-Phase-4 flat
-  // snapshot with no `domain`/`ui` sections and no `schema_version`. The render body reads
-  // `snapshot.state.domain|ui.*`, so an incompatible snapshot must be rejected at the
-  // setSnapshot boundary (never stored) or the App throws before any render gate runs. Feed the
-  // flat snapshot through the ordered state-update port and verify the explicit recovery gate.
+  // #87 Phase 4 IPC contract guard: a stale Rust build can return the prior schema version.
+  // Keep the envelope structurally projectable so the test deterministically exercises the
+  // App setSnapshot version gate rather than the transport's malformed-envelope recovery path.
   await page.evaluate(() => {
-    const { sidebar } = window.__harness.currentSnapshot();
-    const generation = (window.__harness.currentSnapshot().state_generation ?? 0) + 1;
-    const flatV1Snapshot = {
+    const current = window.__harness.currentSnapshot();
+    const generation = (current.state_generation ?? 0) + 10_000;
+    const staleV1Snapshot = {
+      ...current,
       state_generation: generation,
-      state: { session: { kind: "signedOut" }, sync: "stopped" },
-      sidebar,
-      timeline: [],
-      thread: null
+      state: { ...current.state, schema_version: 1 }
     };
     window.__harness.pushStateUpdate({
       protocol_version: 1,
       kind: "snapshot",
       generation,
-      snapshot: flatV1Snapshot as never,
+      snapshot: staleV1Snapshot as never,
       reason: "settlement"
     });
   });

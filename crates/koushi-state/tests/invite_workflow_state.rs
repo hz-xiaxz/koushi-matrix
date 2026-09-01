@@ -61,6 +61,7 @@ fn room_member(user_id: &str, display_label: &str) -> RoomMemberSummary {
         avatar_url: None,
         power_level: Some(0),
         role: RoomMemberRole::User,
+        role_options: Vec::new(),
         user_trust: None,
     }
 }

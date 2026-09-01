@@ -1,6 +1,6 @@
 //! `profile` ownership for AccountActor.
 
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{collections::BTreeSet, future::Future, sync::Arc, time::Duration};
 
 use koushi_sdk::MatrixClientSession;
 use koushi_state::{
@@ -26,6 +26,7 @@ use super::actor::{AccountActor, AccountMessage};
 /// Maximum number of concurrent avatar thumbnail downloads. Bounded to avoid
 /// flooding the SDK media layer with parallel requests during large room joins.
 pub(super) const AVATAR_DOWNLOAD_CONCURRENCY: usize = 6;
+const AVATAR_DOWNLOAD_MAX_ATTEMPTS: usize = 2;
 
 const ACCOUNT_HYDRATION_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -96,6 +97,35 @@ fn map_matrix_own_profile(profile: koushi_sdk::MatrixOwnProfile) -> OwnProfile {
             mxc_uri,
             thumbnail: AvatarThumbnailState::NotRequested,
         }),
+    }
+}
+
+async fn retry_avatar_thumbnail_fetch<F, Fut>(
+    mut fetch: F,
+) -> Result<AvatarThumbnailState, AvatarThumbnailFailureKind>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<AvatarThumbnailState, AvatarThumbnailFailureKind>>,
+{
+    for attempt in 1..=AVATAR_DOWNLOAD_MAX_ATTEMPTS {
+        match fetch().await {
+            Err(AvatarThumbnailFailureKind::Network) if attempt < AVATAR_DOWNLOAD_MAX_ATTEMPTS => {}
+            result => return result,
+        }
+    }
+    unreachable!("avatar retry loop always returns on its final attempt")
+}
+
+fn avatar_thumbnail_for_request(
+    thumbnail: &AvatarThumbnailState,
+    request_id: RequestId,
+) -> AvatarThumbnailState {
+    match thumbnail {
+        AvatarThumbnailState::Failed { kind, .. } => AvatarThumbnailState::Failed {
+            request_id: request_id.sequence,
+            kind: kind.clone(),
+        },
+        other => other.clone(),
     }
 }
 
@@ -332,33 +362,26 @@ impl AccountActor {
 
     /// Non-blocking, cache-first avatar thumbnail handler (Stage R1).
     ///
-    /// 1. Cache hit (`Ready`): emit immediately; no SDK call.
+    /// 1. Cache hit (`Ready` or terminal `Failed`): emit immediately; no SDK call.
     /// 2. Already in-flight: return; the completing task will emit.
-    /// 3. Otherwise: insert into `avatar_inflight`, spawn a bounded fetch task
-    ///    that posts `AvatarFetched` back into this actor's inbox.
+    /// 3. Otherwise: insert into `avatar_inflight`, spawn one bounded task that
+    ///    owns at most two network attempts and posts `AvatarFetched` back.
     pub(super) async fn handle_download_avatar_thumbnail(
         &mut self,
         request_id: RequestId,
         mxc_uri: String,
     ) {
-        // 1. Cache hit — serve immediately without any I/O.
+        // 1. Cache hit — Ready and terminal Failed states both settle without I/O.
         if let Some(cached) = self.avatar_cache.get(&mxc_uri) {
-            if matches!(cached, AvatarThumbnailState::Ready { .. }) {
-                let thumbnail = cached.clone();
-                self.send_actions(vec![AppAction::AvatarThumbnailUpdated {
-                    mxc_uri: mxc_uri.clone(),
-                    thumbnail: thumbnail.clone(),
-                }])
-                .await;
-                self.emit(CoreEvent::Account(
-                    AccountEvent::AvatarThumbnailDownloaded {
-                        request_id,
-                        mxc_uri,
-                        thumbnail,
-                    },
-                ));
-                return;
-            }
+            let thumbnail = avatar_thumbnail_for_request(cached, request_id);
+            self.emit(CoreEvent::Account(
+                AccountEvent::AvatarThumbnailDownloaded {
+                    request_id,
+                    mxc_uri,
+                    thumbnail,
+                },
+            ));
+            return;
         }
 
         // 2. Single-flight dedup — a fetch is already running; record this
@@ -403,12 +426,14 @@ impl AccountActor {
             // Acquire a permit before hitting the SDK so at most
             // AVATAR_DOWNLOAD_CONCURRENCY fetches run concurrently.
             let _permit = semaphore.acquire().await;
-            let thumbnail = download_avatar_thumbnail(&session, &mxc_uri_clone)
-                .await
-                .unwrap_or_else(|kind| AvatarThumbnailState::Failed {
-                    request_id: request_id.sequence,
-                    kind,
-                });
+            let thumbnail = retry_avatar_thumbnail_fetch(|| {
+                download_avatar_thumbnail(&session, &mxc_uri_clone)
+            })
+            .await
+            .unwrap_or_else(|kind| AvatarThumbnailState::Failed {
+                request_id: request_id.sequence,
+                kind,
+            });
             // Best-effort: if the actor is already shut down, the send fails
             // silently — that is correct because the session is gone anyway.
             let _ = tx
@@ -454,9 +479,8 @@ impl AccountActor {
         let waiters = self.avatar_inflight.remove(&mxc_uri).unwrap_or_default();
 
         // Cache the result so subsequent requests for the same URI are served
-        // from memory.  Only `Ready` entries are treated as cache hits; failed
-        // entries are cached too so repeated requests during a session don't
-        // retry immediately, but a future session clear resets them.
+        // from memory. Ready and terminal Failed entries both settle duplicate
+        // renderer demand without another SDK attempt; session clear resets them.
         self.avatar_cache.insert(mxc_uri.clone(), thumbnail.clone());
 
         // Emit one state-delta for the reducer (one cache write, regardless of
@@ -472,13 +496,7 @@ impl AccountActor {
         // the inner AvatarThumbnailState::Failed.request_id matches the outer
         // event request_id (the old inline path produced a per-request payload).
         for request_id in waiters {
-            let per_waiter = match &thumbnail {
-                AvatarThumbnailState::Failed { kind, .. } => AvatarThumbnailState::Failed {
-                    request_id: request_id.sequence,
-                    kind: kind.clone(),
-                },
-                other => other.clone(),
-            };
+            let per_waiter = avatar_thumbnail_for_request(&thumbnail, request_id);
             self.emit(CoreEvent::Account(
                 AccountEvent::AvatarThumbnailDownloaded {
                     request_id,
@@ -696,13 +714,74 @@ mod tests {
     use koushi_sdk::{MatrixClientSession, PersistableMatrixSession};
     use koushi_state::{AvatarThumbnailFailureKind, AvatarThumbnailState};
 
-    use super::download_avatar_thumbnail;
+    use super::{
+        avatar_thumbnail_for_request, download_avatar_thumbnail, retry_avatar_thumbnail_fetch,
+    };
 
+    use crate::ids::{RequestId, RuntimeConnectionId};
     use crate::renderable_thumbnail::clear_renderable_thumbnail_cache;
 
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
     use std::{fs, path::Path};
     use tempfile::tempdir;
+
+    fn ready_thumbnail() -> AvatarThumbnailState {
+        AvatarThumbnailState::Ready {
+            source_url: "koushi-thumbnail://avatar/test".to_owned(),
+            width: None,
+            height: None,
+            mime_type: Some("image/png".to_owned()),
+        }
+    }
+
+    #[tokio::test]
+    async fn avatar_fetch_retries_one_network_failure_inside_core() {
+        let mut calls = 0;
+        let result = retry_avatar_thumbnail_fetch(|| {
+            calls += 1;
+            std::future::ready(if calls == 1 {
+                Err(AvatarThumbnailFailureKind::Network)
+            } else {
+                Ok(ready_thumbnail())
+            })
+        })
+        .await;
+
+        assert!(matches!(result, Ok(AvatarThumbnailState::Ready { .. })));
+        assert_eq!(calls, 2);
+    }
+
+    #[tokio::test]
+    async fn avatar_fetch_exhaustion_is_terminal_after_two_attempts() {
+        let mut calls = 0;
+        let result = retry_avatar_thumbnail_fetch(|| {
+            calls += 1;
+            std::future::ready(Err(AvatarThumbnailFailureKind::Network))
+        })
+        .await;
+
+        assert_eq!(result, Err(AvatarThumbnailFailureKind::Network));
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn cached_avatar_failure_is_recorrelated_without_another_fetch() {
+        let request_id = RequestId {
+            connection_id: RuntimeConnectionId(7),
+            sequence: 42,
+        };
+        let cached = AvatarThumbnailState::Failed {
+            request_id: 3,
+            kind: AvatarThumbnailFailureKind::Network,
+        };
+        assert_eq!(
+            avatar_thumbnail_for_request(&cached, request_id),
+            AvatarThumbnailState::Failed {
+                request_id: 42,
+                kind: AvatarThumbnailFailureKind::Network,
+            }
+        );
+    }
 
     async fn restore_media_test_session(
         server: &MatrixMockServer,

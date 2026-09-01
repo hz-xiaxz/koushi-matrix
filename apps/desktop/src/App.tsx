@@ -907,6 +907,8 @@ export function App() {
     const ownerChanged = composerDraftLifecycleOwnerRef.current !== owner;
     if (ownerChanged) {
       retireComposerRendererGeneration();
+      requestedAvatarMxcsRef.current.clear();
+      requestedMemberAvatarMxcsRef.current.clear();
     }
     submissionAccountOwnerRef.current = owner;
     composerDraftLifecycleOwnerRef.current = owner;
@@ -1111,9 +1113,7 @@ export function App() {
   const qaSendBaselineErrorCount = useRef(0);
   const initialHomeSelectionApplied = useRef(false);
   const requestedAvatarMxcsRef = useRef<Set<string>>(new Set());
-  const avatarRetryCountsRef = useRef<Map<string, number>>(new Map());
   const requestedMemberAvatarMxcsRef = useRef<Set<string>>(new Set());
-  const memberAvatarRetryCountsRef = useRef<Map<string, number>>(new Map());
   const settingsMigrationInFlightRef = useRef(false);
   const navigationMigrationInFlightRef = useRef<Set<string>>(new Set());
 
@@ -1481,9 +1481,7 @@ export function App() {
   useEffect(() => {
     if (!snapshot || !tauriTimelineTransport?.downloadAvatarThumbnail) {
       requestedAvatarMxcsRef.current.clear();
-      avatarRetryCountsRef.current.clear();
       requestedMemberAvatarMxcsRef.current.clear();
-      memberAvatarRetryCountsRef.current.clear();
       return;
     }
     // #116 perf gate: avatar downloads are disabled by default to prevent the
@@ -1492,26 +1490,11 @@ export function App() {
       return;
     }
 
-    for (const profile of Object.values(snapshot.state.domain.profile.users)) {
-      const avatar = profile.avatar;
-      if (!avatar || !requestedMemberAvatarMxcsRef.current.has(avatar.mxc_uri)) {
-        continue;
-      }
-      if (avatar.thumbnail.kind === "ready") {
-        requestedMemberAvatarMxcsRef.current.delete(avatar.mxc_uri);
-        memberAvatarRetryCountsRef.current.delete(avatar.mxc_uri);
-      } else if (avatar.thumbnail.kind === "failed") {
-        requestedMemberAvatarMxcsRef.current.delete(avatar.mxc_uri);
-      }
-    }
-
     const plan = planSnapshotAvatarThumbnailRequests(
       snapshot,
-      requestedAvatarMxcsRef.current,
-      avatarRetryCountsRef.current
+      requestedAvatarMxcsRef.current
     );
     requestedAvatarMxcsRef.current = plan.requestedMxcUris;
-    avatarRetryCountsRef.current = plan.retryCounts;
 
     for (const mxcUri of plan.requestMxcUris) {
       if (requestedMemberAvatarMxcsRef.current.has(mxcUri)) {
@@ -1531,7 +1514,6 @@ export function App() {
       mxcUri,
       requestedAvatarMxcsRef.current,
       requestedMemberAvatarMxcsRef.current,
-      memberAvatarRetryCountsRef.current,
       tauriTimelineTransport.downloadAvatarThumbnail
     );
   }, []);
@@ -4122,6 +4104,27 @@ export function App() {
     targetUserId: string,
     powerLevel: number
   ) {
+    const settings = snapshotRef.current?.state.domain.room_management.settings;
+    const member = settings?.room_id === roomId
+      ? settings.members.find((candidate) => candidate.user_id === targetUserId)
+      : null;
+    const option = member?.role_options.find(
+      (candidate) => candidate.power_level === powerLevel
+    );
+    if (!member || !option) return;
+    if (option.requires_confirmation) {
+      const role =
+        option.role === "administrator"
+          ? t("room.roleAdministrator")
+          : option.role === "moderator"
+            ? t("room.roleModerator")
+            : t("room.roleUser");
+      const confirmed = await windowDialogPort.confirm(
+        t("spaceMembers.roleConfirmCopy", { name: member.display_label, role }),
+        { title: t("spaceMembers.roleConfirmTitle"), kind: "warning" }
+      );
+      if (!confirmed) return;
+    }
     await settleCommand(api.updateRoomMemberRole(roomId, targetUserId, powerLevel));
   }
 

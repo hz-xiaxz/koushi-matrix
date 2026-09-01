@@ -535,7 +535,10 @@ is an entry-and-byte-bounded LRU: access refreshes recency, eviction or session
 clear releases the owned bytes, and an item larger than the byte bound fails
 before a Ready URL is published. It must never persist automatic
 avatar/link-preview plaintext or return `file://` URLs for them. Legacy
-plaintext thumbnail directories remain cleanup-only.
+plaintext thumbnail directories remain cleanup-only. After renderer visibility
+submits an avatar MXC, `AccountActor` owns single-flight deduplication, bounded
+concurrency, two network attempts, terminal Ready/Failed caching and session-
+generation teardown; React owns no retry classifier or attempt counter.
 
 **Prepared-upload retention invariant.** `MediaPreparationService` owns staged
 upload source bytes for the lifetime of the corresponding composer item.
@@ -977,7 +980,12 @@ notification semantics or synthesize badge/window-title state locally.
 Persistent title, badge, overlay, tray, and clear hooks follow the Rust-owned
 snapshot. Sound and activation hooks are candidate-scoped transient effects, so
 they run only for a Rust-owned notification candidate and not for every later
-snapshot that still contains unread state.
+snapshot that still contains unread state. Until a native Core-owned
+notification dispatcher replaces the webview/window sound port,
+`createDesktopBadgeSoundDispatcher` is the explicit platform-mechanics
+exception: it may retain positive-edge, three-second cooldown and one in-flight
+call state, but receives Rust-owned count/candidate/capability/settings facts and
+must not classify Matrix attention or carry identifiers/content.
 Pane-level thread attention is also Rust-owned: `AppState.thread_attention`
 tracks the open thread's notification, highlight, and live-event marker counts
 and reaches React only through the Tauri/TypeScript DTO.

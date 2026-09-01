@@ -40,6 +40,30 @@ for (const path of sourceFiles(frontend)) {
   }
 }
 
+const avatarOwnerTokens = [
+  "MAX_AVATAR_THUMBNAIL_ATTEMPTS",
+  "avatarThumbnailFailureIsRetryable",
+  "avatarRetryCountsRef",
+  "memberAvatarRetryCountsRef"
+];
+for (const path of sourceFiles(frontend)) {
+  const source = readFileSync(path, "utf8");
+  const projectPath = relative(root, path);
+  for (const token of avatarOwnerTokens) {
+    if (source.includes(token)) failures.push(`${projectPath}: retired avatar retry owner ${token}`);
+  }
+}
+
+const peoplePanelPath = join(frontend, "components/PeoplePanel.tsx");
+const peoplePanelSource = readFileSync(peoplePanelPath, "utf8");
+if (
+  peoplePanelSource.includes("roomMemberRoleOptions") ||
+  /power_?level\s*:\s*(?:0|50|100)/.test(peoplePanelSource) ||
+  /\[(?:100\s*,\s*50\s*,\s*0|0\s*,\s*50\s*,\s*100)\]/.test(peoplePanelSource)
+) {
+  failures.push("apps/desktop/src/components/PeoplePanel.tsx: room role options must come from Rust");
+}
+
 const desktopApiPath = join(frontend, "backend/desktopApi.ts");
 if (readFileSync(desktopApiPath, "utf8").includes("setRoomListProjection")) {
   failures.push("apps/desktop/src/backend/desktopApi.ts: fake-only setRoomListProjection remains");

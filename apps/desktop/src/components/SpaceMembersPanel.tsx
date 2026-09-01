@@ -10,7 +10,6 @@ import type {
   SpaceMembersState,
   UserProfile
 } from "../domain/types";
-import { avatarThumbnailFailureIsRetryable } from "../domain/avatarThumbnails";
 import { contextMenuItems } from "../domain/contextMenus";
 import { t } from "../i18n/messages";
 import { ICON_SIZE, type OpenContextMenu } from "../app/uiShared";
@@ -635,10 +634,6 @@ function SpaceMemberRow({
       : null;
   const avatarThumbnailFailureKind =
     avatar?.thumbnail.kind === "failed" ? avatar.thumbnail.failureKind : null;
-  const retryableAvatarFailure = avatar
-    ? avatarThumbnailFailureIsRetryable(avatar.thumbnail)
-    : false;
-
   useEffect(() => {
     const currentAvatarState = {
       mxcUri: avatar?.mxc_uri ?? null,
@@ -654,9 +649,7 @@ function SpaceMemberRow({
       previousAvatarState.failureKind !== currentAvatarState.failureKind;
     previousAvatarStateRef.current = currentAvatarState;
 
-    const canRequestAvatar =
-      avatarThumbnailKind === "notRequested" ||
-      (avatarThumbnailKind === "failed" && retryableAvatarFailure);
+    const canRequestAvatar = avatarThumbnailKind === "notRequested";
     if (avatarStateChanged && canRequestAvatar) {
       requestedAvatarUriRef.current = null;
     }
@@ -698,8 +691,7 @@ function SpaceMemberRow({
     avatarThumbnailKind,
     avatarThumbnailRequestId,
     avatarViewportRef,
-    onRequestAvatarThumbnail,
-    retryableAvatarFailure
+    onRequestAvatarThumbnail
   ]);
 
   const roleLabel = memberRoleLabel(entry.role);

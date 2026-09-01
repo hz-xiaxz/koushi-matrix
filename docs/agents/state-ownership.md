@@ -706,6 +706,11 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
 - Own-profile state, per-user profile cache, room avatars, and space avatars are
   Rust-owned DTOs. React renders them and dispatches `set_display_name` /
   `set_avatar`; do not add React-local profile success/failure semantics.
+- React may discover visible/not-requested avatar MXCs and submit typed thumbnail
+  demand. After submission, `AccountActor` owns single-flight deduplication,
+  bounded concurrency, the two-attempt network policy and the session-terminal
+  Ready/Failed cache. Renderer request sets may suppress duplicate transport
+  admission only; they must not classify retryability or count/release retries.
 - Personal local user aliases are also Rust-owned profile state. Keep alias
   set/clear/list, persistence to `app.koushi.local_aliases`, display-name
   resolution, and pending/failure state in Rust; React may render the returned
@@ -821,14 +826,16 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   consumers. Do not rename them back to request refs, delete them, merge them into
   one generic manager or move renderer composer-drain intent into Rust.
 
-## Space member roles
+## Room and Space member roles
 
-- `AppState.space_members` is the authoritative Space-member projection. Rust
-  owns direct-Space membership, power-level revision, `can_edit_roles`,
-  `role_options`, role authorization, request/generation/revision fences, and
-  role operation/failure state. React renders those DTOs and dispatches the
-  typed `update_space_member_role` command; it must not derive options from
-  role labels, child-room completion, or local permission guesses.
+- `AppState.space_members` and room-management `RoomMemberSummary` are the
+  authoritative role projections. Rust owns direct-Space membership,
+  power-level revision, `can_edit_roles`, room/Space `role_options`, role
+  authorization, request/generation/revision fences, and role operation/failure
+  state. React renders those DTOs and dispatches the typed numeric command; it
+  must not synthesize the 0/50/100 ladder from role labels, child-room
+  completion, or local permission guesses. Arbitrary current levels remain a
+  disabled projected option until Rust supplies an allowed target.
 - The Space-members panel owns one bounded load-demand record and one panel-open
   intent epoch. The demand key is the full ready account
   (homeserver/user/device), Space id and Rust generation. It coalesces only the

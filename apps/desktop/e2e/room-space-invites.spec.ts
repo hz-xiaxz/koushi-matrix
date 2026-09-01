@@ -1010,7 +1010,11 @@ test("room management panel updates settings, roles, and members from Rust state
                   original_display_label: "Target Member",
                   avatar_url: null,
                   power_level: 0,
-                  role: "user"
+                  role: "user",
+                  role_options: [
+                    { power_level: 100, role: "administrator", requires_confirmation: true },
+                    { power_level: 50, role: "moderator", requires_confirmation: false }
+                  ]
                 }
               ]
             },
@@ -1324,7 +1328,8 @@ test("local aliases dispatch typed account command and render Rust-projected lab
                   original_display_label: "Target Member",
                   avatar_url: null,
                   power_level: 0,
-                  role: "user"
+                  role: "user",
+                  role_options: []
                 }
               ]
             },
@@ -2651,7 +2656,8 @@ test("room member panel ignores, unignores, and reports a user", async ({ page }
                       original_display_label: "Target Member",
                       avatar_url: null,
                       power_level: 0,
-                      role: "user"
+                      role: "user",
+                      role_options: []
                     }
                   ]
                 },

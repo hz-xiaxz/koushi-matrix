@@ -375,6 +375,11 @@ gates are all eight CI jobs on the reviewed exact head.
   keeps invites in Home navigation/count rather than room sections, and permits
   `NotFound` while rejecting only settings load errors.
 - Focused round 3 verdict: `CORRECT-TO-IMPLEMENT`; no remaining finding.
+- Acceptance-closure amendment review at `cc79c42` found the regular-room
+  `PeoplePanel` ladder plus missing App/avatar guard and stale inventory scope.
+  The amendment was corrected to add room `role_options`, name every frontend
+  retry owner for deletion, and update the inventory; focused re-review verdict:
+  `CORRECT-TO-IMPLEMENT`.
 
 ## Acceptance-Closure Amendment: Avatar, Sound and Role Policy
 
@@ -390,8 +395,9 @@ separate, independently reviewable slice:
    and serves later duplicate requests from that cache without another SDK call.
    Session clear aborts tasks and resets the cache as today. Delete
    `MAX_AVATAR_THUMBNAIL_ATTEMPTS`, retryability helpers and retry-count refs from
-   both `avatarThumbnails.ts` and `TimelineView.tsx`; add a source guard against
-   their return. RED tests cover the retry policy, success-after-retry, terminal
+   `avatarThumbnails.ts`, `TimelineView.tsx`, and App's
+   `avatarRetryCountsRef`/`memberAvatarRetryCountsRef`; add a source guard
+   against any retry classifier/counter returning. RED tests cover the retry policy, success-after-retry, terminal
    exhaustion and failed-cache reuse.
 2. **Desktop notification sound remains an explicit platform-adapter exception.**
    Rust continues to own the authoritative badge count, attention candidate,

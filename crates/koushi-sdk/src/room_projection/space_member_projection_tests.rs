@@ -246,6 +246,7 @@ fn local_member_profile_debug_redacts_identifiers_names_and_mxc_uris() {
         avatar_url: Some("mxc://example.invalid/member-avatar".to_owned()),
         power_level: Some(50),
         role: super::MatrixRoomMemberRole::Moderator,
+        role_options: Vec::new(),
         user_trust: Some(super::MatrixUserTrustState::Verified),
     };
     let snapshot = super::MatrixJoinedMemberSnapshot {

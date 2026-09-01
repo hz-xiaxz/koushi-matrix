@@ -418,7 +418,8 @@ describe("RoomInfoPanel", () => {
                 original_display_label: "Upstream Member",
                 avatar_url: null,
                 power_level: 0,
-                role: "user"
+                role: "user",
+      role_options: []
               }
             ]
           },

@@ -4,14 +4,15 @@ use crate::event::{CoreEvent, RoomEvent};
 use crate::failure::{CoreFailure, RoomFailureKind};
 use crate::ids::RequestId;
 use koushi_sdk::{
-    MatrixRoomHistoryVisibility, MatrixRoomJoinRule, MatrixRoomMemberRole, MatrixRoomMemberSummary,
-    MatrixRoomModerationAction, MatrixRoomPermissionFacts, MatrixRoomSettingChange,
-    MatrixRoomSettingsSnapshot, MatrixUserTrustState,
+    MatrixRoomHistoryVisibility, MatrixRoomJoinRule, MatrixRoomMemberRole,
+    MatrixRoomMemberRoleOption, MatrixRoomMemberSummary, MatrixRoomModerationAction,
+    MatrixRoomPermissionFacts, MatrixRoomSettingChange, MatrixRoomSettingsSnapshot,
+    MatrixUserTrustState,
 };
 use koushi_state::{
-    AppAction, RoomHistoryVisibility, RoomJoinRule, RoomMemberRole, RoomMemberSummary,
-    RoomModerationAction, RoomPermissionFacts, RoomSettingChange, RoomSettingsSnapshot,
-    UserTrustState,
+    AppAction, RoomHistoryVisibility, RoomJoinRule, RoomMemberRole, RoomMemberRoleOption,
+    RoomMemberSummary, RoomModerationAction, RoomPermissionFacts, RoomSettingChange,
+    RoomSettingsSnapshot, UserTrustState,
 };
 
 fn room_settings_snapshot_from_sdk(settings: MatrixRoomSettingsSnapshot) -> RoomSettingsSnapshot {
@@ -55,6 +56,15 @@ fn room_member_summary_from_sdk(member: MatrixRoomMemberSummary) -> RoomMemberSu
         avatar_url: member.avatar_url,
         power_level: member.power_level,
         role: room_member_role_from_sdk(member.role),
+        role_options: member
+            .role_options
+            .into_iter()
+            .map(|option| RoomMemberRoleOption {
+                power_level: option.power_level,
+                role: room_member_role_from_sdk(option.role),
+                requires_confirmation: option.requires_confirmation,
+            })
+            .collect(),
         user_trust: member.user_trust.map(user_trust_state_from_sdk),
     }
 }
@@ -466,7 +476,8 @@ mod tests {
 
     use koushi_sdk::{
         MatrixRoomHistoryVisibility, MatrixRoomJoinRule, MatrixRoomMemberRole,
-        MatrixRoomMemberSummary, MatrixRoomPermissionFacts, MatrixRoomSettingsSnapshot,
+        MatrixRoomMemberRoleOption, MatrixRoomMemberSummary, MatrixRoomPermissionFacts,
+        MatrixRoomSettingsSnapshot,
     };
 
     use koushi_state::RoomMemberRole;
@@ -496,6 +507,11 @@ mod tests {
                 avatar_url: Some("mxc://example.invalid/member-avatar".to_owned()),
                 power_level: Some(50),
                 role: MatrixRoomMemberRole::Moderator,
+                role_options: vec![MatrixRoomMemberRoleOption {
+                    power_level: 0,
+                    role: MatrixRoomMemberRole::User,
+                    requires_confirmation: false,
+                }],
                 user_trust: None,
             }],
         };
@@ -503,6 +519,7 @@ mod tests {
         let mapped = room_settings_snapshot_from_sdk(settings);
 
         assert!(mapped.permissions.can_edit_roles);
+        assert_eq!(mapped.members[0].role_options[0].power_level, 0);
         assert!(mapped.permissions.can_invite);
         assert_eq!(
             mapped.share_link.as_deref(),

@@ -2723,7 +2723,11 @@ mock.setCommandResponse("load_room_settings", ({ roomId }: { roomId: string }) =
               original_display_label: "Harness Ada",
               avatar_url: null,
               power_level: 100,
-              role: "administrator"
+              role: "administrator",
+              role_options: [
+                { power_level: 50, role: "moderator", requires_confirmation: true },
+                { power_level: 0, role: "user", requires_confirmation: true }
+              ]
             },
             {
               user_id: "@harness-grace:example.invalid",
@@ -2732,7 +2736,11 @@ mock.setCommandResponse("load_room_settings", ({ roomId }: { roomId: string }) =
               original_display_label: "Harness Grace",
               avatar_url: null,
               power_level: 50,
-              role: "moderator"
+              role: "moderator",
+              role_options: [
+                { power_level: 100, role: "administrator", requires_confirmation: true },
+                { power_level: 0, role: "user", requires_confirmation: false }
+              ]
             },
             {
               user_id: "@harness-linus:example.invalid",
@@ -2741,7 +2749,11 @@ mock.setCommandResponse("load_room_settings", ({ roomId }: { roomId: string }) =
               original_display_label: "Harness Linus",
               avatar_url: null,
               power_level: 0,
-              role: "user"
+              role: "user",
+              role_options: [
+                { power_level: 100, role: "administrator", requires_confirmation: true },
+                { power_level: 50, role: "moderator", requires_confirmation: false }
+              ]
             }
           ]
         },

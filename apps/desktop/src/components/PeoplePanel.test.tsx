@@ -91,7 +91,8 @@ describe("PeoplePanel", () => {
       original_display_label: "Ada Lovelace",
       avatar_url: null,
       power_level: 100,
-      role: "administrator"
+      role: "administrator",
+      role_options: []
     },
     {
       user_id: "@grace:example.invalid",
@@ -100,7 +101,8 @@ describe("PeoplePanel", () => {
       original_display_label: "Grace Hopper",
       avatar_url: null,
       power_level: 50,
-      role: "moderator"
+      role: "moderator",
+      role_options: []
     },
     {
       user_id: "@current:example.invalid",
@@ -109,7 +111,8 @@ describe("PeoplePanel", () => {
       original_display_label: "Current User",
       avatar_url: null,
       power_level: 0,
-      role: "user"
+      role: "user",
+      role_options: []
     }
   ];
 
@@ -146,7 +149,8 @@ describe("PeoplePanel", () => {
         original_display_label: `Member ${suffix}`,
         avatar_url: null,
         power_level: 0,
-        role: "user"
+        role: "user",
+      role_options: []
       };
     });
 
@@ -249,7 +253,8 @@ describe("PeoplePanel", () => {
         original_display_label: "Grace Hopper",
         avatar_url: null,
         power_level: 50,
-        role: "moderator"
+        role: "moderator",
+      role_options: []
       }
     ];
     render(
@@ -396,7 +401,11 @@ describe("ProfilePanel", () => {
       original_display_label: "Ada Lovelace",
       avatar_url: null,
       power_level: 100,
-      role: "administrator"
+      role: "administrator",
+      role_options: [
+        { power_level: 50, role: "moderator", requires_confirmation: true },
+        { power_level: 0, role: "user", requires_confirmation: true }
+      ]
     }
   ];
 
@@ -484,15 +493,48 @@ describe("ProfilePanel", () => {
       />
     );
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Member role for Ada Lovelace" }), {
-      target: { value: "50" }
-    });
+    const roleSelect = screen.getByRole("combobox", { name: "Member role for Ada Lovelace" });
+    expect(
+      Array.from((roleSelect as HTMLSelectElement).options).map((option) => option.value)
+    ).toEqual(["100", "50", "0"]);
+    fireEvent.change(roleSelect, { target: { value: "50" } });
 
     expect(onUpdateMemberRole).toHaveBeenCalledWith(
       "!room-alpha:example.invalid",
       "@ada:example.invalid",
       50
     );
+  });
+
+  test("preserves an arbitrary Rust-projected current power level", () => {
+    const arbitrary = {
+      ...members[0],
+      power_level: 75,
+      role: "moderator" as const,
+      role_options: [
+        { power_level: 50, role: "moderator" as const, requires_confirmation: false },
+        { power_level: 0, role: "user" as const, requires_confirmation: false }
+      ]
+    };
+    render(
+      <ProfilePanel
+        userId="@ada:example.invalid"
+        currentUserId="@current:example.invalid"
+        roomOrSpace={baseRoom}
+        roomManagement={roomManagement([arbitrary])}
+        profileUsers={{}}
+        onBack={() => undefined}
+        onUpdateMemberRole={vi.fn()}
+      />
+    );
+
+    const select = screen.getByRole("combobox", { name: "Member role for Ada Lovelace" });
+    expect((select as HTMLSelectElement).value).toBe("75");
+    expect(Array.from((select as HTMLSelectElement).options).map((option) => option.value)).toEqual([
+      "75",
+      "50",
+      "0"
+    ]);
   });
 
   test("routes profile moderation and safety actions", () => {

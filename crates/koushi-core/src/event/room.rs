@@ -601,6 +601,7 @@ mod tests {
                     avatar_url: None,
                     power_level: Some(0),
                     role: koushi_state::RoomMemberRole::User,
+                    role_options: Vec::new(),
                     user_trust: None,
                 }],
             },

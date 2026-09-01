@@ -350,6 +350,7 @@ export function ProfilePanel({
                 disabled={
                   member.power_level === null ||
                   !permissions?.can_edit_roles ||
+                  member.role_options.length === 0 ||
                   rolePending ||
                   !onUpdateMemberRole ||
                   !canTargetMember
@@ -366,8 +367,14 @@ export function ProfilePanel({
                     {roomMemberRoleLabel("creator")}
                   </option>
                 ) : null}
-                {roomMemberRoleOptions.map((option) => (
-                  <option key={option.powerLevel} value={String(option.powerLevel)}>
+                {member.power_level !== null &&
+                !member.role_options.some((option) => option.power_level === member.power_level) ? (
+                  <option value={String(member.power_level)} disabled>
+                    {roomMemberRoleLabel(member.role)}
+                  </option>
+                ) : null}
+                {member.role_options.map((option) => (
+                  <option key={option.power_level} value={String(option.power_level)}>
                     {roomMemberRoleLabel(option.role)}
                   </option>
                 ))}
@@ -520,12 +527,6 @@ function roomMemberRoleLabel(role: RoomMemberRole): string {
       return t("room.roleUser");
   }
 }
-
-const roomMemberRoleOptions: Array<{ role: RoomMemberRole; powerLevel: number }> = [
-  { role: "administrator", powerLevel: 100 },
-  { role: "moderator", powerLevel: 50 },
-  { role: "user", powerLevel: 0 }
-];
 
 function aliasIsActive(profile: RoomMemberSummary): boolean {
   const displayLabel = profile.display_label.trim();

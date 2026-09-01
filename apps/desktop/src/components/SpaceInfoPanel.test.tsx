@@ -166,7 +166,8 @@ describe("SpaceInfoPanel", () => {
                 original_display_label: "Ada",
                 avatar_url: null,
                 power_level: 0,
-                role: "user"
+                role: "user",
+      role_options: []
               }
             ]
           },

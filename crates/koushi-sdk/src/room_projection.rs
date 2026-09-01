@@ -265,11 +265,13 @@ impl fmt::Debug for MatrixUserProfile {
 /// classes from a flattened `ACTIVE` member list.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MatrixSpaceMemberRoleOption {
+pub struct MatrixRoomMemberRoleOption {
     pub power_level: i64,
     pub role: MatrixRoomMemberRole,
     pub requires_confirmation: bool,
 }
+
+pub type MatrixSpaceMemberRoleOption = MatrixRoomMemberRoleOption;
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MatrixSpaceMembersProjection {
@@ -373,6 +375,7 @@ pub struct MatrixRoomMemberSummary {
     pub avatar_url: Option<String>,
     pub power_level: Option<i64>,
     pub role: MatrixRoomMemberRole,
+    pub role_options: Vec<MatrixRoomMemberRoleOption>,
     pub user_trust: Option<MatrixUserTrustState>,
 }
 
@@ -388,6 +391,7 @@ impl fmt::Debug for MatrixRoomMemberSummary {
             .field("has_avatar", &self.avatar_url.is_some())
             .field("power_level", &self.power_level)
             .field("role", &self.role)
+            .field("role_option_count", &self.role_options.len())
             .field("user_trust", &self.user_trust)
             .finish()
     }
@@ -710,6 +714,7 @@ mod space_member_role_option_matrix_tests {
         assert_eq!(levels(int(100), int(0), false, true), vec![50]);
         assert_eq!(levels(int(50), int(0), false, true), Vec::<i64>::new());
         assert_eq!(levels(int(100), int(50), false, true), vec![0]);
+        assert_eq!(levels(int(100), int(75), false, true), vec![0, 50]);
         assert_eq!(
             levels(UserPowerLevel::Infinite, int(0), false, true),
             vec![50, 100]
@@ -947,6 +952,7 @@ async fn matrix_joined_member_snapshot(
                 avatar_url: member.avatar_url().map(ToString::to_string),
                 power_level,
                 role: matrix_room_member_role(power_level),
+                role_options: Vec::new(),
                 user_trust: None,
             }
         })
@@ -1544,7 +1550,7 @@ pub(super) async fn matrix_room_settings_snapshot(
 ) -> MatrixRoomSettingsSnapshot {
     let power_levels = room.power_levels_or_default().await;
     let own_user_id = room.own_user_id();
-    let members = matrix_room_member_summaries(room).await;
+    let members = matrix_room_member_summaries(room, &power_levels).await;
     let is_space = room.is_space();
     let child_room_count = if is_space {
         matrix_space_child_room_ids(room).await.len()
@@ -1642,14 +1648,22 @@ pub(super) fn people_scope_diagnostic_event(
     ))
 }
 
-async fn matrix_room_member_summaries(room: &matrix_sdk::Room) -> Vec<MatrixRoomMemberSummary> {
+async fn matrix_room_member_summaries(
+    room: &matrix_sdk::Room,
+    power_levels: &matrix_sdk::ruma::events::room::power_levels::RoomPowerLevels,
+) -> Vec<MatrixRoomMemberSummary> {
     let Ok(members) = room.members(matrix_sdk::RoomMemberships::ACTIVE).await else {
         return Vec::new();
     };
+    let own_user_id = room.own_user_id();
+    let own_power = power_levels.for_user(own_user_id);
+    let can_edit_roles =
+        power_levels.user_can_send_state(own_user_id, StateEventType::RoomPowerLevels);
     let encryption = room.client().encryption();
     let mut summaries: Vec<MatrixRoomMemberSummary> = Vec::with_capacity(members.len());
     for member in members {
-        let power_level = matrix_room_member_power_level(member.power_level());
+        let target_power = member.power_level();
+        let power_level = matrix_room_member_power_level(target_power);
         let user_trust = encryption
             .get_user_identity(member.user_id())
             .await
@@ -1662,6 +1676,12 @@ async fn matrix_room_member_summaries(room: &matrix_sdk::Room) -> Vec<MatrixRoom
             avatar_url: member.avatar_url().map(ToString::to_string),
             power_level,
             role: matrix_room_member_role(power_level),
+            role_options: role_options_for_powers(
+                own_power,
+                target_power,
+                member.user_id() == own_user_id,
+                can_edit_roles,
+            ),
             user_trust,
         });
     }
@@ -1691,8 +1711,28 @@ pub(super) fn room_settings_snapshot_with_member_power_level(
         .iter_mut()
         .find(|member| member.user_id == target_user_id)
     {
+        let previous_power_level = member.power_level;
         member.power_level = Some(power_level);
         member.role = matrix_room_member_role(Some(power_level));
+        member
+            .role_options
+            .retain(|option| option.power_level != power_level);
+        if let Some(previous) = previous_power_level
+            && previous != power_level
+            && !member
+                .role_options
+                .iter()
+                .any(|option| option.power_level == previous)
+        {
+            member.role_options.push(MatrixRoomMemberRoleOption {
+                power_level: previous,
+                role: matrix_room_member_role(Some(previous)),
+                requires_confirmation: previous >= 100 || power_level >= 100,
+            });
+            member
+                .role_options
+                .sort_by_key(|option| std::cmp::Reverse(option.power_level));
+        }
     }
     snapshot
 }
@@ -1773,7 +1813,7 @@ fn role_options_for_powers(
                     _ => false,
                 }
         })
-        .map(|power_level| MatrixSpaceMemberRoleOption {
+        .map(|power_level| MatrixRoomMemberRoleOption {
             power_level,
             role: matrix_room_member_role(Some(power_level)),
             requires_confirmation: current >= 100 || power_level >= 100,
