@@ -53,13 +53,17 @@ test("accepts the intended protocol and QA ownership", () => {
 
 test("detects forbidden protocol dependencies and runtime tokens", () => {
   const root = fixture();
-  fs.appendFileSync(path.join(root, "crates/koushi-protocol/Cargo.toml"), 'tokio = "1"\n');
+  fs.appendFileSync(
+    path.join(root, "crates/koushi-protocol/Cargo.toml"),
+    'tokio = "1"\nkoushi-key = { path = "../koushi-key" }\n'
+  );
   fs.appendFileSync(
     path.join(root, "crates/koushi-protocol/src/lib.rs"),
     "pub fn bad(_: std::path::PathBuf) { tokio::spawn(async {}); }\n"
   );
   const violations = findProtocolQaBoundaryViolations(root);
   assert(violations.some((item) => item.includes("forbidden dependency: tokio")));
+  assert(violations.some((item) => item.includes("forbidden dependency: koushi-key")));
   assert(violations.some((item) => item.includes("forbidden token tokio::")));
   assert(violations.some((item) => item.includes("forbidden token PathBuf")));
 });

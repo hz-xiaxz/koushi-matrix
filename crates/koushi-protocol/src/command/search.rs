@@ -2,7 +2,7 @@ use std::fmt;
 
 use koushi_state::{AttachmentFilter, AttachmentScope, AttachmentSort, SearchRoomFilter};
 
-use koushi_protocol::ids::RequestId;
+use crate::ids::RequestId;
 
 pub enum SearchCommand {
     Query {
@@ -49,20 +49,6 @@ pub enum SearchScope {
     AllRooms,
     CurrentRoom { room_id: String },
     CurrentSpace { space_id: String },
-}
-
-impl SearchScope {
-    pub(crate) fn to_state(&self) -> koushi_state::SearchScope {
-        match self {
-            Self::AllRooms => koushi_state::SearchScope::AllRooms,
-            Self::CurrentRoom { room_id } => koushi_state::SearchScope::CurrentRoom {
-                room_id: room_id.clone(),
-            },
-            Self::CurrentSpace { space_id } => koushi_state::SearchScope::CurrentSpace {
-                space_id: space_id.clone(),
-            },
-        }
-    }
 }
 
 fn search_room_filter_debug(filter: &SearchRoomFilter) -> (&'static str, usize) {

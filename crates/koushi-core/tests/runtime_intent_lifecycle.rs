@@ -10,11 +10,8 @@
 
 use std::time::Duration;
 
-use koushi_core::{
-    command::{CoreCommand, RoomCommand},
-    event::CoreEvent,
-    runtime::CoreRuntime,
-};
+use koushi_core::runtime::CoreRuntime;
+use koushi_protocol::{CoreCommand, CoreEvent, RoomCommand};
 use koushi_state::{AppAction, AvatarThumbnailState, RoomSummary, SessionState, UserProfile};
 
 mod support;

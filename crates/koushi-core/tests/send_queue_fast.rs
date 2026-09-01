@@ -9,9 +9,9 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use koushi_core::command::{AccountCommand, CoreCommand, SyncCommand, TimelineCommand};
 use koushi_core::composer_draft_lifecycle::ComposerDraftScope;
 use koushi_core::runtime::{CoreConnection, CoreRuntime};
+use koushi_protocol::command::{AccountCommand, CoreCommand, SyncCommand, TimelineCommand};
 use koushi_protocol::event::{
     AccountEvent, CoreEvent, SyncEvent, TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId,
     TimelineMessageActions, TimelineSendState,
@@ -1724,7 +1724,7 @@ async fn run_fast_send_queue_feedback() {
         conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe_id,
             key: key.clone(),
-            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         })),
     )
     .await
@@ -1815,7 +1815,7 @@ async fn run_fast_send_queue_feedback() {
     let unsubscribe_submission_id = SubmissionId::new("fast-unsubscribe-submission");
     let unsubscribe_request_id = conn.next_request_id();
     let unsubscribe_account = match &conn.snapshot().session {
-        SessionState::Ready(info) => koushi_key::SessionKeyId {
+        SessionState::Ready(info) => koushi_protocol::SessionKeyId {
             homeserver: info.homeserver.clone(),
             user_id: info.user_id.clone(),
             device_id: info.device_id.clone(),
@@ -2063,7 +2063,7 @@ async fn run_fast_send_queue_feedback() {
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: resubscribe_id,
         key: key.clone(),
-        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+        initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .expect("fast_send_queue submit post-proof resubscribe");
@@ -2320,7 +2320,7 @@ async fn run_fast_send_queue_feedback() {
         conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe_id,
             key: key.clone(),
-            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         })),
     )
     .await

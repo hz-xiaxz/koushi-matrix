@@ -1,11 +1,9 @@
 use super::super::{CoreCommand, test_support::fake_rid};
 use super::*;
-use koushi_protocol::ids::AccountKey;
 use koushi_state::{
-    ImageUploadCompressionMode, MentionIntent, NativeAttentionCandidate,
-    NativeAttentionCapabilities, NativeAttentionCapability, NativeAttentionDispatchState,
-    NativeAttentionState, NativeAttentionSummary, NativeAttentionSuppressionReason,
-    RoomAttentionKind, ThreadOpenIntent,
+    ImageUploadCompressionMode, NativeAttentionCandidate, NativeAttentionCapabilities,
+    NativeAttentionCapability, NativeAttentionDispatchState, NativeAttentionState,
+    NativeAttentionSummary, NativeAttentionSuppressionReason, RoomAttentionKind, ThreadOpenIntent,
 };
 
 #[test]
@@ -100,8 +98,8 @@ fn activity_commands_debug_redacts_targets_and_carry_request_ids() {
 }
 
 #[test]
-fn upload_staging_commands_require_ready_session_and_redact_debug() {
-    use koushi_state::{StagedUploadKind, build_formatted_message_draft};
+fn upload_staging_commands_are_correlated_and_redact_debug() {
+    use koushi_state::StagedUploadKind;
 
     let set_request_id = fake_rid(24);
     let update_caption_request_id = fake_rid(25);
@@ -149,32 +147,6 @@ fn upload_staging_commands_require_ready_session_and_redact_debug() {
     };
 
     assert_eq!(CoreCommand::App(set).request_id(), set_request_id);
-    for command in [
-        AppCommand::SetUploadStaging {
-            request_id: set_request_id,
-            target: target.clone(),
-            items: Vec::new(),
-        },
-        AppCommand::UpdateStagedUploadCaption {
-            request_id: update_caption_request_id,
-            target: target.clone(),
-            staged_id: "private-staged-id".to_owned(),
-            caption: None,
-        },
-        AppCommand::UpdateStagedUploadCompression {
-            request_id: update_compression_request_id,
-            target: target.clone(),
-            staged_id: "private-staged-id".to_owned(),
-            compression_choice: StagedUploadCompressionChoice::Original,
-        },
-        AppCommand::ClearUploadStaging {
-            request_id: clear_request_id,
-            target: target.clone(),
-        },
-    ] {
-        assert!(CoreCommand::App(command).requires_ready_session());
-    }
-
     for debug in [
         format!("{update_caption:?}"),
         format!("{update_compression:?}"),
@@ -207,7 +179,7 @@ fn upload_staging_commands_require_ready_session_and_redact_debug() {
 }
 
 #[test]
-fn open_timeline_at_timestamp_requires_ready_session_and_redacts_debug() {
+fn open_timeline_at_timestamp_is_correlated_and_redacts_debug() {
     let request_id = fake_rid(28);
     let command = AppCommand::OpenTimelineAtTimestamp {
         request_id,
@@ -216,14 +188,6 @@ fn open_timeline_at_timestamp_requires_ready_session_and_redacts_debug() {
     };
 
     assert_eq!(CoreCommand::App(command).request_id(), request_id);
-    assert!(
-        CoreCommand::App(AppCommand::OpenTimelineAtTimestamp {
-            request_id,
-            room_id: "!private-room:example.invalid".to_owned(),
-            timestamp_ms: 1_718_000_000_000,
-        })
-        .requires_ready_session()
-    );
     let debug = format!(
         "{:?}",
         AppCommand::OpenTimelineAtTimestamp {

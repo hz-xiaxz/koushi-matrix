@@ -5,6 +5,7 @@ edition = "2024"
 license.workspace = true
 
 [dependencies]
+koushi-protocol = { path = "../koushi-protocol" }
 base64 = "0.22"
 hkdf = "0.12"
 rand = "0.9"

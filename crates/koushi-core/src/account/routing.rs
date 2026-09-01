@@ -1,16 +1,17 @@
 //! `routing` ownership for AccountActor.
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
-use koushi_key::SessionKeyId;
+use koushi_protocol::SessionKeyId;
 use koushi_state::{AppAction, OperationFailureKind};
 
-use crate::command::{
-    RoomCommand, SearchCommand, SyncCommand, ThreadsListCommand, TimelineCommand,
-};
+use crate::command_policy::{search_scope_to_state, timeline_composer_account_fence};
 use crate::room::RoomMessage;
 use crate::runtime::ForwardedComposerDraftPermit;
 use crate::sync::SyncMessage;
 use crate::timeline::TimelineMessage;
+use koushi_protocol::command::{
+    RoomCommand, SearchCommand, SyncCommand, ThreadsListCommand, TimelineCommand,
+};
 use koushi_protocol::event::{CoreEvent, TimelineEvent};
 #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
 use koushi_protocol::failure::SyncFailureKind;
@@ -26,8 +27,7 @@ fn composer_timeline_command_targets_active_session(
     active_session_key: Option<&SessionKeyId>,
     command: &TimelineCommand,
 ) -> bool {
-    command
-        .composer_account_fence()
+    timeline_composer_account_fence(command)
         .is_none_or(|(_, expected_account)| active_session_key == Some(expected_account))
 }
 
@@ -216,7 +216,7 @@ impl AccountActor {
         formatting_options: Option<koushi_state::ComposerFormattingOptions>,
     ) {
         if !composer_timeline_command_targets_active_session(self.session_key_id.as_ref(), &command)
-            && let Some((request_id, _)) = command.composer_account_fence()
+            && let Some((request_id, _)) = timeline_composer_account_fence(&command)
         {
             record(
                 DiagnosticEvent::new(
@@ -393,7 +393,7 @@ impl AccountActor {
         &self,
         request_id: RequestId,
         query: &str,
-        scope: &crate::command::SearchScope,
+        scope: &koushi_protocol::command::SearchScope,
         message: &str,
     ) {
         let _ = self
@@ -401,7 +401,7 @@ impl AccountActor {
             .send(vec![AppAction::SearchFailed {
                 request_id: request_id.sequence,
                 query: query.to_owned(),
-                scope: scope.to_state(),
+                scope: search_scope_to_state(scope),
                 message: message.to_owned(),
             }])
             .await;
@@ -542,7 +542,7 @@ impl AccountActor {
                 account_key,
                 kind: TimelineKind::Focused { room_id, event_id },
             },
-            initial_backfill: crate::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         })
         .await;
     }
@@ -700,14 +700,14 @@ impl AccountActor {
 #[cfg(test)]
 mod tests {
 
-    use koushi_key::SessionKeyId;
+    use koushi_protocol::SessionKeyId;
 
     use tokio::sync::oneshot;
 
     use super::composer_timeline_command_targets_active_session;
     use crate::account::actor::AccountMessage;
     use crate::account::test_support::spawn_actor_with_dirs;
-    use crate::command::TimelineCommand;
+    use koushi_protocol::command::TimelineCommand;
 
     use koushi_protocol::ids::{AccountKey, RequestId, RuntimeConnectionId, TimelineKey};
 

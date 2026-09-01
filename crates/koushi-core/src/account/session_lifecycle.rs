@@ -8,7 +8,8 @@ use std::{
 
 use futures_util::StreamExt;
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
-use koushi_key::{LocalStoreId, SessionKeyId, StoredMatrixSession};
+use koushi_key::{LocalStoreId, StoredMatrixSession};
+use koushi_protocol::SessionKeyId;
 use koushi_sdk::{MatrixClientSession, PendingOidcLogin, PersistableMatrixSession};
 use koushi_state::{
     AppAction, AuthFailureKind, LoginAttemptId, LoginRequest, SessionInfo, SlidingSyncAdmission,

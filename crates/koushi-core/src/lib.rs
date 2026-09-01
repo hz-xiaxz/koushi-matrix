@@ -14,7 +14,7 @@ pub(crate) mod account_work;
 mod activity_resolution;
 pub(crate) mod cached_image;
 mod causal_projection;
-pub mod command;
+mod command_policy;
 pub mod composer_draft_lifecycle;
 mod credential_vault;
 mod direct_message_classification;
@@ -55,16 +55,13 @@ mod time;
 pub mod timeline;
 pub(crate) mod unread_trace;
 
-pub use command::{
-    AccountCommand, AppCommand, CoreCommand, CreateRoomOptions, CreateRoomParentSpace,
-    CreateRoomVisibility, ImageUploadCompressionPolicy, ImageUploadCompressionState,
-    ImageUploadDimensions, ImageUploadVariantInfo, ImageUploadVariantKind, KeyRequestOrigin,
-    MediaDownloadSelection, RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest, SearchCommand,
-    SearchScope, SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
-    SyncCommand, TimelineCommand, UploadMediaKind, UploadMediaRequest, UploadMediaThumbnail,
-};
+pub use command_policy::CoreCommandPolicy;
 pub use direct_message_classification::DirectAccountDataSource;
-pub use koushi_protocol::*;
+pub use koushi_protocol::command::*;
+pub use koushi_protocol::event::*;
+pub use koushi_protocol::failure::*;
+pub use koushi_protocol::ids::*;
+pub use koushi_protocol::state_update::*;
 pub use koushi_state::{EncryptionDebugOperationKind, MediaTransferProgress};
 pub use media_save::{
     MediaSaveError, MediaSaveFilesystem, MediaSaveIoError, default_media_save_path,

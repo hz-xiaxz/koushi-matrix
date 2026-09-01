@@ -17,7 +17,7 @@ use crate::account::test_support::{
     login_gated_actor, shutdown_and_ack, spawn_actor_with_dirs, test_request_id,
 };
 use crate::account::verification::incoming_verification_request_id;
-use crate::command::AccountCommand;
+use koushi_protocol::command::AccountCommand;
 
 use crate::executor;
 use koushi_protocol::event::CoreEvent;

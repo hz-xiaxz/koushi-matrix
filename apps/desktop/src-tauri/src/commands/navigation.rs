@@ -192,7 +192,7 @@ async fn open_anchored_timeline(
     let anchor_baseline_generation = event_conn.versioned_snapshot().generation;
     let anchor_key = TimelineKey {
         account_key,
-        kind: koushi_core::TimelineKind::Focused {
+        kind: koushi_protocol::TimelineKind::Focused {
             room_id: room_id.clone(),
             event_id: event_id.clone(),
         },
@@ -472,14 +472,14 @@ async fn wait_for_main_timeline_anchor(
 }
 
 pub(super) fn build_update_navigation_preference_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     update: koushi_state::NavigationPreferenceUpdate,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::UpdateNavigationPreference { request_id, update })
 }
 
 pub(super) fn build_select_space_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     space_id: Option<String>,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::SelectSpace {
@@ -489,7 +489,7 @@ pub(super) fn build_select_space_command(
 }
 
 pub(super) fn build_reorder_spaces_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     space_ids: Vec<String>,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::ReorderSpaces {
@@ -500,7 +500,7 @@ pub(super) fn build_reorder_spaces_command(
 
 #[cfg(test)]
 pub(super) fn build_select_room_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::SelectRoom {
@@ -582,7 +582,7 @@ mod tests {
                 assert_eq!(key.account_key, account_key);
                 assert_eq!(
                     key.kind,
-                    koushi_core::TimelineKind::Room {
+                    koushi_protocol::TimelineKind::Room {
                         room_id: "!room:example.org".to_owned()
                     }
                 );
@@ -621,7 +621,7 @@ mod tests {
         };
         assert_eq!(
             key.kind,
-            koushi_core::TimelineKind::Thread {
+            koushi_protocol::TimelineKind::Thread {
                 room_id: "!room:example.org".to_owned(),
                 root_event_id: "$root".to_owned(),
             }

@@ -20,10 +20,12 @@ use koushi_state::{
     StagedUploadPreparation,
 };
 
+use koushi_protocol::{
+    AccountKey, AppCommand, CoreCommand, TimelineCommand, UploadMediaKind, UploadMediaRequest,
+};
+
 use crate::{
-    command::{AppCommand, CoreCommand, TimelineCommand, UploadMediaKind, UploadMediaRequest},
     executor,
-    ids::AccountKey,
     media_preparation::{
         MAX_PREPARATION_BATCH_SIZE, MediaPreparationRegistry, MediaPreparationService,
         StageUploadBytesInput,
@@ -682,7 +684,7 @@ impl MediaStagingService {
     pub async fn send_prepared_uploads(
         &self,
         connection: &mut CoreConnection,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: koushi_protocol::SessionKeyId,
         generation: crate::composer_draft_lifecycle::ComposerRendererGeneration,
         lease: crate::composer_draft_lifecycle::ComposerDraftLeaseId,
         target: ComposerTarget,
@@ -1019,7 +1021,7 @@ fn map_staging_send_error(error: MediaStagingError) -> PreparedUploadSendError {
     }
 }
 
-fn ready_account(state: &koushi_state::AppState) -> Option<koushi_key::SessionKeyId> {
+fn ready_account(state: &koushi_state::AppState) -> Option<koushi_protocol::SessionKeyId> {
     match &state.session {
         koushi_state::SessionState::Ready(info) => {
             Some(crate::store::session_key_id_from_info(info))

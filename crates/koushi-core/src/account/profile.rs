@@ -319,7 +319,7 @@ impl AccountActor {
     pub(super) async fn handle_set_avatar(
         &self,
         request_id: RequestId,
-        request: crate::command::SetAvatarRequest,
+        request: koushi_protocol::command::SetAvatarRequest,
     ) {
         let Some(session) = &self.session else {
             self.send_actions(vec![AppAction::ProfileUpdateFailed {

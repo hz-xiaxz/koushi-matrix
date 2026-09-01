@@ -1,10 +1,10 @@
 use super::super::{CoreCommand, test_support::fake_rid};
 use super::*;
-use koushi_protocol::ids::AccountKey;
+use crate::ids::AccountKey;
 use koushi_state::{ImageUploadCompressionMode, MentionIntent, MentionTarget};
 
-fn test_session_key() -> koushi_key::SessionKeyId {
-    koushi_key::SessionKeyId {
+fn test_session_key() -> crate::SessionKeyId {
+    crate::SessionKeyId {
         homeserver: "https://example.test".to_owned(),
         user_id: "@a:test".to_owned(),
         device_id: "DEVICE".to_owned(),

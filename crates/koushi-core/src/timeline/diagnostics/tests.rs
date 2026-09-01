@@ -10,9 +10,9 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::account_work::AccountWorkScheduler;
 
-use crate::command::TimelineCommand;
 use crate::executor;
 use crate::link_preview::LinkPreviewContext;
+use koushi_protocol::command::TimelineCommand;
 use koushi_protocol::event::{PaginationDirection, TimelineDiff};
 use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
 #[cfg(any(test, feature = "test-hooks"))]
@@ -600,7 +600,7 @@ async fn subscribe_replay_path_records_subscribed_done_stage() {
             key,
             false,
             true,
-            crate::command::InitialBackfillPolicy::Disabled,
+            koushi_protocol::command::InitialBackfillPolicy::Disabled,
         )
         .await;
     drop(manager_tx);
@@ -812,7 +812,7 @@ async fn diagnostics_producer_paths_run_without_trace_environment() {
             key.clone(),
             false,
             true,
-            crate::command::InitialBackfillPolicy::Disabled,
+            koushi_protocol::command::InitialBackfillPolicy::Disabled,
         )
         .await;
 

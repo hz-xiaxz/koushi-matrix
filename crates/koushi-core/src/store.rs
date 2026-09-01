@@ -27,7 +27,8 @@ use std::sync::Arc;
 #[cfg(any(test, feature = "test-hooks"))]
 use std::sync::{Mutex, atomic::AtomicUsize};
 
-use koushi_key::{LocalStoreBinding, LocalStoreId, LocalUnlockSecret, SessionKeyId};
+use koushi_key::{LocalStoreBinding, LocalStoreId, LocalUnlockSecret};
+use koushi_protocol::SessionKeyId;
 
 use crate::credential_vault::{
     LocalStoreMigrationRecord, LocalStoreMigrationState, PendingLoginRecord, PendingLoginState,

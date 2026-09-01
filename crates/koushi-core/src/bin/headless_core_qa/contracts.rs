@@ -15,7 +15,7 @@ use super::{
     Mutex, RequestId, SessionState, SyncEvent, TimelineDiff, TimelineEvent, TimelineItem,
     TimelineItemId, TimelineKey, TimelineMessageActions,
 };
-use koushi_core::event::ThreadSummaryDto;
+use koushi_protocol::event::ThreadSummaryDto;
 
 pub(super) fn reconnect_test_bodies() -> Vec<String> {
     (0..TIMELINE_RECONNECT_EXPECTED_BODY_COUNT)
@@ -41,7 +41,7 @@ pub(super) fn reconnect_test_items(indices: impl IntoIterator<Item = usize>) -> 
 
 pub(super) fn reconnect_test_request(sequence: u64) -> RequestId {
     RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence,
     }
 }
@@ -229,8 +229,8 @@ pub(super) fn withheld_projection_test_item(event_id: &str, body: &str) -> Timel
 pub(super) fn withheld_projection_items_updated(key: TimelineKey, item: TimelineItem) -> CoreEvent {
     CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
         key,
-        generation: koushi_core::ids::TimelineGeneration(0),
-        batch_id: koushi_core::ids::TimelineBatchId(1),
+        generation: koushi_protocol::ids::TimelineGeneration(0),
+        batch_id: koushi_protocol::ids::TimelineBatchId(1),
         diffs: vec![TimelineDiff::PushBack { item }],
     })
 }

@@ -1,8 +1,7 @@
 //! Public command boundary. Every command carries a runtime-scoped
 //! `RequestId`. Secret-bearing payloads redact `Debug`.
 
-use crate::composer_draft_lifecycle::ComposerDraftScope;
-use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
+use crate::ids::{RequestId, RuntimeConnectionId};
 
 #[derive(Debug)]
 pub enum CoreCommand {
@@ -220,132 +219,6 @@ impl CoreCommand {
                 | SearchCommand::StopHistoryCrawl { request_id, .. } => *request_id,
             },
         }
-    }
-
-    /// Exact account/target owner for every command that carries a composer
-    /// revision. Callers must acquire a matching Core lease permit before the
-    /// command may enter the runtime inbox.
-    pub fn composer_draft_scope(&self) -> Option<ComposerDraftScope> {
-        match self {
-            Self::App(AppCommand::SetComposerDraft {
-                expected_account,
-                room_id,
-                ..
-            }) => Some(ComposerDraftScope {
-                account: expected_account.clone(),
-                target: koushi_state::ComposerTarget::Main {
-                    room_id: room_id.clone(),
-                },
-            }),
-            Self::App(AppCommand::SetThreadComposerDraft {
-                expected_account,
-                room_id,
-                root_event_id,
-                ..
-            }) => Some(ComposerDraftScope {
-                account: expected_account.clone(),
-                target: koushi_state::ComposerTarget::Thread {
-                    room_id: room_id.clone(),
-                    root_event_id: root_event_id.clone(),
-                },
-            }),
-            Self::App(AppCommand::AcceptComposerDraft {
-                expected_account,
-                target,
-                ..
-            }) => Some(ComposerDraftScope {
-                account: expected_account.clone(),
-                target: target.clone(),
-            }),
-            Self::App(AppCommand::ScheduleSend {
-                expected_account,
-                room_id,
-                thread_root_event_id,
-                ..
-            }) => Some(ComposerDraftScope {
-                account: expected_account.clone(),
-                target: thread_root_event_id
-                    .as_ref()
-                    .map(|root_event_id| koushi_state::ComposerTarget::Thread {
-                        room_id: room_id.clone(),
-                        root_event_id: root_event_id.clone(),
-                    })
-                    .unwrap_or_else(|| koushi_state::ComposerTarget::Main {
-                        room_id: room_id.clone(),
-                    }),
-            }),
-            Self::Timeline(
-                TimelineCommand::SubmitText {
-                    expected_account,
-                    key,
-                    ..
-                }
-                | TimelineCommand::SubmitReply {
-                    expected_account,
-                    key,
-                    ..
-                },
-            ) => Some(ComposerDraftScope {
-                account: expected_account.clone(),
-                target: match &key.kind {
-                    koushi_protocol::ids::TimelineKind::Room { room_id }
-                    | koushi_protocol::ids::TimelineKind::Focused { room_id, .. } => {
-                        koushi_state::ComposerTarget::Main {
-                            room_id: room_id.clone(),
-                        }
-                    }
-                    koushi_protocol::ids::TimelineKind::Thread {
-                        room_id,
-                        root_event_id,
-                    } => koushi_state::ComposerTarget::Thread {
-                        room_id: room_id.clone(),
-                        root_event_id: root_event_id.clone(),
-                    },
-                },
-            }),
-            Self::App(_)
-            | Self::Account(_)
-            | Self::Sync(_)
-            | Self::Room(_)
-            | Self::Timeline(_)
-            | Self::Search(_) => None,
-        }
-    }
-
-    /// Commands that require an exact `Ready` session before they are routed.
-    /// External `SyncCommand`s are included; the restricted E2EE crypto lane
-    /// used while gated is owned internally by `AccountActor`.
-    pub fn requires_ready_session(&self) -> bool {
-        matches!(
-            self,
-            Self::Room(_) | Self::Timeline(_) | Self::Search(_) | Self::Sync(_)
-        ) || matches!(
-            self,
-            Self::Account(command) if command.requires_ready_session()
-        ) || matches!(
-            self,
-            Self::App(
-                AppCommand::OpenTimelineAtTimestamp { .. }
-                    | AppCommand::RepairRoomTimeline { .. }
-                    | AppCommand::EnterAnchoredTimeline { .. }
-                    | AppCommand::ScheduleSend { .. }
-                    | AppCommand::CancelScheduledSend { .. }
-                    | AppCommand::RescheduleScheduledSend { .. }
-                    | AppCommand::SetUploadStaging { .. }
-                    | AppCommand::AcceptComposerDraft { .. }
-                    | AppCommand::UpdateStagedUploadCaption { .. }
-                    | AppCommand::UpdateStagedUploadCompression { .. }
-                    | AppCommand::SelectStagedUploadOutput { .. }
-                    | AppCommand::ClearUploadStaging { .. }
-                    | AppCommand::RebuildSearchIndex { .. }
-                    | AppCommand::SetRoomUrlPreviewOverride { .. }
-                    | AppCommand::OpenFilesView { .. }
-                    | AppCommand::OpenThreadsList { .. }
-                    | AppCommand::CloseThreadsList { .. }
-                    | AppCommand::PaginateThreadsList { .. }
-                    | AppCommand::TimelineScrollAnchorUpdated { .. }
-            )
-        )
     }
 }
 

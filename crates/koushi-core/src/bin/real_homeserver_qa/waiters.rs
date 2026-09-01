@@ -513,7 +513,7 @@ pub(super) async fn wait_for_initial_items(
     key: &TimelineKey,
     request_id: RequestId,
     label: &str,
-) -> Result<Vec<koushi_core::event::TimelineItem>, String> {
+) -> Result<Vec<koushi_protocol::event::TimelineItem>, String> {
     loop {
         let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
             .await
@@ -598,11 +598,11 @@ pub(super) async fn wait_for_edit_diff(
                 ..
             }) if ev_key == key => {
                 for diff in diffs {
-                    if let koushi_core::event::TimelineDiff::Set { item, .. } = diff {
+                    if let koushi_protocol::event::TimelineDiff::Set { item, .. } = diff {
                         let body_ok = item.body.as_deref().unwrap_or("").contains(edited_body);
                         let eid_ok = matches!(
                             &item.id,
-                            koushi_core::event::TimelineItemId::Event { event_id: id }
+                            koushi_protocol::event::TimelineItemId::Event { event_id: id }
                             if id == event_id
                         );
                         if body_ok || eid_ok {
@@ -645,8 +645,8 @@ pub(super) async fn wait_for_redact_diff(
             }) if ev_key == key => {
                 for diff in diffs {
                     match diff {
-                        koushi_core::event::TimelineDiff::Remove { .. } => return Ok(()),
-                        koushi_core::event::TimelineDiff::Set { item, .. } => {
+                        koushi_protocol::event::TimelineDiff::Remove { .. } => return Ok(()),
+                        koushi_protocol::event::TimelineDiff::Set { item, .. } => {
                             // A redacted item typically has no body.
                             if item.body.is_none() || item.body.as_deref() == Some("") {
                                 return Ok(());
@@ -1068,11 +1068,11 @@ pub(super) async fn wait_for_body_substring_in_timeline(
                 key: ev_key, diffs, ..
             }) if ev_key == key => diffs.iter().any(|diff| {
                 let item_opt = match diff {
-                    koushi_core::event::TimelineDiff::PushBack { item }
-                    | koushi_core::event::TimelineDiff::PushFront { item }
-                    | koushi_core::event::TimelineDiff::Insert { item, .. }
-                    | koushi_core::event::TimelineDiff::Set { item, .. } => Some(item),
-                    koushi_core::event::TimelineDiff::Reset { items } => {
+                    koushi_protocol::event::TimelineDiff::PushBack { item }
+                    | koushi_protocol::event::TimelineDiff::PushFront { item }
+                    | koushi_protocol::event::TimelineDiff::Insert { item, .. }
+                    | koushi_protocol::event::TimelineDiff::Set { item, .. } => Some(item),
+                    koushi_protocol::event::TimelineDiff::Reset { items } => {
                         return items
                             .iter()
                             .any(|it| it.body.as_deref().unwrap_or("").contains(body_substring));

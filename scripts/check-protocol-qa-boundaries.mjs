@@ -62,6 +62,7 @@ export function findProtocolQaBoundaryViolations(root) {
     violations.push("missing crates/koushi-protocol/Cargo.toml");
   } else {
     for (const dependency of [
+      "koushi-key",
       "matrix-sdk",
       "matrix-sdk-base",
       "matrix-sdk-ui",

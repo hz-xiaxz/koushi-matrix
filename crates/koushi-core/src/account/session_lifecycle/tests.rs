@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
-use koushi_key::{SessionKeyId, StoredMatrixSession};
+use koushi_key::StoredMatrixSession;
+use koushi_protocol::SessionKeyId;
 use koushi_sdk::PersistableMatrixSession;
 use koushi_state::{
     AppAction, LoginAttemptId, LoginRequest, SlidingSyncAdmission, SlidingSyncAdmissionSource,
@@ -22,9 +23,9 @@ use crate::account::test_support::{
     spawn_named_quarantine_password_server_with_controls, spawn_quarantine_password_server,
     test_request_id,
 };
-use crate::command::AccountCommand;
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
 use crate::executor;
+use koushi_protocol::command::AccountCommand;
 use koushi_protocol::event::{AccountEvent, CoreEvent};
 
 use crate::link_preview::LinkPreviewContext;

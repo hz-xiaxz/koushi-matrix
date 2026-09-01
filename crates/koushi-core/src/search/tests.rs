@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use super::*;
-use crate::command::SearchScope;
+use koushi_protocol::command::SearchScope;
 use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 use koushi_search::{
     SearchCandidate, SearchDocumentStore, SearchEdit, SearchableEvent, SensitiveString,
@@ -444,7 +444,7 @@ fn matrix_sdk_search_scope_respects_actor_resolved_room_filter() {
 
 #[test]
 fn search_command_query_redacts_query_in_debug() {
-    use crate::command::{SearchCommand, SearchScope};
+    use koushi_protocol::command::{SearchCommand, SearchScope};
     use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
     let cmd = SearchCommand::Query {
         request_id: RequestId {
@@ -540,7 +540,7 @@ fn contiguous_pending_queries_coalesce_to_latest_without_crossing_non_query_mess
     use std::collections::VecDeque;
     use std::time::Instant;
 
-    use crate::command::SearchScope;
+    use koushi_protocol::command::SearchScope;
     use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 
     fn query(sequence: u64) -> super::SearchActorMessage {

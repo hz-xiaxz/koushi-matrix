@@ -61,9 +61,10 @@ use koushi_state::{
 use tokio::sync::{broadcast, mpsc};
 
 use crate::account_work::AccountWorkScheduler;
-use crate::command::{SearchCommand, SearchScope};
+use crate::command_policy::search_scope_to_state;
 use crate::executor;
 use crate::search_crawler::{HistoryCrawlCheckpoint, HistoryCrawlPageResult};
+use koushi_protocol::command::{SearchCommand, SearchScope};
 use koushi_protocol::event::{CoreEvent, SearchEvent, SearchResultItem};
 use koushi_protocol::failure::SearchFailureKind;
 use koushi_protocol::ids::RequestId;
@@ -984,7 +985,7 @@ impl SearchActor {
             .send(vec![AppAction::SearchSucceeded {
                 request_id: request_id.sequence,
                 query: query.to_owned(),
-                scope: scope.to_state(),
+                scope: search_scope_to_state(scope),
                 results,
             }])
             .await;

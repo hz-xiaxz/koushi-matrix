@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, sync::Arc};
 
-use koushi_key::SessionKeyId;
+use koushi_protocol::SessionKeyId;
 use koushi_sdk::MatrixClientSession;
 use koushi_state::{AppAction, ScheduledSendHandle, ScheduledSendItem, SessionInfo};
 
@@ -15,8 +15,8 @@ use crate::account::actor::{AccountActorHandle, AccountMessage};
 use crate::account::test_support::{
     recv_account_action_with_sliding_sync_effects, spawn_actor_with_dirs_and_registry,
 };
-use crate::command::AccountCommand;
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
+use koushi_protocol::command::AccountCommand;
 
 use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 

@@ -186,7 +186,7 @@ async fn wait_for_room_settings_loaded(
 /// failure text. Used by private-data-free invite QA.
 async fn wait_for_user_invited_ack(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<(), String> {
     loop {
@@ -212,7 +212,7 @@ async fn wait_for_user_invited_ack(
 
 async fn wait_for_invite_accepted(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     expected_room_id: &str,
     label: &str,
 ) -> Result<(), String> {
@@ -247,7 +247,7 @@ async fn wait_for_invite_accepted(
 
 async fn wait_for_direct_message_started(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<String, String> {
     let deadline = QaEventDeadline::after(EVENT_TIMEOUT);

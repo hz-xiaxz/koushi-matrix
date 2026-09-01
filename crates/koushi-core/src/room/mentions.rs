@@ -80,7 +80,7 @@ impl RoomActor {
     pub(super) async fn handle_query_mention_candidates(
         &mut self,
         request_id: RequestId,
-        account_key: crate::AccountKey,
+        account_key: koushi_protocol::AccountKey,
         room_id: String,
         surface: MentionSurface,
         query: String,

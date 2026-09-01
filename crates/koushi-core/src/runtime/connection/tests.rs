@@ -255,7 +255,7 @@ fn standalone_composer_command_permit_outlives_activation_lease() {
         command_tx,
         composer_draft_leases: Arc::clone(&composer_draft_leases),
     };
-    let account = koushi_key::SessionKeyId {
+    let account = koushi_protocol::SessionKeyId {
         homeserver: "https://example.invalid".to_owned(),
         user_id: "@permit:example.invalid".to_owned(),
         device_id: "DEVICE".to_owned(),

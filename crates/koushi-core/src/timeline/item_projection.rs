@@ -36,13 +36,13 @@ use matrix_sdk_ui::timeline::{
 use tokio::sync::mpsc;
 
 use crate::account_work::AccountWorkKind;
-use crate::command::{MediaDownloadSelection, UploadMediaKind, UploadMediaRequest};
 use crate::event_projection::{
     message_actions_for_timeline_item, message_source_for_timeline_item,
 };
 use crate::executor;
 use crate::link_preview::{LinkPreviewContext, extract_link_ranges};
 use crate::search::SearchIndexMessage;
+use koushi_protocol::command::{MediaDownloadSelection, UploadMediaKind, UploadMediaRequest};
 use koushi_protocol::event::{
     CoreEvent, LinkPreview, LinkPreviewState, ReactionSender, RoomKeyRequestStage,
     RoomKeyRequestStateDto, RoomKeyRequestWithheldCode, ThreadSummaryDto, TimelineDiff,

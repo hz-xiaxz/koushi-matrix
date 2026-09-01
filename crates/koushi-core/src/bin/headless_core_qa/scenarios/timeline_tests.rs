@@ -18,7 +18,7 @@ use crate::{
     PaginationState, TimelineDiff, TimelineGapId, TimelineGapPosition, TimelineItemId,
     TimelineMessageActions,
 };
-use koushi_core::event::ThreadSummaryDto;
+use koushi_protocol::event::ThreadSummaryDto;
 
 #[test]
 fn reconnect_initial_projection_rejects_missing_newest_body() {
@@ -441,9 +441,9 @@ fn visible_gap_capture_requires_a_post_body_projection() {
 #[test]
 fn finds_timeline_item_in_initial_items_by_body_substring() {
     let items = vec![
-        koushi_core::event::TimelineItem {
+        koushi_protocol::event::TimelineItem {
             request_state: None,
-            id: koushi_core::event::TimelineItemId::Synthetic {
+            id: koushi_protocol::event::TimelineItemId::Synthetic {
                 synthetic_id: "skip".to_owned(),
             },
             sender: None,
@@ -474,9 +474,9 @@ fn finds_timeline_item_in_initial_items_by_body_substring() {
             display_metadata: None,
             unable_to_decrypt: None,
         },
-        koushi_core::event::TimelineItem {
+        koushi_protocol::event::TimelineItem {
             request_state: None,
-            id: koushi_core::event::TimelineItemId::Event {
+            id: koushi_protocol::event::TimelineItemId::Event {
                 event_id: "$thread:test".to_owned(),
             },
             sender: Some("@b:test".to_owned()),
@@ -518,9 +518,9 @@ fn finds_timeline_item_in_initial_items_by_body_substring() {
 
 #[test]
 fn thread_reply_missing_from_initial_items_requires_paginate_backfill() {
-    let initial_items = vec![koushi_core::event::TimelineItem {
+    let initial_items = vec![koushi_protocol::event::TimelineItem {
         request_state: None,
-        id: koushi_core::event::TimelineItemId::Synthetic {
+        id: koushi_protocol::event::TimelineItemId::Synthetic {
             synthetic_id: "placeholder".to_owned(),
         },
         sender: None,
@@ -560,9 +560,9 @@ fn thread_reply_missing_from_initial_items_requires_paginate_backfill() {
 
 #[test]
 fn thread_reply_present_in_initial_items_does_not_require_backfill() {
-    let initial_items = vec![koushi_core::event::TimelineItem {
+    let initial_items = vec![koushi_protocol::event::TimelineItem {
         request_state: None,
-        id: koushi_core::event::TimelineItemId::Synthetic {
+        id: koushi_protocol::event::TimelineItemId::Synthetic {
             synthetic_id: "thread-reply".to_owned(),
         },
         sender: Some("@b:test".to_owned()),
@@ -668,9 +668,9 @@ fn room_thread_assertion_requires_rust_projected_root_activity_and_summary() {
     );
 
     let mut projected = unprojected;
-    projected.display_metadata = Some(koushi_core::event::TimelineDisplayMetadata {
+    projected.display_metadata = Some(koushi_protocol::event::TimelineDisplayMetadata {
         row_id: "thread-root:$root:test".to_owned(),
-        kind: koushi_core::event::TimelineDisplayKind::ThreadRoot,
+        kind: koushi_protocol::event::TimelineDisplayKind::ThreadRoot,
         content_event_id: Some("$root:test".to_owned()),
         activity_event_id: Some("$reply:test".to_owned()),
         display_timestamp_ms: Some(2),
@@ -767,9 +767,9 @@ fn room_thread_summary_observer_rejects_stale_non_null_summary_until_rust_advanc
             latest_timestamp_ms: Some(200),
         }),
     );
-    current_root.display_metadata = Some(koushi_core::event::TimelineDisplayMetadata {
+    current_root.display_metadata = Some(koushi_protocol::event::TimelineDisplayMetadata {
         row_id: "thread-root:$root:test".to_owned(),
-        kind: koushi_core::event::TimelineDisplayKind::ThreadRoot,
+        kind: koushi_protocol::event::TimelineDisplayKind::ThreadRoot,
         content_event_id: Some("$root:test".to_owned()),
         activity_event_id: Some("$reply-b:test".to_owned()),
         display_timestamp_ms: Some(200),
@@ -925,7 +925,7 @@ fn timeline_stress_blank_row_detection_rejects_empty_formatted_body() {
         None,
         None,
     );
-    item.formatted = Some(koushi_core::event::TimelineFormattedBody {
+    item.formatted = Some(koushi_protocol::event::TimelineFormattedBody {
         html: "<p><br /></p>".to_owned(),
         plain_text: String::new(),
         code_blocks: Vec::new(),

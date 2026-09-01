@@ -2,8 +2,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use koushi_protocol::event::TimelineViewportObservation;
-use koushi_protocol::ids::{RequestId, TimelineKey};
+use crate::event::TimelineViewportObservation;
+use crate::ids::{RequestId, TimelineKey};
 use koushi_state::{
     ComposerDocument, ComposerDraftRevision, FormattedMessageDraft, ImageUploadCompressionMode,
     SubmissionId,
@@ -239,7 +239,7 @@ pub enum TimelineCommand {
     Paginate {
         request_id: RequestId,
         key: TimelineKey,
-        direction: koushi_protocol::event::PaginationDirection,
+        direction: crate::event::PaginationDirection,
         event_count: u16,
     },
     CancelPagination {
@@ -274,7 +274,7 @@ pub enum TimelineCommand {
     },
     SubmitText {
         request_id: RequestId,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: crate::SessionKeyId,
         submission_id: SubmissionId,
         key: TimelineKey,
         transaction_id: String,
@@ -290,7 +290,7 @@ pub enum TimelineCommand {
     },
     SubmitReply {
         request_id: RequestId,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: crate::SessionKeyId,
         submission_id: SubmissionId,
         key: TimelineKey,
         transaction_id: String,
@@ -332,7 +332,7 @@ pub enum TimelineCommand {
     },
     UploadAndSendMedia {
         request_id: RequestId,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: crate::SessionKeyId,
         key: TimelineKey,
         transaction_id: String,
         request: UploadMediaRequest,
@@ -403,33 +403,6 @@ pub enum TimelineCommand {
         encrypted_global_enabled: bool,
         room_overrides: std::collections::BTreeMap<String, bool>,
     },
-}
-
-impl TimelineCommand {
-    /// Complete account owner captured by composer-affecting commands.
-    ///
-    /// AppActor and AccountActor both revalidate this immediately before
-    /// routing so an account switch cannot redirect an already-issued send.
-    pub fn composer_account_fence(&self) -> Option<(RequestId, &koushi_key::SessionKeyId)> {
-        match self {
-            Self::SubmitText {
-                request_id,
-                expected_account,
-                ..
-            }
-            | Self::SubmitReply {
-                request_id,
-                expected_account,
-                ..
-            }
-            | Self::UploadAndSendMedia {
-                request_id,
-                expected_account,
-                ..
-            } => Some((*request_id, expected_account)),
-            _ => None,
-        }
-    }
 }
 
 // Message bodies and reaction keys are visible UI state but must not reach

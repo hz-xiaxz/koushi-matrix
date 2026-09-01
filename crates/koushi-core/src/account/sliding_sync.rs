@@ -1,7 +1,8 @@
 //! `sliding_sync` ownership for AccountActor.
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
-use koushi_key::{SessionKeyId, StoredMatrixSession};
+use koushi_key::StoredMatrixSession;
+use koushi_protocol::SessionKeyId;
 use koushi_sdk::{MatrixClientSession, PersistableMatrixSession};
 use koushi_state::{
     AppAction, AuthFailureKind, LoginAttemptId, SlidingSyncAdmission, SlidingSyncAdmissionSource,

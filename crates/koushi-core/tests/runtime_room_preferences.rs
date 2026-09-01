@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use koushi_core::command::{AppCommand, CoreCommand};
 use koushi_core::{CoreRuntime, executor};
+use koushi_protocol::command::{AppCommand, CoreCommand};
 use koushi_state::{AppAction, RoomNotificationMode, RoomNotificationModeOperation, SessionState};
 
 mod support;

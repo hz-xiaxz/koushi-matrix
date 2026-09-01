@@ -8,9 +8,9 @@ use super::{
 
 #[test]
 fn timeline_items_updated_forwarding_emits_core_event_name_and_all_diffs() {
-    use koushi_core::{
-        AccountKey, CoreEvent, TimelineDiff, TimelineEvent, TimelineKey,
-        ids::{TimelineBatchId, TimelineGeneration},
+    use koushi_protocol::{
+        AccountKey, CoreEvent, TimelineBatchId, TimelineDiff, TimelineEvent, TimelineGeneration,
+        TimelineKey,
     };
     use serde_json::json;
 
@@ -43,7 +43,8 @@ fn timeline_items_updated_forwarding_emits_core_event_name_and_all_diffs() {
 }
 #[test]
 fn state_delta_forwarding_emits_core_event_changed_slices() {
-    use koushi_core::{CoreEvent, build_state_delta};
+    use koushi_core::build_state_delta;
+    use koushi_protocol::CoreEvent;
     use koushi_state::{AppState, SearchCrawlerRoomState};
     use serde_json::json;
 
@@ -84,7 +85,8 @@ fn state_delta_forwarding_emits_core_event_changed_slices() {
 }
 #[test]
 fn session_state_delta_forwarding_is_one_state_update_without_generic_duplicate() {
-    use koushi_core::{CoreEvent, build_state_delta};
+    use koushi_core::build_state_delta;
+    use koushi_protocol::CoreEvent;
     use koushi_state::{AppState, ProvisionalPhase, SessionInfo, SessionState};
     use serde_json::json;
 
@@ -167,8 +169,9 @@ fn forwarder_lag_disposition_replays_positive_lag_and_stops_on_zero_sentinel() {
 /// coreEvents.ts and coreEvents.generated.json must change with it.
 #[test]
 fn core_event_wire_format_matches_checked_in_contract_artifact() {
-    use koushi_core::{
-        AccountKey, CoreEvent, TimelineDiff, TimelineKey, build_state_delta,
+    use koushi_core::build_state_delta;
+    use koushi_protocol::{
+        AccountKey, CoreEvent, TimelineDiff, TimelineKey,
         event::{
             AccountEvent, ActivityEvent, CjkTextPolicyEvent, E2eeTrustEvent,
             EncryptionDebugOperationOutcome, EventCacheFailureReasonClass,
@@ -1683,7 +1686,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
                 request_id,
                 key: TimelineKey {
                     account_key: AccountKey("@user:example.test".to_owned()),
-                    kind: koushi_core::TimelineKind::Room {
+                    kind: koushi_protocol::TimelineKind::Room {
                         room_id: "!room:example.test".to_owned(),
                     },
                 },
@@ -1696,7 +1699,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
                 request_id,
                 key: TimelineKey {
                     account_key: AccountKey("@user:example.test".to_owned()),
-                    kind: koushi_core::TimelineKind::Room {
+                    kind: koushi_protocol::TimelineKind::Room {
                         room_id: "!room:example.test".to_owned(),
                     },
                 },

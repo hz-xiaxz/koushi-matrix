@@ -181,7 +181,7 @@ fn session_restored_account_mismatch_is_private_safe() {
 #[tokio::test]
 async fn logged_out_waiter_requires_event_and_signed_out_snapshot_in_either_order() {
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 7,
     };
     let account_key = AccountKey("@logout-barrier:example.invalid".to_owned());
@@ -221,7 +221,7 @@ async fn logged_out_waiter_requires_event_and_signed_out_snapshot_in_either_orde
 #[tokio::test]
 async fn logged_out_waiter_keeps_wrong_account_and_failure_terminal_and_private_safe() {
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 8,
     };
     let account_key = AccountKey("@expected:example.invalid".to_owned());
@@ -271,7 +271,7 @@ async fn logged_out_waiter_keeps_wrong_account_and_failure_terminal_and_private_
 #[tokio::test]
 async fn operation_failed_signed_out_waiter_requires_both_signals_in_either_order() {
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 10,
     };
     let cases = [
@@ -338,7 +338,7 @@ async fn operation_failed_signed_out_waiter_requires_both_signals_in_either_orde
 #[tokio::test(start_paused = true)]
 async fn operation_failed_signed_out_deadline_survives_unrelated_event_starvation() {
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 11,
     };
     let mut source = IntervalQaSnapshotEventSource {
@@ -378,7 +378,7 @@ async fn ready_recovery_deadline_survives_unrelated_event_starvation() {
     );
 
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 12,
     };
     let mut recovery_source = IntervalQaEventSource {
@@ -407,7 +407,7 @@ async fn ready_recovery_deadline_survives_unrelated_event_starvation() {
 #[tokio::test(start_paused = true)]
 async fn logout_and_operation_failed_deadlines_survive_unrelated_event_starvation() {
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 9,
     };
     let account_key = AccountKey("@deadline:example.invalid".to_owned());

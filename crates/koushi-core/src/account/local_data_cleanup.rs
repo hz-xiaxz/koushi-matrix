@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
-use koushi_key::SessionKeyId;
+use koushi_protocol::SessionKeyId;
 use koushi_state::{
     AppAction, DeviceCleanupAuthMode, DeviceCleanupFailureKind, DeviceCleanupRemoteOutcome,
 };

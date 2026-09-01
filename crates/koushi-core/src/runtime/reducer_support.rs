@@ -47,8 +47,8 @@ fn reduce_with_unread_diagnostics(state: &mut AppState, action: AppAction) -> Ve
 #[derive(Default)]
 pub(super) struct DeferredReducerSideEffects {
     cancel_activity_resolution: bool,
-    navigation: Option<(koushi_key::SessionKeyId, NavigationState, bool)>,
-    composer_drafts: Option<(koushi_key::SessionKeyId, ComposerDraftStore)>,
+    navigation: Option<(koushi_protocol::SessionKeyId, NavigationState, bool)>,
+    composer_drafts: Option<(koushi_protocol::SessionKeyId, ComposerDraftStore)>,
     composer_drafts_discarded: bool,
     scheduled_sends: Option<DeferredScheduledSendPersist>,
 }

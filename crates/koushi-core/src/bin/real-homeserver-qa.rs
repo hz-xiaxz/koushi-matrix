@@ -55,19 +55,19 @@
 
 use std::process::ExitCode;
 
-use koushi_core::command::{
-    AccountCommand, CoreCommand, CreateRoomOptions, CreateRoomVisibility, RoomCommand,
-    SearchCommand, SearchScope, SyncCommand, TimelineCommand,
-};
-use koushi_core::event::{
-    AccountEvent, CoreEvent, PaginationDirection, PaginationState, RoomEvent, SearchEvent,
-    SyncEvent, TimelineEvent,
-};
-use koushi_core::failure::{CoreFailure, RecoveryFailureKind, TimelineFailureKind};
-use koushi_core::ids::{AccountKey, RequestId, TimelineKey};
 #[cfg(any(debug_assertions, test))]
 use koushi_core::runtime::EventStreamLag;
 use koushi_core::runtime::{CoreConnection, CoreRuntime};
+use koushi_protocol::command::{
+    AccountCommand, CoreCommand, CreateRoomOptions, CreateRoomVisibility, RoomCommand,
+    SearchCommand, SearchScope, SyncCommand, TimelineCommand,
+};
+use koushi_protocol::event::{
+    AccountEvent, CoreEvent, PaginationDirection, PaginationState, RoomEvent, SearchEvent,
+    SyncEvent, TimelineEvent,
+};
+use koushi_protocol::failure::{CoreFailure, RecoveryFailureKind, TimelineFailureKind};
+use koushi_protocol::ids::{AccountKey, RequestId, TimelineKey};
 use koushi_state::{
     AppState, AuthSecret, ComposerDocument, LoginRequest, RecoveryRequest, SessionState,
 };

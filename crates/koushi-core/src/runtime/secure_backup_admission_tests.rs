@@ -1,7 +1,6 @@
 use super::{account_command_projected_action, secure_backup_setup_projection_failure};
-use crate::{
-    AccountCommand, CoreFailure, RequestId, RuntimeConnectionId, SecureBackupSetupRequest,
-};
+use crate::{CoreFailure, RequestId, RuntimeConnectionId};
+use koushi_protocol::{AccountCommand, SecureBackupSetupRequest};
 use koushi_state::{
     AppAction, AppState, SecureBackupGateState, SecureBackupSetupIntent, SecureBackupSetupState,
     SessionInfo, SessionState,

@@ -210,7 +210,7 @@ async fn e2ee_multi_device_cleanup_attempts_every_owned_participant_after_one_fa
 #[tokio::test]
 async fn logged_out_waiter_requires_event_and_signed_out_snapshot_in_either_order() {
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 7,
     };
     let account_key = AccountKey("@logout-barrier:example.invalid".to_owned());
@@ -251,7 +251,7 @@ async fn logged_out_waiter_requires_event_and_signed_out_snapshot_in_either_orde
 async fn logout_waiters_observe_final_signed_out_snapshot_without_another_broadcast() {
     for keyed in [true, false] {
         let request_id = RequestId {
-            connection_id: koushi_core::ids::RuntimeConnectionId(1),
+            connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
             sequence: if keyed { 71 } else { 72 },
         };
         let account_key = AccountKey("@logout-final-snapshot:example.invalid".to_owned());
@@ -299,7 +299,7 @@ async fn logout_waiters_observe_final_signed_out_snapshot_without_another_broadc
 async fn logout_waiters_observe_final_signed_out_snapshot_after_lag_or_close() {
     for (keyed, skipped) in [(true, 0), (false, 4)] {
         let request_id = RequestId {
-            connection_id: koushi_core::ids::RuntimeConnectionId(1),
+            connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
             sequence: if keyed { 73 } else { 74 },
         };
         let account_key = AccountKey("@logout-terminal-lag:example.invalid".to_owned());
@@ -332,7 +332,7 @@ async fn logout_waiters_observe_final_signed_out_snapshot_after_lag_or_close() {
 #[tokio::test]
 async fn logged_out_waiter_keeps_wrong_account_and_failure_terminal_and_private_safe() {
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 8,
     };
     let account_key = AccountKey("@expected:example.invalid".to_owned());
@@ -382,7 +382,7 @@ async fn logged_out_waiter_keeps_wrong_account_and_failure_terminal_and_private_
 #[tokio::test]
 async fn operation_failed_signed_out_waiter_requires_both_signals_in_either_order() {
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 10,
     };
     let cases = [
@@ -449,7 +449,7 @@ async fn operation_failed_signed_out_waiter_requires_both_signals_in_either_orde
 #[tokio::test(start_paused = true)]
 async fn operation_failed_signed_out_deadline_survives_unrelated_event_starvation() {
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 11,
     };
     let mut source = IntervalQaSnapshotEventSource {

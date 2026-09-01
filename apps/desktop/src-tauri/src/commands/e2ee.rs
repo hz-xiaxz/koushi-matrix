@@ -374,13 +374,15 @@ pub async fn submit_identity_reset_oauth(
 }
 
 pub(super) fn build_bootstrap_cross_signing_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     auth: Option<AuthSecret>,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::BootstrapCrossSigning { request_id, auth })
 }
 
-pub(super) fn build_enable_key_backup_command(request_id: koushi_core::RequestId) -> CoreCommand {
+pub(super) fn build_enable_key_backup_command(
+    request_id: koushi_protocol::RequestId,
+) -> CoreCommand {
     CoreCommand::Account(AccountCommand::EnableKeyBackup {
         request_id,
         passphrase: None,
@@ -388,7 +390,7 @@ pub(super) fn build_enable_key_backup_command(request_id: koushi_core::RequestId
 }
 
 pub(super) fn build_bootstrap_secure_backup_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     passphrase: Option<AuthSecret>,
     recovery_key_destination_requested: bool,
     intent: koushi_state::SecureBackupSetupIntent,
@@ -404,7 +406,7 @@ pub(super) fn build_bootstrap_secure_backup_command(
 }
 
 pub(super) fn build_recover_secure_backup_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     secret: AuthSecret,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::RecoverSecureBackup {
@@ -414,13 +416,13 @@ pub(super) fn build_recover_secure_backup_command(
 }
 
 pub(super) fn build_retry_secure_backup_inspection_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::RetrySecureBackupInspection { request_id })
 }
 
 pub(super) fn build_change_secure_backup_passphrase_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     old_secret: AuthSecret,
     new_passphrase: AuthSecret,
     recovery_key_destination_requested: bool,
@@ -436,7 +438,7 @@ pub(super) fn build_change_secure_backup_passphrase_command(
 }
 
 pub(super) fn build_export_room_keys_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     passphrase: AuthSecret,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::ExportRoomKeys {
@@ -446,7 +448,7 @@ pub(super) fn build_export_room_keys_command(
 }
 
 pub(super) fn build_import_room_keys_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     passphrase: AuthSecret,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::ImportRoomKeys {
@@ -456,7 +458,7 @@ pub(super) fn build_import_room_keys_command(
 }
 
 pub(super) fn build_accept_verification_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     flow_id: u64,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::AcceptVerification {
@@ -506,7 +508,7 @@ pub(super) fn build_confirm_session_bootstrap_saved_command(
 }
 
 pub(super) fn build_confirm_sas_verification_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     flow_id: u64,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::ConfirmSasVerification {
@@ -516,7 +518,7 @@ pub(super) fn build_confirm_sas_verification_command(
 }
 
 pub(super) fn build_cancel_verification_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     flow_id: u64,
     reason: VerificationCancelReason,
 ) -> CoreCommand {
@@ -527,12 +529,12 @@ pub(super) fn build_cancel_verification_command(
     })
 }
 
-pub(super) fn build_reset_identity_command(request_id: koushi_core::RequestId) -> CoreCommand {
+pub(super) fn build_reset_identity_command(request_id: koushi_protocol::RequestId) -> CoreCommand {
     CoreCommand::Account(AccountCommand::ResetIdentity { request_id })
 }
 
 pub(super) fn build_cancel_identity_reset_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     flow_id: u64,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::CancelIdentityReset {
@@ -542,7 +544,7 @@ pub(super) fn build_cancel_identity_reset_command(
 }
 
 pub(super) fn build_submit_identity_reset_password_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     flow_id: u64,
     password: AuthSecret,
 ) -> CoreCommand {
@@ -554,7 +556,7 @@ pub(super) fn build_submit_identity_reset_password_command(
 }
 
 pub(super) fn build_submit_identity_reset_oauth_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     flow_id: u64,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::SubmitIdentityResetAuth {

@@ -39,10 +39,9 @@ use crate::window_state::{
 use koushi_core::renderable_thumbnail::{
     cleanup_legacy_plaintext_thumbnail_dirs, lookup_renderable_thumbnail,
 };
-use koushi_core::{
-    AccountCommand, AppCommand, CoreCommand, CoreConnection, CoreRuntime, NativeArtifactRegistry,
-};
+use koushi_core::{CoreConnection, CoreRuntime, NativeArtifactRegistry};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
+use koushi_protocol::{AccountCommand, AppCommand, CoreCommand};
 
 // Must stay in sync with `OIDC_REDIRECT_URI` in koushi-core. The scheme is
 // reverse-DNS per RFC 8252 §7.1 because MAS deployments reject bare schemes.

@@ -8,11 +8,11 @@ use koushi_state::{
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::account::actor::{AccountActor, AccountActorHandle, AccountMessage};
-use crate::command::AccountCommand;
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
 use crate::link_preview::LinkPreviewContext;
 use crate::store::CredentialStoreBackend;
 use crate::store::StoreActor;
+use koushi_protocol::command::AccountCommand;
 use koushi_protocol::event::CoreEvent;
 use koushi_protocol::ids::RequestId;
 use tempfile::tempdir;

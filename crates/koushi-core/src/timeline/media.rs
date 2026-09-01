@@ -15,8 +15,8 @@ use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk_ui::timeline::TimelineItem as SdkTimelineItem;
 
-use crate::command::MediaDownloadSelection;
 use crate::executor;
+use koushi_protocol::command::MediaDownloadSelection;
 use koushi_protocol::event::{
     CoreEvent, TimelineEvent, TimelineItem, TimelineItemId, TimelineMediaKind, TimelineMediaSource,
     TimelineMediaThumbnail,
@@ -766,12 +766,12 @@ mod tests {
 
     use matrix_sdk::attachment::AttachmentInfo;
 
-    use crate::command::{UploadMediaKind, UploadMediaRequest};
+    use koushi_protocol::command::{UploadMediaKind, UploadMediaRequest};
     use koushi_protocol::event::{TimelineDiff, TimelineItemId, TimelineMediaKind};
 
     use matrix_sdk::ruma::uint;
 
-    use crate::command::{
+    use koushi_protocol::command::{
         ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,
         ImageUploadVariantInfo, ImageUploadVariantKind,
     };

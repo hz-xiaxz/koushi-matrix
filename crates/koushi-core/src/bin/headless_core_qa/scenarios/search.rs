@@ -239,7 +239,7 @@ fn assert_hide_redacted_projection() -> Result<(), String> {
         cause_request_id: None,
         key,
         actor_generation: 0,
-        generation: koushi_core::ids::TimelineGeneration(0),
+        generation: koushi_protocol::ids::TimelineGeneration(0),
         items: vec![
             projection_timeline_item("$redacted:example.invalid", true),
             projection_timeline_item("$visible:example.invalid", false),
@@ -269,7 +269,7 @@ fn assert_hide_redacted_projection() -> Result<(), String> {
 pub(super) async fn wait_for_paginate_end_reached(
     conn: &mut CoreConnection,
     key: &TimelineKey,
-    first_request_id: koushi_core::ids::RequestId,
+    first_request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<String, String> {
     // We use the conn to submit additional Paginate commands inside the loop.
@@ -434,7 +434,7 @@ pub(super) async fn poll_search_until_absent(
 /// Propagates search failure (IndexUnavailable, etc.) as errors.
 async fn wait_for_search_result(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     expected_event_id: &str,
     label: &str,
 ) -> Result<bool, String> {

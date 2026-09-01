@@ -12,8 +12,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
 
-use crate::command::TimelineCommand;
 use crate::executor;
+use koushi_protocol::command::TimelineCommand;
 use koushi_protocol::event::{
     CoreEvent, RoomKeyRequestStage, RoomKeyRequestStateDto, RoomKeyRequestWithheldCode,
     TimelineEvent,

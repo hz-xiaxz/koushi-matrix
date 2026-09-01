@@ -11,11 +11,11 @@ use tauri::Emitter;
 use crate::dto::{
     FrontendDesktopSnapshotDelta, FrontendStateUpdateEnvelope, StateUpdateSnapshotReason,
 };
-use koushi_core::{
-    CoreCommand, CoreCommandHandle, CoreConnection, EventStreamLag, TimelineCommand,
-};
+use koushi_core::{CoreCommandHandle, CoreConnection, EventStreamLag};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
-use koushi_protocol::{CoreEvent, SearchEvent, TimelineEvent, VersionedAppStateSnapshot};
+use koushi_protocol::{
+    CoreCommand, CoreEvent, SearchEvent, TimelineCommand, TimelineEvent, VersionedAppStateSnapshot,
+};
 
 /// Tauri event for serialized CoreEvent payloads (discrete events + diff batches).
 pub(crate) const CORE_EVENT_NAME: &str = "koushi-desktop://event";
@@ -90,7 +90,7 @@ pub(super) fn spawn_core_event_forwarder(
 }
 async fn submit_timeline_replay_after_forwarder_lag(
     command_handle: CoreCommandHandle,
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
 ) {
     let command = CoreCommand::Timeline(TimelineCommand::ReplaySubscribed { request_id });
     let _ = tokio::time::timeout(
@@ -138,18 +138,18 @@ fn forwarded_webview_events_for_core_event(
 
     forwarded
 }
-fn diffs_net_count_change(diffs: &[koushi_core::TimelineDiff]) -> i64 {
+fn diffs_net_count_change(diffs: &[koushi_protocol::TimelineDiff]) -> i64 {
     diffs
         .iter()
         .map(|diff| match diff {
-            koushi_core::TimelineDiff::PushFront { .. }
-            | koushi_core::TimelineDiff::PushBack { .. }
-            | koushi_core::TimelineDiff::Insert { .. } => 1_i64,
-            koushi_core::TimelineDiff::Remove { .. } => -1_i64,
-            koushi_core::TimelineDiff::Truncate { .. }
-            | koushi_core::TimelineDiff::Clear
-            | koushi_core::TimelineDiff::Reset { .. }
-            | koushi_core::TimelineDiff::Set { .. } => 0_i64,
+            koushi_protocol::TimelineDiff::PushFront { .. }
+            | koushi_protocol::TimelineDiff::PushBack { .. }
+            | koushi_protocol::TimelineDiff::Insert { .. } => 1_i64,
+            koushi_protocol::TimelineDiff::Remove { .. } => -1_i64,
+            koushi_protocol::TimelineDiff::Truncate { .. }
+            | koushi_protocol::TimelineDiff::Clear
+            | koushi_protocol::TimelineDiff::Reset { .. }
+            | koushi_protocol::TimelineDiff::Set { .. } => 0_i64,
         })
         .sum()
 }

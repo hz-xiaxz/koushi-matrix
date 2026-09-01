@@ -1,5 +1,5 @@
 use super::{CoreCommandEnvelope, CoreRuntime};
-use crate::command::{CoreCommand, RoomCommand};
+use crate::command_policy::CoreCommandPolicy;
 use crate::composer_draft_lifecycle::{
     ComposerDraftCommandPermit, ComposerDraftLeaseAdmission, ComposerDraftLeaseAdmissionFailure,
     ComposerDraftLeaseFailure, ComposerDraftLeaseId, ComposerDraftLeaseRegistry,
@@ -10,6 +10,7 @@ use crate::event_projection::{
 };
 use crate::media_staging::MediaStagingService;
 use crate::native_artifact::{NativeArtifactError, NativeArtifactKind, NativeArtifactPort};
+use koushi_protocol::command::{CoreCommand, RoomCommand};
 #[cfg(test)]
 use koushi_protocol::event::IntentOutcome;
 use koushi_protocol::event::{CoreEvent, IntentNoOpReason};
@@ -510,7 +511,7 @@ impl CoreConnection {
 
     pub async fn send_prepared_uploads(
         &mut self,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: koushi_protocol::SessionKeyId,
         generation: crate::composer_draft_lifecycle::ComposerRendererGeneration,
         lease: crate::composer_draft_lifecycle::ComposerDraftLeaseId,
         target: koushi_state::ComposerTarget,
@@ -556,7 +557,7 @@ impl CoreConnection {
 
     pub fn acquire_composer_draft_lease_for_active_target(
         &self,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: koushi_protocol::SessionKeyId,
         generation: ComposerRendererGeneration,
         target: koushi_state::ComposerTarget,
     ) -> Result<ComposerDraftLeaseAdmission, ComposerDraftLeaseAdmissionFailure> {
@@ -584,7 +585,7 @@ impl CoreConnection {
 
     pub fn acquire_composer_draft_command_permit_for_active_target(
         &self,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: koushi_protocol::SessionKeyId,
         target: koushi_state::ComposerTarget,
         generation: ComposerRendererGeneration,
         lease_id: ComposerDraftLeaseId,
@@ -777,7 +778,7 @@ impl CoreConnection {
 
 fn validate_active_composer_scope(
     snapshot: &AppStateSnapshot,
-    expected_account: &koushi_key::SessionKeyId,
+    expected_account: &koushi_protocol::SessionKeyId,
     target: &koushi_state::ComposerTarget,
 ) -> Result<(), ComposerDraftLeaseAdmissionFailure> {
     let koushi_state::SessionState::Ready(info) = &snapshot.session else {

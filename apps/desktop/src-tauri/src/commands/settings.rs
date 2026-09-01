@@ -69,27 +69,27 @@ pub async fn set_room_url_preview_override(
 }
 
 pub(super) fn build_update_settings_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     patch: SettingsPatch,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::UpdateSettings { request_id, patch })
 }
 
 pub(super) fn build_import_legacy_settings_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     patch: SettingsPatch,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::ImportLegacySettings { request_id, patch })
 }
 
 pub(super) fn build_rebuild_search_index_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::RebuildSearchIndex { request_id })
 }
 
 pub(super) fn build_set_room_url_preview_override_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     enabled: bool,
 ) -> CoreCommand {

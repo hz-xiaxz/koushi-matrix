@@ -19,7 +19,7 @@ use crate::account_work::AccountWorkKind;
 #[cfg(test)]
 use crate::causal_projection::CAUSAL_PROJECTION_SERIAL_MAX;
 use crate::causal_projection::CausalProjectionId;
-use crate::command::TimelineCommand;
+use koushi_protocol::command::TimelineCommand;
 use koushi_protocol::event::{
     CoreEvent, TimelineDiff, TimelineEvent, TimelineGapId, TimelineGapPosition, TimelineItem,
     TimelineItemId, TimelineMessageActions,
@@ -2061,7 +2061,7 @@ async fn gap_repair_room_switch_cancels_completion() {
             key.clone(),
             true,
             true,
-            crate::command::InitialBackfillPolicy::Disabled,
+            koushi_protocol::command::InitialBackfillPolicy::Disabled,
         )
         .await;
 

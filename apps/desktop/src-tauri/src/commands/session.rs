@@ -497,7 +497,7 @@ pub(super) async fn submit_recovery_request(
 }
 
 pub(super) fn build_submit_login_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     login_request: LoginRequest,
     platform: DisplayPlatform,
 ) -> CoreCommand {
@@ -509,7 +509,7 @@ pub(super) fn build_submit_login_command(
 }
 
 pub(super) fn build_submit_soft_logout_reauth_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     password: AuthSecret,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::SoftLogoutReauth {
@@ -519,7 +519,7 @@ pub(super) fn build_submit_soft_logout_reauth_command(
 }
 
 pub(super) fn build_discover_login_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     homeserver: String,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::DiscoverLogin {
@@ -529,7 +529,7 @@ pub(super) fn build_discover_login_command(
 }
 
 pub(super) fn build_start_oidc_login_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     homeserver: String,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::StartOidcLogin {
@@ -539,7 +539,7 @@ pub(super) fn build_start_oidc_login_command(
 }
 
 pub(crate) fn build_complete_oidc_login_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     callback_url: String,
     platform: DisplayPlatform,
 ) -> CoreCommand {
@@ -551,7 +551,7 @@ pub(crate) fn build_complete_oidc_login_command(
 }
 
 pub(super) fn build_switch_account_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     user_id: String,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::SwitchAccount {
@@ -561,7 +561,7 @@ pub(super) fn build_switch_account_command(
 }
 
 pub(super) fn build_submit_recovery_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     secret: AuthSecret,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::SubmitRecovery {
@@ -570,20 +570,22 @@ pub(super) fn build_submit_recovery_command(
     })
 }
 
-pub(super) fn build_logout_command(request_id: koushi_core::RequestId) -> CoreCommand {
+pub(super) fn build_logout_command(request_id: koushi_protocol::RequestId) -> CoreCommand {
     CoreCommand::Account(AccountCommand::Logout { request_id })
 }
 
 pub(super) fn build_retry_sliding_sync_capability_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::RetrySlidingSyncCapability { request_id })
 }
 
-pub(super) fn build_change_homeserver_command(request_id: koushi_core::RequestId) -> CoreCommand {
+pub(super) fn build_change_homeserver_command(
+    request_id: koushi_protocol::RequestId,
+) -> CoreCommand {
     CoreCommand::Account(AccountCommand::ChangeHomeserver { request_id })
 }
 
-pub(super) fn build_restart_sync_command(request_id: koushi_core::RequestId) -> CoreCommand {
+pub(super) fn build_restart_sync_command(request_id: koushi_protocol::RequestId) -> CoreCommand {
     CoreCommand::Sync(SyncCommand::Restart { request_id })
 }

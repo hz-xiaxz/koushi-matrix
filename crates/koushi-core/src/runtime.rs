@@ -67,9 +67,8 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::account::{AccountActorHandle, AccountMessage};
 use crate::activity_resolution::ActivityResolutionRequest;
-use crate::command::{
-    AccountCommand, AppCommand, CoreCommand, SearchCommand, SearchScope, SyncCommand,
-    TimelineCommand,
+use crate::command_policy::{
+    CoreCommandPolicy, search_scope_to_state, timeline_composer_account_fence,
 };
 use crate::composer_draft_lifecycle::{ComposerDraftCommandPermit, ComposerDraftLeaseRegistry};
 pub use activity::ACTIVITY_RECENT_MAX_ROWS;
@@ -77,6 +76,10 @@ use activity::{
     ActivityProjection, activity_tab_token, cap_activity_resolution_requests,
     guard_activity_resolution_completion, normalize_activity_resolution_action,
     record_activity_transition,
+};
+use koushi_protocol::command::{
+    AccountCommand, AppCommand, CoreCommand, SearchCommand, SearchScope, SyncCommand,
+    TimelineCommand,
 };
 use koushi_protocol::event::{
     ActivityEvent, CoreEvent, IntentNoOpReason, IntentOutcome, NativeAttentionEvent, TimelineEvent,
@@ -259,10 +262,10 @@ fn record_space_member_command_rejection(
 }
 
 pub(crate) fn space_member_forward_failure_action(
-    command: &crate::command::RoomCommand,
+    command: &koushi_protocol::command::RoomCommand,
 ) -> Option<(RequestId, AppAction)> {
     match command {
-        crate::command::RoomCommand::LoadSpaceMembers {
+        koushi_protocol::command::RoomCommand::LoadSpaceMembers {
             request_id,
             space_id,
             generation,
@@ -275,7 +278,7 @@ pub(crate) fn space_member_forward_failure_action(
                 kind: OperationFailureKind::Sdk,
             },
         )),
-        crate::command::RoomCommand::InviteUserToSpace {
+        koushi_protocol::command::RoomCommand::InviteUserToSpace {
             request_id,
             space_id,
             user_id,
@@ -290,7 +293,7 @@ pub(crate) fn space_member_forward_failure_action(
                 outcome: koushi_state::SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
             },
         )),
-        crate::command::RoomCommand::CancelSpaceInvite {
+        koushi_protocol::command::RoomCommand::CancelSpaceInvite {
             request_id,
             space_id,
             user_id,
@@ -305,7 +308,7 @@ pub(crate) fn space_member_forward_failure_action(
                 outcome: koushi_state::SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
             },
         )),
-        crate::command::RoomCommand::UpdateSpaceMemberRole {
+        koushi_protocol::command::RoomCommand::UpdateSpaceMemberRole {
             request_id,
             space_id,
             user_id,
@@ -926,10 +929,10 @@ struct AppActor {
     /// A lock/unlock can retain the same account key but still requires a
     /// fresh draft load after any captured pre-transition save is flushed.
     composer_draft_reload_required: bool,
-    navigation_loaded_for: Option<koushi_key::SessionKeyId>,
+    navigation_loaded_for: Option<koushi_protocol::SessionKeyId>,
     navigation_persistence_status: NavigationPersistenceStatus,
-    scheduled_sends_loaded_for: Option<koushi_key::SessionKeyId>,
-    room_preferences_loaded_for: Option<koushi_key::SessionKeyId>,
+    scheduled_sends_loaded_for: Option<koushi_protocol::SessionKeyId>,
+    room_preferences_loaded_for: Option<koushi_protocol::SessionKeyId>,
     state_generation: u64,
     pending_composer_draft_persist: Option<PendingComposerDraftPersist>,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
@@ -1003,7 +1006,7 @@ impl AppActor {
     /// rejection should be keyed to (canonical user id account key).
     fn composer_target_notice_key(
         &self,
-        account: &koushi_key::SessionKeyId,
+        account: &koushi_protocol::SessionKeyId,
         target: &ComposerTarget,
     ) -> Option<TimelineKey> {
         let account_key = koushi_protocol::ids::AccountKey(account.user_id.clone());
@@ -2911,7 +2914,7 @@ impl AppActor {
                         let _ = self
                             .account_actor
                             .send(AccountMessage::RoomCommand(
-                                crate::command::RoomCommand::MarkRoomAsRead {
+                                koushi_protocol::command::RoomCommand::MarkRoomAsRead {
                                     request_id: room_read_request_id,
                                     room_id: room_id.clone(),
                                     event_id: event_id.clone(),
@@ -3088,7 +3091,7 @@ impl AppActor {
             CoreCommand::Room(room_command) => {
                 let mut state_changed = false;
                 match &room_command {
-                    crate::command::RoomCommand::LoadSpaceMembers {
+                    koushi_protocol::command::RoomCommand::LoadSpaceMembers {
                         request_id,
                         space_id,
                         generation,
@@ -3128,7 +3131,7 @@ impl AppActor {
                         self.handle_ui_event_effects(&effects).await;
                         state_changed = true;
                     }
-                    crate::command::RoomCommand::InviteUserToSpace {
+                    koushi_protocol::command::RoomCommand::InviteUserToSpace {
                         request_id,
                         space_id,
                         user_id,
@@ -3173,7 +3176,7 @@ impl AppActor {
                         self.handle_ui_event_effects(&effects).await;
                         state_changed = true;
                     }
-                    crate::command::RoomCommand::CancelSpaceInvite {
+                    koushi_protocol::command::RoomCommand::CancelSpaceInvite {
                         request_id,
                         space_id,
                         user_id,
@@ -3218,7 +3221,7 @@ impl AppActor {
                         self.handle_ui_event_effects(&effects).await;
                         state_changed = true;
                     }
-                    crate::command::RoomCommand::UpdateSpaceMemberRole {
+                    koushi_protocol::command::RoomCommand::UpdateSpaceMemberRole {
                         request_id,
                         space_id,
                         user_id,
@@ -3296,7 +3299,7 @@ impl AppActor {
                 // correlation BEFORE forwarding so the action loop can emit the
                 // terminal IntentLifecycle outcome. This command path is reliable
                 // and must never be converted into a drop-on-full background path.
-                if let crate::command::RoomCommand::SelectRoom {
+                if let koushi_protocol::command::RoomCommand::SelectRoom {
                     request_id,
                     ref room_id,
                 } = room_command
@@ -3329,7 +3332,7 @@ impl AppActor {
             }
             CoreCommand::Timeline(timeline_command) => {
                 if let Some((request_id, expected_account)) =
-                    timeline_command.composer_account_fence()
+                    timeline_composer_account_fence(&timeline_command)
                     && !composer_draft_account_matches(&self.state, expected_account)
                 {
                     self.emit(CoreEvent::OperationFailed {
@@ -3355,8 +3358,7 @@ impl AppActor {
                 let formatting_options = self.state.settings.values.composer.formatting_options();
                 // Route to AccountActor (which forwards to TimelineManagerActor).
                 let message = if let Some(permit) = composer_permit.take() {
-                    let request_id = timeline_command
-                        .composer_account_fence()
+                    let request_id = timeline_composer_account_fence(&timeline_command)
                         .map(|(request_id, _)| request_id)
                         .expect("leased timeline command must have an account fence");
                     let identity =
@@ -3389,7 +3391,7 @@ impl AppActor {
                             .reduce_app_action(AppAction::SearchSubmitted {
                                 request_id: request_id.sequence,
                                 query: query.clone(),
-                                scope: scope.to_state(),
+                                scope: search_scope_to_state(&scope),
                             })
                             .await;
                         self.handle_app_effects(request_id, effects).await;
@@ -3420,13 +3422,13 @@ impl AppActor {
 
     fn should_suppress_timeline_command_for_privacy(
         &self,
-        command: &crate::command::TimelineCommand,
+        command: &koushi_protocol::command::TimelineCommand,
     ) -> bool {
         match command {
-            crate::command::TimelineCommand::SendReadReceipt { .. } => {
+            koushi_protocol::command::TimelineCommand::SendReadReceipt { .. } => {
                 !self.state.settings.values.notifications.send_read_receipts
             }
-            crate::command::TimelineCommand::SetTyping { .. } => {
+            koushi_protocol::command::TimelineCommand::SetTyping { .. } => {
                 !self
                     .state
                     .settings
@@ -3583,10 +3585,10 @@ impl AppActor {
                             initial_backfill: match intent {
                                 ThreadOpenIntent::ExistingThread
                                 | ThreadOpenIntent::PinnedReply { .. } => {
-                                    crate::command::InitialBackfillPolicy::RequiredForExistingThread
+                                    koushi_protocol::command::InitialBackfillPolicy::RequiredForExistingThread
                                 }
                                 ThreadOpenIntent::NewThreadDraft => {
-                                    crate::command::InitialBackfillPolicy::Disabled
+                                    koushi_protocol::command::InitialBackfillPolicy::Disabled
                                 }
                             },
                         },
@@ -3609,7 +3611,8 @@ impl AppActor {
                                 account_key,
                                 kind: TimelineKind::Focused { room_id, event_id },
                             },
-                            initial_backfill: crate::command::InitialBackfillPolicy::Disabled,
+                            initial_backfill:
+                                koushi_protocol::command::InitialBackfillPolicy::Disabled,
                         },
                     )
                     .await;
@@ -3666,7 +3669,7 @@ impl AppActor {
                     let _ = self
                         .account_actor
                         .send(crate::account::AccountMessage::ThreadsListCommand(
-                            crate::command::ThreadsListCommand::Open {
+                            koushi_protocol::command::ThreadsListCommand::Open {
                                 request_id,
                                 scope: koushi_state::ThreadsListScope::Room {
                                     room_id: room_id.clone(),
@@ -3687,7 +3690,7 @@ impl AppActor {
                     let _ = self
                         .account_actor
                         .send(crate::account::AccountMessage::ThreadsListCommand(
-                            crate::command::ThreadsListCommand::Open {
+                            koushi_protocol::command::ThreadsListCommand::Open {
                                 request_id,
                                 scope,
                                 room_ids,
@@ -3705,7 +3708,7 @@ impl AppActor {
                     let _ = self
                         .account_actor
                         .send(crate::account::AccountMessage::ThreadsListCommand(
-                            crate::command::ThreadsListCommand::Paginate {
+                            koushi_protocol::command::ThreadsListCommand::Paginate {
                                 request_id,
                                 scope: koushi_state::ThreadsListScope::from_scope_key(&room_id),
                             },
@@ -3716,7 +3719,7 @@ impl AppActor {
                     let _ = self
                         .account_actor
                         .send(crate::account::AccountMessage::ThreadsListCommand(
-                            crate::command::ThreadsListCommand::Close { request_id },
+                            koushi_protocol::command::ThreadsListCommand::Close { request_id },
                         ))
                         .await;
                 }
@@ -4382,7 +4385,7 @@ fn is_verification_gate_command(command: &CoreCommand, session: &SessionState) -
     )
 }
 
-fn room_preferences_session_key(state: &AppState) -> Option<koushi_key::SessionKeyId> {
+fn room_preferences_session_key(state: &AppState) -> Option<koushi_protocol::SessionKeyId> {
     composer_draft_session_key(state)
 }
 

@@ -940,7 +940,7 @@ impl TimelineActor {
             match self.msg_tx.try_send(TimelineActorMessage::RequestRoomKey {
                 request_id: None,
                 event_id,
-                origin: crate::command::KeyRequestOrigin::Automatic,
+                origin: koushi_protocol::command::KeyRequestOrigin::Automatic,
             }) {
                 Ok(()) => {}
                 Err(tokio::sync::mpsc::error::TrySendError::Full(message)) => {
@@ -964,7 +964,7 @@ impl TimelineActor {
         &mut self,
         request_id: Option<RequestId>,
         event_id: String,
-        origin: crate::command::KeyRequestOrigin,
+        origin: koushi_protocol::command::KeyRequestOrigin,
     ) {
         let requested_event_id = event_id.clone();
         let event_id = match matrix_sdk::ruma::EventId::parse(&event_id) {
@@ -996,7 +996,7 @@ impl TimelineActor {
         // render. Externally issued commands still retain correlation: when a
         // concrete request id is present, republish the in-flight state with
         // it (silent return only for actor-internal None).
-        if origin == crate::command::KeyRequestOrigin::Automatic
+        if origin == koushi_protocol::command::KeyRequestOrigin::Automatic
             && self.key_request_states.contains_key(&requested_event_id)
         {
             if let Some(request_id) = request_id
@@ -1058,7 +1058,7 @@ impl TimelineActor {
         self.key_request_states.insert(
             requested_event_id.clone(),
             KeyRequestUiState {
-                stage: if origin == crate::command::KeyRequestOrigin::User {
+                stage: if origin == koushi_protocol::command::KeyRequestOrigin::User {
                     "sent"
                 } else {
                     "automatic"

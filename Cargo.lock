@@ -3183,6 +3183,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "hkdf",
+ "koushi-protocol",
  "rand 0.9.4",
  "serde",
  "serde_json",

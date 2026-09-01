@@ -2334,7 +2334,7 @@ pub(super) async fn seed_encrypted_room_key_for_qa(
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: subscribe_id,
         key: key.clone(),
-        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+        initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .map_err(|e| format!("{label}: submit encrypted timeline subscribe failed: {e}"))?;
@@ -2839,7 +2839,7 @@ pub(super) async fn verify_second_device_room_key_delivery_for_qa(
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe_a2_id,
             key: key_a2.clone(),
-            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("second-device decrypt: submit A2 subscribe failed: {e}"))?;

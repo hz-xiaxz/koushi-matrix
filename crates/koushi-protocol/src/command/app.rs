@@ -8,7 +8,7 @@ use koushi_state::{
     StagedUploadCompressionChoice, StagedUploadItem, TimelineScrollAnchor,
 };
 
-use koushi_protocol::ids::{RequestId, TimelineKey};
+use crate::ids::RequestId;
 
 pub enum AppCommand {
     Shutdown {
@@ -24,14 +24,14 @@ pub enum AppCommand {
     },
     SetComposerDraft {
         request_id: RequestId,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: crate::SessionKeyId,
         room_id: String,
         document: ComposerDocument,
         revision: ComposerDraftRevision,
     },
     SetThreadComposerDraft {
         request_id: RequestId,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: crate::SessionKeyId,
         room_id: String,
         root_event_id: String,
         document: ComposerDocument,
@@ -39,7 +39,7 @@ pub enum AppCommand {
     },
     AcceptComposerDraft {
         request_id: RequestId,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: crate::SessionKeyId,
         target: koushi_state::ComposerTarget,
         submitted_revision: ComposerDraftRevision,
     },
@@ -72,7 +72,7 @@ pub enum AppCommand {
     },
     ScheduleSend {
         request_id: RequestId,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: crate::SessionKeyId,
         room_id: String,
         thread_root_event_id: Option<String>,
         body: String,

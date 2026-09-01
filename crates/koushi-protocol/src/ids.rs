@@ -1,5 +1,7 @@
 //! Transport-neutral identity DTOs.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -13,6 +15,24 @@ pub struct RequestId {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct AccountKey(pub String);
+
+#[derive(Clone, Eq, Hash, PartialEq, Deserialize, Serialize)]
+pub struct SessionKeyId {
+    pub homeserver: String,
+    pub user_id: String,
+    pub device_id: String,
+}
+
+impl fmt::Debug for SessionKeyId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SessionKeyId")
+            .field("homeserver", &"Homeserver(..)")
+            .field("user_id", &"UserId(..)")
+            .field("device_id", &"DeviceId(..)")
+            .finish()
+    }
+}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct TimelineKey {
@@ -63,3 +83,21 @@ pub struct TimelineGeneration(pub u64);
     Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
 pub struct TimelineBatchId(pub u64);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_key_debug_redacts_all_identity_fields() {
+        let key = SessionKeyId {
+            homeserver: "https://private-homeserver.invalid".to_owned(),
+            user_id: "@private-user:example.invalid".to_owned(),
+            device_id: "PRIVATE-DEVICE".to_owned(),
+        };
+        let debug = format!("{key:?}");
+        assert!(!debug.contains(&key.homeserver));
+        assert!(!debug.contains(&key.user_id));
+        assert!(!debug.contains(&key.device_id));
+    }
+}

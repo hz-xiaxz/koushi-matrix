@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use koushi_core::command::AppCommand;
 use koushi_core::{CoreCommand, CoreRuntime, executor};
+use koushi_protocol::command::AppCommand;
 use koushi_state::{
     AppAction, HomeSelection, NavigationPreferenceUpdate, RoomSummary, SessionState,
     SpaceLocalPresentation, SpaceLocalPresentations, SpaceSummary,

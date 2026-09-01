@@ -18,9 +18,9 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::account_work::AccountWorkScheduler;
 
-use crate::command::TimelineCommand;
 use crate::executor;
 use crate::link_preview::LinkPreviewContext;
+use koushi_protocol::command::TimelineCommand;
 use koushi_protocol::event::{CoreEvent, TimelineEvent};
 use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
 #[cfg(any(test, feature = "test-hooks"))]
@@ -35,8 +35,8 @@ use koushi_diagnostics::DiagnosticValue;
 use koushi_state::{SessionInfo, SessionState, SubmissionId};
 use std::sync::atomic::AtomicBool;
 
-use crate::command::CoreCommand;
 use crate::runtime::CoreRuntime;
+use koushi_protocol::command::CoreCommand;
 
 use super::super::actor::TimelineActorHandle;
 use super::super::diagnostics::{
@@ -66,8 +66,8 @@ use super::{
     run_global_send_completion_observer,
 };
 
-fn test_session_key() -> koushi_key::SessionKeyId {
-    koushi_key::SessionKeyId {
+fn test_session_key() -> koushi_protocol::SessionKeyId {
+    koushi_protocol::SessionKeyId {
         homeserver: "https://example.test".to_owned(),
         user_id: "@a:test".to_owned(),
         device_id: "DEVICE".to_owned(),

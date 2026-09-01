@@ -31,7 +31,7 @@ fn room_management_scenario_runs_after_room_space_and_reports_private_tokens() {
 #[test]
 fn room_management_forbidden_predicate_requires_matching_failed_moderation_state() {
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 42,
     };
     let mut state = AppState::default();

@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use koushi_protocol::ids::{AccountKey, RequestId};
+use crate::ids::{AccountKey, RequestId};
 use koushi_state::{
     DirectoryQuery, InviteScopeSelection, RoomModerationAction, RoomSettingChange, RoomTagKind,
 };

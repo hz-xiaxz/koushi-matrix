@@ -1,5 +1,5 @@
-use koushi_core::command::{CoreCommand, SearchCommand, SearchScope};
 use koushi_core::runtime::CoreRuntime;
+use koushi_protocol::command::{CoreCommand, SearchCommand, SearchScope};
 use koushi_state::{SearchState, SessionState};
 
 mod support;

@@ -89,23 +89,23 @@ pub async fn mark_activity_read(
     Ok(admission)
 }
 
-pub(super) fn build_open_activity_command(request_id: koushi_core::RequestId) -> CoreCommand {
+pub(super) fn build_open_activity_command(request_id: koushi_protocol::RequestId) -> CoreCommand {
     CoreCommand::App(AppCommand::OpenActivity { request_id })
 }
 
-pub(super) fn build_close_activity_command(request_id: koushi_core::RequestId) -> CoreCommand {
+pub(super) fn build_close_activity_command(request_id: koushi_protocol::RequestId) -> CoreCommand {
     CoreCommand::App(AppCommand::CloseActivity { request_id })
 }
 
 pub(super) fn build_set_activity_tab_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     tab: ActivityTab,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::SetActivityTab { request_id, tab })
 }
 
 pub(super) fn build_paginate_activity_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     tab: ActivityTab,
     cursor: Option<String>,
 ) -> CoreCommand {
@@ -117,14 +117,14 @@ pub(super) fn build_paginate_activity_command(
 }
 
 pub(super) fn build_mark_activity_read_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     target: ActivityMarkReadTarget,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::MarkActivityRead { request_id, target })
 }
 
 pub(super) fn build_retry_activity_resolution_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::RetryActivityResolution { request_id })
 }

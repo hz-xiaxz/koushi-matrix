@@ -29,7 +29,6 @@ use koushi_state::{AppAction, RoomListSource, SyncLifecycleStatus};
 use matrix_sdk_ui::room_list_service::RoomListService;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
-use crate::command::SyncCommand;
 use crate::executor;
 use crate::room::{RoomListReconcileAck, RoomMessage};
 use crate::{
@@ -38,6 +37,7 @@ use crate::{
     SlidingSyncHttpErrorSource, SlidingSyncHttpStatus, SlidingSyncMatrixErrorKind,
     SlidingSyncSdkVersion,
 };
+use koushi_protocol::command::SyncCommand;
 use koushi_protocol::event::{CoreEvent, SyncEvent};
 #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
 use koushi_protocol::failure::CoreFailure;

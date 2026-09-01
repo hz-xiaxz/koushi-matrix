@@ -303,7 +303,7 @@ impl RoomActor {
 mod tests {
     use super::pinned_event_from_raw;
 
-    use crate::command::RoomCommand;
+    use koushi_protocol::command::RoomCommand;
 
     use koushi_protocol::event::CoreEvent;
 

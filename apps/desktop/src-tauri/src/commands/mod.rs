@@ -20,27 +20,29 @@ use std::{
 };
 
 use koushi_core::{
-    AccountCommand, AccountKey, AppCommand, CoreCommand, CoreConnection, CoreEvent, CoreFailure,
-    CreateRoomOptions, EncryptionDebugOperationKind, EncryptionDebugOperationOutcome,
-    IntentNoOpReason, IntentOutcome, MediaDownloadSelection, NativeArtifactKind,
-    OutcomeCorrelation, PaginationDirection, RequestId, RequestOutcome, RequestOutcomeError,
-    RequestOutcomeExpectation, RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest,
-    RoomKeyReshareOutcome, RoomOperationKind, SearchCommand, SearchScope,
-    SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest, SyncCommand,
-    TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId, TimelineGeneration,
-    TimelineKey, TimelineKind, TimelineViewportObservation,
+    CoreConnection, NativeArtifactKind, OutcomeCorrelation, RequestOutcome, RequestOutcomeError,
+    RequestOutcomeExpectation, RoomOperationKind,
 };
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_protocol::{
+    AccountCommand, AccountKey, AppCommand, CoreCommand, CoreEvent, CoreFailure, CreateRoomOptions,
+    EncryptionDebugOperationOutcome, IntentNoOpReason, IntentOutcome, MediaDownloadSelection,
+    PaginationDirection, RequestId, RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest,
+    RoomKeyReshareOutcome, SearchCommand, SearchScope, SecureBackupPassphraseChangeRequest,
+    SecureBackupSetupRequest, SetAvatarRequest, SyncCommand, TimelineBatchId, TimelineCommand,
+    TimelineEvent, TimelineGapId, TimelineGeneration, TimelineKey, TimelineKind,
+    TimelineViewportObservation,
+};
 use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentSort, AuthSecret,
     ComposerDocument, ComposerDraftRevision, ComposerFormattingOptions, ComposerKeyEvent,
     ComposerResolvedAction, ComposerResolverContext, ComposerSurface, DirectoryQuery,
-    DisplayPlatform, FilesViewScope, IdentityResetAuthRequest, ImageUploadCompressionMode,
-    InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface, PresenceKind,
-    RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode, RoomSettingChange,
-    RoomTagKind, SessionInfo, SettingsPatch, StagedUploadCompressionChoice, SubmissionId,
-    ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor, VerificationCancelReason,
-    build_formatted_message_draft,
+    DisplayPlatform, EncryptionDebugOperationKind, FilesViewScope, IdentityResetAuthRequest,
+    ImageUploadCompressionMode, InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface,
+    PresenceKind, RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode,
+    RoomSettingChange, RoomTagKind, SessionInfo, SettingsPatch, StagedUploadCompressionChoice,
+    SubmissionId, ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor,
+    VerificationCancelReason, build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -142,7 +144,7 @@ pub(crate) async fn submit_core_command_with_admission(
 }
 
 /// Allocate a `RequestId` from the command-dispatch connection.
-async fn next_request_id(state: &CoreRuntimeState) -> koushi_core::RequestId {
+async fn next_request_id(state: &CoreRuntimeState) -> koushi_protocol::RequestId {
     state.connection.lock().await.next_request_id()
 }
 

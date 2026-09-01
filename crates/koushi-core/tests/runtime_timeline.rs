@@ -1,9 +1,9 @@
 //! Runtime timeline / composer integration tests.
 
-use koushi_core::command::{AppCommand, CoreCommand, TimelineCommand};
 use koushi_core::executor;
 use koushi_core::runtime::{COMPOSER_DRAFT_PERSIST_DEBOUNCE, CoreRuntime};
-use koushi_key::SessionKeyId;
+use koushi_protocol::SessionKeyId;
+use koushi_protocol::command::{AppCommand, CoreCommand, TimelineCommand};
 use koushi_protocol::event::CoreEvent;
 use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
 use koushi_protocol::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};

@@ -2,9 +2,9 @@
 
 use std::time::Duration;
 
-use koushi_core::command::{AppCommand, CoreCommand, TimelineCommand};
 use koushi_core::executor;
 use koushi_core::runtime::CoreRuntime;
+use koushi_protocol::command::{AppCommand, CoreCommand, TimelineCommand};
 use koushi_protocol::event::CoreEvent;
 use koushi_protocol::ids::{AccountKey, TimelineKey, TimelineKind};
 use koushi_state::{
@@ -125,7 +125,7 @@ async fn privacy_settings_patch_gates_read_receipt_dispatch() {
                 room_id: "!room:example.test".to_owned(),
             },
         },
-        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+        initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .expect("submit subscribe");
@@ -220,7 +220,7 @@ async fn privacy_settings_patch_gates_typing_dispatch() {
                 room_id: "!room:example.test".to_owned(),
             },
         },
-        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+        initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .expect("submit subscribe");

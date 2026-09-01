@@ -4,7 +4,8 @@ use std::{
     time::Duration,
 };
 
-use koushi_key::{SessionKeyId, StoredMatrixSession};
+use koushi_key::StoredMatrixSession;
+use koushi_protocol::SessionKeyId;
 
 use koushi_state::{
     AppAction, DeviceCleanupAuthMode, DeviceCleanupFailureKind, DeviceCleanupRemoteOutcome,
@@ -16,8 +17,8 @@ use crate::account::actor::{AccountActor, AccountActorHandle, AccountMessage};
 use crate::account::profile::AVATAR_DOWNLOAD_CONCURRENCY;
 use crate::account::test_support::{inspect_session_runtime, login_gated_actor, test_request_id};
 use crate::account::verification::INCOMING_VERIFICATION_FLOW_ID_BASE;
-use crate::command::AccountCommand;
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
+use koushi_protocol::command::AccountCommand;
 
 use crate::executor;
 

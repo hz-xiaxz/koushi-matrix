@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use crate::command::TimelineCommand;
+use koushi_protocol::command::TimelineCommand;
 
 #[cfg(any(test, feature = "test-hooks"))]
 use koushi_protocol::ids::AccountKey;

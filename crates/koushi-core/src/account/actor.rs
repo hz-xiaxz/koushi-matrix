@@ -13,7 +13,7 @@ use std::{
 use std::sync::atomic::AtomicUsize;
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
-use koushi_key::SessionKeyId;
+use koushi_protocol::SessionKeyId;
 use koushi_sdk::{MatrixClientSession, PersistableMatrixSession};
 #[cfg(test)]
 use koushi_state::DeviceCleanupFailureKind;
@@ -24,9 +24,6 @@ use koushi_state::{
 };
 use tokio::sync::{Semaphore, broadcast, mpsc, oneshot};
 
-use crate::command::{
-    AccountCommand, RoomCommand, SearchCommand, SyncCommand, ThreadsListCommand, TimelineCommand,
-};
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
 #[cfg(test)]
 use crate::executor;
@@ -41,6 +38,9 @@ use crate::store::StoreActor;
 use crate::sync::SyncActorHandle;
 use crate::timeline::{
     NavigationProjectionIngress, NavigationProjectionIntent, TimelineManagerHandle, TimelineMessage,
+};
+use koushi_protocol::command::{
+    AccountCommand, RoomCommand, SearchCommand, SyncCommand, ThreadsListCommand, TimelineCommand,
 };
 use koushi_protocol::event::{
     CoreEvent, EventCacheFailureReasonClass, EventCacheSubscribeStatus, LocalEncryptionEvent,

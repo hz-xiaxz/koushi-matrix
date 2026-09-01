@@ -431,7 +431,7 @@ pub(super) async fn run_room_people_projection_stage(
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe_id,
             key: key.clone(),
-            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("room people: submit timeline subscribe failed: {e}"))?;
@@ -442,7 +442,7 @@ pub(super) async fn run_room_people_projection_stage(
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe_b_id,
             key: key_b.clone(),
-            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("room people: submit receiver timeline subscribe failed: {e}"))?;
@@ -965,7 +965,7 @@ async fn query_directory_until_room_visible(
 
 async fn wait_for_directory_query_completed(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<Vec<DirectoryRoomSummary>, String> {
     loop {
@@ -1107,7 +1107,7 @@ fn room_management_forbidden_recorded(snapshot: &AppState, request_id: RequestId
 
 async fn wait_for_invite_declined(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     expected_room_id: &str,
     label: &str,
 ) -> Result<(), String> {
@@ -1142,7 +1142,7 @@ async fn wait_for_invite_declined(
 
 pub(super) async fn wait_for_pin_event_completed(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<(), String> {
     loop {
@@ -1168,7 +1168,7 @@ pub(super) async fn wait_for_pin_event_completed(
 
 pub(super) async fn wait_for_unpin_event_completed(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<(), String> {
     loop {

@@ -1,7 +1,8 @@
 use koushi_key::{
     CredentialBackendErrorKind, CredentialStore, InMemoryCredentialBackend, LocalSecretError,
-    LocalUnlockSecret, SessionKeyId, is_locked_or_inaccessible_error, is_missing_credential_error,
+    LocalUnlockSecret, is_locked_or_inaccessible_error, is_missing_credential_error,
 };
+use koushi_protocol::SessionKeyId;
 
 fn key_id() -> SessionKeyId {
     SessionKeyId {

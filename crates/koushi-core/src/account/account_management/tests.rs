@@ -139,7 +139,7 @@ async fn logout_aborts_active_account_management_discovery() {
     assert!(
         handle
             .send(AccountMessage::Command(
-                crate::command::AccountCommand::ChangeHomeserver {
+                koushi_protocol::command::AccountCommand::ChangeHomeserver {
                     request_id: test_request_id(),
                 },
             ))

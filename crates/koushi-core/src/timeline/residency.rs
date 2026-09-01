@@ -15,8 +15,6 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 #[cfg(any(test, feature = "test-hooks"))]
 use crate::account_work::AccountWorkScheduler;
-#[cfg(any(test, feature = "test-hooks"))]
-use crate::command::TimelineCommand;
 use crate::executor;
 #[cfg(any(test, feature = "test-hooks"))]
 use crate::link_preview::LinkPreviewContext;
@@ -24,6 +22,8 @@ use crate::link_preview::LinkPreviewContext;
 use crate::live_tail_freshness::LiveTailRefreshCoordinator;
 #[cfg(any(test, feature = "test-hooks"))]
 use crate::threads_list::ThreadRootProjectionService;
+#[cfg(any(test, feature = "test-hooks"))]
+use koushi_protocol::command::TimelineCommand;
 #[cfg(any(test, feature = "test-hooks"))]
 use koushi_protocol::ids::AccountKey;
 use koushi_protocol::ids::{TimelineKey, TimelineKind};
@@ -410,7 +410,7 @@ impl TimelineManagerActor {
             key,
             false,
             false,
-            crate::command::InitialBackfillPolicy::Disabled,
+            koushi_protocol::command::InitialBackfillPolicy::Disabled,
         )
         .await;
     }
@@ -432,7 +432,7 @@ impl TimelineManagerActor {
             key,
             false,
             false,
-            crate::command::InitialBackfillPolicy::Disabled,
+            koushi_protocol::command::InitialBackfillPolicy::Disabled,
         )
         .await;
     }
@@ -935,7 +935,7 @@ impl TimelineManagerActor {
                 &key,
                 activation.generation,
                 subscription_generation,
-                crate::command::InitialBackfillPolicy::Disabled,
+                koushi_protocol::command::InitialBackfillPolicy::Disabled,
             )
             .await
         {

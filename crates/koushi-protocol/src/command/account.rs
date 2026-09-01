@@ -1,6 +1,6 @@
 use std::fmt;
 
-use koushi_protocol::ids::{AccountKey, RequestId};
+use crate::ids::{AccountKey, RequestId};
 use koushi_state::{
     DisplayPlatform, IdentityResetAuthRequest, LoginRequest, PresenceKind, RecoveryRequest,
     VerificationCancelReason, VerificationTarget,
@@ -292,44 +292,6 @@ pub enum AccountCommand {
         request_id: RequestId,
         account_key: AccountKey,
     },
-}
-
-impl AccountCommand {
-    pub fn requires_ready_session(&self) -> bool {
-        matches!(
-            self,
-            Self::RequestVerification { .. }
-                | Self::RetryCurrentDeviceTrustDiscovery { .. }
-                | Self::AcceptVerification { .. }
-                | Self::ConfirmSasVerification { .. }
-                | Self::CancelVerification { .. }
-                | Self::BootstrapCrossSigning { .. }
-                | Self::EnableKeyBackup { .. }
-                | Self::ResetIdentity { .. }
-                | Self::CancelIdentityReset { .. }
-                | Self::SubmitIdentityResetAuth { .. }
-                | Self::RefreshCurrentSessionStatus { .. }
-                | Self::LoadAccountManagementCapabilities { .. }
-                | Self::ChangePassword { .. }
-                | Self::DeactivateAccount { .. }
-                | Self::SubmitAccountManagementUia { .. }
-                | Self::ExportRoomKeys { .. }
-                | Self::ImportRoomKeys { .. }
-                | Self::BootstrapSecureBackup { .. }
-                | Self::RecoverSecureBackup { .. }
-                | Self::RetrySecureBackupInspection { .. }
-                | Self::ChangeSecureBackupPassphrase { .. }
-                | Self::SetPresence { .. }
-                | Self::SetDisplayName { .. }
-                | Self::SetLocalUserAlias { .. }
-                | Self::SetAvatar { .. }
-                | Self::DownloadAvatarThumbnail { .. }
-                | Self::IgnoreUser { .. }
-                | Self::UnignoreUser { .. }
-                | Self::ReportUser { .. }
-                | Self::ProbeLocalEncryptionHealth { .. }
-        )
-    }
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -700,17 +662,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn soft_logout_reauth_is_allowed_past_ready_session_gate() {
-        let command = CoreCommand::Account(AccountCommand::SoftLogoutReauth {
-            request_id: fake_rid(73),
-            password: koushi_state::AuthSecret::new("synthetic-password"),
-        });
-
-        assert!(!command.requires_ready_session());
-    }
-
-    #[test]
-    fn capability_recovery_commands_are_allowed_while_session_is_blocked() {
+    fn capability_recovery_commands_are_correlated_and_redacted() {
         let retry = CoreCommand::Account(AccountCommand::RetrySlidingSyncCapability {
             request_id: fake_rid(74),
         });
@@ -721,10 +673,8 @@ mod tests {
             request_id: fake_rid(76),
         });
 
-        assert!(!retry.requires_ready_session());
-        assert!(!reset.requires_ready_session());
-        assert!(!change_homeserver.requires_ready_session());
         assert_eq!(retry.request_id(), fake_rid(74));
+        assert_eq!(reset.request_id(), fake_rid(75));
         assert_eq!(change_homeserver.request_id(), fake_rid(76));
         assert!(format!("{retry:?}").contains("RetrySlidingSyncCapability"));
         assert!(format!("{change_homeserver:?}").contains("ChangeHomeserver"));
@@ -785,9 +735,7 @@ mod tests {
             request_id: fake_rid(43),
         };
 
-        assert!(!start.requires_ready_session());
-        assert!(!submit.requires_ready_session());
-        assert!(!erase.requires_ready_session());
+        let _ = (start, erase);
         let debug = format!("{submit:?}");
         assert!(debug.contains("AuthSecret(..)"), "{debug}");
         assert!(!debug.contains("private-cleanup-password"), "{debug}");

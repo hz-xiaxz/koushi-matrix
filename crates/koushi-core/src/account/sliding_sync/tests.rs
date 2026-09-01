@@ -13,7 +13,7 @@ use crate::account::test_support::{
     inspect_session_runtime, recv_account_action_with_sliding_sync_effects, spawn_actor_with_dirs,
     spawn_named_quarantine_password_server_with_controls, test_request_id,
 };
-use crate::command::AccountCommand;
+use koushi_protocol::command::AccountCommand;
 
 use koushi_protocol::event::CoreEvent;
 

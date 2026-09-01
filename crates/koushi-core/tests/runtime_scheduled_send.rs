@@ -2,9 +2,9 @@
 
 use std::time::Duration;
 
-use koushi_core::command::{AppCommand, CoreCommand};
 use koushi_core::executor;
 use koushi_core::runtime::CoreRuntime;
+use koushi_protocol::command::{AppCommand, CoreCommand};
 use koushi_protocol::event::CoreEvent;
 use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
 use koushi_state::{
@@ -120,7 +120,7 @@ async fn schedule_send_rejects_a_command_captured_for_another_account() {
         state.timeline.scheduled_send_capability == ScheduledSendCapability::LocalFallback
     })
     .await;
-    let wrong_account = koushi_key::SessionKeyId {
+    let wrong_account = koushi_protocol::SessionKeyId {
         homeserver: "https://other.example.test".to_owned(),
         user_id: "@alice:example.test".to_owned(),
         device_id: "OTHER-DEVICE".to_owned(),

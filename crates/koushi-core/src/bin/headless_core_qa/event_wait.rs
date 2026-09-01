@@ -88,7 +88,7 @@ where
 /// Wait for `RoomEvent::RoomCreated` with the given request_id. Returns room_id.
 pub(super) async fn wait_for_room_created(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<String, String> {
     let mut seen_total = 0usize;
@@ -170,7 +170,7 @@ fn core_event_kind(event: &CoreEvent) -> &'static str {
 /// Wait for `RoomEvent::SpaceCreated` with the given request_id. Returns space_id.
 pub(super) async fn wait_for_space_created(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<String, String> {
     let mut seen_total = 0usize;
@@ -226,7 +226,7 @@ pub(super) async fn wait_for_space_created(
 /// Wait for `RoomEvent::SpaceChildSet` with the given request_id.
 pub(super) async fn wait_for_space_child_set(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     space_id: &str,
     child_room_id: &str,
     label: &str,
@@ -264,7 +264,7 @@ pub(super) async fn wait_for_space_child_set(
 /// Wait for `RoomEvent::UserInvited` with the given request_id.
 pub(super) async fn wait_for_user_invited(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     room_id: &str,
     user_id: &str,
     label: &str,
@@ -302,7 +302,7 @@ pub(super) async fn wait_for_user_invited(
 /// Wait for `RoomEvent::RoomJoined` with the given request_id.
 pub(super) async fn wait_for_room_joined(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     room_id: &str,
     label: &str,
 ) -> Result<(), String> {
@@ -683,7 +683,7 @@ pub(super) async fn wait_for_invite_in_snapshot(
 /// Wait for request-scoped `SyncEvent::Started`, then a `Running` state projection.
 pub(super) async fn wait_for_sync_started_and_running(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<(), String> {
     let mut saw_started = false;
@@ -750,7 +750,7 @@ pub(super) async fn wait_for_sync_started(
 /// Wait for `SyncEvent::Stopped` with the given request_id.
 pub(super) async fn wait_for_sync_stopped(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<(), String> {
     loop {
@@ -909,7 +909,7 @@ pub(super) fn ready_account_key<S: QaSnapshotEventSource + ?Sized>(conn: &S) -> 
 
 pub(super) async fn wait_for_logged_in<S: QaSnapshotEventSource + ?Sized>(
     conn: &mut S,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<AccountKey, String> {
     if let Some(account_key) = ready_account_key(conn) {
@@ -966,7 +966,7 @@ pub(super) async fn wait_for_logged_in<S: QaSnapshotEventSource + ?Sized>(
 /// Wait for `AccountEvent::SessionRestored` with the given request_id.
 pub(super) async fn wait_for_session_restored<S: QaSnapshotEventSource + ?Sized>(
     conn: &mut S,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     expected_account_key: &AccountKey,
     label: &str,
 ) -> Result<(), String> {
@@ -1024,7 +1024,7 @@ fn ensure_session_restored_account_key(
 /// Wait for `AccountEvent::LoggedOut` with the given request_id.
 pub(super) async fn wait_for_logged_out<S: QaSnapshotEventSource + ?Sized>(
     conn: &mut S,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     expected_account_key: &AccountKey,
     label: &str,
 ) -> Result<(), String> {
@@ -1039,7 +1039,7 @@ pub(super) async fn wait_for_logged_out<S: QaSnapshotEventSource + ?Sized>(
 
 pub(super) async fn wait_for_signed_out_after_logout<S: QaSnapshotEventSource + ?Sized>(
     conn: &mut S,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<(), String> {
     wait_for_logout_barrier(conn, request_id, QaLogoutAccountExpectation::Any, label).await
@@ -1053,7 +1053,7 @@ enum QaLogoutAccountExpectation<'a> {
 
 async fn wait_for_logout_barrier<S: QaSnapshotEventSource + ?Sized>(
     conn: &mut S,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     account_expectation: QaLogoutAccountExpectation<'_>,
     label: &str,
 ) -> Result<(), String> {
@@ -1115,7 +1115,7 @@ async fn wait_for_logout_barrier<S: QaSnapshotEventSource + ?Sized>(
 /// Wait for `OperationFailed` with the given request_id and return the failure.
 pub(super) async fn wait_for_operation_failed<S: QaEventSource + ?Sized>(
     conn: &mut S,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<CoreFailure, String> {
     let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
@@ -1161,7 +1161,7 @@ pub(super) async fn wait_for_operation_failed<S: QaEventSource + ?Sized>(
 
 pub(super) async fn wait_for_operation_failed_and_signed_out<S: QaSnapshotEventSource + ?Sized>(
     conn: &mut S,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<CoreFailure, String> {
     let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
@@ -1224,9 +1224,9 @@ pub(super) async fn subscribe_timeline_for_qa(
         request_id,
         key: key.clone(),
         initial_backfill: if matches!(key.kind, koushi_core::TimelineKind::Thread { .. }) {
-            koushi_core::command::InitialBackfillPolicy::RequiredForExistingThread
+            koushi_protocol::command::InitialBackfillPolicy::RequiredForExistingThread
         } else {
-            koushi_core::command::InitialBackfillPolicy::Disabled
+            koushi_protocol::command::InitialBackfillPolicy::Disabled
         },
     }))
     .await
@@ -1301,9 +1301,9 @@ impl<'a> BodyWaitObserver<'a> {
 pub(super) async fn wait_for_initial_items(
     conn: &mut CoreConnection,
     key: &TimelineKey,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
-) -> Result<Vec<koushi_core::event::TimelineItem>, String> {
+) -> Result<Vec<koushi_protocol::event::TimelineItem>, String> {
     wait_for_initial_items_from_source(conn, key, request_id, label, TIMELINE_INITIAL_EVENT_TIMEOUT)
         .await
 }
@@ -1311,10 +1311,10 @@ pub(super) async fn wait_for_initial_items(
 pub(super) async fn wait_for_initial_items_from_source<S: QaEventSource + ?Sized>(
     source: &mut S,
     key: &TimelineKey,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
     timeout: Duration,
-) -> Result<Vec<koushi_core::event::TimelineItem>, String> {
+) -> Result<Vec<koushi_protocol::event::TimelineItem>, String> {
     let deadline = QaEventDeadline::after(timeout);
     let mut diagnostics = InitialItemsWaitDiagnostics::default();
     loop {
@@ -1380,7 +1380,7 @@ impl InitialItemsWaitDiagnostics {
 }
 
 enum InitialItemsWaitMatch {
-    Items(Vec<koushi_core::event::TimelineItem>),
+    Items(Vec<koushi_protocol::event::TimelineItem>),
     Failure(CoreFailure),
     Ignore,
 }
@@ -1388,7 +1388,7 @@ enum InitialItemsWaitMatch {
 fn match_initial_items_wait_event(
     event: CoreEvent,
     key: &TimelineKey,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
 ) -> InitialItemsWaitMatch {
     match event {
         CoreEvent::Timeline(TimelineEvent::InitialItems {
@@ -1408,9 +1408,9 @@ fn match_initial_items_wait_event(
 }
 
 pub(super) fn find_timeline_item_with_body(
-    items: &[koushi_core::event::TimelineItem],
+    items: &[koushi_protocol::event::TimelineItem],
     expected_body: &str,
-) -> Option<koushi_core::event::TimelineItem> {
+) -> Option<koushi_protocol::event::TimelineItem> {
     items
         .iter()
         .find(|item| {
@@ -1438,7 +1438,7 @@ pub(super) struct SendQueueLocalEcho {
 
 #[derive(Debug)]
 struct SendFlowWaiter {
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     key: TimelineKey,
     expected_client_txn_id: String,
     expected_body: String,
@@ -1450,7 +1450,7 @@ struct SendFlowWaiter {
 
 impl SendFlowWaiter {
     fn new(
-        request_id: koushi_core::ids::RequestId,
+        request_id: koushi_protocol::ids::RequestId,
         key: TimelineKey,
         expected_client_txn_id: impl Into<String>,
         expected_body: impl Into<String>,
@@ -1509,13 +1509,13 @@ impl SendFlowWaiter {
         Ok(())
     }
 
-    fn observe_local_echo(&mut self, diffs: Vec<koushi_core::event::TimelineDiff>) {
+    fn observe_local_echo(&mut self, diffs: Vec<koushi_protocol::event::TimelineDiff>) {
         for diff in &diffs {
             let item = match diff {
-                koushi_core::event::TimelineDiff::PushBack { item }
-                | koushi_core::event::TimelineDiff::PushFront { item }
-                | koushi_core::event::TimelineDiff::Insert { item, .. }
-                | koushi_core::event::TimelineDiff::Set { item, .. } => item,
+                koushi_protocol::event::TimelineDiff::PushBack { item }
+                | koushi_protocol::event::TimelineDiff::PushFront { item }
+                | koushi_protocol::event::TimelineDiff::Insert { item, .. }
+                | koushi_protocol::event::TimelineDiff::Set { item, .. } => item,
                 _ => continue,
             };
             if item
@@ -1527,7 +1527,8 @@ impl SendFlowWaiter {
                 if let Some(state) = item.send_state.as_ref() {
                     self.local_echo_send_state = Some(state.clone());
                 }
-                if let koushi_core::event::TimelineItemId::Transaction { transaction_id } = &item.id
+                if let koushi_protocol::event::TimelineItemId::Transaction { transaction_id } =
+                    &item.id
                 {
                     if self.sdk_transaction_id.is_none() {
                         self.sdk_transaction_id = Some(transaction_id.clone());
@@ -1576,10 +1577,10 @@ fn timeline_send_state_label(state: &TimelineSendState) -> &'static str {
     match state {
         TimelineSendState::Sending => "Sending",
         TimelineSendState::NotSent {
-            reason: koushi_core::event::TimelineSendFailureReason::Recoverable,
+            reason: koushi_protocol::event::TimelineSendFailureReason::Recoverable,
         } => "NotSent(recoverable)",
         TimelineSendState::NotSent {
-            reason: koushi_core::event::TimelineSendFailureReason::Unrecoverable,
+            reason: koushi_protocol::event::TimelineSendFailureReason::Unrecoverable,
         } => "NotSent(unrecoverable)",
         TimelineSendState::Cancelled => "Cancelled",
         TimelineSendState::Sent => "Sent",
@@ -1590,7 +1591,7 @@ fn timeline_send_state_label(state: &TimelineSendState) -> &'static str {
 /// for a single send sequence, accepting either order.
 pub(super) async fn wait_for_send_flow_completion(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     key: &TimelineKey,
     client_txn_id: &str,
     expected_body: &str,
@@ -1610,7 +1611,7 @@ pub(super) async fn wait_for_send_flow_completion(
 
 pub(super) async fn wait_for_send_flow_completion_with_timeout(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     key: &TimelineKey,
     client_txn_id: &str,
     expected_body: &str,
@@ -1884,7 +1885,7 @@ pub(super) fn timeline_item_transaction_id(item: &TimelineItem) -> Option<&str> 
 /// Returns `(transaction_id, event_id)`.
 pub(super) async fn wait_for_send_completed(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     key: &TimelineKey,
     label: &str,
 ) -> Result<(String, String), String> {
@@ -1915,7 +1916,7 @@ pub(super) async fn wait_for_send_completed(
 }
 
 struct MediaSendWaiter {
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     key: TimelineKey,
     expected_client_txn_id: String,
     saw_local_media_echo: bool,
@@ -1925,7 +1926,7 @@ struct MediaSendWaiter {
 
 impl MediaSendWaiter {
     fn new(
-        request_id: koushi_core::ids::RequestId,
+        request_id: koushi_protocol::ids::RequestId,
         key: TimelineKey,
         expected_client_txn_id: impl Into<String>,
     ) -> Self {
@@ -1995,17 +1996,17 @@ impl MediaSendWaiter {
 }
 
 fn media_diffs_include_transaction_media(
-    diffs: &[koushi_core::event::TimelineDiff],
+    diffs: &[koushi_protocol::event::TimelineDiff],
     expected_transaction_id: &str,
 ) -> bool {
     diffs.iter().any(|diff| match diff {
-        koushi_core::event::TimelineDiff::PushBack { item }
-        | koushi_core::event::TimelineDiff::PushFront { item }
-        | koushi_core::event::TimelineDiff::Insert { item, .. }
-        | koushi_core::event::TimelineDiff::Set { item, .. } => {
+        koushi_protocol::event::TimelineDiff::PushBack { item }
+        | koushi_protocol::event::TimelineDiff::PushFront { item }
+        | koushi_protocol::event::TimelineDiff::Insert { item, .. }
+        | koushi_protocol::event::TimelineDiff::Set { item, .. } => {
             timeline_item_is_transaction_media(item, expected_transaction_id)
         }
-        koushi_core::event::TimelineDiff::Reset { items } => items
+        koushi_protocol::event::TimelineDiff::Reset { items } => items
             .iter()
             .any(|item| timeline_item_is_transaction_media(item, expected_transaction_id)),
         _ => false,
@@ -2013,20 +2014,20 @@ fn media_diffs_include_transaction_media(
 }
 
 fn timeline_item_is_transaction_media(
-    item: &koushi_core::event::TimelineItem,
+    item: &koushi_protocol::event::TimelineItem,
     expected_transaction_id: &str,
 ) -> bool {
     item.media.is_some()
         && matches!(
             &item.id,
-            koushi_core::event::TimelineItemId::Transaction { transaction_id }
+            koushi_protocol::event::TimelineItemId::Transaction { transaction_id }
                 if transaction_id == expected_transaction_id
         )
 }
 
 pub(super) async fn wait_for_media_send_flow_completion(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     key: &TimelineKey,
     client_txn_id: &str,
     label: &str,
@@ -2052,7 +2053,7 @@ pub(super) async fn wait_for_media_item(
     conn: &mut CoreConnection,
     key: &TimelineKey,
     label: &str,
-) -> Result<koushi_core::event::TimelineItem, String> {
+) -> Result<koushi_protocol::event::TimelineItem, String> {
     loop {
         let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
             .await
@@ -2076,15 +2077,15 @@ pub(super) async fn wait_for_media_item(
             }) if ev_key == key => {
                 for diff in diffs {
                     match diff {
-                        koushi_core::event::TimelineDiff::PushBack { item }
-                        | koushi_core::event::TimelineDiff::PushFront { item }
-                        | koushi_core::event::TimelineDiff::Insert { item, .. }
-                        | koushi_core::event::TimelineDiff::Set { item, .. } => {
+                        koushi_protocol::event::TimelineDiff::PushBack { item }
+                        | koushi_protocol::event::TimelineDiff::PushFront { item }
+                        | koushi_protocol::event::TimelineDiff::Insert { item, .. }
+                        | koushi_protocol::event::TimelineDiff::Set { item, .. } => {
                             if item.media.is_some() {
                                 return Ok(item);
                             }
                         }
-                        koushi_core::event::TimelineDiff::Reset { items } => {
+                        koushi_protocol::event::TimelineDiff::Reset { items } => {
                             if let Some(item) = items.into_iter().find(|item| item.media.is_some())
                             {
                                 return Ok(item);
@@ -2101,7 +2102,7 @@ pub(super) async fn wait_for_media_item(
 
 pub(super) async fn wait_for_media_download_completed(
     conn: &mut CoreConnection,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     key: &TimelineKey,
     expected_event_id: &str,
     expected_byte_count: u64,
@@ -2149,8 +2150,8 @@ pub(super) async fn wait_for_item_with_body(
     key: &TimelineKey,
     expected_body: &str,
     label: &str,
-) -> Result<koushi_core::event::TimelineItem, String> {
-    let body_matches = |item: &koushi_core::event::TimelineItem| {
+) -> Result<koushi_protocol::event::TimelineItem, String> {
+    let body_matches = |item: &koushi_protocol::event::TimelineItem| {
         item.body
             .as_ref()
             .map(|body| body.contains(expected_body))
@@ -2180,11 +2181,11 @@ pub(super) async fn wait_for_item_with_body(
             }) if ev_key == key => {
                 for diff in diffs {
                     let item = match diff {
-                        koushi_core::event::TimelineDiff::PushBack { item }
-                        | koushi_core::event::TimelineDiff::PushFront { item }
-                        | koushi_core::event::TimelineDiff::Insert { item, .. }
-                        | koushi_core::event::TimelineDiff::Set { item, .. } => item,
-                        koushi_core::event::TimelineDiff::Reset { items } => {
+                        koushi_protocol::event::TimelineDiff::PushBack { item }
+                        | koushi_protocol::event::TimelineDiff::PushFront { item }
+                        | koushi_protocol::event::TimelineDiff::Insert { item, .. }
+                        | koushi_protocol::event::TimelineDiff::Set { item, .. } => item,
+                        koushi_protocol::event::TimelineDiff::Reset { items } => {
                             if let Some(item) = items.into_iter().find(|item| body_matches(item)) {
                                 return Ok(item);
                             }
@@ -2313,7 +2314,7 @@ pub(super) async fn wait_for_item_with_body_or_decryption_failure(
     key: &TimelineKey,
     expected_body: &str,
     label: &str,
-) -> Result<koushi_core::event::TimelineItem, String> {
+) -> Result<koushi_protocol::event::TimelineItem, String> {
     let deadline = tokio::time::Instant::now() + E2EE_EVENT_TIMEOUT;
     let mut observer = BodyWaitObserver::new(expected_body);
     loop {
@@ -2487,7 +2488,7 @@ pub(super) async fn wait_for_withheld_event_projection_from_source<S: QaEventSou
 pub(super) async fn wait_for_bodies_and_pagination_settle(
     conn: &mut CoreConnection,
     key: &TimelineKey,
-    initial_items: &[koushi_core::event::TimelineItem],
+    initial_items: &[koushi_protocol::event::TimelineItem],
     expected_bodies: &[&str],
     label: &str,
 ) -> Result<(), String> {
@@ -2522,11 +2523,11 @@ pub(super) async fn wait_for_bodies_and_pagination_settle(
             }) if ev_key == key => {
                 for diff in diffs {
                     let item = match diff {
-                        koushi_core::event::TimelineDiff::PushBack { item }
-                        | koushi_core::event::TimelineDiff::PushFront { item }
-                        | koushi_core::event::TimelineDiff::Insert { item, .. }
-                        | koushi_core::event::TimelineDiff::Set { item, .. } => item,
-                        koushi_core::event::TimelineDiff::Reset { items } => {
+                        koushi_protocol::event::TimelineDiff::PushBack { item }
+                        | koushi_protocol::event::TimelineDiff::PushFront { item }
+                        | koushi_protocol::event::TimelineDiff::Insert { item, .. }
+                        | koushi_protocol::event::TimelineDiff::Set { item, .. } => item,
+                        koushi_protocol::event::TimelineDiff::Reset { items } => {
                             for it in items {
                                 if let Some(ref body) = it.body {
                                     remaining_bodies.retain(|e| !body.contains(e));

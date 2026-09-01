@@ -747,7 +747,7 @@ fn media_timeline_event_debug_redacts_routing_and_media_identifiers() {
     );
     let event = TimelineEvent::MediaUploadProgress {
         request_id: Some(RequestId {
-            connection_id: crate::ids::RuntimeConnectionId(1),
+            connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
             sequence: 7,
         }),
         key,
@@ -930,7 +930,7 @@ fn media_download_events_redact_routing_and_source_url_in_debug() {
     );
     let completed = TimelineEvent::MediaDownloadCompleted {
         request_id: RequestId {
-            connection_id: crate::ids::RuntimeConnectionId(1),
+            connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
             sequence: 7,
         },
         key: key.clone(),
@@ -952,12 +952,12 @@ fn media_download_events_redact_routing_and_source_url_in_debug() {
 
     let failed = TimelineEvent::MediaDownloadFailed {
         request_id: RequestId {
-            connection_id: crate::ids::RuntimeConnectionId(1),
+            connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
             sequence: 8,
         },
         key,
         event_id: "$event:example.invalid".to_owned(),
-        kind: crate::failure::TimelineFailureKind::Network,
+        kind: koushi_protocol::failure::TimelineFailureKind::Network,
     };
     let debug = format!("{failed:?}");
     assert!(debug.contains("MediaDownloadFailed"), "{debug}");
@@ -971,7 +971,7 @@ fn media_download_event_serializes_with_camel_case_fields() {
     );
     let event = TimelineEvent::MediaDownloadCompleted {
         request_id: RequestId {
-            connection_id: crate::ids::RuntimeConnectionId(1),
+            connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
             sequence: 7,
         },
         key,

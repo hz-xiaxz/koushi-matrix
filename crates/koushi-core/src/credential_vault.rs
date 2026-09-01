@@ -4,7 +4,8 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce,
     aead::{Aead, KeyInit, OsRng, rand_core::RngCore},
 };
-use koushi_key::{CredentialVaultMasterKey, LocalStoreId, SavedSessionIndex, SessionKeyId};
+use koushi_key::{CredentialVaultMasterKey, LocalStoreId, SavedSessionIndex};
+use koushi_protocol::SessionKeyId;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -444,7 +445,8 @@ fn zeroize_replaced_string(value: &mut Option<String>) {
 mod tests {
     use std::fs;
 
-    use koushi_key::{CredentialVaultMasterKey, LocalUnlockSecret, SessionKeyId};
+    use koushi_key::{CredentialVaultMasterKey, LocalUnlockSecret};
+    use koushi_protocol::SessionKeyId;
     use tempfile::tempdir;
 
     use super::{CredentialVaultData, CredentialVaultFile};

@@ -4,7 +4,7 @@ use chacha20poly1305::{
     aead::{Aead, OsRng, rand_core::RngCore},
 };
 use koushi_key::LocalUnlockSecret;
-use koushi_key::SessionKeyId;
+use koushi_protocol::SessionKeyId;
 use koushi_state::NavigationState;
 use std::io::Write;
 use std::path::PathBuf;

@@ -16,8 +16,8 @@ use matrix_sdk::ruma::events::{
 
 use matrix_sdk_ui::timeline::{MembershipChange, ReactionStatus, ReactionsByKeyBySender};
 
-use crate::command::TimelineCommand;
 use crate::event_projection::message_actions_for_timeline_item;
+use koushi_protocol::command::TimelineCommand;
 use koushi_protocol::event::{
     LinkPreview, LinkPreviewState, TimelineFormattedBody, TimelineItemId, TimelineMessageKind,
     TimelineNoticeI18n, TimelineNoticeI18nKey, TimelineSendFailureReason, TimelineSendState,

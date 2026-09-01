@@ -1,6 +1,6 @@
 //! `scheduled_send` ownership for AccountActor.
 
-use koushi_key::SessionKeyId;
+use koushi_protocol::SessionKeyId;
 use koushi_sdk::MatrixClientSession;
 use koushi_state::{
     AppAction, ComposerDraftRevision, ScheduledSendCapability, ScheduledSendHandle,

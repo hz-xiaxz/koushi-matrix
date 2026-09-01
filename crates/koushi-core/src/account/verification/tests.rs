@@ -35,9 +35,9 @@ use crate::account::test_support::{
     inspect_session_runtime, login_gated_actor, recv_account_action_with_sliding_sync_effects,
     shutdown_and_ack, spawn_actor_with_dirs, test_request_id,
 };
-use crate::command::AccountCommand;
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
 use crate::executor;
+use koushi_protocol::command::AccountCommand;
 use koushi_protocol::event::CoreEvent;
 
 use crate::link_preview::LinkPreviewContext;

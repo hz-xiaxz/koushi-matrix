@@ -408,7 +408,7 @@ async fn scan_existing_stress_timeline(
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: subscribe_id,
         key: key.clone(),
-        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+        initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .map_err(|e| format!("{label}: submit replay subscribe failed: {e}"))?;
@@ -561,7 +561,7 @@ pub(super) async fn run_timeline_stress_room_messages(
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: sender_subscribe_id,
             key: sender_key.clone(),
-            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("timeline_stress: submit sender subscribe failed: {e}"))?;
@@ -635,7 +635,7 @@ pub(super) async fn run_timeline_stress_room_messages(
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: receiver_subscribe_id,
             key: receiver_key.clone(),
-            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("timeline_stress: submit receiver subscribe failed: {e}"))?;
@@ -727,7 +727,7 @@ pub(super) async fn run_scheduled_send_stage(
     const SCHEDULED_CREATE_BODY: &str = "Koushi scheduled create QA body";
     const SCHEDULED_FIRE_BODY: &str = "Koushi scheduled fire QA body";
     let session = authenticated_session_info(conn, "scheduled send account")?.clone();
-    let expected_account = koushi_key::SessionKeyId {
+    let expected_account = koushi_protocol::SessionKeyId {
         homeserver: session.homeserver,
         user_id: session.user_id,
         device_id: session.device_id,
@@ -1109,7 +1109,7 @@ pub(super) async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), 
         conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: sub_id,
             key: key.clone(),
-            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("cache_restore: submit subscribe failed: {e}"))?;
@@ -1281,7 +1281,7 @@ pub(super) async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), 
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: shallow_sub_id,
         key: shallow_key.clone(),
-        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+        initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .map_err(|e| format!("cache_restore shallow: subscribe failed: {e}"))?;
@@ -1445,7 +1445,7 @@ pub(super) async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), 
             .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
                 request_id: sub_id,
                 key: key.clone(),
-                initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+                initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
             }))
             .await
             .map_err(|e| format!("cache_restore: offline subscribe failed: {e}"))?;
@@ -1569,7 +1569,7 @@ pub(super) async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), 
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: shallow_sub2,
             key: shallow_key2.clone(),
-            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("cache_restore shallow: offline subscribe failed: {e}"))?;
@@ -1802,7 +1802,7 @@ pub(super) async fn run_send_queue_stage(
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: subscribe_id,
         key: key.clone(),
-        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+        initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .map_err(|e| format!("send_queue: submit subscribe failed: {e}"))?;
@@ -1931,7 +1931,7 @@ pub(super) async fn run_send_queue_stage(
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: subscribe_id,
         key: key.clone(),
-        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+        initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .map_err(|e| format!("send_queue: submit restore subscribe failed: {e}"))?;
@@ -3316,7 +3316,7 @@ pub(super) async fn subscribe_active_timeline_projection_for_qa(
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: subscribe_request_id,
         key: key.clone(),
-        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+        initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .map_err(|e| format!("{label}: submit timeline subscribe failed: {e}"))?;
@@ -3346,7 +3346,7 @@ pub(super) async fn subscribe_active_timeline_projection_for_qa(
 }
 
 pub(super) fn thread_initial_items_need_paginate_backfill(
-    initial_items: &[koushi_core::event::TimelineItem],
+    initial_items: &[koushi_protocol::event::TimelineItem],
     expected_body: &str,
 ) -> bool {
     find_timeline_item_with_body(initial_items, expected_body).is_none()
@@ -3366,10 +3366,10 @@ fn observe_send_queue_retry_item_state(
     }
     match item.send_state.as_ref() {
         Some(TimelineSendState::NotSent {
-            reason: koushi_core::event::TimelineSendFailureReason::Recoverable,
+            reason: koushi_protocol::event::TimelineSendFailureReason::Recoverable,
         }) if *first_left_not_sent_after_retry => Some("recoverable"),
         Some(TimelineSendState::NotSent {
-            reason: koushi_core::event::TimelineSendFailureReason::Unrecoverable,
+            reason: koushi_protocol::event::TimelineSendFailureReason::Unrecoverable,
         }) if *first_left_not_sent_after_retry => Some("unrecoverable"),
         Some(TimelineSendState::NotSent { .. }) | None => None,
         Some(
@@ -3946,7 +3946,7 @@ pub(super) async fn run_media_stage(
         .media
         .as_ref()
         .ok_or_else(|| "media item missing media metadata".to_owned())?;
-    if media.kind != koushi_core::event::TimelineMediaKind::File {
+    if media.kind != koushi_protocol::event::TimelineMediaKind::File {
         return Err("media item kind mismatch".to_owned());
     }
     if media_item.body.as_deref() != Some(MEDIA_CAPTION) {
@@ -3959,9 +3959,9 @@ pub(super) async fn run_media_stage(
     println!("upload_staging=ok");
     println!("media_gallery=ok");
     let media_event_id = match &media_item.id {
-        koushi_core::event::TimelineItemId::Event { event_id } => event_id.clone(),
-        koushi_core::event::TimelineItemId::Transaction { .. }
-        | koushi_core::event::TimelineItemId::Synthetic { .. } => {
+        koushi_protocol::event::TimelineItemId::Event { event_id } => event_id.clone(),
+        koushi_protocol::event::TimelineItemId::Transaction { .. }
+        | koushi_protocol::event::TimelineItemId::Synthetic { .. } => {
             return Err("received media item was not event-backed".to_owned());
         }
     };
@@ -4023,7 +4023,7 @@ pub(super) async fn run_media_stage(
 async fn wait_for_media_caption_edit(
     conn: &mut CoreConnection,
     key: &TimelineKey,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     event_id: &str,
     edited_caption: &str,
     label: &str,
@@ -4042,12 +4042,12 @@ async fn wait_for_media_caption_edit(
                 ..
             }) if ev_key == key => {
                 for diff in &diffs {
-                    let koushi_core::event::TimelineDiff::Set { item, .. } = diff else {
+                    let koushi_protocol::event::TimelineDiff::Set { item, .. } = diff else {
                         continue;
                     };
                     let targets_event = matches!(
                         &item.id,
-                        koushi_core::event::TimelineItemId::Event { event_id: id }
+                        koushi_protocol::event::TimelineItemId::Event { event_id: id }
                         if id == event_id
                     );
                     if !targets_event || item.body.as_deref() != Some(edited_caption) {
@@ -4299,7 +4299,7 @@ pub(super) async fn run_link_preview_stage(
         .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: sub_a_id,
             key: enc_key_a.clone(),
-            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .map_err(|e| format!("link_preview subscribe encrypted room A: {e}"))?;
@@ -5087,10 +5087,10 @@ pub(super) async fn wait_for_timeline_navigation(
 pub(super) async fn wait_for_thread_reply_item(
     conn: &mut CoreConnection,
     key: &TimelineKey,
-    initial_items: &[koushi_core::event::TimelineItem],
+    initial_items: &[koushi_protocol::event::TimelineItem],
     expected_body: &str,
     label: &str,
-) -> Result<koushi_core::event::TimelineItem, String> {
+) -> Result<koushi_protocol::event::TimelineItem, String> {
     if let Some(item) = find_timeline_item_with_body(initial_items, expected_body) {
         return Ok(item);
     }
@@ -5131,11 +5131,11 @@ pub(super) async fn wait_for_thread_reply_item(
             }) if ev_key == key => {
                 for diff in diffs {
                     let item = match diff {
-                        koushi_core::event::TimelineDiff::PushBack { item }
-                        | koushi_core::event::TimelineDiff::PushFront { item }
-                        | koushi_core::event::TimelineDiff::Insert { item, .. }
-                        | koushi_core::event::TimelineDiff::Set { item, .. } => item,
-                        koushi_core::event::TimelineDiff::Reset { items } => {
+                        koushi_protocol::event::TimelineDiff::PushBack { item }
+                        | koushi_protocol::event::TimelineDiff::PushFront { item }
+                        | koushi_protocol::event::TimelineDiff::Insert { item, .. }
+                        | koushi_protocol::event::TimelineDiff::Set { item, .. } => item,
+                        koushi_protocol::event::TimelineDiff::Reset { items } => {
                             if let Some(item) = find_timeline_item_with_body(&items, expected_body)
                             {
                                 return Ok(item);
@@ -5291,7 +5291,7 @@ impl<'a> RoomThreadSummaryObserver<'a> {
                 && metadata.activity_event_id.as_deref() == Some(self.expected_latest_event_id)
                 && matches!(
                     metadata.kind,
-                    koushi_core::event::TimelineDisplayKind::ThreadRoot
+                    koushi_protocol::event::TimelineDisplayKind::ThreadRoot
                 )
         }) {
             self.saw_projected_root_activity = true;
@@ -5570,7 +5570,7 @@ pub(super) fn assert_thread_reply_relation(
 pub(super) async fn wait_for_edit_diff(
     conn: &mut CoreConnection,
     key: &TimelineKey,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     event_id: &str,
     edited_body: &str,
     label: &str,
@@ -5591,13 +5591,13 @@ pub(super) async fn wait_for_edit_diff(
                 ..
             }) if ev_key == key => {
                 for diff in &diffs {
-                    if let koushi_core::event::TimelineDiff::Set { item, .. } = diff {
+                    if let koushi_protocol::event::TimelineDiff::Set { item, .. } = diff {
                         // Accept: item has the edited body, OR item is identified by event_id
                         // (the SDK may not yet have applied the body to the item in all cases).
                         let body_matches = item.body.as_deref().unwrap_or("").contains(edited_body);
                         let event_id_matches = matches!(
                             &item.id,
-                            koushi_core::event::TimelineItemId::Event { event_id: id }
+                            koushi_protocol::event::TimelineItemId::Event { event_id: id }
                             if id == event_id
                         );
                         if body_matches || event_id_matches {
@@ -5624,7 +5624,7 @@ pub(super) async fn wait_for_edit_diff(
 pub(super) async fn wait_for_redact_diff(
     conn: &mut CoreConnection,
     key: &TimelineKey,
-    request_id: koushi_core::ids::RequestId,
+    request_id: koushi_protocol::ids::RequestId,
     label: &str,
 ) -> Result<(), String> {
     let timeout = Duration::from_secs(60);
@@ -5642,8 +5642,8 @@ pub(super) async fn wait_for_redact_diff(
             }) if ev_key == key => {
                 for diff in &diffs {
                     match diff {
-                        koushi_core::event::TimelineDiff::Remove { .. } => return Ok(()),
-                        koushi_core::event::TimelineDiff::Set { item, .. } => {
+                        koushi_protocol::event::TimelineDiff::Remove { .. } => return Ok(()),
+                        koushi_protocol::event::TimelineDiff::Set { item, .. } => {
                             // SDK emits a Set with a redacted body (None or empty) when it
                             // replaces the message body in-place with a "Message redacted" tombstone.
                             if item.body.is_none() || item.body.as_deref() == Some("") {

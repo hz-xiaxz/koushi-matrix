@@ -14,7 +14,7 @@ use koushi_protocol::failure::CoreFailure;
 pub(super) enum DeferredScheduledSendPersist {
     ClearLoadedMarker,
     Persist {
-        key_id: koushi_key::SessionKeyId,
+        key_id: koushi_protocol::SessionKeyId,
         scheduled_sends: ScheduledSendStore,
     },
 }
@@ -50,7 +50,7 @@ impl super::AppActor {
 
     pub(super) async fn persist_scheduled_sends(
         &mut self,
-        key_id: koushi_key::SessionKeyId,
+        key_id: koushi_protocol::SessionKeyId,
         scheduled_sends: ScheduledSendStore,
     ) {
         let store = self.composer_draft_store_actor.clone();
@@ -125,6 +125,8 @@ impl super::AppActor {
     }
 }
 
-pub(super) fn scheduled_send_session_key(state: &AppState) -> Option<koushi_key::SessionKeyId> {
+pub(super) fn scheduled_send_session_key(
+    state: &AppState,
+) -> Option<koushi_protocol::SessionKeyId> {
     composer_draft_session_key(state)
 }

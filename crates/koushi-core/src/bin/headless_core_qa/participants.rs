@@ -1057,7 +1057,7 @@ pub(super) trait QaOwnedE2eeCleanupOperations {
 struct QaCoreOwnedE2eeCleanupOperations {
     runtime: Option<CoreRuntime>,
     conn: Option<CoreConnection>,
-    logout_request_id: Option<koushi_core::ids::RequestId>,
+    logout_request_id: Option<koushi_protocol::ids::RequestId>,
 }
 
 impl QaCoreOwnedE2eeCleanupOperations {

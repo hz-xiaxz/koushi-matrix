@@ -435,8 +435,8 @@ async fn observe_viewport(
 async fn wait_for_navigation(
     conn: &mut CoreConnection,
     key: &TimelineKey,
-    predicate: impl Fn(&koushi_core::event::TimelineNavigationSnapshot) -> bool,
-) -> Result<koushi_core::event::TimelineNavigationSnapshot, String> {
+    predicate: impl Fn(&koushi_protocol::event::TimelineNavigationSnapshot) -> bool,
+) -> Result<koushi_protocol::event::TimelineNavigationSnapshot, String> {
     let deadline = tokio::time::Instant::now() + EVENT_TIMEOUT;
     loop {
         if let CoreEvent::Timeline(TimelineEvent::NavigationUpdated {

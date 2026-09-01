@@ -93,9 +93,9 @@ fn body_wait_observer_tolerates_transient_decryption_failure_before_expected_bod
 
 #[test]
 fn find_timeline_item_with_body_finds_thread_reply_in_one_batch() {
-    let items = vec![koushi_core::event::TimelineItem {
+    let items = vec![koushi_protocol::event::TimelineItem {
         request_state: None,
-        id: koushi_core::event::TimelineItemId::Synthetic {
+        id: koushi_protocol::event::TimelineItemId::Synthetic {
             synthetic_id: "thread-reply".to_owned(),
         },
         sender: Some("@b:test".to_owned()),
@@ -137,9 +137,9 @@ fn find_timeline_item_with_body_finds_thread_reply_in_one_batch() {
 
 #[test]
 fn find_timeline_item_with_body_returns_none_when_missing() {
-    let items = vec![koushi_core::event::TimelineItem {
+    let items = vec![koushi_protocol::event::TimelineItem {
         request_state: None,
-        id: koushi_core::event::TimelineItemId::Synthetic {
+        id: koushi_protocol::event::TimelineItemId::Synthetic {
             synthetic_id: "placeholder".to_owned(),
         },
         sender: None,
@@ -180,8 +180,8 @@ fn send_flow_waiter_accepts_send_completed_before_local_echo() {
         AccountKey("@alice:test".to_owned()),
         "!room:test".to_owned(),
     );
-    let request_id = koushi_core::ids::RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+    let request_id = koushi_protocol::ids::RequestId {
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 1,
     };
     let mut waiter = SendFlowWaiter::new(
@@ -205,12 +205,12 @@ fn send_flow_waiter_accepts_send_completed_before_local_echo() {
     waiter
         .observe(CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
             key: key.clone(),
-            generation: koushi_core::ids::TimelineGeneration(1),
-            batch_id: koushi_core::ids::TimelineBatchId(1),
-            diffs: vec![koushi_core::event::TimelineDiff::PushBack {
-                item: koushi_core::event::TimelineItem {
+            generation: koushi_protocol::ids::TimelineGeneration(1),
+            batch_id: koushi_protocol::ids::TimelineBatchId(1),
+            diffs: vec![koushi_protocol::event::TimelineDiff::PushBack {
+                item: koushi_protocol::event::TimelineItem {
                     request_state: None,
-                    id: koushi_core::event::TimelineItemId::Transaction {
+                    id: koushi_protocol::event::TimelineItemId::Transaction {
                         transaction_id: "sdk-txn-1".to_owned(),
                     },
                     sender: Some("@alice:test".to_owned()),
@@ -257,8 +257,8 @@ fn send_flow_waiter_status_reports_local_echo_send_state() {
         AccountKey("@alice:test".to_owned()),
         "!room:test".to_owned(),
     );
-    let request_id = koushi_core::ids::RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+    let request_id = koushi_protocol::ids::RequestId {
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 1,
     };
     let mut waiter = SendFlowWaiter::new(
@@ -271,12 +271,12 @@ fn send_flow_waiter_status_reports_local_echo_send_state() {
     waiter
         .observe(CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
             key,
-            generation: koushi_core::ids::TimelineGeneration(1),
-            batch_id: koushi_core::ids::TimelineBatchId(1),
-            diffs: vec![koushi_core::event::TimelineDiff::PushBack {
-                item: koushi_core::event::TimelineItem {
+            generation: koushi_protocol::ids::TimelineGeneration(1),
+            batch_id: koushi_protocol::ids::TimelineBatchId(1),
+            diffs: vec![koushi_protocol::event::TimelineDiff::PushBack {
+                item: koushi_protocol::event::TimelineItem {
                     request_state: None,
-                    id: koushi_core::event::TimelineItemId::Transaction {
+                    id: koushi_protocol::event::TimelineItemId::Transaction {
                         transaction_id: "sdk-txn-1".to_owned(),
                     },
                     sender: Some("@alice:test".to_owned()),
@@ -324,8 +324,8 @@ fn send_flow_waiter_errors_when_local_echo_becomes_not_sent() {
         AccountKey("@alice:test".to_owned()),
         "!room:test".to_owned(),
     );
-    let request_id = koushi_core::ids::RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+    let request_id = koushi_protocol::ids::RequestId {
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 1,
     };
     let mut waiter = SendFlowWaiter::new(
@@ -338,12 +338,12 @@ fn send_flow_waiter_errors_when_local_echo_becomes_not_sent() {
     let err = waiter
         .observe(CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
             key,
-            generation: koushi_core::ids::TimelineGeneration(1),
-            batch_id: koushi_core::ids::TimelineBatchId(1),
-            diffs: vec![koushi_core::event::TimelineDiff::PushBack {
-                item: koushi_core::event::TimelineItem {
+            generation: koushi_protocol::ids::TimelineGeneration(1),
+            batch_id: koushi_protocol::ids::TimelineBatchId(1),
+            diffs: vec![koushi_protocol::event::TimelineDiff::PushBack {
+                item: koushi_protocol::event::TimelineItem {
                     request_state: None,
-                    id: koushi_core::event::TimelineItemId::Transaction {
+                    id: koushi_protocol::event::TimelineItemId::Transaction {
                         transaction_id: "sdk-txn-1".to_owned(),
                     },
                     sender: Some("@alice:test".to_owned()),
@@ -371,7 +371,7 @@ fn send_flow_waiter_errors_when_local_echo_becomes_not_sent() {
                     can_edit: false,
                     actions: TimelineMessageActions::default(),
                     send_state: Some(TimelineSendState::NotSent {
-                        reason: koushi_core::event::TimelineSendFailureReason::Recoverable,
+                        reason: koushi_protocol::event::TimelineSendFailureReason::Recoverable,
                     }),
                     unable_to_decrypt: None,
                     display_metadata: None,
@@ -387,15 +387,15 @@ fn send_flow_waiter_errors_when_local_echo_becomes_not_sent() {
 #[test]
 fn initial_items_wait_requires_exact_subscribe_cause_even_for_same_key_replays() {
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 2,
     };
     let old_request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 1,
     };
     let wrong_connection_request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(2),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(2),
         sequence: request_id.sequence,
     };
     let key = TimelineKey::room(AccountKey("@qa:example.invalid".to_owned()), "!room:test");
@@ -406,7 +406,7 @@ fn initial_items_wait_requires_exact_subscribe_cause_even_for_same_key_replays()
             cause_request_id,
             key,
             actor_generation: 1,
-            generation: koushi_core::ids::TimelineGeneration(0),
+            generation: koushi_protocol::ids::TimelineGeneration(0),
             items: Vec::new(),
         })
     };
@@ -605,7 +605,7 @@ async fn login_wait_observes_ready_snapshot_once_at_deadline_without_a_broadcast
     let account_key = wait_for_logged_in(
         &mut source,
         RequestId {
-            connection_id: koushi_core::ids::RuntimeConnectionId(1),
+            connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
             sequence: 1,
         },
         "login final snapshot",
@@ -629,7 +629,7 @@ async fn login_wait_without_event_or_ready_snapshot_still_times_out() {
     let error = wait_for_logged_in(
         &mut source,
         RequestId {
-            connection_id: koushi_core::ids::RuntimeConnectionId(1),
+            connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
             sequence: 2,
         },
         "login remains pending",
@@ -654,7 +654,7 @@ async fn login_wait_without_event_or_ready_snapshot_still_times_out() {
 #[tokio::test]
 async fn session_restored_account_mismatch_is_private_safe() {
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 6,
     };
     let expected = AccountKey("@expected:example.invalid".to_owned());
@@ -682,7 +682,7 @@ async fn session_restored_account_mismatch_is_private_safe() {
 #[tokio::test(start_paused = true)]
 async fn logout_and_operation_failed_deadlines_survive_unrelated_event_starvation() {
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 9,
     };
     let account_key = AccountKey("@deadline:example.invalid".to_owned());
@@ -721,7 +721,7 @@ async fn logout_and_operation_failed_deadlines_survive_unrelated_event_starvatio
 #[tokio::test(start_paused = true)]
 async fn initial_items_wait_deadline_is_not_extended_by_continuous_unrelated_events() {
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 2,
     };
     let key = TimelineKey::room(AccountKey("@qa:example.invalid".to_owned()), "!room:test");
@@ -758,11 +758,11 @@ async fn initial_items_wait_deadline_is_not_extended_by_continuous_unrelated_eve
 #[tokio::test]
 async fn initial_items_wait_skips_fresh_wrong_cause_then_accepts_exact_replay_cause() {
     let old_projection_request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 1,
     };
     let subscribe_request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 2,
     };
     let key = TimelineKey::room(AccountKey("@qa:example.invalid".to_owned()), "!room:test");
@@ -772,7 +772,7 @@ async fn initial_items_wait_skips_fresh_wrong_cause_then_accepts_exact_replay_ca
             cause_request_id: Some(cause_request_id),
             key: key.clone(),
             actor_generation: 1,
-            generation: koushi_core::ids::TimelineGeneration(0),
+            generation: koushi_protocol::ids::TimelineGeneration(0),
             items,
         })
     };
@@ -803,11 +803,11 @@ async fn initial_items_wait_skips_fresh_wrong_cause_then_accepts_exact_replay_ca
 #[tokio::test(start_paused = true)]
 async fn initial_items_timeout_reports_only_private_safe_causal_category_counts() {
     let old_request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 1,
     };
     let request_id = RequestId {
-        connection_id: koushi_core::ids::RuntimeConnectionId(1),
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(1),
         sequence: 2,
     };
     let key = TimelineKey::room(AccountKey("@qa:example.invalid".to_owned()), "!room:test");
@@ -818,7 +818,7 @@ async fn initial_items_timeout_reports_only_private_safe_causal_category_counts(
             cause_request_id,
             key: event_key,
             actor_generation: 1,
-            generation: koushi_core::ids::TimelineGeneration(0),
+            generation: koushi_protocol::ids::TimelineGeneration(0),
             items: Vec::new(),
         })
     };

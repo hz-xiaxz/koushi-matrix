@@ -6,7 +6,8 @@
 
 use std::path::Path;
 
-use koushi_key::{CredentialStore, InMemoryCredentialBackend, LocalStoreId, SessionKeyId};
+use koushi_key::{CredentialStore, InMemoryCredentialBackend, LocalStoreId};
+use koushi_protocol::SessionKeyId;
 use tempfile::TempDir;
 
 use crate::credential_vault::{

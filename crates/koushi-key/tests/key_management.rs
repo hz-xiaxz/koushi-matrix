@@ -1,9 +1,10 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use koushi_key::{
     CredentialBackendErrorKind, CredentialStore, InMemoryCredentialBackend, LocalSecretError,
-    LocalUnlockSecret, SavedSessionIndex, SessionKeyId, StoredMatrixSession,
+    LocalUnlockSecret, SavedSessionIndex, SessionKeyIdCredentialNames, StoredMatrixSession,
     is_missing_credential_error, last_session_account_name, saved_sessions_account_name,
 };
+use koushi_protocol::SessionKeyId;
 
 fn secret_from_test_byte(byte: u8) -> LocalUnlockSecret {
     LocalUnlockSecret::from_storage_string(&STANDARD.encode([byte; 32])).unwrap()

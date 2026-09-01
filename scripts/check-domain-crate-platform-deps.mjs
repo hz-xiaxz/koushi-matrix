@@ -76,6 +76,7 @@ export const BANNED_PLATFORM_DEPS = [
 
 const BANNED_PROTOCOL_DEPS = [
   ...BANNED_PLATFORM_DEPS,
+  "koushi-key",
   "matrix-sdk",
   "matrix-sdk-base",
   "matrix-sdk-search",

@@ -13,12 +13,12 @@ use koushi_state::{
     RecoveryKeyDeliveryState, RecoveryRequest, SecureBackupSetupIntent, TrustOperationFailureKind,
 };
 
-use crate::command::{
+use crate::executor;
+use crate::native_artifact::NativeArtifactKind;
+use koushi_protocol::command::{
     RoomKeyExportRequest, RoomKeyImportRequest, SecureBackupPassphraseChangeRequest,
     SecureBackupSetupRequest,
 };
-use crate::executor;
-use crate::native_artifact::NativeArtifactKind;
 use koushi_protocol::event::{AccountEvent, CoreEvent, E2eeTrustEvent};
 use koushi_protocol::failure::{CoreFailure, RecoveryFailureKind};
 use koushi_protocol::ids::{AccountKey, RequestId};

@@ -5,7 +5,8 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use koushi_key::{CredentialStore, LocalUnlockSecret, SessionKeyId};
+use koushi_key::{CredentialStore, LocalUnlockSecret, SessionKeyIdCredentialNames};
+use koushi_protocol::SessionKeyId;
 use koushi_state::LocalEncryptionHealth;
 
 use super::CREDENTIAL_STORE_SERVICE_NAME;

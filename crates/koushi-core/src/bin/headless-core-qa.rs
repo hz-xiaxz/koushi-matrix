@@ -44,24 +44,24 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{collections::BTreeSet, future::Future, io};
 
-use koushi_core::command::{
+use koushi_core::composer_draft_lifecycle::ComposerDraftScope;
+use koushi_core::runtime::{CoreConnection, CoreRuntime, EventStreamLag};
+use koushi_protocol::command::{
     AccountCommand, AppCommand, CoreCommand, CreateRoomOptions, CreateRoomVisibility,
     ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,
     ImageUploadVariantInfo, ImageUploadVariantKind, MediaDownloadSelection, RoomCommand,
     SearchCommand, SearchScope, SyncCommand, TimelineCommand, UploadMediaKind, UploadMediaRequest,
     UploadMediaThumbnail,
 };
-use koushi_core::composer_draft_lifecycle::ComposerDraftScope;
-use koushi_core::event::{
+use koushi_protocol::event::{
     AccountEvent, ActivityEvent, CoreEvent, E2eeTrustEvent, EncryptionDebugOperationOutcome,
     LinkPreviewState, LiveSignalsEvent, LocalEncryptionEvent, PaginationDirection, PaginationState,
     RoomEvent, SearchEvent, SyncEvent, TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent,
     TimelineGapId, TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMessageActions,
     TimelineReadStateSync, TimelineSendState, TimelineUnreadPosition, TimelineViewportObservation,
 };
-use koushi_core::failure::{CoreFailure, RoomFailureKind};
-use koushi_core::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
-use koushi_core::runtime::{CoreConnection, CoreRuntime, EventStreamLag};
+use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
+use koushi_protocol::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
 use koushi_state::{
     ActivityMarkReadTarget, ActivityRowKind, ActivityState, AppAction, AppState, AuthSecret,
     ComposerDocument, ComposerKey, ComposerKeyEvent, ComposerKeyModifiers, ComposerResolvedAction,

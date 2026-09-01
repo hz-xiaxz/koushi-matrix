@@ -1,6 +1,6 @@
 use super::{classify_room_error, trace_room_operation};
 
-use crate::command::{CreateRoomOptions, CreateRoomVisibility, RoomCommand};
+use koushi_protocol::command::{CreateRoomOptions, CreateRoomVisibility, RoomCommand};
 
 use koushi_protocol::event::CoreEvent;
 

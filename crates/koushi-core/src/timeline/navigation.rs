@@ -829,7 +829,7 @@ impl TimelineManagerActor {
             key.clone(),
             replay_existing,
             emit_failure_terminal,
-            crate::command::InitialBackfillPolicy::Disabled,
+            koushi_protocol::command::InitialBackfillPolicy::Disabled,
         )
         .await;
         if let Some(handle) = self.timelines.get(&key) {
