@@ -50,7 +50,7 @@ function fixture() {
   write(
     root,
     "crates/koushi-core-testkit/Cargo.toml",
-    '[package]\nname = "koushi-core-testkit"\npublish = false\n[dev-dependencies]\nkoushi-core = { path = "../koushi-core", features = ["test-hooks"] }\n'
+    '[package]\nname = "koushi-core-testkit"\npublish = false\n[dev-dependencies]\nkoushi-core = { path = "../koushi-core", features = ["test-hooks"] }\n[target.\'cfg(unix)\'.dev-dependencies]\nhelper = { path = "../helper" }\n'
   );
   write(root, "crates/koushi-core-testkit/tests/support/mod.rs", "pub fn fixture() {}\n");
   for (const target of testkitTargets) {
@@ -131,6 +131,7 @@ test("detects missing test-hook propagation and stale QA probe routing", () => {
 
 test("detects direct and target-specific testkit build dependencies", () => {
   for (const header of [
+    "[build-dependencies]",
     "[build-dependencies.helper]",
     "[target.'cfg(unix)'.build-dependencies]"
   ]) {
