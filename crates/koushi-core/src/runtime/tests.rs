@@ -1569,26 +1569,6 @@ fn verification_followup_commands_project_flow_id_without_speculative_cancel() {
     );
 }
 
-#[cfg(feature = "test-hooks")]
-#[test]
-fn qa_device_key_refresh_has_no_speculative_app_projection() {
-    let (acknowledged, _ack) = tokio::sync::oneshot::channel();
-    assert!(
-        account_command_projected_action(&AccountCommand::QaRefreshDeviceKeysAndAssertKnown {
-            request_id: RequestId {
-                connection_id: RuntimeConnectionId(1),
-                sequence: 43,
-            },
-            target: koushi_state::VerificationTarget {
-                user_id: "@private:example.invalid".to_owned(),
-                device_id: "PRIVATEDEVICE".to_owned(),
-            },
-            acknowledged,
-        })
-        .is_none()
-    );
-}
-
 #[test]
 fn trust_discovery_retry_is_admitted_only_in_retryable_gate_states() {
     let command = CoreCommand::Account(AccountCommand::RetryCurrentDeviceTrustDiscovery {

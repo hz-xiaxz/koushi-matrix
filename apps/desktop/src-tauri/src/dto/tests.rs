@@ -505,7 +505,7 @@ fn frontend_snapshot_serializes_profile_and_summary_avatars() {
                     "mxc_uri": "mxc://matrix.org/avatar",
                     "thumbnail": {
                         "kind": "ready",
-                        "source_url": "asset://avatar",
+                        "source_ref": "avatar/1111111111111111",
                         "width": 64,
                         "height": 64,
                         "mime_type": "image/png"
