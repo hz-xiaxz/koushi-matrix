@@ -766,7 +766,7 @@ describe("session-scoped optional delta merge", () => {
 function makeSnapshot(): DesktopSnapshot {
   return {
     state: {
-      schema_version: 5,
+      schema_version: 6,
       domain: {
         session: { kind: "ready", homeserver: "https://example.invalid", user_id: "@user:example.invalid", device_id: "DEVICE" },
         session_lock_reason: null,

@@ -155,7 +155,7 @@ function snapshotForPanelMode(
 ): Pick<DesktopSnapshot, "state" | "thread"> {
   return {
     state: {
-      schema_version: 5,
+      schema_version: 6,
       domain: {
         session_lock_reason: null,
         session:
