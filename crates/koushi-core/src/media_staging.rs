@@ -25,14 +25,11 @@ use koushi_protocol::{
 };
 
 use crate::{
-    executor,
+    CoreConnection, OutcomeCorrelation, RequestOutcome, RequestOutcomeError,
+    RequestOutcomeExpectation, executor,
     media_preparation::{
         MAX_PREPARATION_BATCH_SIZE, MediaPreparationRegistry, MediaPreparationService,
         StageUploadBytesInput,
-    },
-    runtime::{
-        CoreConnection, OutcomeCorrelation, RequestOutcome, RequestOutcomeError,
-        RequestOutcomeExpectation,
     },
 };
 
@@ -89,7 +86,7 @@ pub enum MediaStagingError {
     #[error("media staging became stale")]
     Stale,
     #[error("media staging command could not be submitted: {0}")]
-    CommandSubmit(crate::runtime::CommandSubmitError),
+    CommandSubmit(crate::CommandSubmitError),
     #[error("media staging outcome was not observed: {0}")]
     Outcome(RequestOutcomeError),
 }
@@ -111,7 +108,7 @@ pub enum PreparedUploadSendError {
     #[error("prepared upload item is no longer available")]
     StaleItem,
     #[error("prepared upload command could not be submitted: {0}")]
-    CommandSubmit(crate::runtime::CommandSubmitError),
+    CommandSubmit(crate::CommandSubmitError),
     #[error("prepared upload outcome was not observed: {0}")]
     Outcome(RequestOutcomeError),
 }

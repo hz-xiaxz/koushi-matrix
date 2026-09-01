@@ -2199,9 +2199,7 @@ pub(super) fn sdk_item_to_timeline_item_with_send_states(
     item: &Arc<SdkTimelineItem>,
     own_user_id: Option<&matrix_sdk::ruma::UserId>,
     send_statuses: &HashMap<String, TimelineSendState>,
-    recovery: Option<
-        &std::collections::BTreeMap<String, crate::room_key_recovery::RecoveryOperation>,
-    >,
+    recovery: Option<&std::collections::BTreeMap<String, super::recovery_model::RecoveryOperation>>,
     key_request_states: Option<&std::collections::BTreeMap<String, KeyRequestUiState>>,
     withheld_codes: Option<&std::collections::BTreeMap<(String, String), &'static str>>,
 ) -> TimelineItem {
@@ -2325,10 +2323,10 @@ pub(super) fn sdk_item_to_timeline_item_with_send_states(
                     && let Some(op) = recovery.and_then(|map| map.get(session_id))
                 {
                     utd.recovery_stage =
-                        Some(crate::room_key_recovery::stage_token(op.stage()).to_owned());
+                        Some(super::recovery_model::stage_token(op.stage()).to_owned());
                     utd.recovery_guidance = op
                         .guidance()
-                        .map(crate::room_key_recovery::guidance_token)
+                        .map(super::recovery_model::guidance_token)
                         .map(ToOwned::to_owned);
                 }
             }

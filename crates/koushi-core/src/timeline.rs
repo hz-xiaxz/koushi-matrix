@@ -58,6 +58,7 @@ mod media;
 mod navigation;
 mod outbound_send;
 mod read_state;
+mod recovery_model;
 mod relay;
 mod residency;
 mod room_key_recovery;

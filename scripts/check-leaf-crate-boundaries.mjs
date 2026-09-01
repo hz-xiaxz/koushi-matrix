@@ -95,6 +95,12 @@ export function findLeafCrateBoundaryViolations(root) {
   const mediaSources = rustSources(root, "crates/koushi-media/src");
   const coreSources = rustSources(root, "crates/koushi-core/src");
   const qaSources = rustSources(root, "crates/koushi-qa/src");
+  const coreActorSources = coreSources.filter(([relativePath]) =>
+    /crates\/koushi-core\/src\/(?:account|room|timeline)\//u.test(relativePath)
+      && !relativePath.endsWith("/tests.rs")
+      && !relativePath.endsWith("/test_support.rs")
+      && !relativePath.endsWith("/test_source.rs")
+  );
 
   if (!workspace.includes('"crates/koushi-store"')) {
     violations.push("workspace member missing: crates/koushi-store");
@@ -209,6 +215,64 @@ export function findLeafCrateBoundaryViolations(root) {
   const renderableThumbnail = read(root, "crates/koushi-core/src/renderable_thumbnail.rs") ?? "";
   if (!renderableThumbnail.includes("koushi_media::image_kind")) {
     violations.push("Core renderable thumbnails must use koushi-media image_kind");
+  }
+
+  for (const [relativePath, source] of coreActorSources) {
+    if (source.includes("crate::runtime")) {
+      violations.push(`Core child source imports runtime internals: ${relativePath}`);
+    }
+    if (
+      relativePath.includes("/account/")
+      && /(?:RoomActor|TimelineManagerActor)::spawn/u.test(source)
+    ) {
+      violations.push(`Account source constructs a concrete child actor: ${relativePath}`);
+    }
+    if (/trait\s+ActorFactory|struct\s+GenericActor/u.test(source)) {
+      violations.push(`generic actor framework introduced: ${relativePath}`);
+    }
+  }
+  const composerLifecycle = read(root, "crates/koushi-core/src/composer_draft_lifecycle.rs") ?? "";
+  const runtimeComposer = read(root, "crates/koushi-core/src/runtime/composer.rs") ?? "";
+  const coreLib = read(root, "crates/koushi-core/src/lib.rs") ?? "";
+  const coreRuntime = read(root, "crates/koushi-core/src/runtime.rs") ?? "";
+  const commandPolicy = read(root, "crates/koushi-core/src/command_policy.rs") ?? "";
+  for (const [owner, source, marker] of [
+    ["composer lifecycle", composerLifecycle, "struct ForwardedComposerDraftPermit"],
+    ["Core crate", coreLib, "const ACTOR_MESSAGE_QUEUE_CAPACITY"],
+    ["command policy", commandPolicy, "fn space_member_forward_failure_action"]
+  ]) {
+    if (!source.includes(marker)) violations.push(`${owner} definition missing: ${marker}`);
+  }
+  for (const [formerOwner, source, marker] of [
+    ["runtime composer", runtimeComposer, "struct ForwardedComposerDraftPermit"],
+    ["runtime", coreRuntime, "const ACTOR_MESSAGE_QUEUE_CAPACITY"],
+    ["runtime", coreRuntime, "fn space_member_forward_failure_action"]
+  ]) {
+    if (source.includes(marker)) violations.push(`${marker} remains in ${formerOwner}`);
+  }
+  if (fs.existsSync(path.join(root, "crates/koushi-core/src/room_key_recovery.rs"))) {
+    violations.push("room-key recovery model remains at the Core crate root");
+  }
+  const recoveryModel = read(root, "crates/koushi-core/src/timeline/recovery_model.rs") ?? "";
+  if (!recoveryModel.includes("pub struct RecoveryOperation")) {
+    violations.push("timeline recovery model owner is missing RecoveryOperation");
+  }
+  for (const featurePath of [
+    "crates/koushi-core/src/scheduled_send.rs",
+    "crates/koushi-core/src/account/scheduled_send.rs",
+    "crates/koushi-core/src/runtime/scheduled_send.rs",
+    "crates/koushi-core/src/store/scheduled_sends.rs",
+    "crates/koushi-core/src/composer_draft_lifecycle.rs",
+    "crates/koushi-core/src/runtime/composer.rs",
+    "crates/koushi-core/src/timeline/composer.rs",
+    "crates/koushi-core/src/store/composer_drafts.rs",
+    "crates/koushi-core/src/runtime/navigation.rs",
+    "crates/koushi-core/src/timeline/navigation.rs",
+    "crates/koushi-core/src/store/navigation.rs"
+  ]) {
+    if (!fs.existsSync(path.join(root, featurePath))) {
+      violations.push(`owner-local feature layer missing: ${featurePath}`);
+    }
   }
 
   if (testkitManifest === null) {

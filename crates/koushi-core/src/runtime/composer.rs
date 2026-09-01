@@ -3,15 +3,10 @@
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
-use koushi_diagnostics::{DiagnosticEvent, DiagnosticLevel, record};
-use koushi_state::{
-    AppAction, AppState, ComposerDraftProtection, ComposerDraftRevision, ComposerDraftStore,
-    ComposerTarget, SessionState, SubmissionId, ThreadPaneState, reduce,
-};
-use tokio::sync::{mpsc, oneshot};
-
 use super::AppActor;
-use crate::composer_draft_lifecycle::{ComposerDraftCommandPermit, ComposerDraftPersistencePermit};
+use crate::composer_draft_lifecycle::{
+    ComposerDraftCommandPermit, ComposerDraftPersistencePermit, ForwardedComposerDraftPermit,
+};
 use crate::executor;
 use crate::store::{
     composer_drafts::{
@@ -19,8 +14,13 @@ use crate::store::{
     },
     session_key_id_from_info,
 };
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticLevel, record};
 use koushi_protocol::command::TimelineCommand;
 use koushi_protocol::ids::{RequestId, TimelineKey, TimelineKind};
+use koushi_state::{
+    AppAction, AppState, ComposerDraftProtection, ComposerDraftRevision, ComposerDraftStore,
+    ComposerTarget, SessionState, SubmissionId, ThreadPaneState, reduce,
+};
 
 pub const COMPOSER_DRAFT_PERSIST_DEBOUNCE: Duration = Duration::from_millis(150);
 
@@ -136,69 +136,6 @@ pub(super) enum ComposerAcceptanceIdentity {
 pub(super) struct PendingComposerAcceptance {
     pub(super) identity: ComposerAcceptanceIdentity,
     _permit: ComposerDraftCommandPermit,
-}
-
-#[doc(hidden)]
-pub struct ForwardedComposerDraftPermit {
-    request_id: RequestId,
-    permit: Option<ComposerDraftCommandPermit>,
-    rejected_tx: mpsc::UnboundedSender<RequestId>,
-    acceptance_enqueued: bool,
-    #[cfg(test)]
-    acceptance_probe: Option<oneshot::Sender<()>>,
-}
-
-impl ForwardedComposerDraftPermit {
-    pub(crate) fn new(
-        request_id: RequestId,
-        permit: ComposerDraftCommandPermit,
-        rejected_tx: mpsc::UnboundedSender<RequestId>,
-    ) -> Self {
-        Self {
-            request_id,
-            permit: Some(permit),
-            rejected_tx,
-            acceptance_enqueued: false,
-            #[cfg(test)]
-            acceptance_probe: None,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn new_with_acceptance_probe(
-        request_id: RequestId,
-        permit: ComposerDraftCommandPermit,
-        rejected_tx: mpsc::UnboundedSender<RequestId>,
-        acceptance_probe: oneshot::Sender<()>,
-    ) -> Self {
-        Self {
-            request_id,
-            permit: Some(permit),
-            rejected_tx,
-            acceptance_enqueued: false,
-            acceptance_probe: Some(acceptance_probe),
-        }
-    }
-
-    pub(crate) fn acceptance_projection_reached(&mut self) {
-        #[cfg(test)]
-        if let Some(probe) = self.acceptance_probe.take() {
-            let _ = probe.send(());
-        }
-    }
-
-    pub(crate) fn acceptance_enqueued(mut self) {
-        self.acceptance_enqueued = true;
-    }
-}
-
-impl Drop for ForwardedComposerDraftPermit {
-    fn drop(&mut self) {
-        self.permit.take();
-        if !self.acceptance_enqueued {
-            let _ = self.rejected_tx.send(self.request_id);
-        }
-    }
 }
 
 pub(super) enum ComposerDraftLoadStatus {

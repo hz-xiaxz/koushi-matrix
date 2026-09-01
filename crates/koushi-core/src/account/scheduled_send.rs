@@ -8,7 +8,7 @@ use koushi_state::{
 };
 use tokio::sync::mpsc;
 
-use crate::runtime::ForwardedComposerDraftPermit;
+use crate::composer_draft_lifecycle::ForwardedComposerDraftPermit;
 use crate::timeline::composer::build_room_message_content_from_composer_body;
 use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
 use koushi_protocol::ids::RequestId;

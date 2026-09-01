@@ -1020,12 +1020,13 @@ async fn manager_enqueue_worker_waits_for_reducer_acceptance_delivery() {
         .expect("release activation after command admission");
     let (rejected_tx, mut rejected_rx) = mpsc::unbounded_channel();
     let (acceptance_probe_tx, acceptance_probe_rx) = oneshot::channel();
-    let forwarded_permit = crate::runtime::ForwardedComposerDraftPermit::new_with_acceptance_probe(
-        fake_rid(7310),
-        command_permit,
-        rejected_tx,
-        acceptance_probe_tx,
-    );
+    let forwarded_permit =
+        crate::composer_draft_lifecycle::ForwardedComposerDraftPermit::new_with_acceptance_probe(
+            fake_rid(7310),
+            command_permit,
+            rejected_tx,
+            acceptance_probe_tx,
+        );
     let route = tokio::spawn(async move {
         manager
             .handle_command_with_permit(

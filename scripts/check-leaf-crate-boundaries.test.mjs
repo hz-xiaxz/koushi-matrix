@@ -62,12 +62,47 @@ function fixture() {
     "crates/koushi-core/Cargo.toml",
     '[package]\nname = "koushi-core"\n[dependencies]\nkoushi-store = { path = "../koushi-store" }\n[features]\ntest-hooks = ["koushi-store/test-hooks"]\n'
   );
-  write(root, "crates/koushi-core/src/lib.rs", "pub struct StoreActor;\n");
+  write(
+    root,
+    "crates/koushi-core/src/lib.rs",
+    "pub struct StoreActor;\npub(crate) const ACTOR_MESSAGE_QUEUE_CAPACITY: usize = 1;\n"
+  );
   write(
     root,
     "crates/koushi-core/src/renderable_thumbnail.rs",
     "pub fn thumbnail() { koushi_media::image_kind(); }\n"
   );
+  write(
+    root,
+    "crates/koushi-core/src/composer_draft_lifecycle.rs",
+    "pub(crate) struct ForwardedComposerDraftPermit;\n"
+  );
+  write(root, "crates/koushi-core/src/runtime.rs", "pub struct CoreRuntime;\n");
+  write(root, "crates/koushi-core/src/runtime/composer.rs", "pub fn composer() {}\n");
+  write(
+    root,
+    "crates/koushi-core/src/command_policy.rs",
+    "pub(crate) fn space_member_forward_failure_action() {}\n"
+  );
+  write(root, "crates/koushi-core/src/account/actor.rs", "pub struct AccountActorHandle;\n");
+  write(
+    root,
+    "crates/koushi-core/src/timeline/recovery_model.rs",
+    "pub struct RecoveryOperation;\n"
+  );
+  for (const featurePath of [
+    "crates/koushi-core/src/scheduled_send.rs",
+    "crates/koushi-core/src/account/scheduled_send.rs",
+    "crates/koushi-core/src/runtime/scheduled_send.rs",
+    "crates/koushi-core/src/store/scheduled_sends.rs",
+    "crates/koushi-core/src/timeline/composer.rs",
+    "crates/koushi-core/src/store/composer_drafts.rs",
+    "crates/koushi-core/src/runtime/navigation.rs",
+    "crates/koushi-core/src/timeline/navigation.rs",
+    "crates/koushi-core/src/store/navigation.rs"
+  ]) {
+    write(root, featurePath, "pub fn owner() {}\n");
+  }
   write(
     root,
     "crates/koushi-core-testkit/Cargo.toml",
@@ -158,6 +193,40 @@ test("detects pure search/media dependency and classifier ownership violations",
   assert(violations.includes("cached image classifier remains in koushi-core"));
   assert(violations.some((item) => item.includes("image kind classifier function remains in Core")));
   assert(violations.includes("Core renderable thumbnails must use koushi-media image_kind"));
+});
+
+test("detects Core runtime reverse edges, concrete child construction, and misplaced owners", () => {
+  const root = fixture();
+  fs.writeFileSync(
+    path.join(root, "crates/koushi-core/src/account/actor.rs"),
+    "use crate::runtime::CoreRuntime;\ntrait ActorFactory {}\nfn spawn() { RoomActor::spawn(); }\n"
+  );
+  fs.writeFileSync(
+    path.join(root, "crates/koushi-core/src/runtime.rs"),
+    "const ACTOR_MESSAGE_QUEUE_CAPACITY: usize = 1;\nfn space_member_forward_failure_action() {}\n"
+  );
+  fs.writeFileSync(
+    path.join(root, "crates/koushi-core/src/runtime/composer.rs"),
+    "struct ForwardedComposerDraftPermit;\n"
+  );
+  write(root, "crates/koushi-core/src/room_key_recovery.rs", "pub struct RecoveryOperation;\n");
+  fs.rmSync(path.join(root, "crates/koushi-core/src/timeline/recovery_model.rs"));
+  fs.rmSync(path.join(root, "crates/koushi-core/src/runtime/navigation.rs"));
+
+  const violations = findLeafCrateBoundaryViolations(root);
+  assert(violations.some((item) => item.includes("imports runtime internals")));
+  assert(violations.some((item) => item.includes("constructs a concrete child actor")));
+  assert(violations.some((item) => item.includes("generic actor framework")));
+  assert(violations.includes("struct ForwardedComposerDraftPermit remains in runtime composer"));
+  assert(violations.includes("const ACTOR_MESSAGE_QUEUE_CAPACITY remains in runtime"));
+  assert(violations.includes("fn space_member_forward_failure_action remains in runtime"));
+  assert(violations.includes("room-key recovery model remains at the Core crate root"));
+  assert(violations.includes("timeline recovery model owner is missing RecoveryOperation"));
+  assert(
+    violations.includes(
+      "owner-local feature layer missing: crates/koushi-core/src/runtime/navigation.rs"
+    )
+  );
 });
 
 test("detects missing test-hook propagation and stale QA probe routing", () => {

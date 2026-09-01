@@ -5,8 +5,9 @@ use std::{
 };
 
 use koushi_protocol::SessionKeyId;
+use koushi_protocol::ids::RequestId;
 use koushi_state::{ComposerDraftRevision, ComposerTarget};
-use tokio::sync::watch;
+use tokio::sync::{mpsc, oneshot, watch};
 
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct ComposerDraftScope {
@@ -176,6 +177,68 @@ impl fmt::Debug for ComposerDraftPersistencePermit {
             .debug_struct("ComposerDraftPersistencePermit")
             .field("kind", &self.guard.kind)
             .finish_non_exhaustive()
+    }
+}
+
+pub(crate) struct ForwardedComposerDraftPermit {
+    request_id: RequestId,
+    permit: Option<ComposerDraftCommandPermit>,
+    rejected_tx: mpsc::UnboundedSender<RequestId>,
+    acceptance_enqueued: bool,
+    #[cfg(test)]
+    acceptance_probe: Option<oneshot::Sender<()>>,
+}
+
+impl ForwardedComposerDraftPermit {
+    pub(crate) fn new(
+        request_id: RequestId,
+        permit: ComposerDraftCommandPermit,
+        rejected_tx: mpsc::UnboundedSender<RequestId>,
+    ) -> Self {
+        Self {
+            request_id,
+            permit: Some(permit),
+            rejected_tx,
+            acceptance_enqueued: false,
+            #[cfg(test)]
+            acceptance_probe: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_acceptance_probe(
+        request_id: RequestId,
+        permit: ComposerDraftCommandPermit,
+        rejected_tx: mpsc::UnboundedSender<RequestId>,
+        acceptance_probe: oneshot::Sender<()>,
+    ) -> Self {
+        Self {
+            request_id,
+            permit: Some(permit),
+            rejected_tx,
+            acceptance_enqueued: false,
+            acceptance_probe: Some(acceptance_probe),
+        }
+    }
+
+    pub(crate) fn acceptance_projection_reached(&mut self) {
+        #[cfg(test)]
+        if let Some(probe) = self.acceptance_probe.take() {
+            let _ = probe.send(());
+        }
+    }
+
+    pub(crate) fn acceptance_enqueued(mut self) {
+        self.acceptance_enqueued = true;
+    }
+}
+
+impl Drop for ForwardedComposerDraftPermit {
+    fn drop(&mut self) {
+        self.permit.take();
+        if !self.acceptance_enqueued {
+            let _ = self.rejected_tx.send(self.request_id);
+        }
     }
 }
 

@@ -190,6 +190,24 @@ pub struct RoomActorHandle {
 }
 
 impl RoomActorHandle {
+    pub(crate) fn spawn_with_account_work(
+        action_tx: mpsc::Sender<Vec<AppAction>>,
+        event_tx: broadcast::Sender<CoreEvent>,
+        sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
+        account_work: AccountWorkScheduler,
+    ) -> Self {
+        RoomActor::spawn_with_account_work(
+            action_tx,
+            event_tx,
+            sliding_sync_diagnostics,
+            account_work,
+        )
+    }
+
+    pub(crate) fn sender(&self) -> mpsc::Sender<RoomMessage> {
+        self.tx.clone()
+    }
+
     pub(crate) fn bind_timeline_residency(
         &self,
         session: Arc<MatrixClientSession>,
@@ -462,7 +480,7 @@ impl RoomActor {
         sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
         account_work: AccountWorkScheduler,
     ) -> RoomActorHandle {
-        let (tx, command_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
+        let (tx, command_rx) = mpsc::channel(crate::ACTOR_MESSAGE_QUEUE_CAPACITY);
         let (encryption_debug_completion_tx, encryption_debug_completion_rx) =
             mpsc::unbounded_channel::<EncryptionDebugCompletion>();
         let (timeline_residency, timeline_residency_rx) = watch::channel(None);

@@ -937,7 +937,7 @@ pub(super) struct TimelineActor {
     /// Standard-only room-key recovery operations (issue #478), keyed by the
     /// Megolm session id internally (never exported).
     pub(super) room_key_recovery:
-        std::collections::BTreeMap<String, crate::room_key_recovery::RecoveryOperation>,
+        std::collections::BTreeMap<String, super::recovery_model::RecoveryOperation>,
     /// Per-event room-key request presentation state (issue #460), keyed by
     /// event id (already visible timeline correlation).
     pub(super) key_request_states: std::collections::BTreeMap<String, KeyRequestUiState>,

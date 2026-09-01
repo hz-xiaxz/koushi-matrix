@@ -20,7 +20,7 @@ use koushi_protocol::command::AccountCommand;
 
 use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 
-use crate::runtime::ForwardedComposerDraftPermit;
+use crate::composer_draft_lifecycle::ForwardedComposerDraftPermit;
 
 use matrix_sdk::test_utils::mocks::MatrixMockServer;
 

@@ -4,9 +4,11 @@ use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, reco
 use koushi_protocol::SessionKeyId;
 use koushi_state::{AppAction, OperationFailureKind};
 
-use crate::command_policy::{search_scope_to_state, timeline_composer_account_fence};
+use crate::command_policy::{
+    search_scope_to_state, space_member_forward_failure_action, timeline_composer_account_fence,
+};
+use crate::composer_draft_lifecycle::ForwardedComposerDraftPermit;
 use crate::room::RoomMessage;
-use crate::runtime::ForwardedComposerDraftPermit;
 use crate::sync::SyncMessage;
 use crate::timeline::TimelineMessage;
 use koushi_protocol::command::{
@@ -136,7 +138,7 @@ impl AccountActor {
     /// SyncStarted).
     pub(super) async fn route_room_command(&self, command: RoomCommand) {
         trace_room_route("send", &command);
-        let forward_failure = crate::runtime::space_member_forward_failure_action(&command);
+        let forward_failure = space_member_forward_failure_action(&command);
         let sent = self.room_actor.send(RoomMessage::Command(command)).await;
         if !sent {
             trace_room_route_closed();

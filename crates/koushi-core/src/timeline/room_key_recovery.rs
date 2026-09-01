@@ -1297,7 +1297,7 @@ impl TimelineActor {
     /// Start or join the standard-only recovery operation for a missing-session
     /// UTD (issue #478). Only `MissingMegolmSession` UTDs are eligible.
     pub(super) fn ensure_room_key_recovery(&mut self, session_id: &str) {
-        use crate::room_key_recovery::{RecoveryOperation, RecoveryStage};
+        use super::recovery_model::{RecoveryOperation, RecoveryStage};
 
         let resume = self.load_recovery_resume(session_id);
         let should_begin = {
@@ -1338,7 +1338,7 @@ impl TimelineActor {
         };
         let records: std::collections::BTreeMap<
             String,
-            crate::room_key_recovery::RecoveryResumeRecord,
+            super::recovery_model::RecoveryResumeRecord,
         > = self
             .room_key_recovery
             .iter()
@@ -1357,17 +1357,17 @@ impl TimelineActor {
     fn load_recovery_resume(
         &self,
         session_id: &str,
-    ) -> Option<crate::room_key_recovery::RecoveryResumeRecord> {
+    ) -> Option<super::recovery_model::RecoveryResumeRecord> {
         let path = self.recovery_resume_path()?;
         let bytes = std::fs::read(&path).ok()?;
         let records: std::collections::BTreeMap<
             String,
-            crate::room_key_recovery::RecoveryResumeRecord,
+            super::recovery_model::RecoveryResumeRecord,
         > = serde_json::from_slice(&bytes).ok()?;
         records.get(session_id).copied()
     }
     fn schedule_recovery_tick(&mut self, session_id: String, attempt: u32) {
-        use crate::room_key_recovery::RECOVERY_BACKOFF;
+        use super::recovery_model::RECOVERY_BACKOFF;
         if let Some(task) = self.recovery_tick_tasks.remove(&session_id) {
             task.abort();
         }
@@ -1392,7 +1392,7 @@ impl TimelineActor {
         attempt: u32,
         actor_generation: u64,
     ) {
-        use crate::room_key_recovery::{RecoveryStage, RecoveryStepOutcome as Outcome};
+        use super::recovery_model::{RecoveryStage, RecoveryStepOutcome as Outcome};
 
         if self.actor_generation != actor_generation {
             return;
@@ -1492,10 +1492,10 @@ impl TimelineActor {
         self.persist_recovery_state();
         match next {
             RecoveryStage::Recovered => {
-                crate::room_key_recovery::record_recovery_settled(RecoveryStage::Recovered);
+                super::recovery_model::record_recovery_settled(RecoveryStage::Recovered);
             }
             RecoveryStage::AutomaticPathsExhausted | RecoveryStage::UnrecoverableNoKnownHolder => {
-                crate::room_key_recovery::record_recovery_settled(next);
+                super::recovery_model::record_recovery_settled(next);
             }
             RecoveryStage::TemporarilyFailed => {
                 // Bounded retry: schedule the next attempt if allowed.
@@ -1513,7 +1513,7 @@ impl TimelineActor {
                         .unwrap_or(0);
                     self.schedule_recovery_tick(session_id, attempts);
                 } else {
-                    crate::room_key_recovery::record_recovery_settled(
+                    super::recovery_model::record_recovery_settled(
                         RecoveryStage::AutomaticPathsExhausted,
                     );
                 }
