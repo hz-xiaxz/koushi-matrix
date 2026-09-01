@@ -1,8 +1,8 @@
 //! Runtime integration tests covering soft-logout reauth and non-device
 //! account-management UIA submission projection.
 
-use koushi_core::command::{AccountCommand, CoreCommand};
 use koushi_core::runtime::CoreRuntime;
+use koushi_protocol::command::{AccountCommand, CoreCommand};
 use koushi_state::{
     AccountManagementOperation, AccountManagementState, AppAction, AuthSecret,
     IdentityResetAuthRequest, SessionState, SoftLogoutReauthState,

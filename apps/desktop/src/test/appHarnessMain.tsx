@@ -229,7 +229,7 @@ function readySnapshot(
   return {
     state_generation: 0,
     state: {
-        schema_version: 5,
+        schema_version: 6,
         domain: {
           session: { kind: "ready", homeserver: HOMESERVER, user_id: USER_ID, device_id: DEVICE_ID },
           session_lock_reason: null,

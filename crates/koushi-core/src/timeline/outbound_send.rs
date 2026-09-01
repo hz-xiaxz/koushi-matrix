@@ -23,12 +23,14 @@ use matrix_sdk_ui::timeline::Timeline;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::account_work::{AccountWorkKind, InteractiveWorkGuard};
-use crate::command::UploadMediaRequest;
-use crate::event::{CoreEvent, TimelineEvent, TimelineItem, TimelineItemId, TimelineSendState};
 use crate::executor;
-use crate::failure::{CoreFailure, TimelineFailureKind};
-use crate::ids::{RequestId, TimelineKey, TimelineKind};
 use crate::runtime::ForwardedComposerDraftPermit;
+use koushi_protocol::command::UploadMediaRequest;
+use koushi_protocol::event::{
+    CoreEvent, TimelineEvent, TimelineItem, TimelineItemId, TimelineSendState,
+};
+use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
+use koushi_protocol::ids::{RequestId, TimelineKey, TimelineKind};
 
 // BEGIN GENERATED SIBLING IMPORTS
 use super::actor::{

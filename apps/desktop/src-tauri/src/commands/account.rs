@@ -84,13 +84,13 @@ pub async fn submit_account_management_uia(
 }
 
 pub(super) fn build_start_device_cleanup_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::StartDeviceCleanup { request_id })
 }
 
 pub(super) fn build_submit_device_cleanup_uia_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     flow_id: u64,
     password: AuthSecret,
 ) -> CoreCommand {
@@ -102,13 +102,13 @@ pub(super) fn build_submit_device_cleanup_uia_command(
 }
 
 pub(super) fn build_erase_device_cleanup_local_data_anyway_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::EraseDeviceCleanupLocalDataAnyway { request_id })
 }
 
 pub(super) fn build_submit_account_management_uia_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     flow_id: u64,
     password: AuthSecret,
 ) -> CoreCommand {

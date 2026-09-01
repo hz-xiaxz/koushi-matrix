@@ -1,10 +1,10 @@
 use super::actor::{RoomActor, RoomMessage};
 use super::operations::classify_room_error;
 use crate::executor;
-use crate::failure::{CoreFailure, RoomFailureKind};
-use crate::ids::RequestId;
 use crate::mention_candidates::{MentionMemberInput, project_candidates};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
+use koushi_protocol::ids::RequestId;
 use koushi_sdk::{MatrixClientSession, MatrixJoinedMemberSnapshot, MatrixRoomOperationError};
 use koushi_state::{
     AppAction, MentionCandidatesCompleteness, MentionCandidatesFailureKind, MentionSurface,
@@ -80,7 +80,7 @@ impl RoomActor {
     pub(super) async fn handle_query_mention_candidates(
         &mut self,
         request_id: RequestId,
-        account_key: crate::AccountKey,
+        account_key: koushi_protocol::AccountKey,
         room_id: String,
         surface: MentionSurface,
         query: String,

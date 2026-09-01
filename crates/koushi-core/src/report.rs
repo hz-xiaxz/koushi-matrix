@@ -1,4 +1,4 @@
-use crate::failure::ReportFailureKind;
+use koushi_protocol::failure::ReportFailureKind;
 
 pub(crate) fn classify_report_error(error: &koushi_sdk::MatrixReportError) -> ReportFailureKind {
     use koushi_sdk::MatrixReportFailureKind;

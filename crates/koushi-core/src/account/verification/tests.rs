@@ -35,14 +35,14 @@ use crate::account::test_support::{
     inspect_session_runtime, login_gated_actor, recv_account_action_with_sliding_sync_effects,
     shutdown_and_ack, spawn_actor_with_dirs, test_request_id,
 };
-use crate::command::AccountCommand;
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
-use crate::event::CoreEvent;
 use crate::executor;
+use koushi_protocol::command::AccountCommand;
+use koushi_protocol::event::CoreEvent;
 
-use crate::failure::{CoreFailure, RecoveryFailureKind};
-use crate::ids::RuntimeConnectionId;
 use crate::link_preview::LinkPreviewContext;
+use koushi_protocol::failure::{CoreFailure, RecoveryFailureKind};
+use koushi_protocol::ids::RuntimeConnectionId;
 
 use crate::store::CredentialStoreBackend;
 use crate::store::StoreActor;

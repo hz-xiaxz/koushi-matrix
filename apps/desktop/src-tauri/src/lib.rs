@@ -39,8 +39,9 @@ use crate::window_state::{
 use koushi_core::renderable_thumbnail::{
     cleanup_legacy_plaintext_thumbnail_dirs, lookup_renderable_thumbnail,
 };
-use koushi_core::{AccountCommand, AppCommand, CoreCommand, CoreConnection, CoreRuntime};
+use koushi_core::{CoreConnection, CoreRuntime, NativeArtifactRegistry};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
+use koushi_protocol::{AccountCommand, AppCommand, CoreCommand};
 
 // Must stay in sync with `OIDC_REDIRECT_URI` in koushi-core. The scheme is
 // reverse-DNS per RFC 8252 §7.1 because MAS deployments reject bare schemes.
@@ -184,7 +185,8 @@ fn allow_runtime_asset_cache_dirs(app: &tauri::App, data_dir: &Path) {
 fn renderable_thumbnail_protocol_response(
     request: tauri::http::Request<Vec<u8>>,
 ) -> tauri::http::Response<Vec<u8>> {
-    let Some(content) = lookup_renderable_thumbnail(request.uri().path()) else {
+    let source_ref = request.uri().path().strip_prefix('/').unwrap_or_default();
+    let Some(content) = lookup_renderable_thumbnail(source_ref) else {
         return tauri::http::Response::builder()
             .status(tauri::http::StatusCode::NOT_FOUND)
             .header(tauri::http::header::CACHE_CONTROL, "no-store")
@@ -209,16 +211,21 @@ fn renderable_thumbnail_protocol_response(
 }
 
 fn start_core_runtime_for_tauri(data_dir: PathBuf) -> CoreRuntime {
+    let native_artifacts = Arc::new(NativeArtifactRegistry::new());
     #[cfg(any(debug_assertions, test))]
     {
         if keychain_persistence_disabled_from_env() {
-            return CoreRuntime::start_with_data_dir(data_dir.clone());
+            return CoreRuntime::start_with_data_dir_and_native_artifact_port(
+                data_dir,
+                native_artifacts,
+            );
         }
     }
 
-    CoreRuntime::start_with_data_dir_and_os_backend(
+    CoreRuntime::start_with_data_dir_and_os_backend_and_native_artifact_port(
         data_dir,
         std::sync::Arc::new(crate::keyring_backend::KeyringCredentialBackend),
+        native_artifacts,
     )
 }
 

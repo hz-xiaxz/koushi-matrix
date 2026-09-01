@@ -37,9 +37,9 @@ use scheduled_send::scheduled_send_id;
 #[cfg(any(test, feature = "test-hooks"))]
 pub use connection::CoreConnectionTestControl;
 pub use connection::{
-    CommandSubmitError, CoreCommandAdmission, CoreCommandHandle, CoreConnection, EventStreamLag,
-    SelectRoomError,
+    CommandSubmitError, CoreCommandHandle, CoreConnection, EventStreamLag, SelectRoomError,
 };
+pub use koushi_protocol::state_update::CoreCommandAdmission;
 pub use request_outcome::{
     OutcomeCorrelation, RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation,
     RoomOperationKind,
@@ -67,30 +67,35 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::account::{AccountActorHandle, AccountMessage};
 use crate::activity_resolution::ActivityResolutionRequest;
-use crate::command::{
-    AccountCommand, AppCommand, CoreCommand, SearchCommand, SearchScope, SyncCommand,
-    TimelineCommand,
+use crate::command_policy::{
+    CoreCommandPolicy, native_artifact_for_account_command, native_artifact_for_command,
+    search_scope_to_state, timeline_composer_account_fence,
 };
 use crate::composer_draft_lifecycle::{ComposerDraftCommandPermit, ComposerDraftLeaseRegistry};
-use crate::event::{
-    ActivityEvent, CoreEvent, IntentNoOpReason, IntentOutcome, NativeAttentionEvent, TimelineEvent,
-    VersionedAppStateSnapshot,
-};
 pub use activity::ACTIVITY_RECENT_MAX_ROWS;
 use activity::{
     ActivityProjection, activity_tab_token, cap_activity_resolution_requests,
     guard_activity_resolution_completion, normalize_activity_resolution_action,
     record_activity_transition,
 };
+use koushi_protocol::command::{
+    AccountCommand, AppCommand, CoreCommand, SearchCommand, SearchScope, SyncCommand,
+    TimelineCommand,
+};
+use koushi_protocol::event::{
+    ActivityEvent, CoreEvent, IntentNoOpReason, IntentOutcome, NativeAttentionEvent, TimelineEvent,
+};
+use koushi_protocol::state_update::VersionedAppStateSnapshot;
 
 use crate::executor;
-use crate::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
-use crate::ids::{
-    AccountKey, RequestId, RuntimeConnectionId, TimelineGeneration, TimelineKey, TimelineKind,
-};
+use crate::native_artifact::{NativeArtifactKind, NativeArtifactPort, RejectingNativeArtifactPort};
 use crate::settings::SettingsStore;
 use crate::state_delta::build_state_delta;
 use crate::store::{StoreActor, session_key_id_from_info};
+use koushi_protocol::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
+use koushi_protocol::ids::{
+    AccountKey, RequestId, RuntimeConnectionId, TimelineGeneration, TimelineKey, TimelineKind,
+};
 
 pub const COMMAND_INBOX_CAPACITY: usize = 256;
 /// Per-consumer broadcast capacity. On large accounts (100+ rooms) initial and
@@ -225,10 +230,10 @@ fn record_space_member_command_rejection(
 }
 
 pub(crate) fn space_member_forward_failure_action(
-    command: &crate::command::RoomCommand,
+    command: &koushi_protocol::command::RoomCommand,
 ) -> Option<(RequestId, AppAction)> {
     match command {
-        crate::command::RoomCommand::LoadSpaceMembers {
+        koushi_protocol::command::RoomCommand::LoadSpaceMembers {
             request_id,
             space_id,
             generation,
@@ -241,7 +246,7 @@ pub(crate) fn space_member_forward_failure_action(
                 kind: OperationFailureKind::Sdk,
             },
         )),
-        crate::command::RoomCommand::InviteUserToSpace {
+        koushi_protocol::command::RoomCommand::InviteUserToSpace {
             request_id,
             space_id,
             user_id,
@@ -256,7 +261,7 @@ pub(crate) fn space_member_forward_failure_action(
                 outcome: koushi_state::SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
             },
         )),
-        crate::command::RoomCommand::CancelSpaceInvite {
+        koushi_protocol::command::RoomCommand::CancelSpaceInvite {
             request_id,
             space_id,
             user_id,
@@ -271,7 +276,7 @@ pub(crate) fn space_member_forward_failure_action(
                 outcome: koushi_state::SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
             },
         )),
-        crate::command::RoomCommand::UpdateSpaceMemberRole {
+        koushi_protocol::command::RoomCommand::UpdateSpaceMemberRole {
             request_id,
             space_id,
             user_id,
@@ -295,10 +300,43 @@ pub(crate) fn space_member_forward_failure_action(
     }
 }
 
-struct CoreCommandEnvelope {
-    command: CoreCommand,
-    composer_permit: Option<ComposerDraftCommandPermit>,
-    admission: Option<oneshot::Sender<CoreCommandAdmission>>,
+#[cfg(any(test, feature = "test-hooks"))]
+#[doc(hidden)]
+pub enum CoreQaCommand {
+    SetLocalDeviceBlacklisted {
+        request_id: RequestId,
+        target: koushi_state::VerificationTarget,
+        room_id: String,
+        acknowledged: oneshot::Sender<Result<(), ()>>,
+    },
+    RefreshDeviceKeysAndAssertKnown {
+        request_id: RequestId,
+        target: koushi_state::VerificationTarget,
+        acknowledged: oneshot::Sender<Result<(), ()>>,
+    },
+    SyncOnce {
+        request_id: RequestId,
+    },
+}
+
+enum CoreCommandEnvelope {
+    Public {
+        command: CoreCommand,
+        composer_permit: Option<ComposerDraftCommandPermit>,
+        admission: Option<oneshot::Sender<CoreCommandAdmission>>,
+    },
+    #[cfg(any(test, feature = "test-hooks"))]
+    Qa(CoreQaCommand),
+}
+
+#[cfg(test)]
+impl CoreCommandEnvelope {
+    fn command(&self) -> &CoreCommand {
+        match self {
+            Self::Public { command, .. } => command,
+            Self::Qa(_) => panic!("expected public command envelope"),
+        }
+    }
 }
 
 /// A task handle that is aborted if its owner is dropped without an orderly
@@ -349,6 +387,7 @@ pub struct CoreRuntime {
     next_connection_id: AtomicU64,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
     sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
+    native_artifacts: Arc<dyn NativeArtifactPort>,
     // Internal action channel: actors project side-effect outcomes through
     // the reducer with this in later phases; tests inject through it today.
     #[cfg_attr(not(any(test, feature = "test-hooks")), allow(dead_code))]
@@ -442,11 +481,33 @@ impl CoreRuntime {
     pub fn start_with_data_dir(data_dir: PathBuf) -> Self {
         let account_store_actor = StoreActor::new(data_dir.clone());
         let composer_draft_store_actor = StoreActor::new(data_dir.clone());
+        #[cfg(any(test, feature = "test-hooks"))]
+        let native_artifacts: Arc<dyn NativeArtifactPort> =
+            Arc::new(crate::native_artifact::NativeArtifactRegistry::new());
+        #[cfg(not(any(test, feature = "test-hooks")))]
+        let native_artifacts: Arc<dyn NativeArtifactPort> = Arc::new(RejectingNativeArtifactPort);
         Self::start_inner(
             EVENT_QUEUE_CAPACITY,
             data_dir,
             account_store_actor,
             composer_draft_store_actor,
+            native_artifacts,
+        )
+    }
+
+    /// Start with a custom data directory and injected native artifact port.
+    pub fn start_with_data_dir_and_native_artifact_port(
+        data_dir: PathBuf,
+        native_artifacts: Arc<dyn NativeArtifactPort>,
+    ) -> Self {
+        let account_store_actor = StoreActor::new(data_dir.clone());
+        let composer_draft_store_actor = StoreActor::new(data_dir.clone());
+        Self::start_inner(
+            EVENT_QUEUE_CAPACITY,
+            data_dir,
+            account_store_actor,
+            composer_draft_store_actor,
+            native_artifacts,
         )
     }
 
@@ -467,6 +528,23 @@ impl CoreRuntime {
             data_dir,
             account_store_actor,
             composer_draft_store_actor,
+            Arc::new(RejectingNativeArtifactPort),
+        )
+    }
+
+    /// Start with an injected native artifact path port.
+    pub fn start_with_data_dir_and_os_backend_and_native_artifact_port(
+        data_dir: PathBuf,
+        os_backend: std::sync::Arc<dyn koushi_key::CredentialBackend>,
+        native_artifacts: Arc<dyn NativeArtifactPort>,
+    ) -> Self {
+        let account_store_actor = StoreActor::with_os_backend(data_dir.clone(), os_backend);
+        Self::start_inner(
+            EVENT_QUEUE_CAPACITY,
+            data_dir,
+            account_store_actor.clone(),
+            account_store_actor,
+            native_artifacts,
         )
     }
 
@@ -480,10 +558,11 @@ impl CoreRuntime {
             data_dir,
             account_store_actor,
             composer_draft_store_actor,
+            Arc::new(RejectingNativeArtifactPort),
         )
     }
 
-    #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub fn start_with_data_dir_and_file_credentials(
         data_dir: PathBuf,
         credential_dir: PathBuf,
@@ -505,6 +584,7 @@ impl CoreRuntime {
             data_dir,
             account_store_actor,
             composer_draft_store_actor,
+            Arc::new(crate::native_artifact::NativeArtifactRegistry::new()),
         )
     }
 
@@ -513,6 +593,7 @@ impl CoreRuntime {
         data_dir: PathBuf,
         store_actor: StoreActor,
         composer_draft_store_actor: StoreActor,
+        native_artifacts: Arc<dyn NativeArtifactPort>,
     ) -> Self {
         let (command_tx, command_rx) = mpsc::channel(COMMAND_INBOX_CAPACITY);
         // NOTE: action_tx is the high-volume action-projection inbox; it must be
@@ -548,15 +629,19 @@ impl CoreRuntime {
         });
 
         // Spawn AccountActor with shared channels.
-        let account_actor = crate::account::AccountActor::spawn_with_diagnostics(
-            store_actor,
-            action_tx.clone(),
-            event_tx.clone(),
-            crate::link_preview::LinkPreviewContext::from_settings(&initial_state.settings.values),
-            Arc::clone(&composer_draft_leases),
-            initial_send_read_receipts(&initial_state),
-            sliding_sync_diagnostics.clone(),
-        );
+        let account_actor =
+            crate::account::AccountActor::spawn_with_diagnostics_and_native_artifacts(
+                store_actor,
+                action_tx.clone(),
+                event_tx.clone(),
+                crate::link_preview::LinkPreviewContext::from_settings(
+                    &initial_state.settings.values,
+                ),
+                Arc::clone(&composer_draft_leases),
+                initial_send_read_receipts(&initial_state),
+                sliding_sync_diagnostics.clone(),
+                Arc::clone(&native_artifacts),
+            );
 
         let focused_projection_rx = account_actor
             .take_focused_projection_commits()
@@ -628,6 +713,7 @@ impl CoreRuntime {
             next_connection_id: AtomicU64::new(1),
             composer_draft_leases,
             sliding_sync_diagnostics,
+            native_artifacts,
             action_tx,
             #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_test_tx,
@@ -774,6 +860,7 @@ impl CoreRuntime {
             next_connection_id: _,
             composer_draft_leases: _,
             sliding_sync_diagnostics: _,
+            native_artifacts: _,
             action_tx: _,
             #[cfg(any(test, feature = "test-hooks"))]
                 composer_draft_test_tx: _,
@@ -815,10 +902,10 @@ struct AppActor {
     /// A lock/unlock can retain the same account key but still requires a
     /// fresh draft load after any captured pre-transition save is flushed.
     composer_draft_reload_required: bool,
-    navigation_loaded_for: Option<koushi_key::SessionKeyId>,
+    navigation_loaded_for: Option<koushi_protocol::SessionKeyId>,
     navigation_persistence_status: NavigationPersistenceStatus,
-    scheduled_sends_loaded_for: Option<koushi_key::SessionKeyId>,
-    room_preferences_loaded_for: Option<koushi_key::SessionKeyId>,
+    scheduled_sends_loaded_for: Option<koushi_protocol::SessionKeyId>,
+    room_preferences_loaded_for: Option<koushi_protocol::SessionKeyId>,
     state_generation: u64,
     pending_composer_draft_persist: Option<PendingComposerDraftPersist>,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
@@ -854,8 +941,11 @@ enum CommandDisposition {
 
 fn command_disposition(envelope: CoreCommandEnvelope) -> CommandDisposition {
     if matches!(
-        &envelope.command,
-        CoreCommand::App(AppCommand::Shutdown { .. })
+        &envelope,
+        CoreCommandEnvelope::Public {
+            command: CoreCommand::App(AppCommand::Shutdown { .. }),
+            ..
+        }
     ) {
         CommandDisposition::Shutdown
     } else {
@@ -889,10 +979,10 @@ impl AppActor {
     /// rejection should be keyed to (canonical user id account key).
     fn composer_target_notice_key(
         &self,
-        account: &koushi_key::SessionKeyId,
+        account: &koushi_protocol::SessionKeyId,
         target: &ComposerTarget,
     ) -> Option<TimelineKey> {
-        let account_key = crate::ids::AccountKey(account.user_id.clone());
+        let account_key = koushi_protocol::ids::AccountKey(account.user_id.clone());
         match target {
             ComposerTarget::Main { room_id } => {
                 Some(TimelineKey::room(account_key, room_id.clone()))
@@ -902,7 +992,7 @@ impl AppActor {
                 root_event_id,
             } => Some(TimelineKey {
                 account_key,
-                kind: crate::ids::TimelineKind::Thread {
+                kind: koushi_protocol::ids::TimelineKind::Thread {
                     room_id: room_id.clone(),
                     root_event_id: root_event_id.clone(),
                 },
@@ -1600,13 +1690,64 @@ impl AppActor {
             .await;
     }
 
+    #[cfg(any(test, feature = "test-hooks"))]
+    async fn handle_qa_command(&mut self, command: CoreQaCommand) -> bool {
+        match command {
+            CoreQaCommand::SetLocalDeviceBlacklisted {
+                request_id,
+                target,
+                room_id,
+                acknowledged,
+            } => {
+                let _ = self
+                    .account_actor
+                    .send(
+                        crate::account::AccountMessage::QaSetLocalDeviceBlacklisted {
+                            request_id,
+                            target,
+                            room_id,
+                            acknowledged,
+                        },
+                    )
+                    .await;
+            }
+            CoreQaCommand::RefreshDeviceKeysAndAssertKnown {
+                request_id,
+                target,
+                acknowledged,
+            } => {
+                let _ = self
+                    .account_actor
+                    .send(
+                        crate::account::AccountMessage::QaRefreshDeviceKeysAndAssertKnown {
+                            request_id,
+                            target,
+                            acknowledged,
+                        },
+                    )
+                    .await;
+            }
+            CoreQaCommand::SyncOnce { request_id } => {
+                let _ = self
+                    .account_actor
+                    .send(crate::account::AccountMessage::QaSyncOnce { request_id })
+                    .await;
+            }
+        }
+        false
+    }
+
     /// Returns whether `AppState` changed.
     async fn handle_command(&mut self, envelope: CoreCommandEnvelope) -> bool {
-        let CoreCommandEnvelope {
-            command,
-            composer_permit,
-            admission,
-        } = envelope;
+        let (command, composer_permit, admission) = match envelope {
+            CoreCommandEnvelope::Public {
+                command,
+                composer_permit,
+                admission,
+            } => (command, composer_permit, admission),
+            #[cfg(any(test, feature = "test-hooks"))]
+            CoreCommandEnvelope::Qa(command) => return self.handle_qa_command(command).await,
+        };
         if let Some(admission) = admission {
             self.pending_command_admissions.push(admission);
         }
@@ -1653,6 +1794,10 @@ impl AppActor {
                 request_id: command_request_id,
                 failure: CoreFailure::SessionRequired,
             });
+            if let Some((request_id, kind)) = native_artifact_for_command(&command) {
+                self.account_actor
+                    .unregister_native_artifact(request_id, kind);
+            }
             return false;
         }
 
@@ -1719,15 +1864,28 @@ impl AppActor {
                         request_id: command_request_id,
                         failure,
                     });
+                    if let Some((request_id, kind)) =
+                        native_artifact_for_account_command(&account_command)
+                    {
+                        self.account_actor
+                            .unregister_native_artifact(request_id, kind);
+                    }
                     return false;
                 }
                 // Route to AccountActor; it will produce AppActions and
                 // CoreEvents. AppActor does not immediately know the result —
                 // it observes it via the action channel.
-                let _ = self
+                let native_artifact = native_artifact_for_account_command(&account_command);
+                let sent = self
                     .account_actor
                     .send(AccountMessage::Command(account_command))
                     .await;
+                if !sent {
+                    if let Some((request_id, kind)) = native_artifact {
+                        self.account_actor
+                            .unregister_native_artifact(request_id, kind);
+                    }
+                }
                 projected_state_changed
             }
             CoreCommand::App(app_command) => match app_command {
@@ -1945,7 +2103,7 @@ impl AppActor {
                                 self.composer_target_notice_key(&expected_account, &target)
                         {
                             self.emit(CoreEvent::Room(
-                                crate::event::RoomEvent::ComposerSlashCommandRejected {
+                                koushi_protocol::event::RoomEvent::ComposerSlashCommandRejected {
                                     key,
                                     request_id,
                                 },
@@ -2090,7 +2248,7 @@ impl AppActor {
                             && let Some(key) = notice_key
                         {
                             self.emit(CoreEvent::Room(
-                                crate::event::RoomEvent::ComposerSlashCommandRejected {
+                                koushi_protocol::event::RoomEvent::ComposerSlashCommandRejected {
                                     key,
                                     request_id,
                                 },
@@ -2729,7 +2887,7 @@ impl AppActor {
                         let _ = self
                             .account_actor
                             .send(AccountMessage::RoomCommand(
-                                crate::command::RoomCommand::MarkRoomAsRead {
+                                koushi_protocol::command::RoomCommand::MarkRoomAsRead {
                                     request_id: room_read_request_id,
                                     room_id: room_id.clone(),
                                     event_id: event_id.clone(),
@@ -2906,7 +3064,7 @@ impl AppActor {
             CoreCommand::Room(room_command) => {
                 let mut state_changed = false;
                 match &room_command {
-                    crate::command::RoomCommand::LoadSpaceMembers {
+                    koushi_protocol::command::RoomCommand::LoadSpaceMembers {
                         request_id,
                         space_id,
                         generation,
@@ -2946,7 +3104,7 @@ impl AppActor {
                         self.handle_ui_event_effects(&effects).await;
                         state_changed = true;
                     }
-                    crate::command::RoomCommand::InviteUserToSpace {
+                    koushi_protocol::command::RoomCommand::InviteUserToSpace {
                         request_id,
                         space_id,
                         user_id,
@@ -2991,7 +3149,7 @@ impl AppActor {
                         self.handle_ui_event_effects(&effects).await;
                         state_changed = true;
                     }
-                    crate::command::RoomCommand::CancelSpaceInvite {
+                    koushi_protocol::command::RoomCommand::CancelSpaceInvite {
                         request_id,
                         space_id,
                         user_id,
@@ -3036,7 +3194,7 @@ impl AppActor {
                         self.handle_ui_event_effects(&effects).await;
                         state_changed = true;
                     }
-                    crate::command::RoomCommand::UpdateSpaceMemberRole {
+                    koushi_protocol::command::RoomCommand::UpdateSpaceMemberRole {
                         request_id,
                         space_id,
                         user_id,
@@ -3114,7 +3272,7 @@ impl AppActor {
                 // correlation BEFORE forwarding so the action loop can emit the
                 // terminal IntentLifecycle outcome. This command path is reliable
                 // and must never be converted into a drop-on-full background path.
-                if let crate::command::RoomCommand::SelectRoom {
+                if let koushi_protocol::command::RoomCommand::SelectRoom {
                     request_id,
                     ref room_id,
                 } = room_command
@@ -3147,7 +3305,7 @@ impl AppActor {
             }
             CoreCommand::Timeline(timeline_command) => {
                 if let Some((request_id, expected_account)) =
-                    timeline_command.composer_account_fence()
+                    timeline_composer_account_fence(&timeline_command)
                     && !composer_draft_account_matches(&self.state, expected_account)
                 {
                     self.emit(CoreEvent::OperationFailed {
@@ -3173,8 +3331,7 @@ impl AppActor {
                 let formatting_options = self.state.settings.values.composer.formatting_options();
                 // Route to AccountActor (which forwards to TimelineManagerActor).
                 let message = if let Some(permit) = composer_permit.take() {
-                    let request_id = timeline_command
-                        .composer_account_fence()
+                    let request_id = timeline_composer_account_fence(&timeline_command)
                         .map(|(request_id, _)| request_id)
                         .expect("leased timeline command must have an account fence");
                     let identity =
@@ -3207,7 +3364,7 @@ impl AppActor {
                             .reduce_app_action(AppAction::SearchSubmitted {
                                 request_id: request_id.sequence,
                                 query: query.clone(),
-                                scope: scope.to_state(),
+                                scope: search_scope_to_state(&scope),
                             })
                             .await;
                         self.handle_app_effects(request_id, effects).await;
@@ -3238,13 +3395,13 @@ impl AppActor {
 
     fn should_suppress_timeline_command_for_privacy(
         &self,
-        command: &crate::command::TimelineCommand,
+        command: &koushi_protocol::command::TimelineCommand,
     ) -> bool {
         match command {
-            crate::command::TimelineCommand::SendReadReceipt { .. } => {
+            koushi_protocol::command::TimelineCommand::SendReadReceipt { .. } => {
                 !self.state.settings.values.notifications.send_read_receipts
             }
-            crate::command::TimelineCommand::SetTyping { .. } => {
+            koushi_protocol::command::TimelineCommand::SetTyping { .. } => {
                 !self
                     .state
                     .settings
@@ -3401,10 +3558,10 @@ impl AppActor {
                             initial_backfill: match intent {
                                 ThreadOpenIntent::ExistingThread
                                 | ThreadOpenIntent::PinnedReply { .. } => {
-                                    crate::command::InitialBackfillPolicy::RequiredForExistingThread
+                                    koushi_protocol::command::InitialBackfillPolicy::RequiredForExistingThread
                                 }
                                 ThreadOpenIntent::NewThreadDraft => {
-                                    crate::command::InitialBackfillPolicy::Disabled
+                                    koushi_protocol::command::InitialBackfillPolicy::Disabled
                                 }
                             },
                         },
@@ -3427,7 +3584,8 @@ impl AppActor {
                                 account_key,
                                 kind: TimelineKind::Focused { room_id, event_id },
                             },
-                            initial_backfill: crate::command::InitialBackfillPolicy::Disabled,
+                            initial_backfill:
+                                koushi_protocol::command::InitialBackfillPolicy::Disabled,
                         },
                     )
                     .await;
@@ -3484,7 +3642,7 @@ impl AppActor {
                     let _ = self
                         .account_actor
                         .send(crate::account::AccountMessage::ThreadsListCommand(
-                            crate::command::ThreadsListCommand::Open {
+                            koushi_protocol::command::ThreadsListCommand::Open {
                                 request_id,
                                 scope: koushi_state::ThreadsListScope::Room {
                                     room_id: room_id.clone(),
@@ -3505,7 +3663,7 @@ impl AppActor {
                     let _ = self
                         .account_actor
                         .send(crate::account::AccountMessage::ThreadsListCommand(
-                            crate::command::ThreadsListCommand::Open {
+                            koushi_protocol::command::ThreadsListCommand::Open {
                                 request_id,
                                 scope,
                                 room_ids,
@@ -3523,7 +3681,7 @@ impl AppActor {
                     let _ = self
                         .account_actor
                         .send(crate::account::AccountMessage::ThreadsListCommand(
-                            crate::command::ThreadsListCommand::Paginate {
+                            koushi_protocol::command::ThreadsListCommand::Paginate {
                                 request_id,
                                 scope: koushi_state::ThreadsListScope::from_scope_key(&room_id),
                             },
@@ -3534,7 +3692,7 @@ impl AppActor {
                     let _ = self
                         .account_actor
                         .send(crate::account::AccountMessage::ThreadsListCommand(
-                            crate::command::ThreadsListCommand::Close { request_id },
+                            koushi_protocol::command::ThreadsListCommand::Close { request_id },
                         ))
                         .await;
                 }
@@ -3948,8 +4106,8 @@ impl AppActor {
     }
 
     fn emit_timeline_display_label_updates(&self, additional_user_ids: &[&str]) {
-        let own_user_id = crate::event::timeline_projection_own_user_id(&self.state);
-        let labels = crate::event::derive_display_label_updates_for_user_ids(
+        let own_user_id = crate::event_projection::timeline_projection_own_user_id(&self.state);
+        let labels = crate::event_projection::derive_display_label_updates_for_user_ids(
             &self.state.profile,
             own_user_id,
             additional_user_ids.iter().copied(),
@@ -4200,7 +4358,7 @@ fn is_verification_gate_command(command: &CoreCommand, session: &SessionState) -
     )
 }
 
-fn room_preferences_session_key(state: &AppState) -> Option<koushi_key::SessionKeyId> {
+fn room_preferences_session_key(state: &AppState) -> Option<koushi_protocol::SessionKeyId> {
     composer_draft_session_key(state)
 }
 
@@ -4430,9 +4588,6 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
         AccountCommand::RestoreSession { .. } | AccountCommand::RestoreLastSession { .. } => {
             Some(AppAction::RestoreSessionRequested)
         }
-        #[cfg(feature = "qa-bin")]
-        AccountCommand::QaSetLocalDeviceBlacklisted { .. }
-        | AccountCommand::QaRefreshDeviceKeysAndAssertKnown { .. } => None,
         AccountCommand::CompleteOidcLogin { .. }
         | AccountCommand::RetrySlidingSyncCapability { .. }
         | AccountCommand::ChangeHomeserver { .. }

@@ -70,7 +70,7 @@ pub(super) fn build_timeline_key(account_key: AccountKey, room_id: String) -> Ti
 
 #[cfg(test)]
 pub(super) fn build_subscribe_focused_timeline_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     event_id: String,
@@ -81,12 +81,12 @@ pub(super) fn build_subscribe_focused_timeline_command(
             account_key,
             kind: TimelineKind::Focused { room_id, event_id },
         },
-        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+        initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
     })
 }
 
 pub(super) fn build_paginate_timeline_backwards_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
 ) -> CoreCommand {
@@ -99,7 +99,7 @@ pub(super) fn build_paginate_timeline_backwards_command(
 }
 
 pub(super) fn build_paginate_thread_timeline_backwards_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     root_event_id: String,
@@ -119,7 +119,7 @@ pub(super) fn build_paginate_thread_timeline_backwards_command(
 }
 
 pub(super) fn build_restore_timeline_anchor_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     timeline_key: TimelineKey,
     event_id: String,
@@ -139,7 +139,7 @@ pub(super) fn build_restore_timeline_anchor_command(
 }
 
 pub(super) fn build_open_timeline_at_timestamp_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     timestamp_ms: u64,
 ) -> CoreCommand {
@@ -151,7 +151,7 @@ pub(super) fn build_open_timeline_at_timestamp_command(
 }
 
 pub(super) fn build_update_navigation_scroll_anchor_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     anchor: TimelineScrollAnchor,
 ) -> CoreCommand {
@@ -163,7 +163,7 @@ pub(super) fn build_update_navigation_scroll_anchor_command(
 }
 
 pub(super) fn build_observe_timeline_viewport_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     first_visible_event_id: Option<String>,
@@ -196,7 +196,7 @@ pub(super) fn build_observe_timeline_viewport_command(
 
 #[cfg(test)]
 pub(super) fn build_send_text_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     transaction_id: String,
@@ -215,7 +215,7 @@ pub(super) fn build_send_text_command(
 
 pub(super) fn build_submit_text_command(
     request_id: RequestId,
-    expected_account: koushi_key::SessionKeyId,
+    expected_account: koushi_protocol::SessionKeyId,
     submission_id: SubmissionId,
     account_key: AccountKey,
     room_id: String,
@@ -238,8 +238,8 @@ pub(super) fn build_submit_text_command(
 }
 
 pub(super) fn build_schedule_send_command(
-    request_id: koushi_core::RequestId,
-    expected_account: koushi_key::SessionKeyId,
+    request_id: koushi_protocol::RequestId,
+    expected_account: koushi_protocol::SessionKeyId,
     target: koushi_state::ComposerTarget,
     body: String,
     send_at_ms: u64,
@@ -267,7 +267,7 @@ pub(super) fn build_schedule_send_command(
 }
 
 pub(super) fn build_cancel_scheduled_send_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     scheduled_id: String,
 ) -> Option<CoreCommand> {
     if scheduled_id.trim().is_empty() {
@@ -280,7 +280,7 @@ pub(super) fn build_cancel_scheduled_send_command(
 }
 
 pub(super) fn build_reschedule_scheduled_send_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     scheduled_id: String,
     body: String,
     send_at_ms: u64,
@@ -297,7 +297,7 @@ pub(super) fn build_reschedule_scheduled_send_command(
 }
 
 pub(super) fn build_retry_send_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     transaction_id: String,
@@ -313,7 +313,7 @@ pub(super) fn build_retry_send_command(
 }
 
 pub(super) fn build_cancel_send_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     transaction_id: String,
@@ -329,7 +329,7 @@ pub(super) fn build_cancel_send_command(
 }
 
 pub(super) fn build_download_media_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     event_id: String,
@@ -346,7 +346,7 @@ pub(super) fn build_download_media_command(
 }
 
 pub(super) fn build_load_message_source_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     event_id: String,
@@ -362,11 +362,11 @@ pub(super) fn build_load_message_source_command(
 }
 
 pub(super) fn build_request_room_key_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     event_id: String,
-    origin: koushi_core::KeyRequestOrigin,
+    origin: koushi_protocol::KeyRequestOrigin,
     timeline_key: Option<TimelineKey>,
 ) -> Option<CoreCommand> {
     if event_id.trim().is_empty() {
@@ -388,7 +388,7 @@ pub(super) fn build_request_room_key_command(
 }
 
 pub(super) fn build_request_late_decryption_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     timeline_key: Option<TimelineKey>,
@@ -406,7 +406,7 @@ pub(super) fn build_request_late_decryption_command(
 }
 
 pub(super) fn build_load_link_previews_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     event_id: String,
@@ -422,7 +422,7 @@ pub(super) fn build_load_link_previews_command(
 }
 
 pub(super) fn build_hide_link_preview_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     event_id: String,
@@ -438,7 +438,7 @@ pub(super) fn build_hide_link_preview_command(
 }
 
 pub(super) fn build_forward_message_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     source_event_id: String,
@@ -461,7 +461,7 @@ pub(super) fn build_forward_message_command(
 }
 
 pub(super) fn build_edit_message_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     event_id: String,
@@ -479,7 +479,7 @@ pub(super) fn build_edit_message_command(
 }
 
 pub(super) fn build_redact_message_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     event_id: String,
@@ -492,7 +492,7 @@ pub(super) fn build_redact_message_command(
 }
 
 pub(super) fn build_toggle_reaction_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     event_id: String,
@@ -510,7 +510,7 @@ pub(super) fn build_toggle_reaction_command(
 }
 
 pub(super) fn build_send_reaction_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     event_id: String,
@@ -528,7 +528,7 @@ pub(super) fn build_send_reaction_command(
 }
 
 pub(super) fn build_redact_reaction_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     event_id: String,
@@ -551,7 +551,7 @@ pub(super) fn build_redact_reaction_command(
 }
 
 pub(super) fn build_send_read_receipt_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     event_id: String,
@@ -578,7 +578,7 @@ pub(super) fn build_send_read_receipt_command(
 }
 
 pub(super) fn build_set_fully_read_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     event_id: String,
@@ -691,7 +691,7 @@ fn acquire_terminal_composer_permit(
     connection: &CoreConnection,
     generation: koushi_core::composer_draft_lifecycle::ComposerRendererGeneration,
     lease_id: koushi_core::composer_draft_lifecycle::ComposerDraftLeaseId,
-    account: &koushi_key::SessionKeyId,
+    account: &koushi_protocol::SessionKeyId,
     target: &koushi_state::ComposerTarget,
 ) -> Result<koushi_core::composer_draft_lifecycle::ComposerDraftCommandPermit, String> {
     connection
@@ -737,7 +737,7 @@ pub async fn acquire_composer_draft_lease(
     if account_homeserver.is_empty() || account_user_id.is_empty() || account_device_id.is_empty() {
         return Err("composer draft owner is incomplete".to_owned());
     }
-    let expected_account = koushi_key::SessionKeyId {
+    let expected_account = koushi_protocol::SessionKeyId {
         homeserver: account_homeserver,
         user_id: account_user_id,
         device_id: account_device_id,
@@ -796,7 +796,7 @@ async fn wait_for_composer_draft_acceptance(
 ) -> Result<
     (
         koushi_state::ComposerDraftRevision,
-        koushi_core::event::VersionedAppStateSnapshot,
+        koushi_protocol::state_update::VersionedAppStateSnapshot,
     ),
     String,
 > {
@@ -959,7 +959,7 @@ pub async fn ensure_timeline_subscribed(
                 account_key,
                 kind: timeline_key.kind,
             },
-            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         }),
     )
     .await?;
@@ -1009,7 +1009,7 @@ pub async fn send_text(
     }
 
     let transaction_id = super::next_transaction_id("desktop");
-    let expected_account = koushi_key::SessionKeyId {
+    let expected_account = koushi_protocol::SessionKeyId {
         homeserver: account_homeserver,
         user_id: account_user_id,
         device_id: account_device_id,
@@ -1076,7 +1076,7 @@ pub async fn schedule_send(
 ) -> Result<ComposerDraftAcceptanceResponse, String> {
     let (generation, lease) = parse_composer_wire_tokens(&renderer_generation, &lease_id)?;
     let mut event_conn = state.runtime.attach();
-    let expected_account = koushi_key::SessionKeyId {
+    let expected_account = koushi_protocol::SessionKeyId {
         homeserver: account_homeserver,
         user_id: account_user_id,
         device_id: account_device_id,
@@ -1229,7 +1229,7 @@ pub async fn send_prepared_uploads(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<ComposerDraftAcceptanceResponse, String> {
-    let expected_account = koushi_key::SessionKeyId {
+    let expected_account = koushi_protocol::SessionKeyId {
         homeserver: account_homeserver,
         user_id: account_user_id,
         device_id: account_device_id,
@@ -1443,7 +1443,7 @@ pub async fn load_message_source(
 pub async fn request_room_key(
     room_id: String,
     event_id: String,
-    origin: Option<koushi_core::KeyRequestOrigin>,
+    origin: Option<koushi_protocol::KeyRequestOrigin>,
     timeline_key: Option<TimelineKey>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
@@ -1452,7 +1452,7 @@ pub async fn request_room_key(
     let request_id = next_request_id(state.inner()).await;
     // Only absent origin defaults to User; unknown wire values are rejected by
     // the typed deserializer instead of being silently coerced.
-    let origin = origin.unwrap_or(koushi_core::KeyRequestOrigin::User);
+    let origin = origin.unwrap_or(koushi_protocol::KeyRequestOrigin::User);
     let admission = submit_required_admission(
         state.inner(),
         build_request_room_key_command(
@@ -1750,7 +1750,7 @@ pub async fn set_composer_draft(
 ) -> Result<FrontendCommandAdmission, String> {
     let (generation, lease) = parse_composer_wire_tokens(&renderer_generation, &lease_id)?;
     let event_conn = state.runtime.attach();
-    let expected_account = koushi_key::SessionKeyId {
+    let expected_account = koushi_protocol::SessionKeyId {
         homeserver: account_homeserver,
         user_id: account_user_id,
         device_id: account_device_id,
@@ -1800,7 +1800,7 @@ pub async fn set_thread_composer_draft(
 ) -> Result<FrontendCommandAdmission, String> {
     let (generation, lease) = parse_composer_wire_tokens(&renderer_generation, &lease_id)?;
     let event_conn = state.runtime.attach();
-    let expected_account = koushi_key::SessionKeyId {
+    let expected_account = koushi_protocol::SessionKeyId {
         homeserver: account_homeserver,
         user_id: account_user_id,
         device_id: account_device_id,
@@ -1856,7 +1856,7 @@ pub async fn send_reply(
     }
 
     let transaction_id = super::next_transaction_id("desktop");
-    let expected_account = koushi_key::SessionKeyId {
+    let expected_account = koushi_protocol::SessionKeyId {
         homeserver: account_homeserver,
         user_id: account_user_id,
         device_id: account_device_id,
@@ -1928,7 +1928,7 @@ pub async fn send_thread_reply(
     }
 
     let transaction_id = super::next_transaction_id("desktop");
-    let expected_account = koushi_key::SessionKeyId {
+    let expected_account = koushi_protocol::SessionKeyId {
         homeserver: account_homeserver,
         user_id: account_user_id,
         device_id: account_device_id,
@@ -2003,7 +2003,7 @@ pub(crate) enum SubmissionFailure {
 pub(crate) enum SubmissionOutcome {
     Accepted,
     Rejected {
-        kind: koushi_core::TimelineFailureKind,
+        kind: koushi_protocol::TimelineFailureKind,
     },
 }
 
@@ -2018,7 +2018,7 @@ pub(crate) struct SubmissionResponse {
 
 #[cfg(test)]
 pub(super) fn build_send_reply_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     transaction_id: String,
@@ -2039,7 +2039,7 @@ pub(super) fn build_send_reply_command(
 
 #[cfg(test)]
 pub(super) fn build_send_thread_reply_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     root_event_id: String,
@@ -2065,8 +2065,8 @@ pub(super) fn build_send_thread_reply_command(
 }
 
 pub(super) fn build_set_composer_draft_command(
-    request_id: koushi_core::RequestId,
-    expected_account: koushi_key::SessionKeyId,
+    request_id: koushi_protocol::RequestId,
+    expected_account: koushi_protocol::SessionKeyId,
     room_id: String,
     document: ComposerDocument,
     revision: ComposerDraftRevision,
@@ -2081,8 +2081,8 @@ pub(super) fn build_set_composer_draft_command(
 }
 
 pub(super) fn build_set_thread_composer_draft_command(
-    request_id: koushi_core::RequestId,
-    expected_account: koushi_key::SessionKeyId,
+    request_id: koushi_protocol::RequestId,
+    expected_account: koushi_protocol::SessionKeyId,
     room_id: String,
     root_event_id: String,
     document: ComposerDocument,
@@ -2100,7 +2100,7 @@ pub(super) fn build_set_thread_composer_draft_command(
 
 pub(super) fn build_submit_reply_command(
     request_id: RequestId,
-    expected_account: koushi_key::SessionKeyId,
+    expected_account: koushi_protocol::SessionKeyId,
     submission_id: SubmissionId,
     account_key: AccountKey,
     room_id: String,
@@ -2126,7 +2126,7 @@ pub(super) fn build_submit_reply_command(
 
 pub(super) fn build_submit_thread_reply_command(
     request_id: RequestId,
-    expected_account: koushi_key::SessionKeyId,
+    expected_account: koushi_protocol::SessionKeyId,
     submission_id: SubmissionId,
     account_key: AccountKey,
     room_id: String,

@@ -4,7 +4,7 @@ use koushi_core::composer_draft_lifecycle::{
     ComposerDraftLeaseFailure, ComposerDraftLeaseRegistry, ComposerDraftScope,
     ComposerDraftWireError, ComposerRendererGeneration,
 };
-use koushi_key::SessionKeyId;
+use koushi_protocol::SessionKeyId;
 use koushi_state::ComposerTarget;
 
 mod support;

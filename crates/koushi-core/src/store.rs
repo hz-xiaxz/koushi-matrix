@@ -6,7 +6,7 @@
 //! - If credential store or encryption cannot be initialized for an account,
 //!   `LocalEncryptionUnavailable` is returned (fail-closed).
 //! - The file-based credential store override is behind a compile-time gate:
-//!   `#[cfg(any(debug_assertions, test, feature = "qa-bin"))]` only.
+//!   `#[cfg(any(debug_assertions, test, feature = "test-hooks"))]` only.
 //!
 //! Architecture: overview.md Platform Portability rule 3 — platform
 //! capabilities live here behind a port. StoreActor is the only actor allowed
@@ -27,7 +27,8 @@ use std::sync::Arc;
 #[cfg(any(test, feature = "test-hooks"))]
 use std::sync::{Mutex, atomic::AtomicUsize};
 
-use koushi_key::{LocalStoreBinding, LocalStoreId, LocalUnlockSecret, SessionKeyId};
+use koushi_key::{LocalStoreBinding, LocalStoreId, LocalUnlockSecret};
+use koushi_protocol::SessionKeyId;
 
 use crate::credential_vault::{
     LocalStoreMigrationRecord, LocalStoreMigrationState, PendingLoginRecord, PendingLoginState,
@@ -38,10 +39,10 @@ use koushi_sdk::{
 };
 use koushi_state::LocalEncryptionHealth;
 
-use crate::failure::CoreFailure;
 pub use credential_backend::{CredentialStoreBackend, OsCredentialStore};
-#[cfg(any(debug_assertions, test, feature = "qa-bin"))]
+#[cfg(any(debug_assertions, test, feature = "test-hooks"))]
 pub use credential_backend::{FileCredentialStore, resolved_credential_backend_is_file_dir};
+use koushi_protocol::failure::CoreFailure;
 
 use composer_drafts::{
     decode_payload_json as decode_composer_draft_payload_json,
@@ -692,7 +693,7 @@ impl StoreActor {
     /// QA/test constructor with an explicit credential backend. This avoids the
     /// env-global `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR` race between unit tests
     /// and lets the headless QA binary isolate same-user device fixtures.
-    #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) fn with_backend(
         credential_store: CredentialStoreBackend,
         data_dir: impl Into<PathBuf>,
@@ -969,6 +970,6 @@ pub fn session_key_id_from_info(info: &koushi_state::SessionInfo) -> SessionKeyI
 
 /// Derive a canonical `AccountKey` string for a session. The account key is
 /// the user's Matrix ID — e.g. `@alice:example.com`.
-pub fn account_key_from_info(info: &koushi_state::SessionInfo) -> crate::ids::AccountKey {
-    crate::ids::AccountKey(info.user_id.clone())
+pub fn account_key_from_info(info: &koushi_state::SessionInfo) -> koushi_protocol::ids::AccountKey {
+    koushi_protocol::ids::AccountKey(info.user_id.clone())
 }

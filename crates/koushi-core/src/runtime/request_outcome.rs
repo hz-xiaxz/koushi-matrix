@@ -13,12 +13,12 @@ use koushi_state::{
 use tokio::sync::broadcast;
 
 use super::connection::CoreConnection;
-use crate::event::{
+use koushi_protocol::event::{
     AccountEvent, CoreEvent, IntentNoOpReason, IntentOutcome, RoomEvent, TimelineEvent,
-    VersionedAppStateSnapshot,
 };
-use crate::failure::{CoreFailure, RoomFailureKind};
-use crate::ids::{AccountKey, RequestId, TimelineKey};
+use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
+use koushi_protocol::ids::{AccountKey, RequestId, TimelineKey};
+use koushi_protocol::state_update::VersionedAppStateSnapshot;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OutcomeCorrelation {
@@ -308,7 +308,7 @@ pub enum RequestOutcome {
     SubmissionRejected {
         request_id: RequestId,
         submission_id: SubmissionId,
-        kind: crate::failure::TimelineFailureKind,
+        kind: koushi_protocol::failure::TimelineFailureKind,
         snapshot: VersionedAppStateSnapshot,
     },
     PreparedMediaQueued {
@@ -320,7 +320,7 @@ pub enum RequestOutcome {
     RoomKeyReshare {
         request_id: RequestId,
         room_id: String,
-        outcome: crate::event::RoomKeyReshareOutcome,
+        outcome: koushi_protocol::event::RoomKeyReshareOutcome,
         generation: u64,
     },
     EncryptionDebug {
@@ -741,7 +741,7 @@ enum EventProgress {
         request_id: RequestId,
         key: TimelineKey,
         submission_id: SubmissionId,
-        kind: crate::failure::TimelineFailureKind,
+        kind: koushi_protocol::failure::TimelineFailureKind,
     },
     PreparedMediaQueued {
         request_id: RequestId,
@@ -751,7 +751,7 @@ enum EventProgress {
     RoomKeyReshare {
         request_id: RequestId,
         room_id: String,
-        outcome: crate::event::RoomKeyReshareOutcome,
+        outcome: koushi_protocol::event::RoomKeyReshareOutcome,
     },
     EncryptionDebug {
         request_id: RequestId,
@@ -1107,7 +1107,7 @@ fn event_progress(
             timeline_event_progress(timeline_event, expectation, request_id)
         }
         CoreEvent::Search(search_event) => match search_event {
-            crate::event::SearchEvent::Results {
+            koushi_protocol::event::SearchEvent::Results {
                 request_id: event_request_id,
                 ..
             } if matches!(expectation, RequestOutcomeExpectation::SearchStarted { .. })
@@ -2626,7 +2626,7 @@ fn timeline_key_matches_composer_target(
     match (target, &key.kind) {
         (
             ComposerTarget::Main { room_id },
-            crate::ids::TimelineKind::Room {
+            koushi_protocol::ids::TimelineKind::Room {
                 room_id: key_room_id,
             },
         ) => room_id == key_room_id,
@@ -2635,7 +2635,7 @@ fn timeline_key_matches_composer_target(
                 room_id,
                 root_event_id,
             },
-            crate::ids::TimelineKind::Thread {
+            koushi_protocol::ids::TimelineKind::Thread {
                 room_id: key_room_id,
                 root_event_id: key_root_event_id,
             },
@@ -2715,7 +2715,7 @@ fn focused_context_matches(state: &AppState, room_id: &str, event_id: Option<&st
 fn timeline_key_matches(key: &TimelineKey, event_id: &str) -> bool {
     matches!(
         &key.kind,
-        crate::ids::TimelineKind::Focused {
+        koushi_protocol::ids::TimelineKind::Focused {
             room_id,
             event_id: key_event_id,
         } if room_id == key.room_id() && key_event_id == event_id

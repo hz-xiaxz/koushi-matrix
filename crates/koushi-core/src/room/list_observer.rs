@@ -7,7 +7,6 @@ use super::normalization::{
     replace_known_room_ids,
 };
 use crate::direct_message_classification::{DirectAccountDataSource, DirectClassificationState};
-use crate::event::{CoreEvent, RoomEvent};
 use crate::executor;
 use crate::timeline::{
     RoomMembershipTransition, RoomMembershipTransitionKind, TimelineSubscriptionResidencyHandle,
@@ -15,6 +14,7 @@ use crate::timeline::{
 };
 use crate::unread_trace;
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_protocol::event::{CoreEvent, RoomEvent};
 use koushi_sdk::{
     MatrixClientSession, MatrixRoomListRoom, MatrixRoomListSnapshot, MatrixRoomListSpace,
 };

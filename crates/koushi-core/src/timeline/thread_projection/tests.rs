@@ -13,17 +13,17 @@ use matrix_sdk_ui::timeline::{
 };
 use tokio::sync::{broadcast, mpsc};
 
-use crate::event::{
+use crate::executor;
+use koushi_protocol::event::{
     CoreEvent, ThreadSummaryDto, TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId,
     TimelineMediaKind, TimelineMessageActions,
 };
-use crate::executor;
 
-use crate::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 use crate::threads_list::{
     AggregateRefreshCause, ThreadRootProjectionActivity, ThreadRootProjectionDecision,
     ThreadRootProjectionService,
 };
+use koushi_protocol::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 
 use std::future::poll_fn;
 

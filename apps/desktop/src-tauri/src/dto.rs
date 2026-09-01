@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use koushi_core::{CoreCommandAdmission, StateDelta, event::VersionedAppStateSnapshot};
+use koushi_protocol::{CoreCommandAdmission, StateDelta, VersionedAppStateSnapshot};
 use koushi_state::{
     AccountManagementCapabilities, AccountManagementState, AccountManagementUrl, ActivityState,
     AppError, AppState, AuthDiscoveryState, BasicOperationState, CjkTextPolicyState, ComposerState,
@@ -445,8 +445,8 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct FrontendAppState {
-    /// IPC snapshot contract version. v5 owns account management on the active
-    /// session and removes the remote-device manager. The renderer asserts this so a stale snapshot or
+    /// IPC snapshot contract version. v6 carries opaque renderable-thumbnail
+    /// references instead of Core-minted Tauri URLs. The renderer asserts this so a stale snapshot or
     /// a mismatched Rust/TS build fails loudly instead of reading `undefined`.
     pub schema_version: u32,
     pub domain: FrontendDomainState,
@@ -580,7 +580,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
 }
 
 /// IPC snapshot contract version. Bumped to 2 by #87 Phase 4 (domain/ui sectioning).
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 5;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 6;
 
 pub(crate) fn frontend_display_platform() -> DisplayPlatform {
     #[cfg(target_os = "macos")]

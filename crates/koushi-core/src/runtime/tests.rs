@@ -1,7 +1,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-use crate::event::{AccountEvent, RoomEvent, TimelineEvent};
+use koushi_protocol::event::{AccountEvent, RoomEvent, TimelineEvent};
 use koushi_state::{
     DisplaySettings, RoomSummary, RoomTags, SessionInfo, SettingsPatch, SpaceMemberEntry,
     SpaceMemberMembership, SpaceMembersProjection, UserProfile,
@@ -131,7 +131,7 @@ async fn close_account_actor_for_runtime_test(runtime: &CoreRuntime) {
 
 async fn run_closed_space_member_forwarding_case(
     membership: SpaceMemberMembership,
-    command: impl FnOnce(RequestId) -> crate::command::RoomCommand,
+    command: impl FnOnce(RequestId) -> koushi_protocol::command::RoomCommand,
 ) -> (AppState, CoreFailure, u64) {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
     let runtime = CoreRuntime::start_with_event_capacity(64);
@@ -235,7 +235,7 @@ async fn run_closed_space_member_forwarding_case(
 async fn closed_account_forwarding_rolls_back_space_member_load() {
     let (state, failure, request_id) =
         run_closed_space_member_forwarding_case(SpaceMemberMembership::SpaceJoined, |request_id| {
-            crate::command::RoomCommand::LoadSpaceMembers {
+            koushi_protocol::command::RoomCommand::LoadSpaceMembers {
                 request_id,
                 space_id: "!closed-forward-space:example.invalid".to_owned(),
                 generation: 9,
@@ -264,7 +264,7 @@ async fn closed_account_forwarding_rolls_back_space_member_load() {
 async fn closed_account_forwarding_rolls_back_optimistic_space_invite() {
     let (state, failure, request_id) = run_closed_space_member_forwarding_case(
         SpaceMemberMembership::ChildRoomOnly,
-        |request_id| crate::command::RoomCommand::InviteUserToSpace {
+        |request_id| koushi_protocol::command::RoomCommand::InviteUserToSpace {
             request_id,
             space_id: "!closed-forward-space:example.invalid".to_owned(),
             user_id: "@closed-forward-user:example.invalid".to_owned(),
@@ -303,7 +303,7 @@ async fn closed_account_forwarding_rolls_back_optimistic_space_invite() {
 async fn closed_account_forwarding_retains_invited_row_for_cancellation_retry() {
     let (state, failure, request_id) = run_closed_space_member_forwarding_case(
         SpaceMemberMembership::SpaceInvited,
-        |request_id| crate::command::RoomCommand::CancelSpaceInvite {
+        |request_id| koushi_protocol::command::RoomCommand::CancelSpaceInvite {
             request_id,
             space_id: "!closed-forward-space:example.invalid".to_owned(),
             user_id: "@closed-forward-user:example.invalid".to_owned(),
@@ -341,7 +341,7 @@ async fn closed_account_forwarding_retains_invited_row_for_cancellation_retry() 
 async fn closed_account_forwarding_rolls_back_space_member_role_once() {
     let (state, failure, request_id) =
         run_closed_space_member_forwarding_case(SpaceMemberMembership::SpaceJoined, |request_id| {
-            crate::command::RoomCommand::UpdateSpaceMemberRole {
+            koushi_protocol::command::RoomCommand::UpdateSpaceMemberRole {
                 request_id,
                 space_id: "!closed-forward-space:example.invalid".to_owned(),
                 user_id: "@closed-forward-user:example.invalid".to_owned(),
@@ -467,7 +467,10 @@ fn search_scope_round_trips_non_all_scope_kinds() {
     ];
 
     for scope in scopes {
-        assert_eq!(map_state_search_scope_to_core(scope.to_state()), scope);
+        assert_eq!(
+            map_state_search_scope_to_core(search_scope_to_state(&scope)),
+            scope
+        );
     }
 }
 
@@ -594,7 +597,7 @@ async fn rejected_space_invites_are_fenced_before_room_actor_route() {
         let request_id = connection.next_request_id();
         connection
             .command(CoreCommand::Room(
-                crate::command::RoomCommand::InviteUserToSpace {
+                koushi_protocol::command::RoomCommand::InviteUserToSpace {
                     request_id,
                     space_id: target_space_id,
                     user_id: duplicate_user_id.clone(),
@@ -623,7 +626,7 @@ async fn rejected_space_invites_are_fenced_before_room_actor_route() {
         assert_eq!(
             failure,
             CoreFailure::RoomOperationFailed {
-                kind: crate::failure::RoomFailureKind::Sdk,
+                kind: koushi_protocol::failure::RoomFailureKind::Sdk,
             }
         );
         assert_eq!(connection.snapshot(), expected_state);
@@ -791,7 +794,7 @@ async fn settings_update_emits_timeline_display_policy_update() {
     let request_id = connection.next_request_id();
     connection
         .command(CoreCommand::App(
-            crate::command::AppCommand::UpdateSettings {
+            koushi_protocol::command::AppCommand::UpdateSettings {
                 request_id,
                 patch: SettingsPatch {
                     display: Some(DisplaySettings {
@@ -1494,7 +1497,7 @@ fn profile_commands_project_pending_state_without_display_name_or_avatar_bytes()
     assert_eq!(
         account_command_projected_action(&AccountCommand::SetAvatar {
             request_id: avatar_request_id,
-            request: crate::command::SetAvatarRequest {
+            request: koushi_protocol::command::SetAvatarRequest {
                 mime_type: "image/png".to_owned(),
                 bytes: vec![1, 2, 3, 4],
             },
@@ -1563,26 +1566,6 @@ fn verification_followup_commands_project_flow_id_without_speculative_cancel() {
             reason: koushi_state::VerificationCancelReason::User,
         }),
         None
-    );
-}
-
-#[cfg(feature = "qa-bin")]
-#[test]
-fn qa_device_key_refresh_has_no_speculative_app_projection() {
-    let (acknowledged, _ack) = tokio::sync::oneshot::channel();
-    assert!(
-        account_command_projected_action(&AccountCommand::QaRefreshDeviceKeysAndAssertKnown {
-            request_id: RequestId {
-                connection_id: RuntimeConnectionId(1),
-                sequence: 43,
-            },
-            target: koushi_state::VerificationTarget {
-                user_id: "@private:example.invalid".to_owned(),
-                device_id: "PRIVATEDEVICE".to_owned(),
-            },
-            acknowledged,
-        })
-        .is_none()
     );
 }
 
@@ -1760,11 +1743,9 @@ fn gate_sas_and_bootstrap_commands_project_only_opaque_flow_state() {
             request_id,
             flow_id: 32,
             auth: Some(koushi_state::AuthSecret::new("private-auth")),
-            request: crate::command::SecureBackupSetupRequest {
+            request: koushi_protocol::command::SecureBackupSetupRequest {
                 passphrase: Some(koushi_state::AuthSecret::new("private-passphrase")),
-                recovery_key_destination_path: Some(std::path::PathBuf::from(
-                    "/private/recovery-key.txt",
-                )),
+                recovery_key_destination_requested: true,
                 intent: koushi_state::SecureBackupSetupIntent::InitialSetup,
             },
         }
@@ -2050,7 +2031,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
 
     runtime
         .command_tx
-        .send(CoreCommandEnvelope {
+        .send(CoreCommandEnvelope::Public {
             command: CoreCommand::App(AppCommand::UpdateSettings {
                 request_id: first_request_id,
                 patch: SettingsPatch {
@@ -2065,7 +2046,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
         .expect("preceding command");
     runtime
         .command_tx
-        .send(CoreCommandEnvelope {
+        .send(CoreCommandEnvelope::Public {
             command: CoreCommand::App(AppCommand::Shutdown {
                 request_id: shutdown_request_id,
             }),
@@ -2076,7 +2057,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
         .expect("first shutdown command");
     runtime
         .command_tx
-        .send(CoreCommandEnvelope {
+        .send(CoreCommandEnvelope::Public {
             command: CoreCommand::App(AppCommand::Shutdown {
                 request_id: duplicate_shutdown_request_id,
             }),
@@ -2087,7 +2068,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
         .expect("duplicate shutdown command");
     runtime
         .command_tx
-        .send(CoreCommandEnvelope {
+        .send(CoreCommandEnvelope::Public {
             command: CoreCommand::App(AppCommand::UpdateSettings {
                 request_id: later_request_id,
                 patch: SettingsPatch {

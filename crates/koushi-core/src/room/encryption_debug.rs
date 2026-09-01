@@ -1,15 +1,15 @@
 use super::actor::{ROOM_ACTOR_SHUTDOWN_JOIN_TIMEOUT, RoomActor};
 use super::operations::classify_room_error;
 use crate::account_work::AccountWorkKind;
-use crate::event::{
+use crate::executor;
+use futures_util::FutureExt;
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_protocol::event::{
     CoreEvent, EncryptionDebugOperationOutcome as CoreEncryptionDebugOutcome, RoomEvent,
     RoomKeyReshareOutcome,
 };
-use crate::executor;
-use crate::failure::CoreFailure;
-use crate::ids::RequestId;
-use futures_util::FutureExt;
-use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::ids::RequestId;
 use koushi_state::{AppAction, EncryptionDebugOperationKind};
 #[cfg(feature = "test-hooks")]
 use std::sync::Mutex;

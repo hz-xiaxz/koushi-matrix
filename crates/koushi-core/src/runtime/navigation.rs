@@ -1,11 +1,11 @@
 //! Runtime navigation persistence and projection helpers.
 
 use super::{AppActor, composer_draft_session_key};
-use crate::event::{CoreEvent, IntentNoOpReason, IntentOutcome};
 use crate::executor;
-use crate::failure::CoreFailure;
-use crate::ids::{RequestId, TimelineKey, TimelineKind};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_protocol::event::{CoreEvent, IntentNoOpReason, IntentOutcome};
+use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::ids::{RequestId, TimelineKey, TimelineKind};
 use koushi_state::{
     AppAction, AppEffect, AppState, FocusedContextState, HomeSelection,
     MAX_SPACE_LOCAL_PRESENTATIONS, NavigationPreferenceUpdate, NavigationState, SessionState,
@@ -15,8 +15,8 @@ use koushi_state::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum NavigationPersistenceStatus {
     Unloaded,
-    Loaded(koushi_key::SessionKeyId),
-    LoadFailed(koushi_key::SessionKeyId),
+    Loaded(koushi_protocol::SessionKeyId),
+    LoadFailed(koushi_protocol::SessionKeyId),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -44,7 +44,7 @@ fn take_committed_focused_navigation(
 }
 
 pub(super) fn admit_focused_projection_generation(
-    latest: &mut std::collections::HashMap<TimelineKey, (u64, crate::TimelineGeneration)>,
+    latest: &mut std::collections::HashMap<TimelineKey, (u64, koushi_protocol::TimelineGeneration)>,
     commit: &crate::timeline::FocusedProjectionCommitted,
 ) -> bool {
     let generation = (commit.actor_generation, commit.timeline_generation);
@@ -178,7 +178,7 @@ impl AppActor {
         if let Some(key) = focused_key {
             self.send_timeline_command_or_fail(
                 commit.projection_request_id,
-                crate::command::TimelineCommand::Unsubscribe {
+                koushi_protocol::command::TimelineCommand::Unsubscribe {
                     request_id: commit.projection_request_id,
                     key,
                 },
@@ -234,7 +234,7 @@ impl AppActor {
 
     pub(super) async fn persist_navigation(
         &mut self,
-        key_id: koushi_key::SessionKeyId,
+        key_id: koushi_protocol::SessionKeyId,
         navigation: NavigationState,
     ) -> bool {
         let ledger_entries = navigation.space_order.len() as u64;
@@ -534,7 +534,7 @@ fn normalize_bounded_text(value: Option<String>, max_scalars: usize) -> Option<S
     .then_some(value)
 }
 
-pub(super) fn navigation_session_key(state: &AppState) -> Option<koushi_key::SessionKeyId> {
+pub(super) fn navigation_session_key(state: &AppState) -> Option<koushi_protocol::SessionKeyId> {
     composer_draft_session_key(state)
 }
 

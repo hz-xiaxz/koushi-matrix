@@ -1,10 +1,12 @@
 [workspace]
 members = [
     "crates/koushi-state",
+    "crates/koushi-protocol",
     "crates/koushi-search",
     "crates/koushi-key",
     "crates/koushi-sdk",
     "crates/koushi-core",
+    "crates/koushi-qa",
     "crates/koushi-diagnostics",
     "crates/koushi-media",
     "apps/desktop/src-tauri",
@@ -14,6 +16,7 @@ members = [
 ]
 default-members = [
     "crates/koushi-state",
+    "crates/koushi-protocol",
     "crates/koushi-search",
     "crates/koushi-key",
     "crates/koushi-sdk",

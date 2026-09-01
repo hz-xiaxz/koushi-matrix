@@ -13,7 +13,7 @@ use std::{
 use std::sync::atomic::AtomicUsize;
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
-use koushi_key::SessionKeyId;
+use koushi_protocol::SessionKeyId;
 use koushi_sdk::{MatrixClientSession, PersistableMatrixSession};
 #[cfg(test)]
 use koushi_state::DeviceCleanupFailureKind;
@@ -24,18 +24,11 @@ use koushi_state::{
 };
 use tokio::sync::{Semaphore, broadcast, mpsc, oneshot};
 
-use crate::command::{
-    AccountCommand, RoomCommand, SearchCommand, SyncCommand, ThreadsListCommand, TimelineCommand,
-};
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
-use crate::event::{
-    CoreEvent, EventCacheFailureReasonClass, EventCacheSubscribeStatus, LocalEncryptionEvent,
-};
 #[cfg(test)]
 use crate::executor;
-use crate::failure::CoreFailure;
-use crate::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
 use crate::link_preview::LinkPreviewContext;
+use crate::native_artifact::{NativeArtifactKind, NativeArtifactPort};
 #[cfg(feature = "test-hooks")]
 use crate::room::RoomOperationTestControl;
 use crate::room::{RoomActorHandle, RoomMessage};
@@ -46,6 +39,14 @@ use crate::sync::SyncActorHandle;
 use crate::timeline::{
     NavigationProjectionIngress, NavigationProjectionIntent, TimelineManagerHandle, TimelineMessage,
 };
+use koushi_protocol::command::{
+    AccountCommand, RoomCommand, SearchCommand, SyncCommand, ThreadsListCommand, TimelineCommand,
+};
+use koushi_protocol::event::{
+    CoreEvent, EventCacheFailureReasonClass, EventCacheSubscribeStatus, LocalEncryptionEvent,
+};
+use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
 
 use super::account_management::PendingUiaOperation;
 use super::local_data_cleanup::{PendingDeviceCleanup, record_device_cleanup_offer};
@@ -60,7 +61,7 @@ use super::session_lifecycle::{
 use super::sliding_sync::{
     PendingSlidingSyncAdmission, PendingSlidingSyncRetry, StoredSlidingSyncAdmissionContext,
 };
-#[cfg(feature = "qa-bin")]
+#[cfg(any(test, feature = "test-hooks"))]
 use super::trust_gate::refresh_device_keys_and_assert_known;
 use super::trust_gate::{
     OwnedVerificationMethodDiscoveryTask, PendingTrustTransition, RecoveryStateObservation,
@@ -118,6 +119,23 @@ pub(super) fn trace_account_request(
 /// Messages routed to the AccountActor task.
 pub(crate) enum AccountMessage {
     Command(AccountCommand),
+    #[cfg(any(test, feature = "test-hooks"))]
+    QaSetLocalDeviceBlacklisted {
+        request_id: RequestId,
+        target: VerificationTarget,
+        room_id: String,
+        acknowledged: oneshot::Sender<Result<(), ()>>,
+    },
+    #[cfg(any(test, feature = "test-hooks"))]
+    QaRefreshDeviceKeysAndAssertKnown {
+        request_id: RequestId,
+        target: VerificationTarget,
+        acknowledged: oneshot::Sender<Result<(), ()>>,
+    },
+    #[cfg(any(test, feature = "test-hooks"))]
+    QaSyncOnce {
+        request_id: RequestId,
+    },
     ContinueSlidingSyncAdmission {
         account_epoch: u64,
         request_id: u64,
@@ -507,11 +525,20 @@ pub struct AccountActorHandle {
     residency_room_tx: mpsc::Sender<RoomMessage>,
     #[cfg(feature = "test-hooks")]
     residency_room_operation_reached_count: Arc<AtomicUsize>,
+    native_artifacts: Arc<dyn NativeArtifactPort>,
 }
 
 impl AccountActorHandle {
     pub(crate) async fn send(&self, msg: AccountMessage) -> bool {
         self.tx.send(msg).await.is_ok()
+    }
+
+    pub(crate) fn unregister_native_artifact(
+        &self,
+        request_id: RequestId,
+        kind: NativeArtifactKind,
+    ) {
+        self.native_artifacts.unregister(request_id, kind);
     }
 
     #[cfg(feature = "test-hooks")]
@@ -691,6 +718,7 @@ impl AccountActorHandle {
             tx,
             navigation_projection,
             focused_projection_rx: Arc::new(Mutex::new(None)),
+            native_artifacts: Arc::new(crate::native_artifact::RejectingNativeArtifactPort),
             #[cfg(feature = "test-hooks")]
             residency_room_tx: {
                 let (room_tx, _room_rx) = mpsc::channel(1);
@@ -721,6 +749,7 @@ pub struct AccountActor {
     pub(super) sliding_sync_revalidation_pending: Option<u64>,
     pub(super) sliding_sync_revalidation_request: Option<(u64, u64)>,
     pub(super) sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
+    pub(super) native_artifacts: Arc<dyn NativeArtifactPort>,
     pub(super) session_promoted: bool,
     pub(super) trust_generation: u64,
     pub(super) trust_observer: Option<crate::executor::JoinHandle<()>>,
@@ -947,6 +976,28 @@ impl AccountActor {
         initial_send_read_receipts: bool,
         sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
     ) -> AccountActorHandle {
+        Self::spawn_with_diagnostics_and_native_artifacts(
+            store_actor,
+            action_tx,
+            event_tx,
+            initial_link_preview_policy,
+            composer_draft_leases,
+            initial_send_read_receipts,
+            sliding_sync_diagnostics,
+            Arc::new(crate::native_artifact::RejectingNativeArtifactPort),
+        )
+    }
+
+    pub(crate) fn spawn_with_diagnostics_and_native_artifacts(
+        store_actor: StoreActor,
+        action_tx: mpsc::Sender<Vec<AppAction>>,
+        event_tx: broadcast::Sender<CoreEvent>,
+        initial_link_preview_policy: LinkPreviewContext,
+        composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
+        initial_send_read_receipts: bool,
+        sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
+        native_artifacts: Arc<dyn NativeArtifactPort>,
+    ) -> AccountActorHandle {
         // AppActor forwards every Room/Timeline/Sync command here via send().await;
         // sized so heavy sync does not block the AppActor's forwarding.
         let (tx, command_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
@@ -993,6 +1044,7 @@ impl AccountActor {
             sliding_sync_revalidation_pending: None,
             sliding_sync_revalidation_request: None,
             sliding_sync_diagnostics,
+            native_artifacts: Arc::clone(&native_artifacts),
             session_promoted: false,
             trust_generation: 0,
             trust_observer: None,
@@ -1107,7 +1159,33 @@ impl AccountActor {
             residency_room_tx,
             #[cfg(feature = "test-hooks")]
             residency_room_operation_reached_count,
+            native_artifacts,
         }
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    async fn qa_set_local_device_blacklisted(
+        &self,
+        target: VerificationTarget,
+        room_id: String,
+    ) -> Result<(), ()> {
+        let session = self.session.as_ref().ok_or(())?;
+        let user_id = matrix_sdk::ruma::UserId::parse(target.user_id).map_err(|_| ())?;
+        let device_id = matrix_sdk::ruma::OwnedDeviceId::from(target.device_id);
+        let device = session
+            .client()
+            .encryption()
+            .get_device(&user_id, &device_id)
+            .await
+            .map_err(|_| ())?
+            .ok_or(())?;
+        device
+            .set_local_trust(matrix_sdk_base::crypto::LocalTrust::BlackListed)
+            .await
+            .map_err(|_| ())?;
+        let room_id = matrix_sdk::ruma::RoomId::parse(room_id).map_err(|_| ())?;
+        let room = session.client().get_room(&room_id).ok_or(())?;
+        room.discard_room_key().await.map_err(|_| ())
     }
 
     async fn run(mut self) {
@@ -1123,6 +1201,34 @@ impl AccountActor {
                 }
                 AccountMessage::Command(command) => {
                     self.handle_command(command).await;
+                }
+                #[cfg(any(test, feature = "test-hooks"))]
+                AccountMessage::QaSetLocalDeviceBlacklisted {
+                    request_id: _,
+                    target,
+                    room_id,
+                    acknowledged,
+                } => {
+                    let result = self.qa_set_local_device_blacklisted(target, room_id).await;
+                    let _ = acknowledged.send(result);
+                }
+                #[cfg(any(test, feature = "test-hooks"))]
+                AccountMessage::QaRefreshDeviceKeysAndAssertKnown {
+                    request_id: _,
+                    target,
+                    acknowledged,
+                } => {
+                    let result = match self.session.as_ref() {
+                        Some(session) => {
+                            refresh_device_keys_and_assert_known(session, target).await
+                        }
+                        None => Err(()),
+                    };
+                    let _ = acknowledged.send(result);
+                }
+                #[cfg(any(test, feature = "test-hooks"))]
+                AccountMessage::QaSyncOnce { request_id } => {
+                    self.route_sync_once_for_qa(request_id).await;
                 }
                 AccountMessage::ContinueSlidingSyncAdmission {
                     account_epoch,
@@ -2281,48 +2387,6 @@ impl AccountActor {
                 self.handle_restore_key_backup(request_id, version, request)
                     .await;
             }
-            #[cfg(feature = "qa-bin")]
-            AccountCommand::QaRefreshDeviceKeysAndAssertKnown {
-                target,
-                acknowledged,
-                ..
-            } => {
-                let result = match self.session.as_ref() {
-                    Some(session) => refresh_device_keys_and_assert_known(session, target).await,
-                    None => Err(()),
-                };
-                let _ = acknowledged.send(result);
-            }
-            #[cfg(feature = "qa-bin")]
-            AccountCommand::QaSetLocalDeviceBlacklisted {
-                target,
-                room_id,
-                acknowledged,
-                ..
-            } => {
-                let result = async {
-                    let session = self.session.as_ref().ok_or(())?;
-                    let user_id =
-                        matrix_sdk::ruma::UserId::parse(target.user_id).map_err(|_| ())?;
-                    let device_id = matrix_sdk::ruma::OwnedDeviceId::from(target.device_id);
-                    let device = session
-                        .client()
-                        .encryption()
-                        .get_device(&user_id, &device_id)
-                        .await
-                        .map_err(|_| ())?
-                        .ok_or(())?;
-                    device
-                        .set_local_trust(matrix_sdk_base::crypto::LocalTrust::BlackListed)
-                        .await
-                        .map_err(|_| ())?;
-                    let room_id = matrix_sdk::ruma::RoomId::parse(room_id).map_err(|_| ())?;
-                    let room = session.client().get_room(&room_id).ok_or(())?;
-                    room.discard_room_key().await.map_err(|_| ())
-                }
-                .await;
-                let _ = acknowledged.send(result);
-            }
             AccountCommand::ResetIdentity { request_id } => {
                 self.handle_reset_identity(request_id).await;
             }
@@ -2496,7 +2560,7 @@ mod tests {
 
     use super::trace_account_request;
 
-    use crate::ids::{RequestId, RuntimeConnectionId};
+    use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 
     #[test]
     fn account_trace_preserves_typed_request_fields_without_environment_switch() {

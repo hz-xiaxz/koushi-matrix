@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use super::*;
-use crate::command::SearchScope;
-use crate::ids::{RequestId, RuntimeConnectionId};
+use koushi_protocol::command::SearchScope;
+use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 use koushi_search::{
     SearchCandidate, SearchDocumentStore, SearchEdit, SearchableEvent, SensitiveString,
 };
@@ -400,7 +400,7 @@ fn unresolved_replacement_resolves_when_original_arrives() {
 
 #[test]
 fn search_failure_kind_is_copy_eq() {
-    use crate::failure::SearchFailureKind;
+    use koushi_protocol::failure::SearchFailureKind;
     let k1 = SearchFailureKind::IndexUnavailable;
     let k2 = k1;
     assert_eq!(k1, k2);
@@ -444,8 +444,8 @@ fn matrix_sdk_search_scope_respects_actor_resolved_room_filter() {
 
 #[test]
 fn search_command_query_redacts_query_in_debug() {
-    use crate::command::{SearchCommand, SearchScope};
-    use crate::ids::{RequestId, RuntimeConnectionId};
+    use koushi_protocol::command::{SearchCommand, SearchScope};
+    use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
     let cmd = SearchCommand::Query {
         request_id: RequestId {
             connection_id: RuntimeConnectionId(1),
@@ -506,8 +506,8 @@ fn search_index_message_edit_redacts_body_in_debug() {
 
 #[test]
 fn search_result_item_snippet_is_redacted_from_debug() {
-    use crate::event::{SearchEvent, SearchResultItem};
-    use crate::ids::{RequestId, RuntimeConnectionId};
+    use koushi_protocol::event::{SearchEvent, SearchResultItem};
+    use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
     let result = SearchResultItem {
         room_id: "!r:test".to_owned(),
         event_id: "$e:test".to_owned(),
@@ -540,8 +540,8 @@ fn contiguous_pending_queries_coalesce_to_latest_without_crossing_non_query_mess
     use std::collections::VecDeque;
     use std::time::Instant;
 
-    use crate::command::SearchScope;
-    use crate::ids::{RequestId, RuntimeConnectionId};
+    use koushi_protocol::command::SearchScope;
+    use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 
     fn query(sequence: u64) -> super::SearchActorMessage {
         super::SearchActorMessage::Query {

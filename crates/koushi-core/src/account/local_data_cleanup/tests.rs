@@ -4,7 +4,8 @@ use std::{
     time::Duration,
 };
 
-use koushi_key::{SessionKeyId, StoredMatrixSession};
+use koushi_key::StoredMatrixSession;
+use koushi_protocol::SessionKeyId;
 
 use koushi_state::{
     AppAction, DeviceCleanupAuthMode, DeviceCleanupFailureKind, DeviceCleanupRemoteOutcome,
@@ -16,13 +17,13 @@ use crate::account::actor::{AccountActor, AccountActorHandle, AccountMessage};
 use crate::account::profile::AVATAR_DOWNLOAD_CONCURRENCY;
 use crate::account::test_support::{inspect_session_runtime, login_gated_actor, test_request_id};
 use crate::account::verification::INCOMING_VERIFICATION_FLOW_ID_BASE;
-use crate::command::AccountCommand;
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
+use koushi_protocol::command::AccountCommand;
 
 use crate::executor;
 
-use crate::ids::{RequestId, RuntimeConnectionId};
 use crate::link_preview::LinkPreviewContext;
+use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 
 use crate::store::CredentialStoreBackend;
 use crate::store::StoreActor;
@@ -405,6 +406,7 @@ async fn reset_local_data_clears_current_account_persistence_and_signs_out_local
         sliding_sync_revalidation_pending: None,
         sliding_sync_revalidation_request: None,
         sliding_sync_diagnostics: crate::SlidingSyncDiagnostics::default(),
+        native_artifacts: Arc::new(crate::native_artifact::RejectingNativeArtifactPort),
         session_promoted: false,
         trust_generation: 0,
         trust_observer: None,

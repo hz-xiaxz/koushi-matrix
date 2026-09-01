@@ -10,10 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::account::{AccountActor, AccountActorHandle};
-use crate::command::RoomCommand;
 use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
-use crate::event::{CoreEvent, RoomEvent};
-use crate::failure::{CoreFailure, RoomFailureKind};
 use crate::link_preview::LinkPreviewContext;
 use crate::room::{
     RoomActor, RoomActorHandle, RoomMessage, RoomOperationKind, RoomOperationTestControl,
@@ -23,7 +20,11 @@ use crate::timeline::{
     RoomMembershipTransition, RoomMembershipTransitionKind, TimelineManagerActor,
     VisibleRoomObservation,
 };
-use crate::{RequestId, RuntimeConnectionId, TimelineKey};
+use crate::{RequestId, RuntimeConnectionId};
+use koushi_protocol::TimelineKey;
+use koushi_protocol::command::RoomCommand;
+use koushi_protocol::event::{CoreEvent, RoomEvent};
+use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
 
 use koushi_diagnostics::DiagnosticValue;
 use koushi_sdk::MatrixClientSession;

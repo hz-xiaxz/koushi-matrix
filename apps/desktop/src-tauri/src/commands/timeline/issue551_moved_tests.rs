@@ -1,6 +1,6 @@
 use super::*;
 use crate::commands::contracts::{fake_request_id, synthetic_session_key};
-use koushi_core::{AccountKey, CoreCommand, PaginationDirection, TimelineCommand};
+use koushi_protocol::{AccountKey, CoreCommand, PaginationDirection, TimelineCommand};
 use koushi_state::{ComposerDocument, ComposerInline, MentionTarget};
 
 #[test]
@@ -23,11 +23,11 @@ fn build_subscribe_focused_timeline_command_routes_to_focused_timeline_kind() {
             assert_eq!(key.account_key, account_key);
             assert_eq!(
                 initial_backfill,
-                koushi_core::command::InitialBackfillPolicy::Disabled
+                koushi_protocol::command::InitialBackfillPolicy::Disabled
             );
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Focused {
+                koushi_protocol::TimelineKind::Focused {
                     room_id: "!room:example.org".to_owned(),
                     event_id: "$event".to_owned(),
                 }
@@ -39,8 +39,8 @@ fn build_subscribe_focused_timeline_command_routes_to_focused_timeline_kind() {
 
 #[test]
 fn hide_link_preview_tauri_command_contract_is_present() {
-    let request_id = koushi_core::RequestId {
-        connection_id: koushi_core::RuntimeConnectionId(1),
+    let request_id = koushi_protocol::RequestId {
+        connection_id: koushi_protocol::RuntimeConnectionId(1),
         sequence: 1,
     };
     let command = build_hide_link_preview_command(
@@ -59,8 +59,8 @@ fn hide_link_preview_tauri_command_contract_is_present() {
 
 #[test]
 fn load_link_previews_tauri_command_contract_is_present() {
-    let request_id = koushi_core::RequestId {
-        connection_id: koushi_core::RuntimeConnectionId(1),
+    let request_id = koushi_protocol::RequestId {
+        connection_id: koushi_protocol::RuntimeConnectionId(1),
         sequence: 1,
     };
     let command = build_load_link_previews_command(
@@ -146,7 +146,7 @@ fn thread_timeline_backwards_pagination_builder_targets_thread_key() {
             assert_eq!(key.account_key, account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Thread {
+                koushi_protocol::TimelineKind::Thread {
                     room_id,
                     root_event_id,
                 }

@@ -11,15 +11,15 @@ use matrix_sdk_ui::timeline::{
 use tokio::sync::{broadcast, mpsc};
 
 use crate::causal_projection::{CausalProjectionDomain, CausalProjectionId};
-use crate::event::{
+use crate::executor;
+use crate::search::SearchIndexMessage;
+use crate::threads_list::ThreadRootProjectionService;
+use koushi_protocol::event::{
     CoreEvent, TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent, TimelineItem,
     TimelineResyncReason, TimelineViewportObservation,
 };
-use crate::executor;
-use crate::failure::TimelineFailureKind;
-use crate::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
-use crate::search::SearchIndexMessage;
-use crate::threads_list::ThreadRootProjectionService;
+use koushi_protocol::failure::TimelineFailureKind;
+use koushi_protocol::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 
 // BEGIN GENERATED SIBLING IMPORTS
 use super::actor::{

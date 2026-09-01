@@ -15,13 +15,7 @@ use matrix_sdk_ui::timeline::TimelineFocus;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
-use crate::command::{InitialBackfillPolicy, TimelineCommand};
-use crate::event::{CoreEvent, TimelineAnchorRestoreStatus, TimelineEvent, TimelineItem};
 use crate::executor;
-use crate::failure::{CoreFailure, TimelineFailureKind};
-use crate::ids::{
-    RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind,
-};
 use crate::link_preview::LinkPreviewContext;
 #[cfg(test)]
 use crate::live_tail_freshness::LiveTailFreshnessState;
@@ -33,6 +27,12 @@ use crate::startup_trace::{self, StartupPhase};
 use crate::threads_list::{
     AggregateRefresh, ThreadRootProjectionActivity, ThreadRootProjectionRefreshResult,
     ThreadRootProjectionService,
+};
+use koushi_protocol::command::{InitialBackfillPolicy, TimelineCommand};
+use koushi_protocol::event::{CoreEvent, TimelineAnchorRestoreStatus, TimelineEvent, TimelineItem};
+use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
+use koushi_protocol::ids::{
+    RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind,
 };
 
 // BEGIN GENERATED SIBLING IMPORTS

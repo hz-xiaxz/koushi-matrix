@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Mutex, Weak},
 };
 
-use koushi_key::SessionKeyId;
+use koushi_protocol::SessionKeyId;
 use koushi_state::{ComposerDraftRevision, ComposerTarget};
 use tokio::sync::watch;
 

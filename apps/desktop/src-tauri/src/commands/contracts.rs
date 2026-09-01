@@ -3,9 +3,8 @@ use super::{
     activity::*, directory::*, e2ee::*, live_signals::*, navigation::*, profile::*, room::*,
     search::*, session::*, timeline::*, views::*,
 };
-use koushi_core::AccountKey;
-use koushi_core::{
-    AccountCommand, AppCommand, CoreCommand, CreateRoomOptions, CreateRoomParentSpace,
+use koushi_protocol::{
+    AccountCommand, AccountKey, AppCommand, CoreCommand, CreateRoomOptions, CreateRoomParentSpace,
     CreateRoomVisibility, MediaDownloadSelection, PaginationDirection, RequestId, RoomCommand,
     SearchCommand, SearchScope, SyncCommand, TimelineCommand, TimelineKey,
 };
@@ -15,15 +14,15 @@ use koushi_state::{
     RoomHistoryVisibility, RoomJoinRule, RoomModerationAction, RoomSettingChange, RoomTagKind,
     ThreadOpenIntent,
 };
-pub(super) fn fake_request_id(sequence: u64) -> koushi_core::RequestId {
-    koushi_core::RequestId {
-        connection_id: koushi_core::RuntimeConnectionId(7),
+pub(super) fn fake_request_id(sequence: u64) -> koushi_protocol::RequestId {
+    koushi_protocol::RequestId {
+        connection_id: koushi_protocol::RuntimeConnectionId(7),
         sequence,
     }
 }
 
-pub(super) fn synthetic_session_key() -> koushi_key::SessionKeyId {
-    koushi_key::SessionKeyId {
+pub(super) fn synthetic_session_key() -> koushi_protocol::SessionKeyId {
+    koushi_protocol::SessionKeyId {
         homeserver: "https://example.org".to_owned(),
         user_id: "@alice:example.org".to_owned(),
         device_id: "DEVICE".to_owned(),
@@ -33,7 +32,7 @@ pub(super) fn synthetic_session_key() -> koushi_key::SessionKeyId {
 #[test]
 fn tauri_command_routes_build_expected_core_commands() {
     let active_account_key = AccountKey("@alice:example.org".to_owned());
-    let active_session_key = koushi_key::SessionKeyId {
+    let active_session_key = koushi_protocol::SessionKeyId {
         homeserver: "https://example.org".to_owned(),
         user_id: "@alice:example.org".to_owned(),
         device_id: "DEVICE".to_owned(),
@@ -105,7 +104,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(request_id, fake_request_id(2));
             assert_eq!(
                 account_key,
-                koushi_core::AccountKey("@bob:example.org".to_owned())
+                koushi_protocol::AccountKey("@bob:example.org".to_owned())
             );
         }
         other => panic!("unexpected command: {other:?}"),
@@ -124,7 +123,6 @@ fn tauri_command_routes_build_expected_core_commands() {
 
     match build_export_room_keys_command(
         fake_request_id(33),
-        "/tmp/element-compatible-export.txt".to_owned(),
         AuthSecret::new("room-key-transfer-phrase"),
     ) {
         CoreCommand::Account(AccountCommand::ExportRoomKeys {
@@ -132,10 +130,6 @@ fn tauri_command_routes_build_expected_core_commands() {
             request,
         }) => {
             assert_eq!(request_id, fake_request_id(33));
-            assert_eq!(
-                request.destination_path,
-                std::path::PathBuf::from("/tmp/element-compatible-export.txt")
-            );
             assert_eq!(
                 request.passphrase.expose_secret(),
                 "room-key-transfer-phrase"
@@ -146,7 +140,6 @@ fn tauri_command_routes_build_expected_core_commands() {
 
     match build_import_room_keys_command(
         fake_request_id(34),
-        "/tmp/element-compatible-import.txt".to_owned(),
         AuthSecret::new("room-key-transfer-phrase"),
     ) {
         CoreCommand::Account(AccountCommand::ImportRoomKeys {
@@ -154,10 +147,6 @@ fn tauri_command_routes_build_expected_core_commands() {
             request,
         }) => {
             assert_eq!(request_id, fake_request_id(34));
-            assert_eq!(
-                request.source_path,
-                std::path::PathBuf::from("/tmp/element-compatible-import.txt")
-            );
             assert_eq!(
                 request.passphrase.expose_secret(),
                 "room-key-transfer-phrase"
@@ -169,7 +158,7 @@ fn tauri_command_routes_build_expected_core_commands() {
     match build_bootstrap_secure_backup_command(
         fake_request_id(35),
         Some(AuthSecret::new("backup-setup-phrase")),
-        Some("/tmp/recovery-artifact.txt".to_owned()),
+        true,
         koushi_state::SecureBackupSetupIntent::InitialSetup,
     ) {
         CoreCommand::Account(AccountCommand::BootstrapSecureBackup {
@@ -185,10 +174,7 @@ fn tauri_command_routes_build_expected_core_commands() {
                     .expose_secret(),
                 "backup-setup-phrase"
             );
-            assert_eq!(
-                request.recovery_key_destination_path,
-                Some(std::path::PathBuf::from("/tmp/recovery-artifact.txt"))
-            );
+            assert!(request.recovery_key_destination_requested);
             assert_eq!(
                 request.intent,
                 koushi_state::SecureBackupSetupIntent::InitialSetup
@@ -201,7 +187,7 @@ fn tauri_command_routes_build_expected_core_commands() {
         fake_request_id(36),
         AuthSecret::new("old-backup-phrase"),
         AuthSecret::new("new-backup-phrase"),
-        Some("/tmp/recovery-artifact.txt".to_owned()),
+        true,
     ) {
         CoreCommand::Account(AccountCommand::ChangeSecureBackupPassphrase {
             request_id,
@@ -210,10 +196,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(request_id, fake_request_id(36));
             assert_eq!(request.old_secret.expose_secret(), "old-backup-phrase");
             assert_eq!(request.new_passphrase.expose_secret(), "new-backup-phrase");
-            assert_eq!(
-                request.recovery_key_destination_path,
-                Some(std::path::PathBuf::from("/tmp/recovery-artifact.txt"))
-            );
+            assert!(request.recovery_key_destination_requested);
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -303,7 +286,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -332,7 +315,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -362,7 +345,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -483,7 +466,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -509,7 +492,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -539,7 +522,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -567,7 +550,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -581,10 +564,10 @@ fn tauri_command_routes_build_expected_core_commands() {
         active_account_key.clone(),
         room_id.clone(),
         "$source-event".to_owned(),
-        koushi_core::KeyRequestOrigin::User,
+        koushi_protocol::KeyRequestOrigin::User,
         Some(TimelineKey {
             account_key: AccountKey("@stale:example.invalid".to_owned()),
-            kind: koushi_core::TimelineKind::Thread {
+            kind: koushi_protocol::TimelineKind::Thread {
                 room_id: room_id.clone(),
                 root_event_id: "$thread-root".to_owned(),
             },
@@ -602,13 +585,13 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Thread {
+                koushi_protocol::TimelineKind::Thread {
                     room_id: room_id.clone(),
                     root_event_id: "$thread-root".to_owned()
                 }
             );
             assert_eq!(event_id, "$source-event");
-            assert_eq!(origin, koushi_core::KeyRequestOrigin::User);
+            assert_eq!(origin, koushi_protocol::KeyRequestOrigin::User);
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -626,7 +609,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -671,7 +654,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -700,7 +683,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -725,7 +708,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -753,7 +736,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -793,7 +776,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -824,7 +807,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -853,7 +836,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -880,7 +863,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Thread {
+                koushi_protocol::TimelineKind::Thread {
                     room_id: room_id.clone(),
                     root_event_id: "$thread-root".to_owned()
                 }
@@ -907,7 +890,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -935,7 +918,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -985,7 +968,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -1627,7 +1610,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Room {
+                koushi_protocol::TimelineKind::Room {
                     room_id: room_id.clone()
                 }
             );
@@ -1659,7 +1642,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(key.account_key, active_account_key);
             assert_eq!(
                 key.kind,
-                koushi_core::TimelineKind::Thread {
+                koushi_protocol::TimelineKind::Thread {
                     room_id: room_id.clone(),
                     root_event_id: "$root".to_owned(),
                 }
@@ -1910,25 +1893,23 @@ fn tauri_command_routes_redact_secret_bearing_values_from_debug() {
     );
     let room_key_export = build_export_room_keys_command(
         fake_request_id(23),
-        "/tmp/private-room-key-export.txt".to_owned(),
         AuthSecret::new("room-key-transfer-phrase"),
     );
     let room_key_import = build_import_room_keys_command(
         fake_request_id(24),
-        "/tmp/private-room-key-import.txt".to_owned(),
         AuthSecret::new("room-key-transfer-phrase"),
     );
     let secure_backup_setup = build_bootstrap_secure_backup_command(
         fake_request_id(25),
         Some(AuthSecret::new("backup-setup-phrase")),
-        Some("/tmp/private-recovery-artifact.txt".to_owned()),
+        true,
         koushi_state::SecureBackupSetupIntent::InitialSetup,
     );
     let secure_backup_change = build_change_secure_backup_passphrase_command(
         fake_request_id(26),
         AuthSecret::new("old-backup-phrase"),
         AuthSecret::new("new-backup-phrase"),
-        Some("/tmp/private-recovery-artifact.txt".to_owned()),
+        true,
     );
 
     for (command, secret) in [
@@ -1959,7 +1940,7 @@ fn tauri_command_routes_redact_secret_bearing_values_from_debug() {
 #[test]
 fn tauri_diagnostics_record_without_stderr_environment_switch() {
     let request_id = RequestId {
-        connection_id: koushi_core::RuntimeConnectionId(99),
+        connection_id: koushi_protocol::RuntimeConnectionId(99),
         sequence: 7,
     };
 

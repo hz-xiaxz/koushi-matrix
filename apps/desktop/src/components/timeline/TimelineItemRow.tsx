@@ -51,7 +51,10 @@ import type {
   TimelineItem
 } from "../../domain/coreEvents";
 import { timelineItemDomId } from "../../domain/coreEvents";
-import { openExternalHttpUrl, mediaSourceUrl } from "../../backend/linkMediaRuntime";
+import {
+  openExternalHttpUrl,
+  renderableThumbnailSourceUrl
+} from "../../backend/linkMediaRuntime";
 import { toExternalHttpUrl } from "../../domain/externalLinks";
 import type { TimelineForwardDestination } from "../../domain/projectionTypes";
 import type { TimelineDisplayRow } from "../../domain/timelineDisplayProjection";
@@ -1384,7 +1387,9 @@ function formatDateDividerLabel(timestampMs: number): string {
 }
 
 function thumbnailSourceUrl(thumbnail: AvatarThumbnailState | null | undefined): string | null {
-  return thumbnail?.kind === "ready" ? mediaSourceUrl(thumbnail.source_url) : null;
+  return thumbnail?.kind === "ready"
+    ? renderableThumbnailSourceUrl(thumbnail.source_ref)
+    : null;
 }
 
 function replyQuoteBody(quote: NonNullable<TimelineItem["reply_quote"]>): string {

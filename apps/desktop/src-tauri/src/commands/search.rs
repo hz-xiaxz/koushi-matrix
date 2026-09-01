@@ -21,7 +21,7 @@ pub(crate) fn record_search_trace(
     scope: SearchScopeKind,
     search_scope: &SearchScope,
     query: &str,
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
 ) {
     let trimmed_query = query.trim();
     record(
@@ -206,7 +206,7 @@ pub async fn stop_room_crawl(
 const SEARCH_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub(super) fn build_submit_search_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     query: String,
     scope: SearchScope,
 ) -> CoreCommand {
@@ -218,7 +218,7 @@ pub(super) fn build_submit_search_command(
     })
 }
 
-pub(super) fn build_close_search_command(request_id: koushi_core::RequestId) -> CoreCommand {
+pub(super) fn build_close_search_command(request_id: koushi_protocol::RequestId) -> CoreCommand {
     CoreCommand::App(AppCommand::CloseSearch { request_id })
 }
 
@@ -245,7 +245,7 @@ pub(super) fn resolve_search_scope_from_active_room(
 async fn resolve_search_scope(
     scope: SearchScopeKind,
     state: &CoreRuntimeState,
-) -> koushi_core::SearchScope {
+) -> koushi_protocol::SearchScope {
     let snapshot = state.connection.lock().await.snapshot();
     resolve_search_scope_from_active_room(
         scope,

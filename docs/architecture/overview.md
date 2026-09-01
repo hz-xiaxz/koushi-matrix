@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-09-04.
+Last amended: 2026-09-05.
 
 The evidence-based classification of remaining frontend-owned resources and
 semantic migration candidates is maintained in
@@ -57,15 +57,20 @@ with an Element Desktop/Web-like three-pane desktop UX:
 ```text
 React UI (apps/desktop)                     presentation only
         |  typed client calls / snapshots / events
-Tauri adapter (apps/desktop/src-tauri)      transport only
-        |  CoreCommand -> / <- CoreEvent, AppStateSnapshot
+Tauri adapter (apps/desktop/src-tauri)      transport + platform delivery
+        |  constructs/serializes public DTOs
+koushi-protocol                     neutral command/event/state-update DTOs
+        |  typed runtime boundary
 koushi-core                         the ONLY production runtime owner
-        |  actors own SDK handles, tasks, projection
+        |  actors own SDK handles, tasks, policy, projection
 koushi-sdk                         thin matrix-rust-sdk adapter
 koushi-state                        pure reducer + snapshot DTOs
 koushi-search / koushi-key  search verification / credential store
         |
 matrix-rust-sdk (vendored)                  sync, timeline, send queue, crypto
+
+koushi-qa (non-default) consumes koushi-protocol + Core test hooks for the
+headless and real-homeserver QA binaries; it is not in the production stack.
 ```
 
 Crate responsibilities:
@@ -164,6 +169,14 @@ Crate responsibilities:
   dispatches typed commands; it does not decide credential health, notification
   eligibility, CJK collation/normalization, IME send-vs-commit behavior, or
   whether key-backup restore is complete.
+- `koushi-protocol` — transport-neutral public Rust commands, events,
+  identities, failures, command-admission/versioned-snapshot and state-delta
+  DTOs. It depends only on pure app-owned crates and serde support: no Matrix
+  SDK, Tauri, async runtime, filesystem/platform, or OS dependency. Data-shape
+  helpers and redacted `Debug` live here; actor routing/admission policy,
+  AppState-dependent projection, state-delta construction and SDK behavior do
+  not. Secret-bearing command aggregates are typed Rust inputs constructed by
+  validated adapters rather than wholesale serde payloads.
 - `koushi-sdk` — low-level SDK adapter (login, restore, recovery,
   sync, room, timeline, search primitives). It may include feature-gated,
   direct-adapter smoke binaries and private-data-free smoke reports for
@@ -185,9 +198,10 @@ Crate responsibilities:
   public SDK APIs. Product state, QA evidence, and UI copy must not claim
   exhaustive backup-wide restore until a public SDK API or reviewed vendored
   patch proves that broader scope.
-- `koushi-core` — actor lifecycle, command routing, event emission,
-  SDK session handles, background tasks, AppState projection, headless QA
-  binaries. It retains the task/subscription handles it creates and makes
+- `koushi-core` — actor lifecycle, command routing/admission policy, event
+  emission/projection, SDK session handles, background tasks and AppState
+  projection. It consumes `koushi-protocol` DTOs and contains no QA binary
+  source tree. It retains the task/subscription handles it creates and makes
   replacement plus ordered shutdown a cancel-and-await barrier; a detached
   task is never a lifecycle owner. Production Matrix behavior lives here and
   nowhere else. Scheduled
@@ -195,12 +209,19 @@ Crate responsibilities:
   event requests, and for the local fallback timer that routes due Local-handle
   items back through the normal outbound send queue; the GUI never owns
   delayed-send timers or Matrix delayed-event API calls.
-- `koushi-key` — OS credential store, key derivation (HKDF from the
-  local unlock secret), zeroizing secret wrappers.
+- `koushi-key` — platform-neutral credential-store port, key derivation (HKDF
+  from the local unlock secret), and zeroizing secret wrappers. The OS keyring
+  backend lives in Tauri.
 - `koushi-search` — candidate verification, document store, index
   maintenance queue.
-- `apps/desktop/src-tauri` — transport adapter. Holds a `CoreRuntime`, sends
-  commands, forwards events/snapshots. No direct SDK wrapper calls.
+- `koushi-qa` — non-default, feature-gated package owning the authoritative
+  `headless-core-qa` and `real-homeserver-qa` binaries, scenario registry,
+  orchestration and private-data-free evidence production. It uses protocol
+  DTOs and narrow Core test hooks without owning product semantics.
+- `apps/desktop/src-tauri` — transport/platform adapter. Holds a `CoreRuntime`,
+  constructs protocol commands, forwards events/snapshots, registers native
+  artifact paths and maps opaque thumbnail references to the desktop custom
+  URI. No direct SDK wrapper calls.
 - `apps/desktop` — view and interaction code only, including viewport state,
   DOM measurement, and scroll anchoring. It may own browser listeners,
   observers, frames, and timers only for mounted presentation lifetime, with
@@ -216,13 +237,14 @@ code under review. The submodule tracks the upstreamable fork on
 surfaces, and `docs/upstream/matrix-rust-sdk-feedback.md` is the required ledger
 for every local SDK behavior or API divergence.
 
-GUI, Tauri, CLI, and QA all use the same command/event boundary. There is no
-standalone daemon; the runtime is in-process. The boundary is frontend-neutral:
-public Rust integration evidence starts `CoreRuntime`, attaches independent
-consumers, submits a connection-scoped typed command, observes `CoreEvent` plus
-versioned-snapshot convergence, recovers a lagged consumer from the latest
-snapshot, and awaits ordered shutdown without importing Tauri. Serialized
-`FrontendDesktopSnapshot` mirrors remain adapter-only in `apps/desktop/src-tauri`.
+GUI, Tauri, CLI, and QA all use the same `koushi-protocol` command/event
+boundary. There is no standalone daemon; the runtime is in-process. The
+boundary is frontend-neutral: public Rust integration evidence starts
+`CoreRuntime`, attaches independent consumers, submits a connection-scoped
+typed command, observes `CoreEvent` plus versioned-snapshot convergence,
+recovers a lagged consumer from the latest snapshot, and awaits ordered
+shutdown without importing Tauri. Serialized `FrontendDesktopSnapshot` mirrors
+remain adapter-only in `apps/desktop/src-tauri`.
 
 ### Core request outcomes (Phase A, issue #755)
 
@@ -308,11 +330,15 @@ decided by our own code discipline, not by the SDK. These rules keep the
 option open at near-zero ongoing cost; retrofitting them later would mean
 rewriting the runtime.
 
-1. **The command/event boundary is transport-neutral.** `CoreCommand`,
-   `CoreEvent`, and `AppStateSnapshot` are serde-serializable and contain no
-   Tauri, OS, or filesystem types. Tauri IPC is one transport; a WebWorker
-   `postMessage` / wasm-bindgen bridge must be addable as another without
-   touching core types.
+1. **The command/event boundary is transport-neutral.** `koushi-protocol`
+   owns `CoreCommand`, `CoreEvent`, identities, failures and state-update DTOs;
+   they contain no Tauri, OS, filesystem, SDK or async-runtime types. Events,
+   identities, failures and snapshots preserve safe serde contracts. Commands
+   that carry secrets remain typed Rust inputs: each adapter validates its IPC
+   payload and constructs them without requiring the secret-bearing aggregate
+   itself to implement serde. Tauri IPC is one transport; a WebWorker
+   `postMessage` / wasm-bindgen bridge must be addable without changing the
+   protocol shapes.
 2. **Core logic uses executor abstractions, not tokio directly.** Task spawn,
    timers, and timeouts in `koushi-core` go through the SDK's
    executor layer (`matrix_sdk_common::executor`) or a thin core-owned
@@ -329,9 +355,9 @@ rewriting the runtime.
    code. The fail-closed local-encryption rule still applies on every
    platform: a weaker browser at-rest story must be an explicit, surfaced
    property, never a silent fallback.
-4. **Pure crates stay wasm-clean.** `koushi-state` and
-   `koushi-search` must compile for `wasm32-unknown-unknown`; a CI
-   check target should enforce this once wired. `koushi-core`'s
+4. **Pure crates stay wasm-clean.** `koushi-state`, `koushi-search`, and
+   `koushi-protocol` compile for `wasm32-unknown-unknown`, enforced by CI.
+   `koushi-core`'s
    portability is enforced structurally by rules 1–3 until a web spike makes
    a wasm CI check for it practical.
 5. **Known open items for a web target** (recorded, not designed): ngram
@@ -539,11 +565,13 @@ also the configuration used by the SDK `SqliteMediaStore`; supplying a separate
 `cache_path` does not remove or replace its `MatrixClientStoreKey`. Automatic
 avatar persistence therefore uses the SDK media store and its retention policy,
 not a Koushi-owned disk cache. Koushi may materialize decrypted bytes into a
-session-scoped in-memory `koushi-thumbnail://` cache for rendering. That cache
-is an entry-and-byte-bounded LRU: access refreshes recency, eviction or session
-clear releases the owned bytes, and an item larger than the byte bound fails
-before a Ready URL is published. It must never persist automatic
-avatar/link-preview plaintext or return `file://` URLs for them. Legacy
+session-scoped in-memory renderable-thumbnail cache. Core/state/protocol expose
+only an opaque cache reference; the desktop Tauri adapter may map that reference
+to `koushi-thumbnail://`, while a native adapter may consume bytes directly.
+The cache is an entry-and-byte-bounded LRU: access refreshes recency, eviction
+or session clear releases the owned bytes, and an item larger than the byte
+bound fails before a Ready reference is published. It must never persist
+automatic avatar/link-preview plaintext or return `file://` URLs for them. Legacy
 plaintext thumbnail directories remain cleanup-only. After renderer visibility
 submits an avatar MXC, `AccountActor` owns single-flight deduplication, bounded
 concurrency, two network attempts, terminal Ready/Failed caching and session-
@@ -1627,8 +1655,9 @@ primary correctness gate.
 1. **Unit tests** — network-free: routing, redaction, unauthenticated command
    rejection, state transitions with fake ports, normalization, reducer.
 2. **Local homeserver QA** — disposable Tuwunel/Synapse servers, synthetic
-   users, a core QA binary speaking `CoreCommand`/`CoreEvent` (never direct
-   SDK wrapper calls). Covers login, sync, room/space create, invite receipt,
+   users, the `koushi-qa` headless binary speaking `koushi-protocol`
+   `CoreCommand`/`CoreEvent` through Core (never direct SDK wrapper calls).
+   Covers login, sync, room/space create, invite receipt,
    invite accept/decline, DM start, bidirectional messaging, room list, logout
    cleanup, and stdout/stderr redaction through the sole Simplified Sliding Sync
    engine.
@@ -1659,9 +1688,10 @@ primary correctness gate.
    option.
 
 **Implementation workflow: headless-first, local-server-first.** New Matrix
-behavior lands in `koushi-core`, is exercised through
-`CoreCommand`/`CoreEvent` against disposable local Tuwunel/Synapse homeservers
-(and real homeserver QA where that gate applies), and only then is wired through
+behavior lands in `koushi-core`, is exercised by `koushi-qa` through
+`koushi-protocol` `CoreCommand`/`CoreEvent` against disposable local
+Tuwunel/Synapse homeservers (and real homeserver QA where that gate applies),
+and only then is wired through
 Tauri into React. Matrix behavior must not be introduced first in GUI or Tauri
 code and back-filled into core later.
 

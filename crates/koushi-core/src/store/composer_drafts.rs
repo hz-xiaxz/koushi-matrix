@@ -11,7 +11,8 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, KeyInit, Nonce,
     aead::{Aead, OsRng, rand_core::RngCore},
 };
-use koushi_key::{LocalUnlockSecret, SessionKeyId};
+use koushi_key::LocalUnlockSecret;
+use koushi_protocol::SessionKeyId;
 
 use koushi_state::{
     ComposerDocument, ComposerDraftPersistenceEntry, ComposerDraftPersistenceProjection,

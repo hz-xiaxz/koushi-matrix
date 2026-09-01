@@ -1,0 +1,31 @@
+[package]
+name = "koushi-qa"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "headless-core-qa"
+path = "src/bin/headless-core-qa.rs"
+required-features = ["qa-bin"]
+
+[[bin]]
+name = "real-homeserver-qa"
+path = "src/bin/real-homeserver-qa.rs"
+required-features = ["qa-bin"]
+
+[dependencies]
+koushi-core = { path = "../koushi-core" }
+koushi-diagnostics = { path = "../koushi-diagnostics" }
+koushi-protocol = { path = "../koushi-protocol" }
+koushi-sdk = { path = "../koushi-sdk" }
+koushi-state = { path = "../koushi-state" }
+matrix-sdk = { workspace = true }
+serde_json = "1"
+tempfile = "3"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "env-filter"] }
+tokio = { version = "1", features = ["rt-multi-thread", "rt", "sync", "time", "macros", "test-util"] }
+
+[features]
+qa-bin = ["koushi-core/test-hooks", "koushi-sdk/test-hooks"]

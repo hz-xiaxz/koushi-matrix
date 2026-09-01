@@ -14,15 +14,13 @@ pub(crate) mod account_work;
 mod activity_resolution;
 pub(crate) mod cached_image;
 mod causal_projection;
-pub mod command;
+mod command_policy;
 pub mod composer_draft_lifecycle;
 mod credential_vault;
 mod direct_message_classification;
-pub mod event;
+mod event_projection;
 pub mod executor;
-pub mod failure;
 mod file;
-pub mod ids;
 pub mod link_preview;
 mod live_catchup;
 mod live_tail_freshness;
@@ -32,6 +30,7 @@ pub mod media_preparation;
 pub mod media_save;
 pub mod media_staging;
 pub(crate) mod mention_candidates;
+pub mod native_artifact;
 pub(crate) mod read_state;
 pub mod renderable_thumbnail;
 mod report;
@@ -56,45 +55,25 @@ mod time;
 pub mod timeline;
 pub(crate) mod unread_trace;
 
-pub use command::{
-    AccountCommand, AppCommand, CoreCommand, CreateRoomOptions, CreateRoomParentSpace,
-    CreateRoomVisibility, ImageUploadCompressionPolicy, ImageUploadCompressionState,
-    ImageUploadDimensions, ImageUploadVariantInfo, ImageUploadVariantKind, KeyRequestOrigin,
-    MediaDownloadSelection, RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest, SearchCommand,
-    SearchScope, SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
-    SyncCommand, TimelineCommand, UploadMediaKind, UploadMediaRequest, UploadMediaThumbnail,
-};
+pub use command_policy::CoreCommandPolicy;
 pub use direct_message_classification::DirectAccountDataSource;
-pub use event::{
-    AccountEvent, ActivityEvent, AppStateSnapshot, CjkTextPolicyEvent, CoreEvent, E2eeTrustEvent,
-    EncryptionDebugOperationOutcome, IntentNoOpReason, IntentOutcome, LinkPreview,
-    LinkPreviewImage, LinkPreviewState, LocalEncryptionEvent, NativeAttentionEvent,
-    PaginationDirection, PaginationState, ReactionGroup, ReactionSender, RoomEvent,
-    RoomKeyReshareOutcome, SearchEvent, SearchResultItem, SyncEvent, TimelineDiff, TimelineEvent,
-    TimelineGapId, TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMedia,
-    TimelineMediaKind, TimelineMediaSource, TimelineMediaThumbnail, TimelineMessageKind,
-    TimelineNavigationSnapshot, TimelineReadStateSync, TimelineResyncReason,
-    TimelineSendFailureReason, TimelineSendState, TimelineSpoilerSpan, TimelineUnreadPosition,
-    TimelineViewportObservation,
-};
-pub use failure::{
-    CoreFailure, LoginFailureKind, ProfileFailureKind, ReadStateFailureKind, RecoveryFailureKind,
-    RoomFailureKind, SearchFailureKind, SyncFailureKind, TimelineFailureKind,
-};
-pub use ids::{
-    AccountKey, RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration, TimelineKey,
-    TimelineKind,
-};
+pub use koushi_protocol::command::*;
+pub use koushi_protocol::event::*;
+pub use koushi_protocol::failure::*;
+pub use koushi_protocol::ids::*;
+pub use koushi_protocol::state_update::*;
 pub use koushi_state::{EncryptionDebugOperationKind, MediaTransferProgress};
 pub use media_save::{
     MediaSaveError, MediaSaveFilesystem, MediaSaveIoError, default_media_save_path,
     safe_media_save_filename, save_downloaded_media,
 };
+pub use native_artifact::{
+    NativeArtifactError, NativeArtifactKind, NativeArtifactPort, NativeArtifactRegistry,
+};
 pub use runtime::{
-    COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandAdmission, CoreCommandHandle,
-    CoreConnection, CoreRuntime, EVENT_QUEUE_CAPACITY, EventStreamLag, OutcomeCorrelation,
-    RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation, RoomOperationKind,
-    SelectRoomError,
+    COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandHandle, CoreConnection, CoreRuntime,
+    EVENT_QUEUE_CAPACITY, EventStreamLag, OutcomeCorrelation, RequestOutcome, RequestOutcomeError,
+    RequestOutcomeExpectation, RoomOperationKind, SelectRoomError,
 };
 pub use sliding_sync_diagnostics::{
     DiagnosticAgeBucket, SlidingSyncDiagnostics, SlidingSyncDiagnosticsSnapshot,
@@ -105,4 +84,13 @@ pub use sliding_sync_diagnostics::{
     SlidingSyncLifecycle, SlidingSyncMatrixErrorKind, SlidingSyncProvisionalHandoffBucket,
     SlidingSyncRequestSchema, SlidingSyncSdkVersion,
 };
-pub use state_delta::{StateDelta, StateDeltaChangedSlices, build_state_delta};
+pub use state_delta::build_state_delta;
+
+#[cfg(any(test, feature = "test-hooks"))]
+#[doc(hidden)]
+pub fn project_timeline_event_for_qa(
+    event: &mut koushi_protocol::TimelineEvent,
+    state: &koushi_state::AppState,
+) {
+    event_projection::project_timeline_event_display_labels(event, state);
+}

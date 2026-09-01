@@ -11,16 +11,18 @@ use matrix_sdk_ui::timeline::Timeline;
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::account_work::{AccountWorkKind, AccountWorkPermit, AccountWorkScheduler};
-use crate::event::{
+use crate::executor;
+use crate::live_tail_freshness::LiveTailSchedulerAction;
+use crate::startup_trace::{self};
+use koushi_protocol::event::{
     CoreEvent, PaginationDirection, PaginationState, TimelineAnchorRestoreStatus, TimelineDiff,
     TimelineEvent, TimelineItem, TimelineItemId, TimelineNavigationSnapshot, TimelineReadStateSync,
     TimelineUnreadPosition, TimelineViewportObservation,
 };
-use crate::executor;
-use crate::failure::{CoreFailure, TimelineFailureKind};
-use crate::ids::{RequestId, TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
-use crate::live_tail_freshness::LiveTailSchedulerAction;
-use crate::startup_trace::{self};
+use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
+use koushi_protocol::ids::{
+    RequestId, TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind,
+};
 use koushi_sdk::MatrixLiveTailRefreshOutcome as LiveTailRefreshOutcome;
 
 // BEGIN GENERATED SIBLING IMPORTS
@@ -159,7 +161,7 @@ pub(super) static DISPLAY_PROJECTION_RESET_FALLBACKS: AtomicU64 = AtomicU64::new
 
 /// QA/test observation point for the process-global projection reset fallback
 /// counter. Product behavior never branches on this diagnostic value.
-#[cfg(any(test, feature = "qa-bin"))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub fn display_projection_reset_fallback_count() -> u64 {
     DISPLAY_PROJECTION_RESET_FALLBACKS.load(Ordering::Relaxed)
 }
@@ -827,7 +829,7 @@ impl TimelineManagerActor {
             key.clone(),
             replay_existing,
             emit_failure_terminal,
-            crate::command::InitialBackfillPolicy::Disabled,
+            koushi_protocol::command::InitialBackfillPolicy::Disabled,
         )
         .await;
         if let Some(handle) = self.timelines.get(&key) {

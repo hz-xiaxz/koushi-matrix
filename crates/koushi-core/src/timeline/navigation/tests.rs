@@ -20,18 +20,18 @@ use crate::causal_projection::{
     CausalProjectionDomain, CausalProjectionId, CausalProjectionOperationId,
     next_causal_projection_serial,
 };
-use crate::command::TimelineCommand;
-use crate::event::{
+use crate::executor;
+use crate::link_preview::LinkPreviewContext;
+use koushi_protocol::command::TimelineCommand;
+use koushi_protocol::event::{
     CoreEvent, PaginationDirection, PaginationState, ThreadSummaryDto, TimelineEvent,
     TimelineFormattedBody, TimelineItemId, TimelineReadStateSync, TimelineUnreadPosition,
     TimelineViewportObservation,
 };
-use crate::executor;
-use crate::failure::{CoreFailure, TimelineFailureKind};
+use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
 #[cfg(any(test, feature = "test-hooks"))]
-use crate::ids::AccountKey;
-use crate::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
-use crate::link_preview::LinkPreviewContext;
+use koushi_protocol::ids::AccountKey;
+use koushi_protocol::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 
 use crate::live_tail_freshness::{
     FOREGROUND_LIVE_TAIL_LIMIT, LiveTailFreshnessState, LiveTailRefreshCoordinator,
@@ -44,8 +44,8 @@ use koushi_sdk::MatrixLiveTailRefreshOutcome as LiveTailRefreshOutcome;
 use koushi_diagnostics::DiagnosticValue;
 use koushi_state::{SessionInfo, SessionState};
 
-use crate::command::CoreCommand;
 use crate::runtime::CoreRuntime;
+use koushi_protocol::command::CoreCommand;
 
 use super::super::actor::{
     TimelineActor, TimelineActorCleanupIngress, TimelineActorCleanupState, TimelineActorControl,
@@ -506,7 +506,7 @@ async fn idempotent_subscribe_replay_carries_exact_command_cause() {
             key.clone(),
             true,
             true,
-            crate::command::InitialBackfillPolicy::Disabled,
+            koushi_protocol::command::InitialBackfillPolicy::Disabled,
         )
         .await;
     manager
@@ -515,7 +515,7 @@ async fn idempotent_subscribe_replay_carries_exact_command_cause() {
             key,
             true,
             true,
-            crate::command::InitialBackfillPolicy::Disabled,
+            koushi_protocol::command::InitialBackfillPolicy::Disabled,
         )
         .await;
 
@@ -563,7 +563,7 @@ async fn cached_room_replay_uses_control_lane_when_ordinary_mailbox_is_full() {
             key,
             true,
             true,
-            crate::command::InitialBackfillPolicy::Disabled,
+            koushi_protocol::command::InitialBackfillPolicy::Disabled,
         ),
     )
     .await
@@ -1383,7 +1383,7 @@ async fn room_actor_hydrates_a_historical_sender_without_a_live_event() {
                     ..
                 }) if event_key == key && saw_unavailable_initial => {
                     if let Some(item) = diffs.iter().find_map(|diff| match diff {
-                        crate::event::TimelineDiff::Set { item, .. }
+                        koushi_protocol::event::TimelineDiff::Set { item, .. }
                             if timeline_item_event_id(item) == Some(event_id.as_str()) =>
                         {
                             Some(item)
@@ -2319,7 +2319,7 @@ async fn forward_pagination_on_room_key_fails_invalid_direction() {
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: rid,
         key: room_key(),
-        initial_backfill: crate::command::InitialBackfillPolicy::Disabled,
+        initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .expect("submit");

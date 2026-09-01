@@ -26,17 +26,23 @@ impl Drop for DropFlag {
 
 #[test]
 fn room_and_focused_timelines_fetch_members_but_threads_reuse_room_state() {
-    assert!(should_fetch_members(&crate::ids::TimelineKind::Room {
-        room_id: "!room:example.org".to_owned(),
-    }));
-    assert!(should_fetch_members(&crate::ids::TimelineKind::Focused {
-        room_id: "!room:example.org".to_owned(),
-        event_id: "$event:example.org".to_owned(),
-    }));
-    assert!(!should_fetch_members(&crate::ids::TimelineKind::Thread {
-        room_id: "!room:example.org".to_owned(),
-        root_event_id: "$root:example.org".to_owned(),
-    }));
+    assert!(should_fetch_members(
+        &koushi_protocol::ids::TimelineKind::Room {
+            room_id: "!room:example.org".to_owned(),
+        }
+    ));
+    assert!(should_fetch_members(
+        &koushi_protocol::ids::TimelineKind::Focused {
+            room_id: "!room:example.org".to_owned(),
+            event_id: "$event:example.org".to_owned(),
+        }
+    ));
+    assert!(!should_fetch_members(
+        &koushi_protocol::ids::TimelineKind::Thread {
+            room_id: "!room:example.org".to_owned(),
+            root_event_id: "$root:example.org".to_owned(),
+        }
+    ));
 }
 
 #[test]

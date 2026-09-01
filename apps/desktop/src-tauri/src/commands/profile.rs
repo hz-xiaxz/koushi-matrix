@@ -153,7 +153,7 @@ pub async fn download_avatar_thumbnail(
 }
 
 pub(super) fn build_set_display_name_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     display_name: Option<String>,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::SetDisplayName {
@@ -163,7 +163,7 @@ pub(super) fn build_set_display_name_command(
 }
 
 pub(super) fn build_set_local_user_alias_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     user_id: String,
     alias: Option<String>,
 ) -> CoreCommand {
@@ -175,7 +175,7 @@ pub(super) fn build_set_local_user_alias_command(
 }
 
 pub(super) fn build_ignore_user_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     user_id: String,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::IgnoreUser {
@@ -185,7 +185,7 @@ pub(super) fn build_ignore_user_command(
 }
 
 pub(super) fn build_unignore_user_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     user_id: String,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::UnignoreUser {
@@ -195,7 +195,7 @@ pub(super) fn build_unignore_user_command(
 }
 
 pub(super) fn build_report_user_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     user_id: String,
     reason: Option<String>,
 ) -> CoreCommand {
@@ -207,7 +207,7 @@ pub(super) fn build_report_user_command(
 }
 
 pub(super) fn build_report_content_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     event_id: String,
     reason: Option<String>,
@@ -221,7 +221,7 @@ pub(super) fn build_report_content_command(
 }
 
 pub(super) fn build_report_room_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     reason: Option<String>,
 ) -> CoreCommand {
@@ -233,7 +233,7 @@ pub(super) fn build_report_room_command(
 }
 
 pub(super) fn build_set_avatar_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     mime_type: String,
     bytes: Vec<u8>,
 ) -> CoreCommand {
@@ -244,7 +244,7 @@ pub(super) fn build_set_avatar_command(
 }
 
 pub(super) fn build_download_avatar_thumbnail_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     mxc_uri: String,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::DownloadAvatarThumbnail {

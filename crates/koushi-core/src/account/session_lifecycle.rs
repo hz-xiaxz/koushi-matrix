@@ -8,22 +8,23 @@ use std::{
 
 use futures_util::StreamExt;
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
-use koushi_key::{LocalStoreId, SessionKeyId, StoredMatrixSession};
+use koushi_key::{LocalStoreId, StoredMatrixSession};
+use koushi_protocol::SessionKeyId;
 use koushi_sdk::{MatrixClientSession, PendingOidcLogin, PersistableMatrixSession};
 use koushi_state::{
     AppAction, AuthFailureKind, LoginAttemptId, LoginRequest, SessionInfo, SlidingSyncAdmission,
 };
 use tokio::sync::{mpsc, oneshot};
 
-use crate::event::{AccountEvent, CoreEvent};
 use crate::executor;
-use crate::failure::{CoreFailure, LoginFailureKind};
-use crate::ids::{AccountKey, RequestId};
 use crate::startup_trace::{self, StartupPhase};
 use crate::store::{
     AccountStoreConfig, PendingLoginCleanupEvidence, account_key_from_info,
     session_key_id_from_info,
 };
+use koushi_protocol::event::{AccountEvent, CoreEvent};
+use koushi_protocol::failure::{CoreFailure, LoginFailureKind};
+use koushi_protocol::ids::{AccountKey, RequestId};
 
 use super::actor::{AccountActor, AccountMessage, trace_account_request, trace_restore};
 use super::sliding_sync::PendingSlidingSyncAdmission;

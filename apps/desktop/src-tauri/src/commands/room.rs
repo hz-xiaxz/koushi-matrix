@@ -853,7 +853,7 @@ pub async fn update_room_member_role(
 
 #[tauri::command]
 pub async fn create_room(
-    options: koushi_core::CreateRoomOptions,
+    options: koushi_protocol::CreateRoomOptions,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendCommandSettlement, String> {
@@ -1274,7 +1274,7 @@ pub(super) async fn wait_for_room_operation(
     operation: RoomOperationKind,
     timeout: std::time::Duration,
     context: &'static str,
-) -> Result<koushi_core::event::VersionedAppStateSnapshot, String> {
+) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, String> {
     let outcome = event_conn
         .wait_for_request_outcome(
             OutcomeCorrelation::Request(operation_request_id),
@@ -1296,7 +1296,7 @@ pub(super) async fn wait_for_room_operation(
 }
 
 pub(super) fn build_update_space_member_role_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     space_id: String,
     user_id: String,
     generation: u64,
@@ -1318,7 +1318,7 @@ pub(super) fn build_update_space_member_role_command(
 }
 
 pub(super) fn build_leave_room_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::LeaveRoom {
@@ -1328,7 +1328,7 @@ pub(super) fn build_leave_room_command(
 }
 
 pub(super) fn build_forget_room_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::ForgetRoom {
@@ -1338,7 +1338,7 @@ pub(super) fn build_forget_room_command(
 }
 
 pub(super) fn build_set_room_tag_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     tag: RoomTagKind,
     order: Option<f64>,
@@ -1352,7 +1352,7 @@ pub(super) fn build_set_room_tag_command(
 }
 
 pub(super) fn build_remove_room_tag_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     tag: RoomTagKind,
 ) -> CoreCommand {
@@ -1364,7 +1364,7 @@ pub(super) fn build_remove_room_tag_command(
 }
 
 pub(super) fn build_pin_event_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     event_id: String,
 ) -> CoreCommand {
@@ -1376,7 +1376,7 @@ pub(super) fn build_pin_event_command(
 }
 
 pub(super) fn build_unpin_event_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     event_id: String,
 ) -> CoreCommand {
@@ -1388,7 +1388,7 @@ pub(super) fn build_unpin_event_command(
 }
 
 pub(super) fn build_refresh_pinned_events_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::RefreshPinnedEvents {
@@ -1398,7 +1398,7 @@ pub(super) fn build_refresh_pinned_events_command(
 }
 
 pub(super) fn build_load_room_settings_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::LoadRoomSettings {
@@ -1408,7 +1408,7 @@ pub(super) fn build_load_room_settings_command(
 }
 
 pub(super) fn build_load_space_members_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     space_id: String,
     generation: u64,
 ) -> CoreCommand {
@@ -1420,7 +1420,7 @@ pub(super) fn build_load_space_members_command(
 }
 
 pub(super) fn build_repair_room_timeline_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::RepairRoomTimeline {
@@ -1430,7 +1430,7 @@ pub(super) fn build_repair_room_timeline_command(
 }
 
 pub(super) fn build_reshare_room_key_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::ReshareRoomKey {
@@ -1440,7 +1440,7 @@ pub(super) fn build_reshare_room_key_command(
 }
 
 pub(super) fn build_force_new_outbound_session_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::ForceNewOutboundSession {
@@ -1450,7 +1450,7 @@ pub(super) fn build_force_new_outbound_session_command(
 }
 
 pub(super) fn build_share_index0_room_key_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::ShareIndex0RoomKey {
@@ -1460,7 +1460,7 @@ pub(super) fn build_share_index0_room_key_command(
 }
 
 pub(super) fn build_resend_index0_room_key_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::ResendIndex0RoomKey {
@@ -1470,7 +1470,7 @@ pub(super) fn build_resend_index0_room_key_command(
 }
 
 pub(super) fn build_update_room_setting_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     change: RoomSettingChange,
 ) -> CoreCommand {
@@ -1482,7 +1482,7 @@ pub(super) fn build_update_room_setting_command(
 }
 
 pub(super) fn build_moderate_room_member_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     target_user_id: String,
     action: RoomModerationAction,
@@ -1498,7 +1498,7 @@ pub(super) fn build_moderate_room_member_command(
 }
 
 pub(super) fn build_update_room_member_role_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     target_user_id: String,
     power_level: i64,

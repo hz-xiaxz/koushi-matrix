@@ -5,7 +5,7 @@ use super::timeline::{
 use super::*;
 
 pub(super) fn build_set_typing_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
     room_id: String,
     is_typing: bool,
@@ -18,7 +18,7 @@ pub(super) fn build_set_typing_command(
 }
 
 pub(super) fn build_set_presence_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     presence: PresenceKind,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::SetPresence {

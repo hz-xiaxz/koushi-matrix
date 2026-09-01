@@ -12,14 +12,14 @@ use matrix_sdk::ruma::events::room::MediaSource as SdkMediaSource;
 use matrix_sdk::ruma::{MxcUri, OwnedMxcUri};
 use tokio::sync::Semaphore;
 
-use crate::event::{AccountEvent, CoreEvent, LiveSignalsEvent};
-use crate::failure::{CoreFailure, ProfileFailureKind};
-use crate::ids::{AccountKey, RequestId};
 use crate::renderable_thumbnail::{
     RenderableThumbnailKind, clear_renderable_thumbnail_cache, store_renderable_thumbnail,
 };
 use crate::room::RoomMessage;
 use crate::timeline::TimelineMessage;
+use koushi_protocol::event::{AccountEvent, CoreEvent, LiveSignalsEvent};
+use koushi_protocol::failure::{CoreFailure, ProfileFailureKind};
+use koushi_protocol::ids::{AccountKey, RequestId};
 
 use super::actor::{AccountActor, AccountMessage};
 
@@ -168,8 +168,8 @@ fn classify_profile_error(error: &koushi_sdk::MatrixProfileError) -> ProfileFail
 
 fn classify_ignored_user_list_error(
     error: &koushi_sdk::MatrixIgnoredUserListError,
-) -> crate::failure::ReportFailureKind {
-    use crate::failure::ReportFailureKind;
+) -> koushi_protocol::failure::ReportFailureKind {
+    use koushi_protocol::failure::ReportFailureKind;
     use koushi_sdk::MatrixIgnoredUserListFailureKind;
     match error.failure_kind() {
         MatrixIgnoredUserListFailureKind::Forbidden => ReportFailureKind::Forbidden,
@@ -319,7 +319,7 @@ impl AccountActor {
     pub(super) async fn handle_set_avatar(
         &self,
         request_id: RequestId,
-        request: crate::command::SetAvatarRequest,
+        request: koushi_protocol::command::SetAvatarRequest,
     ) {
         let Some(session) = &self.session else {
             self.send_actions(vec![AppAction::ProfileUpdateFailed {
@@ -693,7 +693,7 @@ impl AccountActor {
             Ok(()) => {
                 self.emit(CoreEvent::Account(AccountEvent::ReportCompleted {
                     request_id,
-                    kind: crate::event::ReportKind::User,
+                    kind: koushi_protocol::event::ReportKind::User,
                 }));
             }
             Err(error) => {
@@ -718,8 +718,8 @@ mod tests {
         avatar_thumbnail_for_request, download_avatar_thumbnail, retry_avatar_thumbnail_fetch,
     };
 
-    use crate::ids::{RequestId, RuntimeConnectionId};
     use crate::renderable_thumbnail::clear_renderable_thumbnail_cache;
+    use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
     use std::{fs, path::Path};
@@ -727,7 +727,7 @@ mod tests {
 
     fn ready_thumbnail() -> AvatarThumbnailState {
         AvatarThumbnailState::Ready {
-            source_url: "koushi-thumbnail://avatar/test".to_owned(),
+            source_ref: "avatar/0123456789abcdef".to_owned(),
             width: None,
             height: None,
             mime_type: Some("image/png".to_owned()),
@@ -847,11 +847,11 @@ mod tests {
         let online = download_avatar_thumbnail(&online_session, mxc_uri)
             .await
             .expect("online avatar fetch");
-        let AvatarThumbnailState::Ready { source_url, .. } = online else {
+        let AvatarThumbnailState::Ready { source_ref, .. } = online else {
             panic!("online avatar should be ready");
         };
-        assert!(source_url.starts_with("koushi-thumbnail://"));
-        assert!(!source_url.starts_with("file://"));
+        assert!(source_ref.starts_with("avatar/"));
+        assert!(!source_ref.contains("://"));
         drop(online_session);
         clear_renderable_thumbnail_cache();
 
@@ -859,11 +859,11 @@ mod tests {
         let offline = download_avatar_thumbnail(&offline_session, mxc_uri)
             .await
             .expect("cached avatar should load without a second network request");
-        let AvatarThumbnailState::Ready { source_url, .. } = offline else {
+        let AvatarThumbnailState::Ready { source_ref, .. } = offline else {
             panic!("offline cached avatar should be ready");
         };
-        assert!(source_url.starts_with("koushi-thumbnail://"));
-        assert!(!source_url.starts_with("file://"));
+        assert!(source_ref.starts_with("avatar/"));
+        assert!(!source_ref.contains("://"));
         assert!(!data_dir.path().join("avatar_thumbnails").exists());
         assert_directory_does_not_contain_plaintext(data_dir.path(), b"binaryjpegfullimagedata");
     }

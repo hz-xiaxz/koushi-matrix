@@ -1,10 +1,10 @@
 use super::{classify_room_error, trace_room_operation};
 
-use crate::command::{CreateRoomOptions, CreateRoomVisibility, RoomCommand};
+use koushi_protocol::command::{CreateRoomOptions, CreateRoomVisibility, RoomCommand};
 
-use crate::event::CoreEvent;
+use koushi_protocol::event::CoreEvent;
 
-use crate::failure::{CoreFailure, RoomFailureKind};
+use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
 
 use crate::room::actor::make_request_id;
 use crate::room::actor::{RoomActor, RoomMessage};

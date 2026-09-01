@@ -218,7 +218,7 @@ async fn dispatch_native_attention_sound_with_lock(
     let admitted = koushi_core::executor::timeout(std::time::Duration::from_secs(2), async {
         loop {
             if let CoreEvent::NativeAttention(
-                koushi_core::NativeAttentionEvent::DispatchAdmission {
+                koushi_protocol::NativeAttentionEvent::DispatchAdmission {
                     dispatch_id: observed,
                     accepted,
                 },

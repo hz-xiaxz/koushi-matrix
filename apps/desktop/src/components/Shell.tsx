@@ -41,7 +41,7 @@ import type {
 } from "../domain/types";
 import { contextMenuItems } from "../domain/contextMenus";
 import { toExternalHttpUrl } from "../domain/externalLinks";
-import { mediaSourceUrl } from "../backend/linkMediaRuntime";
+import { renderableThumbnailSourceUrl } from "../backend/linkMediaRuntime";
 import { Tooltip } from "./Tooltip";
 import { ImeTextField } from "./ImeTextControl";
 import { useRecoverableImageSource } from "./avatarImage";
@@ -1493,7 +1493,9 @@ export function EntityAvatar({
   fallbackMode?: "initials" | "compactLabel" | "elementSpace";
 }) {
   const sourceUrl =
-    avatar?.thumbnail.kind === "ready" ? mediaSourceUrl(avatar.thumbnail.source_url) : null;
+    avatar?.thumbnail.kind === "ready"
+      ? renderableThumbnailSourceUrl(avatar.thumbnail.source_ref)
+      : null;
   const { displaySourceUrl, onImageError, onImageLoad } = useRecoverableImageSource(sourceUrl);
   const showImage = Boolean(displaySourceUrl);
   const colorClassName = avatarColorClass(colorSeed || fallback);

@@ -1,11 +1,11 @@
 use futures_util::FutureExt;
-use koushi_core::event::{AccountEvent, CoreEvent};
 use koushi_core::runtime::request_outcome::{
     OutcomeCorrelation, RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation,
 };
 use koushi_core::{
     AccountKey, CoreConnection, IntentOutcome, RequestId, RuntimeConnectionId, TimelineKey,
 };
+use koushi_protocol::event::{AccountEvent, CoreEvent};
 use koushi_state::{
     AppState, FocusedContextState, MainTimelineAnchor, SearchScope, SessionInfo, SessionState,
 };
@@ -29,8 +29,11 @@ fn ready_state(user_id: &str) -> AppState {
     state
 }
 
-fn versioned(state: AppState, generation: u64) -> koushi_core::event::VersionedAppStateSnapshot {
-    koushi_core::event::VersionedAppStateSnapshot { generation, state }
+fn versioned(
+    state: AppState,
+    generation: u64,
+) -> koushi_protocol::state_update::VersionedAppStateSnapshot {
+    koushi_protocol::state_update::VersionedAppStateSnapshot { generation, state }
 }
 
 fn commit(request_id: RequestId) -> CoreEvent {

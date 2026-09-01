@@ -16,13 +16,13 @@ use koushi_state::{AppAction, LiveEventReceipts, LiveReadReceipt};
 use matrix_sdk_ui::timeline::TimelineFocus;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
-use crate::command::TimelineCommand;
-use crate::event::{CoreEvent, LiveSignalsEvent, TimelineReadStateSync};
 use crate::executor;
-use crate::failure::{CoreFailure, ReadStateFailureKind, TimelineFailureKind};
+use koushi_protocol::command::TimelineCommand;
+use koushi_protocol::event::{CoreEvent, LiveSignalsEvent, TimelineReadStateSync};
+use koushi_protocol::failure::{CoreFailure, ReadStateFailureKind, TimelineFailureKind};
 #[cfg(any(test, feature = "test-hooks"))]
-use crate::ids::AccountKey;
-use crate::ids::{TimelineKey, TimelineKind};
+use koushi_protocol::ids::AccountKey;
+use koushi_protocol::ids::{TimelineKey, TimelineKind};
 
 use crate::read_state::{
     ReadPersistenceSnapshot, ReadStateEngine, ReadStateKey, ReadTarget, ReadWaiterId,
@@ -1501,7 +1501,7 @@ async fn stalled_read_receipt_worker_does_not_block_cached_subscription_replay()
         .send(TimelineMessage::Command(TimelineCommand::Subscribe {
             request_id: subscribe_request_id,
             key,
-            initial_backfill: crate::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         }))
         .await
         .expect("queue cached subscribe");

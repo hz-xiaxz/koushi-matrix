@@ -1,9 +1,7 @@
-use koushi_core::{
-    event::TimelineFormattedBody,
-    link_preview::{
-        LinkPreviewContext, extract_link_ranges, extract_urls, link_previews_for_message,
-    },
+use koushi_core::link_preview::{
+    LinkPreviewContext, extract_link_ranges, extract_urls, link_previews_for_message,
 };
+use koushi_protocol::TimelineFormattedBody;
 
 fn urls(text: &str) -> Vec<String> {
     extract_link_ranges(text)

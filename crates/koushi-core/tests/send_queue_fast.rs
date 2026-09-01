@@ -9,14 +9,14 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use koushi_core::command::{AccountCommand, CoreCommand, SyncCommand, TimelineCommand};
 use koushi_core::composer_draft_lifecycle::ComposerDraftScope;
-use koushi_core::event::{
+use koushi_core::runtime::{CoreConnection, CoreRuntime};
+use koushi_protocol::command::{AccountCommand, CoreCommand, SyncCommand, TimelineCommand};
+use koushi_protocol::event::{
     AccountEvent, CoreEvent, SyncEvent, TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId,
     TimelineMessageActions, TimelineSendState,
 };
-use koushi_core::ids::{AccountKey, RequestId, TimelineKey};
-use koushi_core::runtime::{CoreConnection, CoreRuntime};
+use koushi_protocol::ids::{AccountKey, RequestId, TimelineKey};
 use koushi_state::{AuthSecret, ComposerDocument, ComposerTarget, SessionState, SubmissionId};
 use matrix_sdk::{
     ruma::{event_id, room_id},
@@ -1136,7 +1136,7 @@ async fn wait_for_fast_send_queue_authoritative_completion(
                     && matches!(
                         item.send_state,
                         Some(TimelineSendState::NotSent {
-                            reason: koushi_core::event::TimelineSendFailureReason::Recoverable,
+                            reason: koushi_protocol::event::TimelineSendFailureReason::Recoverable,
                         })
                     )
             })
@@ -1271,10 +1271,10 @@ async fn wait_for_fast_send_queue_not_sent(
         }) {
             match item.send_state {
                 Some(TimelineSendState::NotSent {
-                    reason: koushi_core::event::TimelineSendFailureReason::Recoverable,
+                    reason: koushi_protocol::event::TimelineSendFailureReason::Recoverable,
                 }) => return Ok(()),
                 Some(TimelineSendState::NotSent {
-                    reason: koushi_core::event::TimelineSendFailureReason::Unrecoverable,
+                    reason: koushi_protocol::event::TimelineSendFailureReason::Unrecoverable,
                 }) => {
                     return Err(format!(
                         "{label}: expected recoverable transport failure, got unrecoverable NotSent"
@@ -1724,7 +1724,7 @@ async fn run_fast_send_queue_feedback() {
         conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe_id,
             key: key.clone(),
-            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         })),
     )
     .await
@@ -1815,7 +1815,7 @@ async fn run_fast_send_queue_feedback() {
     let unsubscribe_submission_id = SubmissionId::new("fast-unsubscribe-submission");
     let unsubscribe_request_id = conn.next_request_id();
     let unsubscribe_account = match &conn.snapshot().session {
-        SessionState::Ready(info) => koushi_key::SessionKeyId {
+        SessionState::Ready(info) => koushi_protocol::SessionKeyId {
             homeserver: info.homeserver.clone(),
             user_id: info.user_id.clone(),
             device_id: info.device_id.clone(),
@@ -1928,7 +1928,7 @@ async fn run_fast_send_queue_feedback() {
     conn.command(CoreCommand::Timeline(TimelineCommand::Paginate {
         request_id: unsubscribe_barrier_id,
         key: key.clone(),
-        direction: koushi_core::event::PaginationDirection::Backward,
+        direction: koushi_protocol::event::PaginationDirection::Backward,
         event_count: 1,
     }))
     .await
@@ -2008,7 +2008,7 @@ async fn run_fast_send_queue_feedback() {
     conn.command(CoreCommand::Timeline(TimelineCommand::Paginate {
         request_id: duplicate_barrier_id,
         key: key.clone(),
-        direction: koushi_core::event::PaginationDirection::Backward,
+        direction: koushi_protocol::event::PaginationDirection::Backward,
         event_count: 1,
     }))
     .await
@@ -2063,7 +2063,7 @@ async fn run_fast_send_queue_feedback() {
     conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
         request_id: resubscribe_id,
         key: key.clone(),
-        initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+        initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
     }))
     .await
     .expect("fast_send_queue submit post-proof resubscribe");
@@ -2320,7 +2320,7 @@ async fn run_fast_send_queue_feedback() {
         conn.command(CoreCommand::Timeline(TimelineCommand::Subscribe {
             request_id: subscribe_id,
             key: key.clone(),
-            initial_backfill: koushi_core::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         })),
     )
     .await
@@ -2357,7 +2357,7 @@ async fn run_fast_send_queue_feedback() {
             &restored_send_state,
             TimelineSendState::Sending
                 | TimelineSendState::NotSent {
-                    reason: koushi_core::event::TimelineSendFailureReason::Recoverable,
+                    reason: koushi_protocol::event::TimelineSendFailureReason::Recoverable,
                 }
         ),
         "fast_send_queue restored Transaction must remain recoverable"
@@ -2378,7 +2378,7 @@ async fn run_fast_send_queue_feedback() {
     let restart_retry_id = if matches!(
         &restored_send_state,
         TimelineSendState::NotSent {
-            reason: koushi_core::event::TimelineSendFailureReason::Recoverable,
+            reason: koushi_protocol::event::TimelineSendFailureReason::Recoverable,
         }
     ) {
         Some(

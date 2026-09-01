@@ -112,6 +112,12 @@ jobs:
         run: node --test scripts/check-diagnostic-test-isolation.test.mjs
       - name: Diagnostic test isolation guard
         run: node scripts/check-diagnostic-test-isolation.mjs
+      - name: Protocol and QA boundary checker tests
+        run: node --test scripts/check-protocol-qa-boundaries.test.mjs scripts/check-domain-crate-platform-deps.test.mjs
+      - name: Protocol and QA boundary guard
+        run: node scripts/check-protocol-qa-boundaries.mjs
+      - name: Domain and protocol dependency guard
+        run: node scripts/check-domain-crate-platform-deps.mjs
       - name: Rust test structure checker tests
         run: node --test scripts/check-rust-test-structure.test.mjs
       - name: Rust test structure checker
@@ -120,8 +126,8 @@ jobs:
         run: cargo test --workspace --exclude sidebar-composition --exclude key-management
       - name: Tauri DTO + IPC contract tests
         run: cargo test -p koushi-desktop
-      - name: wasm build check (state + search)
-        run: cargo check --target wasm32-unknown-unknown -p koushi-state -p koushi-search
+      - name: wasm build check (state + search + protocol)
+        run: cargo check --target wasm32-unknown-unknown -p koushi-state -p koushi-search -p koushi-protocol
       # --- Dependency hygiene (#87 Phase 0) ---
       # cargo-deny: license compliance + advisory check + bans.
       - name: Install cargo-deny
@@ -259,7 +265,7 @@ jobs:
         # `cargo test --workspace` skips them because both bin targets set
         # `required-features = ["qa-bin"]`, which is how a broken
         # `RoomCommand::SetSpaceChild` call sat on main undetected.
-        run: cargo test -p koushi-core --features qa-bin --bin headless-core-qa
+        run: cargo test -p koushi-qa --features qa-bin --bin headless-core-qa
       - name: Upload QA logs on failure
         if: failure()
         uses: actions/upload-artifact@v4

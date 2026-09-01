@@ -8,9 +8,9 @@ use super::{
 
 #[test]
 fn timeline_items_updated_forwarding_emits_core_event_name_and_all_diffs() {
-    use koushi_core::{
-        AccountKey, CoreEvent, TimelineDiff, TimelineEvent, TimelineKey,
-        ids::{TimelineBatchId, TimelineGeneration},
+    use koushi_protocol::{
+        AccountKey, CoreEvent, TimelineBatchId, TimelineDiff, TimelineEvent, TimelineGeneration,
+        TimelineKey,
     };
     use serde_json::json;
 
@@ -43,7 +43,8 @@ fn timeline_items_updated_forwarding_emits_core_event_name_and_all_diffs() {
 }
 #[test]
 fn state_delta_forwarding_emits_core_event_changed_slices() {
-    use koushi_core::{CoreEvent, build_state_delta};
+    use koushi_core::build_state_delta;
+    use koushi_protocol::CoreEvent;
     use koushi_state::{AppState, SearchCrawlerRoomState};
     use serde_json::json;
 
@@ -84,7 +85,8 @@ fn state_delta_forwarding_emits_core_event_changed_slices() {
 }
 #[test]
 fn session_state_delta_forwarding_is_one_state_update_without_generic_duplicate() {
-    use koushi_core::{CoreEvent, build_state_delta};
+    use koushi_core::build_state_delta;
+    use koushi_protocol::CoreEvent;
     use koushi_state::{AppState, ProvisionalPhase, SessionInfo, SessionState};
     use serde_json::json;
 
@@ -127,7 +129,7 @@ fn session_state_delta_forwarding_is_one_state_update_without_generic_duplicate(
 }
 #[test]
 fn lag_resync_forwarding_emits_exact_snapshot_then_typed_resync_marker() {
-    use koushi_core::event::VersionedAppStateSnapshot;
+    use koushi_protocol::state_update::VersionedAppStateSnapshot;
     use koushi_state::AppState;
     use serde_json::json;
 
@@ -167,8 +169,9 @@ fn forwarder_lag_disposition_replays_positive_lag_and_stops_on_zero_sentinel() {
 /// coreEvents.ts and coreEvents.generated.json must change with it.
 #[test]
 fn core_event_wire_format_matches_checked_in_contract_artifact() {
-    use koushi_core::{
-        AccountKey, CoreEvent, TimelineDiff, TimelineKey, build_state_delta,
+    use koushi_core::build_state_delta;
+    use koushi_protocol::{
+        AccountKey, CoreEvent, TimelineDiff, TimelineKey,
         event::{
             AccountEvent, ActivityEvent, CjkTextPolicyEvent, E2eeTrustEvent,
             EncryptionDebugOperationOutcome, EventCacheFailureReasonClass,
@@ -487,7 +490,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
                 width: Some(1200),
                 height: Some(630),
                 thumbnail: AvatarThumbnailState::Ready {
-                    source_url: "koushi-thumbnail://localhost/link-preview/fixture.bin".to_owned(),
+                    source_ref: "link-preview/0123456789abcdef".to_owned(),
                     width: Some(600),
                     height: Some(315),
                     mime_type: Some("image/png".to_owned()),
@@ -766,7 +769,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
                         "height": 630,
                         "thumbnail": {
                             "kind": "ready",
-                            "source_url": "koushi-thumbnail://localhost/link-preview/fixture.bin",
+                            "source_ref": "link-preview/0123456789abcdef",
                             "width": 600,
                             "height": 315,
                             "mime_type": "image/png"
@@ -1003,7 +1006,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
     let account_report_completed =
         serialize_core_event(&CoreEvent::Account(AccountEvent::ReportCompleted {
             request_id,
-            kind: koushi_core::event::ReportKind::User,
+            kind: koushi_protocol::event::ReportKind::User,
         }))
         .expect("serialize account report completed event");
     let account_oidc_authorization_created = serialize_core_event(&CoreEvent::Account(
@@ -1109,7 +1112,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
     let room_report_completed =
         serialize_core_event(&CoreEvent::Room(RoomEvent::ReportCompleted {
             request_id,
-            kind: koushi_core::event::ReportKind::Event,
+            kind: koushi_protocol::event::ReportKind::Event,
         }))
         .expect("serialize room report completed event");
     let sync_started = serialize_core_event(&CoreEvent::Sync(SyncEvent::Started {
@@ -1683,7 +1686,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
                 request_id,
                 key: TimelineKey {
                     account_key: AccountKey("@user:example.test".to_owned()),
-                    kind: koushi_core::TimelineKind::Room {
+                    kind: koushi_protocol::TimelineKind::Room {
                         room_id: "!room:example.test".to_owned(),
                     },
                 },
@@ -1696,7 +1699,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
                 request_id,
                 key: TimelineKey {
                     account_key: AccountKey("@user:example.test".to_owned()),
-                    kind: koushi_core::TimelineKind::Room {
+                    kind: koushi_protocol::TimelineKind::Room {
                         room_id: "!room:example.test".to_owned(),
                     },
                 },

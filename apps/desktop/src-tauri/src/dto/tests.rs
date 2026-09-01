@@ -441,7 +441,7 @@ fn frontend_snapshot_serializes_profile_and_summary_avatars() {
     let ready_avatar = AvatarImage {
         mxc_uri: "mxc://matrix.org/avatar".to_owned(),
         thumbnail: AvatarThumbnailState::Ready {
-            source_url: "asset://avatar".to_owned(),
+            source_ref: "avatar/1111111111111111".to_owned(),
             width: Some(64),
             height: Some(64),
             mime_type: Some("image/png".to_owned()),
@@ -505,7 +505,7 @@ fn frontend_snapshot_serializes_profile_and_summary_avatars() {
                     "mxc_uri": "mxc://matrix.org/avatar",
                     "thumbnail": {
                         "kind": "ready",
-                        "source_url": "asset://avatar",
+                        "source_ref": "avatar/1111111111111111",
                         "width": 64,
                         "height": 64,
                         "mime_type": "image/png"
@@ -971,7 +971,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
     let avatar = AvatarImage {
         mxc_uri: "mxc://example.invalid/fixture-avatar".to_owned(),
         thumbnail: AvatarThumbnailState::Ready {
-            source_url: "asset://fixture-avatar".to_owned(),
+            source_ref: "avatar/2222222222222222".to_owned(),
             width: Some(64),
             height: Some(64),
             mime_type: Some("image/png".to_owned()),
@@ -1631,7 +1631,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
 #[test]
 fn state_update_envelope_serializes_the_v1_delta_and_snapshot_shapes() {
     use super::{FrontendStateUpdateEnvelope, StateUpdateSnapshotReason};
-    use koushi_core::event::VersionedAppStateSnapshot;
+    use koushi_protocol::state_update::VersionedAppStateSnapshot;
 
     let delta = FrontendStateUpdateEnvelope::delta(FrontendDesktopSnapshotDelta {
         generation: 7,

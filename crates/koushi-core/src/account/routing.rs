@@ -1,21 +1,22 @@
 //! `routing` ownership for AccountActor.
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
-use koushi_key::SessionKeyId;
+use koushi_protocol::SessionKeyId;
 use koushi_state::{AppAction, OperationFailureKind};
 
-use crate::command::{
-    RoomCommand, SearchCommand, SyncCommand, ThreadsListCommand, TimelineCommand,
-};
-use crate::event::{CoreEvent, TimelineEvent};
-#[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
-use crate::failure::SyncFailureKind;
-use crate::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
-use crate::ids::{RequestId, TimelineKey, TimelineKind};
+use crate::command_policy::{search_scope_to_state, timeline_composer_account_fence};
 use crate::room::RoomMessage;
 use crate::runtime::ForwardedComposerDraftPermit;
 use crate::sync::SyncMessage;
 use crate::timeline::TimelineMessage;
+use koushi_protocol::command::{
+    RoomCommand, SearchCommand, SyncCommand, ThreadsListCommand, TimelineCommand,
+};
+use koushi_protocol::event::{CoreEvent, TimelineEvent};
+#[cfg(any(test, feature = "test-hooks"))]
+use koushi_protocol::failure::SyncFailureKind;
+use koushi_protocol::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
+use koushi_protocol::ids::{RequestId, TimelineKey, TimelineKind};
 
 use super::actor::{AccountActor, trace_restore};
 use super::scheduled_send::admit_secure_backup_user_content;
@@ -26,14 +27,8 @@ fn composer_timeline_command_targets_active_session(
     active_session_key: Option<&SessionKeyId>,
     command: &TimelineCommand,
 ) -> bool {
-    command
-        .composer_account_fence()
+    timeline_composer_account_fence(command)
         .is_none_or(|(_, expected_account)| active_session_key == Some(expected_account))
-}
-
-#[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
-fn is_manual_sync_once(command: &SyncCommand) -> bool {
-    matches!(command, SyncCommand::SyncOnce { .. })
 }
 
 fn trace_room_route(stage: &'static str, command: &RoomCommand) {
@@ -221,7 +216,7 @@ impl AccountActor {
         formatting_options: Option<koushi_state::ComposerFormattingOptions>,
     ) {
         if !composer_timeline_command_targets_active_session(self.session_key_id.as_ref(), &command)
-            && let Some((request_id, _)) = command.composer_account_fence()
+            && let Some((request_id, _)) = timeline_composer_account_fence(&command)
         {
             record(
                 DiagnosticEvent::new(
@@ -398,7 +393,7 @@ impl AccountActor {
         &self,
         request_id: RequestId,
         query: &str,
-        scope: &crate::command::SearchScope,
+        scope: &koushi_protocol::command::SearchScope,
         message: &str,
     ) {
         let _ = self
@@ -406,7 +401,7 @@ impl AccountActor {
             .send(vec![AppAction::SearchFailed {
                 request_id: request_id.sequence,
                 query: query.to_owned(),
-                scope: scope.to_state(),
+                scope: search_scope_to_state(scope),
                 message: message.to_owned(),
             }])
             .await;
@@ -547,9 +542,30 @@ impl AccountActor {
                 account_key,
                 kind: TimelineKind::Focused { room_id, event_id },
             },
-            initial_backfill: crate::command::InitialBackfillPolicy::Disabled,
+            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
         })
         .await;
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub(super) async fn route_sync_once_for_qa(&mut self, request_id: RequestId) {
+        if let Some(handle) = &self.sync_actor {
+            if !handle.sync_once_for_qa(request_id).await {
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::SyncFailed {
+                        kind: SyncFailureKind::Internal,
+                    },
+                );
+            }
+        } else {
+            self.emit_failure(
+                request_id,
+                CoreFailure::SyncFailed {
+                    kind: SyncFailureKind::Internal,
+                },
+            );
+        }
     }
 
     /// Route a SyncCommand to the SyncActor, or emit SessionRequired if no
@@ -559,8 +575,6 @@ impl AccountActor {
             SyncCommand::Start { request_id } => ("start", *request_id),
             SyncCommand::Stop { request_id } => ("stop", *request_id),
             SyncCommand::Restart { request_id } => ("restart", *request_id),
-            #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
-            SyncCommand::SyncOnce { request_id } => ("sync_once", *request_id),
         };
         trace_restore!(
             "route_sync_command",
@@ -585,20 +599,6 @@ impl AccountActor {
                 "no"
             }
         );
-
-        // Manual classic `/sync` is no longer a production command path. Keep
-        // the typed rejection until the command variant itself is removed with
-        // the remaining legacy backend contract.
-        #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
-        if is_manual_sync_once(&command) {
-            self.emit_failure(
-                request_id,
-                CoreFailure::SyncFailed {
-                    kind: SyncFailureKind::Internal,
-                },
-            );
-            return;
-        }
 
         if self.sync_actor.is_none()
             && !matches!(command, SyncCommand::Stop { .. })
@@ -700,16 +700,16 @@ impl AccountActor {
 #[cfg(test)]
 mod tests {
 
-    use koushi_key::SessionKeyId;
+    use koushi_protocol::SessionKeyId;
 
     use tokio::sync::oneshot;
 
-    use super::{composer_timeline_command_targets_active_session, is_manual_sync_once};
+    use super::composer_timeline_command_targets_active_session;
     use crate::account::actor::AccountMessage;
-    use crate::account::test_support::{spawn_actor_with_dirs, test_request_id};
-    use crate::command::{SyncCommand, TimelineCommand};
+    use crate::account::test_support::spawn_actor_with_dirs;
+    use koushi_protocol::command::TimelineCommand;
 
-    use crate::ids::{AccountKey, RequestId, RuntimeConnectionId, TimelineKey};
+    use koushi_protocol::ids::{AccountKey, RequestId, RuntimeConnectionId, TimelineKey};
 
     use tempfile::tempdir;
 
@@ -839,20 +839,6 @@ mod tests {
                 !serialized.contains(forbidden),
                 "serialized event must not contain forbidden diagnostic data: {forbidden}"
             );
-        }
-    }
-
-    #[test]
-    fn manual_sync_once_is_the_only_rejected_sync_command() {
-        let request_id = test_request_id();
-
-        assert!(is_manual_sync_once(&SyncCommand::SyncOnce { request_id }));
-        for command in [
-            SyncCommand::Start { request_id },
-            SyncCommand::Stop { request_id },
-            SyncCommand::Restart { request_id },
-        ] {
-            assert!(!is_manual_sync_once(&command));
         }
     }
 }

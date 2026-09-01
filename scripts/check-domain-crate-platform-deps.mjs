@@ -2,19 +2,9 @@
 /**
  * check-domain-crate-platform-deps.mjs
  *
- * Verifies that the pure domain crate koushi-state does NOT directly
- * depend on platform/OS crates (keyring, windows-*, winapi, libc, tokio, etc.)
- * in ANY dependency table.
- *
- * Rule (from REPOSITORY_RULES.md and #87 Phase 0):
- *   koushi-state is the pure domain/serialization layer. It must
- *   remain free of platform OS crates so it can target WASM and future mobile.
- *
- * Grandfathered set (as of 2026-06-19, #87 Phase 0):
- *   koushi-core depends on keyring (apple-native, windows-native) —
- *   this is a known Phase 5 target for removal via SecretStore inversion.
- *   koushi-key also depends on keyring for the same reason.
- *   These are NOT checked here; only koushi-state's deps are.
+ * Verifies that pure/domain crates do NOT directly depend on platform/OS
+ * crates. The public koushi-protocol crate additionally forbids Matrix SDK,
+ * Tauri, and async-runtime dependencies.
  *
  * Coverage: ALL dependency tables are scanned to prevent a platform crate from
  * sneaking in through a target-specific or build dep:
@@ -69,7 +59,7 @@ const repoRoot = join(__dirname, "..");
  *   core-foundation — macOS/iOS OS bindings.
  *   security-framework — macOS/iOS OS bindings.
  */
-const BANNED_PLATFORM_DEPS = [
+export const BANNED_PLATFORM_DEPS = [
   "keyring",
   "tokio",
   "libc",
@@ -84,10 +74,20 @@ const BANNED_PLATFORM_DEPS = [
   "security-framework",
 ];
 
-// Pure domain crates and the platform deps each forbids. State is sync/pure and
-// forbids everything; core may use tokio (executor.rs only) but nothing else.
-// koushi-key is now a pure port crate (keyring-free) and forbids the
-// full list including keyring.
+const BANNED_PROTOCOL_DEPS = [
+  ...BANNED_PLATFORM_DEPS,
+  "koushi-key",
+  "matrix-sdk",
+  "matrix-sdk-base",
+  "matrix-sdk-search",
+  "matrix-sdk-test",
+  "matrix-sdk-ui",
+  "tauri",
+  "tauri-build",
+];
+
+// State/key/protocol are sync, pure, and wasm-clean. Core confines Tokio to its
+// executor/channel plumbing but may not directly regain an OS/platform crate.
 const DOMAIN_CRATES = [
   { name: "koushi-state", banned: BANNED_PLATFORM_DEPS },
   {
@@ -95,6 +95,7 @@ const DOMAIN_CRATES = [
     banned: BANNED_PLATFORM_DEPS.filter((dep) => dep !== "tokio"),
   },
   { name: "koushi-key", banned: BANNED_PLATFORM_DEPS },
+  { name: "koushi-protocol", banned: BANNED_PROTOCOL_DEPS },
 ];
 
 /**
@@ -134,11 +135,7 @@ function isAnySectionHeader(line) {
 
 // Scan one crate's Cargo.toml for any banned platform dep (declared name or
 // `package = "..."` alias) across all dependency tables.
-function scanCrate(crateName, banned) {
-  const cargoToml = readFileSync(
-    join(repoRoot, "crates", crateName, "Cargo.toml"),
-    "utf-8"
-  );
+export function scanManifest(cargoToml, banned) {
   const violations = [];
   let inDepSection = false;
   for (const line of cargoToml.split("\n")) {
@@ -162,30 +159,39 @@ function scanCrate(crateName, banned) {
   return violations;
 }
 
-let failed = false;
-for (const crate of DOMAIN_CRATES) {
-  const violations = scanCrate(crate.name, crate.banned);
-  if (violations.length === 0) {
-    console.log(
-      `check-domain-crate-platform-deps: ok — ${crate.name} has no banned platform deps.`
-    );
-    continue;
-  }
-  failed = true;
-  console.error(
-    `check-domain-crate-platform-deps: FAILED — ${crate.name} must not depend on platform/OS crates.`
+function scanCrate(crateName, banned) {
+  const cargoToml = readFileSync(
+    join(repoRoot, "crates", crateName, "Cargo.toml"),
+    "utf-8"
   );
-  console.error(
-    "Pure domain crates must target WASM and future mobile; platform access goes behind a port."
-  );
-  console.error(
-    "See REPOSITORY_RULES.md and #87 Phase 5 (keyring lives only in the src-tauri platform binary, behind the CredentialBackend port).\n"
-  );
-  console.error(`Banned deps found in ${crate.name} (all dependency tables scanned):`);
-  for (const v of violations) {
-    const tag = v.kind === "package-alias" ? " (via package alias)" : "";
-    console.error(`  - ${v.dep}${tag}: ${v.line}`);
-  }
+  return scanManifest(cargoToml, banned);
 }
 
-process.exit(failed ? 1 : 0);
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  let failed = false;
+  for (const crate of DOMAIN_CRATES) {
+    const violations = scanCrate(crate.name, crate.banned);
+    if (violations.length === 0) {
+      console.log(
+        `check-domain-crate-platform-deps: ok — ${crate.name} has no banned platform deps.`
+      );
+      continue;
+    }
+    failed = true;
+    console.error(
+      `check-domain-crate-platform-deps: FAILED — ${crate.name} has forbidden dependencies.`
+    );
+    console.error(
+      "Pure domain/protocol crates must remain wasm-clean; platform access stays behind a port."
+    );
+    console.error(
+      "See REPOSITORY_RULES.md Architecture And Ownership and Platform Portability.\n"
+    );
+    console.error(`Banned deps found in ${crate.name} (all dependency tables scanned):`);
+    for (const violation of violations) {
+      const tag = violation.kind === "package-alias" ? " (via package alias)" : "";
+      console.error(`  - ${violation.dep}${tag}: ${violation.line}`);
+    }
+  }
+  process.exitCode = failed ? 1 : 0;
+}

@@ -1,6 +1,6 @@
 //! `scheduled_send` ownership for AccountActor.
 
-use koushi_key::SessionKeyId;
+use koushi_protocol::SessionKeyId;
 use koushi_sdk::MatrixClientSession;
 use koushi_state::{
     AppAction, ComposerDraftRevision, ScheduledSendCapability, ScheduledSendHandle,
@@ -8,10 +8,10 @@ use koushi_state::{
 };
 use tokio::sync::mpsc;
 
-use crate::failure::{CoreFailure, TimelineFailureKind};
-use crate::ids::RequestId;
 use crate::runtime::ForwardedComposerDraftPermit;
 use crate::timeline::composer::build_room_message_content_from_composer_body;
+use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
+use koushi_protocol::ids::RequestId;
 
 use super::actor::AccountActor;
 

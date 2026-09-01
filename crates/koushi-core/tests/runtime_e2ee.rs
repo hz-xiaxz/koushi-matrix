@@ -6,9 +6,9 @@ use std::{
     time::Duration,
 };
 
-use koushi_core::command::{AccountCommand, CoreCommand};
 use koushi_core::executor;
 use koushi_core::runtime::CoreRuntime;
+use koushi_protocol::command::{AccountCommand, CoreCommand};
 use koushi_state::{AuthSecret, CrossSigningStatus, LoginRequest, SessionState};
 use matrix_sdk::test_utils::mocks::MatrixMockServer;
 use serde_json::json;

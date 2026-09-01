@@ -10,7 +10,7 @@ use matrix_sdk::ruma::events::room::message::{
     RoomMessageEventContent, RoomMessageEventContentWithoutRelation, TextMessageEventContent,
 };
 
-use crate::failure::TimelineFailureKind;
+use koushi_protocol::failure::TimelineFailureKind;
 
 pub(crate) fn validate_composer_body_for_timeline_send(
     body: &str,

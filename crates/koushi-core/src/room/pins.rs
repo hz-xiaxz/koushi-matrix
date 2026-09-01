@@ -1,9 +1,9 @@
 use super::actor::RoomActor;
 use super::list_observer::state_contains_pinned_events;
 use super::operations::{classify_room_error, operation_failure_kind};
-use crate::event::{CoreEvent, RoomEvent};
-use crate::failure::{CoreFailure, RoomFailureKind};
-use crate::ids::RequestId;
+use koushi_protocol::event::{CoreEvent, RoomEvent};
+use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
+use koushi_protocol::ids::RequestId;
 use koushi_sdk::MatrixClientSession;
 use koushi_state::{AppAction, PinnedEvent, PinnedEventState};
 use std::collections::{BTreeSet, HashSet};
@@ -303,11 +303,11 @@ impl RoomActor {
 mod tests {
     use super::pinned_event_from_raw;
 
-    use crate::command::RoomCommand;
+    use koushi_protocol::command::RoomCommand;
 
-    use crate::event::CoreEvent;
+    use koushi_protocol::event::CoreEvent;
 
-    use crate::failure::CoreFailure;
+    use koushi_protocol::failure::CoreFailure;
 
     use crate::room::actor::make_request_id;
     use crate::room::actor::{RoomActor, RoomMessage};

@@ -67,7 +67,7 @@ function coreScenarios() {
     "real_homeserver_qa/config.rs"
   ]) {
     const source = readFileSync(
-      join(repoRoot, "crates/koushi-core/src/bin", bin),
+      join(repoRoot, "crates/koushi-qa/src/bin", bin),
       "utf8"
     );
     const re = /(?:Some\()?"([a-z_0-9]+)"\)? *=> *Ok\(Self::/g;
@@ -75,7 +75,7 @@ function coreScenarios() {
     while ((match = re.exec(source)) !== null) names.add(match[1]);
   }
   if (names.size === 0) {
-    throw new Error("no core QA scenarios found in crates/koushi-core/src/bin");
+    throw new Error("no core QA scenarios found in crates/koushi-qa/src/bin");
   }
   return names;
 }

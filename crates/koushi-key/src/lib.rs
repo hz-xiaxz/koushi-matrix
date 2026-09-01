@@ -9,6 +9,7 @@ use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
 };
 use hkdf::Hkdf;
+use koushi_protocol::SessionKeyId;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use thiserror::Error;
@@ -262,19 +263,18 @@ impl CredentialBackend for InMemoryCredentialBackend {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
-pub struct SessionKeyId {
-    pub homeserver: String,
-    pub user_id: String,
-    pub device_id: String,
+pub trait SessionKeyIdCredentialNames {
+    fn account_name(&self) -> String;
+    fn local_unlock_account_name(&self) -> String;
+    fn matrix_session_account_name(&self) -> String;
 }
 
-impl SessionKeyId {
-    pub fn account_name(&self) -> String {
+impl SessionKeyIdCredentialNames for SessionKeyId {
+    fn account_name(&self) -> String {
         self.local_unlock_account_name()
     }
 
-    pub fn local_unlock_account_name(&self) -> String {
+    fn local_unlock_account_name(&self) -> String {
         format!(
             "v1|{}|{}|{}",
             URL_SAFE_NO_PAD.encode(self.homeserver.as_bytes()),
@@ -283,7 +283,7 @@ impl SessionKeyId {
         )
     }
 
-    pub fn matrix_session_account_name(&self) -> String {
+    fn matrix_session_account_name(&self) -> String {
         format!("matrix-session|{}", self.local_unlock_account_name())
     }
 }

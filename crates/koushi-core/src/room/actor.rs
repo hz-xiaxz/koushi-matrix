@@ -10,16 +10,16 @@ use super::operations::SpaceChildLinkKey;
 use super::operations::{RoomOperationTestControl, RoomOperationTestControlSlot};
 use super::space_members::{SpaceMemberDemand, SpaceMemberRefreshFence};
 use crate::account_work::AccountWorkScheduler;
-use crate::command::RoomCommand;
-use crate::event::CoreEvent;
 use crate::executor;
-use crate::failure::CoreFailure;
-use crate::ids::RequestId;
-#[cfg(test)]
-use crate::ids::RuntimeConnectionId;
 use crate::timeline::{
     RoomMembershipTransition, TimelineSubscriptionResidencyHandle, VisibleRoomObservation,
 };
+use koushi_protocol::command::RoomCommand;
+use koushi_protocol::event::CoreEvent;
+use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::ids::RequestId;
+#[cfg(test)]
+use koushi_protocol::ids::RuntimeConnectionId;
 use koushi_sdk::{
     MatrixClientSession, MatrixJoinedMemberSnapshot, MatrixRoomOperationError,
     MatrixSpaceMembersProjection,

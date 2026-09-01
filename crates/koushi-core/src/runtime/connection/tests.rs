@@ -1,7 +1,9 @@
 use super::*;
-use crate::event::{ThreadSummaryDto, TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId};
-use crate::ids::{AccountKey, TimelineKey, TimelineKind};
 use futures_util::FutureExt;
+use koushi_protocol::event::{
+    ThreadSummaryDto, TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId,
+};
+use koushi_protocol::ids::{AccountKey, TimelineKey, TimelineKind};
 use koushi_state::{
     AppAction, AppState, ComposerTarget, LocalUserAliasUpdateState, OwnProfile, ProfileState,
     SessionInfo, UserProfile, reduce,
@@ -28,6 +30,7 @@ fn scripted_connection(
             connection_id,
             command_tx,
             composer_draft_leases: Arc::new(ComposerDraftLeaseRegistry::new()),
+            native_artifacts: Arc::new(crate::native_artifact::RejectingNativeArtifactPort),
             media_staging: Arc::new(MediaStagingService::new(Arc::new(
                 crate::media_preparation::MediaPreparationService::default(),
             ))),
@@ -39,6 +42,74 @@ fn scripted_connection(
         event_tx,
         snapshot_tx,
     )
+}
+
+#[tokio::test]
+async fn unrelated_command_cannot_claim_a_native_artifact_registration() {
+    let (mut connection, mut command_rx, _event_tx, _snapshot_tx) = scripted_connection(1);
+    let registry = Arc::new(crate::native_artifact::NativeArtifactRegistry::new());
+    connection.native_artifacts = registry.clone();
+    let request_id = connection.next_request_id();
+
+    let result = connection
+        .command_handle()
+        .command_with_native_artifact_and_admission(
+            CoreCommand::App(koushi_protocol::AppCommand::UpdateSettings {
+                request_id,
+                patch: koushi_state::SettingsPatch::default(),
+            }),
+            crate::native_artifact::NativeArtifactKind::RoomKeyExportDestination,
+            std::path::PathBuf::from("synthetic-path"),
+        )
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(CommandSubmitError::NativeArtifact(
+            crate::native_artifact::NativeArtifactError::Missing
+        ))
+    ));
+    assert!(registry.is_empty());
+    assert!(matches!(
+        command_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test]
+async fn cancelled_native_artifact_enqueue_releases_the_registered_path() {
+    let (mut connection, _command_rx, _event_tx, _snapshot_tx) = scripted_connection(4);
+    let registry = Arc::new(crate::native_artifact::NativeArtifactRegistry::new());
+    connection.native_artifacts = registry.clone();
+
+    for _ in 0..4 {
+        let request_id = connection.next_request_id();
+        connection
+            .command(CoreCommand::App(
+                koushi_protocol::AppCommand::UpdateSettings {
+                    request_id,
+                    patch: koushi_state::SettingsPatch::default(),
+                },
+            ))
+            .await
+            .expect("fill command queue");
+    }
+
+    let request_id = connection.next_request_id();
+    let command_handle = connection.command_handle();
+    let mut submission = Box::pin(command_handle.command_with_native_artifact_and_admission(
+        CoreCommand::Account(koushi_protocol::AccountCommand::ExportRoomKeys {
+            request_id,
+            request: koushi_protocol::RoomKeyExportRequest {
+                passphrase: koushi_state::AuthSecret::new("synthetic-passphrase"),
+            },
+        }),
+        crate::native_artifact::NativeArtifactKind::RoomKeyExportDestination,
+        std::path::PathBuf::from("synthetic-path"),
+    ));
+    assert!(submission.as_mut().now_or_never().is_none());
+    drop(submission);
+    assert!(registry.is_empty());
 }
 
 fn selected_snapshot(room_id: &str, generation: u64) -> VersionedAppStateSnapshot {
@@ -58,7 +129,7 @@ async fn committed_lifecycle_waits_for_the_matching_published_snapshot() {
         .recv()
         .await
         .expect("select command")
-        .command
+        .command()
         .request_id();
 
     event_tx
@@ -95,7 +166,7 @@ async fn select_room_waiter_recovers_lag_from_latest_watch_snapshot() {
                 connection_id: RuntimeConnectionId(99),
                 sequence: 1,
             },
-            failure: crate::failure::CoreFailure::SessionRequired,
+            failure: koushi_protocol::failure::CoreFailure::SessionRequired,
         })
         .expect("first event");
     event_tx
@@ -104,7 +175,7 @@ async fn select_room_waiter_recovers_lag_from_latest_watch_snapshot() {
                 connection_id: RuntimeConnectionId(99),
                 sequence: 2,
             },
-            failure: crate::failure::CoreFailure::SessionRequired,
+            failure: koushi_protocol::failure::CoreFailure::SessionRequired,
         })
         .expect("overflowing event");
     let published = selected_snapshot(room_id, 23);
@@ -127,19 +198,19 @@ async fn matching_operation_failure_returns_the_typed_core_failure() {
         .recv()
         .await
         .expect("select command")
-        .command
+        .command()
         .request_id();
 
     event_tx
         .send(CoreEvent::OperationFailed {
             request_id,
-            failure: crate::failure::CoreFailure::SessionRequired,
+            failure: koushi_protocol::failure::CoreFailure::SessionRequired,
         })
         .expect("matching failure");
     assert_eq!(
         waiter.await,
         Err(SelectRoomError::OperationFailed(
-            crate::failure::CoreFailure::SessionRequired
+            koushi_protocol::failure::CoreFailure::SessionRequired
         ))
     );
 }
@@ -156,7 +227,7 @@ async fn matching_superseded_lifecycle_returns_the_typed_noop() {
         .recv()
         .await
         .expect("select command")
-        .command
+        .command()
         .request_id();
 
     event_tx
@@ -183,7 +254,7 @@ async fn unrelated_request_failures_do_not_settle_room_selection() {
         .recv()
         .await
         .expect("select command")
-        .command
+        .command()
         .request_id();
     let unrelated_request_id = RequestId {
         connection_id: request_id.connection_id,
@@ -193,7 +264,7 @@ async fn unrelated_request_failures_do_not_settle_room_selection() {
     event_tx
         .send(CoreEvent::OperationFailed {
             request_id: unrelated_request_id,
-            failure: crate::failure::CoreFailure::SessionRequired,
+            failure: koushi_protocol::failure::CoreFailure::SessionRequired,
         })
         .expect("unrelated failure");
     event_tx
@@ -251,8 +322,9 @@ fn standalone_composer_command_permit_outlives_activation_lease() {
         connection_id: RuntimeConnectionId(1),
         command_tx,
         composer_draft_leases: Arc::clone(&composer_draft_leases),
+        native_artifacts: Arc::new(crate::native_artifact::RejectingNativeArtifactPort),
     };
-    let account = koushi_key::SessionKeyId {
+    let account = koushi_protocol::SessionKeyId {
         homeserver: "https://example.invalid".to_owned(),
         user_id: "@permit:example.invalid".to_owned(),
         device_id: "DEVICE".to_owned(),
@@ -370,6 +442,7 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
         connection_id: RuntimeConnectionId(7),
         command_tx,
         composer_draft_leases: Arc::new(ComposerDraftLeaseRegistry::new()),
+        native_artifacts: Arc::new(crate::native_artifact::RejectingNativeArtifactPort),
         media_staging: Arc::new(MediaStagingService::new(Arc::new(
             crate::media_preparation::MediaPreparationService::default(),
         ))),
@@ -389,7 +462,7 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
         cause_request_id: None,
         key,
         actor_generation: 0,
-        generation: crate::ids::TimelineGeneration(0),
+        generation: koushi_protocol::ids::TimelineGeneration(0),
         items: vec![TimelineItem {
             request_state: None,
             id: TimelineItemId::Event {
@@ -425,12 +498,12 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
             media: None,
             link_previews: None,
             link_ranges: Vec::new(),
-            reactions: vec![crate::event::ReactionGroup {
+            reactions: vec![koushi_protocol::event::ReactionGroup {
                 key: "👍".to_owned(),
                 count: 1,
                 reacted_by_me: false,
                 my_reaction_event_id: None,
-                sender_preview: vec![crate::event::ReactionSender {
+                sender_preview: vec![koushi_protocol::event::ReactionSender {
                     user_id: "@bob:example.invalid".to_owned(),
                     display_label: Some("Bob Room Name".to_owned()),
                 }],
@@ -478,8 +551,8 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
     };
     let _ = event_tx.send(CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
         key,
-        generation: crate::ids::TimelineGeneration(0),
-        batch_id: crate::ids::TimelineBatchId(1),
+        generation: koushi_protocol::ids::TimelineGeneration(0),
+        batch_id: koushi_protocol::ids::TimelineBatchId(1),
         diffs: vec![TimelineDiff::PushBack {
             item: TimelineItem {
                 request_state: None,

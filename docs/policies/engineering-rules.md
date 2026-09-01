@@ -7,7 +7,7 @@ build gates. AGENTS.md remains the operational how-to (permissions, install
 caveats, recovery steps); durable rules discovered there are promoted to
 REPOSITORY_RULES.md or this document.
 
-Last amended: 2026-09-04.
+Last amended: 2026-09-05.
 
 ## Design Simplicity
 
@@ -380,9 +380,12 @@ Rules:
    SDK SQLite media store. A separated SDK `cache_path` must retain the same
    required `MatrixClientStoreKey`, and SDK media retention is the sole
    persistent retention policy. Koushi may keep decrypted renderable bytes only
-   in the account/session-scoped in-memory `koushi-thumbnail://` cache. That
-   cache must be bounded by both entry count and owned bytes, refresh recency on
-   access, and reject an over-bound single item before returning a Ready URL. A
+   in the account/session-scoped in-memory renderable-thumbnail cache. Core,
+   state and protocol expose an opaque reference, never a Tauri URI; the desktop
+   adapter may mint `koushi-thumbnail://` and a native adapter may consume bytes.
+   The cache must be bounded by both entry count and owned bytes, refresh recency
+   on access, and reject an over-bound single item before returning a Ready
+   reference. A
    separate plaintext avatar/link-preview cache and automatic `file://` URLs are
    prohibited; legacy plaintext directories are cleanup-only.
    Personal local user aliases are private account-data-backed profile state:
@@ -452,8 +455,9 @@ Rules:
 2. Raw SDK errors may be printed only behind an explicit debug/test
    diagnostic switch. They must never reach `AppState`, committed logs,
    normal test fixtures, or release diagnostics.
-3. Public boundary types (`CoreCommand`, `CoreEvent`, snapshot DTOs, Tauri DTO
-   mirrors, and shared QA payloads) must treat `Debug` as artifact-facing. Use
+3. Public boundary types (`koushi-protocol` commands/events/identities/failures/
+   state updates, snapshot DTOs, Tauri DTO mirrors, and shared QA payloads) must
+   treat `Debug` as artifact-facing. Use
    derived `Debug` only when every field is safe if copied into CI logs or a
    GitHub issue. Use custom redacted `Debug` for any field that may contain
    message bodies, search snippets/queries, attachment names, room/user/event/
@@ -1033,8 +1037,9 @@ PTY handling, prompt line order) is documented in `AGENTS.md`.
 ## Build, Dependencies, QA Gates
 
 0. New Matrix behavior is implemented and verified headless-first: it lands
-   in `koushi-core`, is exercised via `CoreCommand`/`CoreEvent`
-   against local Tuwunel/Synapse homeserver QA, and only then is wired into
+   in `koushi-core`, is exercised by the non-default `koushi-qa` package via
+   `koushi-protocol` `CoreCommand`/`CoreEvent` against local Tuwunel/Synapse
+   homeserver QA, and only then is wired into
    Tauri/React. GUI-first Matrix behavior is prohibited.
 1. The checked-out `vendor/matrix-rust-sdk` submodule is the authoritative
    Matrix Rust SDK source for this workspace. All root workspace Matrix SDK
@@ -1071,13 +1076,13 @@ PTY handling, prompt line order) is documented in `AGENTS.md`.
    that affect login, recovery, sync, encrypted restore, search, room cleanup,
    or logout.
 5. Core crates stay platform-portable (a future browser/wasm target must not
-   be precluded): no Tauri/OS/filesystem types in `CoreCommand`/`CoreEvent`/
-   `AppStateSnapshot`; task spawn and timers via executor abstractions, not
-   direct `tokio::spawn`/`tokio::time` in actor logic; `keyring`, paths, and
-   store config only behind `StoreActor`/adapter ports;
-   `koushi-state` and `koushi-search` must compile for
-   `wasm32-unknown-unknown`. See Platform Portability in
-   `docs/architecture/overview.md`.
+   be precluded): `koushi-protocol` owns command/event/identity/failure/state-
+   update DTOs with no Tauri/OS/filesystem/SDK/async-runtime types; task spawn
+   and timers use executor abstractions, not direct `tokio::spawn`/
+   `tokio::time` in actor logic; `keyring`, paths, and store config stay behind
+   `StoreActor`/adapter ports; `koushi-state`, `koushi-search`, and
+   `koushi-protocol` compile for `wasm32-unknown-unknown`. See Platform
+   Portability in `docs/architecture/overview.md`.
 6. Japanese/CJK product semantics remain Rust-owned and platform-portable.
    Catalog completeness is tested in `apps/desktop/src/i18n`, but CJK
    normalization, display sort keys, search query variants, and highlight

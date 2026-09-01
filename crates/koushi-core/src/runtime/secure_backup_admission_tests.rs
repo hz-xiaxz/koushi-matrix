@@ -1,7 +1,6 @@
 use super::{account_command_projected_action, secure_backup_setup_projection_failure};
-use crate::{
-    AccountCommand, CoreFailure, RequestId, RuntimeConnectionId, SecureBackupSetupRequest,
-};
+use crate::{CoreFailure, RequestId, RuntimeConnectionId};
+use koushi_protocol::{AccountCommand, SecureBackupSetupRequest};
 use koushi_state::{
     AppAction, AppState, SecureBackupGateState, SecureBackupSetupIntent, SecureBackupSetupState,
     SessionInfo, SessionState,
@@ -15,7 +14,7 @@ fn request(intent: SecureBackupSetupIntent) -> AccountCommand {
         },
         request: SecureBackupSetupRequest {
             passphrase: None,
-            recovery_key_destination_path: Some("/tmp/recovery-key.txt".into()),
+            recovery_key_destination_requested: true,
             intent,
         },
     }

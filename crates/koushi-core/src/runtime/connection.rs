@@ -1,18 +1,23 @@
 use super::{CoreCommandEnvelope, CoreRuntime};
-use crate::command::{CoreCommand, RoomCommand};
+use crate::command_policy::{CoreCommandPolicy, native_artifact_for_command};
 use crate::composer_draft_lifecycle::{
     ComposerDraftCommandPermit, ComposerDraftLeaseAdmission, ComposerDraftLeaseAdmissionFailure,
     ComposerDraftLeaseFailure, ComposerDraftLeaseId, ComposerDraftLeaseRegistry,
     ComposerDraftScope, ComposerRendererGeneration,
 };
-#[cfg(test)]
-use crate::event::IntentOutcome;
-use crate::event::{
-    AppStateSnapshot, CoreEvent, IntentNoOpReason, VersionedAppStateSnapshot,
+use crate::event_projection::{
     project_room_event_display_labels, project_timeline_event_display_labels,
 };
-use crate::ids::{RequestId, RuntimeConnectionId};
 use crate::media_staging::MediaStagingService;
+use crate::native_artifact::{NativeArtifactError, NativeArtifactKind, NativeArtifactPort};
+use koushi_protocol::command::{CoreCommand, RoomCommand};
+#[cfg(test)]
+use koushi_protocol::event::IntentOutcome;
+use koushi_protocol::event::{CoreEvent, IntentNoOpReason};
+use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
+use koushi_protocol::state_update::{
+    AppStateSnapshot, CoreCommandAdmission, VersionedAppStateSnapshot,
+};
 use koushi_state::ComposerDraftRevision;
 use std::{
     sync::{
@@ -35,6 +40,8 @@ pub enum CommandSubmitError {
     ComposerLeaseNotRequired,
     #[error("composer draft lease admission failed")]
     ComposerLease(ComposerDraftLeaseFailure),
+    #[error("native artifact registration failed")]
+    NativeArtifact(NativeArtifactError),
 }
 
 /// Typed terminal failures returned by [`CoreConnection::select_room_and_wait`].
@@ -54,7 +61,7 @@ pub enum SelectRoomError {
     #[error("room selection failed without a state change: {0:?}")]
     FailedNoOp(IntentNoOpReason),
     #[error("room selection operation failed: {0:?}")]
-    OperationFailed(crate::failure::CoreFailure),
+    OperationFailed(koushi_protocol::failure::CoreFailure),
     #[error("core event stream closed")]
     EventStreamClosed,
     #[error("room selection timed out")]
@@ -70,19 +77,13 @@ pub struct EventStreamLag {
     pub skipped: u64,
 }
 
-/// Generation at which Core has handled a command and published its
-/// synchronous admission state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CoreCommandAdmission {
-    pub admitted_generation: u64,
-}
-
 /// One attached consumer: allocates request ids, submits commands, and
 /// observes the shared event stream plus the latest snapshot.
 pub struct CoreConnection {
     connection_id: RuntimeConnectionId,
     command_tx: mpsc::Sender<CoreCommandEnvelope>,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
+    pub(super) native_artifacts: Arc<dyn NativeArtifactPort>,
     pub(super) media_staging: Arc<MediaStagingService>,
     pub(super) event_rx: broadcast::Receiver<CoreEvent>,
     pub(super) snapshot_rx: watch::Receiver<VersionedAppStateSnapshot>,
@@ -96,6 +97,28 @@ pub struct CoreCommandHandle {
     connection_id: RuntimeConnectionId,
     command_tx: mpsc::Sender<CoreCommandEnvelope>,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
+    native_artifacts: Arc<dyn NativeArtifactPort>,
+}
+
+struct NativeArtifactRegistrationGuard {
+    port: Arc<dyn NativeArtifactPort>,
+    request_id: RequestId,
+    kind: NativeArtifactKind,
+    armed: bool,
+}
+
+impl NativeArtifactRegistrationGuard {
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for NativeArtifactRegistrationGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.port.unregister(self.request_id, self.kind);
+        }
+    }
 }
 
 impl CoreRuntime {
@@ -108,6 +131,7 @@ impl CoreRuntime {
             ),
             command_tx: self.command_tx.clone(),
             composer_draft_leases: Arc::clone(&self.composer_draft_leases),
+            native_artifacts: Arc::clone(&self.native_artifacts),
             media_staging: Arc::clone(&self.media_staging),
             event_rx: self.event_tx.subscribe(),
             snapshot_rx: self.snapshot_rx.clone(),
@@ -127,7 +151,7 @@ impl CoreCommandHandle {
             return Err(CommandSubmitError::ComposerLeaseRequired);
         }
         self.command_tx
-            .send(CoreCommandEnvelope {
+            .send(CoreCommandEnvelope::Public {
                 command,
                 composer_permit: None,
                 admission: None,
@@ -148,13 +172,56 @@ impl CoreCommandHandle {
         }
         let (admission_tx, admission_rx) = oneshot::channel();
         self.command_tx
-            .send(CoreCommandEnvelope {
+            .send(CoreCommandEnvelope::Public {
                 command,
                 composer_permit: None,
                 admission: Some(admission_tx),
             })
             .await
             .map_err(|_| CommandSubmitError::RuntimeClosed)?;
+        admission_rx
+            .await
+            .map_err(|_| CommandSubmitError::RuntimeClosed)
+    }
+
+    /// Register one native path and transfer its ownership atomically with
+    /// command enqueue. Cancellation before enqueue removes the registration;
+    /// after enqueue, Core owns consumption or rejection cleanup.
+    pub async fn command_with_native_artifact_and_admission(
+        &self,
+        command: CoreCommand,
+        kind: NativeArtifactKind,
+        path: std::path::PathBuf,
+    ) -> Result<CoreCommandAdmission, CommandSubmitError> {
+        self.validate_request_id(&command)?;
+        if command.composer_draft_scope().is_some() {
+            return Err(CommandSubmitError::ComposerLeaseRequired);
+        }
+        let request_id = command.request_id();
+        if native_artifact_for_command(&command) != Some((request_id, kind)) {
+            return Err(CommandSubmitError::NativeArtifact(
+                NativeArtifactError::Missing,
+            ));
+        }
+        self.native_artifacts
+            .register(request_id, kind, path)
+            .map_err(CommandSubmitError::NativeArtifact)?;
+        let mut registration = NativeArtifactRegistrationGuard {
+            port: Arc::clone(&self.native_artifacts),
+            request_id,
+            kind,
+            armed: true,
+        };
+        let (admission_tx, admission_rx) = oneshot::channel();
+        self.command_tx
+            .send(CoreCommandEnvelope::Public {
+                command,
+                composer_permit: None,
+                admission: Some(admission_tx),
+            })
+            .await
+            .map_err(|_| CommandSubmitError::RuntimeClosed)?;
+        registration.disarm();
         admission_rx
             .await
             .map_err(|_| CommandSubmitError::RuntimeClosed)
@@ -211,11 +278,25 @@ impl CoreCommandHandle {
         lease_id: ComposerDraftLeaseId,
         command: CoreCommand,
     ) -> Result<CoreCommandAdmission, CommandSubmitError> {
-        let mut envelope = self.admit_composer_command(generation, lease_id, command)?;
+        let envelope = self.admit_composer_command(generation, lease_id, command)?;
         let (admission_tx, admission_rx) = oneshot::channel();
-        envelope.admission = Some(admission_tx);
+        let (command, composer_permit) = match envelope {
+            CoreCommandEnvelope::Public {
+                command,
+                composer_permit,
+                admission: _,
+            } => (command, composer_permit),
+            #[cfg(any(test, feature = "test-hooks"))]
+            CoreCommandEnvelope::Qa(_) => {
+                unreachable!("composer admission creates a public command")
+            }
+        };
         self.command_tx
-            .send(envelope)
+            .send(CoreCommandEnvelope::Public {
+                command,
+                composer_permit,
+                admission: Some(admission_tx),
+            })
             .await
             .map_err(|_| CommandSubmitError::RuntimeClosed)?;
         admission_rx
@@ -262,7 +343,7 @@ impl CoreCommandHandle {
             .composer_draft_leases
             .try_command_permit(generation, lease_id, &scope)
             .map_err(CommandSubmitError::ComposerLease)?;
-        Ok(CoreCommandEnvelope {
+        Ok(CoreCommandEnvelope::Public {
             command,
             composer_permit: Some(composer_permit),
             admission: None,
@@ -305,6 +386,7 @@ impl CoreConnection {
                 connection_id: RuntimeConnectionId(41),
                 command_tx,
                 composer_draft_leases: Arc::new(ComposerDraftLeaseRegistry::new()),
+                native_artifacts: Arc::new(crate::native_artifact::RejectingNativeArtifactPort),
                 media_staging: Arc::new(MediaStagingService::new(Arc::new(
                     crate::media_preparation::MediaPreparationService::default(),
                 ))),
@@ -323,6 +405,72 @@ impl CoreConnection {
         self.connection_id
     }
 
+    pub fn register_native_artifact(
+        &self,
+        request_id: RequestId,
+        kind: NativeArtifactKind,
+        path: std::path::PathBuf,
+    ) -> Result<(), NativeArtifactError> {
+        self.native_artifacts.register(request_id, kind, path)
+    }
+
+    pub fn unregister_native_artifact(&self, request_id: RequestId, kind: NativeArtifactKind) {
+        self.native_artifacts.unregister(request_id, kind);
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn qa_set_local_device_blacklisted(
+        &self,
+        target: koushi_state::VerificationTarget,
+        room_id: String,
+    ) -> Result<(), ()> {
+        let request_id = self.next_request_id();
+        let (acknowledged, result) = oneshot::channel();
+        self.command_tx
+            .send(super::CoreCommandEnvelope::Qa(
+                super::CoreQaCommand::SetLocalDeviceBlacklisted {
+                    request_id,
+                    target,
+                    room_id,
+                    acknowledged,
+                },
+            ))
+            .await
+            .map_err(|_| ())?;
+        result.await.map_err(|_| ())?
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn qa_refresh_device_keys_and_assert_known(
+        &self,
+        target: koushi_state::VerificationTarget,
+    ) -> Result<(), ()> {
+        let request_id = self.next_request_id();
+        let (acknowledged, result) = oneshot::channel();
+        self.command_tx
+            .send(super::CoreCommandEnvelope::Qa(
+                super::CoreQaCommand::RefreshDeviceKeysAndAssertKnown {
+                    request_id,
+                    target,
+                    acknowledged,
+                },
+            ))
+            .await
+            .map_err(|_| ())?;
+        result.await.map_err(|_| ())?
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn sync_once_for_qa(&self) -> Result<(), CommandSubmitError> {
+        let request_id = self.next_request_id();
+        self.command_tx
+            .send(super::CoreCommandEnvelope::Qa(
+                super::CoreQaCommand::SyncOnce { request_id },
+            ))
+            .await
+            .map_err(|_| CommandSubmitError::RuntimeClosed)
+    }
+
     /// Clone a lightweight command submitter for callers that must not hold
     /// the full connection guard while awaiting bounded channel capacity.
     pub fn command_handle(&self) -> CoreCommandHandle {
@@ -330,6 +478,7 @@ impl CoreConnection {
             connection_id: self.connection_id,
             command_tx: self.command_tx.clone(),
             composer_draft_leases: Arc::clone(&self.composer_draft_leases),
+            native_artifacts: Arc::clone(&self.native_artifacts),
         }
     }
 
@@ -430,7 +579,7 @@ impl CoreConnection {
 
     pub async fn send_prepared_uploads(
         &mut self,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: koushi_protocol::SessionKeyId,
         generation: crate::composer_draft_lifecycle::ComposerRendererGeneration,
         lease: crate::composer_draft_lifecycle::ComposerDraftLeaseId,
         target: koushi_state::ComposerTarget,
@@ -476,7 +625,7 @@ impl CoreConnection {
 
     pub fn acquire_composer_draft_lease_for_active_target(
         &self,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: koushi_protocol::SessionKeyId,
         generation: ComposerRendererGeneration,
         target: koushi_state::ComposerTarget,
     ) -> Result<ComposerDraftLeaseAdmission, ComposerDraftLeaseAdmissionFailure> {
@@ -504,7 +653,7 @@ impl CoreConnection {
 
     pub fn acquire_composer_draft_command_permit_for_active_target(
         &self,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: koushi_protocol::SessionKeyId,
         target: koushi_state::ComposerTarget,
         generation: ComposerRendererGeneration,
         lease_id: ComposerDraftLeaseId,
@@ -697,7 +846,7 @@ impl CoreConnection {
 
 fn validate_active_composer_scope(
     snapshot: &AppStateSnapshot,
-    expected_account: &koushi_key::SessionKeyId,
+    expected_account: &koushi_protocol::SessionKeyId,
     target: &koushi_state::ComposerTarget,
 ) -> Result<(), ComposerDraftLeaseAdmissionFailure> {
     let koushi_state::SessionState::Ready(info) = &snapshot.session else {

@@ -1,14 +1,14 @@
 use super::actor::{MissingSpaceChildLink, RoomActor};
 use super::list_observer::{record_residency_ack_failure, record_residency_admission_failure};
-use crate::command::{CreateRoomOptions, CreateRoomVisibility};
-use crate::event::{CoreEvent, ReportKind, RoomEvent};
-use crate::failure::{CoreFailure, RoomFailureKind};
-use crate::ids::RequestId;
 use crate::timeline::{
     RoomRemovalCause, TimelineSubscriptionResidencyHandle, TimelineSubscriptionResidencyPermit,
 };
 use crate::unread_trace;
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_protocol::command::{CreateRoomOptions, CreateRoomVisibility};
+use koushi_protocol::event::{CoreEvent, ReportKind, RoomEvent};
+use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
+use koushi_protocol::ids::RequestId;
 use koushi_sdk::{
     MatrixClientSession, MatrixCreateRoomOptions, MatrixCreateRoomParentSpace,
     MatrixCreateRoomVisibility, MatrixRoomOperationError, MatrixRoomTagKind,
@@ -321,7 +321,7 @@ impl RoomActor {
     async fn link_created_room_to_parent_space(
         &self,
         session: &MatrixClientSession,
-        parent_space: Option<&crate::command::CreateRoomParentSpace>,
+        parent_space: Option<&koushi_protocol::command::CreateRoomParentSpace>,
         room_id: &str,
         request_id: RequestId,
     ) {

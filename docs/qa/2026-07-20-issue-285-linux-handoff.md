@@ -135,10 +135,10 @@ short gates:
 ```bash
 cargo test -p koushi-core --test send_queue_fast fast_send_queue_feedback_runs_production_runtime_without_homeserver -- --exact --nocapture
 cargo test -p koushi-core --test send_queue_fast
-cargo test -p koushi-core --features qa-bin --bin headless-core-qa
+cargo test -p koushi-qa --features qa-bin --bin headless-core-qa
 cargo test -p koushi-core --lib display_projection
 npm --prefix apps/desktop test -- src/domain/timelineStore.test.ts --reporter=dot
-cargo check -p koushi-core --features qa-bin --bin headless-core-qa
+cargo check -p koushi-qa --features qa-bin --bin headless-core-qa
 npm --prefix apps/desktop run typecheck
 cargo fmt --all -- --check
 git diff --check

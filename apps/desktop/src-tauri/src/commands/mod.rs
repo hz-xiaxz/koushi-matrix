@@ -20,27 +20,29 @@ use std::{
 };
 
 use koushi_core::{
-    AccountCommand, AccountKey, AppCommand, CoreCommand, CoreConnection, CoreEvent, CoreFailure,
-    CreateRoomOptions, EncryptionDebugOperationKind, EncryptionDebugOperationOutcome,
-    IntentNoOpReason, IntentOutcome, MediaDownloadSelection, OutcomeCorrelation,
-    PaginationDirection, RequestId, RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation,
-    RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest, RoomKeyReshareOutcome,
-    RoomOperationKind, SearchCommand, SearchScope, SecureBackupPassphraseChangeRequest,
+    CoreConnection, NativeArtifactKind, OutcomeCorrelation, RequestOutcome, RequestOutcomeError,
+    RequestOutcomeExpectation, RoomOperationKind,
+};
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_protocol::{
+    AccountCommand, AccountKey, AppCommand, CoreCommand, CoreEvent, CoreFailure, CreateRoomOptions,
+    EncryptionDebugOperationOutcome, IntentNoOpReason, IntentOutcome, MediaDownloadSelection,
+    PaginationDirection, RequestId, RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest,
+    RoomKeyReshareOutcome, SearchCommand, SearchScope, SecureBackupPassphraseChangeRequest,
     SecureBackupSetupRequest, SetAvatarRequest, SyncCommand, TimelineBatchId, TimelineCommand,
     TimelineEvent, TimelineGapId, TimelineGeneration, TimelineKey, TimelineKind,
     TimelineViewportObservation,
 };
-use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentSort, AuthSecret,
     ComposerDocument, ComposerDraftRevision, ComposerFormattingOptions, ComposerKeyEvent,
     ComposerResolvedAction, ComposerResolverContext, ComposerSurface, DirectoryQuery,
-    DisplayPlatform, FilesViewScope, IdentityResetAuthRequest, ImageUploadCompressionMode,
-    InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface, PresenceKind,
-    RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode, RoomSettingChange,
-    RoomTagKind, SessionInfo, SettingsPatch, StagedUploadCompressionChoice, SubmissionId,
-    ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor, VerificationCancelReason,
-    build_formatted_message_draft,
+    DisplayPlatform, EncryptionDebugOperationKind, FilesViewScope, IdentityResetAuthRequest,
+    ImageUploadCompressionMode, InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface,
+    PresenceKind, RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode,
+    RoomSettingChange, RoomTagKind, SessionInfo, SettingsPatch, StagedUploadCompressionChoice,
+    SubmissionId, ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor,
+    VerificationCancelReason, build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -142,12 +144,43 @@ pub(crate) async fn submit_core_command_with_admission(
 }
 
 /// Allocate a `RequestId` from the command-dispatch connection.
-async fn next_request_id(state: &CoreRuntimeState) -> koushi_core::RequestId {
+async fn next_request_id(state: &CoreRuntimeState) -> koushi_protocol::RequestId {
     state.connection.lock().await.next_request_id()
 }
 
+async fn submit_core_command_with_native_artifact(
+    state: &CoreRuntimeState,
+    request_id: RequestId,
+    kind: NativeArtifactKind,
+    path: String,
+    command: CoreCommand,
+) -> Result<FrontendCommandAdmission, String> {
+    if path.trim().is_empty() {
+        return Err("native artifact path is empty".to_owned());
+    }
+    if command.request_id() != request_id {
+        return Err("native artifact request correlation mismatch".to_owned());
+    }
+    let command_handle = { state.connection.lock().await.command_handle() };
+
+    match tokio::time::timeout(
+        CORE_COMMAND_SUBMIT_TIMEOUT,
+        command_handle.command_with_native_artifact_and_admission(
+            command,
+            kind,
+            PathBuf::from(path),
+        ),
+    )
+    .await
+    {
+        Ok(Ok(admission)) => Ok(FrontendCommandAdmission::from_core(admission)),
+        Ok(Err(error)) => Err(format!("command submit failed: {error}")),
+        Err(_) => Err("command submit timed out".to_owned()),
+    }
+}
+
 pub(crate) fn command_settlement(
-    snapshot: koushi_core::event::VersionedAppStateSnapshot,
+    snapshot: koushi_protocol::state_update::VersionedAppStateSnapshot,
 ) -> FrontendCommandSettlement {
     FrontendCommandSettlement::from_published_generation(snapshot.generation)
 }

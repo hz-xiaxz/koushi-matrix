@@ -1,8 +1,8 @@
 use super::EncryptionDebugTestControl;
 
-use crate::command::RoomCommand;
+use koushi_protocol::command::RoomCommand;
 
-use crate::event::{
+use koushi_protocol::event::{
     CoreEvent, EncryptionDebugOperationOutcome as CoreEncryptionDebugOutcome, RoomEvent,
 };
 

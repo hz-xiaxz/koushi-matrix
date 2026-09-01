@@ -8,9 +8,10 @@ use koushi_state::RoomMentionPermission;
 
 use super::{MentionMemberInput, project_candidates};
 use crate::{
-    AccountKey, RequestId, RoomCommand, RuntimeConnectionId,
+    RequestId, RuntimeConnectionId,
     room::{RoomActor, RoomMessage},
 };
+use koushi_protocol::{AccountKey, RoomCommand};
 
 fn member(
     user_id: &str,

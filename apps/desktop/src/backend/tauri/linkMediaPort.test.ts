@@ -46,9 +46,6 @@ describe("Tauri link/media port", () => {
     expect(tauriLinkMediaPort.mediaSourceUrl("asset://localhost/avatar.png")).toBe(
       "asset://localhost/avatar.png"
     );
-    expect(tauriLinkMediaPort.mediaSourceUrl("koushi-thumbnail://localhost/avatar/abc123")).toBe(
-      "koushi-thumbnail://localhost/avatar/abc123"
-    );
     expect(tauriLinkMediaPort.mediaSourceUrl("file:///tmp/avatar%20image.png")).toBe(
       "asset:///tmp/avatar image.png"
     );
@@ -56,6 +53,24 @@ describe("Tauri link/media port", () => {
     expect(tauriLinkMediaPort.mediaSourceUrl("/tmp/media-downloads/report.pdf")).toBe(
       "asset:///tmp/media-downloads/report.pdf"
     );
+  });
+
+  it("mints the desktop thumbnail URI only for a validated opaque Core reference", () => {
+    expect(tauriLinkMediaPort.renderableThumbnailSourceUrl("avatar/0123456789abcdef")).toBe(
+      "koushi-thumbnail://localhost/avatar/0123456789abcdef"
+    );
+    expect(
+      tauriLinkMediaPort.renderableThumbnailSourceUrl("link-preview/fedcba9876543210")
+    ).toBe("koushi-thumbnail://localhost/link-preview/fedcba9876543210");
+    expect(tauriLinkMediaPort.renderableThumbnailSourceUrl("data:image/gif;base64,R0lGODlh")).toBe(
+      "data:image/gif;base64,R0lGODlh"
+    );
+    expect(tauriLinkMediaPort.renderableThumbnailSourceUrl("../private.bin")).toBeNull();
+    expect(
+      tauriLinkMediaPort.renderableThumbnailSourceUrl(
+        "koushi-thumbnail://localhost/avatar/already-minted"
+      )
+    ).toBeNull();
   });
 
   it("preserves the default-path, dialog and save command contract", async () => {

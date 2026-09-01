@@ -10,9 +10,9 @@ use matrix_sdk::ruma::events::room::MediaSource as SdkMediaSource;
 use regex::Regex;
 use url::Url;
 
-use crate::event::{LinkPreview, LinkPreviewImage, LinkPreviewState, TimelineLinkRange};
-use crate::event::{TimelineFormattedBody, TimelineMediaSource};
 use crate::renderable_thumbnail::{RenderableThumbnailKind, store_renderable_thumbnail};
+use koushi_protocol::event::{LinkPreview, LinkPreviewImage, LinkPreviewState, TimelineLinkRange};
+use koushi_protocol::event::{TimelineFormattedBody, TimelineMediaSource};
 
 pub const MAX_LINK_PREVIEWS_PER_MESSAGE: usize = 3;
 

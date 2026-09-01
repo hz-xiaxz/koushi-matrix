@@ -1,8 +1,8 @@
 use super::actor::RoomActor;
 use super::operations::{RoomOperationKind, classify_room_error, operation_failure_kind};
-use crate::event::{CoreEvent, RoomEvent};
-use crate::failure::CoreFailure;
-use crate::ids::RequestId;
+use koushi_protocol::event::{CoreEvent, RoomEvent};
+use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::ids::RequestId;
 use koushi_sdk::{
     MatrixPreviewJoinability, MatrixPreviewMembership, MatrixPublicRoomDirectoryQuery,
     MatrixPublicRoomDirectoryRoom, MatrixRoomPreview,

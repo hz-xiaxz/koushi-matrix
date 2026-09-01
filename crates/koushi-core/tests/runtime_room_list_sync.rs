@@ -9,8 +9,8 @@ use std::{
     time::Duration,
 };
 
-use koushi_core::command::{AccountCommand, AppCommand, CoreCommand};
 use koushi_core::{SyncEvent, runtime::CoreRuntime};
+use koushi_protocol::command::{AccountCommand, AppCommand, CoreCommand};
 use koushi_state::{AppAction, AuthSecret, LoginRequest, RoomListFilter, SessionState, SyncState};
 use matrix_sdk::test_utils::mocks::MatrixMockServer;
 use serde_json::{Map, Value, json};

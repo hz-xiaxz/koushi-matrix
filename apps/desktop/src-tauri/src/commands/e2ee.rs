@@ -60,14 +60,14 @@ pub async fn start_session_bootstrap(
 ) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
     let flow_id = request_id.sequence;
-    let admission = submit_core_command_with_admission(
+    let command =
+        build_start_session_bootstrap_command(request_id, flow_id, passphrase.map(AuthSecret::new));
+    let admission = submit_core_command_with_native_artifact(
         state.inner(),
-        build_start_session_bootstrap_command(
-            request_id,
-            flow_id,
-            passphrase.map(AuthSecret::new),
-            recovery_key_destination_path,
-        ),
+        request_id,
+        NativeArtifactKind::RecoveryKeyDestination,
+        recovery_key_destination_path,
+        command,
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
@@ -129,16 +129,26 @@ pub async fn bootstrap_secure_backup(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    let admission = submit_core_command_with_admission(
-        state.inner(),
-        build_bootstrap_secure_backup_command(
-            request_id,
-            passphrase.map(AuthSecret::new),
-            recovery_key_destination_path,
-            intent,
-        ),
-    )
-    .await?;
+    let destination_requested = recovery_key_destination_path.is_some();
+    let command = build_bootstrap_secure_backup_command(
+        request_id,
+        passphrase.map(AuthSecret::new),
+        destination_requested,
+        intent,
+    );
+    let admission = match recovery_key_destination_path {
+        Some(path) => {
+            submit_core_command_with_native_artifact(
+                state.inner(),
+                request_id,
+                NativeArtifactKind::RecoveryKeyDestination,
+                path,
+                command,
+            )
+            .await?
+        }
+        None => submit_core_command_with_admission(state.inner(), command).await?,
+    };
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(admission)
 }
@@ -183,16 +193,26 @@ pub async fn change_secure_backup_passphrase(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    let admission = submit_core_command_with_admission(
-        state.inner(),
-        build_change_secure_backup_passphrase_command(
-            request_id,
-            AuthSecret::new(old_secret),
-            AuthSecret::new(new_passphrase),
-            recovery_key_destination_path,
-        ),
-    )
-    .await?;
+    let destination_requested = recovery_key_destination_path.is_some();
+    let command = build_change_secure_backup_passphrase_command(
+        request_id,
+        AuthSecret::new(old_secret),
+        AuthSecret::new(new_passphrase),
+        destination_requested,
+    );
+    let admission = match recovery_key_destination_path {
+        Some(path) => {
+            submit_core_command_with_native_artifact(
+                state.inner(),
+                request_id,
+                NativeArtifactKind::RecoveryKeyDestination,
+                path,
+                command,
+            )
+            .await?
+        }
+        None => submit_core_command_with_admission(state.inner(), command).await?,
+    };
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(admission)
 }
@@ -205,9 +225,13 @@ pub async fn export_room_keys(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    let admission = submit_core_command_with_admission(
+    let command = build_export_room_keys_command(request_id, AuthSecret::new(passphrase));
+    let admission = submit_core_command_with_native_artifact(
         state.inner(),
-        build_export_room_keys_command(request_id, destination_path, AuthSecret::new(passphrase)),
+        request_id,
+        NativeArtifactKind::RoomKeyExportDestination,
+        destination_path,
+        command,
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
@@ -222,9 +246,13 @@ pub async fn import_room_keys(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    let admission = submit_core_command_with_admission(
+    let command = build_import_room_keys_command(request_id, AuthSecret::new(passphrase));
+    let admission = submit_core_command_with_native_artifact(
         state.inner(),
-        build_import_room_keys_command(request_id, source_path, AuthSecret::new(passphrase)),
+        request_id,
+        NativeArtifactKind::RoomKeyImportSource,
+        source_path,
+        command,
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
@@ -346,13 +374,15 @@ pub async fn submit_identity_reset_oauth(
 }
 
 pub(super) fn build_bootstrap_cross_signing_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     auth: Option<AuthSecret>,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::BootstrapCrossSigning { request_id, auth })
 }
 
-pub(super) fn build_enable_key_backup_command(request_id: koushi_core::RequestId) -> CoreCommand {
+pub(super) fn build_enable_key_backup_command(
+    request_id: koushi_protocol::RequestId,
+) -> CoreCommand {
     CoreCommand::Account(AccountCommand::EnableKeyBackup {
         request_id,
         passphrase: None,
@@ -360,23 +390,23 @@ pub(super) fn build_enable_key_backup_command(request_id: koushi_core::RequestId
 }
 
 pub(super) fn build_bootstrap_secure_backup_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     passphrase: Option<AuthSecret>,
-    recovery_key_destination_path: Option<String>,
+    recovery_key_destination_requested: bool,
     intent: koushi_state::SecureBackupSetupIntent,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::BootstrapSecureBackup {
         request_id,
         request: SecureBackupSetupRequest {
             passphrase,
-            recovery_key_destination_path: recovery_key_destination_path.map(PathBuf::from),
+            recovery_key_destination_requested,
             intent,
         },
     })
 }
 
 pub(super) fn build_recover_secure_backup_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     secret: AuthSecret,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::RecoverSecureBackup {
@@ -386,57 +416,49 @@ pub(super) fn build_recover_secure_backup_command(
 }
 
 pub(super) fn build_retry_secure_backup_inspection_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::RetrySecureBackupInspection { request_id })
 }
 
 pub(super) fn build_change_secure_backup_passphrase_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     old_secret: AuthSecret,
     new_passphrase: AuthSecret,
-    recovery_key_destination_path: Option<String>,
+    recovery_key_destination_requested: bool,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::ChangeSecureBackupPassphrase {
         request_id,
         request: SecureBackupPassphraseChangeRequest {
             old_secret,
             new_passphrase,
-            recovery_key_destination_path: recovery_key_destination_path.map(PathBuf::from),
+            recovery_key_destination_requested,
         },
     })
 }
 
 pub(super) fn build_export_room_keys_command(
-    request_id: koushi_core::RequestId,
-    destination_path: String,
+    request_id: koushi_protocol::RequestId,
     passphrase: AuthSecret,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::ExportRoomKeys {
         request_id,
-        request: RoomKeyExportRequest {
-            destination_path: PathBuf::from(destination_path),
-            passphrase,
-        },
+        request: RoomKeyExportRequest { passphrase },
     })
 }
 
 pub(super) fn build_import_room_keys_command(
-    request_id: koushi_core::RequestId,
-    source_path: String,
+    request_id: koushi_protocol::RequestId,
     passphrase: AuthSecret,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::ImportRoomKeys {
         request_id,
-        request: RoomKeyImportRequest {
-            source_path: PathBuf::from(source_path),
-            passphrase,
-        },
+        request: RoomKeyImportRequest { passphrase },
     })
 }
 
 pub(super) fn build_accept_verification_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     flow_id: u64,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::AcceptVerification {
@@ -462,7 +484,6 @@ pub(super) fn build_start_session_bootstrap_command(
     request_id: RequestId,
     flow_id: u64,
     passphrase: Option<AuthSecret>,
-    recovery_key_destination_path: String,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::StartSessionBootstrap {
         request_id,
@@ -470,7 +491,7 @@ pub(super) fn build_start_session_bootstrap_command(
         auth: None,
         request: SecureBackupSetupRequest {
             passphrase,
-            recovery_key_destination_path: Some(PathBuf::from(recovery_key_destination_path)),
+            recovery_key_destination_requested: true,
             intent: koushi_state::SecureBackupSetupIntent::InitialSetup,
         },
     })
@@ -487,7 +508,7 @@ pub(super) fn build_confirm_session_bootstrap_saved_command(
 }
 
 pub(super) fn build_confirm_sas_verification_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     flow_id: u64,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::ConfirmSasVerification {
@@ -497,7 +518,7 @@ pub(super) fn build_confirm_sas_verification_command(
 }
 
 pub(super) fn build_cancel_verification_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     flow_id: u64,
     reason: VerificationCancelReason,
 ) -> CoreCommand {
@@ -508,12 +529,12 @@ pub(super) fn build_cancel_verification_command(
     })
 }
 
-pub(super) fn build_reset_identity_command(request_id: koushi_core::RequestId) -> CoreCommand {
+pub(super) fn build_reset_identity_command(request_id: koushi_protocol::RequestId) -> CoreCommand {
     CoreCommand::Account(AccountCommand::ResetIdentity { request_id })
 }
 
 pub(super) fn build_cancel_identity_reset_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     flow_id: u64,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::CancelIdentityReset {
@@ -523,7 +544,7 @@ pub(super) fn build_cancel_identity_reset_command(
 }
 
 pub(super) fn build_submit_identity_reset_password_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     flow_id: u64,
     password: AuthSecret,
 ) -> CoreCommand {
@@ -535,7 +556,7 @@ pub(super) fn build_submit_identity_reset_password_command(
 }
 
 pub(super) fn build_submit_identity_reset_oauth_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     flow_id: u64,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::SubmitIdentityResetAuth {
@@ -692,12 +713,11 @@ mod tests {
             fake_request_id(43),
             403,
             Some(AuthSecret::new("private-passphrase")),
-            "/private/recovery-key".to_owned(),
         );
         let debug = format!("{bootstrap:?}");
         assert!(debug.contains("StartSessionBootstrap"), "{debug}");
         assert!(!debug.contains("private-passphrase"), "{debug}");
-        assert!(!debug.contains("/private/recovery-key"), "{debug}");
+        assert!(!debug.contains("destination_path"), "{debug}");
         assert!(matches!(
             super::build_confirm_session_bootstrap_saved_command(fake_request_id(44), 403),
             CoreCommand::Account(AccountCommand::ConfirmSessionBootstrapSaved { flow_id: 403, .. })

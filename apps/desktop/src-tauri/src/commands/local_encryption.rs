@@ -55,12 +55,14 @@ pub async fn reset_local_data(
 }
 
 pub(super) fn build_probe_local_encryption_health_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::ProbeLocalEncryptionHealth { request_id })
 }
 
-pub(super) fn build_reset_local_data_command(request_id: koushi_core::RequestId) -> CoreCommand {
+pub(super) fn build_reset_local_data_command(
+    request_id: koushi_protocol::RequestId,
+) -> CoreCommand {
     CoreCommand::Account(AccountCommand::ResetLocalData { request_id })
 }
 

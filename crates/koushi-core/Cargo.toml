@@ -4,18 +4,9 @@ version = "0.1.0"
 edition = "2024"
 license.workspace = true
 
-[[bin]]
-name = "headless-core-qa"
-path = "src/bin/headless-core-qa.rs"
-required-features = ["qa-bin"]
-
-[[bin]]
-name = "real-homeserver-qa"
-path = "src/bin/real-homeserver-qa.rs"
-required-features = ["qa-bin"]
-
 [dependencies]
 koushi-diagnostics = { path = "../koushi-diagnostics" }
+koushi-protocol = { path = "../koushi-protocol" }
 koushi-sdk = { path = "../koushi-sdk" }
 koushi-key = { path = "../koushi-key" }
 koushi-media = { path = "../koushi-media" }
@@ -34,7 +25,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
 thiserror = "2"
-tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "env-filter"] }
 url = "2"
 vodozemac = "0.10"
 zeroize = "1"
@@ -42,10 +32,8 @@ zeroize = "1"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 
 [features]
-# Exposes CoreRuntime::inject_actions for QA binaries and integration tests.
+# Exposes narrow runtime hooks for koushi-qa and integration tests.
 test-hooks = ["koushi-sdk/test-hooks"]
-# Enables the headless-core-qa binary.
-qa-bin = ["test-hooks"]
 
 [dev-dependencies]
 # Self-reference so integration tests under tests/ automatically enable the

@@ -1,17 +1,17 @@
 use std::{sync::Arc, time::Duration};
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
-#[cfg(feature = "qa-bin")]
+#[cfg(feature = "test-hooks")]
 use koushi_sdk::MatrixClientSession;
-#[cfg(feature = "qa-bin")]
+#[cfg(feature = "test-hooks")]
 use koushi_state::VerificationTarget;
 use koushi_state::{AppAction, SessionInfo};
-#[cfg(feature = "qa-bin")]
+#[cfg(feature = "test-hooks")]
 use matrix_sdk::test_utils::mocks::MatrixMockServer;
 
 use tokio::sync::{broadcast, mpsc, oneshot};
 
-#[cfg(feature = "qa-bin")]
+#[cfg(feature = "test-hooks")]
 use super::refresh_device_keys_and_assert_known;
 use super::{
     PendingTrustTransition, TrustLifecycleDecision, VerificationMethodDiscoveryResult,
@@ -34,10 +34,10 @@ use crate::account::test_support::{
     spawn_named_quarantine_password_server_with_controls,
 };
 
-use crate::event::{AccountEvent, CoreEvent};
 use crate::executor;
+use koushi_protocol::event::{AccountEvent, CoreEvent};
 
-use crate::ids::AccountKey;
+use koushi_protocol::ids::AccountKey;
 
 use futures_util::stream;
 
@@ -941,7 +941,7 @@ fn stale_projection_ack_does_not_consume_pending_promotion() {
     assert!(trust_projection_ack_matches(&pending, 7, 42, true, false));
 }
 
-#[cfg(feature = "qa-bin")]
+#[cfg(feature = "test-hooks")]
 #[tokio::test]
 async fn qa_device_key_refresh_accepts_identityless_exact_device_and_rejects_missing_device() {
     let server = MatrixMockServer::new().await;

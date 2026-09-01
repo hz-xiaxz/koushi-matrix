@@ -15,14 +15,14 @@ use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk_ui::timeline::TimelineItem as SdkTimelineItem;
 
-use crate::command::MediaDownloadSelection;
-use crate::event::{
+use crate::executor;
+use koushi_protocol::command::MediaDownloadSelection;
+use koushi_protocol::event::{
     CoreEvent, TimelineEvent, TimelineItem, TimelineItemId, TimelineMediaKind, TimelineMediaSource,
     TimelineMediaThumbnail,
 };
-use crate::executor;
-use crate::failure::TimelineFailureKind;
-use crate::ids::{RequestId, TimelineKey, TimelineKind};
+use koushi_protocol::failure::TimelineFailureKind;
+use koushi_protocol::ids::{RequestId, TimelineKey, TimelineKind};
 
 // BEGIN GENERATED SIBLING IMPORTS
 use super::actor::{TimelineActor, TimelineActorMessage};
@@ -766,12 +766,12 @@ mod tests {
 
     use matrix_sdk::attachment::AttachmentInfo;
 
-    use crate::command::{UploadMediaKind, UploadMediaRequest};
-    use crate::event::{TimelineDiff, TimelineItemId, TimelineMediaKind};
+    use koushi_protocol::command::{UploadMediaKind, UploadMediaRequest};
+    use koushi_protocol::event::{TimelineDiff, TimelineItemId, TimelineMediaKind};
 
     use matrix_sdk::ruma::uint;
 
-    use crate::command::{
+    use koushi_protocol::command::{
         ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,
         ImageUploadVariantInfo, ImageUploadVariantKind,
     };

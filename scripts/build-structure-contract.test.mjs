@@ -132,7 +132,7 @@ test("CI gates positive invitations on exactly Tuwunel and Synapse", () => {
   }
 
   assert.match(binaryJob, /name: Core QA binary tests/);
-  assert.match(binaryJob, /cargo test -p koushi-core --features qa-bin --bin headless-core-qa/);
+  assert.match(binaryJob, /cargo test -p koushi-qa --features qa-bin --bin headless-core-qa/);
   assert.doesNotMatch(binaryJob, /Conduit|conduit|--server=/);
 });
 

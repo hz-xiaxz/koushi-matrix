@@ -10,7 +10,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-pub(crate) use crate::failure::ReadStateFailureKind;
+pub(crate) use koushi_protocol::failure::ReadStateFailureKind;
 
 pub(crate) const READ_STATE_WAITER_LIMIT: usize = 32;
 pub(crate) const READ_STATE_OUTBOX_ENTRY_LIMIT: usize = 128;

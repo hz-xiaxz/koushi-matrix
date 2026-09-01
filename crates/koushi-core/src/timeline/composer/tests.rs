@@ -11,7 +11,7 @@ use matrix_sdk::ruma::events::room::message::{MessageType, ReplyWithinThread};
 use matrix_sdk_ui::timeline::{Profile, TimelineDetails};
 use tokio::sync::mpsc;
 
-use crate::failure::TimelineFailureKind;
+use koushi_protocol::failure::TimelineFailureKind;
 
 use super::super::item_projection::{
     attachment_reply_for_key, reply_enforce_thread_for_key, timeline_sender_avatar_from_profile,

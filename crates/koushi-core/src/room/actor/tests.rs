@@ -1,10 +1,10 @@
 use super::make_request_id;
 use super::{RoomActor, RoomActorHandle, RoomMessage};
 
-use crate::command::RoomCommand;
+use koushi_protocol::command::RoomCommand;
 
-use crate::event::RoomEvent;
 use crate::executor;
+use koushi_protocol::event::RoomEvent;
 
 use koushi_sdk::MatrixClientSession;
 

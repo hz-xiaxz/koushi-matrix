@@ -10,7 +10,7 @@ fn cache_test_lock() -> MutexGuard<'static, ()> {
 }
 
 #[test]
-fn stores_avatar_and_link_preview_thumbnails_in_memory_with_protocol_urls() {
+fn stores_avatar_and_link_preview_thumbnails_with_opaque_refs() {
     let _guard = cache_test_lock();
     clear_renderable_thumbnail_cache();
 
@@ -28,30 +28,32 @@ fn stores_avatar_and_link_preview_thumbnails_in_memory_with_protocol_urls() {
     .expect("link-preview bytes are within the cache bound");
 
     let AvatarThumbnailState::Ready {
-        source_url,
+        source_ref,
         mime_type,
         ..
     } = avatar
     else {
         panic!("avatar thumbnail should be ready");
     };
-    assert!(source_url.starts_with("koushi-thumbnail://localhost/avatar/"));
+    assert!(source_ref.starts_with("avatar/"));
+    assert!(!source_ref.contains("://"));
     assert_eq!(mime_type.as_deref(), Some("application/octet-stream"));
 
     let AvatarThumbnailState::Ready {
-        source_url,
+        source_ref,
         mime_type,
         ..
     } = link_preview
     else {
         panic!("link-preview thumbnail should be ready");
     };
-    assert!(source_url.starts_with("koushi-thumbnail://localhost/link-preview/"));
+    assert!(source_ref.starts_with("link-preview/"));
+    assert!(!source_ref.contains("://"));
     assert_eq!(mime_type.as_deref(), Some("application/octet-stream"));
 }
 
 #[test]
-fn lookup_renderable_thumbnail_returns_bytes_for_protocol_path() {
+fn lookup_renderable_thumbnail_returns_bytes_for_opaque_ref() {
     let _guard = cache_test_lock();
     clear_renderable_thumbnail_cache();
 
@@ -61,14 +63,11 @@ fn lookup_renderable_thumbnail_returns_bytes_for_protocol_path() {
         b"lookup-bytes".to_vec(),
     )
     .expect("thumbnail bytes are within the cache bound");
-    let AvatarThumbnailState::Ready { source_url, .. } = ready else {
+    let AvatarThumbnailState::Ready { source_ref, .. } = ready else {
         panic!("thumbnail should be ready");
     };
 
-    let path = source_url
-        .strip_prefix("koushi-thumbnail://localhost")
-        .expect("protocol url should have localhost authority");
-    let content = lookup_renderable_thumbnail(path).expect("thumbnail should be cached");
+    let content = lookup_renderable_thumbnail(&source_ref).expect("thumbnail should be cached");
     assert_eq!(content.bytes, b"lookup-bytes");
     assert_eq!(
         content.mime_type.as_deref(),
@@ -77,7 +76,7 @@ fn lookup_renderable_thumbnail_returns_bytes_for_protocol_path() {
 }
 
 #[test]
-fn ready_thumbnail_protocol_urls_survive_session_cache_churn() {
+fn ready_thumbnail_refs_survive_session_cache_churn() {
     let _guard = cache_test_lock();
     clear_renderable_thumbnail_cache();
 
@@ -87,13 +86,9 @@ fn ready_thumbnail_protocol_urls_survive_session_cache_churn() {
         b"pinned-bytes".to_vec(),
     )
     .expect("pinned thumbnail bytes are within the cache bound");
-    let AvatarThumbnailState::Ready { source_url, .. } = ready else {
+    let AvatarThumbnailState::Ready { source_ref, .. } = ready else {
         panic!("thumbnail should be ready");
     };
-    let path = source_url
-        .strip_prefix("koushi-thumbnail://localhost")
-        .expect("protocol url should have localhost authority");
-
     for index in 0..=128 {
         let source = format!("mxc://example.test/churn/{index}");
         let bytes = format!("bytes-{index}").into_bytes();
@@ -101,9 +96,15 @@ fn ready_thumbnail_protocol_urls_survive_session_cache_churn() {
             .expect("churn thumbnail bytes are within the cache bound");
     }
 
-    let content = lookup_renderable_thumbnail(path)
-        .expect("Ready thumbnail URL must remain reconstructible until session clear");
+    let content = lookup_renderable_thumbnail(&source_ref)
+        .expect("Ready thumbnail ref must remain available until session clear");
     assert_eq!(content.bytes, b"pinned-bytes");
+}
+
+#[test]
+fn lookup_rejects_uri_and_traversal_instead_of_parsing_adapter_schemes() {
+    assert!(lookup_renderable_thumbnail("../avatar/0123456789abcdef").is_none());
+    assert!(lookup_renderable_thumbnail("avatar/not-hex").is_none());
 }
 
 #[test]
@@ -165,18 +166,14 @@ fn clear_renderable_thumbnail_cache_drops_previous_session_bytes() {
         b"session-bytes".to_vec(),
     )
     .expect("thumbnail bytes are within the cache bound");
-    let AvatarThumbnailState::Ready { source_url, .. } = ready else {
+    let AvatarThumbnailState::Ready { source_ref, .. } = ready else {
         panic!("thumbnail should be ready");
     };
-    let path = source_url
-        .strip_prefix("koushi-thumbnail://localhost")
-        .expect("protocol url should have localhost authority");
-
-    assert!(lookup_renderable_thumbnail(path).is_some());
+    assert!(lookup_renderable_thumbnail(&source_ref).is_some());
 
     clear_renderable_thumbnail_cache();
 
-    assert!(lookup_renderable_thumbnail(path).is_none());
+    assert!(lookup_renderable_thumbnail(&source_ref).is_none());
 }
 
 #[test]

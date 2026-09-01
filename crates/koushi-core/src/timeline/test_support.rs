@@ -8,17 +8,17 @@ use koushi_state::ComposerFormattingOptions;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::account_work::AccountWorkScheduler;
-use crate::event::{
-    TimelineItem, TimelineItemId, TimelineMedia, TimelineMediaKind, TimelineMediaSource,
-    TimelineMediaThumbnail, TimelineMessageActions,
-};
 use crate::executor;
-#[cfg(any(test, feature = "test-hooks"))]
-use crate::ids::AccountKey;
-use crate::ids::{RequestId, RuntimeConnectionId, TimelineKey, TimelineKind};
 use crate::link_preview::LinkPreviewContext;
 use crate::live_tail_freshness::LiveTailRefreshCoordinator;
 use crate::threads_list::ThreadRootProjectionService;
+use koushi_protocol::event::{
+    TimelineItem, TimelineItemId, TimelineMedia, TimelineMediaKind, TimelineMediaSource,
+    TimelineMediaThumbnail, TimelineMessageActions,
+};
+#[cfg(any(test, feature = "test-hooks"))]
+use koushi_protocol::ids::AccountKey;
+use koushi_protocol::ids::{RequestId, RuntimeConnectionId, TimelineKey, TimelineKind};
 
 use super::actor::{TimelineActorHandle, TimelineActorMessage};
 use super::manager::TimelineManagerActor;

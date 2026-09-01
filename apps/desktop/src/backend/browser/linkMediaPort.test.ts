@@ -14,6 +14,15 @@ test("browser link/media operations use native web behavior", async () => {
     "noopener,noreferrer"
   );
   expect(browserLinkMediaPort.mediaSourceUrl("/tmp/media.png")).toBe("/tmp/media.png");
+  expect(browserLinkMediaPort.renderableThumbnailSourceUrl("data:image/gif;base64,R0lGODlh")).toBe(
+    "data:image/gif;base64,R0lGODlh"
+  );
+  expect(browserLinkMediaPort.renderableThumbnailSourceUrl("asset://fixture/avatar.png")).toBe(
+    "asset://fixture/avatar.png"
+  );
+  expect(
+    browserLinkMediaPort.renderableThumbnailSourceUrl("avatar/0123456789abcdef")
+  ).toBeNull();
   await expect(browserLinkMediaPort.saveMediaFile("/tmp/media.png", "media.png")).resolves.toBe(
     undefined
   );

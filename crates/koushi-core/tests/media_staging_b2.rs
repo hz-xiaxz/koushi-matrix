@@ -150,7 +150,7 @@ async fn prepared_send_rejects_before_upload_when_account_or_target_fence_fails(
     let generation = connection
         .begin_composer_draft_renderer_generation()
         .expect("renderer generation");
-    let account = koushi_key::SessionKeyId {
+    let account = koushi_protocol::SessionKeyId {
         homeserver: "https://example.invalid".to_owned(),
         user_id: "@alice:example.invalid".to_owned(),
         device_id: "DEVICE".to_owned(),

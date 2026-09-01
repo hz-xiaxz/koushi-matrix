@@ -5,8 +5,8 @@ mod support;
 
 use support::fake_request_id;
 
-use koushi_core::event::LiveSignalsEvent;
 use koushi_core::{AccountKey, CoreEvent, E2eeTrustEvent, TimelineKey};
+use koushi_protocol::event::LiveSignalsEvent;
 use koushi_state::{PresenceKind, SasEmoji, VerificationFlowState, VerificationTarget};
 
 #[test]

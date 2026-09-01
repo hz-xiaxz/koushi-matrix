@@ -11,22 +11,22 @@ use koushi_state::{
 use tokio::sync::{mpsc, oneshot};
 
 use super::AppActor;
-use crate::command::TimelineCommand;
 use crate::composer_draft_lifecycle::{ComposerDraftCommandPermit, ComposerDraftPersistencePermit};
 use crate::executor;
-use crate::ids::{RequestId, TimelineKey, TimelineKind};
 use crate::store::{
     composer_drafts::{
         PersistedComposerDraftStoreV3, persisted_projection as persisted_composer_draft_projection,
     },
     session_key_id_from_info,
 };
+use koushi_protocol::command::TimelineCommand;
+use koushi_protocol::ids::{RequestId, TimelineKey, TimelineKind};
 
 pub const COMPOSER_DRAFT_PERSIST_DEBOUNCE: Duration = Duration::from_millis(150);
 
 pub(super) fn composer_draft_account_matches(
     state: &AppState,
-    expected_account: &koushi_key::SessionKeyId,
+    expected_account: &koushi_protocol::SessionKeyId,
 ) -> bool {
     matches!(
         &state.session,
@@ -203,12 +203,12 @@ impl Drop for ForwardedComposerDraftPermit {
 
 pub(super) enum ComposerDraftLoadStatus {
     Unloaded,
-    Loaded(koushi_key::SessionKeyId),
-    Failed(koushi_key::SessionKeyId),
+    Loaded(koushi_protocol::SessionKeyId),
+    Failed(koushi_protocol::SessionKeyId),
 }
 
 pub(super) struct PendingComposerDraftPersist {
-    key_id: koushi_key::SessionKeyId,
+    key_id: koushi_protocol::SessionKeyId,
     drafts: PersistedComposerDraftStoreV3,
     permits: Vec<ComposerDraftPersistencePermit>,
     deadline: Instant,
@@ -253,7 +253,7 @@ impl AppActor {
     }
     fn composer_draft_persistence_protection(
         &self,
-        key_id: &koushi_key::SessionKeyId,
+        key_id: &koushi_protocol::SessionKeyId,
         active: BTreeSet<ComposerTarget>,
     ) -> ComposerDraftProtection {
         let excluded_permits = self
@@ -341,7 +341,7 @@ impl AppActor {
     }
     pub(super) async fn schedule_composer_draft_persist(
         &mut self,
-        key_id: koushi_key::SessionKeyId,
+        key_id: koushi_protocol::SessionKeyId,
         drafts: ComposerDraftStore,
     ) {
         if !matches!(
@@ -408,7 +408,9 @@ impl AppActor {
     }
 }
 
-pub(super) fn composer_draft_session_key(state: &AppState) -> Option<koushi_key::SessionKeyId> {
+pub(super) fn composer_draft_session_key(
+    state: &AppState,
+) -> Option<koushi_protocol::SessionKeyId> {
     match &state.session {
         SessionState::Ready(info) => Some(session_key_id_from_info(info)),
         SessionState::SignedOut
@@ -480,7 +482,7 @@ pub(super) fn composer_acceptance_identity_for_action(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::{AccountKey, RuntimeConnectionId};
+    use koushi_protocol::ids::{AccountKey, RuntimeConnectionId};
     use koushi_state::SessionInfo;
 
     #[test]
@@ -563,7 +565,7 @@ mod tests {
             .or_default()
             .insert(root_event_id.clone(), ComposerDraftRevision::MAX);
 
-        let expected_account = koushi_key::SessionKeyId {
+        let expected_account = koushi_protocol::SessionKeyId {
             homeserver: "https://example.invalid".to_owned(),
 
             user_id: "@qa:example.invalid".to_owned(),

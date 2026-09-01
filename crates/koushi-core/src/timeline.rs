@@ -72,7 +72,7 @@ pub(crate) use diagnostics::record_thread_summary_reconciliation;
 pub use item_projection::sdk_item_to_timeline_item;
 pub(crate) use manager::TimelineMessage;
 pub use manager::{TIMELINE_DIFF_QUEUE_CAPACITY, TimelineManagerActor, TimelineManagerHandle};
-#[cfg(any(test, feature = "qa-bin"))]
+#[cfg(any(test, feature = "test-hooks"))]
 pub use navigation::display_projection_reset_fallback_count;
 pub(crate) use navigation::{
     FocusedProjectionCommitted, NavigationProjectionCleanup, NavigationProjectionIngress,

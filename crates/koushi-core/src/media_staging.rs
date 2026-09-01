@@ -20,10 +20,12 @@ use koushi_state::{
     StagedUploadPreparation,
 };
 
+use koushi_protocol::{
+    AccountKey, AppCommand, CoreCommand, TimelineCommand, UploadMediaKind, UploadMediaRequest,
+};
+
 use crate::{
-    command::{AppCommand, CoreCommand, TimelineCommand, UploadMediaKind, UploadMediaRequest},
     executor,
-    ids::AccountKey,
     media_preparation::{
         MAX_PREPARATION_BATCH_SIZE, MediaPreparationRegistry, MediaPreparationService,
         StageUploadBytesInput,
@@ -116,7 +118,7 @@ pub enum PreparedUploadSendError {
 
 pub struct PreparedUploadSendResult {
     pub accepted_revision: ComposerDraftRevision,
-    pub snapshot: crate::event::VersionedAppStateSnapshot,
+    pub snapshot: koushi_protocol::state_update::VersionedAppStateSnapshot,
 }
 
 #[derive(Clone)]
@@ -218,7 +220,7 @@ impl MediaStagingService {
         connection: &mut CoreConnection,
         target: ComposerTarget,
         items: Vec<StageUploadBytesInput>,
-    ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+    ) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, MediaStagingError> {
         let _admission = self.admit_target(&target).await;
         validate_batch(&items)?;
         let initial = connection.snapshot();
@@ -331,7 +333,7 @@ impl MediaStagingService {
         target: ComposerTarget,
         staged_id: String,
         selection: StagedUploadOutputSelection,
-    ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+    ) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, MediaStagingError> {
         let _admission = self.admit_target(&target).await;
         let initial = connection.snapshot();
         let policy = authoritative_policy(&initial);
@@ -426,7 +428,7 @@ impl MediaStagingService {
         connection: &mut CoreConnection,
         target: ComposerTarget,
         staged_id: String,
-    ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+    ) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, MediaStagingError> {
         let _admission = self.admit_target(&target).await;
         let initial = connection.snapshot();
         let policy = authoritative_policy(&initial);
@@ -491,7 +493,7 @@ impl MediaStagingService {
         connection: &mut CoreConnection,
         target: ComposerTarget,
         staged_id: String,
-    ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+    ) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, MediaStagingError> {
         let _admission = self.admit_target(&target).await;
         let snapshot = connection.snapshot();
         let account = account_key(&snapshot);
@@ -517,7 +519,7 @@ impl MediaStagingService {
         target: ComposerTarget,
         staged_id: String,
         caption: Option<ComposerDocument>,
-    ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+    ) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, MediaStagingError> {
         let _admission = self.admit_target(&target).await;
         let snapshot = connection.snapshot();
         let account = account_key(&snapshot);
@@ -560,7 +562,7 @@ impl MediaStagingService {
         target: ComposerTarget,
         staged_id: String,
         compression_choice: StagedUploadCompressionChoice,
-    ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+    ) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, MediaStagingError> {
         let _admission = self.admit_target(&target).await;
         let snapshot = connection.snapshot();
         let account = account_key(&snapshot);
@@ -600,7 +602,7 @@ impl MediaStagingService {
         &self,
         connection: &mut CoreConnection,
         target: ComposerTarget,
-    ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+    ) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, MediaStagingError> {
         let _admission = self.admit_target(&target).await;
         let snapshot = connection.snapshot();
         let account = account_key(&snapshot);
@@ -682,7 +684,7 @@ impl MediaStagingService {
     pub async fn send_prepared_uploads(
         &self,
         connection: &mut CoreConnection,
-        expected_account: koushi_key::SessionKeyId,
+        expected_account: koushi_protocol::SessionKeyId,
         generation: crate::composer_draft_lifecycle::ComposerRendererGeneration,
         lease: crate::composer_draft_lifecycle::ComposerDraftLeaseId,
         target: ComposerTarget,
@@ -858,8 +860,8 @@ impl MediaStagingService {
     async fn wait_prepared_media_queue(
         &self,
         connection: &mut CoreConnection,
-        request_id: crate::ids::RequestId,
-        key: crate::ids::TimelineKey,
+        request_id: koushi_protocol::ids::RequestId,
+        key: koushi_protocol::ids::TimelineKey,
         transaction_id: String,
         baseline_generation: u64,
     ) -> Result<(), PreparedUploadSendError> {
@@ -892,7 +894,7 @@ impl MediaStagingService {
         items: Vec<StagedUploadItem>,
         expected_ids: Vec<String>,
         allow_initial: bool,
-    ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+    ) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, MediaStagingError> {
         let request_id = connection.next_request_id();
         let baseline = connection.versioned_snapshot().generation;
         connection
@@ -922,7 +924,7 @@ impl MediaStagingService {
         target: ComposerTarget,
         staged_id: String,
         selection: StagedUploadOutputSelection,
-    ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+    ) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, MediaStagingError> {
         let expected_ids = active_ids(&connection.snapshot(), &target)?;
         let request_id = connection.next_request_id();
         let baseline = connection.versioned_snapshot().generation;
@@ -954,7 +956,7 @@ impl MediaStagingService {
         target: ComposerTarget,
         staged_id: String,
         replacement: StagedUploadItem,
-    ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+    ) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, MediaStagingError> {
         let current = connection.snapshot();
         let mut items = active_items(&current, &target)
             .ok_or(MediaStagingError::TargetInactive)?
@@ -976,13 +978,13 @@ impl MediaStagingService {
     async fn wait(
         &self,
         connection: &mut CoreConnection,
-        request_id: crate::ids::RequestId,
+        request_id: koushi_protocol::ids::RequestId,
         account_key: AccountKey,
         target: ComposerTarget,
         staged_ids: Vec<String>,
         baseline_generation: u64,
         allow_initial: bool,
-    ) -> Result<crate::event::VersionedAppStateSnapshot, MediaStagingError> {
+    ) -> Result<koushi_protocol::state_update::VersionedAppStateSnapshot, MediaStagingError> {
         match connection
             .wait_for_request_outcome(
                 OutcomeCorrelation::Request(request_id),
@@ -1019,7 +1021,7 @@ fn map_staging_send_error(error: MediaStagingError) -> PreparedUploadSendError {
     }
 }
 
-fn ready_account(state: &koushi_state::AppState) -> Option<koushi_key::SessionKeyId> {
+fn ready_account(state: &koushi_state::AppState) -> Option<koushi_protocol::SessionKeyId> {
     match &state.session {
         koushi_state::SessionState::Ready(info) => {
             Some(crate::store::session_key_id_from_info(info))
@@ -1055,20 +1057,23 @@ fn next_acceptance_revision(
     .ok()
 }
 
-fn timeline_key(account_key: AccountKey, target: &ComposerTarget) -> crate::ids::TimelineKey {
+fn timeline_key(
+    account_key: AccountKey,
+    target: &ComposerTarget,
+) -> koushi_protocol::ids::TimelineKey {
     match target {
-        ComposerTarget::Main { room_id } => crate::ids::TimelineKey {
+        ComposerTarget::Main { room_id } => koushi_protocol::ids::TimelineKey {
             account_key,
-            kind: crate::ids::TimelineKind::Room {
+            kind: koushi_protocol::ids::TimelineKind::Room {
                 room_id: room_id.clone(),
             },
         },
         ComposerTarget::Thread {
             room_id,
             root_event_id,
-        } => crate::ids::TimelineKey {
+        } => koushi_protocol::ids::TimelineKey {
             account_key,
-            kind: crate::ids::TimelineKind::Thread {
+            kind: koushi_protocol::ids::TimelineKind::Thread {
                 room_id: room_id.clone(),
                 root_event_id: root_event_id.clone(),
             },

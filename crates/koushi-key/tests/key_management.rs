@@ -1,9 +1,10 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use koushi_key::{
     CredentialBackendErrorKind, CredentialStore, InMemoryCredentialBackend, LocalSecretError,
-    LocalUnlockSecret, SavedSessionIndex, SessionKeyId, StoredMatrixSession,
+    LocalUnlockSecret, SavedSessionIndex, SessionKeyIdCredentialNames, StoredMatrixSession,
     is_missing_credential_error, last_session_account_name, saved_sessions_account_name,
 };
+use koushi_protocol::SessionKeyId;
 
 fn secret_from_test_byte(byte: u8) -> LocalUnlockSecret {
     LocalUnlockSecret::from_storage_string(&STANDARD.encode([byte; 32])).unwrap()
@@ -107,6 +108,21 @@ fn account_name_is_versioned_and_collision_safe() {
     assert_eq!(id.account_name().split('|').count(), 4);
     assert!(id.account_name().starts_with("v1|"));
     assert_ne!(id.account_name(), alternate_split.account_name());
+}
+
+#[test]
+fn session_key_id_debug_redacts_all_identity_fields() {
+    let id = SessionKeyId {
+        homeserver: "https://private-homeserver.invalid".into(),
+        user_id: "@private-user:example.invalid".into(),
+        device_id: "PRIVATE-DEVICE".into(),
+    };
+
+    let debug = format!("{id:?}");
+    assert!(debug.contains("SessionKeyId"));
+    assert!(!debug.contains(&id.homeserver));
+    assert!(!debug.contains(&id.user_id));
+    assert!(!debug.contains(&id.device_id));
 }
 
 #[test]

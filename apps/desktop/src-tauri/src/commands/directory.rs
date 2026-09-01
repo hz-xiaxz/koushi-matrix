@@ -175,7 +175,7 @@ fn normalize_join_target(
 }
 
 pub(super) fn build_create_room_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     options: CreateRoomOptions,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::CreateRoom {
@@ -185,14 +185,14 @@ pub(super) fn build_create_room_command(
 }
 
 pub(super) fn build_create_space_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     name: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::CreateSpace { request_id, name })
 }
 
 pub(super) fn build_join_room_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
 ) -> Option<CoreCommand> {
     let room_id = room_id.trim().to_owned();
@@ -206,7 +206,7 @@ pub(super) fn build_join_room_command(
 }
 
 pub(super) fn build_set_space_child_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     space_id: String,
     child_room_id: String,
     via_server: String,
@@ -220,7 +220,7 @@ pub(super) fn build_set_space_child_command(
 }
 
 pub(super) fn build_accept_invite_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::AcceptInvite {
@@ -230,7 +230,7 @@ pub(super) fn build_accept_invite_command(
 }
 
 pub(super) fn build_decline_invite_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::DeclineInvite {
@@ -240,7 +240,7 @@ pub(super) fn build_decline_invite_command(
 }
 
 pub(super) fn build_start_direct_message_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     user_id: String,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::StartDirectMessage {
@@ -250,7 +250,7 @@ pub(super) fn build_start_direct_message_command(
 }
 
 pub(super) fn build_invite_user_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     user_id: String,
 ) -> CoreCommand {
@@ -262,7 +262,7 @@ pub(super) fn build_invite_user_command(
 }
 
 pub(super) fn build_invite_user_to_space_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     space_id: String,
     user_id: String,
     generation: u64,
@@ -276,7 +276,7 @@ pub(super) fn build_invite_user_to_space_command(
 }
 
 pub(super) fn build_cancel_space_invite_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     space_id: String,
     user_id: String,
     generation: u64,
@@ -290,7 +290,7 @@ pub(super) fn build_cancel_space_invite_command(
 }
 
 pub(super) fn build_open_invite_workflow_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::OpenInviteWorkflow {
@@ -300,13 +300,13 @@ pub(super) fn build_open_invite_workflow_command(
 }
 
 pub(super) fn build_close_invite_workflow_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::CloseInviteWorkflow { request_id })
 }
 
 pub(super) fn build_search_invite_targets_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     query: String,
 ) -> CoreCommand {
@@ -318,7 +318,7 @@ pub(super) fn build_search_invite_targets_command(
 }
 
 pub(super) fn build_set_invite_scope_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     scope: InviteScopeSelection,
 ) -> CoreCommand {
@@ -330,7 +330,7 @@ pub(super) fn build_set_invite_scope_command(
 }
 
 pub(super) fn build_select_invite_target_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     user_id: String,
 ) -> CoreCommand {
@@ -342,7 +342,7 @@ pub(super) fn build_select_invite_target_command(
 }
 
 pub(super) fn build_remove_invite_target_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     user_id: String,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::RemoveInviteTarget {
@@ -352,7 +352,7 @@ pub(super) fn build_remove_invite_target_command(
 }
 
 pub(super) fn build_invite_targets_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id: String,
     user_ids: Vec<String>,
     scope: InviteScopeSelection,
@@ -366,7 +366,7 @@ pub(super) fn build_invite_targets_command(
 }
 
 pub(super) fn build_query_directory_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     term: Option<String>,
     server_name: Option<String>,
     limit: Option<u32>,
@@ -384,7 +384,7 @@ pub(super) fn build_query_directory_command(
 }
 
 pub(super) fn build_preview_join_target_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id_or_alias: String,
     via_servers: Vec<String>,
 ) -> Option<CoreCommand> {
@@ -397,13 +397,13 @@ pub(super) fn build_preview_join_target_command(
 }
 
 pub(super) fn build_dismiss_directory_preview_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::DismissDirectoryPreview { request_id })
 }
 
 pub(super) fn build_join_directory_room_command(
-    request_id: koushi_core::RequestId,
+    request_id: koushi_protocol::RequestId,
     room_id_or_alias: String,
     via_servers: Vec<String>,
 ) -> Option<CoreCommand> {

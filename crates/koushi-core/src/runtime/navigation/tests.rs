@@ -1,6 +1,6 @@
 use super::*;
-use crate::ids::{AccountKey, RuntimeConnectionId, TimelineGeneration};
 use crate::timeline::FocusedProjectionCommitted;
+use koushi_protocol::ids::{AccountKey, RuntimeConnectionId, TimelineGeneration};
 use koushi_state::SessionInfo;
 
 fn focused_projection_fixture(sequence: u64) -> PendingFocusedNavigation {

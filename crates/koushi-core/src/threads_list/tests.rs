@@ -7,7 +7,9 @@ use matrix_sdk_ui::timeline::thread_list_service::{ThreadListItemEvent, ThreadRe
 use matrix_sdk_ui::timeline::{Profile, TimelineDetails};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::event::{ThreadSummaryDto, TimelineItem, TimelineItemId, TimelineMessageActions};
+use koushi_protocol::event::{
+    ThreadSummaryDto, TimelineItem, TimelineItemId, TimelineMessageActions,
+};
 
 use super::{
     ActiveSubscription, AggregateRefreshCause, AuthoritativeThreadAggregate, OperationFailureKind,

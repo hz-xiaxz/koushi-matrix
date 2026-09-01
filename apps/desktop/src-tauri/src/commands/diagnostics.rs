@@ -324,7 +324,7 @@ const QA_RECOVERY_PROMPT_TIMEOUT: std::time::Duration = std::time::Duration::fro
 
 #[cfg(test)]
 mod qa_tests {
-    use koushi_core::{AccountCommand, CoreCommand};
+    use koushi_protocol::{AccountCommand, CoreCommand};
     use koushi_state::{AppState, RoomSummary, RoomTags, SessionInfo, SessionState};
 
     #[test]

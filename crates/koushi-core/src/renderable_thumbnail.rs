@@ -10,7 +10,6 @@ use crate::cached_image::cached_image_kind;
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::AvatarThumbnailState;
 
-const RENDERABLE_THUMBNAIL_SCHEME: &str = "koushi-thumbnail://localhost/";
 pub(crate) const MAX_RENDERABLE_THUMBNAIL_ENTRIES: usize = 256;
 pub(crate) const MAX_RENDERABLE_THUMBNAIL_BYTES: usize = 32 * 1024 * 1024;
 
@@ -71,9 +70,9 @@ pub struct RenderableThumbnailCacheStats {
 
 #[derive(Default)]
 struct RenderableThumbnailCache {
-    // Ready protocol URLs are stored in AppState while their bytes remain in
-    // this count-and-byte-bounded LRU. Access refreshes recency; session clear
-    // drops all retained bytes.
+    // Opaque references are stored in AppState while their bytes remain in this
+    // count-and-byte-bounded LRU. Access refreshes recency; session clear drops
+    // all retained bytes.
     entries: HashMap<String, RenderableThumbnailEntry>,
     // Oldest at the front, most recently accessed at the back. The bound is
     // deliberately larger than the existing 129-entry session churn contract.
@@ -253,23 +252,15 @@ fn renderable_thumbnail_cache_key(kind: RenderableThumbnailKind, source: &str) -
     format!("{}/{:016x}", kind.path_segment(), hasher.finish())
 }
 
-fn renderable_thumbnail_source_url(cache_key: &str) -> String {
-    format!("{RENDERABLE_THUMBNAIL_SCHEME}{cache_key}")
-}
-
-fn renderable_thumbnail_cache_key_from_path(path: &str) -> Option<String> {
-    let trimmed = path.strip_prefix('/').unwrap_or(path);
-    let mut segments = trimmed.split('/');
-    let kind = segments.next()?;
-    let key = segments.next()?;
-    if key.is_empty() || segments.next().is_some() {
+fn validated_renderable_thumbnail_ref(source_ref: &str) -> Option<&str> {
+    let (kind, hash) = source_ref.split_once('/')?;
+    if !matches!(kind, "avatar" | "link-preview")
+        || hash.len() != 16
+        || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
         return None;
     }
-
-    match kind {
-        "avatar" | "link-preview" => Some(format!("{kind}/{key}")),
-        _ => None,
-    }
+    Some(source_ref)
 }
 
 pub fn store_renderable_thumbnail(
@@ -287,15 +278,15 @@ pub fn store_renderable_thumbnail(
     }
 
     Ok(AvatarThumbnailState::Ready {
-        source_url: renderable_thumbnail_source_url(&cache_key),
+        source_ref: cache_key,
         width: None,
         height: None,
         mime_type: Some(mime_type),
     })
 }
 
-pub fn lookup_renderable_thumbnail(path: &str) -> Option<RenderableThumbnailContent> {
-    let cache_key = renderable_thumbnail_cache_key_from_path(path)?;
+pub fn lookup_renderable_thumbnail(source_ref: &str) -> Option<RenderableThumbnailContent> {
+    let cache_key = validated_renderable_thumbnail_ref(source_ref)?;
     let mut cache = renderable_thumbnail_cache()
         .lock()
         .expect("renderable thumbnail cache should not be poisoned");

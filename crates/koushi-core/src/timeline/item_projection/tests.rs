@@ -16,14 +16,15 @@ use matrix_sdk::ruma::events::{
 
 use matrix_sdk_ui::timeline::{MembershipChange, ReactionStatus, ReactionsByKeyBySender};
 
-use crate::command::TimelineCommand;
-use crate::event::{
+use crate::event_projection::message_actions_for_timeline_item;
+use koushi_protocol::command::TimelineCommand;
+use koushi_protocol::event::{
     LinkPreview, LinkPreviewState, TimelineFormattedBody, TimelineItemId, TimelineMessageKind,
     TimelineNoticeI18n, TimelineNoticeI18nKey, TimelineSendFailureReason, TimelineSendState,
-    TimelineSpoilerSpan, TimelineViewportObservation, message_actions_for_timeline_item,
+    TimelineSpoilerSpan, TimelineViewportObservation,
 };
 
-use crate::failure::TimelineFailureKind;
+use koushi_protocol::failure::TimelineFailureKind;
 
 use koushi_diagnostics::DiagnosticValue;
 
@@ -126,7 +127,7 @@ fn formatted_only_content_is_renderable_for_shared_eligibility() {
 
 #[test]
 fn local_megolm_reason_is_exact_and_missing_evidence_is_unavailable() {
-    use crate::event::TimelineMegolmSessionReason as Projected;
+    use koushi_protocol::event::TimelineMegolmSessionReason as Projected;
     use koushi_sdk::MatrixRoomKeyRotationReason as Sdk;
 
     assert_eq!(
@@ -695,7 +696,7 @@ fn message_projection_falls_back_to_plain_body_when_formatted_body_has_only_mark
 #[test]
 fn user_visible_content_includes_formatted_body() {
     let mut item = timeline_item("$formatted:test", None, "@alice:test", false);
-    item.formatted = Some(crate::event::TimelineFormattedBody {
+    item.formatted = Some(koushi_protocol::event::TimelineFormattedBody {
         html: "<strong>visible</strong>".to_owned(),
         plain_text: "visible".to_owned(),
         code_blocks: Vec::new(),
@@ -718,7 +719,7 @@ fn timeline_item_structured_fields_match_private_legacy_semantics() {
     item.timestamp_ms = Some(1_783_076_820_000);
     item.thread_root = Some("   ".to_owned());
     item.in_reply_to_event_id = Some("   ".to_owned());
-    item.formatted = Some(crate::event::TimelineFormattedBody {
+    item.formatted = Some(koushi_protocol::event::TimelineFormattedBody {
         html: "<br>".to_owned(),
         plain_text: "   ".to_owned(),
         code_blocks: Vec::new(),

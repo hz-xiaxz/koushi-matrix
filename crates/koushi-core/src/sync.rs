@@ -29,13 +29,7 @@ use koushi_state::{AppAction, RoomListSource, SyncLifecycleStatus};
 use matrix_sdk_ui::room_list_service::RoomListService;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
-use crate::command::SyncCommand;
-use crate::event::{CoreEvent, SyncEvent};
 use crate::executor;
-#[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
-use crate::failure::CoreFailure;
-use crate::failure::SyncFailureKind;
-use crate::ids::RequestId;
 use crate::room::{RoomListReconcileAck, RoomMessage};
 use crate::{
     SlidingSyncDiagnostics, SlidingSyncFailureDiagnostic, SlidingSyncFailureKind,
@@ -43,6 +37,12 @@ use crate::{
     SlidingSyncHttpErrorSource, SlidingSyncHttpStatus, SlidingSyncMatrixErrorKind,
     SlidingSyncSdkVersion,
 };
+use koushi_protocol::command::SyncCommand;
+use koushi_protocol::event::{CoreEvent, SyncEvent};
+#[cfg(any(test, feature = "test-hooks"))]
+use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::failure::SyncFailureKind;
+use koushi_protocol::ids::RequestId;
 
 const SYNC_ACTOR_SHUTDOWN_SEND_TIMEOUT: Duration = Duration::from_secs(1);
 const SYNC_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -59,6 +59,10 @@ macro_rules! trace_sync {
 
 pub enum SyncMessage {
     Command(SyncCommand),
+    #[cfg(any(test, feature = "test-hooks"))]
+    SyncOnceForQa {
+        request_id: RequestId,
+    },
     Shutdown,
 }
 
@@ -70,6 +74,11 @@ pub struct SyncActorHandle {
 impl SyncActorHandle {
     pub async fn send(&self, msg: SyncMessage) -> bool {
         self.tx.send(msg).await.is_ok()
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn sync_once_for_qa(&self, request_id: RequestId) -> bool {
+        self.send(SyncMessage::SyncOnceForQa { request_id }).await
     }
 
     pub async fn shutdown(self) -> bool {
@@ -161,7 +170,7 @@ fn internal_observer_failure_at(reason: &'static str, ever_connected: bool) -> S
     internal_observer_failure(ever_connected)
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+#[cfg(any(test, feature = "test-hooks"))]
 fn sync_once_admitted(
     lifecycle: SyncLifecycle,
     sync_task_active: bool,
@@ -219,8 +228,6 @@ fn sync_command_trace_parts(command: &SyncCommand) -> (&'static str, RequestId) 
         SyncCommand::Start { request_id } => ("start", *request_id),
         SyncCommand::Stop { request_id } => ("stop", *request_id),
         SyncCommand::Restart { request_id } => ("restart", *request_id),
-        #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
-        SyncCommand::SyncOnce { request_id } => ("sync_once", *request_id),
     }
 }
 
@@ -341,6 +348,8 @@ impl SyncActor {
                             break;
                         }
                         Some(SyncMessage::Command(command)) => self.handle_command(command).await,
+                        #[cfg(any(test, feature = "test-hooks"))]
+                        Some(SyncMessage::SyncOnceForQa { request_id }) => self.handle_sync_once(request_id).await,
                     },
                     control = self.control_rx.recv() => {
                         if let Some(control) = control {
@@ -352,6 +361,10 @@ impl SyncActor {
                 match self.command_rx.recv().await {
                     None | Some(SyncMessage::Shutdown) => break,
                     Some(SyncMessage::Command(command)) => self.handle_command(command).await,
+                    #[cfg(any(test, feature = "test-hooks"))]
+                    Some(SyncMessage::SyncOnceForQa { request_id }) => {
+                        self.handle_sync_once(request_id).await
+                    }
                 }
             }
         }
@@ -465,8 +478,6 @@ impl SyncActor {
                 self.do_stop(None).await;
                 self.handle_start(request_id).await;
             }
-            #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
-            SyncCommand::SyncOnce { request_id } => self.handle_sync_once(request_id).await,
         }
     }
 
@@ -636,7 +647,7 @@ impl SyncActor {
         self.ignored_user_list_handler = Some(handle);
     }
 
-    #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
+    #[cfg(any(test, feature = "test-hooks"))]
     async fn handle_sync_once(&self, request_id: RequestId) {
         if !sync_once_admitted(
             self.lifecycle,

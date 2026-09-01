@@ -1,8 +1,8 @@
 //! Runtime settings integration tests.
 
-use koushi_core::command::AppCommand;
 use koushi_core::settings::{SettingsStore, SettingsStoreErrorKind};
 use koushi_core::{CoreCommand, CoreRuntime};
+use koushi_protocol::command::AppCommand;
 use koushi_state::{
     AppearanceSettings, DisplayDensity, DisplaySettings, MediaSettings, NativeAttentionCandidate,
     NativeAttentionCapabilities, NativeAttentionCapability, NativeAttentionDispatchState,
