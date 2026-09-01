@@ -376,6 +376,37 @@ gates are all eight CI jobs on the reviewed exact head.
   `NotFound` while rejecting only settings load errors.
 - Focused round 3 verdict: `CORRECT-TO-IMPLEMENT`; no remaining finding.
 
+## Acceptance-Closure Amendment: Avatar, Sound and Role Policy
+
+Issue #761 also names three later audit mirrors. They close in this PR as a
+separate, independently reviewable slice:
+
+1. **Avatar request lifecycle moves fully behind Core after demand submission.**
+   React may discover a visible/not-requested MXC and dispatch a typed request,
+   but owns no retryability classifier, attempt counter or terminal retry loop.
+   `AccountActor` keeps its existing single-flight/in-flight deduplication and
+   bounded concurrency, performs at most two network attempts inside the owned
+   fetch task, caches both Ready and terminal Failed results for the session,
+   and serves later duplicate requests from that cache without another SDK call.
+   Session clear aborts tasks and resets the cache as today. RED tests cover the
+   retry policy, success-after-retry, terminal exhaustion and failed-cache reuse.
+2. **Desktop notification sound remains an explicit platform-adapter exception.**
+   Rust continues to own the authoritative badge count, attention candidate,
+   capability facts and user settings. The renderer adapter may retain only the
+   positive-edge/cooldown/in-flight mechanics needed to call the webview/window
+   sound port. This exception remains covered by `desktopAttention.test.ts` and
+   ends when a native Core-owned notification dispatcher replaces that port; it
+   must not expand into Matrix attention classification.
+3. **Room role choices are already Rust-owned and are pinned as such.**
+   Room/Space member DTOs carry `role_options`, including arbitrary current
+   power levels; React renders those options and dispatches the selected numeric
+   level. Production React must not synthesize `[0, 50, 100]`. Existing
+   reducer/panel tests and the semantic-owner checker pin this boundary.
+
+Verification adds focused avatar Core tests, removes frontend retry/count tests,
+keeps the notification exception tests, checks no production role constants,
+and reruns the full Rust/frontend/browser matrix before final review.
+
 ## Non-Goals
 
 - Moving sidebar search text, emoji search text, IME drafts, focus, popovers,
