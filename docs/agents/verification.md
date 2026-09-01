@@ -95,7 +95,7 @@ A subagent's "gates passed" claim is not evidence — re-run the gate yourself.
 | `Rust (workspace / src-tauri / wasm)` | submodule guard, diagnostic-isolation guard, workspace tests, Tauri DTO + IPC contract tests, wasm build, `cargo-deny`, `cargo-machete` |
 | `macOS Tauri cargo check` | `cargo check -p koushi-desktop` on macOS, including `#[cfg(target_os = "macos")]` paths excluded by Linux CI |
 | `Core invitations (tuwunel)` / `Core invitations (synapse)` | real homeserver `--core --scenario=invites_dm` per server |
-| `Core QA binary tests` | `cargo test -p koushi-core --features qa-bin --bin headless-core-qa` |
+| `Core QA binary tests` | `cargo test -p koushi-qa --features qa-bin --bin headless-core-qa` |
 | `Windows overlay ACL IPC` | `cargo test -p koushi-windows-overlay-acl windows_overlay_ipc_is_authorized` |
 
 `cargo test --workspace` does not compile the QA binaries: both bin targets set

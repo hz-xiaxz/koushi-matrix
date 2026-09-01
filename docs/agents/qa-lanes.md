@@ -36,7 +36,10 @@ window-title tokens instead.
 
 ## Headless core lane
 
-The primary functional gate. Command shape:
+The primary functional gate. The binary and orchestration live in the
+non-default `koushi-qa` package and consume `koushi-protocol` DTOs plus narrow
+Core test hooks; `koushi-core` production sources contain no QA binary tree.
+Command shape:
 
 ```bash
 PATH=/tmp/koushi-desktop-local-qa-bin:$PATH \
@@ -58,9 +61,9 @@ restoration of that exact device.
 
 `--scenario=all` runs the aggregate lane. `--scenario=timeline_stress` requires
 `--core` and must be the only scenario in the run. The `send_queue` scenario
-injects offline failure through a stdlib TCP proxy inside the Rust QA binary and
-must be built with `--features qa-bin`; plain `cargo test` does not compile that
-binary.
+injects offline failure through a stdlib TCP proxy inside the Rust QA binary
+and must be built with `koushi-qa`'s `--features qa-bin`; plain `cargo test`
+does not compile that binary.
 
 | Scenario | Proves | Evidence tokens |
 | --- | --- | --- |

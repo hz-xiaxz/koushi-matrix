@@ -6,7 +6,7 @@ glue. Vendored upstream code must keep its original license and copyright
 notices; local changes to vendored code must remain easy to upstream or
 revert.
 
-Last amended: 2026-09-04.
+Last amended: 2026-09-05.
 
 ## Read Order And Authority
 
@@ -142,8 +142,13 @@ conflict is being resolved.
   applies, Linux virtual-display GUI tests are green. Issues are split along
   this A/B boundary, and QA tokens stay private-data-free.
 - Product logic and state that decide Matrix operation semantics live in Rust:
-  `koushi-state` for serializable state/reducers and
-  `koushi-core` for actors, commands, events, and runtime ownership.
+  `koushi-state` for serializable state/reducers and `koushi-core` for actors,
+  policy, projection, and runtime ownership. `koushi-protocol` owns the public
+  transport-neutral Rust command/event/identity/failure/state-update DTOs used
+  by Core, Tauri, CLI, and QA; it has no Matrix SDK, Tauri, async-runtime,
+  filesystem/platform, or OS dependency. Secret-bearing typed commands are
+  constructed by each validated adapter and are not required to be wholesale
+  serde payloads.
 - WebView `localStorage` is not a product-state or preference store. Production
   frontend code may access it only in an explicitly allowlisted, bounded legacy
   migration reader that submits typed Rust commands and deletes each old key only
@@ -170,9 +175,11 @@ conflict is being resolved.
   lifetime exclusively and the same effect or controller cancels it on logical
   key change and unmount. Product retries, backoff, operation correlation, and
   session-scoped cleanup must not be implemented by browser timers or refs.
-- `apps/desktop/src-tauri` is a transport adapter. It holds `CoreRuntime`,
-  sends commands, forwards events/snapshots, and does not call Matrix SDK
-  wrapper APIs directly.
+- `apps/desktop/src-tauri` is a transport/platform adapter. It holds
+  `CoreRuntime`, constructs `koushi-protocol` commands, forwards protocol
+  events/snapshots, and does not call Matrix SDK wrapper APIs directly.
+  Platform URI minting and native artifact-path registration stay in this
+  adapter; Core/state/protocol expose only opaque references and typed ports.
 - Every public Tauri command (`#[tauri::command]` in
   `apps/desktop/src-tauri/src/commands/`) must be registered in
   `tauri::generate_handler!` in `apps/desktop/src-tauri/src/lib.rs`.
@@ -186,8 +193,13 @@ conflict is being resolved.
 - `koushi-sdk` is the low-level Matrix SDK adapter crate. It owns
   SDK-facing primitives only and may include feature-gated, direct-adapter
   smoke binaries and private-data-free smoke reports for adapter integration;
-  product state, actor lifecycle, authoritative app QA orchestration, and
-  product opinions stay in `koushi-core` and `koushi-state`.
+  product state, actor lifecycle, and product opinions stay in `koushi-core`
+  and `koushi-state`.
+- `koushi-qa` owns authoritative headless and real-homeserver product QA
+  binaries/orchestration. It consumes `koushi-protocol` DTOs and narrow
+  `koushi-core` test hooks, is not a default production package, and must not
+  become a second product runtime or move QA-only channels into the public
+  protocol.
 - UI code must not import SDK types. SDK data is mapped to app-owned Rust DTOs
   before it crosses the command/event/snapshot boundary.
 
