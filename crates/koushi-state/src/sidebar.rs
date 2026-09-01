@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::state::{
-    AvatarImage, RoomNotificationMode, RoomNotificationSettings, RoomSummary, RoomTags,
-    SpaceSummary, room_activity_unread_count, room_attention_projection,
+    AppState, AvatarImage, RoomListSort, RoomNotificationMode, RoomNotificationSettings,
+    RoomSummary, RoomTags, SpaceLocalPresentations, SpaceSummary, compare_conversation_activity,
+    room_activity_unread_count, room_attention_projection,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -20,6 +21,16 @@ pub struct SidebarModel {
     pub dm_unread_count: u64,
     pub space_highlight_count: u64,
     pub dm_highlight_count: u64,
+    pub sections: SidebarSections,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SidebarSections {
+    pub favourites: Vec<RoomListItem>,
+    pub rooms: Vec<RoomListItem>,
+    pub people: Vec<RoomListItem>,
+    pub low_priority: Vec<RoomListItem>,
+    pub not_joined: Vec<RoomListItem>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -45,6 +56,8 @@ pub struct AccountHomeItem {
 pub struct SpaceRailItem {
     pub space_id: String,
     pub display_name: String,
+    #[serde(default)]
+    pub local_icon: Option<String>,
     pub avatar: Option<AvatarImage>,
     pub unread_count: u64,
     pub highlight_count: u64,
@@ -93,6 +106,52 @@ pub fn compose_sidebar_with_account_facts(
     room_notification_settings: &HashMap<String, RoomNotificationSettings>,
     pending_invite_count: u64,
 ) -> SidebarModel {
+    compose_sidebar_with_preferences(
+        active_space_id,
+        spaces,
+        rooms,
+        room_notification_settings,
+        pending_invite_count,
+        RoomListSort::Activity,
+        &SpaceLocalPresentations::default(),
+    )
+}
+
+pub fn compose_sidebar_for_state(state: &AppState) -> SidebarModel {
+    let mut sidebar = compose_sidebar_with_preferences(
+        state.navigation.active_space_id.as_deref(),
+        &state.spaces,
+        &state.rooms,
+        &state.room_notification_settings,
+        state.invites.len() as u64,
+        state.settings.values.room_list_sort,
+        &state.navigation.space_local_presentations,
+    );
+    let preferred_positions: HashMap<&str, usize> = state
+        .navigation
+        .space_order
+        .iter()
+        .enumerate()
+        .map(|(position, space_id)| (space_id.as_str(), position))
+        .collect();
+    sidebar.space_rail.sort_by_key(|space| {
+        preferred_positions
+            .get(space.space_id.as_str())
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
+    sidebar
+}
+
+fn compose_sidebar_with_preferences(
+    active_space_id: Option<&str>,
+    spaces: &[SpaceSummary],
+    rooms: &[RoomSummary],
+    room_notification_settings: &HashMap<String, RoomNotificationSettings>,
+    pending_invite_count: u64,
+    sort: RoomListSort,
+    local_presentations: &SpaceLocalPresentations,
+) -> SidebarModel {
     let rooms_by_id: HashMap<&str, &RoomSummary> = rooms
         .iter()
         .map(|room| (room.room_id.as_str(), room))
@@ -100,13 +159,24 @@ pub fn compose_sidebar_with_account_facts(
 
     let space_rail = spaces
         .iter()
-        .map(|space| SpaceRailItem {
-            space_id: space.space_id.clone(),
-            display_name: space.display_name.clone(),
-            avatar: space.avatar.clone(),
-            unread_count: space_unread_count(space, &rooms_by_id, room_notification_settings),
-            highlight_count: space_highlight_count(space, &rooms_by_id, room_notification_settings),
-            is_active: active_space_id == Some(space.space_id.as_str()),
+        .map(|space| {
+            let local = local_presentations.0.get(&space.space_id);
+            SpaceRailItem {
+                space_id: space.space_id.clone(),
+                display_name: local
+                    .and_then(|presentation| presentation.name.as_ref())
+                    .cloned()
+                    .unwrap_or_else(|| space.display_name.clone()),
+                local_icon: local.and_then(|presentation| presentation.icon.clone()),
+                avatar: space.avatar.clone(),
+                unread_count: space_unread_count(space, &rooms_by_id, room_notification_settings),
+                highlight_count: space_highlight_count(
+                    space,
+                    &rooms_by_id,
+                    room_notification_settings,
+                ),
+                is_active: active_space_id == Some(space.space_id.as_str()),
+            }
         })
         .collect();
 
@@ -139,18 +209,7 @@ pub fn compose_sidebar_with_account_facts(
                 .collect()
         })
         .unwrap_or_else(|| rooms.iter().filter(|room| !room.is_dm).collect());
-    space_rooms.sort_by(|left, right| {
-        RoomSummary::compare_attention_activity(
-            Some(*left),
-            room_notification_settings
-                .get(left.room_id.as_str())
-                .map(|settings| settings.mode),
-            Some(*right),
-            room_notification_settings
-                .get(right.room_id.as_str())
-                .map(|settings| settings.mode),
-        )
-    });
+    sort_room_summaries(&mut space_rooms, sort, room_notification_settings);
     let space_rooms: Vec<_> = space_rooms
         .into_iter()
         .map(|room| room_list_item(room, room_notification_settings))
@@ -169,22 +228,30 @@ pub fn compose_sidebar_with_account_facts(
                         .any(|space_id| Some(space_id.as_str()) == active_space_id))
         })
         .collect();
-    global_dm_rooms.sort_by(|left, right| {
-        RoomSummary::compare_attention_activity(
-            Some(*left),
-            room_notification_settings
-                .get(left.room_id.as_str())
-                .map(|settings| settings.mode),
-            Some(*right),
-            room_notification_settings
-                .get(right.room_id.as_str())
-                .map(|settings| settings.mode),
-        )
-    });
+    sort_room_summaries(&mut global_dm_rooms, sort, room_notification_settings);
     let global_dms: Vec<_> = global_dm_rooms
         .into_iter()
         .map(|room| room_list_item(room, room_notification_settings))
         .collect();
+    let sections = SidebarSections {
+        favourites: space_rooms
+            .iter()
+            .filter(|room| room.tags.favourite.is_some())
+            .cloned()
+            .collect(),
+        rooms: space_rooms
+            .iter()
+            .filter(|room| room.tags.favourite.is_none() && room.tags.low_priority.is_none())
+            .cloned()
+            .collect(),
+        people: global_dms.clone(),
+        low_priority: space_rooms
+            .iter()
+            .filter(|room| room.tags.low_priority.is_some())
+            .cloned()
+            .collect(),
+        not_joined: not_joined_space_rooms.clone(),
+    };
 
     SidebarModel {
         active_space_id: active_space_id.map(str::to_owned),
@@ -193,11 +260,37 @@ pub fn compose_sidebar_with_account_facts(
         dm_unread_count: unread_count(&global_dms, room_notification_settings),
         space_highlight_count: highlight_count(&space_rooms, room_notification_settings),
         dm_highlight_count: highlight_count(&global_dms, room_notification_settings),
+        sections,
         space_rail,
         space_rooms,
         not_joined_space_rooms,
         global_dms,
     }
+}
+
+fn sort_room_summaries(
+    rooms: &mut Vec<&RoomSummary>,
+    sort: RoomListSort,
+    room_notification_settings: &HashMap<String, RoomNotificationSettings>,
+) {
+    rooms.sort_by(|left, right| match sort {
+        RoomListSort::Activity => RoomSummary::compare_attention_activity(
+            Some(*left),
+            room_notification_settings
+                .get(left.room_id.as_str())
+                .map(|settings| settings.mode),
+            Some(*right),
+            room_notification_settings
+                .get(right.room_id.as_str())
+                .map(|settings| settings.mode),
+        ),
+        RoomListSort::RecentFirst => compare_conversation_activity(Some(*left), Some(*right)),
+        RoomListSort::NormalLocale => left
+            .display_label
+            .to_lowercase()
+            .cmp(&right.display_label.to_lowercase())
+            .then_with(|| left.room_id.cmp(&right.room_id)),
+    });
 }
 
 fn space_unread_count(

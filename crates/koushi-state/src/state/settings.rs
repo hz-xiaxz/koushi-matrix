@@ -38,6 +38,30 @@ fn default_room_list_sort() -> RoomListSort {
     RoomListSort::Activity
 }
 
+fn canonicalize_recent_emojis(emojis: Vec<String>) -> Vec<String> {
+    let mut canonical = Vec::with_capacity(emojis.len().min(24));
+    for emoji in emojis {
+        let emoji = emoji.trim();
+        if emoji.is_empty() || emoji.chars().count() > 16 || emoji.chars().any(char::is_control) {
+            continue;
+        }
+        if !canonical.iter().any(|existing| existing == emoji) {
+            canonical.push(emoji.to_owned());
+            if canonical.len() == 24 {
+                break;
+            }
+        }
+    }
+    canonical
+}
+
+fn deserialize_recent_emojis<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Vec::<String>::deserialize(deserializer).map(canonicalize_recent_emojis)
+}
+
 pub type RoomUrlPreviews = std::collections::BTreeMap<String, bool>;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -120,6 +144,10 @@ pub struct SettingsValues {
     pub room_list_sort: RoomListSort,
     #[serde(default)]
     pub search_crawler: SearchCrawlerSettings,
+    #[serde(default)]
+    pub sidebar: SidebarSettings,
+    #[serde(default)]
+    pub legacy_frontend_preferences_imported: bool,
 }
 
 impl SettingsValues {
@@ -136,7 +164,8 @@ impl SettingsValues {
         if let Some(keyboard) = patch.keyboard {
             self.keyboard = keyboard;
         }
-        if let Some(composer) = patch.composer {
+        if let Some(mut composer) = patch.composer {
+            composer.recent_emojis = canonicalize_recent_emojis(composer.recent_emojis);
             self.composer = composer;
         }
         if let Some(notifications) = patch.notifications {
@@ -160,6 +189,9 @@ impl SettingsValues {
         if let Some(search_crawler) = patch.search_crawler {
             self.search_crawler = search_crawler;
         }
+        if let Some(sidebar) = patch.sidebar {
+            self.sidebar = sidebar;
+        }
     }
 }
 
@@ -178,6 +210,8 @@ impl Default for SettingsValues {
             thread_list_order: ThreadListOrder::default(),
             room_list_sort: RoomListSort::default(),
             search_crawler: SearchCrawlerSettings::default(),
+            sidebar: SidebarSettings::default(),
+            legacy_frontend_preferences_imported: false,
         }
     }
 }
@@ -208,14 +242,26 @@ pub enum TextDirectionPreference {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AppearanceSettings {
     pub theme: ThemePreference,
+    #[serde(default)]
+    pub density: DisplayDensity,
 }
 
 impl Default for AppearanceSettings {
     fn default() -> Self {
         Self {
             theme: ThemePreference::System,
+            density: DisplayDensity::default(),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DisplayDensity {
+    Compact,
+    #[default]
+    Comfortable,
+    Default,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -224,6 +270,41 @@ pub enum ThemePreference {
     System,
     Light,
     Dark,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SidebarSettings {
+    #[serde(default)]
+    pub category: SidebarCategory,
+    #[serde(default)]
+    pub collapsed: SidebarCollapsedSections,
+}
+
+impl Default for SidebarSettings {
+    fn default() -> Self {
+        Self {
+            category: SidebarCategory::default(),
+            collapsed: SidebarCollapsedSections::default(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SidebarCategory {
+    #[default]
+    Rooms,
+    People,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SidebarCollapsedSections {
+    #[serde(default)]
+    pub favourites: bool,
+    #[serde(default)]
+    pub low_priority: bool,
+    #[serde(default)]
+    pub not_joined: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -275,10 +356,12 @@ pub enum ComposerSendShortcut {
     ModEnter,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ComposerSettings {
     #[serde(default = "default_true")]
     pub math_mode: bool,
+    #[serde(default, deserialize_with = "deserialize_recent_emojis")]
+    pub recent_emojis: Vec<String>,
 }
 
 impl ComposerSettings {
@@ -289,9 +372,22 @@ impl ComposerSettings {
     }
 }
 
+impl std::fmt::Debug for ComposerSettings {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ComposerSettings")
+            .field("math_mode", &self.math_mode)
+            .field("recent_emoji_count", &self.recent_emojis.len())
+            .finish()
+    }
+}
+
 impl Default for ComposerSettings {
     fn default() -> Self {
-        Self { math_mode: true }
+        Self {
+            math_mode: true,
+            recent_emojis: Vec::new(),
+        }
     }
 }
 
@@ -511,4 +607,6 @@ pub struct SettingsPatch {
     pub thread_list_order: Option<ThreadListOrder>,
     pub room_list_sort: Option<RoomListSort>,
     pub search_crawler: Option<SearchCrawlerSettings>,
+    #[serde(default)]
+    pub sidebar: Option<SidebarSettings>,
 }

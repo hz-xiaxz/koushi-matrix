@@ -16,11 +16,11 @@ async function selectHome(page: import("@playwright/test").Page) {
 }
 
 async function selectSpace(page: import("@playwright/test").Page) {
-  await rail(page).getByRole("button", { name: "Synthetic Lab" }).click();
+  await rail(page).getByRole("button", { name: "Harness Space" }).click();
 }
 
 test("Home owns Explore and Invites; a selected space shows neither", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/appHarness.html");
   await expect(page.getByRole("complementary", { name: t("workspace.rooms") })).toBeVisible();
 
   await selectHome(page);
@@ -33,7 +33,7 @@ test("Home owns Explore and Invites; a selected space shows neither", async ({ p
 });
 
 test("a selected space exposes the aggregate Threads nav entry", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/appHarness.html");
   await expect(page.getByRole("complementary", { name: t("workspace.rooms") })).toBeVisible();
 
   await selectSpace(page);
@@ -46,7 +46,7 @@ test("the room header exposes Threads with no unread thread activity", async ({ 
   // Previously the header button appeared only when a thread had unread
   // attention, so a quiet room's threads were unreachable once the sidebar
   // entry went away.
-  await page.goto("/");
+  await page.goto("/appHarness.html");
   const header = page.getByRole("main", { name: t("timeline.conversation") });
   await expect(header.getByRole("button", { name: t("workspace.threads") })).toBeVisible();
 });
@@ -54,7 +54,7 @@ test("the room header exposes Threads with no unread thread activity", async ({ 
 test("the Home rail badge totals unread messages and invites separately in its label", async ({
   page
 }) => {
-  await page.goto("/");
+  await page.goto("/appHarness.html");
   await expect(page.getByRole("complementary", { name: t("workspace.rooms") })).toBeVisible();
 
   const homeButton = rail(page).getByRole("button", { name: "Home" });
@@ -80,7 +80,7 @@ test("the Home rail badge totals unread messages and invites separately in its l
 test("Explore separates joining by address from searching a public directory", async ({
   page
 }) => {
-  await page.goto("/");
+  await page.goto("/appHarness.html");
   await expect(page.getByRole("complementary", { name: t("workspace.rooms") })).toBeVisible();
   await selectHome(page);
   await page.getByRole("button", { name: t("workspace.explore"), exact: true }).click();
@@ -103,7 +103,7 @@ test("Explore separates joining by address from searching a public directory", a
 });
 
 test("a user id in the address field is explained, not silently ignored", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/appHarness.html");
   await selectHome(page);
   await page.getByRole("button", { name: t("workspace.explore"), exact: true }).click();
 
@@ -117,7 +117,7 @@ test("a user id in the address field is explained, not silently ignored", async 
 });
 
 test("ordinary words in the address field are reported as not an address", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/appHarness.html");
   await selectHome(page);
   await page.getByRole("button", { name: t("workspace.explore"), exact: true }).click();
 
@@ -131,7 +131,7 @@ test("ordinary words in the address field are reported as not an address", async
 });
 
 test("directory results state whether each hit is a room or a space", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/appHarness.html");
   await selectHome(page);
   await page.getByRole("button", { name: t("workspace.explore"), exact: true }).click();
 

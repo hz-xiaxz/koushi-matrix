@@ -67,6 +67,7 @@ pub fn dark_theme_settings_patch() -> SettingsPatch {
     SettingsPatch {
         appearance: Some(AppearanceSettings {
             theme: ThemePreference::Dark,
+            ..AppearanceSettings::default()
         }),
         ..SettingsPatch::default()
     }

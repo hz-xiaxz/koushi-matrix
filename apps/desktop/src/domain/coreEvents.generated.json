@@ -230,6 +230,19 @@
     },
     "kind": "E2eeTrust"
   },
+  "index0RoomKeyResent": {
+    "event": {
+      "Index0RoomKeyResent": {
+        "outcome": "completed",
+        "request_id": {
+          "connection_id": 3,
+          "sequence": 7
+        },
+        "room_id": "!r:example.test"
+      }
+    },
+    "kind": "Room"
+  },
   "intentLifecycleCommitted": {
     "kind": "IntentLifecycle",
     "outcome": {
@@ -423,24 +436,11 @@
     "event": {
       "RoomKeyReshared": {
         "outcome": {
+          "failed_recipient_count": 0,
           "kind": "sent",
           "recipient_count": 3,
-          "request_count": 2,
-          "failed_recipient_count": 0
+          "request_count": 2
         },
-        "request_id": {
-          "connection_id": 3,
-          "sequence": 7
-        },
-        "room_id": "!r:example.test"
-      }
-    },
-    "kind": "Room"
-  },
-  "index0RoomKeyResent": {
-    "event": {
-      "Index0RoomKeyResent": {
-        "outcome": "completed",
         "request_id": {
           "connection_id": 3,
           "sequence": 7
@@ -515,21 +515,6 @@
     },
     "kind": "Room"
   },
-  "spaceMemberRoleUpdateSettled": {
-    "event": {
-      "SpaceMemberRoleUpdateSettled": {
-        "generation": 4,
-        "outcome": "succeeded",
-        "request_id": {
-          "connection_id": 3,
-          "sequence": 7
-        },
-        "space_id": "!space:example.test",
-        "user_id": "@target:example.test"
-      }
-    },
-    "kind": "Room"
-  },
   "roomReportCompleted": {
     "event": {
       "ReportCompleted": {
@@ -565,6 +550,7 @@
               "original_display_label": "Synthetic Member",
               "power_level": 50,
               "role": "moderator",
+              "role_options": [],
               "user_id": "@member:example.test",
               "user_trust": {
                 "kind": "verified"
@@ -611,6 +597,7 @@
               "original_display_label": "Synthetic Member",
               "power_level": 50,
               "role": "moderator",
+              "role_options": [],
               "user_id": "@member:example.test",
               "user_trust": {
                 "kind": "verified"
@@ -731,6 +718,21 @@
       }
     },
     "kind": "Search"
+  },
+  "spaceMemberRoleUpdateSettled": {
+    "event": {
+      "SpaceMemberRoleUpdateSettled": {
+        "generation": 4,
+        "outcome": "succeeded",
+        "request_id": {
+          "connection_id": 3,
+          "sequence": 7
+        },
+        "space_id": "!space:example.test",
+        "user_id": "@target:example.test"
+      }
+    },
+    "kind": "Room"
   },
   "stateDeltaSearchCrawlerQueued": {
     "changed": {
@@ -920,6 +922,15 @@
             "can_edit": true,
             "can_react": true,
             "can_redact": true,
+            "display_metadata": {
+              "activity_event_id": "$thread-reply:example.test",
+              "content_event_id": "$e1",
+              "display_timestamp_ms": 124,
+              "kind": {
+                "kind": "threadRoot"
+              },
+              "row_id": "thread-root:$e1"
+            },
             "formatted": {
               "code_blocks": [
                 {
@@ -976,16 +987,7 @@
               "latest_timestamp_ms": 124,
               "reply_count": 2
             },
-            "timestamp_ms": 123,
-            "display_metadata": {
-              "row_id": "thread-root:$e1",
-              "kind": {
-                "kind": "threadRoot"
-              },
-              "content_event_id": "$e1",
-              "activity_event_id": "$thread-reply:example.test",
-              "display_timestamp_ms": 124
-            }
+            "timestamp_ms": 123
           }
         ],
         "key": {
@@ -1042,6 +1044,15 @@
                 "can_edit": true,
                 "can_react": true,
                 "can_redact": true,
+                "display_metadata": {
+                  "activity_event_id": "$thread-reply:example.test",
+                  "content_event_id": "$e1",
+                  "display_timestamp_ms": 124,
+                  "kind": {
+                    "kind": "threadRoot"
+                  },
+                  "row_id": "thread-root:$e1"
+                },
                 "formatted": {
                   "code_blocks": [
                     {
@@ -1098,16 +1109,7 @@
                   "latest_timestamp_ms": 124,
                   "reply_count": 2
                 },
-                "timestamp_ms": 123,
-                "display_metadata": {
-                  "row_id": "thread-root:$e1",
-                  "kind": {
-                    "kind": "threadRoot"
-                  },
-                  "content_event_id": "$e1",
-                  "activity_event_id": "$thread-reply:example.test",
-                  "display_timestamp_ms": 124
-                }
+                "timestamp_ms": 123
               }
             }
           },
@@ -1453,8 +1455,8 @@
           "in_reply_to_event_id": null,
           "is_edited": true,
           "is_redacted": false,
-          "megolm_session_fingerprint": "AbCdEfGhIjKl",
           "megolm_message_index": 2,
+          "megolm_session_fingerprint": "AbCdEfGhIjKl",
           "megolm_session_rotation_reason": "expiredTime",
           "sender": "@u:example.test",
           "thread_root": null,
@@ -1478,12 +1480,12 @@
         "snapshot": {
           "can_jump_to_bottom": true,
           "first_unread_event_id": "$unread:example.test",
+          "local_viewed_event_id": "$read:example.test",
           "newer_event_count": 3,
           "read_marker_display_event_id": "$read:example.test",
           "read_marker_event_id": "$read:example.test",
-          "local_viewed_event_id": "$read:example.test",
-          "server_confirmed_read_event_id": "$read:example.test",
           "read_state_sync": "synced",
+          "server_confirmed_read_event_id": "$read:example.test",
           "unread_event_count": 2,
           "unread_position": "belowViewport"
         }

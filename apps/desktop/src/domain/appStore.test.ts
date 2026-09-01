@@ -563,6 +563,9 @@ describe("appStore projection cache", () => {
               navigation: {
                 active_space_id: null,
                 active_room_id: "!stale-room:example.invalid",
+                home_selection: { kind: "activity" },
+                space_local_presentations: {},
+                legacy_frontend_preferences_imported: false,
                 last_room_by_space_id: {},
                 space_order: []
               }
@@ -637,6 +640,9 @@ describe("appStore projection cache", () => {
               navigation: {
                 active_space_id: null,
                 active_room_id: "!room-a:example.invalid",
+                home_selection: { kind: "activity" },
+                space_local_presentations: {},
+                legacy_frontend_preferences_imported: false,
                 last_room_by_space_id: {},
                 space_order: []
               }
@@ -771,10 +777,10 @@ function makeSnapshot(): DesktopSnapshot {
         settings: {
           values: {
             locale: { language_tag: null, text_direction: "auto" },
-            appearance: { theme: "system" },
+            appearance: { theme: "system", density: "comfortable" },
             typography: { font: "system", emoji: "system" },
             keyboard: { composer_send_shortcut: "enter" },
-            composer: { math_mode: true },
+            composer: { math_mode: true, recent_emojis: [] },
             notifications: {
               desktop_notifications: true,
               sound: true,
@@ -806,7 +812,12 @@ function makeSnapshot(): DesktopSnapshot {
               include_filenames: true
             },
             thread_list_order: { kind: "latestReply" },
-            room_list_sort: { kind: "activity" }
+            room_list_sort: { kind: "activity" },
+            sidebar: {
+              category: "rooms",
+              collapsed: { favourites: false, low_priority: false, not_joined: false }
+            },
+            legacy_frontend_preferences_imported: false
           },
           persistence: { kind: "idle" }
         },
@@ -969,7 +980,13 @@ function makeSnapshot(): DesktopSnapshot {
         }
       },
       ui: {
-        navigation: { active_space_id: "!space-alpha:example.invalid", active_room_id: "!room-alpha:example.invalid" },
+        navigation: {
+          active_space_id: "!space-alpha:example.invalid",
+          active_room_id: "!room-alpha:example.invalid",
+          home_selection: { kind: "activity" },
+          space_local_presentations: {},
+          legacy_frontend_preferences_imported: false
+        },
         room_list: {
           readiness: { kind: "ready", source: "cache", generation: 0 },
           active_filter: { kind: "rooms" },
@@ -1049,7 +1066,8 @@ function makeSnapshot(): DesktopSnapshot {
       space_unread_count: 0,
       dm_unread_count: 1,
       space_highlight_count: 0,
-      dm_highlight_count: 0
+      dm_highlight_count: 0,
+      sections: { favourites: [], rooms: [], people: [], low_priority: [], not_joined: [] }
     },
     timeline: [
       {

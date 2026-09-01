@@ -1,9 +1,12 @@
-import { browserCommandSnapshot } from "./backend/browserFakeApi.testSupport";
+import { commandSnapshot } from "./test/commandReceiptFixture";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, test, vi } from "vitest";
 
-import { createBrowserFakeApi } from "./backend/browserFakeApi";
+import {
+  awaitingVerificationSnapshotFixture,
+  createDesktopApiFixture
+} from "./test/desktopApiFixture";
 import {
   createComposerSubmissionController,
   createComposerSubmissionControllerRegistry,
@@ -60,7 +63,7 @@ describe("ContextualRightPanel", () => {
     const first = controller.begin()!;
     controller.capture(first, { body: "original" });
     controller.markUnknown(first, "timeout");
-    const snapshot = await createBrowserFakeApi().getSnapshot();
+    const snapshot = await createDesktopApiFixture().getSnapshot();
     snapshot.state.ui.timeline.submission_registry = {
       accepted_submission_ids: [first],
       settled_submission_ids: [first]
@@ -114,7 +117,7 @@ describe("ContextualRightPanel", () => {
   test("workspace rail exposes create space control", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { WorkspaceRail } = await import("./App");
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
 
     const markup = renderToStaticMarkup(
@@ -139,7 +142,7 @@ describe("ContextualRightPanel", () => {
   test("workspace rail renders Rust-projected space attention counts", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { WorkspaceRail } = await import("./App");
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     snapshot.sidebar.space_rail = [
       {
@@ -717,7 +720,7 @@ describe("ContextualRightPanel", () => {
           } as TimelineItem
         }
         roomId="!room:example.invalid"
-        searchQuery="keyword"
+        searchHighlights={[{ start_utf16: 10, end_utf16: 17 }]}
         onReply={() => undefined}
         onSendReaction={() => undefined}
         onRedactReaction={() => undefined}
@@ -878,10 +881,27 @@ describe("ContextualRightPanel", () => {
   test("renders search results as a contextual right panel mode", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
-    const api = createBrowserFakeApi();
-    const snapshot = await browserCommandSnapshot(api, api.submitSearch("Alpha", "allRooms"));
-    const firstSearchResult =
-      snapshot.state.domain.search.kind === "results" ? snapshot.state.domain.search.results[0] : null;
+    const api = createDesktopApiFixture();
+    const snapshot = await api.getSnapshot();
+    const firstSearchResult = {
+      room_id: "!room-alpha:example.invalid",
+      event_id: "$search:example.invalid",
+      context_label: "synthetic-room",
+      sender: "@alice:example.invalid",
+      timestamp_ms: 1_800_000_000_000,
+      score_millis: 1000,
+      snippet: "Alpha keyword update",
+      match_field: "messageBody" as const,
+      highlights: [{ start_utf16: 0, end_utf16: 5 }],
+      match_kind: "exact" as const
+    };
+    snapshot.state.domain.search = {
+      kind: "results",
+      request_id: 1,
+      query: "Alpha",
+      scope: "allRooms",
+      results: [firstSearchResult]
+    };
 
     const markup = renderToStaticMarkup(
       <ContextualRightPanel
@@ -936,8 +956,8 @@ describe("ContextualRightPanel", () => {
   test("renders indexing-pending copy for empty search results while crawler is active", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
-    const api = createBrowserFakeApi();
-    const snapshot = await browserCommandSnapshot(api, api.submitSearch("NoMatch", "allRooms"));
+    const api = createDesktopApiFixture();
+    const snapshot = await commandSnapshot(api, api.submitSearch("NoMatch", "allRooms"));
 
     const markup = renderToStaticMarkup(
       <ContextualRightPanel
@@ -978,8 +998,8 @@ describe("ContextualRightPanel", () => {
   test("renders focused search context from Rust-owned snapshot state", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
-    const api = createBrowserFakeApi();
-    const snapshot = await browserCommandSnapshot(api, api.submitSearch("Alpha", "allRooms"));
+    const api = createDesktopApiFixture();
+    const snapshot = await commandSnapshot(api, api.submitSearch("Alpha", "allRooms"));
     snapshot.state.ui.focused_context = {
       kind: "open",
       room_id: snapshot.state.domain.search.kind === "results" ? snapshot.state.domain.search.results[0]?.room_id ?? "!room:example.invalid" : "!room:example.invalid",
@@ -1057,8 +1077,8 @@ describe("ContextualRightPanel", () => {
   test("renders focusedContext mode as a focused TimelineView without search results", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
-    const api = createBrowserFakeApi();
-    const snapshot = await browserCommandSnapshot(api, api.submitSearch("Alpha", "allRooms"));
+    const api = createDesktopApiFixture();
+    const snapshot = await commandSnapshot(api, api.submitSearch("Alpha", "allRooms"));
     snapshot.state.ui.focused_context = {
       kind: "open",
       room_id: "!room-alpha:example.invalid",
@@ -1134,7 +1154,7 @@ describe("ContextualRightPanel", () => {
   test("renders thread panel as a keyed TimelineView from Rust-owned state", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     snapshot.state.ui.thread = {
       kind: "open",
@@ -1223,7 +1243,7 @@ describe("ContextualRightPanel", () => {
   test("thread composer renders Rust-owned draft and enables send only when not pending", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     snapshot.state.ui.thread = {
       kind: "open",
@@ -1283,7 +1303,7 @@ describe("ContextualRightPanel", () => {
   test("thread composer disables send while the Rust-owned composer is pending", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     snapshot.state.ui.thread = {
       kind: "open",
@@ -1472,24 +1492,21 @@ describe("ContextualRightPanel", () => {
   test("desktop api contract is neutral and exposes the search index rebuild command", () => {
     const contractSource = readFileSync(new URL("./backend/desktopApi.ts", import.meta.url), "utf8");
     const source = readFileSync(new URL("./backend/client.ts", import.meta.url), "utf8");
-    const fakeSource = readFileSync(new URL("./backend/browserFakeApi.ts", import.meta.url), "utf8");
     const runtimeSource = readFileSync(new URL("./backend/appRuntime.ts", import.meta.url), "utf8");
 
     expect(contractSource).toContain("export interface DesktopApi");
     expect(contractSource).toContain("rebuildSearchIndex(): Promise<CommandAdmission>");
-    expect(source).toContain('invoke<CommandAdmission>("rebuild_search_index"');
+    expect(source).toContain('this.invokeCommand<CommandAdmission>("rebuild_search_index"');
     expect(source).not.toContain("createDesktopApi");
     expect(source).not.toContain("function isTauriRuntime");
-    expect(fakeSource).toContain("async rebuildSearchIndex(): Promise<CommandAdmission>");
-    expect(fakeSource).not.toContain("export interface DesktopApi");
     expect(runtimeSource).toContain("new TauriDesktopApi()");
-    expect(runtimeSource).toContain("createBrowserFakeApi()");
+    expect(runtimeSource).not.toContain("browserFakeApi");
   });
 
   test("renders encryption recovery as a contextual right panel mode", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { ContextualRightPanel } = await import("./App");
-    const api = createBrowserFakeApi({ session: "needsRecovery" });
+    const api = createDesktopApiFixture(awaitingVerificationSnapshotFixture());
     const snapshot = await api.getSnapshot();
 
     const markup = renderToStaticMarkup(
@@ -1845,7 +1862,7 @@ describe("desktop integration source guards", () => {
   test("retains the anchored main timeline key while focused context panel is closed", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { retainedTimelineStoreKeyIds } = await import("./App");
-    const snapshot = await createBrowserFakeApi().getSnapshot();
+    const snapshot = await createDesktopApiFixture().getSnapshot();
     snapshot.state.ui.navigation.main_timeline_anchor = {
       event_id: "$seed-event:example.invalid"
     };
@@ -2709,7 +2726,7 @@ describe("Timeline item row rendering", () => {
   test("rejected login transport refreshes authoritative gate state without rejecting", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { settleLoginTransport } = await import("./App");
-    const gate = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const gate = structuredClone(awaitingVerificationSnapshotFixture());
     const apply = vi.fn();
     await expect(
       settleLoginTransport(
@@ -2725,7 +2742,7 @@ describe("Timeline item row rendering", () => {
   test("login transport does not duplicate an authoritative projected failure", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { settleLoginTransport } = await import("./App");
-    const failed = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const failed = structuredClone(awaitingVerificationSnapshotFixture());
     failed.state.ui.errors.push({ code: "login_failed", message: "Login failed", recoverable: true });
     await expect(settleLoginTransport(
       Promise.reject(new Error("ipc")),
@@ -2738,7 +2755,7 @@ describe("Timeline item row rendering", () => {
   test("unrelated projected errors do not hide a rejected login transport", async () => {
     vi.stubGlobal("window", { location: { search: "" } });
     const { settleLoginTransport } = await import("./App");
-    const snapshot = await createBrowserFakeApi({ session: "needsRecovery" }).getSnapshot();
+    const snapshot = structuredClone(awaitingVerificationSnapshotFixture());
     snapshot.state.ui.errors.push({ code: "media_download_failed", message: "Old media error", recoverable: true });
     await expect(
       settleLoginTransport(

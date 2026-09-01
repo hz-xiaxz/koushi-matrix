@@ -894,7 +894,9 @@ export function UploadStagingDialog({
   mentionCandidatesLoading = false,
   onMentionQueryChange,
   mathModeEnabled = true,
+  recentEmojis = [],
   onMathModeChange = () => undefined,
+  onRecentEmojisChange = () => undefined,
   roomName = t("panel.thread")
 }: {
   items: StagedUploadItem[];
@@ -919,7 +921,9 @@ export function UploadStagingDialog({
   mentionCandidatesLoading?: boolean;
   onMentionQueryChange?: (query: string | null) => void;
   mathModeEnabled?: boolean;
+  recentEmojis?: string[];
   onMathModeChange?: (enabled: boolean) => void | Promise<void>;
+  onRecentEmojisChange?: (emojis: string[]) => void | Promise<void>;
   roomName?: string;
 }) {
   const sendable = uploadStagingItemsAreSendable(items);
@@ -1006,6 +1010,8 @@ export function UploadStagingDialog({
                 isSending={false}
                 stagedUploadsReady={sendable}
                 mathModeEnabled={mathModeEnabled}
+                recentEmojis={recentEmojis}
+                onRecentEmojisChange={onRecentEmojisChange}
                 mentionCandidates={mentionCandidates}
                 mentionCandidatesLoading={mentionCandidatesLoading}
                 resolveComposerKeyAction={resolveComposerKeyAction}

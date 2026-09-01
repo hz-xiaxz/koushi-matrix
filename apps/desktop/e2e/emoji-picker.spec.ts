@@ -100,6 +100,25 @@ test("selecting an emoji by mouse inserts it into the composer draft", async ({ 
   await expect(composer).toHaveText(emojiChar ?? "");
 });
 
+test("recent emoji selection is projected through Rust-owned composer settings", async ({ page }) => {
+  await gotoReadyShell(page);
+  await openEmojiPicker(page);
+  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  const selected = await picker.locator(".emoji-picker-item").first().textContent();
+  await picker.locator(".emoji-picker-item").first().click();
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.__harness.currentSnapshot().state.domain.settings.values.composer.recent_emojis
+      )
+    )
+    .toEqual([selected]);
+
+  await openEmojiPicker(page);
+  await expect(page.getByRole("heading", { name: t("composer.emojiRecent") })).toBeVisible();
+});
+
 test("typing a search term filters the emoji grid", async ({ page }) => {
   await gotoReadyShell(page);
   await openEmojiPicker(page);

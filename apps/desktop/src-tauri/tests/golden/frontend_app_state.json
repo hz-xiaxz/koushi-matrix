@@ -13,13 +13,48 @@
     "dm_unread_count": 0,
     "global_dms": [],
     "not_joined_space_rooms": [],
+    "sections": {
+      "favourites": [],
+      "low_priority": [],
+      "not_joined": [],
+      "people": [],
+      "rooms": [
+        {
+          "avatar": {
+            "mxc_uri": "mxc://example.invalid/fixture-avatar",
+            "thumbnail": {
+              "height": 64,
+              "kind": "ready",
+              "mime_type": "image/png",
+              "source_url": "asset://fixture-avatar",
+              "width": 64
+            }
+          },
+          "display_count": 2,
+          "display_name": "Fixture Room",
+          "has_unread_content": true,
+          "has_unread_mention": true,
+          "highlight_count": 1,
+          "is_attention_highlighted": true,
+          "is_muted": false,
+          "notification_count": 2,
+          "room_id": "!room:example.invalid",
+          "tags": {
+            "favourite": null,
+            "low_priority": null
+          },
+          "unread_count": 3
+        }
+      ]
+    },
     "space_highlight_count": 1,
     "space_rail": [
       {
         "avatar": null,
-        "display_name": "Fixture Space",
+        "display_name": "Local Space",
         "highlight_count": 1,
         "is_active": true,
+        "local_icon": "L",
         "space_id": "!space:example.invalid",
         "unread_count": 3
       }
@@ -474,6 +509,7 @@
               "original_display_label": "Fixture User",
               "power_level": 100,
               "role": "administrator",
+              "role_options": [],
               "user_id": "@fixture:example.invalid",
               "user_trust": null
             }
@@ -631,10 +667,12 @@
         },
         "values": {
           "appearance": {
+            "density": "comfortable",
             "theme": "system"
           },
           "composer": {
-            "math_mode": true
+            "math_mode": true,
+            "recent_emojis": []
           },
           "display": {
             "code_block_wrap": true,
@@ -645,6 +683,7 @@
           "keyboard": {
             "composer_send_shortcut": "enter"
           },
+          "legacy_frontend_preferences_imported": false,
           "locale": {
             "language_tag": null,
             "text_direction": "auto"
@@ -671,6 +710,14 @@
             "include_filenames": true,
             "include_media_captions": true,
             "speed": "standard"
+          },
+          "sidebar": {
+            "category": "rooms",
+            "collapsed": {
+              "favourites": false,
+              "low_priority": false,
+              "not_joined": false
+            }
           },
           "thread_list_order": {
             "kind": "latestReply"
@@ -786,6 +833,10 @@
       "navigation": {
         "active_room_id": "!room:example.invalid",
         "active_space_id": "!space:example.invalid",
+        "home_selection": {
+          "kind": "directMessage",
+          "room_id": "!dm:example.invalid"
+        },
         "last_room_by_space_id": {
           "!space:example.invalid": "!room:example.invalid"
         },
@@ -793,6 +844,13 @@
           "!space:example.invalid": {
             "room_id": "!dm:example.invalid",
             "surface": "dms"
+          }
+        },
+        "legacy_frontend_preferences_imported": true,
+        "space_local_presentations": {
+          "!space:example.invalid": {
+            "icon": "L",
+            "name": "Local Space"
           }
         },
         "space_order": [

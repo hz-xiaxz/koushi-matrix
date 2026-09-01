@@ -132,9 +132,11 @@ export interface SettingsValues {
   display: DisplaySettings;
   media: MediaSettings;
   timeline: TimelineSettings;
+  sidebar: SidebarSettings;
   search_crawler: SearchCrawlerSettings;
   thread_list_order: ThreadListOrder;
   room_list_sort: RoomListSort;
+  legacy_frontend_preferences_imported: boolean;
 }
 
 export interface SettingsPatch {
@@ -147,6 +149,7 @@ export interface SettingsPatch {
   display?: DisplaySettings;
   media?: MediaSettings;
   timeline?: TimelineSettings;
+  sidebar?: SidebarSettings;
   search_crawler?: SearchCrawlerSettings;
   thread_list_order?: ThreadListOrder;
   room_list_sort?: RoomListSort;
@@ -202,9 +205,11 @@ export type TypographyAssetStatus = "systemFallback" | "bundledPreferred";
 
 export interface AppearanceSettings {
   theme: ThemePreference;
+  density: DisplayDensity;
 }
 
 export type ThemePreference = "system" | "light" | "dark";
+export type DisplayDensity = "compact" | "default" | "comfortable";
 
 export interface TypographySettings {
   font: FontPreference;
@@ -222,6 +227,20 @@ export type ComposerSendShortcut = "enter" | "modEnter";
 
 export interface ComposerSettings {
   math_mode: boolean;
+  recent_emojis: string[];
+}
+
+export type SidebarCategory = "rooms" | "people";
+
+export interface SidebarCollapsedSections {
+  favourites: boolean;
+  low_priority: boolean;
+  not_joined: boolean;
+}
+
+export interface SidebarSettings {
+  category: SidebarCategory;
+  collapsed: SidebarCollapsedSections;
 }
 
 export interface NotificationSettings {
@@ -699,9 +718,36 @@ export interface SpaceNavigationSelection {
   room_id?: string | null;
 }
 
+export type HomeSelection =
+  | { kind: "activity" }
+  | { kind: "explore" }
+  | { kind: "invites" }
+  | { kind: "directMessage"; room_id: string };
+
+export interface SpaceLocalPresentation {
+  name?: string | null;
+  icon?: string | null;
+}
+
+export type NavigationPreferenceUpdate =
+  | { kind: "setHomeSelection"; selection: HomeSelection }
+  | {
+      kind: "setSpacePresentation";
+      space_id: string;
+      presentation: SpaceLocalPresentation | null;
+    }
+  | {
+      kind: "importLegacy";
+      home_selection?: HomeSelection | null;
+      space_local_presentations: Record<string, SpaceLocalPresentation>;
+    };
+
 export interface NavigationState {
   active_space_id: string | null;
   active_room_id: string | null;
+  home_selection: HomeSelection;
+  space_local_presentations: Record<string, SpaceLocalPresentation>;
+  legacy_frontend_preferences_imported: boolean;
   space_order?: string[];
   /** Legacy non-DM-only memory, superseded by `last_selection_by_space_id`. */
   last_room_by_space_id?: Record<string, string>;
@@ -1441,7 +1487,14 @@ export interface RoomMemberSummary {
   avatar_url: string | null;
   power_level: number | null;
   role: RoomMemberRole;
+  role_options: RoomMemberRoleOption[];
   user_trust?: UserTrustState;
+}
+
+export interface RoomMemberRoleOption {
+  power_level: number;
+  role: RoomMemberRole;
+  requires_confirmation: boolean;
 }
 
 export type RoomMemberRole = "creator" | "administrator" | "moderator" | "user";
@@ -2169,6 +2222,15 @@ export interface SidebarModel {
   dm_unread_count: number;
   space_highlight_count: number;
   dm_highlight_count: number;
+  sections: SidebarSections;
+}
+
+export interface SidebarSections {
+  favourites: RoomListItem[];
+  rooms: RoomListItem[];
+  people: RoomListItem[];
+  low_priority: RoomListItem[];
+  not_joined: RoomListItem[];
 }
 
 export interface AccountHomeItem {
@@ -2186,6 +2248,7 @@ export interface AccountHomeItem {
 export interface SpaceRailItem {
   space_id: string;
   display_name: string;
+  local_icon?: string | null;
   avatar: AvatarImage | null;
   unread_count: number;
   highlight_count: number;

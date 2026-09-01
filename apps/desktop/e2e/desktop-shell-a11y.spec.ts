@@ -18,7 +18,7 @@ async function focusedLabel(page: import("@playwright/test").Page): Promise<stri
 test("the three-pane shell exposes landmarks and reachable keyboard focus stops", async ({
   page
 }) => {
-  await page.goto("/");
+  await page.goto("/appHarness.html");
 
   await expect(page.getByRole("navigation", { name: "Workspaces" })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Rooms" })).toBeVisible();
@@ -35,8 +35,7 @@ test("the three-pane shell exposes landmarks and reachable keyboard focus stops"
   expect(labels).toContain("Search");
   expect(labels).toContain("Search scope");
   expect(labels).toContain("Keyboard settings");
-  expect(labels).toContain("Synthetic Workspace");
-  expect(labels).toContain("Synthetic Lab");
+  expect(labels).toContain("Harness Space");
   expect(labels).toContain("Create space");
   expect(labels).toContain("User settings");
   expect(labels).toContain("Message composer");

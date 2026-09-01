@@ -3,12 +3,11 @@ import { Copy } from "lucide-react";
 import katex from "katex";
 
 import { t } from "../../i18n/messages";
-import { findQueryHighlightRange } from "../searchHighlight";
 import { openExternalHttpUrl } from "../../backend/linkMediaRuntime";
 import { toExternalHttpUrl } from "../../domain/externalLinks";
 import { parseMatrixPermalink, type MatrixPermalinkTarget } from "../../domain/matrixPermalink";
 import type { TimelineItem, TimelineLinkRange } from "../../domain/coreEvents";
-import type { UserProfile } from "../../domain/types";
+import type { TextRange, UserProfile } from "../../domain/types";
 import type { TimelineRowActionHandlers } from "./TimelineItemRow";
 
 type TimelineMentionToken = {
@@ -42,28 +41,34 @@ function activateTimelineLink(
 
 export function renderTimelineMessageText(
   text: string,
-  query = "",
-  profileUsers: Record<string, UserProfile> = {}
+  highlightRanges: TextRange[] = [],
+  profileUsers: Record<string, UserProfile> = {},
+  baseOffset = 0
 ) {
   const mentionTokens = timelineMentionTokens(profileUsers);
-  return text.split("\n").map((line, index) => (
-    <span key={`${line}:${index}`}>
-      {index > 0 ? <br /> : null}
-      {renderTimelineMessageLine(line, query, mentionTokens)}
-    </span>
-  ));
+  let offset = baseOffset;
+  return text.split("\n").map((line, index) => {
+    const lineOffset = offset;
+    offset += line.length + 1;
+    return (
+      <span key={`${line}:${index}`}>
+        {index > 0 ? <br /> : null}
+        {renderTimelineMessageLine(line, highlightRanges, mentionTokens, lineOffset)}
+      </span>
+    );
+  });
 }
 
 function renderTimelineMessageTextWithSpoilers(
   text: string,
   spoilerSpans: TimelineItem["spoiler_spans"] | undefined,
-  query: string,
+  highlightRanges: TextRange[],
   profileUsers: Record<string, UserProfile>,
   spoilerState: SpoilerRevealState
 ): ReactNode {
   const spans = normalizeSpoilerSpans(spoilerSpans, text.length);
   if (spans.length === 0) {
-    return renderTimelineMessageText(text, query, profileUsers);
+    return renderTimelineMessageText(text, highlightRanges, profileUsers);
   }
 
   const nodes: ReactNode[] = [];
@@ -73,7 +78,7 @@ function renderTimelineMessageTextWithSpoilers(
       const visibleText = text.slice(cursor, span.start_utf16);
       nodes.push(
         <Fragment key={`text:${cursor}`}>
-          {renderTimelineMessageText(visibleText, query, profileUsers)}
+          {renderTimelineMessageText(visibleText, highlightRanges, profileUsers, cursor)}
         </Fragment>
       );
     }
@@ -82,7 +87,7 @@ function renderTimelineMessageTextWithSpoilers(
     nodes.push(
       renderSpoiler(
         `plain:${span.start_utf16}:${span.end_utf16}:${index}`,
-        renderTimelineMessageText(spoilerText, query, profileUsers),
+        renderTimelineMessageText(spoilerText, highlightRanges, profileUsers, span.start_utf16),
         span.reason,
         spoilerState
       )
@@ -93,7 +98,7 @@ function renderTimelineMessageTextWithSpoilers(
   if (cursor < text.length) {
     nodes.push(
       <Fragment key={`text:${cursor}`}>
-        {renderTimelineMessageText(text.slice(cursor), query, profileUsers)}
+        {renderTimelineMessageText(text.slice(cursor), highlightRanges, profileUsers, cursor)}
       </Fragment>
     );
   }
@@ -104,7 +109,7 @@ export function renderPlainTextBody(
   text: string,
   linkRanges: TimelineLinkRange[],
   spoilerSpans: TimelineItem["spoiler_spans"] | undefined,
-  query: string,
+  highlightRanges: TextRange[],
   profileUsers: Record<string, UserProfile>,
   spoilerState: SpoilerRevealState,
   onOpenMatrixTarget: OpenMatrixTargetHandler | undefined
@@ -113,7 +118,7 @@ export function renderPlainTextBody(
     return renderTimelineMessageTextWithSpoilers(
       text,
       spoilerSpans,
-      query,
+      highlightRanges,
       profileUsers,
       spoilerState
     );
@@ -134,7 +139,7 @@ export function renderPlainTextBody(
             cursor,
             span.start_utf16,
             sortedLinks,
-            query,
+            highlightRanges,
             profileUsers,
             onOpenMatrixTarget
           )}
@@ -147,7 +152,7 @@ export function renderPlainTextBody(
       span.start_utf16,
       span.end_utf16,
       sortedLinks,
-      query,
+      highlightRanges,
       profileUsers,
       onOpenMatrixTarget
     );
@@ -170,7 +175,7 @@ export function renderPlainTextBody(
           cursor,
           text.length,
           sortedLinks,
-          query,
+          highlightRanges,
           profileUsers,
           onOpenMatrixTarget
         )}
@@ -185,7 +190,7 @@ function renderPlainTextSegment(
   segStart: number,
   segEnd: number,
   sortedLinks: TimelineLinkRange[],
-  query: string,
+  highlightRanges: TextRange[],
   profileUsers: Record<string, UserProfile>,
   onOpenMatrixTarget: OpenMatrixTargetHandler | undefined
 ): ReactNode {
@@ -199,7 +204,12 @@ function renderPlainTextSegment(
     if (linkStart > cursor) {
       nodes.push(
         <Fragment key={`text:${cursor}`}>
-          {renderTimelineMessageText(text.slice(cursor, linkStart), query, profileUsers)}
+          {renderTimelineMessageText(
+            text.slice(cursor, linkStart),
+            highlightRanges,
+            profileUsers,
+            cursor
+          )}
         </Fragment>
       );
     }
@@ -207,8 +217,9 @@ function renderPlainTextSegment(
     const href = toExternalHttpUrl(range.url);
     const linkContent = renderTimelineMessageText(
       text.slice(linkStart, linkEnd),
-      query,
-      profileUsers
+      highlightRanges,
+      profileUsers,
+      linkStart
     );
     nodes.push(
       href ? (
@@ -234,7 +245,12 @@ function renderPlainTextSegment(
   if (cursor < segEnd) {
     nodes.push(
       <Fragment key={`text:${cursor}`}>
-        {renderTimelineMessageText(text.slice(cursor, segEnd), query, profileUsers)}
+        {renderTimelineMessageText(
+          text.slice(cursor, segEnd),
+          highlightRanges,
+          profileUsers,
+          cursor
+        )}
       </Fragment>
     );
   }
@@ -258,11 +274,12 @@ function normalizeSpoilerSpans(
 
 function renderTimelineMessageLine(
   line: string,
-  query: string,
-  mentionTokens: TimelineMentionToken[]
+  highlightRanges: TextRange[],
+  mentionTokens: TimelineMentionToken[],
+  baseOffset: number
 ): ReactNode {
   if (mentionTokens.length === 0) {
-    return renderQueryHighlight(line, query);
+    return renderRustHighlights(line, highlightRanges, baseOffset);
   }
 
   const nodes: ReactNode[] = [];
@@ -271,14 +288,20 @@ function renderTimelineMessageLine(
     const next = findNextMentionToken(line, cursor, mentionTokens);
     if (!next) {
       nodes.push(
-        <Fragment key={`text:${cursor}`}>{renderQueryHighlight(line.slice(cursor), query)}</Fragment>
+        <Fragment key={`text:${cursor}`}>
+          {renderRustHighlights(line.slice(cursor), highlightRanges, baseOffset + cursor)}
+        </Fragment>
       );
       break;
     }
     if (next.start > cursor) {
       nodes.push(
         <Fragment key={`text:${cursor}`}>
-          {renderQueryHighlight(line.slice(cursor, next.start), query)}
+          {renderRustHighlights(
+            line.slice(cursor, next.start),
+            highlightRanges,
+            baseOffset + cursor
+          )}
         </Fragment>
       );
     }
@@ -290,29 +313,44 @@ function renderTimelineMessageLine(
         dir="auto"
         key={`${next.userId}:${next.start}`}
       >
-        {renderQueryHighlight(token, query)}
+        {renderRustHighlights(token, highlightRanges, baseOffset + next.start)}
       </span>
     );
     cursor = next.end;
   }
 
-  return nodes.length > 0 ? nodes : renderQueryHighlight(line, query);
+  return nodes.length > 0
+    ? nodes
+    : renderRustHighlights(line, highlightRanges, baseOffset);
 }
 
-function renderQueryHighlight(text: string, query: string): ReactNode {
-  // #162: match with the same NFKC + case-fold rule as the Rust search matcher
-  // so a visible highlight and the Search panel's exact-match count agree.
-  const range = findQueryHighlightRange(text, query);
-  if (!range) {
-    return text;
+function renderRustHighlights(
+  text: string,
+  ranges: TextRange[],
+  baseOffset: number
+): ReactNode {
+  const endOffset = baseOffset + text.length;
+  const relevant = ranges
+    .filter((range) => range.end_utf16 > baseOffset && range.start_utf16 < endOffset)
+    .map((range) => ({
+      start: Math.max(0, range.start_utf16 - baseOffset),
+      end: Math.min(text.length, range.end_utf16 - baseOffset)
+    }))
+    .filter((range) => range.start < range.end)
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+  if (relevant.length === 0) return text;
+
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  for (const [index, range] of relevant.entries()) {
+    const start = Math.max(cursor, range.start);
+    if (start >= range.end) continue;
+    if (start > cursor) nodes.push(text.slice(cursor, start));
+    nodes.push(<mark key={`${baseOffset + start}:${index}`}>{text.slice(start, range.end)}</mark>);
+    cursor = range.end;
   }
-  return (
-    <>
-      {text.slice(0, range.start)}
-      <mark>{text.slice(range.start, range.end)}</mark>
-      {text.slice(range.end)}
-    </>
-  );
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes;
 }
 
 type FormattedNode =
@@ -357,7 +395,7 @@ export function renderFormattedBody(
   linkRanges: TimelineLinkRange[],
   codeBlockWrap: boolean,
   onCopyText: TimelineRowActionHandlers["onCopyText"],
-  searchQuery: string,
+  highlightRanges: TextRange[],
   spoilerState: SpoilerRevealState,
   onOpenMatrixTarget: OpenMatrixTargetHandler | undefined
 ): ReactNode {
@@ -366,16 +404,42 @@ export function renderFormattedBody(
       ? linkifyFormattedNodes(parseFormattedHtml(formatted.html), linkRanges)
       : parseFormattedHtml(formatted.html);
   const codeBlockIndexRef = { current: 0 };
+  const textOffsetRef = { current: 0 };
+  const projectedHighlightRanges = formattedTextOffsetsProject(nodes, formatted.plain_text)
+    ? highlightRanges
+    : [];
   return renderFormattedNodes(
     nodes,
     formatted,
     codeBlockWrap,
     codeBlockIndexRef,
     onCopyText,
-    searchQuery,
+    projectedHighlightRanges,
+    textOffsetRef,
     spoilerState,
     onOpenMatrixTarget
   );
+}
+
+function formattedTextOffsetsProject(nodes: FormattedNode[], plainText: string): boolean {
+  const cursor = { current: 0 };
+  const visit = (candidates: FormattedNode[], parentTagName: string | null): boolean => {
+    const rendered =
+      parentTagName === "ul" || parentTagName === "ol"
+        ? candidates.filter((node) => node.kind !== "text" || node.value.trim().length > 0)
+        : candidates;
+    for (const node of rendered) {
+      if (node.kind === "text") {
+        const projectedOffset = plainText.indexOf(node.value, cursor.current);
+        if (projectedOffset < 0) return false;
+        cursor.current = projectedOffset + node.value.length;
+      } else if (!visit(node.children, node.tagName)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  return visit(nodes, null);
 }
 
 function parseFormattedHtml(html: string): FormattedNode[] {
@@ -540,7 +604,8 @@ function renderFormattedNodes(
   codeBlockWrap: boolean,
   codeBlockIndexRef: { current: number },
   onCopyText: TimelineRowActionHandlers["onCopyText"],
-  searchQuery: string,
+  highlightRanges: TextRange[],
+  textOffsetRef: { current: number },
   spoilerState: SpoilerRevealState,
   onOpenMatrixTarget: OpenMatrixTargetHandler | undefined,
   keyPrefix = "",
@@ -558,7 +623,8 @@ function renderFormattedNodes(
       codeBlockWrap,
       codeBlockIndexRef,
       onCopyText,
-      searchQuery,
+      highlightRanges,
+      textOffsetRef,
       spoilerState,
       onOpenMatrixTarget
     )
@@ -572,13 +638,17 @@ function renderFormattedNode(
   codeBlockWrap: boolean,
   codeBlockIndexRef: { current: number },
   onCopyText: TimelineRowActionHandlers["onCopyText"],
-  searchQuery: string,
+  highlightRanges: TextRange[],
+  textOffsetRef: { current: number },
   spoilerState: SpoilerRevealState,
   onOpenMatrixTarget: OpenMatrixTargetHandler | undefined
 ): ReactNode {
   if (node.kind === "text") {
+    const projectedOffset = formatted.plain_text.indexOf(node.value, textOffsetRef.current);
+    const baseOffset = projectedOffset >= 0 ? projectedOffset : textOffsetRef.current;
+    textOffsetRef.current = baseOffset + node.value.length;
     return (
-      <Fragment key={key}>{renderQueryHighlight(node.value, searchQuery)}</Fragment>
+      <Fragment key={key}>{renderRustHighlights(node.value, highlightRanges, baseOffset)}</Fragment>
     );
   }
   const children = renderFormattedNodes(
@@ -587,7 +657,8 @@ function renderFormattedNode(
     codeBlockWrap,
     codeBlockIndexRef,
     onCopyText,
-    searchQuery,
+    highlightRanges,
+    textOffsetRef,
     spoilerState,
     onOpenMatrixTarget,
     key,

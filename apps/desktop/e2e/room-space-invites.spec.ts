@@ -90,7 +90,7 @@ test("workspace rail space and Home clicks apply returned navigation snapshots",
   });
 
   const rail = page.getByRole("navigation", { name: "Workspaces" });
-  const home = rail.getByRole("button", { name: "Home", exact: true });
+  const home = rail.getByRole("button", { name: /^Home/ });
   const space = rail.getByRole("button", { name: "Harness Space", exact: true });
 
   await space.click({ force: true });
@@ -183,7 +183,7 @@ test("workspace rail keeps a delta that arrives before its command receipt", asy
   });
 
   const rail = page.getByRole("navigation", { name: "Workspaces" });
-  const home = rail.getByRole("button", { name: "Home", exact: true });
+  const home = rail.getByRole("button", { name: /^Home/ });
   const space = rail.getByRole("button", { name: "Harness Space", exact: true });
 
   await expect(home).toHaveClass(/is-active/);
@@ -246,7 +246,7 @@ test("space rail separates system buttons, reorders Spaces, and leaves a Space h
 
   const rail = page.getByRole("navigation", { name: "Workspaces" });
   await expect(rail.locator('[role="separator"]')).toBeVisible();
-  await expect(rail.getByRole("button", { name: "Home", exact: true })).toBeVisible();
+  await expect(rail.getByRole("button", { name: /^Home/ })).toBeVisible();
 
   const firstSpace = rail.getByRole("button", { name: "Harness Space", exact: true });
   const secondSpace = rail.getByRole("button", { name: "Second Harness Space", exact: true });
@@ -481,6 +481,14 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
         highlight_count: 0,
         parent_space_ids: []
       };
+      const joinedItem = {
+        room_id: joinedRoom.room_id,
+        display_name: joinedRoom.display_name,
+        avatar: null,
+        tags: { favourite: null, low_priority: null },
+        unread_count: 0,
+        highlight_count: 0
+      };
       const next = {
         ...snapshot,
         state: {
@@ -505,17 +513,11 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
         },
         sidebar: {
           ...snapshot.sidebar,
-          space_rooms: [
-            ...snapshot.sidebar.space_rooms,
-            {
-              room_id: joinedRoom.room_id,
-              display_name: joinedRoom.display_name,
-              avatar: null,
-              tags: { favourite: null, low_priority: null },
-              unread_count: 0,
-              highlight_count: 0
-            }
-          ]
+          space_rooms: [...snapshot.sidebar.space_rooms, joinedItem],
+          sections: {
+            ...snapshot.sidebar.sections,
+            rooms: [...snapshot.sidebar.sections.rooms, joinedItem]
+          }
         }
       };
       window.__harness.setSnapshot(next);
@@ -533,6 +535,14 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
         notification_count: 0,
         highlight_count: 0,
         parent_space_ids: []
+      };
+      const dmItem = {
+        room_id: dmRoom.room_id,
+        display_name: dmRoom.display_name,
+        avatar: null,
+        tags: { favourite: null, low_priority: null },
+        unread_count: 0,
+        highlight_count: 0
       };
       const next = {
         ...snapshot,
@@ -557,17 +567,11 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
         },
         sidebar: {
           ...snapshot.sidebar,
-          global_dms: [
-            ...snapshot.sidebar.global_dms,
-            {
-              room_id: dmRoom.room_id,
-              display_name: dmRoom.display_name,
-              avatar: null,
-              tags: { favourite: null, low_priority: null },
-              unread_count: 0,
-              highlight_count: 0
-            }
-          ]
+          global_dms: [...snapshot.sidebar.global_dms, dmItem],
+          sections: {
+            ...snapshot.sidebar.sections,
+            people: [...snapshot.sidebar.sections.people, dmItem]
+          }
         }
       };
       window.__harness.setSnapshot(next);
@@ -954,7 +958,11 @@ test("Explore searches public rooms and joins only after Rust snapshot updates",
       },
       sidebar: {
         ...snapshot.sidebar,
-        space_rooms: [...snapshot.sidebar.space_rooms, roomListItem]
+        space_rooms: [...snapshot.sidebar.space_rooms, roomListItem],
+        sections: {
+          ...snapshot.sidebar.sections,
+          rooms: [...snapshot.sidebar.sections.rooms, roomListItem]
+        }
       }
     });
     window.__harness.pushStateUpdate();
@@ -1002,7 +1010,11 @@ test("room management panel updates settings, roles, and members from Rust state
                   original_display_label: "Target Member",
                   avatar_url: null,
                   power_level: 0,
-                  role: "user"
+                  role: "user",
+                  role_options: [
+                    { power_level: 100, role: "administrator", requires_confirmation: true },
+                    { power_level: 50, role: "moderator", requires_confirmation: false }
+                  ]
                 }
               ]
             },
@@ -1316,7 +1328,8 @@ test("local aliases dispatch typed account command and render Rust-projected lab
                   original_display_label: "Target Member",
                   avatar_url: null,
                   power_level: 0,
-                  role: "user"
+                  role: "user",
+                  role_options: []
                 }
               ]
             },
@@ -1336,7 +1349,21 @@ test("local aliases dispatch typed account command and render Rust-projected lab
             unread_count: 0,
             highlight_count: 0
           }
-        ]
+        ],
+        sections: {
+          ...snapshot.sidebar.sections,
+          people: [
+            ...snapshot.sidebar.sections.people,
+            {
+              room_id: dmRoom.room_id,
+              display_name: "Target Member",
+              avatar: null,
+              tags: { favourite: null, low_priority: null },
+              unread_count: 0,
+              highlight_count: 0
+            }
+          ]
+        }
       }
     });
     window.__harness.setCommandResponse("load_room_settings", () =>
@@ -1460,6 +1487,7 @@ test("room tag context menu dispatches typed commands and waits for Rust section
   page
 }) => {
   await gotoReadyShell(page);
+  await page.getByRole("button", { name: "Harness Space" }).click();
   const roomsSection = page.locator('[data-room-section="rooms"]');
   const favouritesSection = page.locator('[data-room-section="favourites"]');
 
@@ -1492,6 +1520,9 @@ test("room tag context menu dispatches typed commands and waits for Rust section
   await page.evaluate((roomId) => {
     const snapshot = window.__harness.currentSnapshot();
     const tags = { favourite: { order: null }, low_priority: null };
+    const sourceItem = snapshot.sidebar.space_rooms.find((room) => room.room_id === roomId);
+    if (!sourceItem) throw new Error("authoritative room item missing");
+    const favouriteItem = { ...sourceItem, tags };
     window.__harness.setSnapshot({
       ...snapshot,
       state: {
@@ -1507,12 +1538,29 @@ test("room tag context menu dispatches typed commands and waits for Rust section
         ...snapshot.sidebar,
         space_rooms: snapshot.sidebar.space_rooms.map((room) =>
           room.room_id === roomId ? { ...room, tags } : room
-        )
+        ),
+        sections: {
+          ...snapshot.sidebar.sections,
+          rooms: snapshot.sidebar.sections.rooms.filter((room) => room.room_id !== roomId),
+          favourites: [
+            ...snapshot.sidebar.sections.favourites,
+            favouriteItem
+          ]
+        }
       }
     });
     window.__harness.pushStateUpdate();
   }, HARNESS_ROOM_ID);
 
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.__harness.currentSnapshot().sidebar.sections.favourites.map(
+          (room) => room.display_name
+        )
+      )
+    )
+    .toEqual(["Harness Room"]);
   await expect(roomsSection.getByRole("button", { name: "Harness Room" })).toHaveCount(0);
   await page.evaluate(() => {
     const snapshot = window.__harness.currentSnapshot();
@@ -1552,6 +1600,11 @@ test("room tag context menu dispatches typed commands and waits for Rust section
   await page.evaluate((roomId) => {
     const snapshot = window.__harness.currentSnapshot();
     const tags = { favourite: null, low_priority: null };
+    const sourceItem = snapshot.sidebar.sections.favourites.find(
+      (room) => room.room_id === roomId
+    );
+    if (!sourceItem) throw new Error("authoritative favourite item missing");
+    const roomItem = { ...sourceItem, tags };
     window.__harness.setSnapshot({
       ...snapshot,
       state: {
@@ -1567,7 +1620,17 @@ test("room tag context menu dispatches typed commands and waits for Rust section
         ...snapshot.sidebar,
         space_rooms: snapshot.sidebar.space_rooms.map((room) =>
           room.room_id === roomId ? { ...room, tags } : room
-        )
+        ),
+        sections: {
+          ...snapshot.sidebar.sections,
+          favourites: snapshot.sidebar.sections.favourites.filter(
+            (room) => room.room_id !== roomId
+          ),
+          rooms: [
+            ...snapshot.sidebar.sections.rooms,
+            roomItem
+          ]
+        }
       }
     });
     window.__harness.pushStateUpdate();
@@ -1728,7 +1791,16 @@ test("room sections follow Element-aligned order and render Rust-owned counts", 
         space_unread_count: 1,
         dm_unread_count: 2,
         space_highlight_count: 1,
-        dm_highlight_count: 0
+        dm_highlight_count: 0,
+        sections: {
+          favourites: rooms.filter((room) => room.tags.favourite).map(toRoomListItem),
+          rooms: rooms
+            .filter((room) => !room.is_dm && !room.tags.favourite && !room.tags.low_priority)
+            .map(toRoomListItem),
+          people: rooms.filter((room) => room.is_dm).map(toRoomListItem),
+          low_priority: rooms.filter((room) => room.tags.low_priority).map(toRoomListItem),
+          not_joined: []
+        }
       }
     });
     window.__harness.pushStateUpdate();
@@ -1820,7 +1892,14 @@ test("category unread badges keep DMs and Rooms attention visible from Rust side
         dm_unread_count: 3,
         space_unread_count: 5,
         dm_highlight_count: 0,
-        space_highlight_count: 2
+        space_highlight_count: 2,
+        sections: {
+          favourites: [],
+          rooms: roomListItems("room", 46),
+          people: roomListItems("dm", 58),
+          low_priority: [],
+          not_joined: []
+        }
       }
     });
     window.__harness.pushStateUpdate();
@@ -1842,8 +1921,12 @@ test("category unread badges keep DMs and Rooms attention visible from Rust side
   await expect(dms).toHaveAttribute("aria-pressed", "true");
   await expect(rooms).toBeVisible();
   await expect
-    .poll(() => page.evaluate(() => localStorage.getItem("koushi.sidebarRoomCategory.v1")))
-    .toBe("dms");
+    .poll(() =>
+      page.evaluate(
+        () => window.__harness.currentSnapshot().state.domain.settings.values.sidebar.category
+      )
+    )
+    .toBe("people");
 
   await page.evaluate(() => {
     const snapshot = window.__harness.currentSnapshot();
@@ -2005,7 +2088,14 @@ test("notification attention snapshot drives room, space, thread, and click rout
         space_unread_count: 4,
         dm_unread_count: 0,
         space_highlight_count: 1,
-        dm_highlight_count: 0
+        dm_highlight_count: 0,
+        sections: {
+          favourites: [],
+          rooms: rooms.filter((room) => !room.tags.low_priority).map(toRoomListItem),
+          people: [],
+          low_priority: rooms.filter((room) => room.tags.low_priority).map(toRoomListItem),
+          not_joined: []
+        }
       }
     };
     window.__harness.setSnapshot(next);
@@ -2185,7 +2275,8 @@ test("room selection keeps a delta that arrives before its command receipt", asy
           ...space,
           is_active: false
         })),
-        space_rooms: roomListItems
+        space_rooms: roomListItems,
+        sections: { ...current.sidebar.sections, rooms: roomListItems }
       },
       thread: null
     };
@@ -2217,7 +2308,8 @@ test("room selection keeps a delta that arrives before its command receipt", asy
           },
           sidebar: {
             ...staleSnapshot.sidebar,
-            space_rooms: roomListItems
+            space_rooms: roomListItems,
+            sections: { ...staleSnapshot.sidebar.sections, rooms: roomListItems }
           },
           thread: null
         }
@@ -2287,7 +2379,8 @@ test("room selection ignores unrelated avatar thumbnail bursts headlessly", asyn
       },
       sidebar: {
         ...current.sidebar,
-        space_rooms: spaceRooms
+        space_rooms: spaceRooms,
+        sections: { ...current.sidebar.sections, rooms: spaceRooms }
       }
     };
     window.__harness.setSnapshot(seeded);
@@ -2316,7 +2409,8 @@ test("room selection ignores unrelated avatar thumbnail bursts headlessly", asyn
         },
         sidebar: {
           ...snapshot.sidebar,
-          space_rooms: spaceRooms
+          space_rooms: spaceRooms,
+          sections: { ...snapshot.sidebar.sections, rooms: spaceRooms }
         },
         thread: null
       };
@@ -2458,6 +2552,28 @@ test("room context menu mark unread dispatches Rust-owned commands", async ({ pa
             ]
           }
         }
+      },
+      sidebar: {
+        ...snapshot.sidebar,
+        space_rooms: [
+          { ...snapshot.sidebar.space_rooms[0], room_id: "!room-alpha:example.invalid", display_name: "Room Alpha", unread_count: 3 },
+          { ...snapshot.sidebar.space_rooms[0], room_id: "!room-beta:example.invalid", display_name: "Room Beta", unread_count: 0 }
+        ],
+        global_dms: [
+          { ...snapshot.sidebar.space_rooms[0], room_id: "!dm-alpha:example.invalid", display_name: "DM Alpha", unread_count: 0 }
+        ],
+        sections: {
+          favourites: [],
+          rooms: [
+            { ...snapshot.sidebar.space_rooms[0], room_id: "!room-alpha:example.invalid", display_name: "Room Alpha", unread_count: 3 },
+            { ...snapshot.sidebar.space_rooms[0], room_id: "!room-beta:example.invalid", display_name: "Room Beta", unread_count: 0 }
+          ],
+          people: [
+            { ...snapshot.sidebar.space_rooms[0], room_id: "!dm-alpha:example.invalid", display_name: "DM Alpha", unread_count: 0 }
+          ],
+          low_priority: [],
+          not_joined: []
+        }
       }
     });
     window.__harness.pushStateUpdate();
@@ -2540,7 +2656,8 @@ test("room member panel ignores, unignores, and reports a user", async ({ page }
                       original_display_label: "Target Member",
                       avatar_url: null,
                       power_level: 0,
-                      role: "user"
+                      role: "user",
+                      role_options: []
                     }
                   ]
                 },

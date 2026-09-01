@@ -1,6 +1,11 @@
 import { t } from "../../i18n/messages";
-import type { DisplayDensity } from "../../app/localPresentation";
-import type { EmojiPreference, FontPreference, SettingsPatch, ThemePreference } from "../../domain/types";
+import type {
+  DisplayDensity,
+  EmojiPreference,
+  FontPreference,
+  SettingsPatch,
+  ThemePreference
+} from "../../domain/types";
 
 export function AppearanceControls({
   displayDensity,
@@ -24,18 +29,21 @@ export function AppearanceControls({
             label={t("settings.themeSystem")}
             selected={selectedTheme === "system"}
             value="system"
+            density={displayDensity}
             onSelect={onUpdateSettings}
           />
           <ThemeButton
             label={t("settings.themeLight")}
             selected={selectedTheme === "light"}
             value="light"
+            density={displayDensity}
             onSelect={onUpdateSettings}
           />
           <ThemeButton
             label={t("settings.themeDark")}
             selected={selectedTheme === "dark"}
             value="dark"
+            density={displayDensity}
             onSelect={onUpdateSettings}
           />
         </div>
@@ -111,11 +119,13 @@ function ThemeButton({
   label,
   selected,
   value,
+  density,
   onSelect
 }: {
   label: string;
   selected: boolean;
   value: ThemePreference;
+  density: DisplayDensity;
   onSelect: (patch: SettingsPatch) => void;
 }) {
   return (
@@ -125,7 +135,7 @@ function ThemeButton({
       aria-pressed={selected}
       onClick={() => {
         if (!selected) {
-          onSelect({ appearance: { theme: value } });
+          onSelect({ appearance: { theme: value, density } });
         }
       }}
     >

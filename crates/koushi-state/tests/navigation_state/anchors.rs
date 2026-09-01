@@ -59,6 +59,9 @@ fn navigation_state_round_trips_scroll_anchors_through_serde() {
     let navigation = koushi_state::NavigationState {
         active_space_id: Some("!space:test.example.com".to_owned()),
         active_room_id: Some("!room:test.example.com".to_owned()),
+        home_selection: koushi_state::HomeSelection::default(),
+        space_local_presentations: koushi_state::SpaceLocalPresentations::default(),
+        legacy_frontend_preferences_imported: false,
         space_order: vec!["!space:test.example.com".to_owned()],
         last_room_by_space_id: BTreeMap::from([(
             "!space:test.example.com".to_owned(),

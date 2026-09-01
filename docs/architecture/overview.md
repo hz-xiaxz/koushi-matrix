@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-08-30.
+Last amended: 2026-09-04.
 
 The evidence-based classification of remaining frontend-owned resources and
 semantic migration candidates is maintained in
@@ -102,9 +102,17 @@ Crate responsibilities:
   only apply the resulting font, emoji, and asset-status tokens to root
   attributes/CSS. Inter and Twemoji COLR are bundled-preferred choices with
   system fallbacks; React must not choose fallback semantics per component.
-  Display preferences such as code-block line wrapping live under
-  `SettingsValues.display`; React may map the snapshot value to presentation
-  CSS but must not keep an independent display-policy store.
+  Display preferences such as code-block line wrapping and desktop density live
+  under `SettingsValues`; sidebar category, section collapse and room-list sort
+  are likewise Rust-owned settings, and recent emoji is a bounded canonical MRU
+  projected from `SettingsValues.composer`. React may map these snapshot values
+  to presentation CSS/visibility and dispatch typed updates, but it must not keep
+  an independent display, sidebar or recent-emoji product store.
+  Home subsection/DM memory and per-Space local name/icon presentation contain
+  Matrix identifiers or free-form account data, so they live in the existing
+  per-account encrypted navigation store rather than the non-secret settings
+  JSON. Rust projects the final Space label/icon and complete sidebar section
+  membership/order; React never joins, classifies or sorts those product facts.
   Composer key handling uses the pure Rust-owned resolver in
   `koushi-state`; GUI code supplies typed key facts and
   renders/dispatches the resolved action. Because the resolver may cross an
@@ -527,7 +535,10 @@ is an entry-and-byte-bounded LRU: access refreshes recency, eviction or session
 clear releases the owned bytes, and an item larger than the byte bound fails
 before a Ready URL is published. It must never persist automatic
 avatar/link-preview plaintext or return `file://` URLs for them. Legacy
-plaintext thumbnail directories remain cleanup-only.
+plaintext thumbnail directories remain cleanup-only. After renderer visibility
+submits an avatar MXC, `AccountActor` owns single-flight deduplication, bounded
+concurrency, two network attempts, terminal Ready/Failed caching and session-
+generation teardown; React owns no retry classifier or attempt counter.
 
 **Prepared-upload retention invariant.** `MediaPreparationService` owns staged
 upload source bytes for the lifetime of the corresponding composer item.
@@ -636,7 +647,10 @@ CoreCommand -> actor side effect -> CoreEvent -> AppAction
 subscriptions, and keys live in actor-owned runtime state.
 
 Desktop WebViews consume `AppState` through a selector-subscribed projection
-cache, not as React-owned product state. Runtime/background state updates use
+cache, not as React-owned product state. Browser tests consume explicit
+Rust-shaped snapshots/events through a transport mock; no production or test
+`BrowserFakeApi` may reproduce reducers, actor transitions, sidebar/search
+semantics or composer resolution in TypeScript. Runtime/background state updates use
 one ordered Rust-owned state-update lane: contiguous `StateDelta` envelopes
 replace only changed top-level `AppState` slices and carry a monotonic
 generation. Versioned full snapshots are limited to initial attach and explicit
@@ -966,7 +980,12 @@ notification semantics or synthesize badge/window-title state locally.
 Persistent title, badge, overlay, tray, and clear hooks follow the Rust-owned
 snapshot. Sound and activation hooks are candidate-scoped transient effects, so
 they run only for a Rust-owned notification candidate and not for every later
-snapshot that still contains unread state.
+snapshot that still contains unread state. Until a native Core-owned
+notification dispatcher replaces the webview/window sound port,
+`createDesktopBadgeSoundDispatcher` is the explicit platform-mechanics
+exception: it may retain positive-edge, three-second cooldown and one in-flight
+call state, but receives Rust-owned count/candidate/capability/settings facts and
+must not classify Matrix attention or carry identifiers/content.
 Pane-level thread attention is also Rust-owned: `AppState.thread_attention`
 tracks the open thread's notification, highlight, and live-event marker counts
 and reaches React only through the Tauri/TypeScript DTO.

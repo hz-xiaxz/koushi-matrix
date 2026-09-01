@@ -530,7 +530,6 @@ describe("SpaceMembersPanel", () => {
   it("deduplicates member avatar requests across filter remounts and retries rejection", async () => {
     const requestedMxcUris = new Set<string>();
     const memberRequestedMxcUris = new Set<string>();
-    const retryCounts = new Map<string, number>();
     let rejectFirst: ((reason?: unknown) => void) | undefined;
     const request = vi
       .fn<(mxcUri: string) => Promise<void>>()
@@ -546,7 +545,6 @@ describe("SpaceMembersPanel", () => {
         mxcUri,
         requestedMxcUris,
         memberRequestedMxcUris,
-        retryCounts,
         request
       );
 
@@ -588,17 +586,15 @@ describe("SpaceMembersPanel", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
-  it("retries one visible failed avatar after a production-shaped loading transition", () => {
+  it("does not retry a failed avatar after Core reaches a terminal state", () => {
     const requestedMxcUris = new Set<string>();
     const memberRequestedMxcUris = new Set<string>();
-    const retryCounts = new Map<string, number>();
     const request = vi.fn<(mxcUri: string) => Promise<void>>().mockResolvedValue(undefined);
     const requestMemberAvatar = (mxcUri: string) =>
       requestAvatarThumbnailWithDedupe(
         mxcUri,
         requestedMxcUris,
         memberRequestedMxcUris,
-        retryCounts,
         request
       );
     const aliceMxcUri = "mxc://example.invalid/alice-avatar";
@@ -613,12 +609,6 @@ describe("SpaceMembersPanel", () => {
         thumbnail: { kind: "notRequested" }
       })
     });
-    const appReconcilesMemberAvatarSnapshot = (avatar: UserProfile["avatar"]) => {
-      if (avatar && (avatar.thumbnail.kind === "ready" || avatar.thumbnail.kind === "failed")) {
-        memberRequestedMxcUris.delete(avatar.mxc_uri);
-      }
-    };
-
     const { rerender } = render(
       <SpaceMembersPanel
         state={state()}
@@ -661,19 +651,13 @@ describe("SpaceMembersPanel", () => {
         })}
       />
     );
-    appReconcilesMemberAvatarSnapshot(profileUsers({
-      kind: "failed",
-      request_id: 1,
-      failureKind: "network"
-    })["@alice:example.invalid"].avatar);
-
     const search = screen.getByRole("searchbox", { name: "Search space members" });
     fireEvent.change(search, { target: { value: "nobody" } });
     fireEvent.change(search, { target: { value: "Alice" } });
     const visibleAliceRow = screen.getByText("Alice").closest("li");
     MockIntersectionObserver.instances.forEach((observer) => observer.trigger(visibleAliceRow));
 
-    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledTimes(1);
     expect(request).toHaveBeenLastCalledWith(aliceMxcUri);
     expect(request.mock.calls.flat()).not.toContain(bobMxcUri);
   });

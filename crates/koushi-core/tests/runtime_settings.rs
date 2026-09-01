@@ -4,10 +4,10 @@ use koushi_core::command::AppCommand;
 use koushi_core::settings::{SettingsStore, SettingsStoreErrorKind};
 use koushi_core::{CoreCommand, CoreRuntime};
 use koushi_state::{
-    DisplaySettings, MediaSettings, NativeAttentionCandidate, NativeAttentionCapabilities,
-    NativeAttentionCapability, NativeAttentionDispatchState, NativeAttentionState,
-    NativeAttentionSummary, NotificationSettings, RoomAttentionKind, SettingsPatch,
-    SettingsPersistenceState, ThemePreference,
+    AppearanceSettings, DisplayDensity, DisplaySettings, MediaSettings, NativeAttentionCandidate,
+    NativeAttentionCapabilities, NativeAttentionCapability, NativeAttentionDispatchState,
+    NativeAttentionState, NativeAttentionSummary, NotificationSettings, RoomAttentionKind,
+    SettingsPatch, SettingsPersistenceState, ThemePreference,
 };
 
 mod support;
@@ -41,6 +41,124 @@ async fn app_update_settings_projects_state_and_persists() {
         .load()
         .expect("load persisted settings");
     assert_eq!(persisted.appearance.theme, ThemePreference::Dark);
+}
+
+#[tokio::test]
+async fn legacy_settings_import_persists_once_and_ignores_replay() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let runtime = CoreRuntime::start_with_data_dir(data_dir.path().to_path_buf());
+    let connection = runtime.attach();
+
+    let request_id = connection.next_request_id();
+    connection
+        .command_with_admission(CoreCommand::App(AppCommand::ImportLegacySettings {
+            request_id,
+            patch: SettingsPatch {
+                appearance: Some(AppearanceSettings {
+                    density: DisplayDensity::Compact,
+                    ..AppearanceSettings::default()
+                }),
+                ..SettingsPatch::default()
+            },
+        }))
+        .await
+        .expect("import legacy settings");
+
+    assert_eq!(
+        connection.snapshot().settings.values.appearance.density,
+        DisplayDensity::Compact
+    );
+    assert!(
+        connection
+            .snapshot()
+            .settings
+            .values
+            .legacy_frontend_preferences_imported
+    );
+
+    let replay_id = connection.next_request_id();
+    connection
+        .command_with_admission(CoreCommand::App(AppCommand::ImportLegacySettings {
+            request_id: replay_id,
+            patch: SettingsPatch {
+                appearance: Some(AppearanceSettings {
+                    density: DisplayDensity::Comfortable,
+                    ..AppearanceSettings::default()
+                }),
+                ..SettingsPatch::default()
+            },
+        }))
+        .await
+        .expect("admit ignored replay");
+
+    let persisted = SettingsStore::new(data_dir.path())
+        .load()
+        .expect("load imported settings");
+    assert_eq!(persisted.appearance.density, DisplayDensity::Compact);
+    assert!(persisted.legacy_frontend_preferences_imported);
+}
+
+#[tokio::test]
+async fn legacy_settings_import_rejects_a_failed_initial_load() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let settings_dir = data_dir.path().join("settings");
+    std::fs::create_dir_all(&settings_dir).expect("settings dir");
+    std::fs::write(settings_dir.join("settings.json"), "{not-json").expect("corrupt settings");
+    let runtime = CoreRuntime::start_with_data_dir(data_dir.path().to_path_buf());
+    let connection = runtime.attach();
+
+    connection
+        .command_with_admission(CoreCommand::App(AppCommand::ImportLegacySettings {
+            request_id: connection.next_request_id(),
+            patch: dark_theme_settings_patch(),
+        }))
+        .await
+        .expect("admit rejected import");
+
+    assert!(
+        !connection
+            .snapshot()
+            .settings
+            .values
+            .legacy_frontend_preferences_imported
+    );
+    assert_eq!(
+        connection.snapshot().settings.values.appearance.theme,
+        ThemePreference::System
+    );
+    assert_eq!(
+        std::fs::read_to_string(settings_dir.join("settings.json")).expect("corrupt file remains"),
+        "{not-json"
+    );
+}
+
+#[tokio::test]
+async fn legacy_settings_import_does_not_project_before_persistence() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let runtime = CoreRuntime::start_with_data_dir(data_dir.path().to_path_buf());
+    let connection = runtime.attach();
+    let settings_path = data_dir.path().join("settings/settings.json");
+    std::fs::create_dir_all(&settings_path).expect("block atomic replacement with directory");
+
+    connection
+        .command_with_admission(CoreCommand::App(AppCommand::ImportLegacySettings {
+            request_id: connection.next_request_id(),
+            patch: dark_theme_settings_patch(),
+        }))
+        .await
+        .expect("admit failed persist");
+
+    assert!(
+        !connection
+            .snapshot()
+            .settings
+            .values
+            .legacy_frontend_preferences_imported
+    );
+    assert_eq!(
+        connection.snapshot().settings.values.appearance.theme,
+        ThemePreference::System
+    );
 }
 
 #[tokio::test]

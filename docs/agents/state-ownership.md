@@ -100,13 +100,13 @@ cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml core_event_wire_for
 npm --prefix apps/desktop run typecheck
 ```
 
-Browser fakes must enforce the same guards as the Rust reducer. Do not let tests
-create `room_interactions[roomId]` for a room absent from `state.rooms`, and do
-not model real data loss in a fake: `browserFakeApi.editMessage` keeps
-`attachment_filename`, because clearing it hid #328 from the frontend tier while
-the real product path was broken.
+Browser tests do not own reducer guards. They use the typed Tauri transport mock,
+assert the submitted command, and inject an explicit Rust-shaped snapshot/event
+for the resulting state. A command receipt alone must leave the visible state
+unchanged. Do not add another stateful `BrowserFakeApi`; Rust behavioral tests
+cover reducer/actor guards, while frontend tests cover rendering and transport.
 
-Focused check: `npm --prefix apps/desktop run test -- --run src/backend/browserFakeApi.test.ts`.
+Focused check: `npm --prefix apps/desktop run test -- --run src/test/tauriIpcMock.test.ts`.
 
 ## Private-data-free projections
 
@@ -540,9 +540,12 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   projection field changes, update Rust `compose_sidebar`, the Tauri DTO
   serialization-contract test, `types.ts`, browser fake snapshots, `tauriIpcMock`,
   app harness snapshots, and browser-headless shell tests together.
-- Room-list sections (Favourites / People / Rooms / Low priority) must derive from
-  Rust snapshots (`RoomSummary.tags` + `is_dm`). Do not introduce React-only
-  section membership while wiring context menus or browser-headless tests.
+- Room-list sections (Favourites / People / Rooms / Low priority / Not joined)
+  and their ordering are emitted directly as `SidebarModel.sections` by
+  `compose_sidebar_for_state`. React may text-filter the selected already-ordered
+  vector but must not classify tags/DMs, join room/Space membership, compute
+  attention or sort. Account-global invites remain the Home navigation/count and
+  are not a room section.
 - Room-tag GUI tests should stub `set_room_tag` / `remove_room_tag` to return the
   current snapshot first, assert the row does not move immediately, then push a
   Rust-shaped snapshot with updated `RoomSummary.tags` / sidebar room tags and
@@ -703,6 +706,11 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
 - Own-profile state, per-user profile cache, room avatars, and space avatars are
   Rust-owned DTOs. React renders them and dispatches `set_display_name` /
   `set_avatar`; do not add React-local profile success/failure semantics.
+- React may discover visible/not-requested avatar MXCs and submit typed thumbnail
+  demand. After submission, `AccountActor` owns single-flight deduplication,
+  bounded concurrency, the two-attempt network policy and the session-terminal
+  Ready/Failed cache. Renderer request sets may suppress duplicate transport
+  admission only; they must not classify retryability or count/release retries.
 - Personal local user aliases are also Rust-owned profile state. Keep alias
   set/clear/list, persistence to `app.koushi.local_aliases`, display-name
   resolution, and pending/failure state in Rust; React may render the returned
@@ -818,14 +826,16 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   consumers. Do not rename them back to request refs, delete them, merge them into
   one generic manager or move renderer composer-drain intent into Rust.
 
-## Space member roles
+## Room and Space member roles
 
-- `AppState.space_members` is the authoritative Space-member projection. Rust
-  owns direct-Space membership, power-level revision, `can_edit_roles`,
-  `role_options`, role authorization, request/generation/revision fences, and
-  role operation/failure state. React renders those DTOs and dispatches the
-  typed `update_space_member_role` command; it must not derive options from
-  role labels, child-room completion, or local permission guesses.
+- `AppState.space_members` and room-management `RoomMemberSummary` are the
+  authoritative role projections. Rust owns direct-Space membership,
+  power-level revision, `can_edit_roles`, room/Space `role_options`, role
+  authorization, request/generation/revision fences, and role operation/failure
+  state. React renders those DTOs and dispatches the typed numeric command; it
+  must not synthesize the 0/50/100 ladder from role labels, child-room
+  completion, or local permission guesses. Arbitrary current levels remain a
+  disabled projected option until Rust supplies an allowed target.
 - The Space-members panel owns one bounded load-demand record and one panel-open
   intent epoch. The demand key is the full ready account
   (homeserver/user/device), Space id and Rust generation. It coalesces only the
@@ -931,8 +941,19 @@ normal QA-title mode and cannot change product title semantics.
 
 - Settings product state lives in `koushi-state::AppState.settings`. GUI work may
   render it and dispatch `update_settings`, but must not make locale, theme,
-  font/emoji, or composer-send shortcut preferences a React or localStorage
-  source of truth.
+  font/emoji, density, sidebar category/sort/collapse, recent emoji, or
+  composer-send shortcut preferences a React or localStorage source of truth.
+  Recent emoji is a Rust-canonical distinct MRU capped at 24; the picker owns only
+  open/search/category/focus presentation.
+- Home subsection/DM memory and per-Space local name/icon presentation are
+  account-private encrypted `NavigationState`, not general settings. AppActor
+  loads the current navigation store before accepting mutation/import, Core
+  validates bounds and redacts the complete navigation Debug, and Rust projects
+  final Space rail/header labels/icons. React may retain only text-field drafts.
+- Legacy WebView keys are read only by the allowlisted migration module. It
+  submits typed imports and clears each key only after persisted import-marker
+  plus exact Rust snapshot proof. A marked replay removes the stale key without
+  applying it; failed or stale work retains the source key.
 - Notification preferences are Rust-owned `SettingsValues.notifications` product
   state and must persist through the settings store with legacy JSON backfill.
   React settings UI may dispatch typed `SettingsPatch.notifications` updates, but

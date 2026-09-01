@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { COMPOSER_DRAFT_REVISION_ZERO } from "./composerDraftRevision";
 
-import { createBrowserFakeApi } from "../backend/browserFakeApi";
+import { createDesktopApiFixture } from "../test/desktopApiFixture";
 import {
   createDiagnosticLogBuffer,
   DEFAULT_DIAGNOSTIC_LOG_LIMIT,
@@ -31,7 +31,7 @@ test("bounds the rendered diagnostic preview while preserving the report tail", 
 
 describe("diagnosticReport", () => {
   test("renders the Rust-owned Sliding Sync snapshot in deterministic private-safe order", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     const report = diagnosticReport({
       snapshot,
@@ -154,7 +154,7 @@ describe("diagnosticReport", () => {
   });
 
   test("summarizes sync, timeline, and crawler progress without private identifiers or message bodies", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     const report = diagnosticReport({
       snapshot: {
@@ -275,7 +275,7 @@ describe("diagnosticReport", () => {
     expect(report).toContain("Koushi diagnostics");
     expect(report).toContain("Generated at:");
     expect(report).toContain(
-      "Room classification: domain_dms=2 sidebar_dms=0 room_list_items=2 room_list_dm_items=0 active_filter=rooms"
+      "Room classification: domain_dms=1 sidebar_dms=1 room_list_items=1 room_list_dm_items=0 active_filter=rooms"
     );
     expect(report).toContain("Timeline matches active room: true");
     expect(report).toContain("Timeline visible items: 3");
@@ -305,7 +305,7 @@ describe("diagnosticReport", () => {
   });
 
   test("merges frontend and runtime diagnostic records chronologically without mutating inputs", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     const frontendEntries: DiagnosticLogEntry[] = [
       {
@@ -392,7 +392,7 @@ describe("diagnosticReport", () => {
   });
 
   test("always includes supplied security diagnostics without a build flag", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     const baseInput = {
       snapshot,
@@ -445,7 +445,7 @@ describe("diagnosticReport", () => {
   });
 
   test("normalizes invalid dropped diagnostic counts", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     const baseInput = {
       snapshot,
@@ -485,7 +485,7 @@ describe("diagnosticReport", () => {
   });
 
   test("includes state-transport delta health tokens when provided", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     const report = diagnosticReport({
       snapshot,
@@ -543,7 +543,7 @@ describe("diagnosticReport", () => {
   });
 
   test("renders only coarse captured JS error kinds and channels with a count token", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     const report = diagnosticReport({
       snapshot,

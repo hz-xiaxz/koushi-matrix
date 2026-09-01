@@ -9,7 +9,7 @@ Core command/actor path; tests may interpret effects through local fixtures.
 The state-transition diagrams in this document are normative and must track the
 reducer; see [Maintenance Contract](#maintenance-contract).
 
-Date: 2026-08-30
+Date: 2026-09-04
 
 ## Contract
 
@@ -4163,10 +4163,10 @@ Rust-owned (`AppState.navigation`, `rooms[].unread_count`/`highlight_count`,
 
 Settings are Rust-owned product state and are not gated by a Ready session.
 They affect signed-out and signed-in UI surfaces such as language, text
-direction, appearance/theme, font/emoji choice, and composer send shortcut.
-React renders `AppState.settings` and dispatches typed settings commands; it
-must not store these preferences as product state in localStorage or component
-state.
+direction, appearance/theme/density, font/emoji choice, composer send shortcut
+and recent emoji, plus sidebar category/sort/collapse. React renders
+`AppState.settings` and dispatches typed settings commands; it must not store
+these preferences as product state in localStorage or component state.
 
 ```mermaid
 stateDiagram-v2
@@ -4180,7 +4180,12 @@ stateDiagram-v2
 ```
 
 - Settings load failure keeps safe defaults and records a private-data-free
-  recoverable error.
+  recoverable error. The migration-only `ImportLegacySettings` command is
+  eligible after `NotFound -> defaults`, but is rejected after a settings-load
+  error so it cannot overwrite unreadable existing data. Admission prepares the
+  same canonical settings update, saves it with a one-time marker, and projects
+  the matching settings action only after save success; a marked replay
+  cannot overwrite a later user edit.
 - Settings updates are optimistic: the reducer applies the typed patch before
   persistence completes, records the latest saving request id, and ignores stale
   persist completions.
@@ -4197,11 +4202,41 @@ stateDiagram-v2
 - Persist failures do not roll back the in-memory product state. They clear the
   pending save and record a recoverable error so the UI can surface retry/status
   later without inventing product semantics.
+- Density defaults to Comfortable; sidebar category defaults to Rooms; collapse
+  flags default open; recent emoji is a stable distinct MRU capped at 24. Legacy
+  settings JSON backfills all four defaults before projection.
 - Settings values are non-secret by construction. They must never include
   access tokens, refresh tokens, passwords, recovery material, SDK store keys,
   search index keys, local unlock secrets, raw homeserver credentials, raw
   Matrix session JSON, message bodies, attachment filenames, room IDs, event
   IDs, user IDs, or raw SDK errors.
+
+Account-private local presentation is a navigation preference, not general
+settings. It is accepted only for a Ready account after its encrypted navigation
+store has completed the current `SessionKeyId` load barrier.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Loaded
+    Loaded --> Loaded: NavigationPreferenceUpdated(SetHomeSelection)
+    Loaded --> Loaded: NavigationPreferenceUpdated(SetSpacePresentation)
+    Loaded --> Loaded: NavigationPreferenceUpdated(ImportLegacy) [save marked clone before project]
+    Loaded --> Loaded: stale/replaced account or invalid/oversized update ignored with typed failure
+```
+
+- Home `DirectMessage` identity and per-Space local name/icon overrides persist
+  only in `navigation/navigation.v1.enc`; they never enter
+  `settings/settings.json`.
+- `ImportLegacy` is rejected after navigation load failure and cannot race a
+  later startup load. It saves a marked clone before projecting; persistence
+  failure leaves live state unchanged, and a marked replay never reapplies a
+  retained stale key. Direct current-user edits may use the existing explicit
+  preference recovery path.
+- Unknown but bounded Space entries are retained until a later room-list
+  projection can use them. Empty overrides are removed; an unavailable Home DM
+  falls back to Activity without deleting the remembered encrypted preference.
+- The complete `NavigationState` Debug representation exposes counts/booleans
+  and coarse kinds only; it never exposes IDs, local names/icons or anchors.
 
 ### UI readability #130
 

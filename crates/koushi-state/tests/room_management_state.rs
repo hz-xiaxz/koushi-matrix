@@ -82,6 +82,7 @@ fn editable_settings(room_id: &str) -> RoomSettingsSnapshot {
                 avatar_url: None,
                 power_level: Some(100),
                 role: RoomMemberRole::Administrator,
+                role_options: Vec::new(),
                 user_trust: None,
             },
             RoomMemberSummary {
@@ -92,6 +93,7 @@ fn editable_settings(room_id: &str) -> RoomSettingsSnapshot {
                 avatar_url: Some("mxc://example.invalid/target-avatar".to_owned()),
                 power_level: Some(0),
                 role: RoomMemberRole::User,
+                role_options: Vec::new(),
                 user_trust: None,
             },
         ],
@@ -815,6 +817,7 @@ fn avatar_metadata_debug_redacts_mxc_and_user_room_associations() {
         avatar_url: Some("mxc://example.invalid/member-avatar".to_owned()),
         power_level: Some(0),
         role: RoomMemberRole::User,
+        role_options: Vec::new(),
         user_trust: None,
     };
     let member_debug = format!("{:?}", member);

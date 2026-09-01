@@ -84,6 +84,7 @@ export const Composer = memo(function Composer({
   stagedUploadsReady = false,
   isSending,
   mathModeEnabled = true,
+  recentEmojis = [],
   mentionCandidates = [],
   mentionCandidatesLoading = false,
   resolveComposerKeyAction = ignoreComposerKeyAction,
@@ -97,6 +98,7 @@ export const Composer = memo(function Composer({
   onAttachFiles = async () => undefined,
   onDocumentChange,
   onMathModeChange = () => undefined,
+  onRecentEmojisChange = () => undefined,
   onMentionQueryChange = () => undefined,
   onScheduleSend,
   onSend,
@@ -113,6 +115,7 @@ export const Composer = memo(function Composer({
   stagedUploadsReady?: boolean;
   isSending: boolean;
   mathModeEnabled?: boolean;
+  recentEmojis?: string[];
   mentionCandidates?: MentionCandidate[];
   mentionCandidatesLoading?: boolean;
   resolveComposerKeyAction?: ResolveComposerKeyAction;
@@ -126,6 +129,7 @@ export const Composer = memo(function Composer({
   onAttachFiles?: (files: File[]) => void | Promise<void>;
   onDocumentChange: (document: ComposerDocument) => void;
   onMathModeChange?: (enabled: boolean) => void | Promise<void>;
+  onRecentEmojisChange?: (emojis: string[]) => void | Promise<void>;
   onMentionQueryChange?: (query: string | null) => void;
   onScheduleSend?: (sendAtMs: number, document: ComposerDocument) => void | Promise<void>;
   onSend: (document: ComposerDocument) => void | Promise<void>;
@@ -661,6 +665,8 @@ export const Composer = memo(function Composer({
       {emojiPickerOpen ? (
         <EmojiPicker
           anchorRef={emojiButtonRef}
+          recentEmojis={recentEmojis}
+          onRecentEmojisChange={(emojis) => void onRecentEmojisChange(emojis)}
           onSelect={insertEmoji}
           onClose={closeEmojiPicker}
         />
@@ -986,6 +992,8 @@ function ThreadComposer({
   hasStagedUploads = false,
   stagedUploadsReady = false,
   isSending,
+  mathModeEnabled = true,
+  recentEmojis = [],
   mentionCandidates = [],
   mentionCandidatesLoading = false,
   notice = null,
@@ -993,6 +1001,8 @@ function ThreadComposer({
   resolveComposerKeyAction,
   onAttachFiles,
   onDocumentChange,
+  onMathModeChange,
+  onRecentEmojisChange,
   onMentionQueryChange,
   onScheduleSend,
   onSend,
@@ -1005,6 +1015,8 @@ function ThreadComposer({
   hasStagedUploads?: boolean;
   stagedUploadsReady?: boolean;
   isSending: boolean;
+  mathModeEnabled?: boolean;
+  recentEmojis?: string[];
   mentionCandidates?: MentionCandidate[];
   mentionCandidatesLoading?: boolean;
   notice?: string | null;
@@ -1012,6 +1024,8 @@ function ThreadComposer({
   resolveComposerKeyAction: ResolveComposerKeyAction;
   onAttachFiles?: (files: File[]) => void | Promise<void>;
   onDocumentChange: (document: ComposerDocument) => void;
+  onMathModeChange?: (enabled: boolean) => void | Promise<void>;
+  onRecentEmojisChange?: (emojis: string[]) => void | Promise<void>;
   onMentionQueryChange?: (query: string | null) => void;
   onScheduleSend?: (sendAtMs: number, document: ComposerDocument) => void | Promise<void>;
   onSend: (document: ComposerDocument) => void | Promise<void>;
@@ -1026,6 +1040,10 @@ function ThreadComposer({
       hasStagedUploads={hasStagedUploads}
       stagedUploadsReady={stagedUploadsReady}
       isSending={isSending}
+      mathModeEnabled={mathModeEnabled}
+      recentEmojis={recentEmojis}
+      onMathModeChange={onMathModeChange}
+      onRecentEmojisChange={onRecentEmojisChange}
       mentionCandidates={mentionCandidates}
       mentionCandidatesLoading={mentionCandidatesLoading}
       notice={notice}

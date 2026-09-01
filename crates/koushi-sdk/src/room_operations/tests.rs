@@ -372,6 +372,7 @@ fn room_management_wrappers_use_settings_privacy_and_moderation_apis() {
             avatar_url: None,
             power_level: Some(50),
             role: MatrixRoomMemberRole::Moderator,
+            role_options: Vec::new(),
             user_trust: None,
         }],
     };
@@ -473,6 +474,18 @@ fn room_member_power_level_projection_updates_role_in_success_snapshot() {
             avatar_url: None,
             power_level: Some(0),
             role: MatrixRoomMemberRole::User,
+            role_options: vec![
+                super::MatrixRoomMemberRoleOption {
+                    power_level: 50,
+                    role: MatrixRoomMemberRole::Moderator,
+                    requires_confirmation: false,
+                },
+                super::MatrixRoomMemberRoleOption {
+                    power_level: 100,
+                    role: MatrixRoomMemberRole::Administrator,
+                    requires_confirmation: true,
+                },
+            ],
             user_trust: None,
         }],
     };
@@ -482,6 +495,14 @@ fn room_member_power_level_projection_updates_role_in_success_snapshot() {
     let member = updated.members.first().expect("member summary");
     assert_eq!(member.power_level, Some(50));
     assert_eq!(member.role, MatrixRoomMemberRole::Moderator);
+    assert_eq!(
+        member
+            .role_options
+            .iter()
+            .map(|option| option.power_level)
+            .collect::<Vec<_>>(),
+        [100, 0]
+    );
     assert_eq!(
         matrix_room_member_role(Some(100)),
         MatrixRoomMemberRole::Administrator

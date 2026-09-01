@@ -1,4 +1,3 @@
-import { listenBrowserFakeStateUpdates } from "./browserFakeStateUpdates";
 import type { DesktopEventPort } from "./desktopEventPort";
 import { isTauriRuntime } from "./runtimeEnvironment";
 import { createTauriDesktopEventPort } from "./tauri/desktopEventPort";
@@ -12,7 +11,5 @@ export const desktopEventPort: DesktopEventPort = {
   listenMenuActions: (listener) =>
     isTauriRuntime() ? tauriEventPort.listenMenuActions(listener) : noEvents(),
   listenStateUpdates: (listener) =>
-    isTauriRuntime()
-      ? tauriEventPort.listenStateUpdates(listener)
-      : listenBrowserFakeStateUpdates(listener)
+    isTauriRuntime() ? tauriEventPort.listenStateUpdates(listener) : noEvents()
 };

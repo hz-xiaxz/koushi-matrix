@@ -1097,6 +1097,9 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::NavigationLoaded { navigation } => {
             navigation::handle_navigation_loaded(state, navigation)
         }
+        AppAction::NavigationPreferenceUpdated { update } => {
+            navigation::handle_navigation_preference_updated(state, update)
+        }
         AppAction::TimelineScrollAnchorUpdated { room_id, anchor } => {
             navigation::handle_timeline_scroll_anchor_updated(state, room_id, anchor)
         }

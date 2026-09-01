@@ -237,6 +237,86 @@ fn select_room_cleanup_still_uses_explicit_target_room() {
         ))
     );
 }
+#[test]
+fn navigation_preference_boundary_rejects_invalid_and_oversized_imports() {
+    assert!(
+        normalize_navigation_preference_update(NavigationPreferenceUpdate::SetSpacePresentation {
+            space_id: "not-a-matrix-id".to_owned(),
+            presentation: Some(SpaceLocalPresentation {
+                name: Some("Private".to_owned()),
+                icon: None,
+            }),
+        })
+        .is_err()
+    );
+
+    let oversized = (0..=MAX_SPACE_LOCAL_PRESENTATIONS)
+        .map(|index| {
+            (
+                format!("!space-{index}:example.invalid"),
+                SpaceLocalPresentation {
+                    name: Some(format!("Space {index}")),
+                    icon: None,
+                },
+            )
+        })
+        .collect();
+    assert!(
+        normalize_navigation_preference_update(NavigationPreferenceUpdate::ImportLegacy {
+            home_selection: None,
+            space_local_presentations: SpaceLocalPresentations(oversized),
+        })
+        .is_err()
+    );
+
+    let full = NavigationState {
+        space_local_presentations: SpaceLocalPresentations(
+            (0..MAX_SPACE_LOCAL_PRESENTATIONS)
+                .map(|index| {
+                    (
+                        format!("!space-{index}:example.invalid"),
+                        SpaceLocalPresentation {
+                            name: Some(format!("Space {index}")),
+                            icon: None,
+                        },
+                    )
+                })
+                .collect(),
+        ),
+        ..NavigationState::default()
+    };
+    assert!(navigation_preference_exceeds_capacity(
+        &full,
+        &NavigationPreferenceUpdate::SetSpacePresentation {
+            space_id: "!one-more:example.invalid".to_owned(),
+            presentation: Some(SpaceLocalPresentation {
+                name: Some("One more".to_owned()),
+                icon: None,
+            }),
+        }
+    ));
+}
+
+#[test]
+fn navigation_preference_boundary_canonicalizes_empty_presentations() {
+    let update =
+        normalize_navigation_preference_update(NavigationPreferenceUpdate::SetSpacePresentation {
+            space_id: "!space:example.invalid".to_owned(),
+            presentation: Some(SpaceLocalPresentation {
+                name: Some("   ".to_owned()),
+                icon: None,
+            }),
+        })
+        .expect("valid preference update");
+    assert!(matches!(
+        update,
+        NavigationPreferenceUpdate::SetSpacePresentation {
+            presentation: None,
+            ..
+        }
+    ));
+}
+
 fn focused_key(event_id: &str) -> TimelineKey {
     TimelineKey {
         account_key: AccountKey("@alice:example.invalid".to_owned()),

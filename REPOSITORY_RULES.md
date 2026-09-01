@@ -6,7 +6,7 @@ glue. Vendored upstream code must keep its original license and copyright
 notices; local changes to vendored code must remain easy to upstream or
 revert.
 
-Last amended: 2026-08-31.
+Last amended: 2026-09-04.
 
 ## Read Order And Authority
 
@@ -144,6 +144,18 @@ conflict is being resolved.
 - Product logic and state that decide Matrix operation semantics live in Rust:
   `koushi-state` for serializable state/reducers and
   `koushi-core` for actors, commands, events, and runtime ownership.
+- WebView `localStorage` is not a product-state or preference store. Production
+  frontend code may access it only in an explicitly allowlisted, bounded legacy
+  migration reader that submits typed Rust commands and deletes each old key only
+  after a persisted one-time import marker plus the authoritative Rust snapshot
+  prove persistence. A retained stale key must never overwrite a later Rust edit. Device-global typed
+  preferences use `SettingsValues`; preferences containing Matrix identifiers or
+  free-form account data use a privacy-reviewed account-scoped encrypted store.
+- Browser and component tests use explicit Rust-shaped snapshots/events plus
+  transport fixtures. A frontend fake must not implement reducer, actor,
+  projection, search-matching, composer-resolution, ordering, retry, or terminal
+  semantics that can let the browser tier pass against a second product state
+  machine.
 - React may own ephemeral presentation state only: focus, popovers, unsent form
   text, viewport measurements, virtual-list cache, and scroll anchors. If UI
   state affects a Matrix command shape, selected target, pending operation,

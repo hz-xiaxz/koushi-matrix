@@ -916,7 +916,7 @@ describe("TimelineView", () => {
     expect(downloadAvatarThumbnail.mock.calls.length).toBeLessThan(items.length);
   });
 
-  it("emits timestamped avatar diagnostics for request, success, and retryable failure", async () => {
+  it("emits timestamped avatar diagnostics without retrying a Core-terminal failure", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const downloadAvatarThumbnail = vi.fn(async () => undefined);
     const onDiagnosticLogEntry = vi.fn();
@@ -985,7 +985,7 @@ describe("TimelineView", () => {
     });
 
     await waitFor(() => {
-      expect(downloadAvatarThumbnail).toHaveBeenCalledTimes(2);
+      expect(downloadAvatarThumbnail).toHaveBeenCalledTimes(1);
     });
     expect(onDiagnosticLogEntry).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -119,12 +119,7 @@ type SetStateAction
 } from "react";
 
 import { peopleFacingLabel,type MentionCandidate } from "../app/uiShared";
-import {
-AVATAR_THUMBNAIL_DOWNLOADS_ENABLED,
-MAX_AVATAR_THUMBNAIL_ATTEMPTS,
-avatarThumbnailFailureIsRetryable,
-avatarThumbnailRequestShouldBeSkipped
-} from "../domain/avatarThumbnails";
+import { AVATAR_THUMBNAIL_DOWNLOADS_ENABLED } from "../domain/avatarThumbnails";
 import {
 type ContextMenuItem
 } from "../domain/contextMenus";
@@ -196,6 +191,7 @@ RoomLatestEventSummary,
 TimelineContinuityState,
 TimelineMediaDownloadState,
 TimelineScrollAnchor,
+TextRange,
 UserProfile
 } from "../domain/types";
 import { ImeSafeForm,ImeTextField } from "./ImeTextControl";
@@ -329,7 +325,7 @@ export const TimelineView = memo(function TimelineView({
   liveLatestEventId = null,
   autoLoadOlderMessages = false,
   codeBlockWrap = true,
-  searchQuery = "",
+  searchHighlightsByEventId = {},
   mediaDownloads = {},
   continuity = { kind: "unknown" },
   roomScrollAnchor: _persistedRoomScrollAnchor = null,
@@ -387,7 +383,7 @@ export const TimelineView = memo(function TimelineView({
   liveLatestEventId?: string | null;
   autoLoadOlderMessages?: boolean;
   codeBlockWrap?: boolean;
-  searchQuery?: string;
+  searchHighlightsByEventId?: Record<string, { snippet: string; ranges: TextRange[] }>;
   mediaDownloads?: Record<string, TimelineMediaDownloadState>;
   continuity?: TimelineContinuityState;
   roomScrollAnchor?: TimelineScrollAnchor | null;
@@ -598,7 +594,6 @@ export const TimelineView = memo(function TimelineView({
   const requestedImagePreviewEventIdsRef = useRef<Set<string>>(new Set());
   const relevantAvatarMxcsRef = useRef<Set<string>>(new Set());
   const requestedAvatarMxcsRef = useRef<Set<string>>(new Set());
-  const avatarRetryCountsRef = useRef<Map<string, number>>(new Map());
   const initialItemsSeenForTimelineKeyRef = useRef<string | null>(null);
   const lastDiagnosticsEmissionRef = useRef<{
     callback: (diagnostics: TimelineDiagnostics) => void;
@@ -1222,12 +1217,6 @@ export const TimelineView = memo(function TimelineView({
         ) {
           return;
         }
-        if (thumbnail.kind === "failed" && avatarThumbnailFailureIsRetryable(thumbnail)) {
-          const attempts = avatarRetryCountsRef.current.get(mxc_uri) ?? 0;
-          if (attempts < MAX_AVATAR_THUMBNAIL_ATTEMPTS) {
-            requestedAvatarMxcsRef.current.delete(mxc_uri);
-          }
-        }
         emitDiagnosticLog("timeline.avatar", avatarThumbnailLogMessage(thumbnail));
         setAvatarThumbnails((current) => ({ ...current, [mxc_uri]: thumbnail }));
         return;
@@ -1613,7 +1602,6 @@ export const TimelineView = memo(function TimelineView({
     requestedImagePreviewEventIdsRef.current = new Set();
     relevantAvatarMxcsRef.current = new Set();
     requestedAvatarMxcsRef.current = new Set();
-    avatarRetryCountsRef.current = new Map();
     initialItemsSeenForTimelineKeyRef.current = null;
     lastDiagnosticsEmissionRef.current = null;
     initialLiveEdgeScrollAppliedRef.current = null;
@@ -2033,18 +2021,13 @@ export const TimelineView = memo(function TimelineView({
         continue;
       }
       const thumbnail = avatarThumbnails[avatar.mxc_uri] ?? avatar.thumbnail;
-      if (avatarThumbnailRequestShouldBeSkipped(thumbnail)) {
-        continue;
-      }
-      const attempts = avatarRetryCountsRef.current.get(avatar.mxc_uri) ?? 0;
-      if (attempts >= MAX_AVATAR_THUMBNAIL_ATTEMPTS) {
+      if (thumbnail.kind !== "notRequested") {
         continue;
       }
       if (requestedAvatarMxcsRef.current.has(avatar.mxc_uri)) {
         continue;
       }
       requestedAvatarMxcsRef.current.add(avatar.mxc_uri);
-      avatarRetryCountsRef.current.set(avatar.mxc_uri, attempts + 1);
       emitDiagnosticLog("timeline.avatar", "avatar thumbnail request queued");
       void transport.downloadAvatarThumbnail(avatar.mxc_uri).catch(() => {
         requestedAvatarMxcsRef.current.delete(avatar.mxc_uri);
@@ -3479,7 +3462,13 @@ export const TimelineView = memo(function TimelineView({
                 keyRequestPending={pendingKeyRequests.has(`event:${timelineItemDomId(item.id)}`)}
                 presentationContext={presentationContext}
                 codeBlockWrap={codeBlockWrap}
-                searchQuery={searchQuery}
+                searchHighlights={
+                  contentEventId &&
+                  searchHighlightsByEventId[contentEventId]?.snippet ===
+                    (item.formatted?.plain_text ?? item.body)
+                    ? searchHighlightsByEventId[contentEventId]?.ranges ?? []
+                    : []
+                }
                 onReply={onReply}
                 onOpenThread={onOpenThread}
                 resolveComposerKeyAction={resolveComposerKeyAction}

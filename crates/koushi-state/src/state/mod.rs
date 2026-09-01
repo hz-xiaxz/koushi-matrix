@@ -80,13 +80,14 @@ pub use sliding_sync::{
 
 // ── Re-exports: settings ────────────────────────────────────────────────────
 pub use settings::{
-    AppearanceSettings, ComposerSendShortcut, ComposerSettings, DisplaySettings, EmojiPreference,
-    FontPreference, ImageUploadCompressionMode, ImageUploadCompressionPolicy, KeyboardSettings,
-    LinkPreviewSettingsState, LocaleSettings, MediaSettings, NotificationSettings,
-    RoomNotificationMode, RoomNotificationModeOperation, RoomNotificationSettings, RoomPreference,
-    RoomPreferencesState, RoomUrlPreviews, SettingsPatch, SettingsPersistenceState, SettingsState,
-    SettingsValues, TextDirectionPreference, ThemePreference, ThreadListOrder, TimelineSettings,
-    TimelineThreadRootOrder, TypographySettings,
+    AppearanceSettings, ComposerSendShortcut, ComposerSettings, DisplayDensity, DisplaySettings,
+    EmojiPreference, FontPreference, ImageUploadCompressionMode, ImageUploadCompressionPolicy,
+    KeyboardSettings, LinkPreviewSettingsState, LocaleSettings, MediaSettings,
+    NotificationSettings, RoomNotificationMode, RoomNotificationModeOperation,
+    RoomNotificationSettings, RoomPreference, RoomPreferencesState, RoomUrlPreviews, SettingsPatch,
+    SettingsPersistenceState, SettingsState, SettingsValues, SidebarCategory,
+    SidebarCollapsedSections, SidebarSettings, TextDirectionPreference, ThemePreference,
+    ThreadListOrder, TimelineSettings, TimelineThreadRootOrder, TypographySettings,
 };
 
 // ── Re-exports: profile ─────────────────────────────────────────────────────
@@ -138,9 +139,10 @@ pub use room_interactions::{
 
 // ── Re-exports: navigation ──────────────────────────────────────────────────
 pub use navigation::{
-    FocusedContextState, MainTimelineAnchor, NavigationState, RoomListEntryKind,
-    RoomListFailureKind, RoomListFilter, RoomListProjection, RoomListProjectionItem,
-    RoomListReadiness, RoomListSort, RoomListSource, SpaceConversationSurface,
+    FocusedContextState, HomeSelection, MAX_SPACE_LOCAL_PRESENTATIONS, MainTimelineAnchor,
+    NavigationPreferenceUpdate, NavigationState, RoomListEntryKind, RoomListFailureKind,
+    RoomListFilter, RoomListProjection, RoomListProjectionItem, RoomListReadiness, RoomListSort,
+    RoomListSource, SpaceConversationSurface, SpaceLocalPresentation, SpaceLocalPresentations,
     SpaceNavigationSelection, TimelineScrollAnchor, TimelineScrollAnchorEdge,
     compute_room_list_projection,
 };
@@ -161,9 +163,9 @@ pub use directory::{
 // ── Re-exports: room_management ─────────────────────────────────────────────
 pub use room_management::{
     RoomHistoryVisibility, RoomJoinRule, RoomManagementOperationKind, RoomManagementOperationState,
-    RoomManagementState, RoomMemberRole, RoomMemberSummary, RoomModerationAction,
-    RoomPermissionFacts, RoomSettingChange, RoomSettingsSnapshot, UserTrustState,
-    room_settings_share_link,
+    RoomManagementState, RoomMemberRole, RoomMemberRoleOption, RoomMemberSummary,
+    RoomModerationAction, RoomPermissionFacts, RoomSettingChange, RoomSettingsSnapshot,
+    UserTrustState, room_settings_share_link,
 };
 
 // ── Re-exports: e2ee ────────────────────────────────────────────────────────

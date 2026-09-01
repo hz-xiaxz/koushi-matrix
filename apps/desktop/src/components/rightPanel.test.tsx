@@ -77,7 +77,8 @@ const roomMember: RoomMemberSummary = {
   original_display_label: "Room member",
   avatar_url: null,
   power_level: 0,
-  role: "user"
+  role: "user",
+      role_options: []
 };
 
 const roomManagement: RoomManagementState = {
@@ -335,10 +336,12 @@ describe("ContextualRightPanel people composition", () => {
             ...spaceMembers,
             space_joined: [
               spaceMember(administratorId, "Space member", "space_joined", {
-                role: "administrator"
+                role: "administrator",
+      role_options: []
               }),
               spaceMember("@space-creator:example.invalid", "Space creator", "space_joined", {
-                role: "creator"
+                role: "creator",
+      role_options: []
               })
             ],
             child_room_only: []
@@ -392,7 +395,8 @@ describe("ContextualRightPanel people composition", () => {
             ...spaceMembers,
             space_joined: [
               spaceMember(administratorId, "Space member", "space_joined", {
-                role: "administrator"
+                role: "administrator",
+      role_options: []
               })
             ],
             child_room_only: []

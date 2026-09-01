@@ -180,6 +180,14 @@ fn hex_digit(value: u8) -> char {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomMemberRoleOption {
+    pub power_level: i64,
+    pub role: RoomMemberRole,
+    pub requires_confirmation: bool,
+}
+
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RoomMemberSummary {
     pub user_id: String,
@@ -190,6 +198,8 @@ pub struct RoomMemberSummary {
     pub avatar_url: Option<String>,
     pub power_level: Option<i64>,
     pub role: RoomMemberRole,
+    #[serde(default)]
+    pub role_options: Vec<RoomMemberRoleOption>,
     #[serde(default)]
     pub user_trust: Option<UserTrustState>,
 }
@@ -211,6 +221,7 @@ impl fmt::Debug for RoomMemberSummary {
             )
             .field("power_level", &self.power_level)
             .field("role", &self.role)
+            .field("role_option_count", &self.role_options.len())
             .field("user_trust", &self.user_trust)
             .finish()
     }

@@ -5,7 +5,8 @@ use crate::room_projection::{
     sdk_history_visibility, sdk_join_rule_for_update,
 };
 use crate::{
-    MatrixClientSession, MatrixRoomMemberSummary, MatrixRoomTagKind, MatrixSpaceMembersProjection,
+    MatrixClientSession, MatrixRoomMemberRoleOption, MatrixRoomMemberSummary, MatrixRoomTagKind,
+    MatrixSpaceMembersProjection,
 };
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticLevel};
 #[cfg(test)]

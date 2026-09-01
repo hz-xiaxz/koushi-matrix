@@ -2,7 +2,10 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use super::{AppState, ProfileState, RoomMemberRole, SessionState, errors::OperationFailureKind};
+use super::{
+    AppState, ProfileState, RoomMemberRole, RoomMemberRoleOption, SessionState,
+    errors::OperationFailureKind,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -34,13 +37,7 @@ pub enum SpaceMembersCommandRejection {
     RoleSessionRequired,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SpaceMemberRoleOption {
-    pub power_level: i64,
-    pub role: RoomMemberRole,
-    pub requires_confirmation: bool,
-}
+pub type SpaceMemberRoleOption = RoomMemberRoleOption;
 
 /// Closed, private-data-free failure kinds for a Space-member role update.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

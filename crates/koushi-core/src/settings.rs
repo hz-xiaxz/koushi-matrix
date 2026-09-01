@@ -52,8 +52,10 @@ impl SettingsStore {
         let json = serde_json::to_string_pretty(values).map_err(|_| SettingsStoreError {
             kind: SettingsStoreErrorKind::Corrupt,
         })?;
-        std::fs::write(&self.path, format!("{json}\n")).map_err(|_| SettingsStoreError {
-            kind: SettingsStoreErrorKind::Io,
-        })
+        crate::file::atomic_replace_file(&self.path, format!("{json}\n").as_bytes(), false).map_err(
+            |_| SettingsStoreError {
+                kind: SettingsStoreErrorKind::Io,
+            },
+        )
     }
 }

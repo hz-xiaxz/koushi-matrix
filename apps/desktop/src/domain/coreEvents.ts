@@ -789,7 +789,14 @@ export interface RoomMemberSummary {
   avatar_url: string | null;
   power_level: number | null;
   role: RoomMemberRole;
+  role_options: RoomMemberRoleOption[];
   user_trust?: UserTrustState;
+}
+
+export interface RoomMemberRoleOption {
+  power_level: number;
+  role: RoomMemberRole;
+  requires_confirmation: boolean;
 }
 
 export type RoomMemberRole = "creator" | "administrator" | "moderator" | "user";
@@ -1216,6 +1223,7 @@ export type CoreFailure =
   | { ReportOperationFailed: { kind: ReportFailureKind } }
   | { SearchFailed: { kind: string } }
   | "LocalEncryptionUnavailable"
+  | "PreferenceRejected"
   | "StoreUnavailable"
   | "ShutdownFailed";
 

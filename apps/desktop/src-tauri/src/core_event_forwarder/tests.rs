@@ -1180,6 +1180,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
             avatar_url: Some("mxc://example.test/member-avatar".to_owned()),
             power_level: Some(50),
             role: RoomMemberRole::Moderator,
+            role_options: Vec::new(),
             user_trust: Some(UserTrustState::Verified),
         }],
     };
@@ -1727,10 +1728,21 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
         )
         .expect("serialize intent lifecycle failed noop room not in state"),
     });
-    let checked_in_contract: serde_json::Value = serde_json::from_str(include_str!(concat!(
+    let contract_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../src/domain/coreEvents.generated.json"
-    )))
+    );
+    if std::env::var("UPDATE_CORE_EVENT_GOLDEN").as_deref() == Ok("1") {
+        std::fs::write(
+            contract_path,
+            serde_json::to_string_pretty(&actual_contract).expect("format core event contract"),
+        )
+        .expect("write core event contract artifact");
+        return;
+    }
+    let checked_in_contract: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(contract_path).expect("read core event contract artifact"),
+    )
     .expect("checked-in core event contract artifact must be valid JSON");
     assert_eq!(actual_contract, checked_in_contract);
 }

@@ -9,7 +9,7 @@ async function railBackground(page: import("@playwright/test").Page): Promise<st
 
 test("the space rail follows the OS color scheme", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" });
-  await page.goto("/");
+  await page.goto("/appHarness.html");
   await expect(page.getByRole("navigation", { name: "Workspaces" })).toBeVisible();
   const light = await railBackground(page);
 

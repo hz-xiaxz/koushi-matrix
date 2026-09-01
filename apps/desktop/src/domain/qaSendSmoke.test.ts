@@ -1,7 +1,7 @@
-import { browserCommandSnapshot } from "../backend/browserFakeApi.testSupport";
+import { commandSnapshot } from "../test/commandReceiptFixture";
 import { describe, expect, test } from "vitest";
 
-import { createBrowserFakeApi } from "../backend/browserFakeApi";
+import { createDesktopApiFixture } from "../test/desktopApiFixture";
 import {
   qaSendCompletionStatusFromCoreEvent,
   qaSendSmokeCanStart,
@@ -31,8 +31,8 @@ describe("qaSendSmoke", () => {
   });
 
   test("finds the DM room for a synthetic send target without exposing room names", async () => {
-    const api = createBrowserFakeApi();
-    const snapshot = await browserCommandSnapshot(api, api.startDirectMessage("@hiroshi.shinaoka:matrix.org"));
+    const api = createDesktopApiFixture();
+    const snapshot = await commandSnapshot(api, api.startDirectMessage("@hiroshi.shinaoka:matrix.org"));
 
     const room = qaSendSmokeTargetRoom(snapshot, "@hiroshi.shinaoka:matrix.org");
 
@@ -41,8 +41,8 @@ describe("qaSendSmoke", () => {
   });
 
   test("summarizes target DM encryption without exposing identifiers", async () => {
-    const api = createBrowserFakeApi();
-    const started = await browserCommandSnapshot(api, api.startDirectMessage("@hiroshi.shinaoka:matrix.org"));
+    const api = createDesktopApiFixture();
+    const started = await commandSnapshot(api, api.startDirectMessage("@hiroshi.shinaoka:matrix.org"));
     const room = qaSendSmokeTargetRoom(started, "@hiroshi.shinaoka:matrix.org");
     expect(room).not.toBeNull();
     const encryptedSnapshot = {
@@ -56,6 +56,11 @@ describe("qaSendSmoke", () => {
               ? { ...candidate, is_encrypted: true, joined_members: 2 }
               : candidate
           )
+        },
+        ui: {
+          ...started.state.ui,
+          navigation: { ...started.state.ui.navigation, active_room_id: room?.room_id ?? null },
+          timeline: { ...started.state.ui.timeline, room_id: room?.room_id ?? null }
         }
       }
     };
@@ -71,7 +76,7 @@ describe("qaSendSmoke", () => {
   });
 
   test("starts only after a ready synced active timeline without errors", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
 
     expect(qaSendSmokeCanStart(snapshot)).toBe(true);
@@ -97,7 +102,7 @@ describe("qaSendSmoke", () => {
   });
 
   test("marks send completion from pending state and error count", async () => {
-    const api = createBrowserFakeApi();
+    const api = createDesktopApiFixture();
     const snapshot = await api.getSnapshot();
     const idle = {
       ...snapshot,

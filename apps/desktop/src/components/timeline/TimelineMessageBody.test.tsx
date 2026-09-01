@@ -29,7 +29,7 @@ const renderMath = (
       [],
       false,
       () => undefined,
-      "",
+      [],
       { revealed: new Set<string>(), reveal: () => undefined },
       undefined
     )
@@ -173,7 +173,7 @@ describe("renderFormattedBody math bounds", () => {
         [],
         false,
         () => undefined,
-        "",
+        [],
         { revealed: new Set<string>(), reveal: () => undefined },
         undefined
       )

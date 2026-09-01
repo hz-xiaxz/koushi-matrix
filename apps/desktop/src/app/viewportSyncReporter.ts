@@ -1,4 +1,4 @@
-import type { DisplayDensity } from "./localPresentation";
+import type { DisplayDensity } from "../domain/types";
 import type {
   DesktopApi,
   ViewportSyncObservation,

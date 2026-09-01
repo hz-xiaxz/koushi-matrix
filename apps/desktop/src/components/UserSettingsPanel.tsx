@@ -29,7 +29,7 @@ import { SecuritySection } from "./user-settings/SecuritySection";
 import { TrustSection } from "./user-settings/TrustSection";
 import { AppearanceControls } from "./user-settings/AppearanceControls";
 import { DetailRow } from "./user-settings/SettingsStatusPrimitives";
-import type { DisplayDensity } from "../app/localPresentation";
+import type { DisplayDensity } from "../domain/types";
 import type { ShortcutLabelProfile } from "../domain/shortcuts";
 import { mediaSourceUrl } from "../backend/linkMediaRuntime";
 import type {

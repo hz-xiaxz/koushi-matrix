@@ -62,6 +62,7 @@ import type {
   ResolveComposerKeyAction,
   ThreadOpenIntent,
   TimelineMediaDownloadState,
+  TextRange,
   UserProfile
 } from "../../domain/types";
 import { Composer } from "../composer";
@@ -189,7 +190,7 @@ export function TimelineItemRow({
   presentationContext = "room",
   codeBlockWrap = true,
   showThreadSummary = true,
-  searchQuery = "",
+  searchHighlights = [],
   onReply,
   onOpenThread = () => undefined,
   resolveComposerKeyAction = ignoreComposerKeyAction,
@@ -250,7 +251,7 @@ export function TimelineItemRow({
   presentationContext?: "room" | "thread" | "focused";
   codeBlockWrap?: boolean;
   showThreadSummary?: boolean;
-  searchQuery?: string;
+  searchHighlights?: TextRange[];
   onReply: TimelineRowActionHandlers["onReply"];
   onOpenThread?: TimelineRowActionHandlers["onOpenThread"];
   resolveComposerKeyAction?: ResolveComposerKeyAction;
@@ -667,7 +668,7 @@ export function TimelineItemRow({
         item.link_ranges ?? [],
         codeBlockWrap,
         onCopyText,
-        searchQuery,
+        searchHighlights,
         spoilerState,
         onOpenMatrixTarget
       )
@@ -675,7 +676,7 @@ export function TimelineItemRow({
         displayBody,
         item.link_ranges ?? [],
         item.spoiler_spans,
-        searchQuery,
+        searchHighlights,
         mentionProfileUsers,
         spoilerState,
         onOpenMatrixTarget
@@ -699,7 +700,7 @@ export function TimelineItemRow({
                 [],
                 codeBlockWrap,
                 onCopyText,
-                "",
+                [],
                 spoilerState,
                 onOpenMatrixTarget
               )

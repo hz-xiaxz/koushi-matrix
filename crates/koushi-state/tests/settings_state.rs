@@ -10,6 +10,7 @@ fn dark_theme_patch() -> SettingsPatch {
     SettingsPatch {
         appearance: Some(AppearanceSettings {
             theme: ThemePreference::Dark,
+            ..AppearanceSettings::default()
         }),
         ..SettingsPatch::default()
     }
@@ -79,6 +80,7 @@ fn settings_loaded_replaces_values_without_requiring_a_session() {
         },
         appearance: AppearanceSettings {
             theme: ThemePreference::Light,
+            ..AppearanceSettings::default()
         },
         typography: koushi_state::TypographySettings {
             font: FontPreference::Inter,
@@ -111,6 +113,8 @@ fn settings_loaded_replaces_values_without_requiring_a_session() {
         thread_list_order: ThreadListOrder::LatestReply,
         room_list_sort: RoomListSort::Activity,
         search_crawler: koushi_state::SearchCrawlerSettings::default(),
+        sidebar: koushi_state::SidebarSettings::default(),
+        legacy_frontend_preferences_imported: false,
     };
 
     let effects = reduce(
@@ -250,7 +254,13 @@ fn settings_values_deserialize_legacy_without_composer_as_default_math_on() {
     )
     .expect("legacy settings without composer should deserialize");
 
-    assert_eq!(values.composer, ComposerSettings { math_mode: true });
+    assert_eq!(
+        values.composer,
+        ComposerSettings {
+            math_mode: true,
+            ..ComposerSettings::default()
+        }
+    );
 }
 
 #[test]
@@ -452,7 +462,10 @@ fn hide_redacted_patch_is_rust_owned_and_persisted() {
 #[test]
 fn composer_math_mode_patch_is_rust_owned_and_persisted() {
     let mut state = AppState::default();
-    let composer_settings = ComposerSettings { math_mode: false };
+    let composer_settings = ComposerSettings {
+        math_mode: false,
+        ..ComposerSettings::default()
+    };
 
     let effects = reduce(
         &mut state,
@@ -916,6 +929,7 @@ fn settings_update_without_sort_changes_does_not_emit_room_or_threads_list_event
             patch: SettingsPatch {
                 appearance: Some(AppearanceSettings {
                     theme: ThemePreference::Dark,
+                    ..AppearanceSettings::default()
                 }),
                 ..SettingsPatch::default()
             },

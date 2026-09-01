@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -57,10 +60,16 @@ pub struct SpaceNavigationSelection {
     pub room_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct NavigationState {
     pub active_space_id: Option<String>,
     pub active_room_id: Option<String>,
+    #[serde(default)]
+    pub home_selection: HomeSelection,
+    #[serde(default)]
+    pub space_local_presentations: SpaceLocalPresentations,
+    #[serde(default)]
+    pub legacy_frontend_preferences_imported: bool,
     #[serde(default)]
     pub space_order: Vec<String>,
     /// Legacy non-DM-only memory. Retained so an older build and already
@@ -74,6 +83,212 @@ pub struct NavigationState {
     pub room_scroll_anchors: BTreeMap<String, TimelineScrollAnchor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub main_timeline_anchor: Option<MainTimelineAnchor>,
+}
+
+impl Default for NavigationState {
+    fn default() -> Self {
+        Self {
+            active_space_id: None,
+            active_room_id: None,
+            home_selection: HomeSelection::default(),
+            space_local_presentations: SpaceLocalPresentations::default(),
+            legacy_frontend_preferences_imported: false,
+            space_order: Vec::new(),
+            last_room_by_space_id: BTreeMap::new(),
+            last_selection_by_space_id: BTreeMap::new(),
+            room_scroll_anchors: BTreeMap::new(),
+            main_timeline_anchor: None,
+        }
+    }
+}
+
+impl fmt::Debug for NavigationState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NavigationState")
+            .field("active_space_present", &self.active_space_id.is_some())
+            .field("active_room_present", &self.active_room_id.is_some())
+            .field("home_selection", &self.home_selection)
+            .field(
+                "space_local_presentation_count",
+                &self.space_local_presentations.0.len(),
+            )
+            .field(
+                "legacy_frontend_preferences_imported",
+                &self.legacy_frontend_preferences_imported,
+            )
+            .field("space_order_count", &self.space_order.len())
+            .field("last_room_count", &self.last_room_by_space_id.len())
+            .field(
+                "last_selection_count",
+                &self.last_selection_by_space_id.len(),
+            )
+            .field("room_scroll_anchor_count", &self.room_scroll_anchors.len())
+            .field(
+                "main_timeline_anchored",
+                &self.main_timeline_anchor.is_some(),
+            )
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum HomeSelection {
+    Activity,
+    Explore,
+    Invites,
+    DirectMessage { room_id: String },
+}
+
+impl Default for HomeSelection {
+    fn default() -> Self {
+        Self::Activity
+    }
+}
+
+impl fmt::Debug for HomeSelection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Activity => "Activity",
+            Self::Explore => "Explore",
+            Self::Invites => "Invites",
+            Self::DirectMessage { .. } => "DirectMessage { room_id: RoomId(..) }",
+        })
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SpaceLocalPresentation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}
+
+impl fmt::Debug for SpaceLocalPresentation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SpaceLocalPresentation")
+            .field("name_present", &self.name.is_some())
+            .field("icon_present", &self.icon.is_some())
+            .finish()
+    }
+}
+
+pub const MAX_SPACE_LOCAL_PRESENTATIONS: usize = 256;
+
+#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SpaceLocalPresentations(pub BTreeMap<String, SpaceLocalPresentation>);
+
+impl fmt::Debug for SpaceLocalPresentations {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SpaceLocalPresentations")
+            .field("count", &self.0.len())
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum NavigationPreferenceUpdate {
+    SetHomeSelection {
+        selection: HomeSelection,
+    },
+    SetSpacePresentation {
+        space_id: String,
+        presentation: Option<SpaceLocalPresentation>,
+    },
+    ImportLegacy {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        home_selection: Option<HomeSelection>,
+        #[serde(default)]
+        space_local_presentations: SpaceLocalPresentations,
+    },
+}
+
+impl NavigationState {
+    pub fn apply_preference_update(&mut self, update: NavigationPreferenceUpdate) -> bool {
+        match update {
+            NavigationPreferenceUpdate::SetHomeSelection { selection } => {
+                if self.home_selection == selection {
+                    return false;
+                }
+                self.home_selection = selection;
+                true
+            }
+            NavigationPreferenceUpdate::SetSpacePresentation {
+                space_id,
+                presentation,
+            } => match presentation {
+                Some(presentation) => {
+                    if self.space_local_presentations.0.get(&space_id) == Some(&presentation) {
+                        false
+                    } else if !self.space_local_presentations.0.contains_key(&space_id)
+                        && self.space_local_presentations.0.len() >= MAX_SPACE_LOCAL_PRESENTATIONS
+                    {
+                        false
+                    } else {
+                        self.space_local_presentations
+                            .0
+                            .insert(space_id, presentation);
+                        true
+                    }
+                }
+                None => self.space_local_presentations.0.remove(&space_id).is_some(),
+            },
+            NavigationPreferenceUpdate::ImportLegacy {
+                home_selection,
+                space_local_presentations,
+            } => {
+                if self.legacy_frontend_preferences_imported {
+                    return false;
+                }
+                if self.home_selection == HomeSelection::Activity
+                    && let Some(home_selection) = home_selection
+                {
+                    self.home_selection = home_selection;
+                }
+                for (space_id, presentation) in space_local_presentations.0 {
+                    self.space_local_presentations
+                        .0
+                        .entry(space_id)
+                        .or_insert(presentation);
+                }
+                self.legacy_frontend_preferences_imported = true;
+                true
+            }
+        }
+    }
+}
+
+impl fmt::Debug for NavigationPreferenceUpdate {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SetHomeSelection { selection } => formatter
+                .debug_struct("SetHomeSelection")
+                .field("selection", selection)
+                .finish(),
+            Self::SetSpacePresentation { presentation, .. } => formatter
+                .debug_struct("SetSpacePresentation")
+                .field("space_id", &"SpaceId(..)")
+                .field("presentation", presentation)
+                .finish(),
+            Self::ImportLegacy {
+                home_selection,
+                space_local_presentations,
+            } => formatter
+                .debug_struct("ImportLegacy")
+                .field("home_selection", home_selection)
+                .field(
+                    "space_local_presentation_count",
+                    &space_local_presentations.0.len(),
+                )
+                .finish(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

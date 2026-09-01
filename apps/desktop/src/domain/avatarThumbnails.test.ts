@@ -1,225 +1,76 @@
 import { describe, expect, test, vi } from "vitest";
 
 import {
-  MAX_AVATAR_THUMBNAIL_ATTEMPTS,
   planSnapshotAvatarThumbnailRequests,
   requestAvatarThumbnailWithDedupe
 } from "./avatarThumbnails";
-import type { AvatarImage, DesktopSnapshot, UserProfile } from "./types";
+import { readyDesktopSnapshotFixture } from "../test/desktopApiFixture";
 
-describe("planSnapshotAvatarThumbnailRequests", () => {
-  test("deduplicates a visible member request and retries after rejection", async () => {
-    const requestedMxcUris = new Set<string>();
-    const memberRequestedMxcUris = new Set<string>();
-    const retryCounts = new Map<string, number>();
-    let rejectFirst: ((reason?: unknown) => void) | undefined;
-    const request = vi
-      .fn<(mxcUri: string) => Promise<void>>()
-      .mockImplementationOnce(
-        () =>
-          new Promise<void>((_resolve, reject) => {
-            rejectFirst = reject;
-          })
-      )
-      .mockResolvedValue(undefined);
+describe("avatar thumbnail demand discovery", () => {
+  test("deduplicates not-requested snapshot avatars without owning retries", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    const avatar = {
+      mxc_uri: "mxc://example.invalid/shared",
+      thumbnail: { kind: "notRequested" as const }
+    };
+    snapshot.state.domain.profile.own.avatar = avatar;
+    snapshot.state.domain.rooms[0].avatar = avatar;
 
-    const requestMemberAvatar = () =>
-      requestAvatarThumbnailWithDedupe(
-        "mxc://matrix.org/member-avatar",
-        requestedMxcUris,
-        memberRequestedMxcUris,
-        retryCounts,
-        request
-      );
-
-    const first = requestMemberAvatar();
-    const duplicate = requestMemberAvatar();
-    expect(request).toHaveBeenCalledTimes(1);
-    expect(memberRequestedMxcUris.has("mxc://matrix.org/member-avatar")).toBe(true);
-
-    rejectFirst?.(new Error("temporary thumbnail failure"));
-    await first;
-    await duplicate;
-    expect(memberRequestedMxcUris.has("mxc://matrix.org/member-avatar")).toBe(false);
-    expect(retryCounts.get("mxc://matrix.org/member-avatar")).toBe(1);
-
-    await requestMemberAvatar();
-    expect(request).toHaveBeenCalledTimes(2);
+    const first = planSnapshotAvatarThumbnailRequests(snapshot, new Set());
+    expect(first.requestMxcUris).toEqual([avatar.mxc_uri]);
+    expect(
+      planSnapshotAvatarThumbnailRequests(snapshot, first.requestedMxcUris).requestMxcUris
+    ).toEqual([]);
   });
 
-  test("requests not-yet-downloaded snapshot avatars", () => {
-    const plan = planSnapshotAvatarThumbnailRequests(
-      snapshotWithAvatars([avatar("mxc://matrix.org/profile", { kind: "notRequested" })]),
-      new Set(),
-      new Map()
-    );
-
-    expect(plan.requestMxcUris).toEqual(["mxc://matrix.org/profile"]);
-    expect(plan.requestedMxcUris.has("mxc://matrix.org/profile")).toBe(true);
-    expect(plan.retryCounts.get("mxc://matrix.org/profile")).toBe(1);
-  });
-
-  test("retries transient failed snapshot avatars after an in-flight request settles", () => {
-    const plan = planSnapshotAvatarThumbnailRequests(
-      snapshotWithAvatars([
-        avatar("mxc://matrix.org/profile-retry", {
-          kind: "failed",
-          request_id: 7,
-          failureKind: "network"
-        })
-      ]),
-      new Set(["mxc://matrix.org/profile-retry"]),
-      new Map([["mxc://matrix.org/profile-retry", 1]])
-    );
-
-    expect(plan.requestMxcUris).toEqual(["mxc://matrix.org/profile-retry"]);
-    expect(plan.requestedMxcUris.has("mxc://matrix.org/profile-retry")).toBe(true);
-    expect(plan.retryCounts.get("mxc://matrix.org/profile-retry")).toBe(2);
-  });
-
-  test("stops retrying snapshot avatars after the bounded retry budget", () => {
-    const plan = planSnapshotAvatarThumbnailRequests(
-      snapshotWithAvatars([
-        avatar("mxc://matrix.org/profile-retry", {
-          kind: "failed",
-          request_id: 8,
-          failureKind: "sdk"
-        })
-      ]),
-      new Set(["mxc://matrix.org/profile-retry"]),
-      new Map([["mxc://matrix.org/profile-retry", MAX_AVATAR_THUMBNAIL_ATTEMPTS]])
-    );
-
-    expect(plan.requestMxcUris).toEqual([]);
-    expect(plan.requestedMxcUris.has("mxc://matrix.org/profile-retry")).toBe(false);
-    expect(plan.retryCounts.get("mxc://matrix.org/profile-retry")).toBe(
-      MAX_AVATAR_THUMBNAIL_ATTEMPTS
-    );
-  });
-
-  test("does not retry permanent failures or avatars that already have a ready duplicate", () => {
-    const plan = planSnapshotAvatarThumbnailRequests(
-      snapshotWithAvatars([
-        avatar("mxc://matrix.org/permanent", {
-          kind: "failed",
-          request_id: 9,
-          failureKind: "forbidden"
-        }),
-        // roomAvatar: duplicate notRequested
-        avatar("mxc://matrix.org/duplicate", { kind: "notRequested" }),
-        // spaceAvatar: duplicate ready — the 'ready' entry wins and evicts the notRequested one
-        avatar("mxc://matrix.org/duplicate", {
-          kind: "ready",
-          source_url: "asset://localhost/avatar",
-          width: null,
-          height: null,
-          mime_type: null
-        })
-      ]),
-      new Set(["mxc://matrix.org/permanent", "mxc://matrix.org/duplicate"]),
-      new Map([
-        ["mxc://matrix.org/permanent", 1],
-        ["mxc://matrix.org/duplicate", 1]
-      ])
-    );
-
-    expect(plan.requestMxcUris).toEqual([]);
-    expect(plan.requestedMxcUris.has("mxc://matrix.org/permanent")).toBe(false);
-    expect(plan.requestedMxcUris.has("mxc://matrix.org/duplicate")).toBe(false);
-    expect(plan.retryCounts.has("mxc://matrix.org/permanent")).toBe(false);
-    expect(plan.retryCounts.has("mxc://matrix.org/duplicate")).toBe(false);
-  });
-
-  test("flood guard: profile.users member avatars are NOT bulk-requested by the snapshot planner", () => {
-    // Build a snapshot with 500 member avatars (profile.users), plus one own avatar,
-    // one room avatar, one space avatar, and one invite avatar — all not-yet-downloaded.
-    // The planner must emit ZERO requests for the member mxc URIs, while still
-    // requesting the own/room/space/invite avatars (#116 Stage F1a flood guard).
-    const memberCount = 500;
-    const memberUsers: Record<string, UserProfile> = {};
-    for (let i = 0; i < memberCount; i++) {
-      const uid = `@member${i}:example.invalid`;
-      memberUsers[uid] = {
-        user_id: uid,
-        display_name: null,
-        display_label: `Member ${i}`,
-        original_display_label: `Member ${i}`,
-        mention_search_terms: [],
-        avatar: {
-          mxc_uri: `mxc://matrix.org/member-avatar-${i}`,
-          thumbnail: { kind: "notRequested" }
-        }
+  test.each(["loading", "ready", "failed"] as const)(
+    "does not retry a %s Rust-owned terminal or in-flight state",
+    (kind) => {
+      const snapshot = readyDesktopSnapshotFixture();
+      snapshot.state.domain.profile.own.avatar = {
+        mxc_uri: "mxc://example.invalid/avatar",
+        thumbnail:
+          kind === "loading"
+            ? { kind, request_id: 1 }
+            : kind === "ready"
+              ? { kind, source_url: "asset://avatar", width: null, height: null, mime_type: null }
+              : { kind, request_id: 1, failureKind: "network" }
       };
+
+      expect(
+        planSnapshotAvatarThumbnailRequests(
+          snapshot,
+          new Set(["mxc://example.invalid/avatar"])
+        )
+      ).toEqual({ requestMxcUris: [], requestedMxcUris: new Set() });
     }
+  );
 
-    const snap = {
-      state: {
-        domain: {
-          profile: {
-            own: {
-              display_name: null,
-              avatar: avatar("mxc://matrix.org/own-avatar", { kind: "notRequested" })
-            },
-            users: memberUsers,
-            room_users: {},
-            local_aliases: {},
-            local_alias_update: { kind: "idle" },
-            ignored_user_ids: [],
-            ignored_user_update: { kind: "idle" },
-            update: { kind: "idle" }
-          },
-          rooms: [{ avatar: avatar("mxc://matrix.org/room-avatar", { kind: "notRequested" }) }],
-          spaces: [{ avatar: avatar("mxc://matrix.org/space-avatar", { kind: "notRequested" }) }],
-          invites: [{ avatar: avatar("mxc://matrix.org/invite-avatar", { kind: "notRequested" }) }]
-        }
-      }
-    } as unknown as DesktopSnapshot;
+  test("visible-row dedupe releases only when transport admission fails", async () => {
+    const visible = new Set<string>();
+    const request = vi.fn().mockRejectedValueOnce(new Error("transport")).mockResolvedValue(undefined);
 
-    const plan = planSnapshotAvatarThumbnailRequests(snap, new Set(), new Map());
+    await requestAvatarThumbnailWithDedupe(
+      "mxc://example.invalid/member",
+      new Set(),
+      visible,
+      request
+    );
+    expect(visible.size).toBe(0);
 
-    // own / room / space / invite avatars must be requested
-    expect(plan.requestMxcUris).toContain("mxc://matrix.org/own-avatar");
-    expect(plan.requestMxcUris).toContain("mxc://matrix.org/room-avatar");
-    expect(plan.requestMxcUris).toContain("mxc://matrix.org/space-avatar");
-    expect(plan.requestMxcUris).toContain("mxc://matrix.org/invite-avatar");
-    expect(plan.requestMxcUris).toHaveLength(4);
-
-    // None of the 500 member mxc URIs must appear in the plan
-    for (let i = 0; i < memberCount; i++) {
-      expect(plan.requestMxcUris).not.toContain(`mxc://matrix.org/member-avatar-${i}`);
-    }
+    await requestAvatarThumbnailWithDedupe(
+      "mxc://example.invalid/member",
+      new Set(),
+      visible,
+      request
+    );
+    await requestAvatarThumbnailWithDedupe(
+      "mxc://example.invalid/member",
+      new Set(),
+      visible,
+      request
+    );
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(visible).toEqual(new Set(["mxc://example.invalid/member"]));
   });
 });
-
-function avatar(mxcUri: string, thumbnail: AvatarImage["thumbnail"]): AvatarImage {
-  return { mxc_uri: mxcUri, thumbnail };
-}
-
-/**
- * Helper: builds a minimal DesktopSnapshot with avatars placed at the four
- * positions that the snapshot planner now covers (own, room, space, invite).
- * profile.users is intentionally left empty — member avatars are no longer
- * bulk-requested by the planner (#116 Stage F1a).
- */
-function snapshotWithAvatars(avatars: AvatarImage[]): DesktopSnapshot {
-  const [ownAvatar, roomAvatar, spaceAvatar, inviteAvatar] = avatars;
-  return {
-    state: {
-      domain: {
-        profile: {
-          own: { display_name: null, avatar: ownAvatar ?? null },
-          users: {},
-          room_users: {},
-          local_aliases: {},
-          local_alias_update: { kind: "idle" },
-          ignored_user_ids: [],
-          ignored_user_update: { kind: "idle" },
-          update: { kind: "idle" }
-        },
-        rooms: roomAvatar ? [{ avatar: roomAvatar }] : [],
-        spaces: spaceAvatar ? [{ avatar: spaceAvatar }] : [],
-        invites: inviteAvatar ? [{ avatar: inviteAvatar }] : []
-      }
-    }
-  } as unknown as DesktopSnapshot;
-}
