@@ -38,6 +38,9 @@ export const tauriLinkMediaPort: LinkMediaPort = {
     }
   },
   renderableThumbnailSourceUrl(sourceRef) {
+    if (sourceRef.startsWith("data:") || sourceRef.startsWith("blob:")) {
+      return sourceRef;
+    }
     if (!/^(?:avatar|link-preview)\/[0-9a-f]{16}$/.test(sourceRef)) {
       return null;
     }

@@ -192,7 +192,7 @@ test("timeline sender avatars render after headless account thumbnail events", a
             mxc_uri: mxcUri,
             thumbnail: {
               kind: "ready",
-              source_url: sourceUrl,
+              source_ref: sourceUrl,
               width: 1,
               height: 1,
               mime_type: "image/gif"
@@ -948,7 +948,7 @@ test("read receipt avatars render from Rust projection with overflow and tooltip
                         mxc_uri: "mxc://example.invalid/alice",
                         thumbnail: {
                           kind: "ready",
-                          source_url:
+                          source_ref:
                             "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
                           width: 1,
                           height: 1,

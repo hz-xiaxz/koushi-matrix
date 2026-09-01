@@ -62,6 +62,9 @@ describe("Tauri link/media port", () => {
     expect(
       tauriLinkMediaPort.renderableThumbnailSourceUrl("link-preview/fedcba9876543210")
     ).toBe("koushi-thumbnail://localhost/link-preview/fedcba9876543210");
+    expect(tauriLinkMediaPort.renderableThumbnailSourceUrl("data:image/gif;base64,R0lGODlh")).toBe(
+      "data:image/gif;base64,R0lGODlh"
+    );
     expect(tauriLinkMediaPort.renderableThumbnailSourceUrl("../private.bin")).toBeNull();
     expect(
       tauriLinkMediaPort.renderableThumbnailSourceUrl(

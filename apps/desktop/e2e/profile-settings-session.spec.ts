@@ -997,7 +997,7 @@ test("profile settings dispatch Rust-owned commands and avatars render from prof
       mxc_uri: "mxc://example.invalid/avatar-user",
       thumbnail: {
         kind: "ready",
-        source_url:
+        source_ref:
           "data:image/gif;base64,R0lGODlhAQABAPAAAP///wAAACH5BAAAAAAALAAAAAABAAEAAAICRAEAOw==",
         width: 1,
         height: 1,
