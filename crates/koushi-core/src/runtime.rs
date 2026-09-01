@@ -18,7 +18,7 @@ mod scheduled_send;
 #[cfg(test)]
 mod secure_backup_admission_tests;
 
-pub use composer::{COMPOSER_DRAFT_PERSIST_DEBOUNCE, ForwardedComposerDraftPermit};
+pub use composer::COMPOSER_DRAFT_PERSIST_DEBOUNCE;
 use composer::{
     ComposerAcceptanceIdentity, ComposerDraftLoadStatus, PendingComposerAcceptance,
     PendingComposerDraftPersist, composer_acceptance_identity_for_action,
@@ -69,7 +69,7 @@ use crate::account::{AccountActorHandle, AccountMessage};
 use crate::activity_resolution::ActivityResolutionRequest;
 use crate::command_policy::{
     CoreCommandPolicy, native_artifact_for_account_command, native_artifact_for_command,
-    search_scope_to_state, timeline_composer_account_fence,
+    search_scope_to_state, space_member_forward_failure_action, timeline_composer_account_fence,
 };
 use crate::composer_draft_lifecycle::{ComposerDraftCommandPermit, ComposerDraftLeaseRegistry};
 pub use activity::ACTIVITY_RECENT_MAX_ROWS;
@@ -127,10 +127,6 @@ pub const EVENT_QUEUE_CAPACITY: usize = 16384;
 /// large-account "room selection did not complete" / blank-timeline bug. See
 /// the async channel-capacity rule in docs/policies/engineering-rules.md.
 pub const ACTION_QUEUE_CAPACITY: usize = 16384;
-/// Inter-actor command/message inboxes (AppActor -> AccountActor ->
-/// Room/Timeline actors). Sized so that forwarding a command under heavy sync
-/// does not block the forwarding actor's loop.
-pub const ACTOR_MESSAGE_QUEUE_CAPACITY: usize = 1024;
 const INTERNAL_RUNTIME_CONNECTION_ID: RuntimeConnectionId = RuntimeConnectionId(0);
 macro_rules! trace_runtime_sync {
     ($stage:expr, [$($field:expr),* $(,)?], $($arg:tt)*) => {{
@@ -227,77 +223,6 @@ fn record_space_member_command_rejection(
         .field(DiagnosticField::token("outcome", outcome))
         .field(DiagnosticField::count("rejection_count", 1)),
     );
-}
-
-pub(crate) fn space_member_forward_failure_action(
-    command: &koushi_protocol::command::RoomCommand,
-) -> Option<(RequestId, AppAction)> {
-    match command {
-        koushi_protocol::command::RoomCommand::LoadSpaceMembers {
-            request_id,
-            space_id,
-            generation,
-        } => Some((
-            *request_id,
-            AppAction::SpaceMembersLoadFailed {
-                request_id: request_id.sequence,
-                space_id: space_id.clone(),
-                generation: *generation,
-                kind: OperationFailureKind::Sdk,
-            },
-        )),
-        koushi_protocol::command::RoomCommand::InviteUserToSpace {
-            request_id,
-            space_id,
-            user_id,
-            generation,
-        } => Some((
-            *request_id,
-            AppAction::SpaceMemberInviteSettled {
-                request_id: request_id.sequence,
-                space_id: space_id.clone(),
-                user_id: user_id.clone(),
-                generation: *generation,
-                outcome: koushi_state::SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
-            },
-        )),
-        koushi_protocol::command::RoomCommand::CancelSpaceInvite {
-            request_id,
-            space_id,
-            user_id,
-            generation,
-        } => Some((
-            *request_id,
-            AppAction::SpaceMemberInviteCancellationSettled {
-                request_id: request_id.sequence,
-                space_id: space_id.clone(),
-                user_id: user_id.clone(),
-                generation: *generation,
-                outcome: koushi_state::SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
-            },
-        )),
-        koushi_protocol::command::RoomCommand::UpdateSpaceMemberRole {
-            request_id,
-            space_id,
-            user_id,
-            generation,
-            ..
-        } => Some((
-            *request_id,
-            AppAction::SpaceMemberRoleUpdateSettled {
-                request_id: request_id.sequence,
-                space_id: space_id.clone(),
-                user_id: user_id.clone(),
-                generation: *generation,
-                outcome: koushi_state::SpaceMemberRoleUpdateOutcome::Failed(
-                    koushi_state::SpaceMemberRoleFailureKind::Sdk,
-                ),
-                sent_revision: None,
-                projection: None,
-            },
-        )),
-        _ => None,
-    }
 }
 
 #[cfg(any(test, feature = "test-hooks"))]

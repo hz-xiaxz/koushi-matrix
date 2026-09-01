@@ -15,13 +15,13 @@ use matrix_sdk_ui::timeline::TimelineFocus;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
+use crate::composer_draft_lifecycle::ForwardedComposerDraftPermit;
 use crate::executor;
 use crate::link_preview::LinkPreviewContext;
 #[cfg(test)]
 use crate::live_tail_freshness::LiveTailFreshnessState;
 use crate::live_tail_freshness::LiveTailRefreshCoordinator;
 use crate::read_state::{ReadPersistenceSnapshot, ReadStateKey};
-use crate::runtime::ForwardedComposerDraftPermit;
 use crate::search::SearchIndexMessage;
 use crate::startup_trace::{self, StartupPhase};
 use crate::threads_list::{
@@ -241,6 +241,56 @@ pub(super) enum TimelineManagerControl {
 }
 
 impl TimelineManagerHandle {
+    pub(crate) fn spawn(
+        action_tx: mpsc::Sender<Vec<AppAction>>,
+        event_tx: broadcast::Sender<CoreEvent>,
+        data_dir: Option<std::path::PathBuf>,
+        account_work: AccountWorkScheduler,
+        navigation_projection_rx: Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
+        focused_projection_tx: Option<mpsc::UnboundedSender<super::FocusedProjectionCommitted>>,
+    ) -> Self {
+        TimelineManagerActor::spawn(
+            action_tx,
+            event_tx,
+            data_dir,
+            account_work,
+            navigation_projection_rx,
+            focused_projection_tx,
+        )
+    }
+
+    pub(crate) fn spawn_with_session(
+        session: Arc<MatrixClientSession>,
+        read_session_generation: u64,
+        restored_read_state: ReadPersistenceSnapshot,
+        read_persistence: ReadPersistenceIngress,
+        send_read_receipts: bool,
+        action_tx: mpsc::Sender<Vec<AppAction>>,
+        event_tx: broadcast::Sender<CoreEvent>,
+        search_index_tx: mpsc::Sender<SearchIndexMessage>,
+        data_dir: Option<std::path::PathBuf>,
+        link_preview_policy: LinkPreviewContext,
+        account_work: AccountWorkScheduler,
+        navigation_projection_rx: Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
+        focused_projection_tx: Option<mpsc::UnboundedSender<super::FocusedProjectionCommitted>>,
+    ) -> Self {
+        TimelineManagerActor::spawn_with_session(
+            session,
+            read_session_generation,
+            restored_read_state,
+            read_persistence,
+            send_read_receipts,
+            action_tx,
+            event_tx,
+            search_index_tx,
+            data_dir,
+            link_preview_policy,
+            account_work,
+            navigation_projection_rx,
+            focused_projection_tx,
+        )
+    }
+
     pub(crate) async fn send(&self, msg: TimelineMessage) -> bool {
         self.tx.send(msg).await.is_ok()
     }
@@ -421,7 +471,7 @@ impl TimelineManagerActor {
         navigation_projection_rx: Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
         focused_projection_tx: Option<mpsc::UnboundedSender<super::FocusedProjectionCommitted>>,
     ) -> TimelineManagerHandle {
-        let (tx, msg_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
+        let (tx, msg_rx) = mpsc::channel(crate::ACTOR_MESSAGE_QUEUE_CAPACITY);
         let (control_tx, control_rx) = mpsc::channel(1);
         let (terminal_ingress, terminal_rx) = TimelineSendTerminalIngress::channel();
         let residency = TimelineSubscriptionResidencyHandle {
@@ -502,7 +552,7 @@ impl TimelineManagerActor {
         navigation_projection_rx: Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
         focused_projection_tx: Option<mpsc::UnboundedSender<super::FocusedProjectionCommitted>>,
     ) -> TimelineManagerHandle {
-        let (tx, msg_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
+        let (tx, msg_rx) = mpsc::channel(crate::ACTOR_MESSAGE_QUEUE_CAPACITY);
         let (control_tx, control_rx) = mpsc::channel(1);
         let (terminal_ingress, terminal_rx) = TimelineSendTerminalIngress::channel();
         let residency = TimelineSubscriptionResidencyHandle {

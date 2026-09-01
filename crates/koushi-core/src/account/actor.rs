@@ -24,7 +24,7 @@ use koushi_state::{
 };
 use tokio::sync::{Semaphore, broadcast, mpsc, oneshot};
 
-use crate::composer_draft_lifecycle::ComposerDraftLeaseRegistry;
+use crate::composer_draft_lifecycle::{ComposerDraftLeaseRegistry, ForwardedComposerDraftPermit};
 #[cfg(test)]
 use crate::executor;
 use crate::link_preview::LinkPreviewContext;
@@ -32,7 +32,7 @@ use crate::native_artifact::{NativeArtifactKind, NativeArtifactPort};
 #[cfg(any(test, feature = "test-hooks"))]
 use crate::room::RoomOperationTestControl;
 use crate::room::{RoomActorHandle, RoomMessage};
-use crate::runtime::ForwardedComposerDraftPermit;
+
 use crate::search::SearchActorHandle;
 use crate::store::StoreActor;
 use crate::sync::SyncActorHandle;
@@ -1000,12 +1000,12 @@ impl AccountActor {
     ) -> AccountActorHandle {
         // AppActor forwards every Room/Timeline/Sync command here via send().await;
         // sized so heavy sync does not block the AppActor's forwarding.
-        let (tx, command_rx) = mpsc::channel(crate::runtime::ACTOR_MESSAGE_QUEUE_CAPACITY);
+        let (tx, command_rx) = mpsc::channel(crate::ACTOR_MESSAGE_QUEUE_CAPACITY);
         let data_dir = store_actor.data_dir().to_path_buf();
         // Spawn RoomActor once at AccountActor creation. It starts with no
         // session and waits for RoomMessage::SyncStarted.
         let account_work = crate::account_work::AccountWorkScheduler::default();
-        let room_actor = crate::room::RoomActor::spawn_with_account_work(
+        let room_actor = crate::room::RoomActorHandle::spawn_with_account_work(
             action_tx.clone(),
             event_tx.clone(),
             sliding_sync_diagnostics.clone(),
@@ -1016,7 +1016,7 @@ impl AccountActor {
         let (focused_projection_tx, focused_projection_rx) = mpsc::unbounded_channel();
         // Spawn TimelineManagerActor. It starts with no session; the session
         // is injected when a store-backed session is established.
-        let timeline_manager = crate::timeline::TimelineManagerActor::spawn(
+        let timeline_manager = crate::timeline::TimelineManagerHandle::spawn(
             action_tx.clone(),
             event_tx.clone(),
             Some(data_dir.clone()),
@@ -1025,7 +1025,7 @@ impl AccountActor {
             Some(focused_projection_tx.clone()),
         );
         #[cfg(any(test, feature = "test-hooks"))]
-        let residency_room_tx = room_actor.tx.clone();
+        let residency_room_tx = room_actor.sender();
         #[cfg(any(test, feature = "test-hooks"))]
         let residency_room_operation_reached_count = room_actor.operation_test_reached_count();
         let actor = AccountActor {

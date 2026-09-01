@@ -10,6 +10,11 @@
 //! Migration spec: `docs/superpowers/specs/2026-06-12-headless-core-runtime-design.md`.
 
 pub mod account;
+
+/// Inter-actor command/message inboxes (AppActor -> AccountActor ->
+/// Room/Timeline actors). Sized so that forwarding a command under heavy sync
+/// does not block the forwarding actor's loop.
+pub(crate) const ACTOR_MESSAGE_QUEUE_CAPACITY: usize = 1024;
 pub(crate) mod account_work;
 mod activity_resolution;
 mod causal_projection;
@@ -33,7 +38,6 @@ pub mod renderable_thumbnail;
 mod report;
 pub mod room;
 mod room_key_receive;
-mod room_key_recovery;
 #[cfg(any(test, feature = "test-hooks"))]
 pub mod room_subscription_residency_test_support;
 pub mod runtime;

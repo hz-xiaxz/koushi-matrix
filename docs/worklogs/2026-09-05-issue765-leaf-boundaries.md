@@ -203,5 +203,40 @@ Hosted PR #791 then exposed the existing avatar-completion E2E race: the harness
 promise acknowledges dispatch, not React commit, so two non-replaying completion
 events sent in one browser task could drop the second during rerender. The test
 now publishes and DOM-settles each completion before the next. Focused repeat:
-10/10 passed. This is test synchronization only; product listener/cache behavior
-is unchanged. Exact-delta review and hosted rerun are required before merge.
+10/10 passed. Fireworks returned `CORRECT-TO-MERGE` for exact final head
+`dc8f270391a88faa8c3bb553ab39586bea508cf3`; the hosted rerun passed all
+eight jobs. PR #791 merged as `0ba1664c3644ed22cf77d98d631f403181a9acb9`.
+
+## PR4 verify-first evidence
+
+Commit `2ddf3963c26420216461439038318de176e7ac54` extended the leaf checker
+before implementation.
+
+- checker self-tests: 8 passed;
+- current-tree checker: RED for 8 production child→runtime imports, concrete
+  AccountActor construction of room/timeline implementations, three runtime-
+  owned shared definitions, and the crate-root room-key recovery model;
+- owner-local scheduled-send/composer/navigation paths are pinned so the cleanup
+  cannot collapse deliberate layers;
+- generic actor factory/framework names fail closed.
+
+PR4 integration preserved the two moved definition bodies exactly: the 62-line
+forwarded composer permit moved to the composer lifecycle owner (with visibility
+narrowed to crate-only), and the 70-line Space-member failure mapper moved to
+command policy. The actor inbox capacity/value moved to the crate root. Account
+production now constructs children only through `RoomActorHandle` and
+`TimelineManagerHandle`; child sources contain no runtime import. No actor trait
+or generic factory was added.
+
+The 501-line room-key recovery model moved byte-identically under the timeline
+owner; only module paths changed. Scheduled-send, composer and navigation layers
+remain at their pinned owner-local paths.
+
+Focused PR4 evidence:
+
+- leaf checker/self-tests: green after the previously RED edge/model findings;
+- exact definition/model verifiers: green;
+- Core lib: 910 passed / 8 ignored;
+- runtime/core/timeline/residency/command-admission/scheduled-send integrations:
+  71 passed;
+- Core check, rustfmt and diff: green.

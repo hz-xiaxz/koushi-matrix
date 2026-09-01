@@ -373,7 +373,7 @@ impl AccountActor {
                 read_persistence_rx,
             )));
         }
-        self.timeline_manager = crate::timeline::TimelineManagerActor::spawn_with_session(
+        self.timeline_manager = crate::timeline::TimelineManagerHandle::spawn_with_session(
             session.clone(),
             read_session_generation,
             restored_read_state,
@@ -411,7 +411,7 @@ impl AccountActor {
             session.clone(),
             self.action_tx.clone(),
             self.event_tx.clone(),
-            self.room_actor.tx.clone(),
+            self.room_actor.sender(),
             self.timeline_manager.sender(),
             self.sync_generation.clone(),
             self.encryption_sync_permit.clone(),
@@ -490,7 +490,7 @@ impl AccountActor {
         self.record_lifecycle_probe("stop_timeline_manager");
         self.stop_timeline_actor().await;
         self.stop_read_persistence_worker().await;
-        self.timeline_manager = crate::timeline::TimelineManagerActor::spawn(
+        self.timeline_manager = crate::timeline::TimelineManagerHandle::spawn(
             self.action_tx.clone(),
             self.event_tx.clone(),
             Some(self.data_dir.clone()),

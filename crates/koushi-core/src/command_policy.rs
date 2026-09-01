@@ -4,6 +4,78 @@ use koushi_protocol::command::{
     AccountCommand, AppCommand, CoreCommand, SearchScope, TimelineCommand,
 };
 use koushi_protocol::ids::{RequestId, TimelineKind};
+use koushi_state::{AppAction, OperationFailureKind};
+
+pub(crate) fn space_member_forward_failure_action(
+    command: &koushi_protocol::command::RoomCommand,
+) -> Option<(RequestId, AppAction)> {
+    match command {
+        koushi_protocol::command::RoomCommand::LoadSpaceMembers {
+            request_id,
+            space_id,
+            generation,
+        } => Some((
+            *request_id,
+            AppAction::SpaceMembersLoadFailed {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                generation: *generation,
+                kind: OperationFailureKind::Sdk,
+            },
+        )),
+        koushi_protocol::command::RoomCommand::InviteUserToSpace {
+            request_id,
+            space_id,
+            user_id,
+            generation,
+        } => Some((
+            *request_id,
+            AppAction::SpaceMemberInviteSettled {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                user_id: user_id.clone(),
+                generation: *generation,
+                outcome: koushi_state::SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
+            },
+        )),
+        koushi_protocol::command::RoomCommand::CancelSpaceInvite {
+            request_id,
+            space_id,
+            user_id,
+            generation,
+        } => Some((
+            *request_id,
+            AppAction::SpaceMemberInviteCancellationSettled {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                user_id: user_id.clone(),
+                generation: *generation,
+                outcome: koushi_state::SpaceMemberInviteOutcome::Failed(OperationFailureKind::Sdk),
+            },
+        )),
+        koushi_protocol::command::RoomCommand::UpdateSpaceMemberRole {
+            request_id,
+            space_id,
+            user_id,
+            generation,
+            ..
+        } => Some((
+            *request_id,
+            AppAction::SpaceMemberRoleUpdateSettled {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                user_id: user_id.clone(),
+                generation: *generation,
+                outcome: koushi_state::SpaceMemberRoleUpdateOutcome::Failed(
+                    koushi_state::SpaceMemberRoleFailureKind::Sdk,
+                ),
+                sent_revision: None,
+                projection: None,
+            },
+        )),
+        _ => None,
+    }
+}
 
 pub(crate) fn native_artifact_for_command(
     command: &CoreCommand,
