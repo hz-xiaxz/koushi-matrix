@@ -17,7 +17,7 @@ use koushi_state::SessionInfo;
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 #[tokio::test]
 async fn resend_actor_rejects_duplicate_and_correlates_one_terminal_each() {
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
@@ -161,7 +161,7 @@ async fn resend_actor_rejects_duplicate_and_correlates_one_terminal_each() {
     handle.join().await;
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 #[tokio::test]
 async fn authoritative_room_removal_cancels_resend_and_rejects_replacement() {
     use matrix_sdk::test_utils::mocks::MatrixMockServer;

@@ -439,9 +439,9 @@ async fn reset_local_data_clears_current_account_persistence_and_signs_out_local
         teardown_retry_task: None,
         lifecycle_probe: None,
         residency_install_gap: None,
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         residency_teardown_gap: None,
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         residency_preserve_room_session: false,
         trust_observation_override: std::sync::Mutex::new(None),
         trust_observation_is_synthetic: false,

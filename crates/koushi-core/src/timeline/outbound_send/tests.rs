@@ -468,7 +468,7 @@ async fn duplicate_submission_routes_one_manager_enqueue_worker() {
         room_subscription_service_epoch: 0,
         current_core_generation: None,
         room_leave_states: BTreeMap::new(),
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         restored_room_subscription_probe: None,
         session_subscribed_rooms: BTreeSet::new(),
         subscribed_room_leases: BTreeMap::new(),
@@ -859,7 +859,7 @@ async fn shutdown_cleans_captured_room_keys_before_acknowledging() {
         room_subscription_service_epoch: 0,
         current_core_generation: None,
         room_leave_states: BTreeMap::new(),
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         restored_room_subscription_probe: None,
         session_subscribed_rooms: BTreeSet::new(),
         subscribed_room_leases: BTreeMap::new(),
@@ -955,7 +955,7 @@ async fn manager_enqueue_worker_waits_for_reducer_acceptance_delivery() {
         room_subscription_service_epoch: 0,
         current_core_generation: None,
         room_leave_states: BTreeMap::new(),
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         restored_room_subscription_probe: None,
         session_subscribed_rooms: BTreeSet::new(),
         subscribed_room_leases: BTreeMap::new(),

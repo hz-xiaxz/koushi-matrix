@@ -11,7 +11,7 @@ use koushi_protocol::event::{
 use koushi_protocol::failure::CoreFailure;
 use koushi_protocol::ids::RequestId;
 use koushi_state::{AppAction, EncryptionDebugOperationKind};
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 use std::sync::Mutex;
 use std::{collections::BTreeSet, sync::Arc};
 use tokio::sync::{broadcast, oneshot};
@@ -74,17 +74,17 @@ fn record_manual_room_key_reshare(outcome: &koushi_sdk::MatrixRoomKeyReshareOutc
     );
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 pub(crate) struct EncryptionDebugTestControl {
     pub(crate) kind: EncryptionDebugOperationKind,
     pub(crate) reached: oneshot::Sender<()>,
     pub(crate) completion: oneshot::Receiver<CoreEncryptionDebugOutcome>,
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 pub(super) type EncryptionDebugTestControlSlot = Arc<Mutex<Option<EncryptionDebugTestControl>>>;
 
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 fn take_encryption_debug_test_control(
     control: &mut Option<EncryptionDebugTestControl>,
     kind: EncryptionDebugOperationKind,
@@ -668,7 +668,7 @@ impl RoomActor {
         let op_request_id = request_id;
         let session_for_fence = std::sync::Arc::clone(session);
         let known_room_ids = Arc::clone(&self.known_room_ids);
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         let test_control = take_encryption_debug_test_control(
             &mut *self
                 .encryption_debug_test_control
@@ -676,7 +676,7 @@ impl RoomActor {
                 .expect("encryption-debug test control lock"),
             kind,
         );
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         if let Some(control) = test_control {
             let (cancel_tx, _cancel_rx) = broadcast::channel::<()>(1);
             let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));

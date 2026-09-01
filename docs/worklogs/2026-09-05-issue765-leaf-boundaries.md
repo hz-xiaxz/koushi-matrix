@@ -99,5 +99,58 @@ Focused post-integration evidence:
 Fireworks exact-diff review at `bececb93fa8ad68f982a59e0b78e04a08071c12a`
 returned `CORRECT-TO-MERGE` with one cosmetic finding: the macOS QA test title
 and comment still named Core as the credential mechanism owner. The wording was
-corrected to `koushi-store`; a focused exact-delta re-review is required before
-merge.
+corrected to `koushi-store`; Fireworks re-reviewed exact head
+`c1eeda78e53e76a74e00bf64171ad87741c5225a` and returned
+`CORRECT-TO-MERGE`.
+
+PR #789 passed all eight hosted jobs and merged as
+`d3982a84d1b98c9bb73cc2b22f9a0465233c8892`.
+
+The broad local `qa:headless-basic:local` attempt passed Tuwunel login and
+directory, then the unrelated timeline-reconnect oracle rejected a pagination
+terminal arriving before `Paginating`. Exact base `cfa56c1e` reproduced the same
+failure. The affected credential/login/restore scenarios passed for Tuwunel and
+Synapse; #738 remains the separate settlement issue.
+
+## PR2 verify-first evidence
+
+Commit `97293b54dbbc3b44559724c706ca1c61fec8fba0` extended the leaf
+checker before the test move.
+
+- checker self-tests: 4 passed;
+- current-tree checker: RED for the absent non-default testkit, Core
+  self-dev-dependency, shared support/32 hook-consuming targets still in Core,
+  and missing explicit CI testkit gate;
+- four self-contained Core integration targets are intentionally retained:
+  `link_preview`, `media_save`, `native_artifact_boundary`, and
+  `sliding_sync_diagnostics`.
+
+The exact 32/4 partition was added to the design and Fireworks returned
+`CORRECT-TO-IMPLEMENT` at `45de4b8decc2508a0a9efb250d95265b9e381c60`
+before the stashed partial implementation resumed. Two non-blocking checker
+coverage findings were fixed by enforcing exact directory target sets and
+mutating both duplicate/misplaced branches.
+
+Removing the self-dev-dependency exposed why it had existed: Core unit-test
+items used feature-only `test-hooks` cfgs. These were changed mechanically to
+`cfg(any(test, feature = "test-hooks"))`, with the three inverse branches changed
+to the exact negation. Normal/release production cfg remains byte-equivalent;
+bare `cargo test -p koushi-core` now compiles the same hooks under `cfg(test)`
+without feature unification. A leaf guard rejects future feature-only unit-test
+hooks.
+
+Focused PR2 evidence:
+
+- exact move verifier: support + 32 moved target bodies byte-identical to
+  `d3982a84`; four retained Core targets byte-identical;
+- testkit: 32 targets / 228 tests;
+- Core: 912 passed / 8 ignored plus 22 tests across the four retained targets;
+- release Core check, leaf checker/self-tests, Rust structure/self-tests and
+  cargo-machete: green.
+
+Fireworks exact-diff review at
+`5a2a3778ab199871170dcc70f94ccfeb1245fcaa` returned
+`CORRECT-TO-MERGE` with one actionable guard-hardening Minor and one deliberate
+plan-mandated CI duplication note. The checker was strengthened to reject any
+normal `[dependencies]` table in the testkit; the explicit CI test remains
+because the approved plan requires it. Exact-delta re-review remains required.

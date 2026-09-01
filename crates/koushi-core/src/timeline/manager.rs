@@ -103,7 +103,7 @@ pub(crate) enum TimelineMessage {
         room_list_service: Arc<matrix_sdk_ui::room_list_service::RoomListService>,
         core_generation: u64,
     },
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     ResidencyTestSnapshot {
         response: oneshot::Sender<(Vec<String>, Vec<String>)>,
     },
@@ -257,7 +257,7 @@ impl TimelineManagerHandle {
         self.residency.close_and_drain().await;
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) async fn residency_snapshot_for_testing(
         &self,
         response: oneshot::Sender<(Vec<String>, Vec<String>)>,
@@ -266,7 +266,7 @@ impl TimelineManagerHandle {
             .await
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) fn residency_gate_snapshot_for_testing(&self) -> (bool, usize) {
         self.residency.gate_snapshot()
     }
@@ -341,7 +341,7 @@ pub struct TimelineManagerActor {
     pub(super) room_subscription_service_epoch: u64,
     pub(super) current_core_generation: Option<u64>,
     pub(super) room_leave_states: BTreeMap<OwnedRoomId, RoomLeaveState>,
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(super) restored_room_subscription_probe: Option<(bool, BTreeSet<OwnedRoomId>)>,
     /// Session-resident desired room subscriptions. This set outlives every
     /// presentation actor and is dropped with the manager/session.
@@ -435,7 +435,7 @@ impl TimelineManagerActor {
             room_subscription_service_epoch: 0,
             current_core_generation: None,
             room_leave_states: BTreeMap::new(),
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             restored_room_subscription_probe: None,
             session_subscribed_rooms: BTreeSet::new(),
             subscribed_room_leases: BTreeMap::new(),
@@ -523,7 +523,7 @@ impl TimelineManagerActor {
             room_subscription_service_epoch: 0,
             current_core_generation: None,
             room_leave_states: BTreeMap::new(),
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             restored_room_subscription_probe: None,
             session_subscribed_rooms: BTreeSet::new(),
             subscribed_room_leases: BTreeMap::new(),
@@ -691,7 +691,7 @@ impl TimelineManagerActor {
                     self.handle_sync_started(room_list_service, core_generation)
                         .await;
                 }
-                #[cfg(feature = "test-hooks")]
+                #[cfg(any(test, feature = "test-hooks"))]
                 TimelineMessage::ResidencyTestSnapshot { response } => {
                     let (desired, active, ..) = self.room_subscription_residency_test_snapshot();
                     let _ = response.send((desired, active));
@@ -1819,7 +1819,7 @@ impl TimelineManagerActor {
             }
         };
 
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         if self.session.is_none() {
             return Ok(Self::room_subscription_residency_test_actor_handle());
         }

@@ -3117,7 +3117,6 @@ dependencies = [
  "eyeball-im",
  "futures-util",
  "image",
- "koushi-core",
  "koushi-diagnostics",
  "koushi-key",
  "koushi-media",
@@ -3138,6 +3137,26 @@ dependencies = [
  "tokio",
  "url",
  "vodozemac",
+ "wiremock",
+]
+
+[[package]]
+name = "koushi-core-testkit"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "image",
+ "koushi-core",
+ "koushi-diagnostics",
+ "koushi-protocol",
+ "koushi-sdk",
+ "koushi-state",
+ "matrix-sdk",
+ "matrix-sdk-test",
+ "matrix-sdk-ui",
+ "serde_json",
+ "tempfile",
+ "tokio",
  "wiremock",
 ]
 

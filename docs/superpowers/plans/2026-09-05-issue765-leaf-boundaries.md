@@ -131,11 +131,14 @@ behavioral byte/round-trip/corruption/migration evidence.
 ### Move
 
 1. Add non-default, `publish = false` `koushi-core-testkit`.
-2. Move `crates/koushi-core/tests/support/mod.rs` into the testkit library and
-   move every Core integration-test target that consumes it into the testkit
-   package. Test bodies and synthetic fixtures remain byte-equivalent except for
-   imports/relative paths.
-3. Keep Core unit-only `account/test_support`, `timeline/test_support`,
+2. Move `crates/koushi-core/tests/support/mod.rs` and the exact 32 integration
+   targets that consume that support or Core `test-hooks` into the testkit
+   package. Test bodies and synthetic fixtures remain byte-identical. The target
+   manifest is enforced by `check-leaf-crate-boundaries.mjs`.
+3. Keep the four self-contained integration targets (`link_preview`,
+   `media_save`, `native_artifact_boundary`, `sliding_sync_diagnostics`) in Core;
+   they use neither the shared support nor Core `test-hooks`. Also keep Core
+   unit-only `account/test_support`, `timeline/test_support`,
    `store/test_support` and single-owner fixtures beside their private owners.
 4. Make the testkit depend on Core with `features = ["test-hooks"]`; remove the
    Core self-dev-dependency. Add an explicit CI
@@ -153,8 +156,9 @@ behavioral byte/round-trip/corruption/migration evidence.
 ### Verify first
 
 Tighten the structural self-test so it fails while Core self-depends, shared
-support remains under Core integration tests, the testkit is default/production,
-or moved target names disappear.
+support or any of the 32 named targets remains under Core, any of the four local
+targets moves unnecessarily, the testkit is default/production, or a target
+name disappears.
 
 ## PR 3 — Align pure search/media leaves and record intentional mappings
 

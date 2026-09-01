@@ -11,7 +11,7 @@ use koushi_sdk::MatrixClientSession;
 use koushi_state::SessionInfo;
 use koushi_state::{AppAction, RoomListSource};
 
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 use std::sync::{Mutex, atomic::AtomicUsize};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -26,11 +26,11 @@ async fn room_actor_shutdown_aborts_when_its_mailbox_cannot_accept_shutdown() {
         tx,
         timeline_residency,
         session,
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         room_operation_test_control: Arc::new(Mutex::new(None)),
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         room_operation_test_reached_count: Arc::new(AtomicUsize::new(0)),
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         encryption_debug_test_control: Arc::new(Mutex::new(None)),
         task: Some(executor::spawn(std::future::pending())),
     };

@@ -6,7 +6,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
 
-import { findLeafCrateBoundaryViolations } from "./check-leaf-crate-boundaries.mjs";
+import {
+  coreLocalIntegrationTargets,
+  findLeafCrateBoundaryViolations,
+  testkitTargets
+} from "./check-leaf-crate-boundaries.mjs";
 
 const roots = [];
 afterEach(() => {
@@ -25,7 +29,7 @@ function fixture() {
   write(
     root,
     "Cargo.toml",
-    '[workspace]\nmembers = ["crates/koushi-store", "crates/koushi-core", "crates/koushi-qa"]\ndefault-members = ["crates/koushi-store", "crates/koushi-core"]\n'
+    '[workspace]\nmembers = ["crates/koushi-store", "crates/koushi-core", "crates/koushi-core-testkit", "crates/koushi-qa"]\ndefault-members = ["crates/koushi-store", "crates/koushi-core"]\n'
   );
   write(
     root,
@@ -45,6 +49,23 @@ function fixture() {
   write(root, "crates/koushi-core/src/lib.rs", "pub struct StoreActor;\n");
   write(
     root,
+    "crates/koushi-core-testkit/Cargo.toml",
+    '[package]\nname = "koushi-core-testkit"\npublish = false\n[dev-dependencies]\nkoushi-core = { path = "../koushi-core", features = ["test-hooks"] }\n[target.\'cfg(unix)\'.dev-dependencies]\nhelper = { path = "../helper" }\n'
+  );
+  write(root, "crates/koushi-core-testkit/tests/support/mod.rs", "pub fn fixture() {}\n");
+  for (const target of testkitTargets) {
+    write(root, path.join("crates/koushi-core-testkit/tests", target), "#[test]\nfn moved() {}\n");
+  }
+  for (const target of coreLocalIntegrationTargets) {
+    write(root, path.join("crates/koushi-core/tests", target), "#[test]\nfn local() {}\n");
+  }
+  write(
+    root,
+    ".github/workflows/ci.yml",
+    "- run: cargo test -p koushi-core-testkit\n"
+  );
+  write(
+    root,
     "crates/koushi-qa/Cargo.toml",
     '[package]\nname = "koushi-qa"\n[dependencies]\nkoushi-store = { path = "../koushi-store" }\n[features]\nqa-bin = ["koushi-store/test-hooks"]\n'
   );
@@ -56,7 +77,7 @@ function fixture() {
   return root;
 }
 
-test("accepts the intended persistence leaf boundary", () => {
+test("accepts the intended persistence and Core testkit boundaries", () => {
   assert.deepEqual(findLeafCrateBoundaryViolations(fixture()), []);
 });
 
@@ -73,7 +94,7 @@ test("detects missing packages, dependency leaks, and retained Core crypto", () 
   );
   fs.appendFileSync(
     path.join(root, "crates/koushi-core/src/lib.rs"),
-    "use chacha20poly1305::ChaCha20Poly1305;\npub enum CredentialStoreBackend {}\n"
+    'use chacha20poly1305::ChaCha20Poly1305;\npub enum CredentialStoreBackend {}\n#[cfg(feature = "test-hooks")]\npub fn unit_test_hidden() {}\n'
   );
 
   const violations = findLeafCrateBoundaryViolations(root);
@@ -83,6 +104,7 @@ test("detects missing packages, dependency leaks, and retained Core crypto", () 
   assert(violations.includes("koushi-core still depends on chacha20poly1305"));
   assert(violations.some((item) => item.includes("CredentialStoreBackend")));
   assert(violations.some((item) => item.includes("use chacha20poly1305")));
+  assert(violations.some((item) => item.includes("Core test-hook cfg excludes unit tests")));
 });
 
 test("detects missing test-hook propagation and stale QA probe routing", () => {
@@ -105,4 +127,92 @@ test("detects missing test-hook propagation and stale QA probe routing", () => {
   assert(violations.includes("koushi-qa must depend directly on koushi-store"));
   assert(violations.includes("koushi-qa qa-bin must enable koushi-store/test-hooks"));
   assert(violations.some((item) => item.includes("removed Core credential probe")));
+});
+
+test("detects direct and target-specific testkit build dependencies", () => {
+  for (const header of [
+    "[build-dependencies]",
+    "[build-dependencies.helper]",
+    "[target.'cfg(unix)'.build-dependencies]"
+  ]) {
+    const root = fixture();
+    fs.writeFileSync(
+      path.join(root, "crates/koushi-core-testkit/Cargo.toml"),
+      `[package]\nname = "koushi-core-testkit"\npublish = false\n${header}\npath = "../helper"\n[dev-dependencies]\nkoushi-core = { path = "../koushi-core", features = ["test-hooks"] }\n`
+    );
+    assert(
+      findLeafCrateBoundaryViolations(root).includes(
+        "koushi-core-testkit must use dev-dependencies only"
+      )
+    );
+  }
+});
+
+test("detects target-specific normal testkit dependencies", () => {
+  const root = fixture();
+  fs.writeFileSync(
+    path.join(root, "crates/koushi-core-testkit/Cargo.toml"),
+    '[package]\nname = "koushi-core-testkit"\npublish = false\n[target.\'cfg(unix)\'.dependencies]\nkoushi-qa = { path = "../koushi-qa" }\n[dev-dependencies]\nkoushi-core = { path = "../koushi-core", features = ["test-hooks"] }\n'
+  );
+  assert(
+    findLeafCrateBoundaryViolations(root).includes(
+      "koushi-core-testkit must use dev-dependencies only"
+    )
+  );
+});
+
+test("detects testkit default or production leakage, self-dependency, and missing targets", () => {
+  const root = fixture();
+  fs.appendFileSync(
+    path.join(root, "crates/koushi-core/Cargo.toml"),
+    'koushi-core = { path = ".", features = ["test-hooks"] }\nkoushi-core-testkit = { path = "../koushi-core-testkit" }\n'
+  );
+  fs.appendFileSync(
+    path.join(root, "crates/koushi-qa/Cargo.toml"),
+    'koushi-core-testkit = { path = "../koushi-core-testkit" }\n'
+  );
+  fs.writeFileSync(
+    path.join(root, "crates/koushi-core-testkit/Cargo.toml"),
+    '[package]\nname = "koushi-core-testkit"\npublish = true\n  [dependencies.koushi-qa] # forbidden normal edge\npath = "../koushi-qa"\n[dev-dependencies]\nkoushi-core = { path = "../koushi-core" }\n'
+  );
+  fs.rmSync(path.join(root, "crates/koushi-core-testkit/tests/support"), {
+    recursive: true,
+    force: true
+  });
+  fs.rmSync(path.join(root, "crates/koushi-core-testkit/tests", testkitTargets[0]));
+  write(
+    root,
+    path.join("crates/koushi-core/tests", testkitTargets[1]),
+    "#[test]\nfn duplicate() {}\n"
+  );
+  write(
+    root,
+    path.join("crates/koushi-core-testkit/tests", coreLocalIntegrationTargets[0]),
+    "#[test]\nfn misplaced() {}\n"
+  );
+  fs.writeFileSync(path.join(root, ".github/workflows/ci.yml"), "jobs: {}\n");
+  fs.writeFileSync(
+    path.join(root, "Cargo.toml"),
+    '[workspace]\nmembers = ["crates/koushi-store", "crates/koushi-core", "crates/koushi-core-testkit", "crates/koushi-qa"]\ndefault-members = ["crates/koushi-store", "crates/koushi-core", "crates/koushi-core-testkit"]\n'
+  );
+
+  const violations = findLeafCrateBoundaryViolations(root);
+  assert(violations.includes("koushi-core-testkit must not be a default workspace member"));
+  assert(violations.includes("koushi-core-testkit must be publish-disabled"));
+  assert(violations.includes("koushi-core-testkit must use dev-dependencies only"));
+  assert(violations.includes("koushi-core-testkit must enable koushi-core/test-hooks"));
+  assert(violations.includes("koushi-core must not self-depend for test hooks"));
+  assert(violations.includes("koushi-core must not depend on koushi-core-testkit"));
+  assert(violations.includes("koushi-qa must not depend on koushi-core-testkit"));
+  assert(violations.includes("shared Core integration support missing from koushi-core-testkit"));
+  assert(violations.includes(`koushi-core-testkit target missing: ${testkitTargets[0]}`));
+  assert(violations.includes(`moved integration target remains in koushi-core: ${testkitTargets[1]}`));
+  assert(
+    violations.includes(
+      `Core-local integration target moved unnecessarily: ${coreLocalIntegrationTargets[0]}`
+    )
+  );
+  assert(violations.includes("unexpected Rust integration target set in koushi-core"));
+  assert(violations.includes("unexpected Rust integration target set in koushi-core-testkit"));
+  assert(violations.includes("CI must run koushi-core-testkit explicitly"));
 });

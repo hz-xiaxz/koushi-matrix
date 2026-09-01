@@ -16,7 +16,7 @@ use super::{
     MembershipOperationGate, SubscriptionReconcileTrigger, TimelineSubscriptionResidencyHandle,
 };
 
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 #[tokio::test]
 async fn begin_operation_rejects_when_message_receiver_is_closed() {
     let (tx, rx) = mpsc::channel(1);

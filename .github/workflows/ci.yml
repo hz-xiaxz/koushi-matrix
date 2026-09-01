@@ -126,6 +126,8 @@ jobs:
         run: node scripts/check-rust-test-structure.mjs
       - name: Workspace tests
         run: cargo test --workspace --exclude sidebar-composition --exclude key-management
+      - name: Core testkit integration tests
+        run: cargo test -p koushi-core-testkit
       - name: Tauri DTO + IPC contract tests
         run: cargo test -p koushi-desktop
       - name: wasm build check (state + search + protocol)

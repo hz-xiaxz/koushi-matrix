@@ -134,7 +134,7 @@ impl MembershipOperationGate {
         let _ = active_count.wait_for(|count| *count == 0).await;
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     fn snapshot(&self) -> (bool, usize) {
         let state = self.state.lock().expect("membership operation gate lock");
         (state.accepting, state.active_count)
@@ -175,12 +175,12 @@ impl TimelineSubscriptionResidencyHandle {
         self.gate.close_and_drain().await;
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) fn gate_snapshot(&self) -> (bool, usize) {
         self.gate.snapshot()
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(crate) async fn gate_probe_for_testing(&self) -> (bool, usize, bool, bool) {
         let permit = self
             .begin_operation()
@@ -310,7 +310,7 @@ impl SubscriptionReconcileTrigger {
 }
 
 impl TimelineManagerActor {
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     pub(super) fn room_subscription_residency_test_actor_handle() -> TimelineActorHandle {
         let (tx, mut rx) = mpsc::channel(1);
         let task = executor::spawn(async move { while rx.recv().await.is_some() {} });
@@ -326,7 +326,7 @@ impl TimelineManagerActor {
             enqueue_context: None,
         }
     }
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     #[doc(hidden)]
     pub(crate) fn room_subscription_residency_test_manager(
         room_list_service: Arc<matrix_sdk_ui::room_list_service::RoomListService>,
@@ -342,7 +342,7 @@ impl TimelineManagerActor {
             room_subscription_service_epoch: 0,
             current_core_generation: None,
             room_leave_states: BTreeMap::new(),
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             restored_room_subscription_probe: None,
             session_subscribed_rooms: BTreeSet::new(),
             subscribed_room_leases: BTreeMap::new(),
@@ -382,7 +382,7 @@ impl TimelineManagerActor {
             test_session_available: true,
         }
     }
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     #[doc(hidden)]
     pub(crate) fn room_subscription_residency_test_handle(
         &self,
@@ -392,7 +392,7 @@ impl TimelineManagerActor {
             gate: MembershipOperationGate::new(),
         }
     }
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_gate_probe() -> (bool, usize, bool, bool) {
         let (tx, _rx) = mpsc::channel(1);
@@ -402,7 +402,7 @@ impl TimelineManagerActor {
         };
         handle.gate_probe_for_testing().await
     }
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_admit_key(&mut self, key: TimelineKey) {
         self.handle_subscribe(
@@ -414,7 +414,7 @@ impl TimelineManagerActor {
         )
         .await;
     }
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_admit_build_failure(
         &mut self,
@@ -436,7 +436,7 @@ impl TimelineManagerActor {
         )
         .await;
     }
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_unsubscribe(&mut self, key: TimelineKey) {
         self.handle_command(TimelineCommand::Unsubscribe {
@@ -445,7 +445,7 @@ impl TimelineManagerActor {
         })
         .await;
     }
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     #[doc(hidden)]
     pub(crate) fn room_subscription_residency_test_snapshot(
         &self,
@@ -486,7 +486,7 @@ impl TimelineManagerActor {
             sdk_generation,
         )
     }
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_seed_sdk_subscriptions(
         &mut self,
@@ -498,7 +498,7 @@ impl TimelineManagerActor {
                 .await;
         }
     }
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_expire_sdk_subscriptions(&mut self) {
         if let Some(service) = self.room_list_service.clone() {
@@ -508,7 +508,7 @@ impl TimelineManagerActor {
                 .await;
         }
     }
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_pump_next_ingress(&mut self) {
         loop {
@@ -558,7 +558,7 @@ impl TimelineManagerActor {
             }
         }
     }
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_sync_started(
         &mut self,
@@ -569,7 +569,7 @@ impl TimelineManagerActor {
             self.handle_sync_started(service, core_generation).await;
         }
     }
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     #[doc(hidden)]
     pub(crate) async fn room_subscription_residency_test_offer_restore(
         &mut self,
@@ -856,7 +856,7 @@ impl TimelineManagerActor {
         // The SDK's actual room map is importable only when it was restored
         // with the matching non-empty Sliding Sync position. UnknownPos and
         // expiry clear that proof, so those rooms are deliberately ignored.
-        #[cfg(feature = "test-hooks")]
+        #[cfg(any(test, feature = "test-hooks"))]
         let (restored_from_shared_position, restored_rooms) = self
             .restored_room_subscription_probe
             .take()
@@ -866,7 +866,7 @@ impl TimelineManagerActor {
                     service.actual_subscribed_rooms(),
                 )
             });
-        #[cfg(not(feature = "test-hooks"))]
+        #[cfg(not(any(test, feature = "test-hooks")))]
         let (restored_from_shared_position, restored_rooms) = (
             service.has_restored_room_subscriptions(),
             service.actual_subscribed_rooms(),

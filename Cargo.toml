@@ -10,6 +10,7 @@ members = [
     "crates/koushi-diagnostics",
     "crates/koushi-media",
     "crates/koushi-store",
+    "crates/koushi-core-testkit",
     "apps/desktop/src-tauri",
     "tests/windows-overlay-acl",
     "spikes/sidebar-composition",

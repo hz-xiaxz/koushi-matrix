@@ -713,9 +713,9 @@ pub(super) fn record_subscribe_stage(stage: &str, count: Option<usize>) {
     if let Some(count) = count {
         fields.push(DiagnosticField::count("count", count as u64));
     }
-    #[cfg(not(feature = "test-hooks"))]
+    #[cfg(not(any(test, feature = "test-hooks")))]
     record_timeline_event(stage, "subscribe", fields);
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     {
         let mut event = DiagnosticEvent::new(
             DiagnosticLevel::Debug,

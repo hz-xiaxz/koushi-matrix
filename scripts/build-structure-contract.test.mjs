@@ -90,6 +90,7 @@ test("CI and npm scripts use the unified workspace contracts", () => {
   assert.match(packageJson, /cargo test -p koushi-desktop/);
   assert.doesNotMatch(ci, /apps\/desktop\/src-tauri\s*$/m);
   assert.match(ci, /cargo test -p koushi-desktop/);
+  assert.match(ci, /cargo test -p koushi-core-testkit/);
   assert.match(ci, /node --test scripts\/check-rust-test-structure\.test\.mjs/);
   assert.match(ci, /node scripts\/check-rust-test-structure\.mjs/);
   assert.match(ci, /node --test[^\n]*check-leaf-crate-boundaries\.test\.mjs/);
