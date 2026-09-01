@@ -174,41 +174,44 @@ test("timeline sender avatars render after headless account thumbnail events", a
   await expect(firstRow.getByText("Avatar headless row A")).toBeVisible();
   await expect(secondRow.getByText("Avatar headless row B")).toBeVisible();
 
-  await page.evaluate(async () => {
-    for (const [mxcUri, sourceUrl, sequence] of [
-      [
-        "mxc://example.invalid/headless-avatar-a",
-        "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
-        31
-      ],
-      [
-        "mxc://example.invalid/headless-avatar-b",
-        "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
-        32
-      ]
-    ] as const) {
-      await window.__harness.pushCoreEvent({
-        kind: "Account",
-        event: {
-          AvatarThumbnailDownloaded: {
-            request_id: { connection_id: 1, sequence },
-            mxc_uri: mxcUri,
-            thumbnail: {
-              kind: "ready",
-              source_ref: sourceUrl,
-              width: 1,
-              height: 1,
-              mime_type: "image/gif"
+  // The harness promise acknowledges dispatch, not React commit. Settle each
+  // completion in the DOM before publishing the next non-replaying event.
+  for (const { mxcUri, sequence, row } of [
+    {
+      mxcUri: "mxc://example.invalid/headless-avatar-a",
+      sequence: 31,
+      row: firstRow
+    },
+    {
+      mxcUri: "mxc://example.invalid/headless-avatar-b",
+      sequence: 32,
+      row: secondRow
+    }
+  ]) {
+    await page.evaluate(
+      async ({ completionMxcUri, completionSequence }) => {
+        await window.__harness.pushCoreEvent({
+          kind: "Account",
+          event: {
+            AvatarThumbnailDownloaded: {
+              request_id: { connection_id: 1, sequence: completionSequence },
+              mxc_uri: completionMxcUri,
+              thumbnail: {
+                kind: "ready",
+                source_ref: "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
+                width: 1,
+                height: 1,
+                mime_type: "image/gif"
+              }
             }
           }
-        }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
-    }
-  });
-
-  await expect(firstRow.locator(".avatar img")).toHaveAttribute("src", /data:image\/gif;base64/);
-  await expect(secondRow.locator(".avatar img")).toHaveAttribute("src", /data:image\/gif;base64/);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any);
+      },
+      { completionMxcUri: mxcUri, completionSequence: sequence }
+    );
+    await expect(row.locator(".avatar img")).toHaveAttribute("src", /data:image\/gif;base64/);
+  }
 });
 
 test("sent own messages show a visible timestamp and a sent check mark", async ({ page }) => {

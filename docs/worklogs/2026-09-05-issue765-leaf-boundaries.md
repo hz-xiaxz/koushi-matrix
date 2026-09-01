@@ -195,4 +195,13 @@ Fireworks exact-diff review at
 `CORRECT-TO-MERGE` with three coverage/guard Minors. All were fixed: GIF87a and
 `avis` plus truncated signatures are tested; the checker rejects any Core
 `*image_kind` function; and a Core cache test proves PNG/JPEG MIME projection
-through the moved helper. Exact-delta re-review remains required.
+through the moved helper. Fireworks re-reviewed exact head
+`ee716c72e80dff53f393639e286a43ccbe6f9eaf` and returned
+`CORRECT-TO-MERGE` with no remaining findings.
+
+Hosted PR #791 then exposed the existing avatar-completion E2E race: the harness
+promise acknowledges dispatch, not React commit, so two non-replaying completion
+events sent in one browser task could drop the second during rerender. The test
+now publishes and DOM-settles each completion before the next. Focused repeat:
+10/10 passed. This is test synchronization only; product listener/cache behavior
+is unchanged. Exact-delta review and hosted rerun are required before merge.
