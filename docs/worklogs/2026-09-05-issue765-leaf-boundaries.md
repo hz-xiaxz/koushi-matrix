@@ -240,3 +240,10 @@ Focused PR4 evidence:
 - runtime/core/timeline/residency/command-admission/scheduled-send integrations:
   71 passed;
 - Core check, rustfmt and diff: green.
+
+Fireworks exact-diff review at
+`c5db204925738b76ea53ef8d3be4d4c9753ac57e` returned
+`CORRECT-TO-MERGE` and identified one pre-existing, non-actor
+`media_staging -> runtime` qualification. The service now consumes the existing
+crate-root runtime API re-exports, removing that residual edge without changing
+any type or behavior. Exact-delta re-review remains required.
