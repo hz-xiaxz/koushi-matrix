@@ -3146,27 +3146,19 @@ pub(super) async fn verify_multi_user_multi_device_room_key_delivery_for_qa(
             subscribe_timeline_for_qa(&mut participant_b3.conn, &key_b3, "blocked QA B3 timeline")
                 .await?;
 
-        let (acknowledged, ack) = tokio::sync::oneshot::channel();
-        let blacklist_id = conn_a.next_request_id();
-        conn_a
-            .command(CoreCommand::Account(
-                AccountCommand::QaSetLocalDeviceBlacklisted {
-                    request_id: blacklist_id,
-                    target: VerificationTarget {
-                        user_id: session_b3.user_id.clone(),
-                        device_id: session_b3.device_id.clone(),
-                    },
-                    room_id: room_id.clone(),
-                    acknowledged,
+        tokio::time::timeout(
+            EVENT_TIMEOUT,
+            conn_a.qa_set_local_device_blacklisted(
+                VerificationTarget {
+                    user_id: session_b3.user_id.clone(),
+                    device_id: session_b3.device_id.clone(),
                 },
-            ))
-            .await
-            .map_err(|_| "blocked QA blacklist submit failed".to_owned())?;
-        tokio::time::timeout(EVENT_TIMEOUT, ack)
-            .await
-            .map_err(|_| "blocked QA blacklist ack timeout".to_owned())?
-            .map_err(|_| "blocked QA blacklist ack closed".to_owned())?
-            .map_err(|_| "blocked QA blacklist failed".to_owned())?;
+                room_id.clone(),
+            ),
+        )
+        .await
+        .map_err(|_| "blocked QA blacklist ack timeout".to_owned())?
+        .map_err(|_| "blocked QA blacklist failed".to_owned())?;
         let blocked_body = "Koushi blocked-device withheld probe";
         let blocked_txn = "qa-e2ee-blocked-device-withheld".to_owned();
         let blocked_send = conn_a.next_request_id();

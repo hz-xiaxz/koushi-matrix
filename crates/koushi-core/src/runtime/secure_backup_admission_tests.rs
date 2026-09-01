@@ -15,7 +15,7 @@ fn request(intent: SecureBackupSetupIntent) -> AccountCommand {
         },
         request: SecureBackupSetupRequest {
             passphrase: None,
-            recovery_key_destination_path: Some("/tmp/recovery-key.txt".into()),
+            recovery_key_destination_requested: true,
             intent,
         },
     }

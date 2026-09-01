@@ -246,7 +246,7 @@ fn assert_hide_redacted_projection() -> Result<(), String> {
         ],
     };
 
-    koushi_core::event::project_timeline_event_display_labels(&mut event, &state);
+    koushi_core::project_timeline_event_for_qa(&mut event, &state);
 
     let TimelineEvent::InitialItems { items, .. } = event else {
         return Err("hide redacted projection did not keep InitialItems shape".to_owned());

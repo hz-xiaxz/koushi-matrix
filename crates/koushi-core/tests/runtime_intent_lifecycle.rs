@@ -149,7 +149,7 @@ fn background_flood_batch(batch_index: usize, kept_room_ids: &[&str]) -> Vec<App
         AppAction::AvatarThumbnailUpdated {
             mxc_uri,
             thumbnail: AvatarThumbnailState::Ready {
-                source_url: format!("koushi-thumbnail://localhost/avatar/{batch_index}"),
+                source_ref: format!("avatar/{batch_index:016x}"),
                 width: Some(32),
                 height: Some(32),
                 mime_type: Some("image/png".to_owned()),

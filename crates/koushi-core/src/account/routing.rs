@@ -31,11 +31,6 @@ fn composer_timeline_command_targets_active_session(
         .is_none_or(|(_, expected_account)| active_session_key == Some(expected_account))
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
-fn is_manual_sync_once(command: &SyncCommand) -> bool {
-    matches!(command, SyncCommand::SyncOnce { .. })
-}
-
 fn trace_room_route(stage: &'static str, command: &RoomCommand) {
     match command {
         RoomCommand::CreateRoom { request_id, .. } => {
@@ -552,6 +547,27 @@ impl AccountActor {
         .await;
     }
 
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub(super) async fn route_sync_once_for_qa(&mut self, request_id: RequestId) {
+        if let Some(handle) = &self.sync_actor {
+            if !handle.sync_once_for_qa(request_id).await {
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::SyncFailed {
+                        kind: SyncFailureKind::Internal,
+                    },
+                );
+            }
+        } else {
+            self.emit_failure(
+                request_id,
+                CoreFailure::SyncFailed {
+                    kind: SyncFailureKind::Internal,
+                },
+            );
+        }
+    }
+
     /// Route a SyncCommand to the SyncActor, or emit SessionRequired if no
     /// store-backed session is active yet.
     pub(super) async fn route_sync_command(&mut self, command: SyncCommand) {
@@ -559,8 +575,6 @@ impl AccountActor {
             SyncCommand::Start { request_id } => ("start", *request_id),
             SyncCommand::Stop { request_id } => ("stop", *request_id),
             SyncCommand::Restart { request_id } => ("restart", *request_id),
-            #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
-            SyncCommand::SyncOnce { request_id } => ("sync_once", *request_id),
         };
         trace_restore!(
             "route_sync_command",
@@ -585,20 +599,6 @@ impl AccountActor {
                 "no"
             }
         );
-
-        // Manual classic `/sync` is no longer a production command path. Keep
-        // the typed rejection until the command variant itself is removed with
-        // the remaining legacy backend contract.
-        #[cfg(any(test, feature = "test-hooks", feature = "qa-bin"))]
-        if is_manual_sync_once(&command) {
-            self.emit_failure(
-                request_id,
-                CoreFailure::SyncFailed {
-                    kind: SyncFailureKind::Internal,
-                },
-            );
-            return;
-        }
 
         if self.sync_actor.is_none()
             && !matches!(command, SyncCommand::Stop { .. })
@@ -704,10 +704,10 @@ mod tests {
 
     use tokio::sync::oneshot;
 
-    use super::{composer_timeline_command_targets_active_session, is_manual_sync_once};
+    use super::composer_timeline_command_targets_active_session;
     use crate::account::actor::AccountMessage;
-    use crate::account::test_support::{spawn_actor_with_dirs, test_request_id};
-    use crate::command::{SyncCommand, TimelineCommand};
+    use crate::account::test_support::spawn_actor_with_dirs;
+    use crate::command::TimelineCommand;
 
     use koushi_protocol::ids::{AccountKey, RequestId, RuntimeConnectionId, TimelineKey};
 
@@ -839,20 +839,6 @@ mod tests {
                 !serialized.contains(forbidden),
                 "serialized event must not contain forbidden diagnostic data: {forbidden}"
             );
-        }
-    }
-
-    #[test]
-    fn manual_sync_once_is_the_only_rejected_sync_command() {
-        let request_id = test_request_id();
-
-        assert!(is_manual_sync_once(&SyncCommand::SyncOnce { request_id }));
-        for command in [
-            SyncCommand::Start { request_id },
-            SyncCommand::Stop { request_id },
-            SyncCommand::Restart { request_id },
-        ] {
-            assert!(!is_manual_sync_once(&command));
         }
     }
 }

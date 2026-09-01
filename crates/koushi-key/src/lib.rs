@@ -262,11 +262,22 @@ impl CredentialBackend for InMemoryCredentialBackend {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub struct SessionKeyId {
     pub homeserver: String,
     pub user_id: String,
     pub device_id: String,
+}
+
+impl fmt::Debug for SessionKeyId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SessionKeyId")
+            .field("homeserver", &"Homeserver(..)")
+            .field("user_id", &"UserId(..)")
+            .field("device_id", &"DeviceId(..)")
+            .finish()
+    }
 }
 
 impl SessionKeyId {

@@ -30,6 +30,7 @@ pub mod media_preparation;
 pub mod media_save;
 pub mod media_staging;
 pub(crate) mod mention_candidates;
+pub mod native_artifact;
 pub(crate) mod read_state;
 pub mod renderable_thumbnail;
 mod report;
@@ -69,6 +70,9 @@ pub use media_save::{
     MediaSaveError, MediaSaveFilesystem, MediaSaveIoError, default_media_save_path,
     safe_media_save_filename, save_downloaded_media,
 };
+pub use native_artifact::{
+    NativeArtifactError, NativeArtifactKind, NativeArtifactPort, NativeArtifactRegistry,
+};
 pub use runtime::{
     COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandHandle, CoreConnection, CoreRuntime,
     EVENT_QUEUE_CAPACITY, EventStreamLag, OutcomeCorrelation, RequestOutcome, RequestOutcomeError,
@@ -84,3 +88,12 @@ pub use sliding_sync_diagnostics::{
     SlidingSyncRequestSchema, SlidingSyncSdkVersion,
 };
 pub use state_delta::build_state_delta;
+
+#[cfg(any(test, feature = "test-hooks"))]
+#[doc(hidden)]
+pub fn project_timeline_event_for_qa(
+    event: &mut koushi_protocol::TimelineEvent,
+    state: &koushi_state::AppState,
+) {
+    event_projection::project_timeline_event_display_labels(event, state);
+}

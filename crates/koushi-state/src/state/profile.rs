@@ -30,7 +30,7 @@ pub enum AvatarThumbnailState {
         request_id: u64,
     },
     Ready {
-        source_url: String,
+        source_ref: String,
         width: Option<u64>,
         height: Option<u64>,
         mime_type: Option<String>,
@@ -57,7 +57,7 @@ impl fmt::Debug for AvatarThumbnailState {
                 ..
             } => formatter
                 .debug_struct("Ready")
-                .field("has_source_url", &true)
+                .field("has_source_ref", &true)
                 .field("width", width)
                 .field("height", height)
                 .field("mime_type", mime_type)

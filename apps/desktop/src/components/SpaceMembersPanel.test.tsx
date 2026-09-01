@@ -468,7 +468,7 @@ describe("SpaceMembersPanel", () => {
             mxc_uri: "mxc://example.invalid/alice-avatar",
             thumbnail: {
               kind: "ready",
-              source_url: "asset://alice-avatar",
+              source_ref: "asset://alice-avatar",
               width: null,
               height: null,
               mime_type: null

@@ -2353,7 +2353,7 @@ describe("Timeline item row rendering", () => {
               mxc_uri: "mxc://matrix.org/avatar",
               thumbnail: {
                 kind: "ready",
-                source_url: "/media/avatar.png",
+                source_ref: "https://fixture.invalid/avatar.png",
                 width: 96,
                 height: 96,
                 mime_type: "image/png"
@@ -2382,7 +2382,7 @@ describe("Timeline item row rendering", () => {
       />
     );
 
-    expect(markup).toContain('<img src="/media/avatar.png"');
+    expect(markup).toContain('<img src="https://fixture.invalid/avatar.png"');
     expect(markup).not.toContain(">KA<");
   });
 

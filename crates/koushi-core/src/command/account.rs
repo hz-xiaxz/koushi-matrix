@@ -1,4 +1,4 @@
-use std::{fmt, path::PathBuf};
+use std::fmt;
 
 use koushi_protocol::ids::{AccountKey, RequestId};
 use koushi_state::{
@@ -8,7 +8,6 @@ use koushi_state::{
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct RoomKeyExportRequest {
-    pub destination_path: PathBuf,
     pub passphrase: koushi_state::AuthSecret,
 }
 
@@ -16,7 +15,6 @@ impl fmt::Debug for RoomKeyExportRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("RoomKeyExportRequest")
-            .field("destination_path", &"DestinationPath(..)")
             .field("passphrase", &"AuthSecret(..)")
             .finish()
     }
@@ -24,7 +22,6 @@ impl fmt::Debug for RoomKeyExportRequest {
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct RoomKeyImportRequest {
-    pub source_path: PathBuf,
     pub passphrase: koushi_state::AuthSecret,
 }
 
@@ -32,7 +29,6 @@ impl fmt::Debug for RoomKeyImportRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("RoomKeyImportRequest")
-            .field("source_path", &"SourcePath(..)")
             .field("passphrase", &"AuthSecret(..)")
             .finish()
     }
@@ -41,7 +37,7 @@ impl fmt::Debug for RoomKeyImportRequest {
 #[derive(Clone, Eq, PartialEq)]
 pub struct SecureBackupSetupRequest {
     pub passphrase: Option<koushi_state::AuthSecret>,
-    pub recovery_key_destination_path: Option<PathBuf>,
+    pub recovery_key_destination_requested: bool,
     pub intent: koushi_state::SecureBackupSetupIntent,
 }
 
@@ -51,8 +47,8 @@ impl fmt::Debug for SecureBackupSetupRequest {
             .debug_struct("SecureBackupSetupRequest")
             .field("has_passphrase", &self.passphrase.is_some())
             .field(
-                "has_recovery_key_destination_path",
-                &self.recovery_key_destination_path.is_some(),
+                "has_recovery_key_destination",
+                &self.recovery_key_destination_requested,
             )
             .field("intent", &self.intent)
             .finish()
@@ -63,7 +59,7 @@ impl fmt::Debug for SecureBackupSetupRequest {
 pub struct SecureBackupPassphraseChangeRequest {
     pub old_secret: koushi_state::AuthSecret,
     pub new_passphrase: koushi_state::AuthSecret,
-    pub recovery_key_destination_path: Option<PathBuf>,
+    pub recovery_key_destination_requested: bool,
 }
 
 impl fmt::Debug for SecureBackupPassphraseChangeRequest {
@@ -71,8 +67,8 @@ impl fmt::Debug for SecureBackupPassphraseChangeRequest {
         formatter
             .debug_struct("SecureBackupPassphraseChangeRequest")
             .field(
-                "has_recovery_key_destination_path",
-                &self.recovery_key_destination_path.is_some(),
+                "has_recovery_key_destination",
+                &self.recovery_key_destination_requested,
             )
             .field("old_secret", &"AuthSecret(..)")
             .field("new_passphrase", &"AuthSecret(..)")
@@ -243,19 +239,6 @@ pub enum AccountCommand {
         version: Option<String>,
         request: RecoveryRequest,
     },
-    #[cfg(feature = "qa-bin")]
-    QaSetLocalDeviceBlacklisted {
-        request_id: RequestId,
-        target: VerificationTarget,
-        room_id: String,
-        acknowledged: tokio::sync::oneshot::Sender<Result<(), ()>>,
-    },
-    #[cfg(feature = "qa-bin")]
-    QaRefreshDeviceKeysAndAssertKnown {
-        request_id: RequestId,
-        target: VerificationTarget,
-        acknowledged: tokio::sync::oneshot::Sender<Result<(), ()>>,
-    },
     ResetIdentity {
         request_id: RequestId,
     },
@@ -313,11 +296,6 @@ pub enum AccountCommand {
 
 impl AccountCommand {
     pub fn requires_ready_session(&self) -> bool {
-        #[cfg(feature = "qa-bin")]
-        if matches!(self, Self::QaRefreshDeviceKeysAndAssertKnown { .. }) {
-            return true;
-        }
-
         matches!(
             self,
             Self::RequestVerification { .. }
@@ -628,18 +606,6 @@ impl fmt::Debug for AccountCommand {
                 .field("version", &version.as_ref().map(|_| "BackupVersion(..)"))
                 .field("request", request)
                 .finish(),
-            #[cfg(feature = "qa-bin")]
-            Self::QaSetLocalDeviceBlacklisted { request_id, .. } => formatter
-                .debug_struct("QaSetLocalDeviceBlacklisted")
-                .field("request_id", request_id)
-                .field("target", &"<redacted>")
-                .finish(),
-            #[cfg(feature = "qa-bin")]
-            Self::QaRefreshDeviceKeysAndAssertKnown { request_id, .. } => formatter
-                .debug_struct("QaRefreshDeviceKeysAndAssertKnown")
-                .field("request_id", request_id)
-                .field("target", &"<redacted>")
-                .finish(),
             Self::ResetIdentity { request_id } => formatter
                 .debug_struct("ResetIdentity")
                 .field("request_id", request_id)
@@ -762,32 +728,6 @@ mod tests {
         assert_eq!(change_homeserver.request_id(), fake_rid(76));
         assert!(format!("{retry:?}").contains("RetrySlidingSyncCapability"));
         assert!(format!("{change_homeserver:?}").contains("ChangeHomeserver"));
-    }
-
-    #[cfg(feature = "qa-bin")]
-    #[test]
-    fn qa_device_key_refresh_is_ready_gated_correlated_and_redacted() {
-        let request_id = fake_rid(74);
-        let (acknowledged, _ack) = tokio::sync::oneshot::channel();
-        let command = CoreCommand::Account(AccountCommand::QaRefreshDeviceKeysAndAssertKnown {
-            request_id,
-            target: VerificationTarget {
-                user_id: "@private-user:example.invalid".to_owned(),
-                device_id: "PRIVATEDEVICE".to_owned(),
-            },
-            acknowledged,
-        });
-
-        assert_eq!(command.request_id(), request_id);
-        assert!(command.requires_ready_session());
-        let debug = format!("{command:?}");
-        assert!(
-            debug.contains("QaRefreshDeviceKeysAndAssertKnown"),
-            "{debug}"
-        );
-        assert!(debug.contains("<redacted>"), "{debug}");
-        assert!(!debug.contains("private-user"), "{debug}");
-        assert!(!debug.contains("PRIVATEDEVICE"), "{debug}");
     }
 
     #[test]

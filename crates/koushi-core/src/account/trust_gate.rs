@@ -12,7 +12,7 @@ use std::{
 use futures_util::StreamExt;
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::MatrixClientSession;
-#[cfg(feature = "qa-bin")]
+#[cfg(any(test, feature = "test-hooks"))]
 use koushi_state::VerificationTarget;
 use koushi_state::{
     AppAction, E2eeRecoveryState, RecoveryMethod, SessionInfo, TrustOperationFailureKind,
@@ -170,7 +170,7 @@ fn recovery_sync_should_resume(
         && !provisional_encryption_sync_active
 }
 
-#[cfg(feature = "qa-bin")]
+#[cfg(any(test, feature = "test-hooks"))]
 pub(super) async fn refresh_device_keys_and_assert_known(
     session: &MatrixClientSession,
     target: VerificationTarget,

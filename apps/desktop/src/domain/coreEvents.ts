@@ -833,7 +833,7 @@ export type AvatarThumbnailState =
   | { kind: "loading"; request_id: number }
   | {
       kind: "ready";
-      source_url: string;
+      source_ref: string;
       width: number | null;
       height: number | null;
       mime_type: string | null;

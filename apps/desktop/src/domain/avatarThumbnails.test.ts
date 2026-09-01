@@ -33,7 +33,7 @@ describe("avatar thumbnail demand discovery", () => {
           kind === "loading"
             ? { kind, request_id: 1 }
             : kind === "ready"
-              ? { kind, source_url: "asset://avatar", width: null, height: null, mime_type: null }
+              ? { kind, source_ref: "asset://avatar", width: null, height: null, mime_type: null }
               : { kind, request_id: 1, failureKind: "network" }
       };
 

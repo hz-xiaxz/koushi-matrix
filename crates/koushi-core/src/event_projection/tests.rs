@@ -1006,7 +1006,7 @@ fn avatar_metadata_events_redact_private_mxc_values() {
     item.sender_avatar = Some(koushi_state::AvatarImage {
         mxc_uri: "mxc://example.invalid/private-avatar".to_owned(),
         thumbnail: koushi_state::AvatarThumbnailState::Ready {
-            source_url: "koushi-thumbnail://localhost/private.bin".to_owned(),
+            source_ref: "avatar/0123456789abcdef".to_owned(),
             width: Some(64),
             height: Some(64),
             mime_type: Some("image/png".to_owned()),
@@ -1017,9 +1017,6 @@ fn avatar_metadata_events_redact_private_mxc_values() {
         !debug.contains("mxc://example.invalid/private-avatar"),
         "{debug}"
     );
-    assert!(
-        !debug.contains("koushi-thumbnail://localhost/private.bin"),
-        "{debug}"
-    );
+    assert!(!debug.contains("avatar/0123456789abcdef"), "{debug}");
     assert!(debug.contains("AvatarImage"), "{debug}");
 }

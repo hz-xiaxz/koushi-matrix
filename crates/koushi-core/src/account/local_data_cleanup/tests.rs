@@ -405,6 +405,7 @@ async fn reset_local_data_clears_current_account_persistence_and_signs_out_local
         sliding_sync_revalidation_pending: None,
         sliding_sync_revalidation_request: None,
         sliding_sync_diagnostics: crate::SlidingSyncDiagnostics::default(),
+        native_artifacts: Arc::new(crate::native_artifact::RejectingNativeArtifactPort),
         session_promoted: false,
         trust_generation: 0,
         trust_observer: None,

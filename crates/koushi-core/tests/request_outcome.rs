@@ -54,10 +54,10 @@ fn room_summary(room_id: &str) -> koushi_state::RoomSummary {
 fn selected_snapshot(
     room_id: &str,
     generation: u64,
-) -> koushi_protocol::event::VersionedAppStateSnapshot {
+) -> koushi_protocol::state_update::VersionedAppStateSnapshot {
     let mut state = AppState::default();
     state.navigation.active_room_id = Some(room_id.to_owned());
-    koushi_protocol::event::VersionedAppStateSnapshot { generation, state }
+    koushi_protocol::state_update::VersionedAppStateSnapshot { generation, state }
 }
 
 #[tokio::test]
@@ -67,7 +67,7 @@ async fn event_before_projection_waits_for_authoritative_snapshot_and_returns_ge
     let room_id = "!created:example.invalid";
     let mut state = account_state("@alice:example.invalid");
     state.rooms.push(room_summary(room_id));
-    let published = koushi_protocol::event::VersionedAppStateSnapshot {
+    let published = koushi_protocol::state_update::VersionedAppStateSnapshot {
         generation: 9,
         state,
     };
@@ -128,7 +128,7 @@ async fn baseline_generation_fences_projection_until_newer_snapshot() {
     let room_id = "!baseline:example.invalid";
     let mut state = account_state("@alice:example.invalid");
     state.rooms.push(room_summary(room_id));
-    control.send_snapshot(koushi_protocol::event::VersionedAppStateSnapshot {
+    control.send_snapshot(koushi_protocol::state_update::VersionedAppStateSnapshot {
         generation: 3,
         state: state.clone(),
     });
@@ -147,7 +147,7 @@ async fn baseline_generation_fences_projection_until_newer_snapshot() {
         request_id,
         room_id: room_id.to_owned(),
     }));
-    let published = koushi_protocol::event::VersionedAppStateSnapshot {
+    let published = koushi_protocol::state_update::VersionedAppStateSnapshot {
         generation: 4,
         state,
     };
@@ -280,7 +280,7 @@ async fn lag_policy_can_continue_or_finish_as_terminal_lag() {
     joined_state
         .rooms
         .push(room_summary("!room:example.invalid"));
-    control.send_snapshot(koushi_protocol::event::VersionedAppStateSnapshot {
+    control.send_snapshot(koushi_protocol::state_update::VersionedAppStateSnapshot {
         generation: 1,
         state: joined_state,
     });

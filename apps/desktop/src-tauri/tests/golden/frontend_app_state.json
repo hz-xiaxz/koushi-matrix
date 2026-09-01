@@ -26,7 +26,7 @@
               "height": 64,
               "kind": "ready",
               "mime_type": "image/png",
-              "source_url": "asset://fixture-avatar",
+              "source_ref": "avatar/2222222222222222",
               "width": 64
             }
           },
@@ -67,7 +67,7 @@
             "height": 64,
             "kind": "ready",
             "mime_type": "image/png",
-            "source_url": "asset://fixture-avatar",
+            "source_ref": "avatar/2222222222222222",
             "width": 64
           }
         },
@@ -429,7 +429,7 @@
               "height": 64,
               "kind": "ready",
               "mime_type": "image/png",
-              "source_url": "asset://fixture-avatar",
+              "source_ref": "avatar/2222222222222222",
               "width": 64
             }
           },
@@ -447,7 +447,7 @@
                 "height": 64,
                 "kind": "ready",
                 "mime_type": "image/png",
-                "source_url": "asset://fixture-avatar",
+                "source_ref": "avatar/2222222222222222",
                 "width": 64
               }
             },
@@ -549,7 +549,7 @@
               "height": 64,
               "kind": "ready",
               "mime_type": "image/png",
-              "source_url": "asset://fixture-avatar",
+              "source_ref": "avatar/2222222222222222",
               "width": 64
             }
           },
@@ -779,7 +779,7 @@
         "platform": "linux"
       }
     },
-    "schema_version": 5,
+    "schema_version": 6,
     "ui": {
       "basic_operation": {
         "kind": "creatingRoom",

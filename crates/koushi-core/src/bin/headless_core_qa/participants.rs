@@ -47,20 +47,33 @@ pub(super) async fn complete_new_identity_gate_for_qa(
     std::fs::create_dir_all(&bootstrap_dir)
         .map_err(|_| "prepare private bootstrap delivery directory".to_owned())?;
     let recovery_key_path = bootstrap_dir.join("recovery-key.txt");
-    conn.command(CoreCommand::Account(
-        AccountCommand::StartSessionBootstrap {
-            request_id,
-            flow_id,
-            auth: Some(AuthSecret::new(password.to_owned())),
-            request: koushi_core::SecureBackupSetupRequest {
-                passphrase: Some(AuthSecret::new(password.to_owned())),
-                recovery_key_destination_path: Some(recovery_key_path.clone()),
-                intent: koushi_state::SecureBackupSetupIntent::InitialSetup,
+    conn.register_native_artifact(
+        request_id,
+        koushi_core::NativeArtifactKind::RecoveryKeyDestination,
+        recovery_key_path.clone(),
+    )
+    .map_err(|_| "register private bootstrap delivery path".to_owned())?;
+    if let Err(error) = conn
+        .command(CoreCommand::Account(
+            AccountCommand::StartSessionBootstrap {
+                request_id,
+                flow_id,
+                auth: Some(AuthSecret::new(password.to_owned())),
+                request: koushi_core::SecureBackupSetupRequest {
+                    passphrase: Some(AuthSecret::new(password.to_owned())),
+                    recovery_key_destination_requested: true,
+                    intent: koushi_state::SecureBackupSetupIntent::InitialSetup,
+                },
             },
-        },
-    ))
-    .await
-    .map_err(|error| format!("submit new identity bootstrap: {error}"))?;
+        ))
+        .await
+    {
+        conn.unregister_native_artifact(
+            request_id,
+            koushi_core::NativeArtifactKind::RecoveryKeyDestination,
+        );
+        return Err(format!("submit new identity bootstrap: {error}"));
+    }
     let delivery_deadline = tokio::time::Instant::now() + EVENT_TIMEOUT;
     loop {
         match &conn.snapshot().session {
@@ -534,23 +547,13 @@ pub(super) async fn refresh_device_keys_and_assert_known_for_qa(
     target: VerificationTarget,
     label: &str,
 ) -> Result<(), String> {
-    let (acknowledged, ack) = tokio::sync::oneshot::channel();
-    let request_id = conn.next_request_id();
-    conn.command(CoreCommand::Account(
-        AccountCommand::QaRefreshDeviceKeysAndAssertKnown {
-            request_id,
-            target,
-            acknowledged,
-        },
-    ))
+    tokio::time::timeout(
+        E2EE_EVENT_TIMEOUT,
+        conn.qa_refresh_device_keys_and_assert_known(target),
+    )
     .await
-    .map_err(|_| format!("{label}: submit device-key refresh checkpoint failed"))?;
-
-    tokio::time::timeout(E2EE_EVENT_TIMEOUT, ack)
-        .await
-        .map_err(|_| format!("{label}: timed out waiting for device-key refresh checkpoint"))?
-        .map_err(|_| format!("{label}: device-key refresh checkpoint closed"))?
-        .map_err(|_| format!("{label}: exact device was not known after key refresh"))
+    .map_err(|_| format!("{label}: timed out waiting for device-key refresh checkpoint"))?
+    .map_err(|_| format!("{label}: exact device was not known after key refresh"))
 }
 
 pub(super) enum QaParticipantLoginGate<'a> {

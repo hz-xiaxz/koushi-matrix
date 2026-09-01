@@ -323,7 +323,7 @@ describe("ContextualRightPanel people composition", () => {
                   mxc_uri: "mxc://example.invalid/space-member-avatar",
                   thumbnail: {
                     kind: "ready",
-                    source_url: "asset://space-member-avatar",
+                    source_ref: "asset://space-member-avatar",
                     width: null,
                     height: null,
                     mime_type: null

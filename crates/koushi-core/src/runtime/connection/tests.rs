@@ -30,6 +30,7 @@ fn scripted_connection(
             connection_id,
             command_tx,
             composer_draft_leases: Arc::new(ComposerDraftLeaseRegistry::new()),
+            native_artifacts: Arc::new(crate::native_artifact::RejectingNativeArtifactPort),
             media_staging: Arc::new(MediaStagingService::new(Arc::new(
                 crate::media_preparation::MediaPreparationService::default(),
             ))),
@@ -60,7 +61,7 @@ async fn committed_lifecycle_waits_for_the_matching_published_snapshot() {
         .recv()
         .await
         .expect("select command")
-        .command
+        .command()
         .request_id();
 
     event_tx
@@ -129,7 +130,7 @@ async fn matching_operation_failure_returns_the_typed_core_failure() {
         .recv()
         .await
         .expect("select command")
-        .command
+        .command()
         .request_id();
 
     event_tx
@@ -158,7 +159,7 @@ async fn matching_superseded_lifecycle_returns_the_typed_noop() {
         .recv()
         .await
         .expect("select command")
-        .command
+        .command()
         .request_id();
 
     event_tx
@@ -185,7 +186,7 @@ async fn unrelated_request_failures_do_not_settle_room_selection() {
         .recv()
         .await
         .expect("select command")
-        .command
+        .command()
         .request_id();
     let unrelated_request_id = RequestId {
         connection_id: request_id.connection_id,
@@ -372,6 +373,7 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
         connection_id: RuntimeConnectionId(7),
         command_tx,
         composer_draft_leases: Arc::new(ComposerDraftLeaseRegistry::new()),
+        native_artifacts: Arc::new(crate::native_artifact::RejectingNativeArtifactPort),
         media_staging: Arc::new(MediaStagingService::new(Arc::new(
             crate::media_preparation::MediaPreparationService::default(),
         ))),

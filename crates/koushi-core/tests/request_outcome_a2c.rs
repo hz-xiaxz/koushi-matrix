@@ -28,8 +28,8 @@ fn ready_state(user_id: &str) -> AppState {
 fn versioned(
     state: AppState,
     generation: u64,
-) -> koushi_protocol::event::VersionedAppStateSnapshot {
-    koushi_protocol::event::VersionedAppStateSnapshot { generation, state }
+) -> koushi_protocol::state_update::VersionedAppStateSnapshot {
+    koushi_protocol::state_update::VersionedAppStateSnapshot { generation, state }
 }
 
 fn staged(staged_id: &str, room_id: &str) -> koushi_state::StagedUploadItem {

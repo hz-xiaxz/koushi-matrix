@@ -110,6 +110,21 @@ fn account_name_is_versioned_and_collision_safe() {
 }
 
 #[test]
+fn session_key_id_debug_redacts_all_identity_fields() {
+    let id = SessionKeyId {
+        homeserver: "https://private-homeserver.invalid".into(),
+        user_id: "@private-user:example.invalid".into(),
+        device_id: "PRIVATE-DEVICE".into(),
+    };
+
+    let debug = format!("{id:?}");
+    assert!(debug.contains("SessionKeyId"));
+    assert!(!debug.contains(&id.homeserver));
+    assert!(!debug.contains(&id.user_id));
+    assert!(!debug.contains(&id.device_id));
+}
+
+#[test]
 fn matrix_session_account_name_is_separate_from_local_unlock_secret() {
     let id = SessionKeyId {
         homeserver: "https://matrix.example".into(),

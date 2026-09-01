@@ -416,7 +416,7 @@ function PinnedEventsList({
           );
           const avatarSource =
             profile?.avatar?.thumbnail.kind === "ready"
-              ? renderableThumbnailSourceUrl(profile.avatar.thumbnail.source_url)
+              ? renderableThumbnailSourceUrl(profile.avatar.thumbnail.source_ref)
               : null;
           return (
           <div className="pinned-event" key={event.event_id}>

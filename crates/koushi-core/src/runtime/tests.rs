@@ -1762,9 +1762,7 @@ fn gate_sas_and_bootstrap_commands_project_only_opaque_flow_state() {
             auth: Some(koushi_state::AuthSecret::new("private-auth")),
             request: crate::command::SecureBackupSetupRequest {
                 passphrase: Some(koushi_state::AuthSecret::new("private-passphrase")),
-                recovery_key_destination_path: Some(std::path::PathBuf::from(
-                    "/private/recovery-key.txt",
-                )),
+                recovery_key_destination_requested: true,
                 intent: koushi_state::SecureBackupSetupIntent::InitialSetup,
             },
         }
@@ -2050,7 +2048,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
 
     runtime
         .command_tx
-        .send(CoreCommandEnvelope {
+        .send(CoreCommandEnvelope::Public {
             command: CoreCommand::App(AppCommand::UpdateSettings {
                 request_id: first_request_id,
                 patch: SettingsPatch {
@@ -2065,7 +2063,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
         .expect("preceding command");
     runtime
         .command_tx
-        .send(CoreCommandEnvelope {
+        .send(CoreCommandEnvelope::Public {
             command: CoreCommand::App(AppCommand::Shutdown {
                 request_id: shutdown_request_id,
             }),
@@ -2076,7 +2074,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
         .expect("first shutdown command");
     runtime
         .command_tx
-        .send(CoreCommandEnvelope {
+        .send(CoreCommandEnvelope::Public {
             command: CoreCommand::App(AppCommand::Shutdown {
                 request_id: duplicate_shutdown_request_id,
             }),
@@ -2087,7 +2085,7 @@ async fn first_shutdown_publishes_preceding_state_and_ignores_duplicate_and_late
         .expect("duplicate shutdown command");
     runtime
         .command_tx
-        .send(CoreCommandEnvelope {
+        .send(CoreCommandEnvelope::Public {
             command: CoreCommand::App(AppCommand::UpdateSettings {
                 request_id: later_request_id,
                 patch: SettingsPatch {

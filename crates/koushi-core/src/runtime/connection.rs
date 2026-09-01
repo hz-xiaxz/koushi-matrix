@@ -9,6 +9,7 @@ use crate::event_projection::{
     project_room_event_display_labels, project_timeline_event_display_labels,
 };
 use crate::media_staging::MediaStagingService;
+use crate::native_artifact::{NativeArtifactError, NativeArtifactKind, NativeArtifactPort};
 #[cfg(test)]
 use koushi_protocol::event::IntentOutcome;
 use koushi_protocol::event::{CoreEvent, IntentNoOpReason};
@@ -79,6 +80,7 @@ pub struct CoreConnection {
     connection_id: RuntimeConnectionId,
     command_tx: mpsc::Sender<CoreCommandEnvelope>,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
+    pub(super) native_artifacts: Arc<dyn NativeArtifactPort>,
     pub(super) media_staging: Arc<MediaStagingService>,
     pub(super) event_rx: broadcast::Receiver<CoreEvent>,
     pub(super) snapshot_rx: watch::Receiver<VersionedAppStateSnapshot>,
@@ -104,6 +106,7 @@ impl CoreRuntime {
             ),
             command_tx: self.command_tx.clone(),
             composer_draft_leases: Arc::clone(&self.composer_draft_leases),
+            native_artifacts: Arc::clone(&self.native_artifacts),
             media_staging: Arc::clone(&self.media_staging),
             event_rx: self.event_tx.subscribe(),
             snapshot_rx: self.snapshot_rx.clone(),
@@ -123,7 +126,7 @@ impl CoreCommandHandle {
             return Err(CommandSubmitError::ComposerLeaseRequired);
         }
         self.command_tx
-            .send(CoreCommandEnvelope {
+            .send(CoreCommandEnvelope::Public {
                 command,
                 composer_permit: None,
                 admission: None,
@@ -144,7 +147,7 @@ impl CoreCommandHandle {
         }
         let (admission_tx, admission_rx) = oneshot::channel();
         self.command_tx
-            .send(CoreCommandEnvelope {
+            .send(CoreCommandEnvelope::Public {
                 command,
                 composer_permit: None,
                 admission: Some(admission_tx),
@@ -207,11 +210,25 @@ impl CoreCommandHandle {
         lease_id: ComposerDraftLeaseId,
         command: CoreCommand,
     ) -> Result<CoreCommandAdmission, CommandSubmitError> {
-        let mut envelope = self.admit_composer_command(generation, lease_id, command)?;
+        let envelope = self.admit_composer_command(generation, lease_id, command)?;
         let (admission_tx, admission_rx) = oneshot::channel();
-        envelope.admission = Some(admission_tx);
+        let (command, composer_permit) = match envelope {
+            CoreCommandEnvelope::Public {
+                command,
+                composer_permit,
+                admission: _,
+            } => (command, composer_permit),
+            #[cfg(any(test, feature = "test-hooks"))]
+            CoreCommandEnvelope::Qa(_) => {
+                unreachable!("composer admission creates a public command")
+            }
+        };
         self.command_tx
-            .send(envelope)
+            .send(CoreCommandEnvelope::Public {
+                command,
+                composer_permit,
+                admission: Some(admission_tx),
+            })
             .await
             .map_err(|_| CommandSubmitError::RuntimeClosed)?;
         admission_rx
@@ -258,7 +275,7 @@ impl CoreCommandHandle {
             .composer_draft_leases
             .try_command_permit(generation, lease_id, &scope)
             .map_err(CommandSubmitError::ComposerLease)?;
-        Ok(CoreCommandEnvelope {
+        Ok(CoreCommandEnvelope::Public {
             command,
             composer_permit: Some(composer_permit),
             admission: None,
@@ -301,6 +318,7 @@ impl CoreConnection {
                 connection_id: RuntimeConnectionId(41),
                 command_tx,
                 composer_draft_leases: Arc::new(ComposerDraftLeaseRegistry::new()),
+                native_artifacts: Arc::new(crate::native_artifact::RejectingNativeArtifactPort),
                 media_staging: Arc::new(MediaStagingService::new(Arc::new(
                     crate::media_preparation::MediaPreparationService::default(),
                 ))),
@@ -317,6 +335,72 @@ impl CoreConnection {
 
     pub fn connection_id(&self) -> RuntimeConnectionId {
         self.connection_id
+    }
+
+    pub fn register_native_artifact(
+        &self,
+        request_id: RequestId,
+        kind: NativeArtifactKind,
+        path: std::path::PathBuf,
+    ) -> Result<(), NativeArtifactError> {
+        self.native_artifacts.register(request_id, kind, path)
+    }
+
+    pub fn unregister_native_artifact(&self, request_id: RequestId, kind: NativeArtifactKind) {
+        self.native_artifacts.unregister(request_id, kind);
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn qa_set_local_device_blacklisted(
+        &self,
+        target: koushi_state::VerificationTarget,
+        room_id: String,
+    ) -> Result<(), ()> {
+        let request_id = self.next_request_id();
+        let (acknowledged, result) = oneshot::channel();
+        self.command_tx
+            .send(super::CoreCommandEnvelope::Qa(
+                super::CoreQaCommand::SetLocalDeviceBlacklisted {
+                    request_id,
+                    target,
+                    room_id,
+                    acknowledged,
+                },
+            ))
+            .await
+            .map_err(|_| ())?;
+        result.await.map_err(|_| ())?
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn qa_refresh_device_keys_and_assert_known(
+        &self,
+        target: koushi_state::VerificationTarget,
+    ) -> Result<(), ()> {
+        let request_id = self.next_request_id();
+        let (acknowledged, result) = oneshot::channel();
+        self.command_tx
+            .send(super::CoreCommandEnvelope::Qa(
+                super::CoreQaCommand::RefreshDeviceKeysAndAssertKnown {
+                    request_id,
+                    target,
+                    acknowledged,
+                },
+            ))
+            .await
+            .map_err(|_| ())?;
+        result.await.map_err(|_| ())?
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn sync_once_for_qa(&self) -> Result<(), CommandSubmitError> {
+        let request_id = self.next_request_id();
+        self.command_tx
+            .send(super::CoreCommandEnvelope::Qa(
+                super::CoreQaCommand::SyncOnce { request_id },
+            ))
+            .await
+            .map_err(|_| CommandSubmitError::RuntimeClosed)
     }
 
     /// Clone a lightweight command submitter for callers that must not hold

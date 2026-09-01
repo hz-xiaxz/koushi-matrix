@@ -1494,7 +1494,7 @@ export function EntityAvatar({
 }) {
   const sourceUrl =
     avatar?.thumbnail.kind === "ready"
-      ? renderableThumbnailSourceUrl(avatar.thumbnail.source_url)
+      ? renderableThumbnailSourceUrl(avatar.thumbnail.source_ref)
       : null;
   const { displaySourceUrl, onImageError, onImageLoad } = useRecoverableImageSource(sourceUrl);
   const showImage = Boolean(displaySourceUrl);

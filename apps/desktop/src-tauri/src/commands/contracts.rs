@@ -124,7 +124,6 @@ fn tauri_command_routes_build_expected_core_commands() {
 
     match build_export_room_keys_command(
         fake_request_id(33),
-        "/tmp/element-compatible-export.txt".to_owned(),
         AuthSecret::new("room-key-transfer-phrase"),
     ) {
         CoreCommand::Account(AccountCommand::ExportRoomKeys {
@@ -132,10 +131,6 @@ fn tauri_command_routes_build_expected_core_commands() {
             request,
         }) => {
             assert_eq!(request_id, fake_request_id(33));
-            assert_eq!(
-                request.destination_path,
-                std::path::PathBuf::from("/tmp/element-compatible-export.txt")
-            );
             assert_eq!(
                 request.passphrase.expose_secret(),
                 "room-key-transfer-phrase"
@@ -146,7 +141,6 @@ fn tauri_command_routes_build_expected_core_commands() {
 
     match build_import_room_keys_command(
         fake_request_id(34),
-        "/tmp/element-compatible-import.txt".to_owned(),
         AuthSecret::new("room-key-transfer-phrase"),
     ) {
         CoreCommand::Account(AccountCommand::ImportRoomKeys {
@@ -154,10 +148,6 @@ fn tauri_command_routes_build_expected_core_commands() {
             request,
         }) => {
             assert_eq!(request_id, fake_request_id(34));
-            assert_eq!(
-                request.source_path,
-                std::path::PathBuf::from("/tmp/element-compatible-import.txt")
-            );
             assert_eq!(
                 request.passphrase.expose_secret(),
                 "room-key-transfer-phrase"
@@ -169,7 +159,7 @@ fn tauri_command_routes_build_expected_core_commands() {
     match build_bootstrap_secure_backup_command(
         fake_request_id(35),
         Some(AuthSecret::new("backup-setup-phrase")),
-        Some("/tmp/recovery-artifact.txt".to_owned()),
+        true,
         koushi_state::SecureBackupSetupIntent::InitialSetup,
     ) {
         CoreCommand::Account(AccountCommand::BootstrapSecureBackup {
@@ -185,10 +175,7 @@ fn tauri_command_routes_build_expected_core_commands() {
                     .expose_secret(),
                 "backup-setup-phrase"
             );
-            assert_eq!(
-                request.recovery_key_destination_path,
-                Some(std::path::PathBuf::from("/tmp/recovery-artifact.txt"))
-            );
+            assert!(request.recovery_key_destination_requested);
             assert_eq!(
                 request.intent,
                 koushi_state::SecureBackupSetupIntent::InitialSetup
@@ -201,7 +188,7 @@ fn tauri_command_routes_build_expected_core_commands() {
         fake_request_id(36),
         AuthSecret::new("old-backup-phrase"),
         AuthSecret::new("new-backup-phrase"),
-        Some("/tmp/recovery-artifact.txt".to_owned()),
+        true,
     ) {
         CoreCommand::Account(AccountCommand::ChangeSecureBackupPassphrase {
             request_id,
@@ -210,10 +197,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(request_id, fake_request_id(36));
             assert_eq!(request.old_secret.expose_secret(), "old-backup-phrase");
             assert_eq!(request.new_passphrase.expose_secret(), "new-backup-phrase");
-            assert_eq!(
-                request.recovery_key_destination_path,
-                Some(std::path::PathBuf::from("/tmp/recovery-artifact.txt"))
-            );
+            assert!(request.recovery_key_destination_requested);
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -1910,25 +1894,23 @@ fn tauri_command_routes_redact_secret_bearing_values_from_debug() {
     );
     let room_key_export = build_export_room_keys_command(
         fake_request_id(23),
-        "/tmp/private-room-key-export.txt".to_owned(),
         AuthSecret::new("room-key-transfer-phrase"),
     );
     let room_key_import = build_import_room_keys_command(
         fake_request_id(24),
-        "/tmp/private-room-key-import.txt".to_owned(),
         AuthSecret::new("room-key-transfer-phrase"),
     );
     let secure_backup_setup = build_bootstrap_secure_backup_command(
         fake_request_id(25),
         Some(AuthSecret::new("backup-setup-phrase")),
-        Some("/tmp/private-recovery-artifact.txt".to_owned()),
+        true,
         koushi_state::SecureBackupSetupIntent::InitialSetup,
     );
     let secure_backup_change = build_change_secure_backup_passphrase_command(
         fake_request_id(26),
         AuthSecret::new("old-backup-phrase"),
         AuthSecret::new("new-backup-phrase"),
-        Some("/tmp/private-recovery-artifact.txt".to_owned()),
+        true,
     );
 
     for (command, secret) in [

@@ -141,7 +141,7 @@ function receiptInitials(receipt: LiveReadReceipt): string {
 
 function receiptAvatarSource(receipt: LiveReadReceipt): string | null {
   return receipt.avatar?.thumbnail.kind === "ready"
-    ? renderableThumbnailSourceUrl(receipt.avatar.thumbnail.source_url)
+    ? renderableThumbnailSourceUrl(receipt.avatar.thumbnail.source_ref)
     : null;
 }
 

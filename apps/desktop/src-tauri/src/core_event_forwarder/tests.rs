@@ -487,7 +487,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
                 width: Some(1200),
                 height: Some(630),
                 thumbnail: AvatarThumbnailState::Ready {
-                    source_url: "koushi-thumbnail://localhost/link-preview/fixture.bin".to_owned(),
+                    source_ref: "link-preview/0123456789abcdef".to_owned(),
                     width: Some(600),
                     height: Some(315),
                     mime_type: Some("image/png".to_owned()),
@@ -766,7 +766,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
                         "height": 630,
                         "thumbnail": {
                             "kind": "ready",
-                            "source_url": "koushi-thumbnail://localhost/link-preview/fixture.bin",
+                            "source_ref": "link-preview/0123456789abcdef",
                             "width": 600,
                             "height": 315,
                             "mime_type": "image/png"

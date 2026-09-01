@@ -22,13 +22,13 @@ use std::{
 use koushi_core::{
     AccountCommand, AccountKey, AppCommand, CoreCommand, CoreConnection, CoreEvent, CoreFailure,
     CreateRoomOptions, EncryptionDebugOperationKind, EncryptionDebugOperationOutcome,
-    IntentNoOpReason, IntentOutcome, MediaDownloadSelection, OutcomeCorrelation,
-    PaginationDirection, RequestId, RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation,
-    RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest, RoomKeyReshareOutcome,
-    RoomOperationKind, SearchCommand, SearchScope, SecureBackupPassphraseChangeRequest,
-    SecureBackupSetupRequest, SetAvatarRequest, SyncCommand, TimelineBatchId, TimelineCommand,
-    TimelineEvent, TimelineGapId, TimelineGeneration, TimelineKey, TimelineKind,
-    TimelineViewportObservation,
+    IntentNoOpReason, IntentOutcome, MediaDownloadSelection, NativeArtifactKind,
+    OutcomeCorrelation, PaginationDirection, RequestId, RequestOutcome, RequestOutcomeError,
+    RequestOutcomeExpectation, RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest,
+    RoomKeyReshareOutcome, RoomOperationKind, SearchCommand, SearchScope,
+    SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest, SyncCommand,
+    TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId, TimelineGeneration,
+    TimelineKey, TimelineKind, TimelineViewportObservation,
 };
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
@@ -144,6 +144,46 @@ pub(crate) async fn submit_core_command_with_admission(
 /// Allocate a `RequestId` from the command-dispatch connection.
 async fn next_request_id(state: &CoreRuntimeState) -> koushi_core::RequestId {
     state.connection.lock().await.next_request_id()
+}
+
+async fn submit_core_command_with_native_artifact(
+    state: &CoreRuntimeState,
+    request_id: RequestId,
+    kind: NativeArtifactKind,
+    path: String,
+    command: CoreCommand,
+) -> Result<FrontendCommandAdmission, String> {
+    if path.trim().is_empty() {
+        return Err("native artifact path is empty".to_owned());
+    }
+    let command_handle = {
+        let connection = state.connection.lock().await;
+        connection
+            .register_native_artifact(request_id, kind, PathBuf::from(path))
+            .map_err(|error| format!("native artifact registration failed: {error}"))?;
+        connection.command_handle()
+    };
+
+    match tokio::time::timeout(
+        CORE_COMMAND_SUBMIT_TIMEOUT,
+        command_handle.command_with_admission(command),
+    )
+    .await
+    {
+        Ok(Ok(admission)) => Ok(FrontendCommandAdmission::from_core(admission)),
+        Ok(Err(error)) => {
+            state
+                .connection
+                .lock()
+                .await
+                .unregister_native_artifact(request_id, kind);
+            Err(format!("command submit failed: {error}"))
+        }
+        // Acceptance is ambiguous after the local deadline. Keep the
+        // registration so an already-enqueued command can still consume it;
+        // actor rejection or runtime teardown removes the entry.
+        Err(_) => Err("command submit timed out".to_owned()),
+    }
 }
 
 pub(crate) fn command_settlement(

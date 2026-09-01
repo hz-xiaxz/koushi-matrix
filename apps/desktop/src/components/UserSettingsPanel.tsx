@@ -971,7 +971,7 @@ function avatarSourceUrl(avatar: ProfileState["own"]["avatar"]): string | null {
   if (avatar?.thumbnail.kind !== "ready") {
     return null;
   }
-  return renderableThumbnailSourceUrl(avatar.thumbnail.source_url);
+  return renderableThumbnailSourceUrl(avatar.thumbnail.source_ref);
 }
 
 function accountInitial(userId: string): string {

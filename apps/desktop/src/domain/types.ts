@@ -38,7 +38,7 @@ export type ComposerDraftAccountOwner = SavedSessionInfo;
  * IPC snapshot contract version. Must match `dto.rs`'s `SNAPSHOT_SCHEMA_VERSION`.
  * Bumped to 4 for the required secure backup gate DTO field.
  */
-export const SNAPSHOT_SCHEMA_VERSION = 5;
+export const SNAPSHOT_SCHEMA_VERSION = 6;
 
 /**
  * Snapshot state. #87 Phase 4 sectioned this into domain (Matrix/product, Rust-owned,
@@ -808,7 +808,7 @@ export type AvatarThumbnailState =
   | { kind: "loading"; request_id: number }
   | {
       kind: "ready";
-      source_url: string;
+      source_ref: string;
       width: number | null;
       height: number | null;
       mime_type: string | null;

@@ -84,6 +84,7 @@ use koushi_protocol::event::{
 use koushi_protocol::state_update::VersionedAppStateSnapshot;
 
 use crate::executor;
+use crate::native_artifact::{NativeArtifactKind, NativeArtifactPort, RejectingNativeArtifactPort};
 use crate::settings::SettingsStore;
 use crate::state_delta::build_state_delta;
 use crate::store::{StoreActor, session_key_id_from_info};
@@ -136,6 +137,39 @@ macro_rules! trace_runtime_sync {
         )$(.field($field))*;
         record(event);
     }};
+}
+
+fn native_artifact_for_account_command(
+    command: &AccountCommand,
+) -> Option<(RequestId, NativeArtifactKind)> {
+    match command {
+        AccountCommand::ExportRoomKeys { request_id, .. } => {
+            Some((*request_id, NativeArtifactKind::RoomKeyExportDestination))
+        }
+        AccountCommand::ImportRoomKeys { request_id, .. } => {
+            Some((*request_id, NativeArtifactKind::RoomKeyImportSource))
+        }
+        AccountCommand::BootstrapSecureBackup {
+            request_id,
+            request,
+        } if request.recovery_key_destination_requested => {
+            Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
+        }
+        AccountCommand::ChangeSecureBackupPassphrase {
+            request_id,
+            request,
+        } if request.recovery_key_destination_requested => {
+            Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
+        }
+        _ => None,
+    }
+}
+
+fn native_artifact_for_command(command: &CoreCommand) -> Option<(RequestId, NativeArtifactKind)> {
+    match command {
+        CoreCommand::Account(command) => native_artifact_for_account_command(command),
+        _ => None,
+    }
 }
 
 fn intent_outcome_token(outcome: &IntentOutcome) -> &'static str {
@@ -295,10 +329,43 @@ pub(crate) fn space_member_forward_failure_action(
     }
 }
 
-struct CoreCommandEnvelope {
-    command: CoreCommand,
-    composer_permit: Option<ComposerDraftCommandPermit>,
-    admission: Option<oneshot::Sender<CoreCommandAdmission>>,
+#[cfg(any(test, feature = "test-hooks"))]
+#[doc(hidden)]
+pub enum CoreQaCommand {
+    SetLocalDeviceBlacklisted {
+        request_id: RequestId,
+        target: koushi_state::VerificationTarget,
+        room_id: String,
+        acknowledged: oneshot::Sender<Result<(), ()>>,
+    },
+    RefreshDeviceKeysAndAssertKnown {
+        request_id: RequestId,
+        target: koushi_state::VerificationTarget,
+        acknowledged: oneshot::Sender<Result<(), ()>>,
+    },
+    SyncOnce {
+        request_id: RequestId,
+    },
+}
+
+enum CoreCommandEnvelope {
+    Public {
+        command: CoreCommand,
+        composer_permit: Option<ComposerDraftCommandPermit>,
+        admission: Option<oneshot::Sender<CoreCommandAdmission>>,
+    },
+    #[cfg(any(test, feature = "test-hooks"))]
+    Qa(CoreQaCommand),
+}
+
+#[cfg(test)]
+impl CoreCommandEnvelope {
+    fn command(&self) -> &CoreCommand {
+        match self {
+            Self::Public { command, .. } => command,
+            Self::Qa(_) => panic!("expected public command envelope"),
+        }
+    }
 }
 
 /// A task handle that is aborted if its owner is dropped without an orderly
@@ -349,6 +416,7 @@ pub struct CoreRuntime {
     next_connection_id: AtomicU64,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
     sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
+    native_artifacts: Arc<dyn NativeArtifactPort>,
     // Internal action channel: actors project side-effect outcomes through
     // the reducer with this in later phases; tests inject through it today.
     #[cfg_attr(not(any(test, feature = "test-hooks")), allow(dead_code))]
@@ -447,6 +515,23 @@ impl CoreRuntime {
             data_dir,
             account_store_actor,
             composer_draft_store_actor,
+            Arc::new(RejectingNativeArtifactPort),
+        )
+    }
+
+    /// Start with a custom data directory and injected native artifact port.
+    pub fn start_with_data_dir_and_native_artifact_port(
+        data_dir: PathBuf,
+        native_artifacts: Arc<dyn NativeArtifactPort>,
+    ) -> Self {
+        let account_store_actor = StoreActor::new(data_dir.clone());
+        let composer_draft_store_actor = StoreActor::new(data_dir.clone());
+        Self::start_inner(
+            EVENT_QUEUE_CAPACITY,
+            data_dir,
+            account_store_actor,
+            composer_draft_store_actor,
+            native_artifacts,
         )
     }
 
@@ -467,6 +552,23 @@ impl CoreRuntime {
             data_dir,
             account_store_actor,
             composer_draft_store_actor,
+            Arc::new(RejectingNativeArtifactPort),
+        )
+    }
+
+    /// Start with an injected native artifact path port.
+    pub fn start_with_data_dir_and_os_backend_and_native_artifact_port(
+        data_dir: PathBuf,
+        os_backend: std::sync::Arc<dyn koushi_key::CredentialBackend>,
+        native_artifacts: Arc<dyn NativeArtifactPort>,
+    ) -> Self {
+        let account_store_actor = StoreActor::with_os_backend(data_dir.clone(), os_backend);
+        Self::start_inner(
+            EVENT_QUEUE_CAPACITY,
+            data_dir,
+            account_store_actor.clone(),
+            account_store_actor,
+            native_artifacts,
         )
     }
 
@@ -480,6 +582,7 @@ impl CoreRuntime {
             data_dir,
             account_store_actor,
             composer_draft_store_actor,
+            Arc::new(RejectingNativeArtifactPort),
         )
     }
 
@@ -505,6 +608,7 @@ impl CoreRuntime {
             data_dir,
             account_store_actor,
             composer_draft_store_actor,
+            Arc::new(crate::native_artifact::NativeArtifactRegistry::new()),
         )
     }
 
@@ -513,6 +617,7 @@ impl CoreRuntime {
         data_dir: PathBuf,
         store_actor: StoreActor,
         composer_draft_store_actor: StoreActor,
+        native_artifacts: Arc<dyn NativeArtifactPort>,
     ) -> Self {
         let (command_tx, command_rx) = mpsc::channel(COMMAND_INBOX_CAPACITY);
         // NOTE: action_tx is the high-volume action-projection inbox; it must be
@@ -548,15 +653,19 @@ impl CoreRuntime {
         });
 
         // Spawn AccountActor with shared channels.
-        let account_actor = crate::account::AccountActor::spawn_with_diagnostics(
-            store_actor,
-            action_tx.clone(),
-            event_tx.clone(),
-            crate::link_preview::LinkPreviewContext::from_settings(&initial_state.settings.values),
-            Arc::clone(&composer_draft_leases),
-            initial_send_read_receipts(&initial_state),
-            sliding_sync_diagnostics.clone(),
-        );
+        let account_actor =
+            crate::account::AccountActor::spawn_with_diagnostics_and_native_artifacts(
+                store_actor,
+                action_tx.clone(),
+                event_tx.clone(),
+                crate::link_preview::LinkPreviewContext::from_settings(
+                    &initial_state.settings.values,
+                ),
+                Arc::clone(&composer_draft_leases),
+                initial_send_read_receipts(&initial_state),
+                sliding_sync_diagnostics.clone(),
+                Arc::clone(&native_artifacts),
+            );
 
         let focused_projection_rx = account_actor
             .take_focused_projection_commits()
@@ -628,6 +737,7 @@ impl CoreRuntime {
             next_connection_id: AtomicU64::new(1),
             composer_draft_leases,
             sliding_sync_diagnostics,
+            native_artifacts,
             action_tx,
             #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_test_tx,
@@ -774,6 +884,7 @@ impl CoreRuntime {
             next_connection_id: _,
             composer_draft_leases: _,
             sliding_sync_diagnostics: _,
+            native_artifacts: _,
             action_tx: _,
             #[cfg(any(test, feature = "test-hooks"))]
                 composer_draft_test_tx: _,
@@ -854,8 +965,11 @@ enum CommandDisposition {
 
 fn command_disposition(envelope: CoreCommandEnvelope) -> CommandDisposition {
     if matches!(
-        &envelope.command,
-        CoreCommand::App(AppCommand::Shutdown { .. })
+        &envelope,
+        CoreCommandEnvelope::Public {
+            command: CoreCommand::App(AppCommand::Shutdown { .. }),
+            ..
+        }
     ) {
         CommandDisposition::Shutdown
     } else {
@@ -1600,13 +1714,64 @@ impl AppActor {
             .await;
     }
 
+    #[cfg(any(test, feature = "test-hooks"))]
+    async fn handle_qa_command(&mut self, command: CoreQaCommand) -> bool {
+        match command {
+            CoreQaCommand::SetLocalDeviceBlacklisted {
+                request_id,
+                target,
+                room_id,
+                acknowledged,
+            } => {
+                let _ = self
+                    .account_actor
+                    .send(
+                        crate::account::AccountMessage::QaSetLocalDeviceBlacklisted {
+                            request_id,
+                            target,
+                            room_id,
+                            acknowledged,
+                        },
+                    )
+                    .await;
+            }
+            CoreQaCommand::RefreshDeviceKeysAndAssertKnown {
+                request_id,
+                target,
+                acknowledged,
+            } => {
+                let _ = self
+                    .account_actor
+                    .send(
+                        crate::account::AccountMessage::QaRefreshDeviceKeysAndAssertKnown {
+                            request_id,
+                            target,
+                            acknowledged,
+                        },
+                    )
+                    .await;
+            }
+            CoreQaCommand::SyncOnce { request_id } => {
+                let _ = self
+                    .account_actor
+                    .send(crate::account::AccountMessage::QaSyncOnce { request_id })
+                    .await;
+            }
+        }
+        false
+    }
+
     /// Returns whether `AppState` changed.
     async fn handle_command(&mut self, envelope: CoreCommandEnvelope) -> bool {
-        let CoreCommandEnvelope {
-            command,
-            composer_permit,
-            admission,
-        } = envelope;
+        let (command, composer_permit, admission) = match envelope {
+            CoreCommandEnvelope::Public {
+                command,
+                composer_permit,
+                admission,
+            } => (command, composer_permit, admission),
+            #[cfg(any(test, feature = "test-hooks"))]
+            CoreCommandEnvelope::Qa(command) => return self.handle_qa_command(command).await,
+        };
         if let Some(admission) = admission {
             self.pending_command_admissions.push(admission);
         }
@@ -1653,6 +1818,10 @@ impl AppActor {
                 request_id: command_request_id,
                 failure: CoreFailure::SessionRequired,
             });
+            if let Some((request_id, kind)) = native_artifact_for_command(&command) {
+                self.account_actor
+                    .unregister_native_artifact(request_id, kind);
+            }
             return false;
         }
 
@@ -1719,15 +1888,28 @@ impl AppActor {
                         request_id: command_request_id,
                         failure,
                     });
+                    if let Some((request_id, kind)) =
+                        native_artifact_for_account_command(&account_command)
+                    {
+                        self.account_actor
+                            .unregister_native_artifact(request_id, kind);
+                    }
                     return false;
                 }
                 // Route to AccountActor; it will produce AppActions and
                 // CoreEvents. AppActor does not immediately know the result —
                 // it observes it via the action channel.
-                let _ = self
+                let native_artifact = native_artifact_for_account_command(&account_command);
+                let sent = self
                     .account_actor
                     .send(AccountMessage::Command(account_command))
                     .await;
+                if !sent {
+                    if let Some((request_id, kind)) = native_artifact {
+                        self.account_actor
+                            .unregister_native_artifact(request_id, kind);
+                    }
+                }
                 projected_state_changed
             }
             CoreCommand::App(app_command) => match app_command {
@@ -4430,9 +4612,6 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
         AccountCommand::RestoreSession { .. } | AccountCommand::RestoreLastSession { .. } => {
             Some(AppAction::RestoreSessionRequested)
         }
-        #[cfg(feature = "qa-bin")]
-        AccountCommand::QaSetLocalDeviceBlacklisted { .. }
-        | AccountCommand::QaRefreshDeviceKeysAndAssertKnown { .. } => None,
         AccountCommand::CompleteOidcLogin { .. }
         | AccountCommand::RetrySlidingSyncCapability { .. }
         | AccountCommand::ChangeHomeserver { .. }

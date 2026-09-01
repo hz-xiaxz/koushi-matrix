@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use koushi_core::command::{
     AccountCommand, AppCommand, CoreCommand, RoomCommand, RoomKeyExportRequest,
     RoomKeyImportRequest, SearchCommand, SearchScope, SecureBackupPassphraseChangeRequest,
@@ -377,23 +375,19 @@ fn soft_logout_reauth_is_correlated_redacted_and_allowed_when_locked() {
 }
 
 #[test]
-fn room_key_file_transfer_commands_are_correlated_ready_gated_and_redacted() {
+fn room_key_file_transfer_commands_are_correlated_ready_gated_and_path_free() {
     let request_id = fake_request_id();
-    let destination = PathBuf::from("/tmp/private-element-compatible-export.txt");
-    let source = PathBuf::from("/tmp/private-element-compatible-import.txt");
     let transfer_phrase = "element-compatible-transfer-phrase";
     let commands = vec![
         CoreCommand::Account(AccountCommand::ExportRoomKeys {
             request_id,
             request: RoomKeyExportRequest {
-                destination_path: destination.clone(),
                 passphrase: AuthSecret::new(transfer_phrase),
             },
         }),
         CoreCommand::Account(AccountCommand::ImportRoomKeys {
             request_id,
             request: RoomKeyImportRequest {
-                source_path: source.clone(),
                 passphrase: AuthSecret::new(transfer_phrase),
             },
         }),
@@ -404,31 +398,24 @@ fn room_key_file_transfer_commands_are_correlated_ready_gated_and_redacted() {
         assert!(command.requires_ready_session());
         let debug = format!("{command:?}");
         assert!(!debug.contains(transfer_phrase), "{debug}");
-        assert!(
-            !debug.contains(destination.to_string_lossy().as_ref()),
-            "{debug}"
-        );
-        assert!(
-            !debug.contains(source.to_string_lossy().as_ref()),
-            "{debug}"
-        );
+        assert!(!debug.contains("destination_path"), "{debug}");
+        assert!(!debug.contains("source_path"), "{debug}");
         assert!(debug.contains("AuthSecret(..)"), "{debug}");
     }
 }
 
 #[test]
-fn secure_backup_commands_are_correlated_ready_gated_and_redacted() {
+fn secure_backup_commands_are_correlated_ready_gated_redacted_and_path_free() {
     let request_id = fake_request_id();
     let setup_phrase = "secure-backup-setup-phrase";
     let old_phrase = "secure-backup-old-phrase";
     let new_phrase = "secure-backup-new-phrase";
-    let destination = PathBuf::from("/tmp/private-recovery-artifact.txt");
     let commands = vec![
         CoreCommand::Account(AccountCommand::BootstrapSecureBackup {
             request_id,
             request: SecureBackupSetupRequest {
                 passphrase: Some(AuthSecret::new(setup_phrase)),
-                recovery_key_destination_path: Some(destination.clone()),
+                recovery_key_destination_requested: true,
                 intent: koushi_state::SecureBackupSetupIntent::InitialSetup,
             },
         }),
@@ -437,7 +424,7 @@ fn secure_backup_commands_are_correlated_ready_gated_and_redacted() {
             request: SecureBackupPassphraseChangeRequest {
                 old_secret: AuthSecret::new(old_phrase),
                 new_passphrase: AuthSecret::new(new_phrase),
-                recovery_key_destination_path: Some(destination.clone()),
+                recovery_key_destination_requested: true,
             },
         }),
     ];
@@ -449,14 +436,8 @@ fn secure_backup_commands_are_correlated_ready_gated_and_redacted() {
         assert!(!debug.contains(setup_phrase), "{debug}");
         assert!(!debug.contains(old_phrase), "{debug}");
         assert!(!debug.contains(new_phrase), "{debug}");
-        assert!(
-            !debug.contains(destination.to_string_lossy().as_ref()),
-            "{debug}"
-        );
-        assert!(
-            debug.contains("has_recovery_key_destination_path"),
-            "{debug}"
-        );
+        assert!(debug.contains("has_recovery_key_destination"), "{debug}");
+        assert!(!debug.contains("destination_path"), "{debug}");
     }
 }
 
@@ -515,7 +496,6 @@ fn sync_commands_are_correlated_and_ready_gated() {
         CoreCommand::Sync(SyncCommand::Start { request_id }),
         CoreCommand::Sync(SyncCommand::Stop { request_id }),
         CoreCommand::Sync(SyncCommand::Restart { request_id }),
-        CoreCommand::Sync(SyncCommand::SyncOnce { request_id }),
     ];
 
     for command in commands {

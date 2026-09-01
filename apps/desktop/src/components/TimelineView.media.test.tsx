@@ -1005,7 +1005,7 @@ describe("TimelineView", () => {
           mxc_uri: "mxc://matrix.org/avatar-retry",
           thumbnail: {
             kind: "ready",
-            source_url: AVATAR_DATA_URL_A,
+            source_ref: AVATAR_DATA_URL_A,
             width: null,
             height: null,
             mime_type: null
@@ -1170,7 +1170,7 @@ describe("TimelineView", () => {
           mxc_uri: "mxc://matrix.org/avatar",
           thumbnail: {
             kind: "ready",
-            source_url: AVATAR_DATA_URL_A,
+            source_ref: AVATAR_DATA_URL_A,
             width: null,
             height: null,
             mime_type: null
@@ -1246,7 +1246,7 @@ describe("TimelineView", () => {
           mxc_uri: "mxc://matrix.org/unrelated-avatar",
           thumbnail: {
             kind: "ready",
-            source_url: AVATAR_DATA_URL_B,
+            source_ref: AVATAR_DATA_URL_B,
             width: null,
             height: null,
             mime_type: null
@@ -1319,7 +1319,7 @@ describe("TimelineView", () => {
           mxc_uri: "mxc://matrix.org/avatar-a",
           thumbnail: {
             kind: "ready",
-            source_url: AVATAR_DATA_URL_A,
+            source_ref: AVATAR_DATA_URL_A,
             width: null,
             height: null,
             mime_type: null
@@ -1335,7 +1335,7 @@ describe("TimelineView", () => {
           mxc_uri: "mxc://matrix.org/avatar-b",
           thumbnail: {
             kind: "ready",
-            source_url: AVATAR_DATA_URL_B,
+            source_ref: AVATAR_DATA_URL_B,
             width: null,
             height: null,
             mime_type: null
@@ -1389,7 +1389,7 @@ describe("TimelineView", () => {
                 mxc_uri: "mxc://matrix.org/avatar-broken",
                 thumbnail: {
                   kind: "ready",
-                  source_url: "asset://missing-avatar.bin",
+                  source_ref: "asset://missing-avatar.bin",
                   width: null,
                   height: null,
                   mime_type: null
@@ -1447,7 +1447,7 @@ describe("TimelineView", () => {
                   mxc_uri: "mxc://matrix.org/avatar-retry-render",
                   thumbnail: {
                     kind: "ready",
-                    source_url: "asset://transient-avatar.bin",
+                    source_ref: "asset://transient-avatar.bin",
                     width: null,
                     height: null,
                     mime_type: null

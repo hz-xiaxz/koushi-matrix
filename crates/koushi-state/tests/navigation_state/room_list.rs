@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 
 fn ready_avatar_thumbnail(label: &str) -> AvatarThumbnailState {
     AvatarThumbnailState::Ready {
-        source_url: format!("file:///tmp/koushi-test-{label}.png"),
+        source_ref: format!("avatar/{:016x}", label.len()),
         width: Some(64),
         height: Some(64),
         mime_type: Some("image/png".to_owned()),

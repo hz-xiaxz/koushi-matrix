@@ -727,7 +727,7 @@ mod tests {
 
     fn ready_thumbnail() -> AvatarThumbnailState {
         AvatarThumbnailState::Ready {
-            source_url: "koushi-thumbnail://avatar/test".to_owned(),
+            source_ref: "avatar/0123456789abcdef".to_owned(),
             width: None,
             height: None,
             mime_type: Some("image/png".to_owned()),
@@ -847,11 +847,11 @@ mod tests {
         let online = download_avatar_thumbnail(&online_session, mxc_uri)
             .await
             .expect("online avatar fetch");
-        let AvatarThumbnailState::Ready { source_url, .. } = online else {
+        let AvatarThumbnailState::Ready { source_ref, .. } = online else {
             panic!("online avatar should be ready");
         };
-        assert!(source_url.starts_with("koushi-thumbnail://"));
-        assert!(!source_url.starts_with("file://"));
+        assert!(source_ref.starts_with("avatar/"));
+        assert!(!source_ref.contains("://"));
         drop(online_session);
         clear_renderable_thumbnail_cache();
 
@@ -859,11 +859,11 @@ mod tests {
         let offline = download_avatar_thumbnail(&offline_session, mxc_uri)
             .await
             .expect("cached avatar should load without a second network request");
-        let AvatarThumbnailState::Ready { source_url, .. } = offline else {
+        let AvatarThumbnailState::Ready { source_ref, .. } = offline else {
             panic!("offline cached avatar should be ready");
         };
-        assert!(source_url.starts_with("koushi-thumbnail://"));
-        assert!(!source_url.starts_with("file://"));
+        assert!(source_ref.starts_with("avatar/"));
+        assert!(!source_ref.contains("://"));
         assert!(!data_dir.path().join("avatar_thumbnails").exists());
         assert_directory_does_not_contain_plaintext(data_dir.path(), b"binaryjpegfullimagedata");
     }

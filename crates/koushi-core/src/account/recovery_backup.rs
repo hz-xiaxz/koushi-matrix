@@ -18,6 +18,7 @@ use crate::command::{
     SecureBackupSetupRequest,
 };
 use crate::executor;
+use crate::native_artifact::NativeArtifactKind;
 use koushi_protocol::event::{AccountEvent, CoreEvent, E2eeTrustEvent};
 use koushi_protocol::failure::{CoreFailure, RecoveryFailureKind};
 use koushi_protocol::ids::{AccountKey, RequestId};
@@ -585,6 +586,8 @@ impl AccountActor {
         let session = match &self.session {
             Some(session) => session.clone(),
             None => {
+                self.native_artifacts
+                    .unregister(request_id, NativeArtifactKind::RoomKeyExportDestination);
                 self.send_actions(vec![AppAction::RoomKeyExportFailed {
                     request_id: request_id.sequence,
                     kind: TrustOperationFailureKind::Sdk,
@@ -595,10 +598,27 @@ impl AccountActor {
             }
         };
 
-        let RoomKeyExportRequest {
-            destination_path,
-            passphrase,
-        } = request;
+        let RoomKeyExportRequest { passphrase } = request;
+        let destination_path = match self
+            .native_artifacts
+            .take(request_id, NativeArtifactKind::RoomKeyExportDestination)
+        {
+            Ok(path) => path,
+            Err(_) => {
+                self.send_actions(vec![AppAction::RoomKeyExportFailed {
+                    request_id: request_id.sequence,
+                    kind: TrustOperationFailureKind::Sdk,
+                }])
+                .await;
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::AccountOperationFailed {
+                        kind: AuthFailureKind::Sdk,
+                    },
+                );
+                return;
+            }
+        };
         let result =
             koushi_sdk::export_room_keys_to_file(&session, destination_path, &passphrase).await;
         drop(passphrase);
@@ -635,6 +655,8 @@ impl AccountActor {
         let session = match &self.session {
             Some(session) => session.clone(),
             None => {
+                self.native_artifacts
+                    .unregister(request_id, NativeArtifactKind::RoomKeyImportSource);
                 self.send_actions(vec![AppAction::RoomKeyImportFailed {
                     request_id: request_id.sequence,
                     kind: TrustOperationFailureKind::Sdk,
@@ -645,10 +667,27 @@ impl AccountActor {
             }
         };
 
-        let RoomKeyImportRequest {
-            source_path,
-            passphrase,
-        } = request;
+        let RoomKeyImportRequest { passphrase } = request;
+        let source_path = match self
+            .native_artifacts
+            .take(request_id, NativeArtifactKind::RoomKeyImportSource)
+        {
+            Ok(path) => path,
+            Err(_) => {
+                self.send_actions(vec![AppAction::RoomKeyImportFailed {
+                    request_id: request_id.sequence,
+                    kind: TrustOperationFailureKind::Sdk,
+                }])
+                .await;
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::AccountOperationFailed {
+                        kind: AuthFailureKind::Sdk,
+                    },
+                );
+                return;
+            }
+        };
         let result =
             koushi_sdk::import_room_keys_from_file(&session, source_path, &passphrase).await;
         drop(passphrase);
@@ -686,6 +725,8 @@ impl AccountActor {
         let session = match &self.session {
             Some(session) => session.clone(),
             None => {
+                self.native_artifacts
+                    .unregister(request_id, NativeArtifactKind::RecoveryKeyDestination);
                 self.send_actions(vec![AppAction::SecureBackupSetupFailed {
                     request_id: request_id.sequence,
                     kind: TrustOperationFailureKind::Sdk,
@@ -698,10 +739,12 @@ impl AccountActor {
 
         let SecureBackupSetupRequest {
             passphrase,
-            recovery_key_destination_path,
+            recovery_key_destination_requested,
             intent,
         } = request;
-        if recovery_key_destination_path.is_none() {
+        if !recovery_key_destination_requested {
+            self.native_artifacts
+                .unregister(request_id, NativeArtifactKind::RecoveryKeyDestination);
             self.send_actions(vec![AppAction::SecureBackupGateChanged(
                 koushi_state::SecureBackupGateState::RecoveryKeyDeliveryRequired,
             )])
@@ -714,6 +757,25 @@ impl AccountActor {
             );
             return;
         }
+        let recovery_key_destination_path = match self
+            .native_artifacts
+            .take(request_id, NativeArtifactKind::RecoveryKeyDestination)
+        {
+            Ok(path) => Some(path),
+            Err(_) => {
+                self.send_actions(vec![AppAction::SecureBackupGateChanged(
+                    koushi_state::SecureBackupGateState::RecoveryKeyDeliveryRequired,
+                )])
+                .await;
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::AccountOperationFailed {
+                        kind: AuthFailureKind::Sdk,
+                    },
+                );
+                return;
+            }
+        };
         self.send_actions(vec![AppAction::SecureBackupGateChanged(
             koushi_state::SecureBackupGateState::CreatingBackup,
         )])
@@ -821,6 +883,8 @@ impl AccountActor {
         let session = match &self.session {
             Some(session) => session.clone(),
             None => {
+                self.native_artifacts
+                    .unregister(request_id, NativeArtifactKind::RecoveryKeyDestination);
                 self.send_actions(vec![AppAction::SecureBackupPassphraseChangeFailed {
                     request_id: request_id.sequence,
                     kind: TrustOperationFailureKind::Sdk,
@@ -834,8 +898,34 @@ impl AccountActor {
         let SecureBackupPassphraseChangeRequest {
             old_secret,
             new_passphrase,
-            recovery_key_destination_path,
+            recovery_key_destination_requested,
         } = request;
+        let recovery_key_destination_path = if recovery_key_destination_requested {
+            match self
+                .native_artifacts
+                .take(request_id, NativeArtifactKind::RecoveryKeyDestination)
+            {
+                Ok(path) => Some(path),
+                Err(_) => {
+                    self.send_actions(vec![AppAction::SecureBackupPassphraseChangeFailed {
+                        request_id: request_id.sequence,
+                        kind: TrustOperationFailureKind::Sdk,
+                    }])
+                    .await;
+                    self.emit_failure(
+                        request_id,
+                        CoreFailure::AccountOperationFailed {
+                            kind: AuthFailureKind::Sdk,
+                        },
+                    );
+                    return;
+                }
+            }
+        } else {
+            self.native_artifacts
+                .unregister(request_id, NativeArtifactKind::RecoveryKeyDestination);
+            None
+        };
         let result = koushi_sdk::change_secure_backup_passphrase(
             &session,
             &old_secret,
@@ -932,10 +1022,14 @@ impl AccountActor {
         request: SecureBackupSetupRequest,
     ) {
         let Some(session) = self.session.clone() else {
+            self.native_artifacts
+                .unregister(request_id, NativeArtifactKind::RecoveryKeyDestination);
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         };
-        if request.recovery_key_destination_path.is_none() {
+        if !request.recovery_key_destination_requested {
+            self.native_artifacts
+                .unregister(request_id, NativeArtifactKind::RecoveryKeyDestination);
             self.send_actions(vec![AppAction::BootstrapRecoveryKeyDeliveryFailed {
                 flow_id,
                 kind: koushi_state::VerificationGateFailureKind::Sdk,
@@ -945,6 +1039,8 @@ impl AccountActor {
         }
         if let Err(error) = koushi_sdk::bootstrap_cross_signing(&session, auth.as_ref()).await {
             drop(auth);
+            self.native_artifacts
+                .unregister(request_id, NativeArtifactKind::RecoveryKeyDestination);
             self.send_actions(vec![AppAction::BootstrapRecoveryKeyDeliveryFailed {
                 flow_id,
                 kind: verification_gate_failure_kind(&error),
@@ -955,9 +1051,23 @@ impl AccountActor {
         drop(auth);
         let SecureBackupSetupRequest {
             passphrase,
-            recovery_key_destination_path,
+            recovery_key_destination_requested: _,
             intent: _,
         } = request;
+        let recovery_key_destination_path = match self
+            .native_artifacts
+            .take(request_id, NativeArtifactKind::RecoveryKeyDestination)
+        {
+            Ok(path) => Some(path),
+            Err(_) => {
+                self.send_actions(vec![AppAction::BootstrapRecoveryKeyDeliveryFailed {
+                    flow_id,
+                    kind: koushi_state::VerificationGateFailureKind::Sdk,
+                }])
+                .await;
+                return;
+            }
+        };
         let result = koushi_sdk::bootstrap_secure_backup(
             &session,
             passphrase.as_ref(),

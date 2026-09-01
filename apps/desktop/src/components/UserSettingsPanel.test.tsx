@@ -106,7 +106,7 @@ describe("UserSettingsPanel", () => {
         mxc_uri: "mxc://matrix.org/avatar",
         thumbnail: {
           kind: "ready",
-          source_url: "asset://profile-avatar",
+          source_ref: "asset://profile-avatar",
           width: 64,
           height: 64,
           mime_type: "image/png"

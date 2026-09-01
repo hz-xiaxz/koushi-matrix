@@ -82,13 +82,13 @@ fn renderable_thumbnail_protocol_serves_known_cached_bytes() {
         b"protocol-bytes".to_vec(),
     )
     .expect("protocol fixture is within the thumbnail cache bound");
-    let source_url = match ready {
-        koushi_state::AvatarThumbnailState::Ready { source_url, .. } => source_url,
+    let source_ref = match ready {
+        koushi_state::AvatarThumbnailState::Ready { source_ref, .. } => source_ref,
         other => panic!("unexpected thumbnail state: {other:?}"),
     };
     let response = super::renderable_thumbnail_protocol_response(
         tauri::http::Request::builder()
-            .uri(source_url)
+            .uri(format!("koushi-thumbnail://localhost/{source_ref}"))
             .body(Vec::new())
             .expect("request"),
     );

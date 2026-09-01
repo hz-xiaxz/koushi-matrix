@@ -1388,7 +1388,7 @@ function formatDateDividerLabel(timestampMs: number): string {
 
 function thumbnailSourceUrl(thumbnail: AvatarThumbnailState | null | undefined): string | null {
   return thumbnail?.kind === "ready"
-    ? renderableThumbnailSourceUrl(thumbnail.source_url)
+    ? renderableThumbnailSourceUrl(thumbnail.source_ref)
     : null;
 }
 

@@ -718,7 +718,7 @@ fn user_profile_debug_redacts_person_and_avatar_values() {
         avatar: Some(AvatarImage {
             mxc_uri: "mxc://example.invalid/carol-avatar".to_owned(),
             thumbnail: AvatarThumbnailState::Ready {
-                source_url: "data:image/png;base64,secret".to_owned(),
+                source_ref: "avatar/1111111111111111".to_owned(),
                 width: None,
                 height: None,
                 mime_type: Some("image/png".to_owned()),
@@ -1188,7 +1188,7 @@ fn user_profile_avatar_thumbnail_is_preserved_across_partial_profile_update() {
     // Seed the user with a Ready thumbnail.
     let mxc = "mxc://example.test/bob-avatar";
     let ready_thumbnail = AvatarThumbnailState::Ready {
-        source_url: "data:image/png;base64,synthetic".to_owned(),
+        source_ref: "avatar/2222222222222222".to_owned(),
         width: Some(64),
         height: Some(64),
         mime_type: Some("image/png".to_owned()),
@@ -1278,11 +1278,11 @@ fn profile_state_clears_with_session_views() {
 }
 
 #[test]
-fn avatar_image_debug_redacts_mxc_uri_and_thumbnail_source_url() {
+fn avatar_image_debug_redacts_mxc_uri_and_thumbnail_source_ref() {
     let image = AvatarImage {
         mxc_uri: "mxc://localhost/private-avatar".to_owned(),
         thumbnail: AvatarThumbnailState::Ready {
-            source_url: "koushi-thumbnail://localhost/private.bin".to_owned(),
+            source_ref: "avatar/3333333333333333".to_owned(),
             width: Some(64),
             height: Some(64),
             mime_type: Some("image/png".to_owned()),
@@ -1290,25 +1290,22 @@ fn avatar_image_debug_redacts_mxc_uri_and_thumbnail_source_url() {
     };
     let debug = format!("{:?}", image);
     assert!(!debug.contains("mxc://localhost/private-avatar"), "{debug}");
-    assert!(
-        !debug.contains("koushi-thumbnail://localhost/private.bin"),
-        "{debug}"
-    );
+    assert!(!debug.contains("avatar/3333333333333333"), "{debug}");
     assert!(debug.contains("has_mxc_uri"), "{debug}");
     assert!(debug.contains("Ready"), "{debug}");
 }
 
 #[test]
-fn avatar_thumbnail_state_debug_redacts_ready_source_url() {
+fn avatar_thumbnail_state_debug_redacts_ready_source_ref() {
     let ready = AvatarThumbnailState::Ready {
-        source_url: "asset://private-avatar".to_owned(),
+        source_ref: "avatar/4444444444444444".to_owned(),
         width: Some(128),
         height: None,
         mime_type: Some("image/jpeg".to_owned()),
     };
     let debug = format!("{:?}", ready);
-    assert!(!debug.contains("asset://private-avatar"), "{debug}");
-    assert!(debug.contains("has_source_url"), "{debug}");
+    assert!(!debug.contains("avatar/4444444444444444"), "{debug}");
+    assert!(debug.contains("has_source_ref"), "{debug}");
     assert!(debug.contains("width"), "{debug}");
 
     let loading = AvatarThumbnailState::Loading { request_id: 7 };
