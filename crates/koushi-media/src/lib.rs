@@ -1,3 +1,7 @@
+mod image_kind;
+
+pub use image_kind::{ImageKind, image_kind};
+
 use std::io::Cursor;
 
 use image::{

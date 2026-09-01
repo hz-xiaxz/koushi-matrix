@@ -53,6 +53,45 @@ fn stores_avatar_and_link_preview_thumbnails_with_opaque_refs() {
 }
 
 #[test]
+fn store_renderable_thumbnail_uses_media_owned_image_mime_detection() {
+    let _guard = cache_test_lock();
+    clear_renderable_thumbnail_cache();
+
+    for (source, bytes, expected_mime) in [
+        (
+            "mxc://example.test/png",
+            &b"\x89PNG\r\n\x1a\nrest"[..],
+            "image/png",
+        ),
+        (
+            "mxc://example.test/jpeg",
+            &b"\xff\xd8\xff\xe0rest"[..],
+            "image/jpeg",
+        ),
+    ] {
+        let ready =
+            store_renderable_thumbnail(RenderableThumbnailKind::Avatar, source, bytes.to_vec())
+                .expect("image bytes are within the cache bound");
+        let AvatarThumbnailState::Ready {
+            source_ref,
+            mime_type,
+            ..
+        } = ready
+        else {
+            panic!("image thumbnail should be ready");
+        };
+        assert_eq!(mime_type.as_deref(), Some(expected_mime));
+        assert_eq!(
+            lookup_renderable_thumbnail(&source_ref)
+                .expect("image thumbnail should be cached")
+                .mime_type
+                .as_deref(),
+            Some(expected_mime)
+        );
+    }
+}
+
+#[test]
 fn lookup_renderable_thumbnail_returns_bytes_for_opaque_ref() {
     let _guard = cache_test_lock();
     clear_renderable_thumbnail_cache();
