@@ -5,11 +5,13 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use koushi_key::{CredentialStore, LocalUnlockSecret, SessionKeyIdCredentialNames};
+#[cfg(any(debug_assertions, test, feature = "test-hooks"))]
+use koushi_key::SessionKeyIdCredentialNames;
+use koushi_key::{CredentialStore, LocalUnlockSecret};
 use koushi_protocol::SessionKeyId;
 use koushi_state::LocalEncryptionHealth;
 
-use super::CREDENTIAL_STORE_SERVICE_NAME;
+use crate::CREDENTIAL_STORE_SERVICE_NAME;
 
 /// Env var for QA/debug file-based credential store override.
 /// Only honored in debug/test/test-hooks builds; production release builds ignore it.
@@ -28,7 +30,7 @@ pub enum CredentialStoreBackend {
 }
 
 impl CredentialStoreBackend {
-    pub(super) fn resolve() -> Self {
+    pub fn resolve() -> Self {
         #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
         if let Ok(dir) = std::env::var(ENV_FILE_CREDENTIAL_STORE_DIR) {
             let dir = PathBuf::from(dir);
@@ -41,7 +43,7 @@ impl CredentialStoreBackend {
         ))
     }
 
-    pub(super) fn resolve_with_os_backend(
+    pub fn resolve_with_os_backend(
         data_dir: PathBuf,
         os_backend: Arc<dyn koushi_key::CredentialBackend>,
     ) -> Self {
@@ -54,7 +56,7 @@ impl CredentialStoreBackend {
         Self::OsKeychain(OsCredentialStore::with_backend(data_dir, os_backend))
     }
 
-    pub(super) fn load(
+    pub fn load(
         &self,
         key_id: &SessionKeyId,
     ) -> Result<LocalUnlockSecret, koushi_key::LocalSecretError> {
@@ -66,7 +68,7 @@ impl CredentialStoreBackend {
         }
     }
 
-    pub(super) fn save(
+    pub fn save(
         &self,
         key_id: &SessionKeyId,
         secret: &LocalUnlockSecret,
@@ -79,7 +81,7 @@ impl CredentialStoreBackend {
         }
     }
 
-    pub(super) fn delete(&self, key_id: &SessionKeyId) -> Result<(), koushi_key::LocalSecretError> {
+    pub fn delete(&self, key_id: &SessionKeyId) -> Result<(), koushi_key::LocalSecretError> {
         match self {
             Self::OsKeychain(store) => store.delete(key_id),
             #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
@@ -768,9 +770,7 @@ fn vault_error_to_local_secret_error(
     koushi_key::LocalSecretError::CredentialBackend(kind)
 }
 
-pub(super) fn local_secret_error_health(
-    error: &koushi_key::LocalSecretError,
-) -> LocalEncryptionHealth {
+pub fn local_secret_error_health(error: &koushi_key::LocalSecretError) -> LocalEncryptionHealth {
     if koushi_key::is_missing_credential_error(error) {
         return LocalEncryptionHealth::MissingCredential;
     }
@@ -861,17 +861,13 @@ impl FileCredentialStore {
 
     /// Save an arbitrary named credential (used for session JSON, last-session
     /// pointer, etc.).
-    pub(super) fn save_named(
-        &self,
-        name: &str,
-        value: &str,
-    ) -> Result<(), koushi_key::LocalSecretError> {
+    fn save_named(&self, name: &str, value: &str) -> Result<(), koushi_key::LocalSecretError> {
         self.ensure_dir()?;
         self.write_file(&self.named_file(name), value)
     }
 
     /// Load an arbitrary named credential.
-    pub(super) fn load_named(&self, name: &str) -> Result<String, koushi_key::LocalSecretError> {
+    fn load_named(&self, name: &str) -> Result<String, koushi_key::LocalSecretError> {
         let path = self.named_file(name);
         std::fs::read_to_string(&path).map_err(|_| {
             koushi_key::LocalSecretError::CredentialBackend(
@@ -881,7 +877,7 @@ impl FileCredentialStore {
     }
 
     /// Delete an arbitrary named credential (no error if absent).
-    pub(super) fn delete_named(&self, name: &str) -> Result<(), koushi_key::LocalSecretError> {
+    fn delete_named(&self, name: &str) -> Result<(), koushi_key::LocalSecretError> {
         let _ = std::fs::remove_file(self.named_file(name));
         Ok(())
     }
@@ -932,7 +928,7 @@ fn record_file_credential_store_active() {
     );
 }
 
-pub(super) fn record_local_unlock_secret(purpose: Option<&'static str>, outcome: &'static str) {
+pub fn record_local_unlock_secret(purpose: Option<&'static str>, outcome: &'static str) {
     let Some(purpose) = purpose else {
         return;
     };

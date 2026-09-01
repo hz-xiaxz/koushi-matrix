@@ -567,7 +567,7 @@ describe("desktop release scripts", () => {
     // src-tauri became a pure transport adapter; the compile-time gate lives
     // there now.
     const credentialStore = readFileSync(
-      new URL("../../../../crates/koushi-core/src/store/credential_backend.rs", import.meta.url),
+      new URL("../../../../crates/koushi-store/src/credential_backend.rs", import.meta.url),
       "utf8"
     );
 

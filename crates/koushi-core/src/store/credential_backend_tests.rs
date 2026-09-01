@@ -1,50 +1,14 @@
-use super::super::StoreActor;
-use super::super::test_support::{file_store_actor, make_key_id};
-use super::*;
+use super::StoreActor;
+use super::test_support::{file_store_actor, make_key_id};
+use koushi_key::{LocalUnlockSecret, SessionKeyIdCredentialNames};
+use koushi_protocol::SessionKeyId;
+use koushi_store::{
+    CREDENTIAL_STORE_SERVICE_NAME, CredentialStoreBackend, CredentialVaultData,
+    CredentialVaultFile, OsCredentialStore,
+};
+use std::sync::Arc;
 use tempfile::tempdir;
 
-#[test]
-fn store_diagnostic_producer_records_typed_outcome_without_environment_switch() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    record_file_credential_store_active();
-    let record = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .into_iter()
-        .rev()
-        .find(|record| {
-            record.event.source == "core.store" && record.event.stage == "credential_store"
-        })
-        .expect("store producer should record");
-    assert!(
-        record
-            .event
-            .fields
-            .iter()
-            .any(|field| field.key == "outcome")
-    );
-}
-#[test]
-fn file_credential_store_round_trip() {
-    let dir = tempdir().expect("tempdir");
-    let store = FileCredentialStore::new(dir.path());
-    let key_id = make_key_id();
-
-    // Not found initially.
-    let result = store.load(&key_id);
-    assert!(koushi_key::is_missing_credential_error(
-        &result.unwrap_err()
-    ));
-
-    // Save and reload.
-    let secret = LocalUnlockSecret::generate();
-    store.save(&key_id, &secret).expect("save");
-    let loaded = store.load(&key_id).expect("load");
-
-    // Keys derived from both secrets must match.
-    let key1 = secret.derive_sdk_store_key();
-    let key2 = loaded.derive_sdk_store_key();
-    assert_eq!(key1.as_bytes(), key2.as_bytes());
-}
 #[test]
 fn store_actor_generates_config_with_file_backend() {
     let data_dir = tempdir().expect("tempdir");
@@ -191,7 +155,7 @@ fn migrated_credential_vault_reads_keychain_once() {
         user_id: "@bob:test.example.com".to_owned(),
         device_id: "DEVICE2".to_owned(),
     };
-    let mut vault = crate::credential_vault::CredentialVaultData::default();
+    let mut vault = koushi_store::CredentialVaultData::default();
     vault.set_last_session(Some(alice.clone()));
     vault.upsert_matrix_session(alice.clone(), "alice-session");
     vault.remember_session(alice.clone());
@@ -205,7 +169,7 @@ fn migrated_credential_vault_reads_keychain_once() {
         bob.clone(),
         LocalUnlockSecret::generate().to_storage_string().as_str(),
     );
-    crate::credential_vault::CredentialVaultFile::new(
+    koushi_store::CredentialVaultFile::new(
         data_dir
             .path()
             .join("credentials")
@@ -501,16 +465,13 @@ fn credential_vault_concurrent_initialization_reads_keychain_once() {
     key_store
         .save_vault_master_key(&master_key)
         .expect("seed master key");
-    crate::credential_vault::CredentialVaultFile::new(
+    koushi_store::CredentialVaultFile::new(
         data_dir
             .path()
             .join("credentials")
             .join("credentials.v1.enc"),
     )
-    .store(
-        &master_key,
-        &crate::credential_vault::CredentialVaultData::default(),
-    )
+    .store(&master_key, &koushi_store::CredentialVaultData::default())
     .expect("seed vault");
     let actor = StoreActor::with_os_backend(data_dir.path(), Arc::new(backend.clone()));
     let barrier = Arc::new(std::sync::Barrier::new(8));
@@ -619,25 +580,4 @@ fn credential_vault_corrupt_file_is_not_overwritten() {
     let actor = StoreActor::with_os_backend(data_dir.path(), Arc::new(backend));
     assert!(actor.credential_backend().load_saved_sessions().is_err());
     assert_eq!(std::fs::read(path).expect("read corrupt vault"), corrupt);
-}
-#[test]
-fn os_keychain_does_not_read_legacy_matrix_desktop_service() {
-    let data_dir = tempdir().expect("tempdir");
-    let backend = koushi_key::InMemoryCredentialBackend::default();
-    let backend_dyn: Arc<dyn koushi_key::CredentialBackend> = Arc::new(backend);
-    let store = OsCredentialStore::with_backend(data_dir.path(), backend_dyn.clone());
-    let key_id = make_key_id();
-    let secret = LocalUnlockSecret::generate();
-
-    let legacy_probe =
-        koushi_key::CredentialStore::with_backend("matrix-desktop", backend_dyn.clone());
-    legacy_probe
-        .save(&key_id, &secret)
-        .expect("seed legacy unlock secret");
-
-    let error = store.load(&key_id).expect_err("legacy service is not read");
-    assert!(
-        koushi_key::is_missing_credential_error(&error),
-        "legacy matrix-desktop credentials must not be migrated"
-    );
 }

@@ -3113,7 +3113,6 @@ name = "koushi-core"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "chacha20poly1305",
  "eyeball",
  "eyeball-im",
  "futures-util",
@@ -3126,6 +3125,7 @@ dependencies = [
  "koushi-sdk",
  "koushi-search",
  "koushi-state",
+ "koushi-store",
  "matrix-sdk",
  "matrix-sdk-base",
  "matrix-sdk-test",
@@ -3139,7 +3139,6 @@ dependencies = [
  "url",
  "vodozemac",
  "wiremock",
- "zeroize",
 ]
 
 [[package]]
@@ -3219,6 +3218,7 @@ dependencies = [
  "koushi-protocol",
  "koushi-sdk",
  "koushi-state",
+ "koushi-store",
  "matrix-sdk",
  "serde_json",
  "tempfile",
@@ -3272,6 +3272,21 @@ dependencies = [
  "serde",
  "serde_json",
  "unicode-normalization",
+ "zeroize",
+]
+
+[[package]]
+name = "koushi-store"
+version = "0.1.0"
+dependencies = [
+ "chacha20poly1305",
+ "koushi-diagnostics",
+ "koushi-key",
+ "koushi-protocol",
+ "koushi-state",
+ "serde",
+ "serde_json",
+ "tempfile",
  "zeroize",
 ]
 

@@ -1,8 +1,4 @@
-use super::{COMPOSER_DRAFTS_NONCE_LEN, CoreFailure, StoreActor};
-use chacha20poly1305::{
-    ChaCha20Poly1305, Key, KeyInit, Nonce,
-    aead::{Aead, OsRng, rand_core::RngCore},
-};
+use super::{CoreFailure, StoreActor};
 use koushi_key::LocalUnlockSecret;
 use koushi_protocol::SessionKeyId;
 use serde::{Deserialize, Serialize};
@@ -87,7 +83,7 @@ impl StoreActor {
         if payload.len() > READ_STATE_OUTBOX_MAX_BYTES {
             return Err(CoreFailure::StoreUnavailable);
         }
-        crate::file::atomic_replace_file(&path, &payload, false)
+        koushi_store::atomic_replace_file(&path, &payload, false)
             .map_err(|_| CoreFailure::StoreUnavailable)?;
         remove_read_state_file(&legacy_path)
     }
@@ -206,53 +202,34 @@ fn encrypt_read_state_outbox_v2_payload(
 ) -> Result<Vec<u8>, CoreFailure> {
     let plaintext = serde_json::to_vec(&(READ_STATE_OUTBOX_V2_VERSION, snapshot))
         .map_err(|_| CoreFailure::StoreUnavailable)?;
-    encrypt_read_state_outbox_payload(secret, READ_STATE_OUTBOX_V2_MAGIC, plaintext)
+    encrypt_read_state_payload(secret, READ_STATE_OUTBOX_V2_MAGIC, plaintext)
 }
 
-fn encrypt_read_state_outbox_payload(
+fn encrypt_read_state_payload(
     secret: &LocalUnlockSecret,
     magic: &[u8],
     plaintext: Vec<u8>,
 ) -> Result<Vec<u8>, CoreFailure> {
-    if plaintext.len() > READ_STATE_OUTBOX_MAX_BYTES {
-        return Err(CoreFailure::StoreUnavailable);
-    }
     let key = secret.derive_read_state_outbox_key();
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_bytes()));
-    let mut nonce_bytes = [0_u8; COMPOSER_DRAFTS_NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce_bytes);
-    let ciphertext = cipher
-        .encrypt(Nonce::from_slice(&nonce_bytes), plaintext.as_ref())
-        .map_err(|_| CoreFailure::StoreUnavailable)?;
-    let mut payload =
-        Vec::with_capacity(magic.len() + COMPOSER_DRAFTS_NONCE_LEN + ciphertext.len());
-    payload.extend_from_slice(magic);
-    payload.extend_from_slice(&nonce_bytes);
-    payload.extend_from_slice(&ciphertext);
-    Ok(payload)
+    koushi_store::encrypt_envelope(
+        magic,
+        key.as_bytes(),
+        &plaintext,
+        READ_STATE_OUTBOX_MAX_BYTES,
+    )
+    .map_err(|_| CoreFailure::StoreUnavailable)
 }
 
-fn decrypt_read_state_payload(
+fn decrypt_bounded_read_state_envelope(
     secret: &LocalUnlockSecret,
     payload: &[u8],
     magic: &[u8],
 ) -> Result<Vec<u8>, CoreFailure> {
-    let header_len = magic.len() + COMPOSER_DRAFTS_NONCE_LEN;
-    if payload.len() < header_len
-        || payload.len() > READ_STATE_OUTBOX_MAX_BYTES
-        || !payload.starts_with(magic)
-    {
+    if payload.len() > READ_STATE_OUTBOX_MAX_BYTES {
         return Err(CoreFailure::StoreUnavailable);
     }
-    let nonce_start = magic.len();
-    let nonce_end = nonce_start + COMPOSER_DRAFTS_NONCE_LEN;
     let key = secret.derive_read_state_outbox_key();
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_bytes()));
-    cipher
-        .decrypt(
-            Nonce::from_slice(&payload[nonce_start..nonce_end]),
-            &payload[nonce_end..],
-        )
+    koushi_store::decrypt_envelope(magic, key.as_bytes(), payload, READ_STATE_OUTBOX_MAX_BYTES)
         .map_err(|_| CoreFailure::StoreUnavailable)
 }
 
@@ -260,7 +237,8 @@ fn decrypt_read_state_outbox_v2_payload(
     secret: &LocalUnlockSecret,
     payload: &[u8],
 ) -> Result<crate::read_state::ReadPersistenceSnapshot, CoreFailure> {
-    let plaintext = decrypt_read_state_payload(secret, payload, READ_STATE_OUTBOX_V2_MAGIC)?;
+    let plaintext =
+        decrypt_bounded_read_state_envelope(secret, payload, READ_STATE_OUTBOX_V2_MAGIC)?;
     let (version, snapshot): (u8, crate::read_state::ReadPersistenceSnapshot) =
         serde_json::from_slice(&plaintext).map_err(|_| CoreFailure::StoreUnavailable)?;
     if version != READ_STATE_OUTBOX_V2_VERSION
@@ -286,7 +264,8 @@ fn decrypt_read_state_outbox_v1_payload(
     secret: &LocalUnlockSecret,
     payload: &[u8],
 ) -> Result<ReadPersistenceV1Snapshot, CoreFailure> {
-    let plaintext = decrypt_read_state_payload(secret, payload, READ_STATE_OUTBOX_V1_MAGIC)?;
+    let plaintext =
+        decrypt_bounded_read_state_envelope(secret, payload, READ_STATE_OUTBOX_V1_MAGIC)?;
     let (version, snapshot): (u8, ReadPersistenceV1Snapshot) =
         serde_json::from_slice(&plaintext).map_err(|_| CoreFailure::StoreUnavailable)?;
     if version != READ_STATE_OUTBOX_V1_VERSION {

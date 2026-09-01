@@ -20,8 +20,8 @@ use koushi_protocol::event::{AccountEvent, CoreEvent};
 
 use koushi_protocol::ids::RequestId;
 
-use crate::store::CredentialStoreBackend;
 use crate::store::StoreActor;
+use koushi_store::CredentialStoreBackend;
 
 use crate::timeline::{ReadPersistenceIngress, ReadPersistenceRequest};
 
@@ -194,7 +194,7 @@ async fn read_persistence_worker_saves_latest_snapshot_and_joins_after_channel_c
         device_id: "WORKER".to_owned(),
     };
     let store = StoreActor::with_backend(
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path())),
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path())),
         data_dir.path(),
     );
     store

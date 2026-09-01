@@ -15,7 +15,7 @@ use crate::link_preview::LinkPreviewContext;
 use crate::room::{
     RoomActor, RoomActorHandle, RoomMessage, RoomOperationKind, RoomOperationTestControl,
 };
-use crate::store::{CredentialStoreBackend, FileCredentialStore, StoreActor};
+use crate::store::StoreActor;
 use crate::timeline::{
     RoomMembershipTransition, RoomMembershipTransitionKind, TimelineManagerActor,
     VisibleRoomObservation,
@@ -25,6 +25,7 @@ use koushi_protocol::TimelineKey;
 use koushi_protocol::command::RoomCommand;
 use koushi_protocol::event::{CoreEvent, RoomEvent};
 use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
+use koushi_store::{CredentialStoreBackend, FileCredentialStore};
 
 use koushi_diagnostics::DiagnosticValue;
 use koushi_sdk::MatrixClientSession;

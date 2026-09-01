@@ -568,13 +568,13 @@ impl CoreRuntime {
         credential_dir: PathBuf,
     ) -> Self {
         let account_store_actor = StoreActor::with_backend(
-            crate::store::CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(
+            koushi_store::CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(
                 credential_dir.clone(),
             )),
             data_dir.clone(),
         );
         let composer_draft_store_actor = StoreActor::with_backend(
-            crate::store::CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(
+            koushi_store::CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(
                 credential_dir,
             )),
             data_dir.clone(),

@@ -1,6 +1,9 @@
 # Issue #765 — Leaf crate boundaries and Core edge cleanup
 
-Status: proposed; implementation is blocked on independent design/canon approval.
+Status: approved and in progress. Fireworks `reviewer-flash` returned
+`CORRECT-TO-IMPLEMENT` for exact design head
+`b32968a7049823fff4ed5b63377b1d126e74e1f2`; canon PR #788 merged before
+implementation.
 
 ## Objective
 

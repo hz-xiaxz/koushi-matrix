@@ -12,8 +12,8 @@ koushi-key = { path = "../koushi-key" }
 koushi-media = { path = "../koushi-media" }
 koushi-search = { path = "../koushi-search" }
 koushi-state = { path = "../koushi-state" }
+koushi-store = { path = "../koushi-store" }
 base64 = "0.22"
-chacha20poly1305 = "0.10"
 eyeball = "0.8"
 eyeball-im = "0.8"
 futures-util = "0.3"
@@ -27,13 +27,12 @@ tempfile = "3"
 thiserror = "2"
 url = "2"
 vodozemac = "0.10"
-zeroize = "1"
 # Confined to executor.rs and channel plumbing per Platform Portability rule 2.
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 
 [features]
 # Exposes narrow runtime hooks for koushi-qa and integration tests.
-test-hooks = ["koushi-sdk/test-hooks"]
+test-hooks = ["koushi-sdk/test-hooks", "koushi-store/test-hooks"]
 
 [dev-dependencies]
 # Self-reference so integration tests under tests/ automatically enable the

@@ -13,7 +13,6 @@
 //! platform-conditional code.
 
 pub(crate) mod composer_drafts;
-mod credential_backend;
 mod navigation;
 mod read_state;
 mod room_preferences;
@@ -30,31 +29,29 @@ use std::sync::{Mutex, atomic::AtomicUsize};
 use koushi_key::{LocalStoreBinding, LocalStoreId, LocalUnlockSecret};
 use koushi_protocol::SessionKeyId;
 
-use crate::credential_vault::{
-    LocalStoreMigrationRecord, LocalStoreMigrationState, PendingLoginRecord, PendingLoginState,
-};
 use koushi_sdk::{
     MatrixClientStoreConfig, MatrixClientStoreKey, MatrixSearchIndexKey,
     MatrixSearchIndexStoreConfig,
 };
 use koushi_state::LocalEncryptionHealth;
+use koushi_store::{
+    CredentialStoreBackend, LocalStoreMigrationRecord, LocalStoreMigrationState,
+    PendingLoginRecord, PendingLoginState,
+};
 
-pub use credential_backend::{CredentialStoreBackend, OsCredentialStore};
-#[cfg(any(debug_assertions, test, feature = "test-hooks"))]
-pub use credential_backend::{FileCredentialStore, resolved_credential_backend_is_file_dir};
+#[cfg(test)]
+mod credential_backend_tests;
 use koushi_protocol::failure::CoreFailure;
 
 use composer_drafts::{
     decode_payload_json as decode_composer_draft_payload_json,
     encode_payload_json as encode_composer_draft_payload_json,
 };
-use credential_backend::{local_secret_error_health, record_local_unlock_secret};
+use koushi_store::{local_secret_error_health, record_local_unlock_secret};
 
 /// Service name used for OS keyring entries. This is user-visible in macOS
 /// Keychain Access, so keep it aligned with the shipped product name.
-const CREDENTIAL_STORE_SERVICE_NAME: &str = "koushi-desktop";
 const COMPOSER_DRAFTS_FILE_MAGIC: &[u8] = b"KOUSHI-DRAFTS-V1\0";
-const COMPOSER_DRAFTS_NONCE_LEN: usize = 12;
 const PENDING_LOGIN_CAP: u8 = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

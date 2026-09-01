@@ -1,22 +1,16 @@
 use std::{fmt, fs, path::PathBuf};
 
-use chacha20poly1305::{
-    ChaCha20Poly1305, Key, Nonce,
-    aead::{Aead, KeyInit, OsRng, rand_core::RngCore},
-};
 use koushi_key::{CredentialVaultMasterKey, LocalStoreId, SavedSessionIndex};
 use koushi_protocol::SessionKeyId;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
 const CREDENTIAL_VAULT_FILE_MAGIC: &[u8] = b"KOUSHI-CREDENTIAL-VAULT-V1\0";
-const CREDENTIAL_VAULT_NONCE_LEN: usize = 12;
 const CREDENTIAL_VAULT_VERSION: u8 = 2;
 const CREDENTIAL_VAULT_MAX_BYTES: usize = 16 * 1024 * 1024;
-const CREDENTIAL_VAULT_TAG_LEN: usize = 16;
 
 #[derive(Clone)]
-pub(crate) struct CredentialVaultData {
+pub struct CredentialVaultData {
     last_session: Option<SessionKeyId>,
     saved_sessions: Vec<SessionKeyId>,
     entries: Vec<CredentialVaultEntry>,
@@ -61,20 +55,20 @@ impl Drop for CredentialVaultEntry {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct PendingLoginRecord {
-    pub(crate) allocation_id: LocalStoreId,
-    pub(crate) slot: u8,
-    pub(crate) attempt_generation: u64,
-    pub(crate) normalized_homeserver: String,
-    pub(crate) auth_method: String,
-    pub(crate) device_id: String,
-    pub(crate) local_store_id: LocalStoreId,
+pub struct PendingLoginRecord {
+    pub allocation_id: LocalStoreId,
+    pub slot: u8,
+    pub attempt_generation: u64,
+    pub normalized_homeserver: String,
+    pub auth_method: String,
+    pub device_id: String,
+    pub local_store_id: LocalStoreId,
     /// Storage form of the local unlock secret. It is encrypted in the OS
     /// vault and is only exposed to the journal owner while materializing a
     /// binding.
-    pub(crate) binding_secret: String,
-    pub(crate) state: PendingLoginState,
-    pub(crate) final_session_key_id: Option<SessionKeyId>,
+    pub binding_secret: String,
+    pub state: PendingLoginState,
+    pub final_session_key_id: Option<SessionKeyId>,
 }
 
 impl Drop for PendingLoginRecord {
@@ -84,22 +78,22 @@ impl Drop for PendingLoginRecord {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct LocalStoreMigrationRecord {
-    pub(crate) key_id: SessionKeyId,
-    pub(crate) local_store_id: LocalStoreId,
+pub struct LocalStoreMigrationRecord {
+    pub key_id: SessionKeyId,
+    pub local_store_id: LocalStoreId,
     #[serde(default)]
-    pub(crate) state: LocalStoreMigrationState,
+    pub state: LocalStoreMigrationState,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, Default, Eq, PartialEq)]
-pub(crate) enum LocalStoreMigrationState {
+pub enum LocalStoreMigrationState {
     #[default]
     Marked,
     Renamed,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, Eq, PartialEq)]
-pub(crate) enum PendingLoginState {
+pub enum PendingLoginState {
     PreAuth,
     BoundTokenless,
     Abandoning,
@@ -121,21 +115,21 @@ struct CredentialVaultPayload {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CredentialVaultError {
+pub enum CredentialVaultError {
     Unavailable,
     Corrupt,
 }
 
 impl CredentialVaultData {
-    pub(crate) fn last_session(&self) -> Option<&SessionKeyId> {
+    pub fn last_session(&self) -> Option<&SessionKeyId> {
         self.last_session.as_ref()
     }
 
-    pub(crate) fn set_last_session(&mut self, key_id: Option<SessionKeyId>) {
+    pub fn set_last_session(&mut self, key_id: Option<SessionKeyId>) {
         self.last_session = key_id;
     }
 
-    pub(crate) fn saved_sessions(&self) -> SavedSessionIndex {
+    pub fn saved_sessions(&self) -> SavedSessionIndex {
         let mut index = SavedSessionIndex::new();
         for key_id in &self.saved_sessions {
             index.upsert(key_id.clone());
@@ -143,32 +137,28 @@ impl CredentialVaultData {
         index
     }
 
-    pub(crate) fn remember_session(&mut self, key_id: SessionKeyId) {
+    pub fn remember_session(&mut self, key_id: SessionKeyId) {
         if !self.saved_sessions.contains(&key_id) {
             self.saved_sessions.push(key_id);
         }
     }
 
-    pub(crate) fn forget_session(&mut self, key_id: &SessionKeyId) {
+    pub fn forget_session(&mut self, key_id: &SessionKeyId) {
         self.saved_sessions.retain(|saved| saved != key_id);
     }
 
-    pub(crate) fn matrix_session(&self, key_id: &SessionKeyId) -> Option<&str> {
+    pub fn matrix_session(&self, key_id: &SessionKeyId) -> Option<&str> {
         self.entry(key_id)
             .and_then(|entry| entry.matrix_session.as_deref())
     }
 
-    pub(crate) fn upsert_matrix_session(
-        &mut self,
-        key_id: SessionKeyId,
-        session: impl Into<String>,
-    ) {
+    pub fn upsert_matrix_session(&mut self, key_id: SessionKeyId, session: impl Into<String>) {
         let entry = self.entry_mut(key_id);
         zeroize_replaced_string(&mut entry.matrix_session);
         entry.matrix_session = Some(session.into());
     }
 
-    pub(crate) fn delete_matrix_session(&mut self, key_id: &SessionKeyId) {
+    pub fn delete_matrix_session(&mut self, key_id: &SessionKeyId) {
         if let Some(entry) = self
             .entries
             .iter_mut()
@@ -180,22 +170,18 @@ impl CredentialVaultData {
         }
     }
 
-    pub(crate) fn local_unlock_secret(&self, key_id: &SessionKeyId) -> Option<&str> {
+    pub fn local_unlock_secret(&self, key_id: &SessionKeyId) -> Option<&str> {
         self.entry(key_id)
             .and_then(|entry| entry.local_unlock_secret.as_deref())
     }
 
-    pub(crate) fn upsert_local_unlock_secret(
-        &mut self,
-        key_id: SessionKeyId,
-        secret: impl Into<String>,
-    ) {
+    pub fn upsert_local_unlock_secret(&mut self, key_id: SessionKeyId, secret: impl Into<String>) {
         let entry = self.entry_mut(key_id);
         zeroize_replaced_string(&mut entry.local_unlock_secret);
         entry.local_unlock_secret = Some(secret.into());
     }
 
-    pub(crate) fn delete_local_unlock_secret(&mut self, key_id: &SessionKeyId) {
+    pub fn delete_local_unlock_secret(&mut self, key_id: &SessionKeyId) {
         if let Some(entry) = self
             .entries
             .iter_mut()
@@ -207,16 +193,16 @@ impl CredentialVaultData {
         }
     }
 
-    pub(crate) fn local_store_id(&self, key_id: &SessionKeyId) -> Option<&LocalStoreId> {
+    pub fn local_store_id(&self, key_id: &SessionKeyId) -> Option<&LocalStoreId> {
         self.entry(key_id)
             .and_then(|entry| entry.local_store_id.as_ref())
     }
 
-    pub(crate) fn upsert_local_store_id(&mut self, key_id: SessionKeyId, store_id: LocalStoreId) {
+    pub fn upsert_local_store_id(&mut self, key_id: SessionKeyId, store_id: LocalStoreId) {
         self.entry_mut(key_id).local_store_id = Some(store_id);
     }
 
-    pub(crate) fn delete_local_store_id(&mut self, key_id: &SessionKeyId) {
+    pub fn delete_local_store_id(&mut self, key_id: &SessionKeyId) {
         if let Some(entry) = self
             .entries
             .iter_mut()
@@ -226,43 +212,43 @@ impl CredentialVaultData {
         }
     }
 
-    pub(crate) fn payload_version(&self) -> u8 {
+    pub fn payload_version(&self) -> u8 {
         self.payload_version
     }
 
-    pub(crate) fn mark_current_version(&mut self) {
+    pub fn mark_current_version(&mut self) {
         self.payload_version = CREDENTIAL_VAULT_VERSION;
     }
 
-    pub(crate) fn pending_logins(&self) -> &[PendingLoginRecord] {
+    pub fn pending_logins(&self) -> &[PendingLoginRecord] {
         &self.pending_logins
     }
 
-    pub(crate) fn pending_logins_mut(&mut self) -> &mut Vec<PendingLoginRecord> {
+    pub fn pending_logins_mut(&mut self) -> &mut Vec<PendingLoginRecord> {
         &mut self.pending_logins
     }
 
-    pub(crate) fn local_store_migration(&self) -> Option<&LocalStoreMigrationRecord> {
+    pub fn local_store_migration(&self) -> Option<&LocalStoreMigrationRecord> {
         self.local_store_migration.as_ref()
     }
 
-    pub(crate) fn set_local_store_migration(&mut self, migration: LocalStoreMigrationRecord) {
+    pub fn set_local_store_migration(&mut self, migration: LocalStoreMigrationRecord) {
         self.local_store_migration = Some(migration);
     }
 
-    pub(crate) fn clear_local_store_migration(&mut self) -> bool {
+    pub fn clear_local_store_migration(&mut self) -> bool {
         self.local_store_migration.take().is_some()
     }
 
-    pub(crate) fn legacy_cleanup_pending(&self) -> &[SessionKeyId] {
+    pub fn legacy_cleanup_pending(&self) -> &[SessionKeyId] {
         &self.legacy_cleanup_pending
     }
 
-    pub(crate) fn set_legacy_cleanup_pending(&mut self, key_ids: Vec<SessionKeyId>) {
+    pub fn set_legacy_cleanup_pending(&mut self, key_ids: Vec<SessionKeyId>) {
         self.legacy_cleanup_pending = key_ids;
     }
 
-    pub(crate) fn clear_legacy_cleanup_pending(&mut self) {
+    pub fn clear_legacy_cleanup_pending(&mut self) {
         self.legacy_cleanup_pending.clear();
     }
 
@@ -305,21 +291,27 @@ impl fmt::Debug for CredentialVaultData {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct CredentialVaultFile {
+#[derive(Clone)]
+pub struct CredentialVaultFile {
     path: PathBuf,
 }
 
+impl fmt::Debug for CredentialVaultFile {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("CredentialVaultFile(..)")
+    }
+}
+
 impl CredentialVaultFile {
-    pub(crate) fn new(path: PathBuf) -> Self {
+    pub fn new(path: PathBuf) -> Self {
         Self { path }
     }
 
-    pub(crate) fn exists(&self) -> bool {
+    pub fn exists(&self) -> bool {
         self.path.is_file()
     }
 
-    pub(crate) fn load(
+    pub fn load(
         &self,
         master_key: &CredentialVaultMasterKey,
     ) -> Result<CredentialVaultData, CredentialVaultError> {
@@ -327,7 +319,7 @@ impl CredentialVaultFile {
         decrypt_payload(master_key, &payload)
     }
 
-    pub(crate) fn store(
+    pub fn store(
         &self,
         master_key: &CredentialVaultMasterKey,
         data: &CredentialVaultData,
@@ -342,19 +334,19 @@ impl CredentialVaultFile {
         fail_before_persist: bool,
     ) -> Result<(), CredentialVaultError> {
         let payload = encrypt_payload(master_key, data, CREDENTIAL_VAULT_VERSION)?;
-        crate::file::atomic_replace_file(&self.path, &payload, fail_before_persist)
+        crate::atomic_replace_file(&self.path, &payload, fail_before_persist)
             .map_err(|_| CredentialVaultError::Unavailable)
     }
 
     #[cfg(any(test, feature = "test-hooks"))]
-    pub(crate) fn store_version_for_test(
+    pub fn store_version_for_test(
         &self,
         master_key: &CredentialVaultMasterKey,
         data: &CredentialVaultData,
         version: u8,
     ) -> Result<(), CredentialVaultError> {
         let payload = encrypt_payload(master_key, data, version)?;
-        crate::file::atomic_replace_file(&self.path, &payload, false)
+        crate::atomic_replace_file(&self.path, &payload, false)
             .map_err(|_| CredentialVaultError::Unavailable)
     }
 }
@@ -378,46 +370,27 @@ fn encrypt_payload(
     if plaintext.len() > CREDENTIAL_VAULT_MAX_BYTES {
         return Err(CredentialVaultError::Unavailable);
     }
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(master_key.as_bytes()));
-    let mut nonce_bytes = [0_u8; CREDENTIAL_VAULT_NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce_bytes);
-    let ciphertext = cipher
-        .encrypt(Nonce::from_slice(&nonce_bytes), plaintext.as_ref())
-        .map_err(|_| CredentialVaultError::Unavailable)?;
-    let mut encrypted = Vec::with_capacity(
-        CREDENTIAL_VAULT_FILE_MAGIC.len() + CREDENTIAL_VAULT_NONCE_LEN + ciphertext.len(),
-    );
-    encrypted.extend_from_slice(CREDENTIAL_VAULT_FILE_MAGIC);
-    encrypted.extend_from_slice(&nonce_bytes);
-    encrypted.extend_from_slice(&ciphertext);
-    Ok(encrypted)
+    crate::encrypt_envelope(
+        CREDENTIAL_VAULT_FILE_MAGIC,
+        master_key.as_bytes(),
+        plaintext.as_ref(),
+        CREDENTIAL_VAULT_MAX_BYTES,
+    )
+    .map_err(|_| CredentialVaultError::Unavailable)
 }
 
 fn decrypt_payload(
     master_key: &CredentialVaultMasterKey,
     encrypted: &[u8],
 ) -> Result<CredentialVaultData, CredentialVaultError> {
-    let header_len = CREDENTIAL_VAULT_FILE_MAGIC.len() + CREDENTIAL_VAULT_NONCE_LEN;
-    if encrypted.len() < header_len
-        || encrypted.len()
-            > CREDENTIAL_VAULT_MAX_BYTES
-                + CREDENTIAL_VAULT_FILE_MAGIC.len()
-                + CREDENTIAL_VAULT_NONCE_LEN
-                + CREDENTIAL_VAULT_TAG_LEN
-        || !encrypted.starts_with(CREDENTIAL_VAULT_FILE_MAGIC)
-    {
-        return Err(CredentialVaultError::Corrupt);
-    }
-    let nonce_start = CREDENTIAL_VAULT_FILE_MAGIC.len();
-    let nonce_end = nonce_start + CREDENTIAL_VAULT_NONCE_LEN;
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(master_key.as_bytes()));
     let plaintext = Zeroizing::new(
-        cipher
-            .decrypt(
-                Nonce::from_slice(&encrypted[nonce_start..nonce_end]),
-                &encrypted[nonce_end..],
-            )
-            .map_err(|_| CredentialVaultError::Corrupt)?,
+        crate::decrypt_envelope(
+            CREDENTIAL_VAULT_FILE_MAGIC,
+            master_key.as_bytes(),
+            encrypted,
+            CREDENTIAL_VAULT_MAX_BYTES,
+        )
+        .map_err(|_| CredentialVaultError::Corrupt)?,
     );
     let payload: CredentialVaultPayload =
         serde_json::from_slice(&plaintext).map_err(|_| CredentialVaultError::Corrupt)?;
@@ -596,5 +569,10 @@ mod tests {
         assert!(!debug.contains("debug-secret-user"));
         assert!(!debug.contains("debug-secret-session"));
         assert!(!debug.contains(unlock.as_str()));
+
+        let file = CredentialVaultFile::new(std::path::PathBuf::from(
+            "/synthetic/private/credentials.v1.enc",
+        ));
+        assert_eq!(format!("{file:?}"), "CredentialVaultFile(..)");
     }
 }

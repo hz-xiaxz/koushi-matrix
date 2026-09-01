@@ -20,8 +20,8 @@ use koushi_protocol::event::CoreEvent;
 use koushi_protocol::failure::CoreFailure;
 use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
 
-use crate::store::CredentialStoreBackend;
 use crate::store::session_key_id_from_info;
+use koushi_store::CredentialStoreBackend;
 
 use tempfile::tempdir;
 
@@ -149,7 +149,7 @@ async fn unsupported_password_login_never_installs_or_persists_the_session() {
         (false, false, false, false)
     );
     let backend =
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path()));
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path()));
     assert!(backend.load_last_session().expect("last pointer").is_none());
     assert!(
         backend
@@ -200,7 +200,7 @@ async fn unsupported_restore_preserves_persisted_session_and_positive_evidence()
     let cred_dir = tempdir().expect("tempdir");
     let data_dir = tempdir().expect("tempdir");
     let backend =
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path()));
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path()));
     backend
         .save_matrix_session(&key_id, &stored)
         .expect("session seed");

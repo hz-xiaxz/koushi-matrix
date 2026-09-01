@@ -9,6 +9,7 @@ members = [
     "crates/koushi-qa",
     "crates/koushi-diagnostics",
     "crates/koushi-media",
+    "crates/koushi-store",
     "apps/desktop/src-tauri",
     "tests/windows-overlay-acl",
     "spikes/sidebar-composition",
@@ -22,6 +23,7 @@ default-members = [
     "crates/koushi-sdk",
     "crates/koushi-core",
     "crates/koushi-diagnostics",
+    "crates/koushi-store",
     "apps/desktop/src-tauri",
 ]
 resolver = "2"

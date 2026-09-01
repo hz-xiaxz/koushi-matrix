@@ -32,7 +32,7 @@
     "release:version:check": "node ../../scripts/desktop-release-version.mjs",
     "lint": "eslint src && node ../../scripts/check-ime-text-inputs.mjs && node ../../scripts/check-agents-docs.mjs && node ../../scripts/check-frontend-semantic-owners.mjs",
     "lint:tauri-boundary": "node ../../scripts/check-tauri-adapter-boundary.mjs && node ../../scripts/check-command-snapshot-contract.mjs",
-    "lint:domain-deps": "node ../../scripts/check-domain-crate-platform-deps.mjs",
+    "lint:domain-deps": "node ../../scripts/check-domain-crate-platform-deps.mjs && node ../../scripts/check-leaf-crate-boundaries.mjs",
     "lint:rust-test-structure": "node ../../scripts/check-rust-test-structure.mjs",
     "test": "vitest run",
     "test:ipc-contract": "cargo test -p koushi-desktop core_event_wire_format_matches_checked_in_contract_artifact",

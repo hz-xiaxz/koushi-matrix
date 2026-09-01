@@ -10,13 +10,10 @@ use koushi_key::{CredentialStore, InMemoryCredentialBackend, LocalStoreId};
 use koushi_protocol::SessionKeyId;
 use tempfile::TempDir;
 
-use crate::credential_vault::{
-    CredentialVaultData, CredentialVaultFile, LocalStoreMigrationRecord, LocalStoreMigrationState,
-    PendingLoginRecord, PendingLoginState,
-};
-use crate::store::{
-    CredentialStoreBackend, MigrationFault, PendingLoginCleanupEvidence, PendingLoginFault,
-    StoreActor,
+use crate::store::{MigrationFault, PendingLoginCleanupEvidence, PendingLoginFault, StoreActor};
+use koushi_store::{
+    CredentialStoreBackend, CredentialVaultData, CredentialVaultFile, LocalStoreMigrationRecord,
+    LocalStoreMigrationState, PendingLoginRecord, PendingLoginState,
 };
 
 pub trait LoginStoreSupportCase {

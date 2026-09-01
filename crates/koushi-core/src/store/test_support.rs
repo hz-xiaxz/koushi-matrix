@@ -1,7 +1,8 @@
 use std::sync::{Arc, Mutex};
 
-use super::{CredentialStoreBackend, FileCredentialStore, StoreActor};
+use super::StoreActor;
 use koushi_protocol::SessionKeyId;
+use koushi_store::{CredentialStoreBackend, FileCredentialStore};
 
 pub(super) fn make_key_id() -> SessionKeyId {
     SessionKeyId {

@@ -32,8 +32,8 @@ use crate::link_preview::LinkPreviewContext;
 use koushi_protocol::failure::CoreFailure;
 use koushi_protocol::ids::{AccountKey, RequestId, RuntimeConnectionId};
 
-use crate::store::CredentialStoreBackend;
 use crate::store::{StoreActor, session_key_id_from_info};
+use koushi_store::CredentialStoreBackend;
 
 use tempfile::tempdir;
 
@@ -45,7 +45,7 @@ async fn restore_and_switch_of_unknown_account_emit_not_found() {
     let cred_dir = tempdir().expect("tempdir");
     let data_dir = tempdir().expect("tempdir");
     let store = StoreActor::with_backend(
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path())),
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path())),
         data_dir.path(),
     );
 
@@ -165,7 +165,7 @@ async fn hard_logout_cleanup_is_bounded_and_deletes_account_persistence() {
         Some([AppAction::LogoutFinished])
     ) {}
     let backend =
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path()));
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path()));
     assert!(
         backend
             .load_last_session()
@@ -331,7 +331,7 @@ async fn password_quarantine_persists_no_credentials_and_restart_is_signed_out()
     ));
 
     let backend =
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path()));
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path()));
     assert!(
         backend
             .load_last_session()
@@ -456,7 +456,7 @@ async fn oidc_completion_installs_only_a_provisional_quarantined_session() {
     );
 
     let backend =
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path()));
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path()));
     assert!(backend.load_last_session().expect("pointer read").is_none());
     assert!(
         backend
@@ -554,7 +554,7 @@ async fn verified_offline_warm_restore_reaches_ready_without_network_catch_up() 
     let cred_dir = tempdir().expect("tempdir");
     let data_dir = tempdir().expect("tempdir");
     let backend =
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path()));
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path()));
     let key_id = SessionKeyId {
         homeserver: homeserver.clone(),
         user_id: "@fixture-user:example.invalid".to_owned(),
@@ -790,7 +790,7 @@ async fn provisional_rejection_deletes_keyed_store_before_signed_out_ack() {
         }
     }
     let backend =
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path()));
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path()));
     assert!(backend.load_last_session().expect("pointer read").is_none());
     assert!(
         backend
@@ -1152,7 +1152,7 @@ async fn real_store_switch_a_to_b_preserves_both_accounts_and_switches_back() {
     }
 
     let backend =
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path()));
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path()));
     let saved = backend.load_saved_sessions().expect("saved index");
     assert_eq!(saved.sessions().len(), 2);
     let alpha_key = saved
@@ -1228,7 +1228,7 @@ async fn same_key_replacement_preserves_open_store_and_restores_again_once() {
         acknowledge_next_verified_projection(&handle, &mut action_rx).await;
     }
     let backend =
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path()));
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path()));
     let saved = backend.load_saved_sessions().expect("saved same-key index");
     assert_eq!(saved.sessions().len(), 1);
     let key_id = saved.sessions()[0].clone();
@@ -1304,7 +1304,7 @@ async fn restore_installs_provisional_without_normal_sync_or_public_ready_event(
     let cred_dir = tempdir().expect("tempdir");
     let data_dir = tempdir().expect("tempdir");
     let backend =
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path()));
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path()));
     let key_id = SessionKeyId {
         homeserver: homeserver.clone(),
         user_id: "@fixture-user:example.invalid".to_owned(),
@@ -2038,7 +2038,7 @@ async fn restore_last_session_with_dangling_pointer_emits_not_found() {
 
     // Seed only the pointer — no session JSON behind it.
     let seeding_backend =
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path()));
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path()));
     let key_id = SessionKeyId {
         homeserver: "https://example.test".to_owned(),
         user_id: "@dangling:example.test".to_owned(),
@@ -2116,7 +2116,7 @@ async fn query_saved_sessions_lists_seeded_identities() {
     let data_dir = tempdir().expect("tempdir");
 
     let seeding_backend =
-        CredentialStoreBackend::FileDir(crate::store::FileCredentialStore::new(cred_dir.path()));
+        CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(cred_dir.path()));
     let alpha = SessionKeyId {
         homeserver: "https://example.test".to_owned(),
         user_id: "@alpha:example.test".to_owned(),
