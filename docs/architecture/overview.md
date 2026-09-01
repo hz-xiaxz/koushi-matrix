@@ -64,13 +64,16 @@ koushi-protocol                     neutral command/event/state-update DTOs
 koushi-core                         the ONLY production runtime owner
         |  actors own SDK handles, tasks, policy, projection
 koushi-sdk                         thin matrix-rust-sdk adapter
+koushi-store                       credential + encrypted-file persistence
 koushi-state                        pure reducer + snapshot DTOs
-koushi-search / koushi-key  search verification / credential store
+koushi-search / koushi-media / koushi-key   pure algorithm/key leaves
         |
 matrix-rust-sdk (vendored)                  sync, timeline, send queue, crypto
 
 koushi-qa (non-default) consumes koushi-protocol + Core test hooks for the
 headless and real-homeserver QA binaries; it is not in the production stack.
+koushi-core-testkit is likewise non-default and test-only: it owns shared Core
+integration fixtures/targets and never participates in the product runtime.
 ```
 
 Crate responsibilities:
@@ -201,7 +204,9 @@ Crate responsibilities:
 - `koushi-core` — actor lifecycle, command routing/admission policy, event
   emission/projection, SDK session handles, background tasks and AppState
   projection. It consumes `koushi-protocol` DTOs and contains no QA binary
-  source tree. It retains the task/subscription handles it creates and makes
+  source tree. Its `StoreActor` remains the sole account/path/key/migration
+  policy owner while delegating credential and encrypted-envelope mechanics to
+  `koushi-store`. It retains the task/subscription handles it creates and makes
   replacement plus ordered shutdown a cancel-and-await barrier; a detached
   task is never a lifecycle owner. Production Matrix behavior lives here and
   nowhere else. Scheduled
@@ -209,11 +214,24 @@ Crate responsibilities:
   event requests, and for the local fallback timer that routes due Local-handle
   items back through the normal outbound send queue; the GUI never owns
   delayed-send timers or Matrix delayed-event API calls.
+- `koushi-store` — native persistence leaf for credential backend selection,
+  the encrypted credential-vault file, and the shared encrypted-file envelope.
+  It depends on app-owned identity/key/state types and diagnostics but has no
+  Matrix SDK, Tauri, async runtime, Core, QA or OS-keyring implementation.
+  `StoreActor` remains in Core as the sole policy/lifecycle owner: it selects
+  account paths, obtains and derives secrets, owns migrations and generation
+  fences, maps coarse failures, and supplies SDK store/search configuration.
 - `koushi-key` — platform-neutral credential-store port, key derivation (HKDF
   from the local unlock secret), and zeroizing secret wrappers. The OS keyring
   backend lives in Tauri.
 - `koushi-search` — candidate verification, document store, index
   maintenance queue.
+- `koushi-media` — pure image decode-limit, resize/format, encoding and byte-kind
+  classification helpers. Core owns media/cache lifecycle and state projection;
+  adapters own platform delivery.
+- `koushi-core-testkit` — non-default, publish-disabled test package for shared
+  Core integration fixtures and targets. It may enable Core `test-hooks`; it is
+  not a production dependency, QA runtime, or reason to expose private actors.
 - `koushi-qa` — non-default, feature-gated package owning the authoritative
   `headless-core-qa` and `real-homeserver-qa` binaries, scenario registry,
   orchestration and private-data-free evidence production. It uses protocol
@@ -351,8 +369,10 @@ rewriting the runtime.
    store config, media-save filesystem operations, and process/OS APIs appear
    only behind traits with platform backends (today: OS keychain + SQLite and
    the native media-save port; browser later: WebCrypto-derived keys +
-   IndexedDB). `StoreActor` is the only actor allowed platform-conditional
-   code. The fail-closed local-encryption rule still applies on every
+   IndexedDB). `koushi-store` may implement native credential/encrypted-file
+   mechanics behind those ports, but `StoreActor` is the only actor allowed
+   platform-conditional policy and remains the account/path/key/migration
+   owner. The fail-closed local-encryption rule still applies on every
    platform: a weaker browser at-rest story must be an explicit, surfaced
    property, never a silent fallback.
 4. **Pure crates stay wasm-clean.** `koushi-state`, `koushi-search`, and

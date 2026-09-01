@@ -1080,9 +1080,13 @@ PTY handling, prompt line order) is documented in `AGENTS.md`.
    update DTOs with no Tauri/OS/filesystem/SDK/async-runtime types; task spawn
    and timers use executor abstractions, not direct `tokio::spawn`/
    `tokio::time` in actor logic; `keyring`, paths, and store config stay behind
-   `StoreActor`/adapter ports; `koushi-state`, `koushi-search`, and
-   `koushi-protocol` compile for `wasm32-unknown-unknown`. See Platform
-   Portability in `docs/architecture/overview.md`.
+   `StoreActor`/adapter ports; `koushi-store` may own native credential and
+   encrypted-file mechanics but never Matrix SDK/Tauri/async runtime or a
+   concrete OS-keyring backend; `koushi-state`, `koushi-search`, and
+   `koushi-protocol` compile for `wasm32-unknown-unknown`. Test-only shared Core
+   integration support belongs in non-default `koushi-core-testkit`, never a
+   Core self-dev-dependency or production API. See Platform Portability in
+   `docs/architecture/overview.md`.
 6. Japanese/CJK product semantics remain Rust-owned and platform-portable.
    Catalog completeness is tested in `apps/desktop/src/i18n`, but CJK
    normalization, display sort keys, search query variants, and highlight
