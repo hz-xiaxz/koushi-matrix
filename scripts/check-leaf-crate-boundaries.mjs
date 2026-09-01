@@ -70,6 +70,16 @@ function manifestHasDependency(manifest, dependency) {
   return new RegExp(`^${dependency}\\s*=`, "mu").test(manifest);
 }
 
+function directRustFiles(root, relativeDirectory) {
+  const directory = path.join(root, relativeDirectory);
+  if (!fs.existsSync(directory)) return [];
+  return fs
+    .readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".rs"))
+    .map((entry) => entry.name)
+    .sort();
+}
+
 export function findLeafCrateBoundaryViolations(root) {
   const violations = [];
   const workspace = read(root, "Cargo.toml") ?? "";
@@ -175,6 +185,14 @@ export function findLeafCrateBoundaryViolations(root) {
     if (fs.existsSync(path.join(root, "crates/koushi-core-testkit/tests", target))) {
       violations.push(`Core-local integration target moved unnecessarily: ${target}`);
     }
+  }
+  const coreTargets = directRustFiles(root, "crates/koushi-core/tests");
+  if (JSON.stringify(coreTargets) !== JSON.stringify([...coreLocalIntegrationTargets].sort())) {
+    violations.push("unexpected Rust integration target set in koushi-core");
+  }
+  const movedTargets = directRustFiles(root, "crates/koushi-core-testkit/tests");
+  if (JSON.stringify(movedTargets) !== JSON.stringify([...testkitTargets].sort())) {
+    violations.push("unexpected Rust integration target set in koushi-core-testkit");
   }
   if (!ci.includes("cargo test -p koushi-core-testkit")) {
     violations.push("CI must run koushi-core-testkit explicitly");

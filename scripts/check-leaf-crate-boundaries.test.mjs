@@ -147,6 +147,16 @@ test("detects testkit default or production leakage, self-dependency, and missin
     force: true
   });
   fs.rmSync(path.join(root, "crates/koushi-core-testkit/tests", testkitTargets[0]));
+  write(
+    root,
+    path.join("crates/koushi-core/tests", testkitTargets[1]),
+    "#[test]\nfn duplicate() {}\n"
+  );
+  write(
+    root,
+    path.join("crates/koushi-core-testkit/tests", coreLocalIntegrationTargets[0]),
+    "#[test]\nfn misplaced() {}\n"
+  );
   fs.writeFileSync(path.join(root, ".github/workflows/ci.yml"), "jobs: {}\n");
   fs.writeFileSync(
     path.join(root, "Cargo.toml"),
@@ -162,5 +172,13 @@ test("detects testkit default or production leakage, self-dependency, and missin
   assert(violations.includes("koushi-qa must not depend on koushi-core-testkit"));
   assert(violations.includes("shared Core integration support missing from koushi-core-testkit"));
   assert(violations.includes(`koushi-core-testkit target missing: ${testkitTargets[0]}`));
+  assert(violations.includes(`moved integration target remains in koushi-core: ${testkitTargets[1]}`));
+  assert(
+    violations.includes(
+      `Core-local integration target moved unnecessarily: ${coreLocalIntegrationTargets[0]}`
+    )
+  );
+  assert(violations.includes("unexpected Rust integration target set in koushi-core"));
+  assert(violations.includes("unexpected Rust integration target set in koushi-core-testkit"));
   assert(violations.includes("CI must run koushi-core-testkit explicitly"));
 });
