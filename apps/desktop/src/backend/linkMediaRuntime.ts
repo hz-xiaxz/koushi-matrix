@@ -20,6 +20,10 @@ export function mediaSourceUrl(sourceUrl: string): string {
   return activePort().mediaSourceUrl(sourceUrl);
 }
 
+export function renderableThumbnailSourceUrl(sourceRef: string): string | null {
+  return activePort().renderableThumbnailSourceUrl(sourceRef);
+}
+
 export async function saveReadyMediaFile(
   sourceUrl: string,
   filename: string

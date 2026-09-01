@@ -27,7 +27,10 @@ import type {
   UserProfile
 } from "../domain/types";
 import { contextMenuItems } from "../domain/contextMenus";
-import { mediaSourceUrl } from "../backend/linkMediaRuntime";
+import {
+  mediaSourceUrl,
+  renderableThumbnailSourceUrl
+} from "../backend/linkMediaRuntime";
 import {
   renderTimelineMessageText,
   type TimelineRowActionHandlers
@@ -413,7 +416,7 @@ function PinnedEventsList({
           );
           const avatarSource =
             profile?.avatar?.thumbnail.kind === "ready"
-              ? mediaSourceUrl(profile.avatar.thumbnail.source_url)
+              ? renderableThumbnailSourceUrl(profile.avatar.thumbnail.source_url)
               : null;
           return (
           <div className="pinned-event" key={event.event_id}>

@@ -8,7 +8,7 @@ import {
   useFloatingPlacement,
   useHoverFocusPopup
 } from "../floatingLayer";
-import { mediaSourceUrl } from "../../backend/linkMediaRuntime";
+import { renderableThumbnailSourceUrl } from "../../backend/linkMediaRuntime";
 import type { LiveReadReceipt } from "../../domain/types";
 
 /** Reader popup width; the panel narrows to the pane when it is smaller. */
@@ -141,7 +141,7 @@ function receiptInitials(receipt: LiveReadReceipt): string {
 
 function receiptAvatarSource(receipt: LiveReadReceipt): string | null {
   return receipt.avatar?.thumbnail.kind === "ready"
-    ? mediaSourceUrl(receipt.avatar.thumbnail.source_url)
+    ? renderableThumbnailSourceUrl(receipt.avatar.thumbnail.source_url)
     : null;
 }
 

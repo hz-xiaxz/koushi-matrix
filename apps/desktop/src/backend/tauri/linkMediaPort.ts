@@ -23,7 +23,6 @@ export const tauriLinkMediaPort: LinkMediaPort = {
       sourceUrl.startsWith("http://") ||
       sourceUrl.startsWith("https://") ||
       sourceUrl.startsWith("asset://") ||
-      sourceUrl.startsWith("koushi-thumbnail://") ||
       sourceUrl.startsWith("data:") ||
       sourceUrl.startsWith("blob:")
     ) {
@@ -37,6 +36,12 @@ export const tauriLinkMediaPort: LinkMediaPort = {
     } catch {
       return sourceUrl;
     }
+  },
+  renderableThumbnailSourceUrl(sourceRef) {
+    if (!/^(?:avatar|link-preview)\/[0-9a-f]{16}$/.test(sourceRef)) {
+      return null;
+    }
+    return `koushi-thumbnail://localhost/${sourceRef}`;
   },
   async saveMediaFile(sourceUrl, filename) {
     const safeFilename = safeDownloadFilename(filename);

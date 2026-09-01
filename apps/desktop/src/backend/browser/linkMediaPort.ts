@@ -7,5 +7,8 @@ export const browserLinkMediaPort: LinkMediaPort = {
   mediaSourceUrl(sourceUrl) {
     return sourceUrl;
   },
+  renderableThumbnailSourceUrl(sourceRef) {
+    return /^(?:data:|blob:|asset:|https?:\/\/)/.test(sourceRef) ? sourceRef : null;
+  },
   async saveMediaFile() {}
 };

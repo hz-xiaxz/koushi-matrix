@@ -31,7 +31,7 @@ import { AppearanceControls } from "./user-settings/AppearanceControls";
 import { DetailRow } from "./user-settings/SettingsStatusPrimitives";
 import type { DisplayDensity } from "../domain/types";
 import type { ShortcutLabelProfile } from "../domain/shortcuts";
-import { mediaSourceUrl } from "../backend/linkMediaRuntime";
+import { renderableThumbnailSourceUrl } from "../backend/linkMediaRuntime";
 import type {
   AccountManagementCapabilities,
   AccountManagementState,
@@ -971,7 +971,7 @@ function avatarSourceUrl(avatar: ProfileState["own"]["avatar"]): string | null {
   if (avatar?.thumbnail.kind !== "ready") {
     return null;
   }
-  return mediaSourceUrl(avatar.thumbnail.source_url);
+  return renderableThumbnailSourceUrl(avatar.thumbnail.source_url);
 }
 
 function accountInitial(userId: string): string {
