@@ -87,8 +87,12 @@ export function findLeafCrateBoundaryViolations(root) {
   const coreManifest = read(root, "crates/koushi-core/Cargo.toml") ?? "";
   const qaManifest = read(root, "crates/koushi-qa/Cargo.toml") ?? "";
   const testkitManifest = read(root, "crates/koushi-core-testkit/Cargo.toml");
+  const searchManifest = read(root, "crates/koushi-search/Cargo.toml");
+  const mediaManifest = read(root, "crates/koushi-media/Cargo.toml");
   const ci = read(root, ".github/workflows/ci.yml") ?? "";
   const storeSources = rustSources(root, "crates/koushi-store/src");
+  const searchSources = rustSources(root, "crates/koushi-search/src");
+  const mediaSources = rustSources(root, "crates/koushi-media/src");
   const coreSources = rustSources(root, "crates/koushi-core/src");
   const qaSources = rustSources(root, "crates/koushi-qa/src");
 
@@ -104,6 +108,11 @@ export function findLeafCrateBoundaryViolations(root) {
   }
   if (defaultMembers.includes('"crates/koushi-core-testkit"')) {
     violations.push("koushi-core-testkit must not be a default workspace member");
+  }
+  for (const member of ["crates/koushi-search", "crates/koushi-media"]) {
+    if (!workspace.includes(`"${member}"`)) {
+      violations.push(`workspace member missing: ${member}`);
+    }
   }
 
   if (storeManifest === null) {
@@ -126,6 +135,53 @@ export function findLeafCrateBoundaryViolations(root) {
     }
   }
 
+  const pureLeafForbiddenDependencies = [
+    "koushi-core",
+    "koushi-key",
+    "koushi-protocol",
+    "koushi-qa",
+    "koushi-sdk",
+    "koushi-store",
+    "matrix-sdk",
+    "matrix-sdk-base",
+    "matrix-sdk-ui",
+    "tauri",
+    "tokio",
+    "keyring",
+    "tempfile",
+    "rusqlite",
+    "libc",
+    "nix",
+    "windows-sys"
+  ];
+  for (const [leaf, manifest] of [
+    ["koushi-search", searchManifest],
+    ["koushi-media", mediaManifest]
+  ]) {
+    if (manifest === null) {
+      violations.push(`missing crates/${leaf}/Cargo.toml`);
+      continue;
+    }
+    for (const dependency of pureLeafForbiddenDependencies) {
+      if (manifestHasDependency(manifest, dependency)) {
+        violations.push(`${leaf} has forbidden dependency: ${dependency}`);
+      }
+    }
+  }
+  const pureLeafForbiddenTokens = ["matrix_sdk", "tauri::", "tokio::", "std::fs", "PathBuf"];
+  for (const [leaf, sources] of [
+    ["koushi-search", searchSources],
+    ["koushi-media", mediaSources]
+  ]) {
+    for (const [relativePath, source] of sources) {
+      for (const token of pureLeafForbiddenTokens) {
+        if (source.includes(token)) {
+          violations.push(`${leaf} source contains forbidden token ${token}: ${relativePath}`);
+        }
+      }
+    }
+  }
+
   for (const required of [
     "pub enum CredentialStoreBackend",
     "pub struct CredentialVaultFile",
@@ -136,6 +192,18 @@ export function findLeafCrateBoundaryViolations(root) {
     if (!storeSources.some(([, source]) => source.includes(required))) {
       violations.push(`koushi-store definition missing: ${required}`);
     }
+  }
+  for (const required of ["pub struct ImageKind", "pub fn image_kind"]) {
+    if (!mediaSources.some(([, source]) => source.includes(required))) {
+      violations.push(`koushi-media definition missing: ${required}`);
+    }
+  }
+  if (fs.existsSync(path.join(root, "crates/koushi-core/src/cached_image.rs"))) {
+    violations.push("cached image classifier remains in koushi-core");
+  }
+  const renderableThumbnail = read(root, "crates/koushi-core/src/renderable_thumbnail.rs") ?? "";
+  if (!renderableThumbnail.includes("koushi_media::image_kind")) {
+    violations.push("Core renderable thumbnails must use koushi-media image_kind");
   }
 
   if (testkitManifest === null) {

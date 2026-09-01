@@ -29,7 +29,7 @@ function fixture() {
   write(
     root,
     "Cargo.toml",
-    '[workspace]\nmembers = ["crates/koushi-store", "crates/koushi-core", "crates/koushi-core-testkit", "crates/koushi-qa"]\ndefault-members = ["crates/koushi-store", "crates/koushi-core"]\n'
+    '[workspace]\nmembers = ["crates/koushi-store", "crates/koushi-core", "crates/koushi-core-testkit", "crates/koushi-search", "crates/koushi-media", "crates/koushi-qa"]\ndefault-members = ["crates/koushi-store", "crates/koushi-core"]\n'
   );
   write(
     root,
@@ -43,10 +43,31 @@ function fixture() {
   );
   write(
     root,
+    "crates/koushi-search/Cargo.toml",
+    '[package]\nname = "koushi-search"\n[dependencies]\nkoushi-state = { path = "../koushi-state" }\n'
+  );
+  write(root, "crates/koushi-search/src/lib.rs", "pub struct SearchDocumentStore;\n");
+  write(
+    root,
+    "crates/koushi-media/Cargo.toml",
+    '[package]\nname = "koushi-media"\n[dependencies]\nimage = "0.25"\n'
+  );
+  write(
+    root,
+    "crates/koushi-media/src/lib.rs",
+    "pub struct ImageKind;\npub fn image_kind() {}\n"
+  );
+  write(
+    root,
     "crates/koushi-core/Cargo.toml",
     '[package]\nname = "koushi-core"\n[dependencies]\nkoushi-store = { path = "../koushi-store" }\n[features]\ntest-hooks = ["koushi-store/test-hooks"]\n'
   );
   write(root, "crates/koushi-core/src/lib.rs", "pub struct StoreActor;\n");
+  write(
+    root,
+    "crates/koushi-core/src/renderable_thumbnail.rs",
+    "pub fn thumbnail() { koushi_media::image_kind(); }\n"
+  );
   write(
     root,
     "crates/koushi-core-testkit/Cargo.toml",
@@ -105,6 +126,37 @@ test("detects missing packages, dependency leaks, and retained Core crypto", () 
   assert(violations.some((item) => item.includes("CredentialStoreBackend")));
   assert(violations.some((item) => item.includes("use chacha20poly1305")));
   assert(violations.some((item) => item.includes("Core test-hook cfg excludes unit tests")));
+});
+
+test("detects pure search/media dependency and classifier ownership violations", () => {
+  const root = fixture();
+  fs.appendFileSync(
+    path.join(root, "crates/koushi-search/Cargo.toml"),
+    'tokio = "1"\n'
+  );
+  fs.appendFileSync(
+    path.join(root, "crates/koushi-media/Cargo.toml"),
+    'koushi-core = { path = "../koushi-core" }\n'
+  );
+  fs.writeFileSync(
+    path.join(root, "crates/koushi-search/src/lib.rs"),
+    "pub fn bad(_: std::path::PathBuf) { tokio::spawn(async {}); }\n"
+  );
+  fs.writeFileSync(path.join(root, "crates/koushi-media/src/lib.rs"), "pub fn missing() {}\n");
+  write(root, "crates/koushi-core/src/cached_image.rs", "pub fn cached_image_kind() {}\n");
+  fs.writeFileSync(
+    path.join(root, "crates/koushi-core/src/renderable_thumbnail.rs"),
+    "pub fn stale() {}\n"
+  );
+
+  const violations = findLeafCrateBoundaryViolations(root);
+  assert(violations.includes("koushi-search has forbidden dependency: tokio"));
+  assert(violations.includes("koushi-media has forbidden dependency: koushi-core"));
+  assert(violations.some((item) => item.includes("koushi-search source contains forbidden token")));
+  assert(violations.includes("koushi-media definition missing: pub struct ImageKind"));
+  assert(violations.includes("koushi-media definition missing: pub fn image_kind"));
+  assert(violations.includes("cached image classifier remains in koushi-core"));
+  assert(violations.includes("Core renderable thumbnails must use koushi-media image_kind"));
 });
 
 test("detects missing test-hook propagation and stale QA probe routing", () => {
