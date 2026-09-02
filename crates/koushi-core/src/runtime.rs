@@ -239,6 +239,11 @@ pub enum CoreQaCommand {
         target: koushi_state::VerificationTarget,
         acknowledged: oneshot::Sender<Result<(), ()>>,
     },
+    AssertInboundSessionsStartAtZero {
+        request_id: RequestId,
+        room_id: String,
+        acknowledged: oneshot::Sender<Result<usize, ()>>,
+    },
     SyncOnce {
         request_id: RequestId,
     },
@@ -1647,6 +1652,22 @@ impl AppActor {
                         crate::account::AccountMessage::QaRefreshDeviceKeysAndAssertKnown {
                             request_id,
                             target,
+                            acknowledged,
+                        },
+                    )
+                    .await;
+            }
+            CoreQaCommand::AssertInboundSessionsStartAtZero {
+                request_id,
+                room_id,
+                acknowledged,
+            } => {
+                let _ = self
+                    .account_actor
+                    .send(
+                        crate::account::AccountMessage::QaAssertInboundSessionsStartAtZero {
+                            request_id,
+                            room_id,
                             acknowledged,
                         },
                     )

@@ -63,7 +63,7 @@ pub use koushi_protocol::event::*;
 pub use koushi_protocol::failure::*;
 pub use koushi_protocol::ids::*;
 pub use koushi_protocol::state_update::*;
-pub use koushi_state::{EncryptionDebugOperationKind, MediaTransferProgress};
+pub use koushi_state::MediaTransferProgress;
 pub use media_save::{
     MediaSaveError, MediaSaveFilesystem, MediaSaveIoError, default_media_save_path,
     safe_media_save_filename, save_downloaded_media,

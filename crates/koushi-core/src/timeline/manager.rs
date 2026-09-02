@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use futures_util::StreamExt;
 use koushi_sdk::{
     MatrixClientSession, MatrixCommittedRoomTimelineCheckpoint as MatrixRoomSubscriptionCheckpoint,
-    MatrixLiveTailRefreshOutcome, MatrixOutboundGroupSessionToken, MatrixRoomKeyReshareTarget,
+    MatrixLiveTailRefreshOutcome,
 };
 use koushi_state::{
     AppAction, ComposerFormattingOptions, OperationFailureKind, TimelineThreadRootOrder,
@@ -65,7 +65,6 @@ use super::residency::{
     MembershipOperationGate, RoomLeaveState, RoomMembershipTransition, RoomRemovalCause,
     SubscriptionReconcileTrigger, TimelineSubscriptionResidencyHandle, VisibleRoomObservation,
 };
-use super::room_key_recovery::RoomKeyReshareCompletion;
 use super::thread_projection::{
     ThreadRootProjectionFetchRegistry, ThreadSummaryActivityObservation,
 };
@@ -194,21 +193,6 @@ pub(crate) enum TimelineMessage {
         key: TimelineKey,
         actor_generation: u64,
         target: crate::read_state::ReadTarget,
-    },
-    RoomKeyReshareCompleted {
-        key: TimelineKey,
-        actor_generation: u64,
-        expected_session: MatrixOutboundGroupSessionToken,
-        target: MatrixRoomKeyReshareTarget,
-        attempt: u8,
-        outcome: RoomKeyReshareCompletion,
-    },
-    RunRoomKeyReshare {
-        key: TimelineKey,
-        actor_generation: u64,
-        expected_session: MatrixOutboundGroupSessionToken,
-        target: MatrixRoomKeyReshareTarget,
-        attempt: u8,
     },
     #[cfg_attr(not(test), allow(dead_code))]
     Shutdown {
@@ -718,10 +702,6 @@ impl TimelineManagerActor {
                     }
                     continue;
                 }
-                _ = self.send_enqueue_workers.diagnostic_tasks.next(),
-                    if !self.send_enqueue_workers.diagnostic_tasks.is_empty() => {
-                    continue;
-                }
                 _ = poll_global_send_completion_observer(&mut self.global_send_completion_observer_future) => {
                     self.global_send_completion_observer_future = None;
                     continue;
@@ -901,39 +881,6 @@ impl TimelineManagerActor {
                     self.handle_local_read_boundary_observed(key, actor_generation, target)
                         .await;
                 }
-                TimelineMessage::RoomKeyReshareCompleted {
-                    key,
-                    actor_generation,
-                    expected_session,
-                    target,
-                    attempt,
-                    outcome,
-                } => {
-                    self.handle_room_key_reshare_completed(
-                        key,
-                        actor_generation,
-                        expected_session,
-                        target,
-                        attempt,
-                        outcome,
-                    )
-                    .await;
-                }
-                TimelineMessage::RunRoomKeyReshare {
-                    key,
-                    actor_generation,
-                    expected_session,
-                    target,
-                    attempt,
-                } => {
-                    self.handle_room_key_reshare(
-                        key,
-                        actor_generation,
-                        expected_session,
-                        target,
-                        attempt,
-                    );
-                }
                 TimelineMessage::Command(command) => {
                     self.handle_command(command).await;
                 }
@@ -975,8 +922,6 @@ impl TimelineManagerActor {
         // while the sole global terminal observer remains live. A worker may
         // still bind a durably saved SDK transaction during this phase.
         self.read_workers.cancel_all();
-        self.send_enqueue_workers.room_key_reshares.clear();
-        self.send_enqueue_workers.cancel_diagnostics();
         self.read_workers.publish_persistence();
         let abandoned_read_waiters = self
             .read_workers
@@ -1092,7 +1037,6 @@ impl TimelineManagerActor {
             }
             TimelineCommand::Unsubscribe { request_id, key } => {
                 trace_timeline_route("manager_received", "unsubscribe", request_id, &key);
-                self.send_enqueue_workers.room_key_reshares.remove(&key);
                 // Drop the actor handle, which cancels its relay task and drops
                 // the SDK Timeline handle — no dedicated success event per spec.
                 if matches!(key.kind, TimelineKind::Room { .. }) {
@@ -1791,7 +1735,6 @@ impl TimelineManagerActor {
         {
             Ok(handle) => {
                 self.emit_timeline_subscribed_action(&key).await;
-                self.send_enqueue_workers.room_key_reshares.remove(&key);
                 if let Some(previous) = self.timelines.insert(key.clone(), handle) {
                     previous.stop().await;
                 }

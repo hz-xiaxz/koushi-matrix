@@ -388,7 +388,6 @@ async fn project_room_list_snapshot(
     snapshot: &koushi_sdk::MatrixRoomListSnapshot,
     known_room_ids: &Arc<RwLock<BTreeSet<String>>>,
     known_dm_rooms: &Arc<RwLock<Vec<RoomSummary>>>,
-    room_tx: Option<&mpsc::Sender<RoomMessage>>,
     action_tx: &mpsc::Sender<Vec<AppAction>>,
     event_tx: &broadcast::Sender<CoreEvent>,
     generation: u64,
@@ -432,31 +431,8 @@ async fn project_room_list_snapshot(
             )),
     );
     let projected_rooms = rooms.clone();
-    let previous_room_ids = known_room_ids
-        .read()
-        .map(|room_ids| room_ids.clone())
-        .unwrap_or_default();
-    let next_room_ids = projected_rooms
-        .iter()
-        .map(|room| room.room_id.clone())
-        .collect::<BTreeSet<_>>();
-    let removed_room_ids = if authoritative {
-        previous_room_ids
-            .difference(&next_room_ids)
-            .cloned()
-            .collect::<BTreeSet<_>>()
-    } else {
-        BTreeSet::new()
-    };
     if authoritative {
         replace_known_room_ids(known_room_ids, &projected_rooms);
-        if let Some(room_tx) = room_tx {
-            let _ = room_tx
-                .send(RoomMessage::AuthoritativeRoomsRemoved {
-                    room_ids: removed_room_ids,
-                })
-                .await;
-        }
     }
     let snapshot_action = if authoritative {
         AppAction::RoomListSnapshotAuthoritative {
@@ -1623,7 +1599,6 @@ async fn normalize_and_project_entries(
         &snapshot,
         known_room_ids,
         known_dm_rooms,
-        Some(room_tx),
         action_tx,
         event_tx,
         generation,

@@ -133,6 +133,12 @@ pub(crate) enum AccountMessage {
         acknowledged: oneshot::Sender<Result<(), ()>>,
     },
     #[cfg(any(test, feature = "test-hooks"))]
+    QaAssertInboundSessionsStartAtZero {
+        request_id: RequestId,
+        room_id: String,
+        acknowledged: oneshot::Sender<Result<usize, ()>>,
+    },
+    #[cfg(any(test, feature = "test-hooks"))]
     QaSyncOnce {
         request_id: RequestId,
     },
@@ -1222,6 +1228,25 @@ impl AccountActor {
                         Some(session) => {
                             refresh_device_keys_and_assert_known(session, target).await
                         }
+                        None => Err(()),
+                    };
+                    let _ = acknowledged.send(result);
+                }
+                #[cfg(any(test, feature = "test-hooks"))]
+                AccountMessage::QaAssertInboundSessionsStartAtZero {
+                    request_id: _,
+                    room_id,
+                    acknowledged,
+                } => {
+                    let result = match self.session.as_ref() {
+                        Some(session) => match koushi_sdk::inbound_group_session_index0_summary(
+                            session, &room_id,
+                        )
+                        .await
+                        {
+                            Ok((count, true)) if count > 0 => Ok(count),
+                            _ => Err(()),
+                        },
                         None => Err(()),
                     };
                     let _ = acknowledged.send(result);

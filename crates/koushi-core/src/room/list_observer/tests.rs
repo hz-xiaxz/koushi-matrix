@@ -275,7 +275,6 @@ async fn project_room_list_snapshot_updates_user_profiles() {
         &snapshot,
         &known_room_ids,
         &known_dm_rooms,
-        None,
         &action_tx,
         &event_tx,
         1,
@@ -291,7 +290,7 @@ async fn project_room_list_snapshot_updates_user_profiles() {
             [
                 AppAction::RoomListSnapshotAuthoritative { .. },
                 AppAction::UserProfilesUpdated { profiles },
-            ] if profiles == &vec![UserProfile {
+            ] if *profiles == vec![UserProfile {
                 user_id: "@alice:example.test".to_owned(),
                 display_name: Some("Alice".to_owned()),
                 display_label: "Alice".to_owned(),
@@ -321,7 +320,6 @@ async fn project_room_list_snapshot_holds_unproven_empty_and_preserves_known_roo
         &snapshot,
         &known_room_ids,
         &known_dm_rooms,
-        None,
         &action_tx,
         &event_tx,
         1,
@@ -1093,7 +1091,6 @@ async fn project_room_list_snapshot_updates_known_rooms_before_action_delivery()
         &snapshot,
         &known_room_ids,
         &Arc::new(RwLock::new(Vec::new())),
-        None,
         &action_tx,
         &event_tx,
         1,

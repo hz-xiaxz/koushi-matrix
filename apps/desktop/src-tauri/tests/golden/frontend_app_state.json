@@ -466,9 +466,6 @@
       },
       "room_interactions": {
         "!room:example.invalid": {
-          "encryption_debug_operation": {
-            "state": "idle"
-          },
           "pin_operation": {
             "event_id": "$pinned:example.invalid",
             "kind": "pending",

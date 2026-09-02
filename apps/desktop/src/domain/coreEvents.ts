@@ -31,7 +31,6 @@ import type {
   AttachmentResult,
   ComposerDocument,
   DesktopSnapshot,
-  EncryptionDebugOperationOutcome,
   SearchCrawlerFailureKind,
   SidebarModel,
   SpaceMemberRoleUpdateOutcome,
@@ -641,9 +640,6 @@ export type RoomEvent =
   | { RoomForgotten: { request_id: RequestId; room_id: string } }
   | { RoomTagSet: { request_id: RequestId; room_id: string; tag: RoomTagKind } }
   | { RoomTagRemoved: { request_id: RequestId; room_id: string; tag: RoomTagKind } }
-  | { OutboundSessionForced: { request_id: RequestId; room_id: string; outcome: EncryptionDebugOperationOutcome } }
-  | { Index0RoomKeyShared: { request_id: RequestId; room_id: string; outcome: EncryptionDebugOperationOutcome } }
-  | { Index0RoomKeyResent: { request_id: RequestId; room_id: string; outcome: EncryptionDebugOperationOutcome } }
   | {
       RoomKeyRequestStateChanged: {
         key: TimelineKey;

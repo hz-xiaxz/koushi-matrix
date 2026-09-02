@@ -41,10 +41,7 @@ use super::composer::{
     build_room_message_content_without_relation_from_composer_document_with_options,
     media_caption_content_from_draft, ruma_mentions_from_intent,
 };
-use super::diagnostics::{
-    OutboundSessionLookupDiagnostic, record_post_send_encryption_snapshot,
-    record_send_diagnostic_snapshot_skipped, trace_timeline_items,
-};
+use super::diagnostics::trace_timeline_items;
 use super::display_projection::{DisplayProjectionContext, DisplayProjectionState};
 use super::item_projection::{
     apply_ignored_sender_suppression, apply_link_previews_to_item, attachment_info_for_upload,
@@ -58,7 +55,6 @@ use super::navigation::{
     InitialItemsRequestIdentity, PreparedInitialWindow,
     commit_prepared_initial_window_for_generation,
 };
-use super::room_key_recovery::RoomKeyReshareSchedule;
 use super::thread_projection::{ThreadAttentionBatchProvenance, ThreadAttentionCounters};
 // END GENERATED SIBLING IMPORTS
 
@@ -73,7 +69,6 @@ pub(super) struct TimelineSendCompletionDelivery {
     pub(super) key: TimelineKey,
     pub(super) transaction_id: String,
     pub(super) event_id: String,
-    pub(super) diagnostic_correlation: Option<u64>,
 }
 
 pub(super) struct TimelineSendFailureDelivery {
@@ -214,7 +209,6 @@ impl OwnUserTrackingDiagnosticState {
 
 struct EncryptedSendDiagnosticSnapshot {
     room_encryption: RoomEncryptionDiagnosticState,
-    outbound_session_present: Option<bool>,
     own_user_tracking: OwnUserTrackingDiagnosticState,
     own_device_present: Option<bool>,
     known_own_device_count: Option<usize>,
@@ -236,7 +230,6 @@ async fn encrypted_send_diagnostic_snapshot(
     if !matches!(room_encryption, RoomEncryptionDiagnosticState::Encrypted) {
         return EncryptedSendDiagnosticSnapshot {
             room_encryption,
-            outbound_session_present: None,
             own_user_tracking: OwnUserTrackingDiagnosticState::Unavailable,
             own_device_present: None,
             known_own_device_count: None,
@@ -247,17 +240,10 @@ async fn encrypted_send_diagnostic_snapshot(
             blacklisted_own_other_device_count: None,
         };
     }
-    let outbound_session_present =
-        koushi_sdk::current_outbound_group_session_token(&context.session, context.key.room_id())
-            .await
-            .ok()
-            .map(|session| session.is_some());
-
     let client = context.session.client();
     let Some(own_user_id) = client.user_id().map(ToOwned::to_owned) else {
         return EncryptedSendDiagnosticSnapshot {
             room_encryption,
-            outbound_session_present,
             own_user_tracking: OwnUserTrackingDiagnosticState::Unavailable,
             own_device_present: None,
             known_own_device_count: None,
@@ -277,7 +263,6 @@ async fn encrypted_send_diagnostic_snapshot(
     let Ok(devices) = client.encryption().get_user_devices(&own_user_id).await else {
         return EncryptedSendDiagnosticSnapshot {
             room_encryption,
-            outbound_session_present,
             own_user_tracking,
             own_device_present: None,
             known_own_device_count: None,
@@ -325,7 +310,6 @@ async fn encrypted_send_diagnostic_snapshot(
 
     EncryptedSendDiagnosticSnapshot {
         room_encryption,
-        outbound_session_present,
         own_user_tracking,
         own_device_present,
         known_own_device_count: Some(known_own_device_count),
@@ -385,12 +369,8 @@ pub(super) struct SendEnqueueWorkerCompletion;
 type SendEnqueueWorkerFuture =
     Pin<Box<dyn Future<Output = SendEnqueueWorkerCompletion> + Send + 'static>>;
 
-type SendDiagnosticFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
-
 pub(super) type GlobalSendCompletionObserverFuture =
     Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
-
-pub(super) const MAX_CONCURRENT_SEND_DIAGNOSTICS: usize = 32;
 
 pub(super) async fn poll_global_send_completion_observer(
     observer: &mut Option<GlobalSendCompletionObserverFuture>,
@@ -415,40 +395,19 @@ async fn poll_global_send_completion_observer_once(
 
 pub(super) struct SendEnqueueWorkerSupervisor {
     pub(super) tasks: FuturesUnordered<SendEnqueueWorkerFuture>,
-    pub(super) diagnostic_tasks: FuturesUnordered<SendDiagnosticFuture>,
     terminal_ingress: TimelineSendTerminalIngress,
-    pub(super) room_key_reshares: HashMap<TimelineKey, RoomKeyReshareSchedule>,
 }
 
 impl SendEnqueueWorkerSupervisor {
     pub(super) fn new(terminal_ingress: TimelineSendTerminalIngress) -> Self {
         Self {
             tasks: FuturesUnordered::new(),
-            diagnostic_tasks: FuturesUnordered::new(),
             terminal_ingress,
-            room_key_reshares: HashMap::new(),
         }
     }
 
     pub(super) fn cancel_all(&mut self) {
         self.tasks = FuturesUnordered::new();
-        self.cancel_diagnostics();
-        self.room_key_reshares.clear();
-    }
-
-    pub(super) fn cancel_diagnostics(&mut self) {
-        self.diagnostic_tasks = FuturesUnordered::new();
-    }
-
-    fn spawn_diagnostic<F>(&mut self, correlation: u64, future: F)
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        if self.diagnostic_tasks.len() >= MAX_CONCURRENT_SEND_DIAGNOSTICS {
-            record_send_diagnostic_snapshot_skipped(correlation);
-            return;
-        }
-        self.diagnostic_tasks.push(Box::pin(future));
     }
 }
 
@@ -910,15 +869,12 @@ impl TimelineManagerActor {
             self.accepted_submissions.terminal(&submission_id);
         }
         if let Some(completion) = completion {
-            let key = completion.key.clone();
-            let diagnostic_correlation = completion.diagnostic_correlation;
             self.emit(CoreEvent::Timeline(TimelineEvent::SendCompleted {
                 request_id: completion.request_id,
                 key: completion.key,
                 transaction_id: completion.transaction_id,
                 event_id: completion.event_id,
             }));
-            self.spawn_post_send_encryption_diagnostics(&key, diagnostic_correlation);
         }
         if let Some(failure) = failure {
             self.emit(CoreEvent::OperationFailed {
@@ -926,51 +882,6 @@ impl TimelineManagerActor {
                 failure: failure.failure,
             });
         }
-    }
-    fn spawn_post_send_encryption_diagnostics(
-        &mut self,
-        key: &TimelineKey,
-        diagnostic_correlation: Option<u64>,
-    ) {
-        let Some(correlation) = diagnostic_correlation else {
-            return;
-        };
-        let Some(session) = self.session.as_ref().cloned() else {
-            return;
-        };
-        let room_id = key.room_id().to_owned();
-        self.send_enqueue_workers
-            .spawn_diagnostic(correlation, async move {
-                let client = session.client();
-                let room_encryption = matrix_sdk::ruma::RoomId::parse(&room_id)
-                    .ok()
-                    .and_then(|room_id| client.get_room(&room_id))
-                    .map(|room| match room.encryption_state() {
-                        state if state.is_encrypted() => RoomEncryptionDiagnosticState::Encrypted,
-                        state if state.is_unknown() => RoomEncryptionDiagnosticState::Unknown,
-                        _ => RoomEncryptionDiagnosticState::NotEncrypted,
-                    })
-                    .unwrap_or(RoomEncryptionDiagnosticState::Unknown);
-                let lookup =
-                    if matches!(room_encryption, RoomEncryptionDiagnosticState::NotEncrypted) {
-                        OutboundSessionLookupDiagnostic::NotApplicable
-                    } else {
-                        match koushi_sdk::current_outbound_group_session_token(&session, &room_id)
-                            .await
-                        {
-                            Ok(Some(_)) => OutboundSessionLookupDiagnostic::Present,
-                            Ok(None) => OutboundSessionLookupDiagnostic::Absent,
-                            Err(error)
-                                if error.failure_kind()
-                                    == Some(koushi_sdk::MatrixRoomOperationFailureKind::Http) =>
-                            {
-                                OutboundSessionLookupDiagnostic::NetworkError
-                            }
-                            Err(_) => OutboundSessionLookupDiagnostic::SdkError,
-                        }
-                    };
-                record_post_send_encryption_snapshot(correlation, room_encryption, lookup);
-            });
     }
     pub(super) async fn route_send_to_worker_or_fail(
         &mut self,
@@ -1964,9 +1875,6 @@ impl SendLifecycleTrace {
             "own_user_tracking",
             snapshot.own_user_tracking.token(),
         ));
-        if let Some(value) = snapshot.outbound_session_present {
-            event = event.field(DiagnosticField::boolean("outbound_session_present", value));
-        }
         if let Some(value) = snapshot.own_device_present {
             event = event.field(DiagnosticField::boolean("own_device_present", value));
         }
@@ -2525,7 +2433,6 @@ impl SendCompletionCoordinator {
         match terminal {
             ObservedSendTerminal::Sent { event_id } => {
                 let mut pending = self.pending_sends.remove(correlation)?;
-                let diagnostic_correlation = pending.lifecycle_trace.correlation();
                 pending.lifecycle_trace.stage_with_outcome(
                     "sdk_terminal_observed",
                     Some("sent"),
@@ -2545,7 +2452,6 @@ impl SendCompletionCoordinator {
                     &pending.key,
                     pending.client_txn_id,
                     pending.submission_id,
-                    Some(diagnostic_correlation),
                     SendCompletionTerminal::Succeeded {
                         request_id: pending.request_id,
                         event_id,
@@ -2576,7 +2482,6 @@ impl SendCompletionCoordinator {
                     &pending.key,
                     pending.client_txn_id.clone(),
                     pending.submission_id.clone(),
-                    None,
                     SendCompletionTerminal::Failed {
                         settles_composer: pending.settles_composer,
                     },
@@ -2603,7 +2508,6 @@ impl SendCompletionCoordinator {
                     &pending.key,
                     pending.client_txn_id,
                     pending.submission_id,
-                    None,
                     SendCompletionTerminal::Cancelled { settles_composer },
                 ))
             }
@@ -2730,7 +2634,6 @@ fn timeline_send_terminal_handoff(
     key: &TimelineKey,
     client_transaction_id: String,
     submission_id: Option<koushi_state::SubmissionId>,
-    diagnostic_correlation: Option<u64>,
     terminal: SendCompletionTerminal,
 ) -> TimelineSendTerminalHandoff {
     let action = send_terminal_action(
@@ -2750,7 +2653,6 @@ fn timeline_send_terminal_handoff(
             key: key.clone(),
             transaction_id: client_transaction_id,
             event_id,
-            diagnostic_correlation,
         }),
         SendCompletionTerminal::Failed { .. } | SendCompletionTerminal::Cancelled { .. } => None,
     };
@@ -2776,7 +2678,6 @@ fn timeline_send_failure_handoff(
         &pending.key,
         pending.client_txn_id.clone(),
         pending.submission_id.clone(),
-        None,
         SendCompletionTerminal::Failed {
             settles_composer: pending.settles_composer,
         },

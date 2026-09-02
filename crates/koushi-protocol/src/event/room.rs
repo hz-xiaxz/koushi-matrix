@@ -141,26 +141,6 @@ pub enum RoomEvent {
         generation: u64,
         outcome: koushi_state::SpaceMemberRoleUpdateOutcome,
     },
-    RoomKeyReshared {
-        request_id: RequestId,
-        room_id: String,
-        outcome: RoomKeyReshareOutcome,
-    },
-    OutboundSessionForced {
-        request_id: RequestId,
-        room_id: String,
-        outcome: EncryptionDebugOperationOutcome,
-    },
-    Index0RoomKeyShared {
-        request_id: RequestId,
-        room_id: String,
-        outcome: EncryptionDebugOperationOutcome,
-    },
-    Index0RoomKeyResent {
-        request_id: RequestId,
-        room_id: String,
-        outcome: EncryptionDebugOperationOutcome,
-    },
     RoomKeyRequestStateChanged {
         key: TimelineKey,
         event_id: String,
@@ -191,25 +171,6 @@ pub enum RoomEvent {
         kind: ReportKind,
     },
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RoomKeyReshareOutcome {
-    Sent {
-        request_count: usize,
-        recipient_count: usize,
-        failed_recipient_count: usize,
-    },
-    NoSession,
-    NoRecipients,
-    StaleSession,
-}
-
-/// Closed outcome of a manual encryption-debug operation (issue #538).
-/// Re-exported from koushi-state; tokens mirror the diagnostic allowlist and
-/// the aggregate detail (own/peer buckets, claim outcome, elapsed) is
-/// carried by the diagnostics only.
-pub use koushi_state::EncryptionDebugOperationOutcome;
-
 impl fmt::Debug for RoomEvent {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -396,46 +357,6 @@ impl fmt::Debug for RoomEvent {
                 .debug_struct("SpaceMemberRoleUpdateSettled")
                 .field("request_id", request_id)
                 .field("generation", generation)
-                .field("outcome", outcome)
-                .finish(),
-            Self::RoomKeyReshared {
-                request_id,
-                outcome,
-                ..
-            } => formatter
-                .debug_struct("RoomKeyReshared")
-                .field("request_id", request_id)
-                .field("room_id", &"RoomId(..)")
-                .field("outcome", outcome)
-                .finish(),
-            Self::OutboundSessionForced {
-                request_id,
-                outcome,
-                ..
-            } => formatter
-                .debug_struct("OutboundSessionForced")
-                .field("request_id", request_id)
-                .field("room_id", &"RoomId(..)")
-                .field("outcome", outcome)
-                .finish(),
-            Self::Index0RoomKeyShared {
-                request_id,
-                outcome,
-                ..
-            } => formatter
-                .debug_struct("Index0RoomKeyShared")
-                .field("request_id", request_id)
-                .field("room_id", &"RoomId(..)")
-                .field("outcome", outcome)
-                .finish(),
-            Self::Index0RoomKeyResent {
-                request_id,
-                outcome,
-                ..
-            } => formatter
-                .debug_struct("Index0RoomKeyResent")
-                .field("request_id", request_id)
-                .field("room_id", &"RoomId(..)")
                 .field("outcome", outcome)
                 .finish(),
             Self::RoomKeyRequestStateChanged {

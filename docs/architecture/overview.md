@@ -1497,68 +1497,40 @@ share-state update, encrypted `m.room_key`, recipient key-request and verified
 device-gossip recovery, and configured backup recovery. Homeserver acceptance
 commits share state but never means recipient decryption acknowledgement.
 
-Recent outbound Megolm creation/rotation attribution is diagnostic-only and
-runtime-local. A small dedicated ledger retains closed reasons and anonymous
-room/session ordinals outside the general diagnostic ring; it is count-bounded,
-reports its own eviction count, and resets with account/crypto-runtime
-replacement. Local Encryption details for an event sent by the current device
-may query the exact room/session only inside the trusted Rust/SDK boundary and
-receive a closed reason. React receives only that presentation enum. Missing or
-evicted evidence is reported as
-unavailable and is never reconstructed from aggregate counters, visible event
-dates, fingerprints, or timing. The ledger does not change rotation, sharing,
-recipient, retry, or persistence behavior.
+Recent outbound Megolm creation/rotation attribution is diagnostic-only. The
+anonymous exported-diagnostic ledger remains runtime-local: it retains closed
+reasons and anonymous room/session ordinals outside the general diagnostic
+ring, is count-bounded, reports its own eviction count, and resets with
+account/crypto-runtime replacement. Separately, the crypto layer persists an
+exact bounded `(room_id, session_id) -> closed reason` ledger in the account's
+encrypted SDK crypto store when a new outbound session is created. It restores
+that ledger with the crypto machine so local Encryption details survive process
+and account-runtime replacement. Missing, legacy, corrupt, or evicted evidence
+is reported as unavailable and never blocks encryption or sending. Local
+Encryption details for an event sent by the current device may query the exact
+room/session only inside the trusted Rust/SDK boundary and receive a closed
+reason; React receives only that presentation enum. Raw identifiers from the
+persisted ledger never enter exported diagnostics, logs, `Debug`, QA tokens, or
+the WebView, and no reason is reconstructed from aggregate counters, visible
+event dates, fingerprints, or timing. Hard logout and local-data deletion remove
+the ledger with the crypto store. Attribution does not change rotation, sharing,
+recipient, or retry behavior.
 
-Before the first event of every newly created or rotated outbound session,
-Koushi's production client requires a successful response from the current
-encryption-sync generation, performs one authoritative full `/keys/query` for
-the room's active members, and repeats the standard SDK pre-share while the
-session is still at index 0. One absolute deadline bounds the fence. Failure
-leaves the queued event retryable and unsent; it never consumes index 0 or falls
-back to plaintext. Only a matching registry entry already marked `Ready`
-bypasses the full query. A restored or otherwise unregistered session still at
-index 0 is fenced before its first event even when its token is unchanged.
+Outbound encrypted sends follow the stock Element X / matrix-rust-sdk sequence:
+synchronize room members when needed, query untracked or dirty device keys, call
+`preshare_room_key` exactly once, then encrypt. Koushi adds no current-generation
+readiness fence, repeated or duplicate pre-share, initial-share repair, fixed-
+delay post-send re-share, manual force-new/discard/share-index-0/resend-index-0
+control, original-recipient ledger, repair timer, or wake listener. The send path
+has one share step and no Koushi retry window between sharing and encryption.
 
-A bounded process-local exact-session registry distinguishes successfully
-fenced sessions from resident sessions whose first fence failed, so retry cannot
-bypass readiness merely because the token is now unchanged. A device first
-visible after the authoritative response has no inferred historical entitlement
-and remains on standard Matrix gossip/backup/request policy. Current visibility,
-membership, timing, aliases, and aggregate counters never justify a historical
-index-0 share or expand #541's immutable original-recipient ledger. No
-acknowledgement protocol or delivery claim is introduced.
-
-Koushi retains two experimental hardening implementations from #510 and #523.
-The #510 bounded index-0 duplicate helper has no production caller; its builder
-flag and a testing-only caller remain solely to keep the implementation covered.
-The #523 targeted initial-share repair is an independent SDK builder option that
-defaults to disabled. Koushi's normal client builder enables neither, and no UI,
-environment, or product setting controls them. A disabled path creates no fence,
-timer, task, claim, wake listener, duplicate to-device request, or terminal
-diagnostic.
-
-Normal sends do not schedule a Koushi-owned post-send room-key re-share. In
-particular, Core does not force-share the current ratchet at fixed delays after
-the first event: Element-compatible SDK pre-share, recipient key requests,
-verified-device gossip, and backup recovery remain the production mechanisms.
-Manual encryption-debug commands remain explicit user actions and are not part
-of the send lifecycle. Homeserver acceptance of the initial `m.room_key` is
-diagnostic evidence only; a later current-index share must not be presented as
-recovery of a missing earlier index.
-
-When #523 is explicitly enabled, its first-event fence is runtime-local and
-bounded. It permits at most one additional event-driven attempt after a matching
-device-key, one-time/fallback-key, or Olm recovery update, then settles or
-reaches its short deadline. It is cancelled by outbound-session replacement,
-room leave, policy/trust/blacklist change, logout, runtime replacement, or
-shutdown. Deadline never permits plaintext fallback. Own-device recovery through
-verified-device gossip or Secure Backup remains supplementary and is not counted
-as successful initial direct delivery; peer-user coverage is tracked separately
-so a peer user with zero covered eligible devices cannot be hidden by aggregate
-device success. Its diagnostics expose only runtime-local aliases, closed
-outcomes, counts/buckets, and elapsed time. Re-enabling #510 requires restoring
-a reviewed production caller as well as opting in; neither path is active
-product behavior by default.
+Upstream rotate-on-full-member-reload remains intact. Normal receive-side
+recovery uses Matrix key requests, verified-device gossip, configured backup
+lookup, and decrypt retry. Homeserver acceptance of `m.room_key` is diagnostic
+evidence only and is never presented as recipient decryption proof. Read-only
+initial-share and rotation diagnostics may observe the stock path when they do
+not add state or control flow to it; diagnostics that exist only for deleted
+repair mechanisms are removed.
 
 ### Mandatory recoverable Secure Backup
 
@@ -1579,14 +1551,12 @@ server backup. Koushi never calls a destructive backup fix/reset path from this
 gate. If backup was explicitly disabled, re-enabling requires a user action
 which states that the account-wide setting also affects other Matrix clients.
 
-Koushi encrypted user-content sends use the SDK's normal encryption setup and
-recipient-device key sharing without opting into the separate disabled #523
-initial-share-repair fence. Koushi's required new-session readiness fence above
-uses only the standard pre-share path. The SDK backup worker uploads new and
-rotated Megolm sessions asynchronously. Core continuously observes backup state
-changes and runs a single-owner periodic inspection while the verified session
-is active; a degraded backup is visible and diagnosed but does not turn an
-otherwise valid encrypted send into `NotSent`.
+Koushi encrypted user-content sends use only the SDK's normal encryption setup
+and recipient-device key sharing sequence above. The SDK backup worker uploads
+new and rotated Megolm sessions asynchronously. Core continuously observes
+backup state changes and runs a single-owner periodic inspection while the
+verified session is active; a degraded backup is visible and diagnosed but does
+not turn an otherwise valid encrypted send into `NotSent`.
 
 ## Room Timeline Gap Repair
 

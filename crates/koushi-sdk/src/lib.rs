@@ -57,13 +57,10 @@ pub use e2ee::{
     E2eeRecoveryStateStream, E2eeTrustError, E2eeTrustFailureKind, IdentityResetOutcome,
     KeyBackupRestoreScope, KeyBackupRestoreSummary, MatrixCrossSigningStatus,
     MatrixCurrentSessionInspection, MatrixCurrentSessionInspectionError,
-    MatrixDeviceCleanupOutcome, MatrixDeviceNameOutcome, MatrixForceNewSessionOutcome,
-    MatrixForceNewSessionSummary, MatrixIdentityResetAuthType, MatrixIdentityResetHandle,
-    MatrixIncomingVerificationRequest, MatrixIncomingVerificationRequestObserver,
-    MatrixIndex0ClaimOutcome, MatrixIndex0ResendOutcome, MatrixIndex0ResendSummary,
-    MatrixIndex0ShareOutcome, MatrixIndex0ShareSummary, MatrixOutboundGroupSessionToken,
-    MatrixOwnUserVerificationHandle, MatrixRoomKeyReceiveDiagnostics, MatrixRoomKeyReshareOutcome,
-    MatrixRoomKeyReshareTarget, MatrixRoomKeyRotationReason, MatrixRoomKeyWithheldCode,
+    MatrixDeviceCleanupOutcome, MatrixDeviceNameOutcome, MatrixIdentityResetAuthType,
+    MatrixIdentityResetHandle, MatrixIncomingVerificationRequest,
+    MatrixIncomingVerificationRequestObserver, MatrixOwnUserVerificationHandle,
+    MatrixRoomKeyReceiveDiagnostics, MatrixRoomKeyRotationReason, MatrixRoomKeyWithheldCode,
     MatrixSasState, MatrixSasStateStream, MatrixSasVerificationHandle,
     MatrixSecureBackupInspection, MatrixSecureBackupLocalState, MatrixSecureBackupRecoveryState,
     MatrixSecureBackupServerState, MatrixSecureBackupState, MatrixSecureBackupStateObservation,
@@ -75,21 +72,22 @@ pub use e2ee::{
     bootstrap_secure_backup, cancel_own_user_sas_verification, cancel_sas_verification,
     cancel_verification_request, change_password, change_secure_backup_passphrase,
     cleanup_current_device, complete_identity_reset, confirm_sas_verification,
-    cross_signing_status, current_outbound_group_session_index,
-    current_outbound_group_session_token, deactivate_account, discard_outbound_group_session,
-    discover_current_session_verification_methods, download_joined_room_keys_from_backup,
-    download_room_key_from_backup, enable_key_backup, ensure_device_display_name,
-    force_new_outbound_session, force_reshare_room_key, has_inbound_group_session,
-    late_decryption_report_stream, map_backup_state_to_desktop,
-    map_cross_signing_status_to_desktop, map_identity_reset_auth_type_to_desktop,
-    map_sdk_sas_emojis_to_desktop, mismatch_sas_verification,
-    observe_incoming_verification_requests, preshare_outbound_group_session, recover_e2ee,
+    cross_signing_status, deactivate_account, discover_current_session_verification_methods,
+    download_joined_room_keys_from_backup, download_room_key_from_backup, enable_key_backup,
+    ensure_device_display_name, has_inbound_group_session, late_decryption_report_stream,
+    map_backup_state_to_desktop, map_cross_signing_status_to_desktop,
+    map_identity_reset_auth_type_to_desktop, map_sdk_sas_emojis_to_desktop,
+    mismatch_sas_verification, observe_incoming_verification_requests, recover_e2ee,
     recover_e2ee_blocking, request_device_verification, request_late_decryption,
-    request_own_user_sas_verification, request_room_key_for_event, resend_index0_room_key,
-    reset_identity, reshare_room_key, restore_key_backup, room_key_receive_diagnostics,
-    room_key_rotation_reason, room_key_withheld_codes, room_key_withheld_stream,
-    share_index0_room_key, start_own_user_sas_verification, start_sas_verification,
+    request_own_user_sas_verification, request_room_key_for_event, reset_identity,
+    restore_key_backup, room_key_receive_diagnostics, room_key_rotation_reason,
+    room_key_withheld_codes, room_key_withheld_stream, start_own_user_sas_verification,
+    start_sas_verification,
 };
+
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub use e2ee::inbound_group_session_index0_summary;
 
 #[cfg(not(target_family = "wasm"))]
 pub use e2ee::export_room_keys_to_file;

@@ -174,12 +174,11 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
         AccountKey, CoreEvent, TimelineDiff, TimelineKey,
         event::{
             AccountEvent, ActivityEvent, CjkTextPolicyEvent, E2eeTrustEvent,
-            EncryptionDebugOperationOutcome, EventCacheFailureReasonClass,
-            EventCacheSubscribeStatus, IntentNoOpReason, IntentOutcome, LinkPreview,
-            LinkPreviewImage, LinkPreviewState, LiveSignalsEvent, LocalEncryptionEvent,
-            NativeAttentionEvent, PaginationDirection, PaginationState, ReactionGroup, RoomEvent,
-            RoomKeyRequestStage, RoomKeyRequestStateDto, RoomKeyRequestWithheldCode,
-            RoomKeyReshareOutcome, SearchEvent, SyncEvent, ThreadSummaryDto, ThreadsListEvent,
+            EventCacheFailureReasonClass, EventCacheSubscribeStatus, IntentNoOpReason,
+            IntentOutcome, LinkPreview, LinkPreviewImage, LinkPreviewState, LiveSignalsEvent,
+            LocalEncryptionEvent, NativeAttentionEvent, PaginationDirection, PaginationState,
+            ReactionGroup, RoomEvent, RoomKeyRequestStage, RoomKeyRequestStateDto,
+            RoomKeyRequestWithheldCode, SearchEvent, SyncEvent, ThreadSummaryDto, ThreadsListEvent,
             TimelineAnchorRestoreStatus, TimelineCodeBlock, TimelineDisplayKind,
             TimelineDisplayLabelUpdate, TimelineDisplayMetadata, TimelineEvent,
             TimelineFormattedBody, TimelineGapId, TimelineGapPosition, TimelineItem,
@@ -1037,23 +1036,6 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
         room_left["event"]["RoomLeft"]["room_id"],
         json!("!r:example.test")
     );
-    let room_key_reshared = serialize_core_event(&CoreEvent::Room(RoomEvent::RoomKeyReshared {
-        request_id,
-        room_id: "!r:example.test".to_owned(),
-        outcome: RoomKeyReshareOutcome::Sent {
-            request_count: 2,
-            recipient_count: 3,
-            failed_recipient_count: 0,
-        },
-    }))
-    .expect("serialize room key reshare outcome");
-    let index0_room_key_resent =
-        serialize_core_event(&CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
-            request_id,
-            room_id: "!r:example.test".to_owned(),
-            outcome: EncryptionDebugOperationOutcome::Completed,
-        }))
-        .expect("serialize index-0 room key resent event");
     let room_key_request_state_changed =
         serialize_core_event(&CoreEvent::Room(RoomEvent::RoomKeyRequestStateChanged {
             key: key.clone(),
@@ -1636,8 +1618,6 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
             "roomInviteAccepted": room_invite_accepted,
             "roomInviteDeclined": room_invite_declined,
             "roomLeft": room_left,
-            "roomKeyReshared": room_key_reshared,
-            "index0RoomKeyResent": index0_room_key_resent,
             "roomKeyRequestStateChanged": room_key_request_state_changed,
             "composerSlashCommandRejected": composer_slash_command_rejected,
             "roomMarkedAsRead": room_marked_as_read,
@@ -1794,8 +1774,6 @@ fn core_event_contract_artifact_key_set_does_not_shrink() {
         "roomInviteAccepted",
         "roomInviteDeclined",
         "roomLeft",
-        "roomKeyReshared",
-        "index0RoomKeyResent",
         "roomKeyRequestStateChanged",
         "composerSlashCommandRejected",
         "roomMarkedAsRead",

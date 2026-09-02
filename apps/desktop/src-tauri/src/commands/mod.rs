@@ -26,23 +26,22 @@ use koushi_core::{
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_protocol::{
     AccountCommand, AccountKey, AppCommand, CoreCommand, CoreEvent, CoreFailure, CreateRoomOptions,
-    EncryptionDebugOperationOutcome, IntentNoOpReason, IntentOutcome, MediaDownloadSelection,
-    PaginationDirection, RequestId, RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest,
-    RoomKeyReshareOutcome, SearchCommand, SearchScope, SecureBackupPassphraseChangeRequest,
-    SecureBackupSetupRequest, SetAvatarRequest, SyncCommand, TimelineBatchId, TimelineCommand,
-    TimelineEvent, TimelineGapId, TimelineGeneration, TimelineKey, TimelineKind,
-    TimelineViewportObservation,
+    IntentNoOpReason, IntentOutcome, MediaDownloadSelection, PaginationDirection, RequestId,
+    RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest, SearchCommand, SearchScope,
+    SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest, SyncCommand,
+    TimelineBatchId, TimelineCommand, TimelineEvent, TimelineGapId, TimelineGeneration,
+    TimelineKey, TimelineKind, TimelineViewportObservation,
 };
 use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentSort, AuthSecret,
     ComposerDocument, ComposerDraftRevision, ComposerFormattingOptions, ComposerKeyEvent,
     ComposerResolvedAction, ComposerResolverContext, ComposerSurface, DirectoryQuery,
-    DisplayPlatform, EncryptionDebugOperationKind, FilesViewScope, IdentityResetAuthRequest,
-    ImageUploadCompressionMode, InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface,
-    PresenceKind, RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode,
-    RoomSettingChange, RoomTagKind, SessionInfo, SettingsPatch, StagedUploadCompressionChoice,
-    SubmissionId, ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor,
-    VerificationCancelReason, build_formatted_message_draft,
+    DisplayPlatform, FilesViewScope, IdentityResetAuthRequest, ImageUploadCompressionMode,
+    InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface, PresenceKind,
+    RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode, RoomSettingChange,
+    RoomTagKind, SessionInfo, SettingsPatch, StagedUploadCompressionChoice, SubmissionId,
+    ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor, VerificationCancelReason,
+    build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};

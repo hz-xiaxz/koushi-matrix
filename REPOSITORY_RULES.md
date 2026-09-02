@@ -371,28 +371,20 @@ conflict is being resolved.
   and crash-recoverable; ambiguous roots are never deleted speculatively.
 - Key bytes and passphrases should use zeroizing containers where practical
   and should be kept out of long-lived UI state.
-- Standard outbound Megolm pre-share is the authoritative production path for
-  encrypted sends, including its normal `/keys/claim`, signed one-time/fallback-
-  key handling, per-device share state, encrypted `m.room_key`, and standard
-  recipient recovery through key requests, verified-device gossip, and configured
-  backup. Homeserver acceptance commits share state but is not proof of recipient
-  decryption. For every newly created or rotated outbound session, the Koushi
-  production client must fence the first event on the current encryption-sync
-  generation, one full active-member key query, and a repeated standard
-  pre-share under one absolute deadline. Failure preserves a typed retryable
-  pending send and must not consume index 0 or fall back to plaintext. A device
-  first visible after the authoritative fence response has no inferred
-  historical entitlement and remains on standard Matrix recovery policy; current
-  visibility, membership, timing, aliases, and counters are insufficient proof
-  for an index-0 share and never expand #541's original-recipient ledger. The
-  retained Koushi-specific #510 index-0 duplicate helper has no
-  production caller, and #523 targeted initial-share repair is an independent
-  default-off SDK builder option; both are disabled in Koushi. Re-enabling #510
-  requires restoring a reviewed production caller, while re-enabling #523
-  requires explicit builder opt-in. Either also requires a new canon/product
-  decision supported by measured evidence. Disabled paths must not add their
-  fence, timer, claim, wake listener, duplicate to-device request, or terminal
-  diagnostic.
+- Standard outbound Megolm pre-share is the sole production send path. It is
+  structurally identical to Element X / stock matrix-rust-sdk: synchronize room
+  members when needed, query untracked or dirty device keys, call
+  `preshare_room_key` exactly once, then encrypt. Its normal `/keys/claim`, signed
+  one-time/fallback-key handling, per-device share state, encrypted `m.room_key`,
+  and recipient recovery through key requests, verified-device gossip, and
+  configured backup remain authoritative. Homeserver acceptance commits share
+  state but is not proof of recipient decryption. Koushi must not add a
+  new-session readiness fence, repeated/duplicate pre-share, post-send re-share,
+  force-new/discard/share-index-0/resend-index-0 API, original-recipient ledger,
+  repair timer, wake listener, or manual UI/QA control. Receive-side decrypt
+  retry, backup lookup, room-key requests, and upstream rotate-on-full-member-
+  reload remain supported. Read-only rotation attribution (#794) may observe the
+  resulting session boundary but must not alter sending or sharing.
 
 ## QA Gates And Cleanup
 

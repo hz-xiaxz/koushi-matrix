@@ -44,8 +44,15 @@ function plannedMethods(): string[] {
 describe("DesktopApi command contract", () => {
   test("classifies every method exactly once in the approved migration map", () => {
     const planned = plannedMethods();
+    const removed = new Set([
+      "setRoomListProjection",
+      "reshareRoomKey",
+      "forceNewOutboundSession",
+      "shareIndex0RoomKey",
+      "resendIndex0RoomKey"
+    ]);
     const current = planned
-      .filter((method) => method !== "setRoomListProjection")
+      .filter((method) => !removed.has(method))
       .concat("importLegacySettings", "updateNavigationPreference")
       .sort();
     expect(new Set(current).size).toBe(current.length);

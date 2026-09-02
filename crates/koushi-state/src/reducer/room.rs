@@ -2,7 +2,6 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::{
     effect::{AppEffect, UiEvent},
-    state::EncryptionDebugOperationState,
     state::{
         AppError, AppState, OperationFailureKind, PinOp, PinOperationState, PinnedEvent,
         RoomListFailureKind, RoomListFilter, RoomListReadiness, RoomListSource, RoomSummary,
@@ -788,97 +787,6 @@ pub(crate) fn handle_unpin_event_failed(
         AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged),
         AppEffect::EmitUiEvent(UiEvent::ErrorChanged),
     ]
-}
-
-pub(crate) fn handle_encryption_debug_started(
-    state: &mut AppState,
-    request_id: u64,
-    room_id: String,
-    kind: crate::state::EncryptionDebugOperationKind,
-) -> Vec<AppEffect> {
-    if !is_session_ready(state) || !room_exists(state, &room_id) {
-        return Vec::new();
-    }
-    let entry = state.room_interactions.entry(room_id.clone()).or_default();
-    if !entry.encryption_debug_operation.accepts_new_request() {
-        return Vec::new();
-    }
-    entry.encryption_debug_operation = EncryptionDebugOperationState::Pending { request_id, kind };
-    vec![AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged)]
-}
-
-pub(crate) fn handle_encryption_debug_settled(
-    state: &mut AppState,
-    request_id: u64,
-    room_id: String,
-    kind: crate::state::EncryptionDebugOperationKind,
-    outcome: crate::state::EncryptionDebugOperationOutcome,
-) -> Vec<AppEffect> {
-    if !has_session_projection_context(state) {
-        return Vec::new();
-    }
-    let Some(entry) = state.room_interactions.get_mut(&room_id) else {
-        return Vec::new();
-    };
-    if !matches!(
-        entry.encryption_debug_operation,
-        EncryptionDebugOperationState::Pending {
-            request_id: pending_request_id,
-            kind: pending_kind,
-        } if pending_request_id == request_id && pending_kind == kind
-    ) {
-        return Vec::new();
-    }
-    entry.encryption_debug_operation = EncryptionDebugOperationState::Settled {
-        request_id,
-        kind,
-        outcome,
-    };
-    vec![AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged)]
-}
-
-pub(crate) fn handle_encryption_debug_failed(
-    state: &mut AppState,
-    request_id: u64,
-    room_id: String,
-    kind: crate::state::EncryptionDebugOperationKind,
-    outcome: crate::state::EncryptionDebugOperationOutcome,
-) -> Vec<AppEffect> {
-    if !has_session_projection_context(state) {
-        return Vec::new();
-    }
-    let Some(entry) = state.room_interactions.get_mut(&room_id) else {
-        return Vec::new();
-    };
-    if !matches!(
-        entry.encryption_debug_operation,
-        EncryptionDebugOperationState::Pending {
-            request_id: pending_request_id,
-            kind: pending_kind,
-        } if pending_request_id == request_id && pending_kind == kind
-    ) {
-        return Vec::new();
-    }
-    entry.encryption_debug_operation = EncryptionDebugOperationState::Failed {
-        request_id,
-        kind,
-        outcome,
-    };
-    vec![AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged)]
-}
-
-pub(crate) fn handle_encryption_debug_reset(
-    state: &mut AppState,
-    room_id: String,
-) -> Vec<AppEffect> {
-    let Some(entry) = state.room_interactions.get_mut(&room_id) else {
-        return Vec::new();
-    };
-    if entry.encryption_debug_operation.is_idle() {
-        return Vec::new();
-    }
-    entry.encryption_debug_operation = EncryptionDebugOperationState::Idle;
-    vec![AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged)]
 }
 
 pub(crate) fn handle_room_marked_as_read_requested(

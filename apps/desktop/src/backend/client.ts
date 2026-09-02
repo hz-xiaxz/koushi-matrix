@@ -10,7 +10,6 @@ import { COMPOSER_DRAFT_REVISION_ZERO } from "../domain/composerDraftRevision";
 import type {
   ActivityMarkReadTarget,
   CommandAdmission,
-  CommandResult,
   CommandSettlement,
   ActivityTab,
   DesktopSnapshot,
@@ -31,7 +30,6 @@ import type {
   RoomListFilter,
   RoomModerationAction,
   RoomNotificationMode,
-  RoomKeyReshareOutcome,
   RoomSettingChange,
   RoomTagKind,
   SavedSessionInfo,
@@ -47,8 +45,7 @@ import type {
   FilesViewScope,
   SubmissionResponse,
   ThreadOpenIntent,
-  ThreadsListScope,
-  EncryptionDebugOperationOutcome
+  ThreadsListScope
 } from "../domain/types";
 import type { DiagnosticLogSnapshot } from "../domain/diagnostics";
 import type { TimelineKey } from "../domain/coreEvents";
@@ -679,22 +676,6 @@ export class TauriDesktopApi implements DesktopApi {
 
   async unpinEvent(roomId: string, eventId: string): Promise<CommandSettlement> {
     return this.invokeCommand<CommandSettlement>("unpin_event", { roomId, eventId });
-  }
-
-  async reshareRoomKey(roomId: string): Promise<CommandResult<RoomKeyReshareOutcome>> {
-    return this.invokeCommand<CommandResult<RoomKeyReshareOutcome>>("reshare_room_key", { roomId });
-  }
-
-  async forceNewOutboundSession(roomId: string): Promise<CommandResult<EncryptionDebugOperationOutcome>> {
-    return this.invokeCommand<CommandResult<EncryptionDebugOperationOutcome>>("force_new_outbound_session", { roomId });
-  }
-
-  async shareIndex0RoomKey(roomId: string): Promise<CommandResult<EncryptionDebugOperationOutcome>> {
-    return this.invokeCommand<CommandResult<EncryptionDebugOperationOutcome>>("share_index0_room_key", { roomId });
-  }
-
-  async resendIndex0RoomKey(roomId: string): Promise<CommandResult<EncryptionDebugOperationOutcome>> {
-    return this.invokeCommand<CommandResult<EncryptionDebugOperationOutcome>>("resend_index0_room_key", { roomId });
   }
 
   async loadRoomSettings(roomId: string): Promise<CommandSettlement> {

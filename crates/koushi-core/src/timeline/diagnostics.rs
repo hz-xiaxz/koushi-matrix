@@ -3,7 +3,7 @@ use std::time::Duration;
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::{
     MatrixCommittedRoomTimelineCheckpoint as MatrixRoomSubscriptionCheckpoint,
-    MatrixLiveTailRefreshDiagnostics, MatrixRoomKeyReshareTarget,
+    MatrixLiveTailRefreshDiagnostics,
 };
 use koushi_state::AppAction;
 
@@ -20,7 +20,6 @@ use koushi_sdk::MatrixLiveTailRefreshOutcome as LiveTailRefreshOutcome;
 // BEGIN GENERATED SIBLING IMPORTS
 use super::gap_repair::GapBoundaryPresenceCounts;
 use super::item_projection::timeline_formatted_body_is_renderable;
-use super::outbound_send::{MAX_CONCURRENT_SEND_DIAGNOSTICS, RoomEncryptionDiagnosticState};
 use super::read_state::{ReadCommandKind, ReadRetrySource};
 use super::room_key_recovery::{
     DECRYPT_RETRY_TIMEOUT, DecryptRetryBackupResult, DecryptRetryBackupState,
@@ -234,109 +233,6 @@ pub(super) fn decrypt_retry_failure_for_room_operation(
         }
         Some(koushi_sdk::MatrixRoomOperationFailureKind::Http) => DecryptRetryFailure::Network,
         _ => DecryptRetryFailure::Sdk,
-    }
-}
-
-pub(super) fn record_room_key_reshare(
-    trigger: &'static str,
-    outcome: &'static str,
-    attempt: u8,
-    target: MatrixRoomKeyReshareTarget,
-    delay_seconds: u64,
-    request_count: usize,
-    recipient_count: usize,
-    failed_recipient_count: usize,
-) {
-    record(
-        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_reshare", "attempt")
-            .field(DiagnosticField::token("trigger", trigger))
-            .field(DiagnosticField::token("outcome", outcome))
-            .field(DiagnosticField::count("attempt", u64::from(attempt)))
-            .field(DiagnosticField::token(
-                "target",
-                room_key_reshare_target_token(target),
-            ))
-            .field(DiagnosticField::count("delay_seconds", delay_seconds))
-            .field(DiagnosticField::count(
-                "request_count",
-                request_count.try_into().unwrap_or(u64::MAX),
-            ))
-            .field(DiagnosticField::count(
-                "recipient_count",
-                recipient_count.try_into().unwrap_or(u64::MAX),
-            )),
-    );
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum OutboundSessionLookupDiagnostic {
-    Present,
-    Absent,
-    NotApplicable,
-    NetworkError,
-    SdkError,
-}
-
-impl OutboundSessionLookupDiagnostic {
-    fn token(self) -> &'static str {
-        match self {
-            Self::Present => "present",
-            Self::Absent => "absent",
-            Self::NotApplicable => "not_applicable",
-            Self::NetworkError => "network_error",
-            Self::SdkError => "sdk_error",
-        }
-    }
-}
-
-pub(super) fn record_post_send_encryption_snapshot(
-    correlation: u64,
-    room_encryption: RoomEncryptionDiagnosticState,
-    outbound_session_lookup: OutboundSessionLookupDiagnostic,
-) {
-    record(
-        DiagnosticEvent::new(
-            DiagnosticLevel::Info,
-            "core.send",
-            "post_send_encryption_snapshot",
-        )
-        .field(DiagnosticField::correlation("correlation", correlation))
-        .field(DiagnosticField::token(
-            "room_encryption_cached_after_send",
-            room_encryption.token(),
-        ))
-        .field(DiagnosticField::token(
-            "outbound_session_lookup",
-            outbound_session_lookup.token(),
-        ))
-        .field(DiagnosticField::token(
-            "snapshot_consistency",
-            "best_effort_post_terminal_local_store",
-        )),
-    );
-}
-
-pub(super) fn record_send_diagnostic_snapshot_skipped(correlation: u64) {
-    record(
-        DiagnosticEvent::new(
-            DiagnosticLevel::Warn,
-            "core.send",
-            "diagnostic_snapshot_skipped",
-        )
-        .field(DiagnosticField::correlation("correlation", correlation))
-        .field(DiagnosticField::token("outcome", "capacity_reached"))
-        .field(DiagnosticField::count(
-            "capacity",
-            MAX_CONCURRENT_SEND_DIAGNOSTICS as u64,
-        )),
-    );
-}
-
-fn room_key_reshare_target_token(target: MatrixRoomKeyReshareTarget) -> &'static str {
-    match target {
-        MatrixRoomKeyReshareTarget::OwnOtherDevices => "own_other_devices",
-        MatrixRoomKeyReshareTarget::PeerDevices => "peer_devices",
-        MatrixRoomKeyReshareTarget::AllEligible => "all_eligible",
     }
 }
 

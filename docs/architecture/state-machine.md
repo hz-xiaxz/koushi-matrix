@@ -1718,66 +1718,6 @@ reaction counts, ownership, target eligibility, or toggle semantics.
   present. If the projection does not support the requested transition, settle
   it as an invalid reaction failure instead of guessing from React state.
 
-## Optional Initial Outbound Megolm Delivery Repair (#523)
-
-The first-event send path owns this runtime-local repair lifecycle only when the
-independent SDK builder option for #523 is explicitly enabled. The SDK and
-Koushi default to disabled, so the normal production path runs standard
-`preshare_room_key` and does not enter this machine. The retained #510 index-0
-duplicate-share helper has no production caller; its default-off builder flag is
-consumed only by the testing seam until a separately reviewed caller is restored.
-Neither path is React or reducer presentation state.
-
-The normal send terminal does not enter a post-send re-share state machine.
-Core must not schedule fixed-delay forced shares of the current Megolm ratchet
-after `SendCompleted`; doing so can turn an initial index-0 delivery failure
-into a receiver whose first known index is a later value without recovering the
-first event. Manual room-key debug operations remain separately admitted and
-fenced explicit commands.
-
-```mermaid
-stateDiagram-v2
-    [*] --> InitialSharing
-    InitialSharing --> Settled: no eligible olm_missing recipient
-    InitialSharing --> Repairing: eligible olm_missing recipients
-    Repairing --> Settled: targeted claim + Olm share accepted
-    Repairing --> WaitingWake: claim empty/stale/no_olm and deadline remains
-    WaitingWake --> Repairing: matching device-key/OTK/Olm recovery update
-    WaitingWake --> Deadline: first-event deadline
-    Repairing --> Deadline: first-event deadline
-    InitialSharing --> Cancelled: session/policy/runtime invalidated
-    Repairing --> Cancelled: session/policy/runtime invalidated
-    WaitingWake --> Cancelled: session/policy/runtime invalidated
-    Settled --> [*]: consume message index 0
-    Deadline --> [*]: emit closed coverage outcome; consume message index 0
-    Cancelled --> [*]: remove stale work
-```
-
-Guard notes:
-
-- The normal pre-share runs first. Only exact recipients reported
-  `olm_missing`, still eligible after membership/history/trust/blacklist/
-  strategy re-evaluation, enter repair. Pending, committed, current-device,
-  and policy-excluded recipients are not claimed or resent.
-- The immediate attempt uses standard `/keys/claim` signed one-time/fallback
-  key handling, creates the Olm session, queues the same index-0
-  `m.room_key`, and commits share state only after homeserver acceptance.
-- One matching device-key, one-time/fallback-key, or Olm recovery update may
-  wake one additional attempt before the fixed short deadline. Duplicate sends
-  in the same session do not add schedules; there is no polling or unbounded
-  retry.
-- Rotation/discard, room leave, recipient-policy/trust/blacklist change,
-  logout, runtime replacement, and shutdown cancel the exact session's work.
-  Every attempt re-evaluates policy before encryption.
-- Deadline permits the encrypted room event to proceed at message index 0 and
-  emits a closed coverage outcome. It never permits plaintext fallback.
-- Coverage is separate for own other devices and peer users. At least one
-  accepted eligible device covers a peer user for later same-user recovery;
-  zero covered eligible devices remains an explicit terminal diagnostic.
-- Homeserver acceptance is not recipient decryption acknowledgement.
-  Diagnostics contain runtime-local aliases, closed tokens, buckets/counts,
-  and elapsed time only.
-
 ## Timeline Room-Key Request Feedback (#460)
 
 Undecryptable-message key-request presentation is Rust-owned. `RequestRoomKey`
@@ -1937,51 +1877,6 @@ stateDiagram-v2
   `reply_quote=ok pin_event=ok pinned_state=ok unpin_event=ok`. Its stdout must
   remain private-data-free. Message-action QA evidence must likewise use coarse
   tokens only; do not print Matrix IDs, message bodies, or generated permalinks.
-
-`AppState.room_interactions[room_id].encryption_debug_operation` is the
-Rust-owned state machine for the temporary dangerous encryption-debug
-controls (issues #538 and #541):
-
-```mermaid
-stateDiagram-v2
-    [*] --> Idle
-    Idle --> Pending: EncryptionDebugOperationStarted [kind]
-    Settled --> Pending: EncryptionDebugOperationStarted [kind] (retry)
-    Failed --> Pending: EncryptionDebugOperationStarted [kind] (retry)
-    Pending --> Settled: EncryptionDebugOperationSettled [matching request_id + room + kind]
-    Pending --> Failed: EncryptionDebugOperationFailed [matching request_id + room + kind]
-    Idle --> [*]: LogoutRequested/LogoutFinished/SessionCleared/room leave/removal
-    Pending --> [*]: LogoutRequested/LogoutFinished/SessionCleared/room leave/removal
-    Settled --> [*]: LogoutRequested/LogoutFinished/SessionCleared/room leave/removal
-    Failed --> [*]: LogoutRequested/LogoutFinished/SessionCleared/room leave/removal
-```
-
-- Start admission is `Idle | Settled | Failed`; a start while `Pending` is
-  rejected (duplicate command dropped). Completion/failure settle only the
-  matching request_id + room + kind; stale or duplicate completions are
-  dropped. Logout, session replacement, room leave, and room removal reset
-  the per-room entry to `Idle`.
-- `RoomCommand::ForceNewOutboundSession`, `RoomCommand::ShareIndex0RoomKey`,
-  and `RoomCommand::ResendIndex0RoomKey` route through `RoomActor` and
-  `koushi-sdk`. The SDK owns all cryptographic decisions: the manual
-  executors hold the per-room transport lock shared with the normal preshare
-  path, check `cancellation` and the actor validator before every HTTP
-  effect, and are bounded by a monotonic deadline; cleanup removes every
-  owned un-marked request (durably) and cancels the claim expectation on
-  every non-completed exit. #541's resend uses standard
-  `m.forwarded_room_key`, only the persisted immutable initial-share ledger,
-  and matching inbound index-0 material; it never widens to current members.
-  No custom wire event, plaintext fallback, recipient widening, or fabricated
-  delivery acknowledgement is permitted. Index 0 is never consumed and no
-  room event is sent.
-- GUI code renders the snapshot and dispatches typed commands only; it never
-  derives busy state or interprets outcomes locally. Diagnostics record one
-  closed `core.room_key_debug` operation per click with the issue-538/#541
-  allowlists (operation, outcome, fresh or ledger/inbound aggregate fields,
-  index before/after, own/peer eligible/accepted/missing buckets, claim
-  token, elapsed, room_event_sent=0, index0_consumed=0); no room/session/user/
-  device ids, identity keys, request/transaction ids, ciphertext, key
-  material, display names, homeservers, raw errors, or hashes are exported.
 
 ## Timeline Media
 

@@ -461,6 +461,26 @@ impl CoreConnection {
     }
 
     #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn qa_assert_inbound_sessions_start_at_zero(
+        &self,
+        room_id: String,
+    ) -> Result<usize, ()> {
+        let request_id = self.next_request_id();
+        let (acknowledged, result) = oneshot::channel();
+        self.command_tx
+            .send(super::CoreCommandEnvelope::Qa(
+                super::CoreQaCommand::AssertInboundSessionsStartAtZero {
+                    request_id,
+                    room_id,
+                    acknowledged,
+                },
+            ))
+            .await
+            .map_err(|_| ())?;
+        result.await.map_err(|_| ())?
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
     pub async fn sync_once_for_qa(&self) -> Result<(), CommandSubmitError> {
         let request_id = self.next_request_id();
         self.command_tx

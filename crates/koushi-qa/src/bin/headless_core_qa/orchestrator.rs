@@ -24,9 +24,8 @@ use super::registry::{
 };
 use super::scenario_identity::{
     run_credential_health_stage, run_e2ee_login_store_scenario, run_e2ee_trust_stage,
-    run_encryption_debug_stage, run_gate_negative_stage, run_gate_no_proof_stage,
-    run_gate_restore_stage, run_native_attention_stage, run_provisional_device_cleanup_qa,
-    run_session_status_stage,
+    run_gate_negative_stage, run_gate_no_proof_stage, run_gate_restore_stage,
+    run_native_attention_stage, run_provisional_device_cleanup_qa, run_session_status_stage,
 };
 use super::scenario_read_state::run_read_state_convergence_scenario;
 use super::scenario_rooms::{
@@ -248,10 +247,6 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
 
     if scenario.should_run_stage(QaStage::NativeAttention) {
         run_native_attention_stage(&mut conn_a).await?;
-    }
-
-    if scenario.should_run_stage(QaStage::EncryptionDebug) {
-        run_encryption_debug_stage(&config, &mut conn_a, &account_key_a).await?;
     }
 
     if scenario == QaScenario::DeviceCleanup {

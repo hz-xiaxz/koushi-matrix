@@ -51,8 +51,6 @@ pub(crate) enum AccountWorkKind {
     OffscreenGapRepair,
     /// Search history crawling and non-visible history hydration.
     SearchCrawl,
-    /// Bounded post-send room-key reshare.
-    RoomKeyReshare,
     /// Housekeeping that may wait for an idle account.
     Maintenance,
 }
@@ -135,13 +133,6 @@ impl AccountWorkKind {
                 max_concurrency: 1,
                 batch_limit: 64,
             },
-            Self::RoomKeyReshare => AccountWorkPolicy {
-                priority: 160,
-                class: AccountWorkClass::Background,
-                preemptible: true,
-                max_concurrency: 1,
-                batch_limit: 1,
-            },
             Self::Maintenance => AccountWorkPolicy {
                 priority: 192,
                 class: AccountWorkClass::Background,
@@ -161,7 +152,6 @@ impl AccountWorkKind {
             Self::ExplicitPagination => "explicit_pagination",
             Self::OffscreenGapRepair => "offscreen_gap_repair",
             Self::SearchCrawl => "search_crawl",
-            Self::RoomKeyReshare => "room_key_reshare",
             Self::Maintenance => "maintenance",
         }
     }

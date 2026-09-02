@@ -197,30 +197,6 @@ pub enum RoomCommand {
         surface: koushi_state::MentionSurface,
         query: String,
     },
-    ReshareRoomKey {
-        request_id: RequestId,
-        room_id: String,
-    },
-    /// Temporary dangerous encryption-debug control (issue #538): rotate the
-    /// outbound Megolm session and confirm the fresh session is at index 0.
-    ForceNewOutboundSession {
-        request_id: RequestId,
-        room_id: String,
-    },
-    /// Temporary dangerous encryption-debug control (issue #538): share the
-    /// current outbound session's index-0 room key to every eligible
-    /// recipient device (claiming missing Olm sessions).
-    ShareIndex0RoomKey {
-        request_id: RequestId,
-        room_id: String,
-    },
-    /// Temporary dangerous encryption-debug control (issue #541): resend
-    /// index-0 recovery material for the current outbound session to the
-    /// immutable original recipient ledger.
-    ResendIndex0RoomKey {
-        request_id: RequestId,
-        room_id: String,
-    },
     UpdateRoomSetting {
         request_id: RequestId,
         room_id: String,
@@ -488,26 +464,6 @@ impl fmt::Debug for RoomCommand {
                 .debug_struct("QueryMentionCandidates")
                 .field("request_id", request_id)
                 .field("surface", surface)
-                .finish(),
-            Self::ReshareRoomKey { request_id, .. } => formatter
-                .debug_struct("ReshareRoomKey")
-                .field("request_id", request_id)
-                .field("room_id", &"RoomId(..)")
-                .finish(),
-            Self::ForceNewOutboundSession { request_id, .. } => formatter
-                .debug_struct("ForceNewOutboundSession")
-                .field("request_id", request_id)
-                .field("room_id", &"RoomId(..)")
-                .finish(),
-            Self::ShareIndex0RoomKey { request_id, .. } => formatter
-                .debug_struct("ShareIndex0RoomKey")
-                .field("request_id", request_id)
-                .field("room_id", &"RoomId(..)")
-                .finish(),
-            Self::ResendIndex0RoomKey { request_id, .. } => formatter
-                .debug_struct("ResendIndex0RoomKey")
-                .field("request_id", request_id)
-                .field("room_id", &"RoomId(..)")
                 .finish(),
             Self::UpdateRoomSetting {
                 request_id, change, ..

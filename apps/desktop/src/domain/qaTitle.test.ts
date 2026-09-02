@@ -164,8 +164,7 @@ describe("qaWindowTitle", () => {
                 room_id: "!private-room:example.test",
                 event_id: "$private-event:example.test",
                 op: "pin"
-              },
-              encryption_debug_operation: { state: "idle" }
+              }
             }
           }
         }

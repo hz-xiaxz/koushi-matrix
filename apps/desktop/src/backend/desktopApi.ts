@@ -5,7 +5,6 @@ import type {
   AttachmentFilter,
   AttachmentSort,
   CommandAdmission,
-  CommandResult,
   CommandSettlement,
   ComposerDocument,
   ComposerDraftAcceptanceResponse,
@@ -19,14 +18,12 @@ import type {
   DesktopSnapshot,
   DirectoryQuery,
   DisplayPlatform,
-  EncryptionDebugOperationOutcome,
   FilesViewScope,
   InviteScopeSelection,
   MentionSurface,
   NavigationPreferenceUpdate,
   OidcAuthorization,
   PresenceKind,
-  RoomKeyReshareOutcome,
   RoomListFilter,
   RoomModerationAction,
   RoomNotificationMode,
@@ -301,10 +298,6 @@ export interface DesktopApi {
   removeRoomTag(roomId: string, tag: RoomTagKind): Promise<CommandSettlement>;
   pinEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
   unpinEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
-  reshareRoomKey(roomId: string): Promise<CommandResult<RoomKeyReshareOutcome>>;
-  forceNewOutboundSession(roomId: string): Promise<CommandResult<EncryptionDebugOperationOutcome>>;
-  shareIndex0RoomKey(roomId: string): Promise<CommandResult<EncryptionDebugOperationOutcome>>;
-  resendIndex0RoomKey(roomId: string): Promise<CommandResult<EncryptionDebugOperationOutcome>>;
   openActivity(): Promise<CommandAdmission>;
   closeActivity(): Promise<CommandAdmission>;
   setActivityTab(tab: ActivityTab): Promise<CommandAdmission>;

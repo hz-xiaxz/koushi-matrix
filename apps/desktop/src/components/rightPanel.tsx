@@ -10,11 +10,9 @@ import type {
   DisplayDensity,
   FilesViewScope,
   ComposerDocument,
-  EncryptionDebugOperationOutcome,
   ResolveComposerKeyAction,
   RoomModerationAction,
   InviteTargetCandidate,
-  RoomKeyReshareOutcome,
   RoomNotificationMode,
   RoomSettingChange,
   SavedSessionInfo,
@@ -141,10 +139,6 @@ export function ContextualRightPanel({
   onUpdateMemberRole = () => undefined,
   onUpdateSpaceMemberRole = () => undefined,
   onReloadSpaceMemberRoles = () => undefined,
-  onReshareRoomKey,
-  onForceNewOutboundSession,
-  onShareIndex0RoomKey,
-  onResendIndex0RoomKey,
   onRecoverySecretPresenceChange,
   onReply,
   onResultSelect,
@@ -282,16 +276,6 @@ export function ContextualRightPanel({
   ) => void;
   onUpdateSpaceMemberRole?: (userId: string, option: SpaceMemberRoleOption) => void;
   onReloadSpaceMemberRoles?: () => void;
-  onReshareRoomKey?: (roomId: string) => Promise<RoomKeyReshareOutcome>;
-  onForceNewOutboundSession?: (
-    roomId: string
-  ) => Promise<EncryptionDebugOperationOutcome> | EncryptionDebugOperationOutcome;
-  onShareIndex0RoomKey?: (
-    roomId: string
-  ) => Promise<EncryptionDebugOperationOutcome> | EncryptionDebugOperationOutcome;
-  onResendIndex0RoomKey?: (
-    roomId: string
-  ) => Promise<EncryptionDebugOperationOutcome> | EncryptionDebugOperationOutcome;
   onRecoverySecretPresenceChange: (value: boolean) => void;
   onReply: TimelineRowActionHandlers["onReply"];
   onResultSelect: (roomId: string, eventId: string) => void;
@@ -556,16 +540,6 @@ export function ContextualRightPanel({
               : undefined
           }
           onSetRoomNotificationMode={onSetRoomNotificationMode}
-          onReshareRoomKey={onReshareRoomKey}
-          onForceNewOutboundSession={onForceNewOutboundSession}
-          onShareIndex0RoomKey={onShareIndex0RoomKey}
-          onResendIndex0RoomKey={onResendIndex0RoomKey}
-          encryptionDebugOperation={
-            activeRoom
-              ? snapshot.state.domain.room_interactions[activeRoom.room_id]
-                  ?.encryption_debug_operation
-              : undefined
-          }
           onUpdateRoomSetting={onUpdateRoomSetting}
           inviteHistoryPolicy={
             snapshot.state.domain.invite_workflow?.query.room_id === activeRoom?.room_id

@@ -64,19 +64,6 @@ function normalizeCommandResponse(command: string, value: unknown, generation = 
       settlement: { protocolVersion: 1, publishedGeneration: generation }
     };
   }
-  if (
-    [
-      "reshare_room_key",
-      "force_new_outbound_session",
-      "share_index0_room_key",
-      "resend_index0_room_key"
-    ].includes(command)
-  ) {
-    return {
-      result: value,
-      settlement: { protocolVersion: 1, publishedGeneration: generation }
-    };
-  }
 
   if (value && typeof value === "object" && "snapshot" in value) {
     const { snapshot, ...result } = value as Record<string, unknown> & {

@@ -5,7 +5,6 @@
 
 mod actor;
 mod directory;
-mod encryption_debug;
 mod list_observer;
 mod management;
 mod mentions;

@@ -30,8 +30,6 @@ async fn room_actor_shutdown_aborts_when_its_mailbox_cannot_accept_shutdown() {
         room_operation_test_control: Arc::new(Mutex::new(None)),
         #[cfg(any(test, feature = "test-hooks"))]
         room_operation_test_reached_count: Arc::new(AtomicUsize::new(0)),
-        #[cfg(any(test, feature = "test-hooks"))]
-        encryption_debug_test_control: Arc::new(Mutex::new(None)),
         task: Some(executor::spawn(std::future::pending())),
     };
 
