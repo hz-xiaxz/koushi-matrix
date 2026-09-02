@@ -21,6 +21,7 @@
 
 import { expect, test } from "@playwright/test";
 import { t } from "../src/i18n/messages";
+import { seedTimelineItems } from "./support/basicOperations";
 
 const VIEWPORT_MARGIN_PX = 16;
 
@@ -117,6 +118,60 @@ test("recent emoji selection is projected through Rust-owned composer settings",
 
   await openEmojiPicker(page);
   await expect(page.getByRole("heading", { name: t("composer.emojiRecent") })).toBeVisible();
+});
+
+test("composer and remote-message reaction pickers share Rust-owned recent emojis", async ({ page }) => {
+  await gotoReadyShell(page);
+  await page.evaluate(() => {
+    const next = structuredClone(window.__harness.currentSnapshot());
+    next.state.domain.settings.values.composer.recent_emojis = ["😀", "🙂"];
+    window.__harness.setSnapshot(next);
+    window.__harness.pushStateUpdate();
+  });
+  await seedTimelineItems(page, [
+    {
+      id: { Event: { event_id: "$remote-reaction:example.invalid" } },
+      sender: "@remote-user:example.invalid",
+      sender_label: "Remote User",
+      body: "Remote reaction target",
+      timestamp_ms: 1_800_000_000_000,
+      in_reply_to_event_id: null,
+      thread_root: null,
+      thread_summary: null,
+      can_react: true,
+      is_redacted: false,
+      is_hidden: false,
+      can_redact: false,
+      is_edited: false,
+      can_edit: false,
+      reactions: []
+    }
+  ]);
+
+  await openEmojiPicker(page);
+  await expect(page.getByRole("heading", { name: t("composer.emojiRecent") })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  const row = page.locator('[data-event-id="$remote-reaction:example.invalid"]');
+  await row.hover();
+  await row.getByRole("button", { name: t("timeline.addReaction") }).click();
+  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  await expect(picker.getByRole("heading", { name: t("composer.emojiRecent") })).toBeVisible();
+
+  await page.evaluate(() => window.__harness.clearInvocations());
+  await picker
+    .locator(".emoji-picker-section")
+    .first()
+    .getByRole("button", { name: "slightly smiling face" })
+    .click();
+
+  await expect
+    .poll(() => page.evaluate(() => window.__harness.invocationsOf("update_settings")[0]?.args))
+    .toEqual({
+      patch: {
+        composer: { math_mode: true, recent_emojis: ["🙂", "😀"] }
+      }
+    });
 });
 
 test("typing a search term filters the emoji grid", async ({ page }) => {

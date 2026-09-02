@@ -1033,6 +1033,8 @@ export function TimelinePane({
               ignoredUserIds={snapshot.state.domain.profile.ignored_user_ids}
               autoLoadOlderMessages={snapshot.state.domain.settings.values.timeline.auto_load_older_messages}
               codeBlockWrap={snapshot.state.domain.settings.values.display.code_block_wrap}
+              recentEmojis={snapshot.state.domain.settings.values.composer.recent_emojis}
+              onRecentEmojisChange={onRecentEmojisChangeStable}
               searchHighlightsByEventId={searchHighlightsByEventId}
               mediaDownloads={mediaDownloads}
               mentionCandidates={mentionCandidates}

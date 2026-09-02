@@ -393,6 +393,9 @@ export function ContextualRightPanel({
   };
   const mediaDownloads = snapshot.state.ui.timeline.media_downloads ?? {};
   const loadThreadPreview = useStableEvent(onThreadLoadStagedUploadPreview);
+  const onRecentEmojisChange = useStableEvent((recent_emojis: string[]) =>
+    onUpdateSettings?.({ composer: { ...composerSettings, recent_emojis } })
+  );
   const threadTarget = snapshot.state.ui.thread ?? { kind: "closed" as const };
   const threadPreviewRoomId =
     threadTarget.kind === "opening" || threadTarget.kind === "open" ? threadTarget.room_id : null;
@@ -800,6 +803,8 @@ export function ContextualRightPanel({
               onSetLocalUserAlias={onSetLocalUserAlias}
               autoLoadOlderMessages={snapshot.state.domain.settings.values.timeline.auto_load_older_messages}
               codeBlockWrap={snapshot.state.domain.settings.values.display.code_block_wrap}
+              recentEmojis={composerSettings.recent_emojis}
+              onRecentEmojisChange={onRecentEmojisChange}
               searchHighlightsByEventId={searchHighlightsByEventId}
               mediaDownloads={mediaDownloads}
             />
@@ -892,6 +897,8 @@ export function ContextualRightPanel({
             }
             autoLoadOlderMessages={snapshot.state.domain.settings.values.timeline.auto_load_older_messages}
             codeBlockWrap={snapshot.state.domain.settings.values.display.code_block_wrap}
+            recentEmojis={composerSettings.recent_emojis}
+            onRecentEmojisChange={onRecentEmojisChange}
             searchHighlightsByEventId={searchHighlightsByEventId}
             mediaDownloads={mediaDownloads}
             mentionCandidates={threadMentionCandidates}
@@ -967,11 +974,7 @@ export function ContextualRightPanel({
               composer: { ...composerSettings, math_mode: enabled }
             })
           }
-          onRecentEmojisChange={(recent_emojis) =>
-            onUpdateSettings?.({
-              composer: { ...composerSettings, recent_emojis }
-            })
-          }
+          onRecentEmojisChange={onRecentEmojisChange}
           roomName={t("panel.thread")}
         />
       ) : null}
@@ -997,11 +1000,7 @@ export function ContextualRightPanel({
             composer: { ...composerSettings, math_mode: enabled }
           })
         }
-        onRecentEmojisChange={(recent_emojis) =>
-          onUpdateSettings?.({
-            composer: { ...composerSettings, recent_emojis }
-          })
-        }
+        onRecentEmojisChange={onRecentEmojisChange}
         mentionCandidates={threadMentionCandidates}
         mentionCandidatesLoading={threadMentionCandidatesLoading}
         resolveComposerKeyAction={onResolveComposerKeyAction}

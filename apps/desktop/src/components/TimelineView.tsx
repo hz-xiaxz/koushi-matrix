@@ -325,6 +325,8 @@ export const TimelineView = memo(function TimelineView({
   liveLatestEventId = null,
   autoLoadOlderMessages = false,
   codeBlockWrap = true,
+  recentEmojis = [],
+  onRecentEmojisChange,
   searchHighlightsByEventId = {},
   mediaDownloads = {},
   continuity = { kind: "unknown" },
@@ -383,6 +385,8 @@ export const TimelineView = memo(function TimelineView({
   liveLatestEventId?: string | null;
   autoLoadOlderMessages?: boolean;
   codeBlockWrap?: boolean;
+  recentEmojis?: string[];
+  onRecentEmojisChange?: (emojis: string[]) => void | Promise<void>;
   searchHighlightsByEventId?: Record<string, { snippet: string; ranges: TextRange[] }>;
   mediaDownloads?: Record<string, TimelineMediaDownloadState>;
   continuity?: TimelineContinuityState;
@@ -3472,6 +3476,8 @@ export const TimelineView = memo(function TimelineView({
                 onReply={onReply}
                 onOpenThread={onOpenThread}
                 resolveComposerKeyAction={resolveComposerKeyAction}
+                recentEmojis={recentEmojis}
+                onRecentEmojisChange={onRecentEmojisChange}
                 mediaUploadProgress={mediaUploadProgressForItem(store, timelineKey, item)}
                 {...rowTransportActions}
                 isPinned={contentEventId ? pinnedEventIds.includes(contentEventId) : false}
