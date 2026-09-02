@@ -197,6 +197,8 @@ export function TimelineItemRow({
   onReply,
   onOpenThread = () => undefined,
   resolveComposerKeyAction = ignoreComposerKeyAction,
+  recentEmojis = [],
+  onRecentEmojisChange,
   mediaUploadProgress = null,
   onSendReaction,
   onRedactReaction,
@@ -258,6 +260,8 @@ export function TimelineItemRow({
   onReply: TimelineRowActionHandlers["onReply"];
   onOpenThread?: TimelineRowActionHandlers["onOpenThread"];
   resolveComposerKeyAction?: ResolveComposerKeyAction;
+  recentEmojis?: string[];
+  onRecentEmojisChange?: (emojis: string[]) => void | Promise<void>;
   mediaUploadProgress?: MediaTransferProgress | null;
   onSendReaction: TimelineRowActionHandlers["onSendReaction"];
   onRedactReaction: TimelineRowActionHandlers["onRedactReaction"];
@@ -1116,6 +1120,8 @@ export function TimelineItemRow({
                   placement="below"
                   resolveBoundaryElement={reactionPickerBoundaryElement}
                   className="timeline-reaction-emoji-picker"
+                  recentEmojis={recentEmojis}
+                  onRecentEmojisChange={onRecentEmojisChange}
                   onSelect={submitReaction}
                   onClose={closeReactionPicker}
                 />
