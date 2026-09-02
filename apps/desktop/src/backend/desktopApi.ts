@@ -135,6 +135,7 @@ export interface DesktopApi {
   selectRoomListFilter(filter: RoomListFilter): Promise<CommandAdmission>;
   markRoomAsRead(roomId: string, eventId: string): Promise<CommandAdmission>;
   markRoomAsUnread(roomId: string, unread: boolean): Promise<CommandAdmission>;
+  forceRotateOutboundSession(roomId: string): Promise<CommandSettlement>;
   setRoomNotificationMode(roomId: string, mode: RoomNotificationMode): Promise<CommandAdmission>;
   refreshCurrentSessionStatus(trigger: SessionStatusRefreshTrigger): Promise<CommandAdmission>;
   submitAccountManagementUia(flowId: number, password: string): Promise<CommandAdmission>;

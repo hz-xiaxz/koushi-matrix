@@ -250,6 +250,12 @@ pub enum RoomCommand {
         room_id: String,
         unread: bool,
     },
+    /// Debug control: discard the current outbound Megolm key. The next
+    /// ordinary encrypted send creates and shares the replacement.
+    ForceRotateOutboundSession {
+        request_id: RequestId,
+        room_id: String,
+    },
     SetRoomNotificationMode {
         request_id: RequestId,
         room_id: String,
@@ -549,6 +555,11 @@ impl fmt::Debug for RoomCommand {
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
                 .field("unread", unread)
+                .finish(),
+            Self::ForceRotateOutboundSession { request_id, .. } => formatter
+                .debug_struct("ForceRotateOutboundSession")
+                .field("request_id", request_id)
+                .field("room_id", &"RoomId(..)")
                 .finish(),
             Self::SetRoomNotificationMode {
                 request_id,

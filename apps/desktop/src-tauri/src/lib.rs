@@ -699,6 +699,7 @@ pub fn run() {
             commands::room::select_room_list_filter,
             commands::room::mark_room_as_read,
             commands::room::mark_room_as_unread,
+            commands::room::force_rotate_outbound_session,
             commands::room::set_room_notification_mode,
             commands::account::refresh_current_session_status,
             commands::account::load_account_management_capabilities,

@@ -166,6 +166,7 @@ impl CoreCommand {
                 | RoomCommand::SelectRoom { request_id, .. }
                 | RoomCommand::MarkRoomAsRead { request_id, .. }
                 | RoomCommand::MarkRoomAsUnread { request_id, .. }
+                | RoomCommand::ForceRotateOutboundSession { request_id, .. }
                 | RoomCommand::SetRoomNotificationMode { request_id, .. }
                 | RoomCommand::ReportContent { request_id, .. }
                 | RoomCommand::ReportRoom { request_id, .. } => *request_id,

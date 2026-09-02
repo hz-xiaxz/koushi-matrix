@@ -372,6 +372,13 @@ export type MessageId =
   | "room.joinRuleRestricted"
   | "room.kick"
   | "room.kickMember"
+  | "room.encryptionDebugging"
+  | "room.forceEncryptionKeyRotation"
+  | "room.forceEncryptionKeyRotationHint"
+  | "room.forceEncryptionKeyRotationConfirm"
+  | "room.confirmRotation"
+  | "room.rotationDiscardCompleted"
+  | "room.rotationDiscardFailed"
   | "room.management"
   | "room.messageMember"
   | "room.aliasDialogTitle"
@@ -1700,6 +1707,13 @@ const en: Catalog = {
   "room.roomInfo": "Room info",
   "room.roomScoped": "Room scoped",
   "room.roomSettings": "Room settings",
+  "room.encryptionDebugging": "Encryption debugging",
+  "room.forceEncryptionKeyRotation": "Force encryption key rotation",
+  "room.forceEncryptionKeyRotationHint": "Discard the current outbound key. The next message uses the normal SDK path to create and share a fresh session.",
+  "room.forceEncryptionKeyRotationConfirm": "Discard the current outbound key? This does not send or re-share a key by itself.",
+  "room.confirmRotation": "Confirm rotation",
+  "room.rotationDiscardCompleted": "Current outbound key discarded. The next message will rotate normally.",
+  "room.rotationDiscardFailed": "Could not discard the current outbound key.",
   "room.repair": "Repair",
   "room.repairTimeline": "Repair room timeline",
   "room.repairTimelineHint": "Detect and repair missing timeline ranges without deleting existing messages.",
@@ -2896,6 +2910,13 @@ const ja: Catalog = {
   "room.roomInfo": "ルーム情報",
   "room.roomScoped": "ルーム内",
   "room.roomSettings": "ルーム設定",
+  "room.encryptionDebugging": "暗号化デバッグ",
+  "room.forceEncryptionKeyRotation": "暗号化鍵を強制ローテーション",
+  "room.forceEncryptionKeyRotationHint": "現在の送信鍵を破棄します。次のメッセージ送信時に通常の SDK 経路で新しいセッションを作成・共有します。",
+  "room.forceEncryptionKeyRotationConfirm": "現在の送信鍵を破棄しますか？この操作だけでは鍵の送信や再共有は行いません。",
+  "room.confirmRotation": "ローテーションを確定",
+  "room.rotationDiscardCompleted": "現在の送信鍵を破棄しました。次のメッセージ送信時に通常どおりローテーションします。",
+  "room.rotationDiscardFailed": "現在の送信鍵を破棄できませんでした。",
   "room.repair": "修復",
   "room.repairTimeline": "ルームのタイムラインを修復",
   "room.repairTimelineHint": "既存のメッセージを削除せず、欠けている範囲を検出して修復します。",

@@ -1082,6 +1082,30 @@ impl RoomActor {
         }
     }
 
+    pub(super) async fn handle_force_rotate_outbound_session(
+        &self,
+        request_id: RequestId,
+        room_id: String,
+    ) {
+        let Some(session) = &self.session else {
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        };
+        if !self.ensure_known_room_for_message_interaction(request_id, &room_id) {
+            return;
+        }
+        match koushi_sdk::discard_outbound_room_key(session, &room_id).await {
+            Ok(()) => self.emit(CoreEvent::Room(RoomEvent::OutboundSessionRotationForced {
+                request_id,
+                room_id,
+            })),
+            Err(error) => {
+                let kind = classify_room_error(&error);
+                self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
+            }
+        }
+    }
+
     pub(super) async fn handle_set_room_notification_mode(
         &self,
         request_id: RequestId,

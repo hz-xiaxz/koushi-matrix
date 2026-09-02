@@ -316,7 +316,10 @@ export function diagnosticReport({
           `JS errors: ${jsErrors.length}`,
           ...jsErrors
             .slice(-5)
-            .map((error) => `[js-error] channel=${error.channel} kind=${error.kind}`)
+            .map(
+              (error) =>
+                `[js-error] channel=${error.channel} kind=${error.kind} age_bucket=${error.ageBucket} fingerprint=${error.fingerprint}`
+            )
         ]
       : []),
     ...securityDiagnosticLog,

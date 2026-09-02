@@ -11,6 +11,7 @@ fn e2ee_login_store_parses_with_exact_private_safe_tokens() {
         final_tokens_for_scenario(scenario),
         [
             "safety=ok",
+            "e2ee_login_store_forced_rotation_index0=ok",
             "e2ee_login_store_fresh_offline_index0=ok",
             "e2ee_login_store_restore_offline_index0=ok",
             "e2ee_login_store_restart_offline_index0=ok",

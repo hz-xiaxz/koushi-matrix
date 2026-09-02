@@ -167,6 +167,7 @@ export function ContextualRightPanel({
   onRebuildSearchIndex = () => undefined,
   onSetRoomUrlPreviewOverride = () => undefined,
   onRepairRoomTimeline = () => undefined,
+  onForceRotateOutboundSession = () => undefined,
   onUpdateRoomSetting = () => undefined,
   onIgnoreUser = () => undefined,
   onUnignoreUser = () => undefined,
@@ -312,6 +313,7 @@ export function ContextualRightPanel({
   onRebuildSearchIndex?: () => void;
   onSetRoomUrlPreviewOverride?: (roomId: string, enabled: boolean) => void;
   onRepairRoomTimeline?: (roomId: string) => void | Promise<void>;
+  onForceRotateOutboundSession?: (roomId: string) => void | Promise<void>;
   onLoadAccountManagementCapabilities?: () => void;
   onChangePassword?: (newPassword: string) => void;
   onDeactivateAccount?: (eraseData: boolean) => void;
@@ -560,6 +562,7 @@ export function ContextualRightPanel({
             void onSetRoomUrlPreviewOverride(roomId, enabled);
           }}
           onRepairRoomTimeline={onRepairRoomTimeline}
+          onForceRotateOutboundSession={onForceRotateOutboundSession}
           onOpenPeople={() => {
             void _onOpenPeople?.();
           }}

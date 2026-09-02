@@ -1520,9 +1520,12 @@ Outbound encrypted sends follow the stock Element X / matrix-rust-sdk sequence:
 synchronize room members when needed, query untracked or dirty device keys, call
 `preshare_room_key` exactly once, then encrypt. Koushi adds no current-generation
 readiness fence, repeated or duplicate pre-share, initial-share repair, fixed-
-delay post-send re-share, manual force-new/discard/share-index-0/resend-index-0
-control, original-recipient ledger, repair timer, or wake listener. The send path
-has one share step and no Koushi retry window between sharing and encryption.
+delay post-send re-share, manual share-index-0/resend-index-0 control,
+original-recipient ledger, repair timer, or wake listener. An explicit encrypted-
+room debugging control may call stock `matrix_sdk::Room::discard_room_key()` so
+the next ordinary send rotates normally; it adds no sharing, retry, recipient,
+or send-path state. The send path has one share step and no Koushi retry window
+between sharing and encryption.
 
 Upstream rotate-on-full-member-reload remains intact. Normal receive-side
 recovery uses Matrix key requests, verified-device gossip, configured backup

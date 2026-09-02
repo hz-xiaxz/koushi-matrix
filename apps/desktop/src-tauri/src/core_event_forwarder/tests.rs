@@ -1857,3 +1857,17 @@ fn core_event_contract_artifact_key_set_does_not_shrink() {
             Rust serialization entry in core_event_wire_format_matches_checked_in_contract_artifact."
     );
 }
+
+#[test]
+fn forced_rotation_settlement_stays_inside_rust() {
+    let event = koushi_protocol::CoreEvent::Room(
+        koushi_protocol::RoomEvent::OutboundSessionRotationForced {
+            request_id: koushi_protocol::RequestId {
+                connection_id: koushi_protocol::RuntimeConnectionId(1),
+                sequence: 2,
+            },
+            room_id: "!private-room:example.invalid".to_owned(),
+        },
+    );
+    assert!(serialize_core_event(&event).is_none());
+}

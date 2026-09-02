@@ -1049,6 +1049,13 @@ impl RoomActor {
                 self.handle_mark_room_as_unread(request_id, room_id, unread)
                     .await;
             }
+            RoomCommand::ForceRotateOutboundSession {
+                request_id,
+                room_id,
+            } => {
+                self.handle_force_rotate_outbound_session(request_id, room_id)
+                    .await;
+            }
             RoomCommand::SetRoomNotificationMode {
                 request_id,
                 room_id,

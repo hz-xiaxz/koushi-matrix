@@ -176,6 +176,7 @@ Phase A is Rust/headless work and comes before Phase B GUI wiring.
 | Eviction-resistant Megolm rotation attribution (#591) | [2026-08-21-issue591-rotation-ledger.md](../superpowers/plans/2026-08-21-issue591-rotation-ledger.md) | [2026-08-21-issue591-rotation-ledger.md](../superpowers/plans/2026-08-21-issue591-rotation-ledger.md) |
 | Persisted Megolm rotation attribution (#794) | [2026-09-05-issue794-persisted-rotation-attribution.md](../superpowers/plans/2026-09-05-issue794-persisted-rotation-attribution.md) | — |
 | Element X Megolm send parity (#795) | [2026-09-05-issue795-element-x-megolm-send-parity.md](../superpowers/plans/2026-09-05-issue795-element-x-megolm-send-parity.md) | — |
+| Stock forced rotation debug control / JS-error attribution (#797) | [2026-09-06-force-rotation-issue797-js-errors.md](../superpowers/plans/2026-09-06-force-rotation-issue797-js-errors.md) | [2026-09-06-force-rotation-issue797-js-errors.md](../superpowers/plans/2026-09-06-force-rotation-issue797-js-errors.md) |
 | New-session Megolm readiness — phase 1 (#577) | [2026-08-21-issue577-megolm-readiness.md](../superpowers/plans/2026-08-21-issue577-megolm-readiness.md) | — |
 | Same-user secondary-device QA credential isolation (#577 follow-up) | [2026-08-21-issue577-secondary-device-qa-credentials.md](../superpowers/plans/2026-08-21-issue577-secondary-device-qa-credentials.md) | — |
 | Formatted-body newline preservation (#522) | [2026-08-14-formatted-body-newlines.md](../superpowers/plans/2026-08-14-formatted-body-newlines.md) | — |

@@ -42,6 +42,7 @@ pub enum RoomOperationKind {
     InviteDeclined,
     MarkedAsRead,
     MarkedAsUnread,
+    OutboundSessionRotationForced,
     RoomLeft,
     RoomForgotten,
     RoomTagSet {
@@ -349,6 +350,7 @@ impl fmt::Debug for RoomOperationKind {
             Self::InviteDeclined => "InviteDeclined",
             Self::MarkedAsRead => "MarkedAsRead",
             Self::MarkedAsUnread => "MarkedAsUnread",
+            Self::OutboundSessionRotationForced => "OutboundSessionRotationForced",
             Self::RoomLeft => "RoomLeft",
             Self::RoomForgotten => "RoomForgotten",
             Self::RoomTagSet { .. } => "RoomTagSet",
@@ -1294,6 +1296,22 @@ fn room_operation_progress(
         } if event_request_id == request_id
             && expected_room_id == &room_id
             && matches!(operation, RoomOperationKind::MarkedAsUnread) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id,
+                event_id: None,
+                user_id: None,
+                action: None,
+                generation: None,
+            }
+        }
+        RoomEvent::OutboundSessionRotationForced {
+            request_id: event_request_id,
+            room_id,
+        } if event_request_id == request_id
+            && expected_room_id == &room_id
+            && matches!(operation, RoomOperationKind::OutboundSessionRotationForced) =>
         {
             EventProgress::RoomOperation {
                 request_id,

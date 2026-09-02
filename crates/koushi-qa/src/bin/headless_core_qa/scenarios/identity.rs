@@ -34,7 +34,7 @@ use super::{
     LocalEncryptionHealth, LocalEncryptionState, NativeAttentionCapabilities,
     NativeAttentionCapability, NativeAttentionDispatchState, NativeAttentionObservationKind,
     NativeAttentionProjectionInput, NativeAttentionState, NativeAttentionSuppressionReason,
-    RecoveryRequest, RequestId, RoomAttentionKind, RoomCommand, RoomNotificationMode,
+    RecoveryRequest, RequestId, RoomAttentionKind, RoomCommand, RoomEvent, RoomNotificationMode,
     SessionAuthenticationMethod, SessionInfo, SessionState, SessionStatusRefreshTrigger,
     SyncCommand, TimelineCommand, TimelineItem, TimelineKey, VerificationTarget,
     native_attention_state_from_rooms,
@@ -154,6 +154,37 @@ async fn send_after_rotation(
     .await
     .map_err(|_| format!("{label}: send completion timed out"))??;
     Ok(())
+}
+
+async fn force_rotate_outbound_session(
+    conn: &mut CoreConnection,
+    room_id: &str,
+    deadline: tokio::time::Instant,
+) -> Result<(), String> {
+    let request_id = conn.next_request_id();
+    conn.command(CoreCommand::Room(RoomCommand::ForceRotateOutboundSession {
+        request_id,
+        room_id: room_id.to_owned(),
+    }))
+    .await
+    .map_err(|_| "e2ee login-store forced rotation submit failed".to_owned())?;
+    loop {
+        match (QaEventDeadline { instant: deadline }).recv(conn).await {
+            Ok(Ok(CoreEvent::Room(RoomEvent::OutboundSessionRotationForced {
+                request_id: event_request_id,
+                ..
+            }))) if event_request_id == request_id => return Ok(()),
+            Ok(Ok(CoreEvent::OperationFailed {
+                request_id: event_request_id,
+                ..
+            })) if event_request_id == request_id => {
+                return Err("e2ee login-store forced rotation failed".to_owned());
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) => return Err("e2ee login-store forced rotation event lagged".to_owned()),
+            Err(_) => return Err("e2ee login-store forced rotation timed out".to_owned()),
+        }
+    }
 }
 
 async fn assert_inbound_sessions_start_at_zero(
@@ -277,6 +308,61 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
             subscribe_timeline_for_qa(&mut b.conn, &key_b, "e2ee login-store B timeline").await?;
         assert_no_decryption_failure_items(&initial_a, "e2ee login-store A initial")?;
         assert_no_decryption_failure_items(&initial_b, "e2ee login-store B initial")?;
+
+        let phase_deadline = tokio::time::Instant::now() + E2EE_EVENT_TIMEOUT;
+        send_after_rotation(
+            &mut a.conn,
+            &a_account_key,
+            &room_id,
+            "QA E2EE login-store rotation baseline",
+            "qa-login-store-rotation-baseline",
+            phase_deadline,
+            "e2ee login-store rotation baseline",
+        )
+        .await?;
+        wait_for_item_with_body_or_decryption_failure(
+            &mut b.conn,
+            &key_b,
+            "QA E2EE login-store rotation baseline",
+            "e2ee login-store rotation baseline receive",
+        )
+        .await?;
+        let sessions_before = assert_inbound_sessions_start_at_zero(
+            &b.conn,
+            &room_id,
+            "e2ee login-store rotation baseline",
+        )
+        .await?;
+        force_rotate_outbound_session(&mut a.conn, &room_id, phase_deadline).await?;
+        send_after_rotation(
+            &mut a.conn,
+            &a_account_key,
+            &room_id,
+            "QA E2EE login-store forced rotation",
+            "qa-login-store-forced-rotation",
+            phase_deadline,
+            "e2ee login-store forced rotation",
+        )
+        .await?;
+        wait_for_item_with_body_or_decryption_failure(
+            &mut b.conn,
+            &key_b,
+            "QA E2EE login-store forced rotation",
+            "e2ee login-store forced rotation receive",
+        )
+        .await?;
+        let sessions_after = assert_inbound_sessions_start_at_zero(
+            &b.conn,
+            &room_id,
+            "e2ee login-store forced rotation",
+        )
+        .await?;
+        if sessions_after <= sessions_before {
+            return Err(
+                "e2ee login-store forced rotation did not create a new inbound session".to_owned(),
+            );
+        }
+        println!("e2ee_login_store_forced_rotation_index0=ok");
 
         let phase_deadline = tokio::time::Instant::now() + E2EE_EVENT_TIMEOUT;
         let stopped = stop_qa_participant_for_offline(
