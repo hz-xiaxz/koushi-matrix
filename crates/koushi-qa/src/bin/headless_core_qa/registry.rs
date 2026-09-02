@@ -514,6 +514,7 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "e2ee_trust=ok",
         ],
         QaStage::E2eeLoginStore => &[
+            "e2ee_login_store_forced_rotation_index0=ok",
             "e2ee_login_store_fresh_offline_index0=ok",
             "e2ee_login_store_restore_offline_index0=ok",
             "e2ee_login_store_restart_offline_index0=ok",

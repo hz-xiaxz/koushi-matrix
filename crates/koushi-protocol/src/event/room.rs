@@ -165,6 +165,10 @@ pub enum RoomEvent {
         room_id: String,
         unread: bool,
     },
+    OutboundSessionRotationForced {
+        request_id: RequestId,
+        room_id: String,
+    },
     RoomListUpdated,
     ReportCompleted {
         request_id: RequestId,
@@ -392,6 +396,11 @@ impl fmt::Debug for RoomEvent {
                 .field("room_id", room_id)
                 .field("unread", unread)
                 .finish(),
+            Self::OutboundSessionRotationForced { request_id, .. } => formatter
+                .debug_struct("OutboundSessionRotationForced")
+                .field("request_id", request_id)
+                .field("room_id", &"RoomId(..)")
+                .finish(),
             Self::RoomListUpdated => formatter.write_str("RoomListUpdated"),
             Self::ReportCompleted { request_id, kind } => formatter
                 .debug_struct("ReportCompleted")
@@ -399,5 +408,24 @@ impl fmt::Debug for RoomEvent {
                 .field("kind", kind)
                 .finish(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forced_rotation_debug_redacts_room_id() {
+        let event = RoomEvent::OutboundSessionRotationForced {
+            request_id: RequestId {
+                connection_id: crate::RuntimeConnectionId(1),
+                sequence: 2,
+            },
+            room_id: "!private-room:example.invalid".to_owned(),
+        };
+        let debug = format!("{event:?}");
+        assert!(debug.contains("RoomId(..)"), "{debug}");
+        assert!(!debug.contains("!private-room:example.invalid"), "{debug}");
     }
 }

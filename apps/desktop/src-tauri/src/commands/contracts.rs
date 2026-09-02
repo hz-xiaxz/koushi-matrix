@@ -1529,6 +1529,20 @@ fn tauri_command_routes_build_expected_core_commands() {
         other => panic!("unexpected command: {other:?}"),
     }
 
+    match build_force_rotate_outbound_session_command(
+        fake_request_id(301),
+        "!room:example.org".to_owned(),
+    ) {
+        CoreCommand::Room(RoomCommand::ForceRotateOutboundSession {
+            request_id,
+            room_id,
+        }) => {
+            assert_eq!(request_id, fake_request_id(301));
+            assert_eq!(room_id, "!room:example.org");
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
     for (offset, change) in [
         (
             31,

@@ -14,7 +14,7 @@ import {
   Settings,
   Users
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { t } from "../i18n/messages";
 import { ImeSafeForm, ImeTextArea, ImeTextField } from "./ImeTextControl";
@@ -46,6 +46,7 @@ export function RoomInfoPanel({
   onSetRoomUrlPreviewOverride,
   onOpenPeople,
   onRepairRoomTimeline,
+  onForceRotateOutboundSession,
   inviteHistoryPolicy,
   onOpenRecovery,
   onReturnToInvite
@@ -63,6 +64,7 @@ export function RoomInfoPanel({
   onSetRoomUrlPreviewOverride?: (roomId: string, enabled: boolean) => void;
   onOpenPeople?: () => void;
   onRepairRoomTimeline?: (roomId: string) => void | Promise<void>;
+  onForceRotateOutboundSession?: (roomId: string) => void | Promise<void>;
   inviteHistoryPolicy?: InviteHistoryPolicy | null;
   onOpenRecovery?: () => void;
   onReturnToInvite?: () => void;
@@ -99,6 +101,11 @@ export function RoomInfoPanel({
   );
   const [historyVisibilityDraft, setHistoryVisibilityDraft] =
     useState<RoomHistoryVisibility>(settings?.history_visibility ?? "shared");
+  const [rotationConfirm, setRotationConfirm] = useState(false);
+  const [rotationState, setRotationState] = useState<"idle" | "pending" | "completed" | "failed">(
+    "idle"
+  );
+  const rotationEpochRef = useRef(0);
 
   useEffect(() => {
     setNameDraft(settings?.name ?? roomName);
@@ -115,6 +122,24 @@ export function RoomInfoPanel({
     settings?.name,
     settings?.topic
   ]);
+
+  useEffect(() => {
+    rotationEpochRef.current += 1;
+    setRotationConfirm(false);
+    setRotationState("idle");
+  }, [roomId]);
+
+  async function forceRotation() {
+    const epoch = ++rotationEpochRef.current;
+    setRotationConfirm(false);
+    setRotationState("pending");
+    try {
+      await onForceRotateOutboundSession?.(roomId);
+      if (rotationEpochRef.current === epoch) setRotationState("completed");
+    } catch {
+      if (rotationEpochRef.current === epoch) setRotationState("failed");
+    }
+  }
 
   function repairRoomTimeline() {
     if (!onRepairRoomTimeline) {
@@ -207,6 +232,49 @@ export function RoomInfoPanel({
           <DetailRow label={t("room.dmList")} value={room.is_dm ? t("room.globalDmList") : t("room.roomScoped")} />
         </div>
       </section>
+
+      {isEncrypted && onForceRotateOutboundSession ? (
+        <section className="settings-section" aria-label={t("room.encryptionDebugging")}>
+          <h3>{t("room.encryptionDebugging")}</h3>
+          <div className="room-key-actions">
+            <button
+              className="profile-settings-action"
+              type="button"
+              disabled={rotationState === "pending"}
+              onClick={() => setRotationConfirm(true)}
+            >
+              <KeyRound size={16} aria-hidden="true" />
+              <span>{t("room.forceEncryptionKeyRotation")}</span>
+            </button>
+            <p className="profile-settings-hint">{t("room.forceEncryptionKeyRotationHint")}</p>
+            {rotationConfirm ? (
+              <div className="settings-detail-row">
+                <p className="profile-settings-hint">{t("room.forceEncryptionKeyRotationConfirm")}</p>
+                <button
+                  className="profile-settings-action"
+                  type="button"
+                  disabled={rotationState === "pending"}
+                  onClick={() => void forceRotation()}
+                >
+                  {t("room.confirmRotation")}
+                </button>
+                <button
+                  className="profile-settings-action"
+                  type="button"
+                  onClick={() => setRotationConfirm(false)}
+                >
+                  {t("action.cancel")}
+                </button>
+              </div>
+            ) : null}
+            {rotationState === "completed" ? (
+              <p className="profile-settings-hint success">{t("room.rotationDiscardCompleted")}</p>
+            ) : rotationState === "failed" ? (
+              <p className="profile-settings-hint error">{t("room.rotationDiscardFailed")}</p>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       {onRepairRoomTimeline ? (
         <section className="settings-section" aria-label={t("room.repair")}>

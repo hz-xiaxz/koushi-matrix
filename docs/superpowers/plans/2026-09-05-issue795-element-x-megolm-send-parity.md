@@ -1,6 +1,6 @@
 # Issue #795 — Element X Megolm send parity
 
-Status: approved by the user's request to implement Issues #794 and #795 together, open a PR, and merge; implementation pending.
+Status: shipped in PR #796.
 
 ## Objective
 

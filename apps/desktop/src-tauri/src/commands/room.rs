@@ -289,6 +289,23 @@ pub async fn mark_room_as_unread(
 }
 
 #[tauri::command]
+pub async fn force_rotate_outbound_session(
+    room_id: String,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandSettlement, String> {
+    let request_id = next_request_id(state.inner()).await;
+    submit_room_operation(
+        state.inner(),
+        request_id,
+        build_force_rotate_outbound_session_command(request_id, room_id.clone()),
+        room_id,
+        RoomOperationKind::OutboundSessionRotationForced,
+        "outbound session rotation",
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn set_room_notification_mode(
     room_id: String,
     mode: RoomNotificationMode,
@@ -1244,6 +1261,16 @@ pub(super) fn build_repair_room_timeline_command(
     room_id: String,
 ) -> CoreCommand {
     CoreCommand::App(AppCommand::RepairRoomTimeline {
+        request_id,
+        room_id,
+    })
+}
+
+pub(super) fn build_force_rotate_outbound_session_command(
+    request_id: RequestId,
+    room_id: String,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::ForceRotateOutboundSession {
         request_id,
         room_id,
     })

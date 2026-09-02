@@ -2316,6 +2316,10 @@ export function App() {
     await settleCommand(api.repairRoomTimeline(roomId));
   }
 
+  async function forceRotateOutboundSession(roomId: string) {
+    await settleCommand(api.forceRotateOutboundSession(roomId));
+  }
+
   async function submitAccountManagementUia(flowId: number, password: string) {
     await settleCommand(api.submitAccountManagementUia(flowId, password));
   }
@@ -6079,6 +6083,7 @@ export function App() {
           onRepairRoomTimeline={(roomId) => {
             runInBackground(repairRoomTimeline(roomId));
           }}
+          onForceRotateOutboundSession={forceRotateOutboundSession}
           onStartDirectMessage={(userId) => {
             runInBackground(startDirectMessage(userId));
           }}

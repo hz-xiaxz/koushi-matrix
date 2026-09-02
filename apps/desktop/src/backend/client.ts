@@ -203,6 +203,10 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandAdmission>("mark_room_as_unread", { roomId, unread });
   }
 
+  async forceRotateOutboundSession(roomId: string): Promise<CommandSettlement> {
+    return this.invokeCommand<CommandSettlement>("force_rotate_outbound_session", { roomId });
+  }
+
   async setRoomNotificationMode(
     roomId: string,
     mode: RoomNotificationMode

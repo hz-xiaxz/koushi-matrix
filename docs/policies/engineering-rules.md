@@ -257,9 +257,11 @@ Rules:
    Outbound encrypted sends use the stock Element X sequence only: synchronize
    members when needed, query untracked or dirty device keys, perform exactly
    one standard `preshare_room_key`, then encrypt. No current-generation fence,
-   repeated pre-share, fixed-delay re-share, force-new/discard/share-index-0/
-   resend-index-0 API, manual encryption-debug share, repair scheduler, or
-   original-recipient ledger may exist in production or test-only SDK code.
+   repeated pre-share, fixed-delay re-share, share-index-0/resend-index-0 API,
+   manual encryption-debug share, repair scheduler, or original-recipient ledger
+   may exist in production or test-only SDK code. A product debug control may
+   call stock `matrix_sdk::Room::discard_room_key()` only; the next ordinary send
+   owns session creation and its single standard share.
    Normal receive-side recovery remains the standard key-request/gossip, backup
    lookup, and decrypt-retry path. Read-only diagnostics may expose aliases,
    closed states, count/time buckets, and unchanged-index facts—not identifiers,

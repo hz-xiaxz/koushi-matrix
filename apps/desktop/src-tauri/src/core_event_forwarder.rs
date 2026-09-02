@@ -207,6 +207,9 @@ fn serialize_core_event(event: &CoreEvent) -> Option<serde_json::Value> {
         }
         CoreEvent::Account(e) => serde_json::json!({ "kind": "Account", "event": e }),
         CoreEvent::Sync(e) => serde_json::json!({ "kind": "Sync", "event": e }),
+        CoreEvent::Room(koushi_protocol::RoomEvent::OutboundSessionRotationForced { .. }) => {
+            return None;
+        }
         CoreEvent::Room(e) => serde_json::json!({ "kind": "Room", "event": e }),
         CoreEvent::Timeline(e) => serde_json::json!({ "kind": "Timeline", "event": e }),
         CoreEvent::LiveSignals(e) => serde_json::json!({ "kind": "LiveSignals", "event": e }),

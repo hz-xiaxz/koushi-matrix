@@ -513,6 +513,7 @@ describe("TauriDesktopApi", () => {
     await api.loadRoomSettings("!room:example.invalid");
     await api.queryMentionCandidates("!room:example.invalid", "thread", "ali");
     await api.repairRoomTimeline("!room:example.invalid");
+    await api.forceRotateOutboundSession("!room:example.invalid");
     await api.updateRoomSetting("!room:example.invalid", {
       topic: "Private topic"
     });
@@ -533,6 +534,9 @@ describe("TauriDesktopApi", () => {
       query: "ali"
     });
     expect(invoke).toHaveBeenCalledWith("repair_room_timeline", {
+      roomId: "!room:example.invalid"
+    });
+    expect(invoke).toHaveBeenCalledWith("force_rotate_outbound_session", {
       roomId: "!room:example.invalid"
     });
     expect(invoke).toHaveBeenCalledWith("update_room_setting", {

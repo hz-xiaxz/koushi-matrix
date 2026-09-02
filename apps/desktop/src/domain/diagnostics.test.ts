@@ -570,14 +570,28 @@ describe("diagnosticReport", () => {
         longFrameCount: 0
       },
       jsErrors: [
-        { kind: "type_error", channel: "window_error" },
-        { kind: "unknown", channel: "unhandled_rejection" }
+        {
+          kind: "type_error",
+          channel: "window_error",
+          ageBucket: "<1m",
+          fingerprint: "f1_0123abcd"
+        },
+        {
+          kind: "unknown",
+          channel: "unhandled_rejection",
+          ageBucket: "1m-5m",
+          fingerprint: "f1_deadbeef"
+        }
       ]
     });
 
     expect(report).toContain("JS errors: 2");
-    expect(report).toContain("[js-error] channel=window_error kind=type_error");
-    expect(report).toContain("[js-error] channel=unhandled_rejection kind=unknown");
+    expect(report).toContain(
+      "[js-error] channel=window_error kind=type_error age_bucket=<1m fingerprint=f1_0123abcd"
+    );
+    expect(report).toContain(
+      "[js-error] channel=unhandled_rejection kind=unknown age_bucket=1m-5m fingerprint=f1_deadbeef"
+    );
     expect(report).toContain("js_error_count=2");
     expect(report).not.toContain("source=");
     expect(report).not.toContain("message=");

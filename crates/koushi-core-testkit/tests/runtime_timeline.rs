@@ -1973,30 +1973,40 @@ async fn ignored_stale_reset_completion_does_not_cancel_pending_composer_save() 
 async fn cleared_composer_drafts_do_not_resurrect_on_restart() {
     let data_dir = tempfile::tempdir().expect("data dir");
     let credential_dir = tempfile::tempdir().expect("credential dir");
+    let room_id = "!room:example.test";
+    seed_composer_payload(
+        data_dir.path(),
+        credential_dir.path(),
+        room_id,
+        "deleted before restart",
+    )
+    .await;
 
     {
         let runtime = CoreRuntime::start_with_data_dir_and_file_credentials(
             data_dir.path().to_path_buf(),
             credential_dir.path().to_path_buf(),
         );
+        let mut barrier = runtime.install_composer_draft_io_barrier_for_testing();
         let mut conn = runtime.attach();
         runtime
             .inject_actions(restore_ready_actions![
                 AppAction::RoomListUpdated {
                     spaces: vec![],
-                    rooms: vec![room_summary("!room:example.test")],
+                    rooms: vec![room_summary(room_id)],
                 },
                 AppAction::SelectRoom {
-                    room_id: "!room:example.test".to_owned(),
+                    room_id: room_id.to_owned(),
                 },
                 AppAction::TimelineSubscribed {
-                    room_id: "!room:example.test".to_owned(),
+                    room_id: room_id.to_owned(),
                 },
             ])
             .await;
         wait_for_state(&mut conn, |state| {
             matches!(state.session, SessionState::Ready(_))
-                && state.timeline.room_id.as_deref() == Some("!room:example.test")
+                && state.timeline.room_id.as_deref() == Some(room_id)
+                && state.timeline.composer.draft == "deleted before restart"
         })
         .await;
 
@@ -2005,25 +2015,7 @@ async fn cleared_composer_drafts_do_not_resurrect_on_restart() {
             CoreCommand::App(AppCommand::SetComposerDraft {
                 request_id: conn.next_request_id(),
                 expected_account: draft_account(),
-                room_id: "!room:example.test".to_owned(),
-                document: "deleted before restart".into(),
-                revision: 1.into(),
-            }),
-        )
-        .await
-        .expect("set room composer draft");
-        wait_for_state(&mut conn, |state| {
-            state.timeline.composer.draft == "deleted before restart"
-        })
-        .await;
-        executor::sleep(COMPOSER_DRAFT_PERSIST_DEBOUNCE * 2).await;
-
-        submit_composer_command(
-            &conn,
-            CoreCommand::App(AppCommand::SetComposerDraft {
-                request_id: conn.next_request_id(),
-                expected_account: draft_account(),
-                room_id: "!room:example.test".to_owned(),
+                room_id: room_id.to_owned(),
                 document: String::new().into(),
                 revision: 2.into(),
             }),
@@ -2031,7 +2023,21 @@ async fn cleared_composer_drafts_do_not_resurrect_on_restart() {
         .await
         .expect("clear room composer draft");
         wait_for_state(&mut conn, |state| state.timeline.composer.draft.is_empty()).await;
-        executor::sleep(COMPOSER_DRAFT_PERSIST_DEBOUNCE * 2).await;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            barrier.wait_for_save_started(),
+        )
+        .await
+        .expect("clear persistence must start");
+        barrier.release_save();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            barrier.wait_for_save_completed(),
+        )
+        .await
+        .expect("clear persistence must complete");
+        drop(conn);
+        runtime.shutdown().await;
     }
 
     let restarted = CoreRuntime::start_with_data_dir_and_file_credentials(
@@ -2043,20 +2049,20 @@ async fn cleared_composer_drafts_do_not_resurrect_on_restart() {
         .inject_actions(restore_ready_actions![
             AppAction::RoomListUpdated {
                 spaces: vec![],
-                rooms: vec![room_summary("!room:example.test")],
+                rooms: vec![room_summary(room_id)],
             },
             AppAction::SelectRoom {
-                room_id: "!room:example.test".to_owned(),
+                room_id: room_id.to_owned(),
             },
             AppAction::TimelineSubscribed {
-                room_id: "!room:example.test".to_owned(),
+                room_id: room_id.to_owned(),
             },
         ])
         .await;
 
     let snapshot = wait_for_state(&mut conn, |state| {
         matches!(state.session, SessionState::Ready(_))
-            && state.timeline.room_id.as_deref() == Some("!room:example.test")
+            && state.timeline.room_id.as_deref() == Some(room_id)
             && state.timeline.is_subscribed
     })
     .await;

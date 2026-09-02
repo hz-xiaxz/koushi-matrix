@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { RoomInfoPanel } from "./RoomInfoPanel";
@@ -408,6 +408,61 @@ describe("RoomInfoPanel", () => {
     expect(screen.getByText("All messages")).toBeTruthy();
     expect(screen.getByText("Mentions only")).toBeTruthy();
     expect(screen.getByText("Mute")).toBeTruthy();
+  });
+
+  test("confirms only stock outbound-session rotation for encrypted rooms", async () => {
+    const onForceRotateOutboundSession = vi.fn();
+    render(
+      <RoomInfoPanel
+        room={{ ...baseRoom, is_encrypted: true }}
+        roomNotificationSettings={idleSettings}
+        spaces={[]}
+        onForceRotateOutboundSession={onForceRotateOutboundSession}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Force encryption key rotation" }));
+    expect(onForceRotateOutboundSession).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm rotation" }));
+
+    expect(onForceRotateOutboundSession).toHaveBeenCalledWith(baseRoom.room_id);
+    expect(
+      await screen.findByText("Current outbound key discarded. The next message will rotate normally.")
+    ).toBeTruthy();
+    expect(screen.queryByText(/share index 0/i)).toBeNull();
+    expect(screen.queryByText(/reshare/i)).toBeNull();
+  });
+
+  test("ignores a forced-rotation completion after switching rooms", async () => {
+    let resolveRotation: () => void = () => {};
+    const onForceRotateOutboundSession = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRotation = () => resolve();
+        })
+    );
+    const { rerender } = render(
+      <RoomInfoPanel
+        room={{ ...baseRoom, is_encrypted: true }}
+        roomNotificationSettings={idleSettings}
+        spaces={[]}
+        onForceRotateOutboundSession={onForceRotateOutboundSession}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Force encryption key rotation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm rotation" }));
+
+    rerender(
+      <RoomInfoPanel
+        room={{ ...baseRoom, room_id: "!room-beta:example.invalid", is_encrypted: true }}
+        roomNotificationSettings={idleSettings}
+        spaces={[]}
+        onForceRotateOutboundSession={onForceRotateOutboundSession}
+      />
+    );
+    await act(async () => resolveRotation());
+
+    expect(screen.queryByText(/Current outbound key discarded/)).toBeNull();
   });
 
   test("requests non-destructive room timeline repair", () => {

@@ -380,10 +380,13 @@ conflict is being resolved.
   configured backup remain authoritative. Homeserver acceptance commits share
   state but is not proof of recipient decryption. Koushi must not add a
   new-session readiness fence, repeated/duplicate pre-share, post-send re-share,
-  force-new/discard/share-index-0/resend-index-0 API, original-recipient ledger,
-  repair timer, wake listener, or manual UI/QA control. Receive-side decrypt
-  retry, backup lookup, room-key requests, and upstream rotate-on-full-member-
-  reload remain supported. Read-only rotation attribution (#794) may observe the
+  share-index-0/resend-index-0 API, original-recipient ledger, repair timer, wake
+  listener, or manual share/repair control. One explicit encrypted-room debugging
+  control may call stock `matrix_sdk::Room::discard_room_key()`; it must add no
+  sharing, retry, recipient, or send-path state, and the next ordinary send owns
+  replacement-session creation and its single standard share. Receive-side
+  decrypt retry, backup lookup, room-key requests, and upstream rotate-on-full-
+  member-reload remain supported. Read-only rotation attribution (#794) may observe the
   resulting session boundary but must not alter sending or sharing.
 
 ## QA Gates And Cleanup

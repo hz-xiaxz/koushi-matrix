@@ -1365,6 +1365,28 @@ pub async fn mark_room_as_unread(
         .map_err(MatrixRoomOperationError::from_sdk_error)
 }
 
+/// Discards the current outbound Megolm key so the next ordinary send rotates
+/// through the SDK's standard create-and-share path.
+pub async fn discard_outbound_room_key(
+    session: &MatrixClientSession,
+    room_id: &str,
+) -> Result<(), MatrixRoomOperationError> {
+    let room = matrix_room(session, room_id)?;
+    if !room
+        .latest_encryption_state()
+        .await
+        .map_err(MatrixRoomOperationError::from_sdk_error)?
+        .is_encrypted()
+    {
+        return Err(MatrixRoomOperationError::Sdk(
+            MatrixRoomOperationFailureKind::WrongRoomState,
+        ));
+    }
+    room.discard_room_key()
+        .await
+        .map_err(MatrixRoomOperationError::from_sdk_error)
+}
+
 const ROOM_NOTIFICATION_RULE_ID_PREFIX: &str = "org.matrix.desktop.notify.room.";
 
 fn room_notification_rule_id(room_id: &matrix_sdk::ruma::RoomId) -> String {

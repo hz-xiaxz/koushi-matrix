@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import {
   getRecentJsErrors,
   installJsErrorCapture,
+  jsErrorAgeBucket,
   recordJsError,
   resetJsErrors
 } from "./jsErrorLog";
@@ -16,11 +17,18 @@ describe("jsErrorLog", () => {
     expect(getRecentJsErrors()).toEqual([]);
   });
 
+  test("buckets monotonic session age at fixed boundaries", () => {
+    expect(jsErrorAgeBucket(59_999)).toBe("<1m");
+    expect(jsErrorAgeBucket(60_000)).toBe("1m-5m");
+    expect(jsErrorAgeBucket(300_000)).toBe("5m-30m");
+    expect(jsErrorAgeBucket(1_800_000)).toBe("30m+");
+  });
+
   test("captures only an allowlisted kind and fixed channel", () => {
     recordJsError(new TypeError("boom"), "window_error");
 
     expect(getRecentJsErrors()).toEqual([
-      { kind: "type_error", channel: "window_error" }
+      expect.objectContaining({ kind: "type_error", channel: "window_error" })
     ]);
   });
 
@@ -42,12 +50,28 @@ describe("jsErrorLog", () => {
 
     const serialized = JSON.stringify(getRecentJsErrors());
     expect(getRecentJsErrors()).toEqual([
-      { kind: "error", channel: "unhandled_rejection" }
+      expect.objectContaining({ kind: "error", channel: "unhandled_rejection" })
     ]);
     for (const privateDetail of privateDetails) {
       expect(serialized).not.toContain(privateDetail);
     }
     expect(serialized).not.toContain("PrivateCustomError");
+  });
+
+  test("fingerprints recurring errors without retaining their source details", () => {
+    const recurring = new Error("private recurring message");
+    recurring.stack = "Error: private recurring message\n at /Users/member/private/app.tsx:10:5";
+    recordJsError(recurring, "window_error");
+    recordJsError(recurring, "window_error");
+    recordJsError(new TypeError("different private message"), "window_error");
+
+    const captured = getRecentJsErrors();
+    expect(captured[0]?.ageBucket).toBe("<1m");
+    expect(captured[0]?.fingerprint).toMatch(/^f1_[0-9a-f]{8}$/);
+    expect(captured[1]?.fingerprint).toBe(captured[0]?.fingerprint);
+    expect(captured[2]?.fingerprint).not.toBe(captured[0]?.fingerprint);
+    expect(JSON.stringify(captured)).not.toContain("private recurring message");
+    expect(JSON.stringify(captured)).not.toContain("/Users/member/private/app.tsx");
   });
 
   test("bounds the buffer to the most recent errors", () => {
@@ -56,7 +80,7 @@ describe("jsErrorLog", () => {
     }
     const captured = getRecentJsErrors();
     expect(captured.length).toBe(20);
-    expect(captured[captured.length - 1]).toEqual({
+    expect(captured[captured.length - 1]).toMatchObject({
       kind: "error",
       channel: "window_error"
     });
@@ -92,7 +116,7 @@ describe("jsErrorLog", () => {
       });
 
       expect(getRecentJsErrors()).toEqual([
-        { kind: "range_error", channel: "window_error" }
+        expect.objectContaining({ kind: "range_error", channel: "window_error" })
       ]);
       const serialized = JSON.stringify(getRecentJsErrors());
       expect(serialized).not.toContain("secret message body");

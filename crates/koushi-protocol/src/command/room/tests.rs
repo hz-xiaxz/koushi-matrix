@@ -23,6 +23,28 @@ fn pin_event_debug_redacts_room_and_event_ids() {
 }
 
 #[test]
+fn force_rotate_outbound_session_is_correlated_and_redacts_room_id() {
+    let request_id = fake_rid(12);
+    let command = RoomCommand::ForceRotateOutboundSession {
+        request_id,
+        room_id: "!private-room:example.invalid".to_owned(),
+    };
+
+    assert_eq!(
+        CoreCommand::Room(RoomCommand::ForceRotateOutboundSession {
+            request_id,
+            room_id: "!private-room:example.invalid".to_owned(),
+        })
+        .request_id(),
+        request_id
+    );
+    let debug = format!("{command:?}");
+    assert!(debug.contains("ForceRotateOutboundSession"), "{debug}");
+    assert!(debug.contains("RoomId(..)"), "{debug}");
+    assert!(!debug.contains("!private-room:example.invalid"), "{debug}");
+}
+
+#[test]
 fn set_room_notification_mode_debug_redacts_room_id() {
     let command = RoomCommand::SetRoomNotificationMode {
         request_id: fake_rid(13),
