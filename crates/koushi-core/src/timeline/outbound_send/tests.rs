@@ -39,9 +39,6 @@ use crate::runtime::CoreRuntime;
 use koushi_protocol::command::CoreCommand;
 
 use super::super::actor::TimelineActorHandle;
-use super::super::diagnostics::{
-    OutboundSessionLookupDiagnostic, record_post_send_encryption_snapshot,
-};
 
 use super::super::manager::{TimelineManagerActor, TimelineMessage};
 use super::super::navigation::{TimelineActorGenerationGate, send_generation_fenced};
@@ -52,15 +49,15 @@ use super::super::test_support::{
 };
 use super::super::thread_projection::ThreadRootProjectionFetchRegistry;
 use super::{
-    EncryptedSendDiagnosticSnapshot, MAX_CONCURRENT_SEND_DIAGNOSTICS, MAX_SETTLED_SEND_TOMBSTONES,
-    MAX_SUBMISSION_TOMBSTONES, MediaSendQueuedDelivery, OwnUserTrackingDiagnosticState,
-    RoomEncryptionDiagnosticState, SEND_ENQUEUE_WORKER_SHUTDOWN_DEADLINE,
-    SendCompletionObservation, SendCompletionRegistration, SendCorrelationKey, SendEnqueueSuccess,
-    SendEnqueueWorkerCompletion, SendEnqueueWorkerSupervisor, SendLifecycleTrace,
-    SharedSendCompletionCoordinator, SubmissionAdmissionLedger, SyntheticSendEnqueueRequest,
-    TimelineSendCompletionDelivery, TimelineSendEnqueueContext, TimelineSendEnqueuePayload,
-    TimelineSendFailureDelivery, TimelineSendTerminalAdmission, TimelineSendTerminalHandoff,
-    TimelineSendTerminalIngress, apply_send_completion_observation_and_handoff,
+    EncryptedSendDiagnosticSnapshot, MAX_SETTLED_SEND_TOMBSTONES, MAX_SUBMISSION_TOMBSTONES,
+    MediaSendQueuedDelivery, OwnUserTrackingDiagnosticState, RoomEncryptionDiagnosticState,
+    SEND_ENQUEUE_WORKER_SHUTDOWN_DEADLINE, SendCompletionObservation, SendCompletionRegistration,
+    SendCorrelationKey, SendEnqueueSuccess, SendEnqueueWorkerCompletion,
+    SendEnqueueWorkerSupervisor, SendLifecycleTrace, SharedSendCompletionCoordinator,
+    SubmissionAdmissionLedger, SyntheticSendEnqueueRequest, TimelineSendCompletionDelivery,
+    TimelineSendEnqueueContext, TimelineSendEnqueuePayload, TimelineSendFailureDelivery,
+    TimelineSendTerminalAdmission, TimelineSendTerminalHandoff, TimelineSendTerminalIngress,
+    apply_send_completion_observation_and_handoff,
     apply_send_completion_observation_loss_and_handoff, await_submission_admission,
     classify_timeline_send_error, media_upload_progress_identity,
     run_global_send_completion_observer,
@@ -345,7 +342,6 @@ async fn send_terminal_required_action_failure_suppresses_completion_and_shutdow
                 key,
                 transaction_id,
                 event_id: "$event-closed-reducer:test".to_owned(),
-                diagnostic_correlation: None,
             }),
             failure: None,
         }),
@@ -1366,7 +1362,6 @@ fn encrypted_send_local_store_diagnostics_are_correlated_and_privacy_safe() {
 
     trace.record_encryption_local_store_snapshot(&EncryptedSendDiagnosticSnapshot {
         room_encryption: RoomEncryptionDiagnosticState::Encrypted,
-        outbound_session_present: Some(true),
         own_user_tracking: OwnUserTrackingDiagnosticState::Tracked,
         own_device_present: Some(true),
         known_own_device_count: Some(4),
@@ -1396,7 +1391,6 @@ fn encrypted_send_local_store_diagnostics_are_correlated_and_privacy_safe() {
             "snapshot_consistency",
             DiagnosticValue::Token("best_effort_concurrent_local_store"),
         ),
-        ("outbound_session_present", DiagnosticValue::Boolean(true)),
         ("own_user_tracking", DiagnosticValue::Token("tracked")),
         ("own_device_present", DiagnosticValue::Boolean(true)),
         ("known_own_device_count", DiagnosticValue::Count(4)),
@@ -1442,101 +1436,6 @@ fn encrypted_send_local_store_diagnostics_are_correlated_and_privacy_safe() {
                 | "key_material"
         )
     }));
-}
-
-#[test]
-fn post_send_encryption_diagnostics_keep_unknown_state_and_session_evidence_separate() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .len();
-    let correlation = 8_204;
-
-    record_post_send_encryption_snapshot(
-        correlation,
-        RoomEncryptionDiagnosticState::Unknown,
-        OutboundSessionLookupDiagnostic::Present,
-    );
-
-    let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
-    let record = diagnostics.records[diagnostic_start..]
-        .iter()
-        .find(|record| {
-            record.event.source == "core.send"
-                && record.event.stage == "post_send_encryption_snapshot"
-        })
-        .expect("post-send encryption diagnostic");
-    for (key, value) in [
-        ("correlation", DiagnosticValue::Correlation(correlation)),
-        (
-            "room_encryption_cached_after_send",
-            DiagnosticValue::Token("unknown"),
-        ),
-        ("outbound_session_lookup", DiagnosticValue::Token("present")),
-        (
-            "snapshot_consistency",
-            DiagnosticValue::Token("best_effort_post_terminal_local_store"),
-        ),
-    ] {
-        assert!(
-            record
-                .event
-                .fields
-                .iter()
-                .any(|field| { field.key == key && field.value == value }),
-            "missing {key}"
-        );
-    }
-    assert!(record.event.fields.iter().all(|field| {
-        !matches!(
-            field.key,
-            "room_id"
-                | "event_id"
-                | "user_id"
-                | "device_id"
-                | "session_id"
-                | "transaction_id"
-                | "request_id"
-                | "message"
-                | "key"
-                | "key_material"
-        )
-    }));
-}
-
-#[test]
-fn send_diagnostic_tasks_are_capacity_bounded_and_cancellable() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .len();
-    let (terminal_ingress, _terminal_rx) = TimelineSendTerminalIngress::channel();
-    let mut supervisor = SendEnqueueWorkerSupervisor::new(terminal_ingress);
-
-    for correlation in 1..=(MAX_CONCURRENT_SEND_DIAGNOSTICS as u64 + 1) {
-        supervisor.spawn_diagnostic(correlation, futures_util::future::pending());
-    }
-
-    assert_eq!(
-        supervisor.diagnostic_tasks.len(),
-        MAX_CONCURRENT_SEND_DIAGNOSTICS
-    );
-    let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
-    assert!(
-        diagnostics.records[diagnostic_start..]
-            .iter()
-            .any(|record| {
-                record.event.source == "core.send"
-                    && record.event.stage == "diagnostic_snapshot_skipped"
-                    && record.event.fields.iter().any(|field| {
-                        field.key == "outcome"
-                            && field.value == DiagnosticValue::Token("capacity_reached")
-                    })
-            })
-    );
-
-    supervisor.cancel_diagnostics();
-    assert!(supervisor.diagnostic_tasks.is_empty());
 }
 
 #[tokio::test]
@@ -2222,11 +2121,6 @@ fn coordinator_maps_sdk_transaction_to_client_request_and_completion() {
         fake_rid(42),
         true,
     );
-    let diagnostic_correlation = registration
-        .lifecycle_trace
-        .as_ref()
-        .expect("send registration lifecycle trace")
-        .correlation();
     registration.activate();
     registration.bind("sdk-auto-generated-txn".to_owned());
 
@@ -2252,12 +2146,10 @@ fn coordinator_maps_sdk_transaction_to_client_request_and_completion() {
             request_id,
             transaction_id,
             event_id,
-            diagnostic_correlation: Some(delivered_correlation),
             ..
         }) if request_id == fake_rid(42)
             && transaction_id == "client-txn-42"
             && event_id == "$event-42:test"
-            && delivered_correlation == diagnostic_correlation
     ));
 }
 

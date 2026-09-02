@@ -45,7 +45,7 @@ under #9/#31 before pre-dogfood audit closure.
 - [x] [H] eligible unverified peer devices remain non-blocking for ordinary sends; no normal-mode verify/send-anyway prompt. Explicitly blocked devices are withheld the room key while the event still reaches nonblocked devices (#191; Synapse tokens `e2ee_unverified_peer_send_nonblocking=ok` and `e2ee_blocked_device_withheld=ok`). Cryptographic send failures remain typed `TimelineFailureKind` failures and verification key mismatches remain closed `MatrixVerificationCancelKind::KeyMismatch`; neither path is converted into a send-anyway prompt. The vendored SDK's `MegolmError::MismatchedIdentityKeys`, `InvalidSignature`, and key-mismatch branches return errors rather than plaintext/partial results, while Core's timeline classifier propagates non-send-queue SDK failures as `TimelineFailureKind::Sdk`. A live mismatch injector is intentionally absent because safely corrupting persisted device identity keys is not a supported product or QA operation.
 - [ ] [H] provisional login method discovery reaches `AwaitingVerification` on a disposable server before gate acceptance. Unknown trust remains fail-closed while authoritative identity facts may still expose only the applicable proof/bootstrap capabilities.
 - [ ] [H] late-decrypt within grace window not reported as UTD; permanent UTD reported once even if timeline dropped (RS#4267, EW#25816)
-- [ ] [H] megolm rotation reshares to the **full** current device set, excludes `Withheld` devices from oversharing/rotation (JS#1986, RS#4954)
+- [ ] [H] a rotated Megolm session's standard pre-share reaches the **full** current eligible device set and excludes `Withheld` devices (JS#1986, RS#4954)
 
 ## 2. Sync & timeline core (→ timeline core, #15, #16, #23)
 - [ ] [H] initial state block = timeline start state; incremental never refetches full state (spec)
@@ -121,7 +121,7 @@ under #9/#31 before pre-dogfood audit closure.
 - [ ] [N] Cmd+Enter (macOS) vs Ctrl+Enter (Linux/Win) logical 'send'
 
 ## 8. Membership / invites / DMs (→ #14)
-- [ ] [H] accept invite to encrypted room → post-join messages decrypt (reshare); pre-join UTD unless history key-share (EW meta#245, MSC3061)
+- [ ] [H] accept invite to encrypted room → post-join messages decrypt through the standard pre-share/key-request path; pre-join UTD unless history key-share (EW meta#245, MSC3061)
 - [ ] [H] reject invite when inviter HS offline still clears locally; declined invite stays gone after re-sync (EW#4225/#3743)
 - [ ] [H] invite to already-joined room = clear no-op (EW#8965); retracted invite (404) forgets room (EW#29006)
 - [ ] [H] invite from ignored user suppressed for NEW rooms (asymmetry vs known rooms) (synapse#18209, spec)

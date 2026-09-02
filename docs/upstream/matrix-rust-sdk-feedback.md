@@ -48,6 +48,28 @@ or SDK boundary without logging private Matrix payloads.
 
 ## Upstreamable Patch Material
 
+- Element X Megolm send parity cleanup (issue #795, 2026-09-05) removes the
+  Koushi-only readiness fence, repeated/duplicate pre-share, initial-share
+  repair, manual force-new/discard/share-index-0/resend-index-0 APIs, and their
+  original-recipient ledger. The retained send flow is the stock sequence:
+  member sync, dirty/untracked key query, one `preshare_room_key`, then encrypt.
+  Receive-side key requests, gossip, backup lookup, decrypt retry, member-reload
+  rotation, and read-only diagnostics remain. Upstream intent: no new upstream
+  feature; this shrinks the fork back toward upstream and leaves only separately
+  justified diagnostic deltas.
+
+- Persisted outbound Megolm rotation attribution (issue #794, 2026-09-05)
+  stores one versioned, 128-entry exact room/session-to-closed-reason ledger in
+  the existing encrypted crypto-store custom-value mechanism. The crypto
+  machine restores it on construction, updates it only after successful new
+  outbound-session creation, replaces exact duplicate keys without growth, and
+  evicts oldest-first. Missing, malformed, unknown-version, oversized, or
+  unwritable data fails closed to unavailable without blocking encryption or
+  sending. Raw identifiers remain internal store keys and never enter exported
+  diagnostics or public return values. Upstreaming intent: propose the generic
+  bounded crypto-store attribution primitive and exact closed-reason accessor;
+  keep Koushi UI wording and product diagnostic projection outside the SDK.
+
 - Issue #541 manual current-session index-0 recovery (SDK topic commit
   `cb164845`, 2026-08-17) adds an immutable initial-share proof ledger,
   request ownership tags with legacy-pickle fail-closed migration, and the

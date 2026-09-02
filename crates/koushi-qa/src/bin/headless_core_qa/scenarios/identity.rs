@@ -1,11 +1,10 @@
 use super::cleanup::{cleanup_e2ee_multi_device_participants, leave_e2ee_login_store_room};
-use super::diagnostics::{diagnostic_count_field, diagnostic_has_token, diagnostic_token_field};
 use super::event_wait::{
     QaEventDeadline, find_timeline_item_with_body, start_sync_for_qa, subscribe_timeline_for_qa,
     timeline_item_is_decryption_failure, wait_for_initial_items, wait_for_invite_in_snapshot,
-    wait_for_item_with_body_or_decryption_failure, wait_for_logged_in, wait_for_logged_out,
-    wait_for_operation_failed, wait_for_operation_failed_and_signed_out, wait_for_ready_snapshot,
-    wait_for_room_created, wait_for_room_in_room_list, wait_for_send_flow_completion,
+    wait_for_item_with_body_or_decryption_failure, wait_for_logged_in, wait_for_operation_failed,
+    wait_for_operation_failed_and_signed_out, wait_for_ready_snapshot, wait_for_room_created,
+    wait_for_room_in_room_list, wait_for_send_flow_completion,
     wait_for_send_flow_completion_with_timeout, wait_for_session_restored,
     wait_for_sync_started_and_running, wait_for_sync_stopped,
     wait_for_withheld_event_projection_from_source,
@@ -30,15 +29,15 @@ use super::registry::{
 use super::{
     AccountCommand, AccountEvent, AccountKey, AppCommand, AuthSecret, CoreCommand, CoreConnection,
     CoreEvent, CoreFailure, CoreRuntime, CurrentSessionStatusState, CurrentSessionSyncState,
-    DeviceCleanupLocalMode, DeviceCleanupState, Duration, E2eeTrustEvent,
-    EncryptionDebugOperationOutcome, IdentityResetAuthRequest, IdentityResetAuthType,
-    IdentityResetState, KeyBackupStatus, LocalEncryptionEvent, LocalEncryptionHealth,
-    LocalEncryptionState, NativeAttentionCapabilities, NativeAttentionCapability,
-    NativeAttentionDispatchState, NativeAttentionObservationKind, NativeAttentionProjectionInput,
-    NativeAttentionState, NativeAttentionSuppressionReason, RecoveryRequest, RequestId,
-    RoomAttentionKind, RoomCommand, RoomEvent, RoomNotificationMode, SessionAuthenticationMethod,
-    SessionInfo, SessionState, SessionStatusRefreshTrigger, SyncCommand, TimelineCommand,
-    TimelineItem, TimelineKey, VerificationTarget, native_attention_state_from_rooms,
+    DeviceCleanupLocalMode, DeviceCleanupState, Duration, E2eeTrustEvent, IdentityResetAuthRequest,
+    IdentityResetAuthType, IdentityResetState, KeyBackupStatus, LocalEncryptionEvent,
+    LocalEncryptionHealth, LocalEncryptionState, NativeAttentionCapabilities,
+    NativeAttentionCapability, NativeAttentionDispatchState, NativeAttentionObservationKind,
+    NativeAttentionProjectionInput, NativeAttentionState, NativeAttentionSuppressionReason,
+    RecoveryRequest, RequestId, RoomAttentionKind, RoomCommand, RoomNotificationMode,
+    SessionAuthenticationMethod, SessionInfo, SessionState, SessionStatusRefreshTrigger,
+    SyncCommand, TimelineCommand, TimelineItem, TimelineKey, VerificationTarget,
+    native_attention_state_from_rooms,
 };
 
 #[derive(Clone)]
@@ -117,7 +116,7 @@ async fn stop_qa_participant_for_offline(
     })
 }
 
-async fn send_forced_index0(
+async fn send_after_rotation(
     conn: &mut CoreConnection,
     account_key: &AccountKey,
     room_id: &str,
@@ -127,27 +126,6 @@ async fn send_forced_index0(
     label: &str,
 ) -> Result<(), String> {
     let key = TimelineKey::room(account_key.clone(), room_id.to_owned());
-    let force_id = conn.next_request_id();
-    tokio::time::timeout_at(
-        deadline,
-        conn.command(CoreCommand::Room(RoomCommand::ForceNewOutboundSession {
-            request_id: force_id,
-            room_id: room_id.to_owned(),
-        })),
-    )
-    .await
-    .map_err(|_| format!("{label}: force-new submit timed out"))?
-    .map_err(|_| format!("{label}: force-new submit failed"))?;
-    let outcome = tokio::time::timeout_at(
-        deadline,
-        wait_for_encryption_debug_event(conn, force_id, room_id, label, "OutboundSessionForced"),
-    )
-    .await
-    .map_err(|_| format!("{label}: force-new timed out"))??;
-    if outcome != EncryptionDebugOperationOutcome::Completed {
-        return Err(format!("{label}: force-new did not complete"));
-    }
-
     let send_id = conn.next_request_id();
     tokio::time::timeout_at(
         deadline,
@@ -176,6 +154,20 @@ async fn send_forced_index0(
     .await
     .map_err(|_| format!("{label}: send completion timed out"))??;
     Ok(())
+}
+
+async fn assert_inbound_sessions_start_at_zero(
+    conn: &CoreConnection,
+    room_id: &str,
+    label: &str,
+) -> Result<usize, String> {
+    tokio::time::timeout(
+        E2EE_EVENT_TIMEOUT,
+        conn.qa_assert_inbound_sessions_start_at_zero(room_id.to_owned()),
+    )
+    .await
+    .map_err(|_| format!("{label}: inbound-session index assertion timed out"))?
+    .map_err(|_| format!("{label}: an inbound session did not start at index 0"))
 }
 
 async fn restart_recipient(
@@ -295,7 +287,7 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
         )
         .await?;
         stopped_b = Some(stopped.clone());
-        send_forced_index0(
+        send_after_rotation(
             &mut a.conn,
             &a_account_key,
             &room_id,
@@ -326,6 +318,8 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
             )
             .await?;
         }
+        assert_inbound_sessions_start_at_zero(&b.conn, &room_id, "e2ee login-store fresh receive")
+            .await?;
         println!("e2ee_login_store_fresh_offline_index0=ok");
 
         let stopped_primary = stop_qa_participant_for_offline(
@@ -352,7 +346,7 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
         let a = owner_a.as_mut().ok_or("e2ee login-store A owner missing")?;
         let key_a = TimelineKey::room(a_account_key.clone(), room_id.clone());
         subscribe_timeline_for_qa(&mut a.conn, &key_a, "e2ee login-store restore sender").await?;
-        send_forced_index0(
+        send_after_rotation(
             &mut a.conn,
             &a_account_key,
             &room_id,
@@ -379,6 +373,12 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
             )
             .await?;
         }
+        assert_inbound_sessions_start_at_zero(
+            &b.conn,
+            &room_id,
+            "e2ee login-store restore receive",
+        )
+        .await?;
         println!("e2ee_login_store_restore_offline_index0=ok");
 
         // A second stop/restart keeps the restore path distinct from fresh login.
@@ -394,7 +394,7 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
         let a = owner_a.as_mut().ok_or("e2ee login-store A owner missing")?;
         let key_a = TimelineKey::room(a_account_key.clone(), room_id.clone());
         subscribe_timeline_for_qa(&mut a.conn, &key_a, "e2ee login-store restart sender").await?;
-        send_forced_index0(
+        send_after_rotation(
             &mut a.conn,
             &a_account_key,
             &room_id,
@@ -421,6 +421,12 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
             )
             .await?;
         }
+        assert_inbound_sessions_start_at_zero(
+            &b.conn,
+            &room_id,
+            "e2ee login-store restart receive",
+        )
+        .await?;
         println!("e2ee_login_store_restart_offline_index0=ok");
 
         let phase_deadline = tokio::time::Instant::now() + E2EE_EVENT_TIMEOUT;
@@ -478,7 +484,7 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
         let a = owner_a.as_mut().ok_or("e2ee login-store A owner missing")?;
         let key_a = TimelineKey::room(a_account_key.clone(), room_id.clone());
         subscribe_timeline_for_qa(&mut a.conn, &key_a, "e2ee login-store reauth sender").await?;
-        send_forced_index0(
+        send_after_rotation(
             &mut a.conn,
             &a_account_key,
             &room_id,
@@ -504,6 +510,8 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
             )
             .await?;
         }
+        assert_inbound_sessions_start_at_zero(&b.conn, &room_id, "e2ee login-store reauth receive")
+            .await?;
         println!("e2ee_login_store_reauth_offline_index0=ok");
 
         let phase_deadline = tokio::time::Instant::now() + E2EE_EVENT_TIMEOUT;
@@ -511,7 +519,7 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
         let b = owner_b.as_mut().ok_or("e2ee login-store B owner missing")?;
         let key_a = TimelineKey::room(a_account_key.clone(), room_id.clone());
         subscribe_timeline_for_qa(&mut a.conn, &key_a, "e2ee login-store online sender").await?;
-        send_forced_index0(
+        send_after_rotation(
             &mut a.conn,
             &a_account_key,
             &room_id,
@@ -529,6 +537,8 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
             "e2ee login-store online receive",
         )
         .await?;
+        assert_inbound_sessions_start_at_zero(&b.conn, &room_id, "e2ee login-store online receive")
+            .await?;
         println!("e2ee_login_store_online_index0=ok");
 
         let user_c = config
@@ -628,7 +638,7 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
         subscribe_timeline_for_qa(&mut b.conn, &key_b, "e2ee login-store group B timeline").await?;
         subscribe_timeline_for_qa(&mut c.conn, &key_c, "e2ee login-store group C timeline").await?;
         let phase_deadline = tokio::time::Instant::now() + E2EE_EVENT_TIMEOUT;
-        send_forced_index0(
+        send_after_rotation(
             &mut a.conn,
             &a_account_key,
             &room_id,
@@ -649,6 +659,18 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
             &mut c.conn,
             &key_c,
             "QA E2EE login-store group",
+            "e2ee login-store group C receive",
+        )
+        .await?;
+        assert_inbound_sessions_start_at_zero(
+            &b.conn,
+            &room_id,
+            "e2ee login-store group B receive",
+        )
+        .await?;
+        assert_inbound_sessions_start_at_zero(
+            &c.conn,
+            &room_id,
             "e2ee login-store group C receive",
         )
         .await?;
@@ -1858,324 +1880,6 @@ pub(super) async fn run_credential_health_stage(conn: &mut CoreConnection) -> Re
         "credential health restore",
     )
     .await
-}
-
-/// The `encryption_debug` scenario (issue #538): in a real encrypted room,
-/// force a new outbound session and share the index-0 key, proving the
-/// command → RoomActor → event path and the typed outcomes. The SDK owns all
-/// cryptographic effects; the scenario only asserts closed outcomes and that
-/// index 0 is not consumed by the share.
-pub(super) async fn run_encryption_debug_stage(
-    config: &QaConfig,
-    conn: &mut CoreConnection,
-    account_key: &AccountKey,
-) -> Result<(), String> {
-    // Ensure the primary device publishes the proof capability required for
-    // the verified second-device prerequisite. Without this, the gate can
-    // observe an intermediate ExistingIdentity snapshot with no SAS method.
-    let bootstrap_id = conn.next_request_id();
-    conn.command(CoreCommand::Account(
-        AccountCommand::BootstrapCrossSigning {
-            request_id: bootstrap_id,
-            auth: Some(AuthSecret::new(config.password_a.clone())),
-        },
-    ))
-    .await
-    .map_err(|e| format!("encryption-debug: bootstrap cross-signing failed: {e}"))?;
-    let bootstrap_deadline = tokio::time::Instant::now() + Duration::from_secs(60);
-    loop {
-        match tokio::time::timeout_at(bootstrap_deadline, conn.recv_event())
-            .await
-            .map_err(|_| "encryption-debug: cross-signing bootstrap timed out".to_owned())?
-            .map_err(|_| "encryption-debug: event stream closed during bootstrap".to_owned())?
-        {
-            CoreEvent::E2eeTrust(E2eeTrustEvent::CrossSigningChanged {
-                account_key: got,
-                status,
-            }) if got == *account_key && status == koushi_state::CrossSigningStatus::Trusted => {
-                break;
-            }
-            CoreEvent::OperationFailed { request_id, .. } if request_id == bootstrap_id => {
-                return Err("encryption-debug: cross-signing bootstrap operation failed".to_owned());
-            }
-            _ => {}
-        }
-    }
-    println!("encryption_debug_cross_signing=ok");
-
-    let room_id =
-        create_room_for_qa(conn, "encryption-debug", true, "encryption-debug room").await?;
-    println!("encryption_debug_room=ok");
-
-    // Add a second, verified device of the same user so the share has a real
-    // eligible recipient (crypto excludes the current device; an empty
-    // eligible set must refuse rather than report success).
-    let session_a = authenticated_session_info(conn, "encryption-debug session A")?;
-    let runtime_a2 = start_isolated_qa_runtime("encryption-debug-a2")?;
-    let mut conn_a2 = runtime_a2.attach();
-    let mut account_key_a2_for_cleanup = None;
-    // Guarded body: A2 is logged out and its runtime is stopped on BOTH the
-    // success and every error path after its runtime exists (issue #538).
-    let guarded: Result<(), String> = async {
-        let login_a2_id = conn_a2.next_request_id();
-        conn_a2
-            .command(CoreCommand::Account(AccountCommand::LoginPassword {
-                request_id: login_a2_id,
-                request: koushi_state::LoginRequest {
-                    homeserver: config.homeserver.clone(),
-                    username: config.user_a.clone(),
-                    password: AuthSecret::new(config.password_a.clone()),
-                    device_display_name: Some("Koushi Core QA encryption-debug A2".to_owned()),
-                },
-                platform: koushi_state::DisplayPlatform::Linux,
-            }))
-            .await
-            .map_err(|e| format!("encryption-debug: submit login A2 failed: {e}"))?;
-        let session_a2 =
-            wait_for_existing_identity_gate(&mut conn_a2, "encryption-debug A2 gate").await?;
-        verify_provisional_second_device_for_qa(
-            conn,
-            &mut conn_a2,
-            &session_a,
-            &session_a2,
-            "encryption-debug A/A2",
-            SasQaOutcome::Success,
-        )
-        .await?;
-        let account_key_a2 =
-            wait_for_logged_in(&mut conn_a2, login_a2_id, "encryption-debug login A2").await?;
-        account_key_a2_for_cleanup = Some(account_key_a2.clone());
-
-        // A2 is a second verified device of the same user, so it is an eligible
-        // own-other device of the room without any invite/join (the room is
-        // creator-owned by the same user). The SAS flow above already settled to
-        // Done, so the share can target this verified own device directly.
-        println!("encryption_debug_recipient=ok");
-        let _ = account_key_a2;
-
-        // Force a new outbound session: the fresh session must settle Completed.
-        let force_id = conn.next_request_id();
-        conn.command(CoreCommand::Room(RoomCommand::ForceNewOutboundSession {
-            request_id: force_id,
-            room_id: room_id.clone(),
-        }))
-        .await
-        .map_err(|e| format!("encryption-debug: submit force-new failed: {e}"))?;
-        let force_outcome = wait_for_encryption_debug_event(
-            conn,
-            force_id,
-            &room_id,
-            "force_new_outbound_session",
-            "OutboundSessionForced",
-        )
-        .await?;
-        if force_outcome != EncryptionDebugOperationOutcome::Completed {
-            return Err(format!(
-                "encryption-debug: force-new did not complete (got {force_outcome:?})"
-            ));
-        }
-        println!("force_new_outbound_session=ok");
-
-        // Share the index-0 key: it must complete without consuming index 0.
-        let share_id = conn.next_request_id();
-        conn.command(CoreCommand::Room(RoomCommand::ShareIndex0RoomKey {
-            request_id: share_id,
-            room_id: room_id.clone(),
-        }))
-        .await
-        .map_err(|e| format!("encryption-debug: submit share-index0 failed: {e}"))?;
-        let share_outcome = wait_for_encryption_debug_event(
-            conn,
-            share_id,
-            &room_id,
-            "share_index0_room_key",
-            "Index0RoomKeyShared",
-        )
-        .await?;
-        if share_outcome != EncryptionDebugOperationOutcome::Completed {
-            return Err(format!(
-                "encryption-debug: index-0 share did not complete (got {share_outcome:?})"
-            ));
-        }
-        println!("share_index0_room_key=ok");
-
-        // A Completed share outcome implies the session was still at index 0
-        // (otherwise the SDK refuses with RefusedIndexAdvanced). The SDK summary
-        // also records index_before/index_after in the diagnostics.
-        println!("index0_not_consumed=ok");
-
-        // Advance the same outbound session, then exercise issue #541's manual
-        // recovery resend. The resend must leave the index unchanged and target
-        // only the immutable original ledger.
-        let timeline_key = TimelineKey::room(account_key.clone(), room_id.clone());
-        let advance_id = conn.next_request_id();
-        let advance_txn = "encryption-debug-advance".to_owned();
-        conn.command(CoreCommand::Timeline(TimelineCommand::SendText {
-            request_id: advance_id,
-            key: timeline_key.clone(),
-            transaction_id: advance_txn.clone(),
-            document: koushi_state::ComposerDocument::from_plain_text(
-                "encryption-debug advance".to_owned(),
-            ),
-        }))
-        .await
-        .map_err(|e| format!("encryption-debug: submit advance failed: {e}"))?;
-        let _ = wait_for_send_flow_completion(
-            conn,
-            advance_id,
-            &timeline_key,
-            &advance_txn,
-            "encryption-debug advance",
-            "encryption-debug advance",
-        )
-        .await?;
-        println!("encryption_debug_index_advanced=ok");
-
-        let resend_id = conn.next_request_id();
-        conn.command(CoreCommand::Room(RoomCommand::ResendIndex0RoomKey {
-            request_id: resend_id,
-            room_id: room_id.clone(),
-        }))
-        .await
-        .map_err(|e| format!("encryption-debug: submit resend failed: {e}"))?;
-        let resend_outcome = wait_for_encryption_debug_event(
-            conn,
-            resend_id,
-            &room_id,
-            "resend_index0_room_key",
-            "Index0RoomKeyResent",
-        )
-        .await?;
-        if resend_outcome != EncryptionDebugOperationOutcome::Completed {
-            return Err(format!(
-                "encryption-debug: index-0 resend did not complete (got {resend_outcome:?})"
-            ));
-        }
-        println!("resend_index0_room_key=ok");
-        let diagnostics = koushi_diagnostics::snapshot();
-        let debug = diagnostics
-            .records
-            .iter()
-            .rev()
-            .map(|record| &record.event)
-            .find(|event| {
-                event.source == "core.room_key_debug"
-                    && diagnostic_has_token(event, "operation", "resend_index0")
-            })
-            .ok_or_else(|| "encryption-debug: resend diagnostic missing".to_owned())?;
-        if diagnostic_token_field(debug, "outcome") != Some("completed")
-            || diagnostic_count_field(debug, "index_before").is_none_or(|index| index == 0)
-            || diagnostic_count_field(debug, "index_before")
-                != diagnostic_count_field(debug, "index_after")
-            || diagnostic_count_field(debug, "inbound_first_known_index") != Some(0)
-            || diagnostic_count_field(debug, "peer_accepted")
-                > diagnostic_count_field(debug, "peer_eligible")
-            || diagnostic_count_field(debug, "peer_missing")
-                > diagnostic_count_field(debug, "peer_eligible")
-            || diagnostic_count_field(debug, "peer_accepted").unwrap_or(0)
-                + diagnostic_count_field(debug, "peer_missing").unwrap_or(0)
-                != diagnostic_count_field(debug, "peer_eligible").unwrap_or(0)
-            || !matches!(
-                diagnostic_token_field(debug, "claim"),
-                Some("not_needed" | "succeeded")
-            )
-            || diagnostic_count_field(debug, "elapsed_ms").is_none_or(|elapsed| elapsed == 0)
-            || diagnostic_count_field(debug, "peer_ledger")
-                < diagnostic_count_field(debug, "peer_eligible")
-            || diagnostic_count_field(debug, "room_event_sent") != Some(0)
-            || diagnostic_count_field(debug, "index0_consumed") != Some(0)
-        {
-            return Err("encryption-debug: resend diagnostic invariants failed".to_owned());
-        }
-        println!("resend_index_unchanged=ok");
-        let _ = config;
-        let _ = account_key;
-        Ok(())
-    }
-    .await;
-    // Finally: attempt A2 logout and stop its runtime so no session leaks,
-    // on both success and error paths (best-effort; a logout failure is not
-    // a scenario failure by itself).
-    let logout_a2_id = conn_a2.next_request_id();
-    if conn_a2
-        .command(CoreCommand::Account(AccountCommand::Logout {
-            request_id: logout_a2_id,
-        }))
-        .await
-        .is_ok()
-    {
-        if let Some(account_key_a2) = account_key_a2_for_cleanup.as_ref() {
-            let _ = wait_for_logged_out(
-                &mut conn_a2,
-                logout_a2_id,
-                account_key_a2,
-                "encryption-debug A2 logout",
-            )
-            .await;
-        }
-    }
-    drop(conn_a2);
-    runtime_a2.shutdown().await;
-    guarded
-}
-
-async fn wait_for_encryption_debug_event(
-    conn: &mut CoreConnection,
-    request_id: RequestId,
-    room_id: &str,
-    label: &str,
-    event_name: &str,
-) -> Result<EncryptionDebugOperationOutcome, String> {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
-    loop {
-        match tokio::time::timeout_at(deadline, conn.recv_event())
-            .await
-            .map_err(|_| format!("encryption-debug: {label} timed out waiting for {event_name}"))?
-            .map_err(|e| format!("{label}: recv: {e:?}"))?
-        {
-            CoreEvent::Room(RoomEvent::OutboundSessionForced {
-                request_id: got,
-                outcome,
-                room_id: got_room,
-                ..
-            }) if event_name == "OutboundSessionForced"
-                && got == request_id
-                && got_room == room_id =>
-            {
-                return Ok(outcome);
-            }
-            CoreEvent::Room(RoomEvent::Index0RoomKeyShared {
-                request_id: got,
-                outcome,
-                room_id: got_room,
-                ..
-            }) if event_name == "Index0RoomKeyShared"
-                && got == request_id
-                && got_room == room_id =>
-            {
-                return Ok(outcome);
-            }
-            CoreEvent::Room(RoomEvent::Index0RoomKeyResent {
-                request_id: got,
-                outcome,
-                room_id: got_room,
-                ..
-            }) if event_name == "Index0RoomKeyResent"
-                && got == request_id
-                && got_room == room_id =>
-            {
-                return Ok(outcome);
-            }
-            CoreEvent::OperationFailed {
-                request_id: got, ..
-            } if got == request_id => {
-                return Err(format!(
-                    "encryption-debug: {label} failed with an operation failure"
-                ));
-            }
-            _ => continue,
-        }
-    }
 }
 
 pub(super) async fn run_native_attention_stage(conn: &mut CoreConnection) -> Result<(), String> {

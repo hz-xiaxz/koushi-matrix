@@ -157,10 +157,6 @@ impl CoreCommand {
                 | RoomCommand::JoinDirectoryRoom { request_id, .. }
                 | RoomCommand::LoadRoomSettings { request_id, .. }
                 | RoomCommand::QueryMentionCandidates { request_id, .. }
-                | RoomCommand::ReshareRoomKey { request_id, .. }
-                | RoomCommand::ForceNewOutboundSession { request_id, .. }
-                | RoomCommand::ShareIndex0RoomKey { request_id, .. }
-                | RoomCommand::ResendIndex0RoomKey { request_id, .. }
                 | RoomCommand::UpdateRoomSetting { request_id, .. }
                 | RoomCommand::ModerateRoomMember { request_id, .. }
                 | RoomCommand::UpdateRoomMemberRole { request_id, .. }

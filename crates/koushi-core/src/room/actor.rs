@@ -1,6 +1,3 @@
-use super::encryption_debug::{EncryptionDebugCompletion, EncryptionDebugFence};
-#[cfg(any(test, feature = "test-hooks"))]
-use super::encryption_debug::{EncryptionDebugTestControl, EncryptionDebugTestControlSlot};
 use super::list_observer::{
     RoomListObservation, RoomListObservationCommand, room_stop_matches_generation,
 };
@@ -95,7 +92,6 @@ pub enum RoomMessage {
         room_generation: u64,
     },
     /// Authoritative room-list removal invalidated in-flight room operations.
-    AuthoritativeRoomsRemoved { room_ids: BTreeSet<String> },
     /// Stop only the observation owned by this runtime generation and
     /// acknowledge after its task has joined.
     StopSyncObservation {
@@ -184,8 +180,6 @@ pub struct RoomActorHandle {
     room_operation_test_control: RoomOperationTestControlSlot,
     #[cfg(any(test, feature = "test-hooks"))]
     room_operation_test_reached_count: Arc<AtomicUsize>,
-    #[cfg(any(test, feature = "test-hooks"))]
-    encryption_debug_test_control: EncryptionDebugTestControlSlot,
     task: Option<executor::JoinHandle<()>>,
 }
 
@@ -194,14 +188,9 @@ impl RoomActorHandle {
         action_tx: mpsc::Sender<Vec<AppAction>>,
         event_tx: broadcast::Sender<CoreEvent>,
         sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
-        account_work: AccountWorkScheduler,
+        _account_work: AccountWorkScheduler,
     ) -> Self {
-        RoomActor::spawn_with_account_work(
-            action_tx,
-            event_tx,
-            sliding_sync_diagnostics,
-            account_work,
-        )
+        RoomActor::spawn(action_tx, event_tx, sliding_sync_diagnostics)
     }
 
     pub(crate) fn sender(&self) -> mpsc::Sender<RoomMessage> {
@@ -235,22 +224,6 @@ impl RoomActorHandle {
             .room_operation_test_control
             .lock()
             .expect("room operation test control lock");
-        if slot.is_some() {
-            return false;
-        }
-        *slot = Some(control);
-        true
-    }
-
-    #[cfg(any(test, feature = "test-hooks"))]
-    pub(crate) fn install_encryption_debug_test_control(
-        &self,
-        control: EncryptionDebugTestControl,
-    ) -> bool {
-        let mut slot = self
-            .encryption_debug_test_control
-            .lock()
-            .expect("encryption-debug test control lock");
         if slot.is_some() {
             return false;
         }
@@ -420,8 +393,6 @@ pub struct RoomActor {
     pub(super) room_operation_test_control: RoomOperationTestControlSlot,
     #[cfg(any(test, feature = "test-hooks"))]
     pub(super) room_operation_test_reached_count: Arc<AtomicUsize>,
-    #[cfg(any(test, feature = "test-hooks"))]
-    pub(super) encryption_debug_test_control: EncryptionDebugTestControlSlot,
     pub(super) observation: Option<RoomListObservation>,
     room_list_generation: u64,
     room_list_source: Option<RoomListSource>,
@@ -441,23 +412,11 @@ pub struct RoomActor {
     pub(super) space_member_session_generation: u64,
     pub(super) space_member_refresh_in_flight: Option<SpaceMemberRefreshFence>,
     pub(super) space_member_refresh_pending: bool,
-    /// In-flight temporary dangerous encryption-debug operations (issue
-    /// #538): at most one per room, keyed by room id and fenced by request
-    /// id. A start is rejected only when that same room already has an
-    /// in-flight operation.
-    pub(super) encryption_debug_fences: std::collections::HashMap<String, EncryptionDebugFence>,
-    /// Reliable nonblocking completion ingress for the encryption-debug
-    /// operation task (issue #538). Unbounded so the join during teardown
-    /// cannot deadlock on a full mailbox, and lossless so the reducer never
-    /// stays pending.
-    encryption_debug_completion_rx: mpsc::UnboundedReceiver<EncryptionDebugCompletion>,
-    pub(super) encryption_debug_completion_tx: mpsc::UnboundedSender<EncryptionDebugCompletion>,
     pub(super) action_tx: mpsc::Sender<Vec<AppAction>>,
     pub(super) event_tx: broadcast::Sender<CoreEvent>,
     pub(super) sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
     pub(super) self_tx: mpsc::Sender<RoomMessage>,
     command_rx: mpsc::Receiver<RoomMessage>,
-    pub(super) account_work: AccountWorkScheduler,
 }
 
 impl RoomActor {
@@ -478,19 +437,15 @@ impl RoomActor {
         action_tx: mpsc::Sender<Vec<AppAction>>,
         event_tx: broadcast::Sender<CoreEvent>,
         sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
-        account_work: AccountWorkScheduler,
+        _account_work: AccountWorkScheduler,
     ) -> RoomActorHandle {
         let (tx, command_rx) = mpsc::channel(crate::ACTOR_MESSAGE_QUEUE_CAPACITY);
-        let (encryption_debug_completion_tx, encryption_debug_completion_rx) =
-            mpsc::unbounded_channel::<EncryptionDebugCompletion>();
         let (timeline_residency, timeline_residency_rx) = watch::channel(None);
         let (session_slot, _session_rx) = watch::channel(None);
         #[cfg(any(test, feature = "test-hooks"))]
         let room_operation_test_control = Arc::new(Mutex::new(None));
         #[cfg(any(test, feature = "test-hooks"))]
         let room_operation_test_reached_count = Arc::new(AtomicUsize::new(0));
-        #[cfg(any(test, feature = "test-hooks"))]
-        let encryption_debug_test_control = Arc::new(Mutex::new(None));
         let actor = RoomActor {
             session: None,
             timeline_residency: timeline_residency_rx,
@@ -499,8 +454,6 @@ impl RoomActor {
             room_operation_test_control: room_operation_test_control.clone(),
             #[cfg(any(test, feature = "test-hooks"))]
             room_operation_test_reached_count: room_operation_test_reached_count.clone(),
-            #[cfg(any(test, feature = "test-hooks"))]
-            encryption_debug_test_control: encryption_debug_test_control.clone(),
             observation: None,
             room_list_generation: 0,
             room_list_source: None,
@@ -520,15 +473,11 @@ impl RoomActor {
             space_member_session_generation: 0,
             space_member_refresh_in_flight: None,
             space_member_refresh_pending: false,
-            encryption_debug_fences: std::collections::HashMap::new(),
-            encryption_debug_completion_rx,
-            encryption_debug_completion_tx: encryption_debug_completion_tx.clone(),
             action_tx,
             event_tx,
             sliding_sync_diagnostics,
             self_tx: tx.clone(),
             command_rx,
-            account_work,
         };
         let task = executor::spawn(actor.run());
         RoomActorHandle {
@@ -539,38 +488,14 @@ impl RoomActor {
             room_operation_test_control,
             #[cfg(any(test, feature = "test-hooks"))]
             room_operation_test_reached_count,
-            #[cfg(any(test, feature = "test-hooks"))]
-            encryption_debug_test_control,
             task: Some(task),
         }
     }
 
     async fn run(mut self) {
-        loop {
-            let msg = tokio::select! {
-                msg = self.command_rx.recv() => match msg {
-                    Some(msg) => msg,
-                    None => break,
-                },
-                completion = self.encryption_debug_completion_rx.recv() => {
-                    let Some(completion) = completion else { continue };
-                    self.handle_encryption_debug_completion(completion).await;
-                    continue;
-                }
-            };
+        while let Some(msg) = self.command_rx.recv().await {
             match msg {
                 RoomMessage::Shutdown => {
-                    // Cancel and join every in-flight encryption-debug
-                    // operation to completion (no abort) before the actor
-                    // exits (issue #538), then settle CancelledStale and
-                    // reset the state machine so no reducer entry is left
-                    // pending.
-                    let room_ids = self
-                        .encryption_debug_fences
-                        .keys()
-                        .cloned()
-                        .collect::<BTreeSet<_>>();
-                    self.cancel_encryption_debug_for_rooms(&room_ids).await;
                     self.stop_observation().await;
                     break;
                 }
@@ -691,9 +616,6 @@ impl RoomActor {
                         self.refresh_room_list();
                     }
                 }
-                RoomMessage::AuthoritativeRoomsRemoved { room_ids } => {
-                    self.cancel_encryption_debug_for_rooms(&room_ids).await;
-                }
                 RoomMessage::StopSyncObservation {
                     backend_generation,
                     ack,
@@ -730,21 +652,6 @@ impl RoomActor {
                     }
                 }
                 RoomMessage::SessionCleared { ack } => {
-                    // Cancel and join every in-flight encryption-debug
-                    // operation to completion before clearing the session
-                    // (issue #538): the SDK executor stops at the next
-                    // wire-effect boundary and runs cleanup before the task
-                    // returns; we never detach it (the operation is bounded
-                    // by its monotonic deadline and the completion lane is
-                    // nonblocking, so the join cannot deadlock).
-                    let room_ids = self
-                        .encryption_debug_fences
-                        .keys()
-                        .cloned()
-                        .collect::<BTreeSet<_>>();
-                    // Settle CancelledStale before clearing the session; the
-                    // helper also resets each room's reducer state.
-                    self.cancel_encryption_debug_for_rooms(&room_ids).await;
                     self.stop_observation().await;
                     self.reset_space_member_session();
                     self.session = None;
@@ -752,9 +659,6 @@ impl RoomActor {
                     self.clear_known_rooms();
                     self.clear_space_child_repair_attempts();
                     self.clear_mention_candidates();
-                    // Acknowledge the teardown so the account actor can
-                    // proceed with session teardown only after the
-                    // encryption-debug operation was cancelled and settled.
                     let _ = ack.send(());
                 }
 
@@ -840,12 +744,9 @@ impl RoomActor {
                 RoomMessage::InspectObservationGeneration { response } => {
                     let _ = response.send(self.room_list_backend_generation);
                 }
-                _ => {}
             }
         }
     }
-
-    fn placeholder_never_called() {}
 
     async fn handle_command(&mut self, command: RoomCommand) {
         match command {
@@ -1032,32 +933,6 @@ impl RoomActor {
                     query,
                 )
                 .await;
-            }
-            RoomCommand::ReshareRoomKey {
-                request_id,
-                room_id,
-            } => {
-                self.handle_reshare_room_key(request_id, room_id).await;
-            }
-            RoomCommand::ForceNewOutboundSession {
-                request_id,
-                room_id,
-            } => {
-                self.handle_force_new_outbound_session(request_id, room_id)
-                    .await;
-            }
-            RoomCommand::ShareIndex0RoomKey {
-                request_id,
-                room_id,
-            } => {
-                self.handle_share_index0_room_key(request_id, room_id).await;
-            }
-            RoomCommand::ResendIndex0RoomKey {
-                request_id,
-                room_id,
-            } => {
-                self.handle_resend_index0_room_key(request_id, room_id)
-                    .await;
             }
             RoomCommand::UpdateRoomSetting {
                 request_id,

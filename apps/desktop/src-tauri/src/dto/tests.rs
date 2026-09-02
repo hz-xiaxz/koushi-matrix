@@ -1163,7 +1163,6 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
                 event_id: "$pinned:example.invalid".to_owned(),
                 op: PinOp::Pin,
             },
-            encryption_debug_operation: koushi_state::EncryptionDebugOperationState::Idle,
         },
     );
 

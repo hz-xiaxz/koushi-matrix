@@ -15,7 +15,6 @@ fn policy_bands_are_ordered_from_interactive_to_maintenance() {
         AccountWorkKind::ExplicitPagination,
         AccountWorkKind::OffscreenGapRepair,
         AccountWorkKind::SearchCrawl,
-        AccountWorkKind::RoomKeyReshare,
         AccountWorkKind::Maintenance,
     ];
     for pair in ordered.windows(2) {
@@ -42,7 +41,6 @@ fn policy_bands_are_ordered_from_interactive_to_maintenance() {
     for kind in [
         AccountWorkKind::OffscreenGapRepair,
         AccountWorkKind::SearchCrawl,
-        AccountWorkKind::RoomKeyReshare,
         AccountWorkKind::Maintenance,
     ] {
         assert_eq!(kind.policy().class, AccountWorkClass::Background);
@@ -53,7 +51,6 @@ fn policy_bands_are_ordered_from_interactive_to_maintenance() {
         AccountWorkKind::ExplicitPagination,
         AccountWorkKind::OffscreenGapRepair,
         AccountWorkKind::SearchCrawl,
-        AccountWorkKind::RoomKeyReshare,
         AccountWorkKind::Maintenance,
     ] {
         assert!(kind.policy().preemptible, "{} must yield", kind.token());

@@ -152,7 +152,6 @@ import type {
   AttachmentSort,
   ComposerTarget,
   CommandReceipt,
-  CommandResult,
   CreateRoomRequest,
   DesktopSnapshot,
   DirectoryRoomSummary,
@@ -823,12 +822,6 @@ export function App() {
 
   function settleCommandInBackground(operation: Promise<CommandReceipt>): void {
     runInBackground(settleCommand(operation));
-  }
-
-  async function settleCommandResult<T>(operation: Promise<CommandResult<T>>): Promise<T> {
-    const response = await operation;
-    await applyCommandReceipt(response.settlement);
-    return response.result;
   }
 
   async function settleCommandSnapshot(
@@ -2453,41 +2446,6 @@ export function App() {
 
   async function importRoomKeys(sourcePath: string, passphrase: string) {
     await settleCommand(api.importRoomKeys(sourcePath, passphrase));
-  }
-
-  async function reshareRoomKey(roomId: string) {
-    appendDiagnosticLog({
-      timestampMs: Date.now(),
-      source: "e2ee.room_key",
-      message: "operation=manual_reshare stage=request"
-    });
-    try {
-      const outcome = await settleCommandResult(api.reshareRoomKey(roomId));
-      appendDiagnosticLog({
-        timestampMs: Date.now(),
-        source: "e2ee.room_key",
-        message: `operation=manual_reshare stage=completed outcome=${outcome.kind}`
-      });
-      return outcome;
-    } catch (error) {
-      appendDiagnosticLog({
-        timestampMs: Date.now(),
-        source: "e2ee.room_key",
-        message: "operation=manual_reshare stage=failed kind=transport"
-      });
-      throw error;
-    }
-  }
-  async function forceNewOutboundSession(roomId: string) {
-    return settleCommandResult(api.forceNewOutboundSession(roomId));
-  }
-
-  async function shareIndex0RoomKey(roomId: string) {
-    return settleCommandResult(api.shareIndex0RoomKey(roomId));
-  }
-
-  async function resendIndex0RoomKey(roomId: string) {
-    return settleCommandResult(api.resendIndex0RoomKey(roomId));
   }
 
   async function chooseRoomKeyExportDestination(): Promise<string | null> {
@@ -6127,10 +6085,6 @@ export function App() {
           onUpdateMemberRole={(roomId, targetUserId, powerLevel) => {
             runInBackground(updateRoomMemberRole(roomId, targetUserId, powerLevel));
           }}
-          onReshareRoomKey={reshareRoomKey}
-          onForceNewOutboundSession={forceNewOutboundSession}
-          onShareIndex0RoomKey={shareIndex0RoomKey}
-          onResendIndex0RoomKey={resendIndex0RoomKey}
           onRecoverySecretPresenceChange={setRecoverySecretFilled}
           onReply={(roomId, eventId) => {
             runInBackground(setComposerReplyTarget(roomId, eventId));

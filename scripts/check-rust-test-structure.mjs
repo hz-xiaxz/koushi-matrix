@@ -524,33 +524,11 @@ export function checkDesktopEventWaitLagContract() {
   const room = readTauriSource("commands/room.rs");
   const source = `${directory}\n${room}`;
   const failures = [];
-  for (const marker of ["wait_for_request_outcome", "RequestOutcomeExpectation::DirectoryQuery", "RequestOutcomeExpectation::DirectoryPreview", "RequestOutcomeExpectation::RoomCreated", "RequestOutcomeExpectation::SpaceCreated", "RequestOutcomeExpectation::DirectMessageStarted", "RequestOutcomeExpectation::RoomJoined", "RequestOutcomeExpectation::InviteWorkflow", "RequestOutcomeExpectation::RoomOperation", "RequestOutcomeExpectation::RoomKeyReshare", "RequestOutcomeExpectation::EncryptionDebug"]) {
+  for (const marker of ["wait_for_request_outcome", "RequestOutcomeExpectation::DirectoryQuery", "RequestOutcomeExpectation::DirectoryPreview", "RequestOutcomeExpectation::RoomCreated", "RequestOutcomeExpectation::SpaceCreated", "RequestOutcomeExpectation::DirectMessageStarted", "RequestOutcomeExpectation::RoomJoined", "RequestOutcomeExpectation::InviteWorkflow", "RequestOutcomeExpectation::RoomOperation"]) {
     if (!source.includes(marker)) failures.push(sourceContractFailure(rule, `missing Core outcome delegation ${marker}`));
   }
   for (const marker of ["timeout_at", "recv_event", "InviteWorkflowSnapshotSource"]) {
     if (source.includes(marker)) failures.push(sourceContractFailure(rule, `adapter retains forbidden waiter marker ${marker}`));
-  }
-  return failures;
-}
-
-export function checkDesktopEncryptionDebugDelegationContract() {
-  const rule = "desktop.room.encryption_debug_delegation_contract";
-  const source = readTauriSource("commands/room.rs");
-  const failures = [];
-  for (const [command, expectation, kind] of [
-    ["pub async fn reshare_room_key", "RequestOutcomeExpectation::RoomKeyReshare", null],
-    ["pub async fn force_new_outbound_session", "RequestOutcomeExpectation::EncryptionDebug", "EncryptionDebugOperationKind::ForceNewOutboundSession"],
-    ["pub async fn share_index0_room_key", "RequestOutcomeExpectation::EncryptionDebug", "EncryptionDebugOperationKind::ShareIndex0Key"],
-    ["pub async fn resend_index0_room_key", "RequestOutcomeExpectation::EncryptionDebug", "EncryptionDebugOperationKind::ResendIndex0Key"]
-  ]) {
-    const body = rustItemBody(source, command);
-    for (const marker of ["versioned_snapshot", "next_request_id", ".command(", "wait_for_request_outcome", expectation]) {
-      if (!body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} lacks ${marker}`));
-    }
-    if (kind && !body?.includes(kind)) failures.push(sourceContractFailure(rule, `${command} lacks exact operation kind`));
-    for (const marker of ["recv_event", "timeout_at", "invoke_error_from_core_failure"]) {
-      if (body?.includes(marker)) failures.push(sourceContractFailure(rule, `${command} retains forbidden waiter marker ${marker}`));
-    }
   }
   return failures;
 }
@@ -1047,7 +1025,7 @@ export function checkSdkDesktopClientBuilderDefaults() {
   const rule = "sdk.desktop_client_builder_defaults";
   const body = rustItemBody(readRustSource("crates/koushi-sdk/src/client_session.rs"), "fn desktop_client_builder_defaults");
   const failures = [];
-  for (const fragment of ["with_threading_support", "ThreadingSupport::Enabled", "with_subscriptions: true", "with_enable_share_history_on_invite(true)", "with_encryption_sync_readiness(true)"]) {
+  for (const fragment of ["with_threading_support", "ThreadingSupport::Enabled", "with_subscriptions: true", "with_enable_share_history_on_invite(true)"]) {
     if (!body?.includes(fragment)) failures.push(sourceContractFailure(rule, `desktop builder default is missing ${fragment}`));
   }
   return failures;
@@ -2659,16 +2637,6 @@ export function checkCoreTimelineOriginObserver() {
   return failures;
 }
 
-export function checkCoreTimelineRoomKeyReshare() {
-  const rule = "core.timeline.room_key_reshare";
-  const source = timelineSource("room_key_recovery.rs");
-  const handler = timelineSection("room_key_recovery.rs", "fn handle_room_key_reshare(\n", "fn take_room_key_reshare_worker");
-  const failures = [];
-  if (handler?.includes(".await") || handler?.includes("force_reshare_room_key")) failures.push(sourceContractFailure(rule, "room-key handler performs SDK work on the manager"));
-  if (!source.includes("RoomKeyReshareCompleted")) failures.push(sourceContractFailure(rule, "room-key worker has no private completion message"));
-  return failures;
-}
-
 export function checkCoreTimelineRoomFocus() {
   const rule = "core.timeline.room_focus";
   const build = timelineItemBody("manager.rs", "async fn build_timeline_actor_handle");
@@ -3260,7 +3228,7 @@ export function checkCoreQaSecondaryRuntimeIsolation() {
   const rule = "core.qa.secondary_runtime_isolation";
   const source = coreQaProductionSource();
   const failures = [];
-  for (const label of ["gate-negative-a2", "gate-negative-a3", "gate-negative-a4", "gate-negative-a5", "gate-negative-a6", "a2", "encryption-debug-a2", "e2ee-b2", "e2ee-b3-unverified"]) {
+  for (const label of ["gate-negative-a2", "gate-negative-a3", "gate-negative-a4", "gate-negative-a5", "gate-negative-a6", "a2", "e2ee-b2", "e2ee-b3-unverified"]) {
     if (!source.includes(`start_isolated_qa_runtime("${label}")`)) failures.push(sourceContractFailure(rule, `secondary runtime is not isolated for ${label}`));
   }
   return failures;
@@ -3738,7 +3706,6 @@ export function runSourceContractRules() {
     checkCoreTimelineInitialReceiptObservation(),
     checkCoreTimelineRecoveryReceiptObservation(),
     checkCoreTimelineOriginObserver(),
-    checkCoreTimelineRoomKeyReshare(),
     checkCoreTimelineRoomFocus(),
     checkCoreTimelineThreadRootHydration(),
     checkCoreTimelineSdkProjectionAccessors(),
@@ -3773,7 +3740,6 @@ export function runSourceContractRules() {
     checkDesktopTauriCommandRegistrationContract(),
     checkDesktopSubmitCoreCommandContract(),
     checkDesktopEventWaitLagContract(),
-    checkDesktopEncryptionDebugDelegationContract(),
     checkDesktopFailureWaiterContract(),
     checkDesktopActivityNavigationContract(),
     checkDesktopActivityCommandContract(),

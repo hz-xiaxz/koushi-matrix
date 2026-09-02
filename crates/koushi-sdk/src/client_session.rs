@@ -537,7 +537,6 @@ pub(super) fn desktop_client_builder_defaults(
             ..Default::default()
         })
         .with_enable_share_history_on_invite(true)
-        .with_encryption_sync_readiness(true)
         .with_threading_support(matrix_sdk::ThreadingSupport::Enabled {
             with_subscriptions: true,
         })

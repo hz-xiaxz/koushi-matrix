@@ -941,7 +941,6 @@ impl TimelineManagerActor {
         {
             Ok(handle) => {
                 self.emit_timeline_subscribed_action(&key).await;
-                self.send_enqueue_workers.room_key_reshares.remove(&key);
                 if let Some(previous) = self.timelines.insert(key.clone(), handle) {
                     previous.stop().await;
                 }

@@ -21,7 +21,6 @@ use koushi_state::{
 #[cfg(any(test, feature = "test-hooks"))]
 use std::sync::Mutex;
 use std::{
-    collections::BTreeSet,
     future::Future,
     sync::{Arc, atomic::Ordering},
 };
@@ -201,7 +200,6 @@ pub(crate) fn classify_room_error(error: &MatrixRoomOperationError) -> RoomFailu
             MatrixRoomOperationFailureKind::Http => RoomFailureKind::Network,
             MatrixRoomOperationFailureKind::Sdk
             | MatrixRoomOperationFailureKind::Encryption
-            | MatrixRoomOperationFailureKind::EncryptionReadiness
             | MatrixRoomOperationFailureKind::Store
             | MatrixRoomOperationFailureKind::SecureBackupRequired
             | MatrixRoomOperationFailureKind::WrongRoomState => RoomFailureKind::Sdk,
@@ -815,13 +813,6 @@ impl RoomActor {
     }
 
     pub(super) async fn handle_leave_room(&mut self, request_id: RequestId, room_id: String) {
-        // Cancel and join any in-flight encryption-debug operation for this
-        // room before the leave request (issue #538): the SDK executor stops
-        // at the next wire-effect boundary and runs cleanup, so no manual
-        // request survives into the leave. Reset even when no fence exists so
-        // a stale terminal state cannot survive a direct leave.
-        self.cancel_encryption_debug_for_rooms(&BTreeSet::from([room_id.clone()]))
-            .await;
         let Some(_session) = &self.session else {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;

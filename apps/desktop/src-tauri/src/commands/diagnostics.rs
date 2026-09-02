@@ -497,7 +497,6 @@ mod qa_tests {
 #[cfg(test)]
 mod snapshot_tests {
     use super::*;
-
     #[test]
     fn diagnostic_snapshot_maps_structured_snapshot_to_camel_case_frontend_contract() {
         let snapshot = koushi_diagnostics::DiagnosticSnapshot {
@@ -515,7 +514,6 @@ mod snapshot_tests {
             }],
             dropped_records: 7,
         };
-
         let json = serde_json::to_value(map_snapshot(
             snapshot,
             koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
@@ -577,7 +575,6 @@ mod snapshot_tests {
             })
         );
     }
-
     #[test]
     fn diagnostic_snapshot_serialization_excludes_synthetic_private_values() {
         let snapshot = koushi_diagnostics::DiagnosticSnapshot {
@@ -620,7 +617,6 @@ mod snapshot_tests {
         assert!(serialized.contains("query_bytes"));
         assert!(serialized.contains("query_chars"));
     }
-
     #[test]
     fn diagnostic_snapshot_exports_current_media_memory_summaries() {
         let _guard = koushi_diagnostics::test_support::lock();
@@ -651,7 +647,6 @@ mod snapshot_tests {
             },
             koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
         );
-
         let thumbnail = exported
             .entries
             .iter()
@@ -668,9 +663,16 @@ mod snapshot_tests {
             .expect("media-preparation summary must be exported");
         assert!(media.message.contains("stage=summary"));
         assert!(media.message.contains("source_backed_variant_count=2"));
-
         let details = koushi_diagnostics::test_support::detail_snapshot();
-        let summaries = &details.records[before..];
+        let summaries = details.records[before..]
+            .iter()
+            .filter(|record| {
+                matches!(
+                    record.event.source,
+                    "core.renderable_thumbnail" | "core.media_preparation"
+                )
+            })
+            .collect::<Vec<_>>();
         assert_eq!(summaries.len(), 2);
         for record in summaries {
             assert!(record.event.fields.iter().all(|field| matches!(

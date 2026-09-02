@@ -122,10 +122,6 @@ fn initial_share_diagnostic_records_closed_tokens_and_counters() {
     );
     record_initial_share_diagnostic(
         &counters,
-        device_event(Class::Unknown, Stage::RequestFailed),
-    );
-    record_initial_share_diagnostic(
-        &counters,
         device_event(
             Class::Unknown,
             Stage::ShareStateCommitted { message_index: 0 },
@@ -169,7 +165,6 @@ fn initial_share_diagnostic_records_closed_tokens_and_counters() {
         counter_value(&counters, "initial_share_homeserver_accepted"),
         1
     );
-    assert_eq!(counter_value(&counters, "initial_share_request_failed"), 1);
     assert_eq!(
         counter_value(&counters, "initial_share_share_committed_index0"),
         1
@@ -202,8 +197,8 @@ fn initial_share_diagnostic_records_closed_tokens_and_counters() {
         .skip(diagnostic_start)
         .filter(|record| record.event.source == "core.initial_share")
         .collect();
-    // 10 device stages + 1 session summary.
-    assert_eq!(stage_records.len(), 11);
+    // 9 device stages + 1 session summary.
+    assert_eq!(stage_records.len(), 10);
     let stage_tokens: Vec<_> = stage_records
         .iter()
         .filter(|record| record.event.stage == "stage")
@@ -228,7 +223,6 @@ fn initial_share_diagnostic_records_closed_tokens_and_counters() {
         "withheld",
         "request_queued",
         "homeserver_accepted",
-        "request_failed",
         "share_state_committed",
         "share_state_committed",
     ] {

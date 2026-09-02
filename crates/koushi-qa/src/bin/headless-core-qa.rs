@@ -54,11 +54,11 @@ use koushi_protocol::command::{
     UploadMediaThumbnail,
 };
 use koushi_protocol::event::{
-    AccountEvent, ActivityEvent, CoreEvent, E2eeTrustEvent, EncryptionDebugOperationOutcome,
-    LinkPreviewState, LiveSignalsEvent, LocalEncryptionEvent, PaginationDirection, PaginationState,
-    RoomEvent, SearchEvent, SyncEvent, TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent,
-    TimelineGapId, TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMessageActions,
-    TimelineReadStateSync, TimelineSendState, TimelineUnreadPosition, TimelineViewportObservation,
+    AccountEvent, ActivityEvent, CoreEvent, E2eeTrustEvent, LinkPreviewState, LiveSignalsEvent,
+    LocalEncryptionEvent, PaginationDirection, PaginationState, RoomEvent, SearchEvent, SyncEvent,
+    TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent, TimelineGapId, TimelineGapPosition,
+    TimelineItem, TimelineItemId, TimelineMessageActions, TimelineReadStateSync, TimelineSendState,
+    TimelineUnreadPosition, TimelineViewportObservation,
 };
 use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
 use koushi_protocol::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};

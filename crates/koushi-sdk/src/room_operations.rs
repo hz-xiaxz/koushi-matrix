@@ -58,7 +58,6 @@ impl MatrixRoomOperationError {
 pub enum MatrixRoomOperationFailureKind {
     AuthenticationRequired,
     Encryption,
-    EncryptionReadiness,
     Forbidden,
     Http,
     Store,
@@ -97,7 +96,6 @@ impl fmt::Display for MatrixRoomOperationFailureKind {
         let label = match self {
             Self::AuthenticationRequired => "authentication_required",
             Self::Encryption => "encryption",
-            Self::EncryptionReadiness => "encryption_readiness",
             Self::Forbidden => "forbidden",
             Self::Http => "http",
             Self::Store => "store",

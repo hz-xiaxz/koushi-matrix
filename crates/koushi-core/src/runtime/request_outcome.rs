@@ -208,17 +208,6 @@ pub enum RequestOutcomeExpectation {
         key: TimelineKey,
         transaction_id: String,
     },
-    RoomKeyReshare {
-        request_id: RequestId,
-        account_key: AccountKey,
-        room_id: String,
-    },
-    EncryptionDebug {
-        request_id: RequestId,
-        account_key: AccountKey,
-        room_id: String,
-        kind: koushi_state::EncryptionDebugOperationKind,
-    },
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -317,19 +306,6 @@ pub enum RequestOutcome {
         transaction_id: String,
         snapshot: VersionedAppStateSnapshot,
     },
-    RoomKeyReshare {
-        request_id: RequestId,
-        room_id: String,
-        outcome: koushi_protocol::event::RoomKeyReshareOutcome,
-        generation: u64,
-    },
-    EncryptionDebug {
-        request_id: RequestId,
-        room_id: String,
-        kind: koushi_state::EncryptionDebugOperationKind,
-        outcome: koushi_state::EncryptionDebugOperationOutcome,
-        generation: u64,
-    },
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, thiserror::Error)]
@@ -427,8 +403,6 @@ impl fmt::Debug for RequestOutcomeExpectation {
             Self::ComposerAccepted { .. } => "ComposerAccepted",
             Self::Submission { .. } => "Submission",
             Self::PreparedMediaQueued { .. } => "PreparedMediaQueued",
-            Self::RoomKeyReshare { .. } => "RoomKeyReshare",
-            Self::EncryptionDebug { .. } => "EncryptionDebug",
         };
         formatter
             .debug_tuple("RequestOutcomeExpectation")
@@ -461,8 +435,6 @@ impl fmt::Debug for RequestOutcome {
             Self::SubmissionAccepted { .. } => "SubmissionAccepted",
             Self::SubmissionRejected { .. } => "SubmissionRejected",
             Self::PreparedMediaQueued { .. } => "PreparedMediaQueued",
-            Self::RoomKeyReshare { .. } => "RoomKeyReshare",
-            Self::EncryptionDebug { .. } => "EncryptionDebug",
         };
         formatter
             .debug_tuple("RequestOutcome")
@@ -515,9 +487,7 @@ impl RequestOutcomeExpectation {
             | Self::UploadStaging { request_id, .. }
             | Self::ComposerAccepted { request_id, .. }
             | Self::Submission { request_id, .. }
-            | Self::PreparedMediaQueued { request_id, .. }
-            | Self::RoomKeyReshare { request_id, .. }
-            | Self::EncryptionDebug { request_id, .. } => *request_id,
+            | Self::PreparedMediaQueued { request_id, .. } => *request_id,
         }
     }
 
@@ -537,8 +507,6 @@ impl RequestOutcomeExpectation {
                 | Self::Submission { .. }
                 | Self::PreparedMediaQueued { .. }
                 | Self::SavedSessions { .. }
-                | Self::RoomKeyReshare { .. }
-                | Self::EncryptionDebug { .. }
         )
     }
 }
@@ -748,17 +716,6 @@ enum EventProgress {
         key: TimelineKey,
         transaction_id: String,
     },
-    RoomKeyReshare {
-        request_id: RequestId,
-        room_id: String,
-        outcome: koushi_protocol::event::RoomKeyReshareOutcome,
-    },
-    EncryptionDebug {
-        request_id: RequestId,
-        room_id: String,
-        kind: koushi_state::EncryptionDebugOperationKind,
-        outcome: koushi_state::EncryptionDebugOperationOutcome,
-    },
 }
 
 impl EventProgress {
@@ -857,54 +814,6 @@ impl EventProgress {
                 })
             }
             (
-                Self::RoomKeyReshare {
-                    request_id,
-                    room_id,
-                    outcome,
-                },
-                RequestOutcomeExpectation::RoomKeyReshare {
-                    request_id: expected_request_id,
-                    account_key,
-                    room_id: expected_room_id,
-                },
-            ) if request_id == expected_request_id
-                && room_id == expected_room_id
-                && account_matches(&snapshot.state, Some(account_key)) =>
-            {
-                Some(RequestOutcome::RoomKeyReshare {
-                    request_id: *request_id,
-                    room_id: room_id.clone(),
-                    outcome: *outcome,
-                    generation: snapshot.generation,
-                })
-            }
-            (
-                Self::EncryptionDebug {
-                    request_id,
-                    room_id,
-                    kind,
-                    outcome,
-                },
-                RequestOutcomeExpectation::EncryptionDebug {
-                    request_id: expected_request_id,
-                    account_key,
-                    room_id: expected_room_id,
-                    kind: expected_kind,
-                },
-            ) if request_id == expected_request_id
-                && room_id == expected_room_id
-                && kind == expected_kind
-                && account_matches(&snapshot.state, Some(account_key)) =>
-            {
-                Some(RequestOutcome::EncryptionDebug {
-                    request_id: *request_id,
-                    room_id: room_id.clone(),
-                    kind: *kind,
-                    outcome: *outcome,
-                    generation: snapshot.generation,
-                })
-            }
-            (
                 Self::Directory { request_id },
                 RequestOutcomeExpectation::DirectoryQuery { .. }
                 | RequestOutcomeExpectation::DirectoryPreview { .. },
@@ -945,9 +854,7 @@ impl EventProgress {
             | Self::Search { request_id }
             | Self::PreparedMediaQueued { request_id, .. }
             | Self::SubmissionAccepted { request_id, .. }
-            | Self::SubmissionRejected { request_id, .. }
-            | Self::RoomKeyReshare { request_id, .. }
-            | Self::EncryptionDebug { request_id, .. } => *request_id,
+            | Self::SubmissionRejected { request_id, .. } => *request_id,
         }
     }
 
@@ -1240,76 +1147,6 @@ fn room_event_progress(
             Ok(Some(EventProgress::RoomJoined {
                 request_id,
                 room_id,
-            }))
-        }
-        RoomEvent::RoomKeyReshared {
-            request_id: event_request_id,
-            room_id,
-            outcome,
-        } if matches!(expectation, RequestOutcomeExpectation::RoomKeyReshare {
-            room_id: expected_room_id,
-            ..
-        } if expected_room_id == &room_id)
-            && event_request_id == request_id =>
-        {
-            Ok(Some(EventProgress::RoomKeyReshare {
-                request_id,
-                room_id,
-                outcome,
-            }))
-        }
-        RoomEvent::OutboundSessionForced {
-            request_id: event_request_id,
-            room_id,
-            outcome,
-        } if matches!(expectation, RequestOutcomeExpectation::EncryptionDebug {
-            room_id: expected_room_id,
-            kind: koushi_state::EncryptionDebugOperationKind::ForceNewOutboundSession,
-            ..
-        } if expected_room_id == &room_id)
-            && event_request_id == request_id =>
-        {
-            Ok(Some(EventProgress::EncryptionDebug {
-                request_id,
-                room_id,
-                kind: koushi_state::EncryptionDebugOperationKind::ForceNewOutboundSession,
-                outcome,
-            }))
-        }
-        RoomEvent::Index0RoomKeyShared {
-            request_id: event_request_id,
-            room_id,
-            outcome,
-        } if matches!(expectation, RequestOutcomeExpectation::EncryptionDebug {
-            room_id: expected_room_id,
-            kind: koushi_state::EncryptionDebugOperationKind::ShareIndex0Key,
-            ..
-        } if expected_room_id == &room_id)
-            && event_request_id == request_id =>
-        {
-            Ok(Some(EventProgress::EncryptionDebug {
-                request_id,
-                room_id,
-                kind: koushi_state::EncryptionDebugOperationKind::ShareIndex0Key,
-                outcome,
-            }))
-        }
-        RoomEvent::Index0RoomKeyResent {
-            request_id: event_request_id,
-            room_id,
-            outcome,
-        } if matches!(expectation, RequestOutcomeExpectation::EncryptionDebug {
-            room_id: expected_room_id,
-            kind: koushi_state::EncryptionDebugOperationKind::ResendIndex0Key,
-            ..
-        } if expected_room_id == &room_id)
-            && event_request_id == request_id =>
-        {
-            Ok(Some(EventProgress::EncryptionDebug {
-                request_id,
-                room_id,
-                kind: koushi_state::EncryptionDebugOperationKind::ResendIndex0Key,
-                outcome,
             }))
         }
         RoomEvent::ComposerSlashCommandRejected {

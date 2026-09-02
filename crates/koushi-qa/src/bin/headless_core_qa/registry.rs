@@ -128,7 +128,6 @@ pub(super) enum QaScenario {
     SessionStatus,
     CredentialHealth,
     NativeAttention,
-    EncryptionDebug,
     E2eeTrust,
     E2eeLoginStore,
     DeviceCleanup,
@@ -167,7 +166,6 @@ pub(super) enum QaStage {
     SessionStatus,
     CredentialHealth,
     NativeAttention,
-    EncryptionDebug,
     E2eeTrust,
     E2eeLoginStore,
     DeviceCleanup,
@@ -245,7 +243,6 @@ impl QaScenario {
             "session_status" => Ok(Self::SessionStatus),
             "credential_health" => Ok(Self::CredentialHealth),
             "native_attention" => Ok(Self::NativeAttention),
-            "encryption_debug" => Ok(Self::EncryptionDebug),
             "e2ee_trust" => Ok(Self::E2eeTrust),
             "e2ee_login_store" => Ok(Self::E2eeLoginStore),
             "device_cleanup" => Ok(Self::DeviceCleanup),
@@ -276,7 +273,7 @@ impl QaScenario {
             "cache_restore" => Ok(Self::CacheRestore),
             "read_state_convergence" => Ok(Self::ReadStateConvergence),
             other => Err(format!(
-                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, encryption_debug, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, scheduled_send, restore_cleanup, link_preview, cache_restore, read_state_convergence; got {other}"
+                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, scheduled_send, restore_cleanup, link_preview, cache_restore, read_state_convergence; got {other}"
             )),
         }
     }
@@ -303,13 +300,6 @@ impl QaScenario {
             Self::NativeAttention => matches!(
                 stage,
                 QaStage::Safety | QaStage::LoginSync | QaStage::NativeAttention
-            ),
-            Self::EncryptionDebug => matches!(
-                stage,
-                QaStage::Safety
-                    | QaStage::LoginSync
-                    | QaStage::RoomSpace
-                    | QaStage::EncryptionDebug
             ),
             Self::E2eeTrust => {
                 matches!(
@@ -514,18 +504,6 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "badge_state=ok",
             "suppress_focus=ok",
             "clear_badge=ok",
-        ],
-        QaStage::EncryptionDebug => &[
-            "encryption_debug_cross_signing=ok",
-            "encryption_debug_room=ok",
-            "encryption_debug_recipient=ok",
-            "force_new_outbound_session=ok",
-            "share_index0_room_key=ok",
-            "index0_not_consumed=ok",
-            "encryption_debug_index_advanced=ok",
-            "resend_index0_room_key=ok",
-            "resend_index_unchanged=ok",
-            "encryption_debug=ok",
         ],
         QaStage::E2eeTrust => &[
             "joined_room_restore=ok",
@@ -793,12 +771,6 @@ pub(super) fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
             QaStage::LoginSync,
             QaStage::NativeAttention,
         ],
-        QaScenario::EncryptionDebug => vec![
-            QaStage::Safety,
-            QaStage::LoginSync,
-            QaStage::RoomSpace,
-            QaStage::EncryptionDebug,
-        ],
         QaScenario::E2eeTrust => {
             vec![QaStage::Safety, QaStage::LoginSync, QaStage::E2eeTrust]
         }
@@ -993,7 +965,6 @@ pub(super) fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static st
         | QaScenario::SessionStatus
         | QaScenario::CredentialHealth
         | QaScenario::NativeAttention
-        | QaScenario::EncryptionDebug
         | QaScenario::E2eeTrust
         | QaScenario::InvitesDm
         | QaScenario::Timeline
