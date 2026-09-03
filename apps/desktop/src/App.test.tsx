@@ -1608,17 +1608,6 @@ describe("desktop integration source guards", () => {
     expect(createSource).not.toContain("api.setSpaceChild(");
   });
 
-  test("accepting an invite returns to the timeline view", () => {
-    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-    const acceptStart = source.indexOf("async function acceptInvite");
-    const acceptEnd = source.indexOf("async function declineInvite", acceptStart);
-    const acceptSource = source.slice(acceptStart, acceptEnd);
-
-    expect(acceptSource).toContain("api.acceptInvite(roomId)");
-    expect(acceptSource).toContain("await selectRoom(roomId)");
-    expect(acceptSource).toContain('setPrimaryView("timeline")');
-  });
-
   test("directory search queries the chosen homeserver, not always the user's own", () => {
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
     const queryStart = source.indexOf("async function queryDirectory");
@@ -2620,39 +2609,6 @@ describe("Timeline item row rendering", () => {
     expect(sending).toContain('data-send-state="sending"');
     expect(sending).toContain("Sending");
     expect(sending).toContain("Cancel send");
-  });
-
-  test("room People entries load room settings before switching to people mode", () => {
-    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-
-    const timelinePaneStart = source.indexOf("<TimelinePane");
-    const timelinePaneEnd = source.indexOf("\n          />", timelinePaneStart);
-    expect(timelinePaneStart).toBeGreaterThanOrEqual(0);
-    expect(timelinePaneEnd).toBeGreaterThan(timelinePaneStart);
-    const timelinePaneSource = source.slice(timelinePaneStart, timelinePaneEnd);
-
-    expect(timelinePaneSource).toContain("api.loadRoomSettings(");
-    expect(timelinePaneSource).toContain('setRightPanelModeClosingFocusedContext("people")');
-    expect(timelinePaneSource.indexOf("api.loadRoomSettings(")).toBeLessThan(
-      timelinePaneSource.indexOf('setRightPanelModeClosingFocusedContext("people")')
-    );
-
-    const contextualRightPanelStart = source.indexOf("<ContextualRightPanel");
-    const contextualRightPanelEnd = source.indexOf("\n        />", contextualRightPanelStart);
-    expect(contextualRightPanelStart).toBeGreaterThanOrEqual(0);
-    expect(contextualRightPanelEnd).toBeGreaterThan(contextualRightPanelStart);
-    const contextualRightPanelSource = source.slice(
-      contextualRightPanelStart,
-      contextualRightPanelEnd
-    );
-
-    expect(contextualRightPanelSource).toContain("api.loadRoomSettings(");
-    expect(contextualRightPanelSource).toContain(
-      'setRightPanelModeClosingFocusedContext("people")'
-    );
-    expect(contextualRightPanelSource.indexOf("api.loadRoomSettings(")).toBeLessThan(
-      contextualRightPanelSource.indexOf('setRightPanelModeClosingFocusedContext("people")')
-    );
   });
 
   test("main and thread caption edits retain bounded mounted-editor ordering", () => {

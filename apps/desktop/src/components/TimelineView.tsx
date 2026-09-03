@@ -307,6 +307,7 @@ export const TimelineView = memo(function TimelineView({
   transport,
   onReply,
   onOpenMatrixTarget,
+  onOpenSenderProfile,
   onOpenThread = () => undefined,
   resolveComposerKeyAction = ignoreComposerKeyAction,
   liveSignals,
@@ -351,6 +352,7 @@ export const TimelineView = memo(function TimelineView({
   transport: TimelineTransport;
   onReply: TimelineRowActionHandlers["onReply"];
   onOpenMatrixTarget?: TimelineRowActionHandlers["onOpenMatrixTarget"];
+  onOpenSenderProfile?: TimelineRowActionHandlers["onOpenSenderProfile"];
   onOpenThread?: TimelineRowActionHandlers["onOpenThread"];
   resolveComposerKeyAction?: ResolveComposerKeyAction;
   liveSignals?: LiveSignalsState;
@@ -1058,9 +1060,8 @@ export const TimelineView = memo(function TimelineView({
         container &&
         viewportIntentRef.current.kind === "free-scroll" &&
         !jumpViewportControlRef.current &&
-        !anchorRestorePendingRef.current &&
         !roomScrollAnchorRestorePendingRef.current
-          ? freeScrollAnchorRef.current
+          ? pendingAnchorRef.current ?? freeScrollAnchorRef.current
           : null;
       pendingHeightModelCommitRef.current = heightAnchor
         ? { timelineKeyHash: timelineKeyHashRef.current, anchor: heightAnchor, changedRows }
@@ -1875,7 +1876,6 @@ export const TimelineView = memo(function TimelineView({
       !container ||
       viewportIntentRef.current.kind !== "free-scroll" ||
       jumpViewportControlRef.current ||
-      anchorRestorePendingRef.current ||
       roomScrollAnchorRestorePendingRef.current
     ) {
       return;
@@ -2873,9 +2873,8 @@ export const TimelineView = memo(function TimelineView({
       container &&
       viewportIntentRef.current.kind === "free-scroll" &&
       !jumpViewportControlRef.current &&
-      !anchorRestorePendingRef.current &&
       !roomScrollAnchorRestorePendingRef.current
-        ? freeScrollAnchorRef.current
+        ? pendingAnchorRef.current ?? freeScrollAnchorRef.current
         : null;
     pendingHeightModelCommitRef.current = heightAnchor
       ? {
@@ -3497,6 +3496,9 @@ export const TimelineView = memo(function TimelineView({
                 onSaveMediaFile={transport.saveMediaFile}
                 forwardDestinations={effectiveForwardDestinations}
                 onOpenMatrixTarget={onOpenMatrixTarget}
+                onOpenSenderProfile={
+                  presentationContext === "room" ? onOpenSenderProfile : undefined
+                }
                 presence={item.sender ? liveSignals?.presence[item.sender] : undefined}
                 profile={item.sender ? profileUsers[item.sender] : undefined}
                 reactionSenderLabelsByUserId={reactionSenderLabelsByUserId}

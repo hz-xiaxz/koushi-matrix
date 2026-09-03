@@ -466,9 +466,12 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
 - Read-receipt reader avatars are Rust-owned live-signal projection data:
   reducers resolve reader display labels and avatar DTOs from profile state,
   dedupe by reader using the newest timestamp, order readers most-recent-first,
-  cap the rendered readers, and expose `overflow_count`. `TimelineView` renders
-  that DTO and may own only tooltip visibility through DOM/CSS; do not join
-  receipts with `profile.users` in React.
+  cap the rendered readers, and expose `overflow_count`. The existing
+  `AvatarThumbnailUpdated` reducer settles every already-copied reader avatar
+  with the same exact MXC URI and emits `LiveSignalsChanged` when any changes.
+  Main and thread timelines consume this same room/event projection.
+  `TimelineView` renders the DTO and may own only tooltip visibility through
+  DOM/CSS; do not join receipts with `profile.users` in React.
 - Read-receipt readers carry both `display_name` (the Rust-projected visible
   label, despite the legacy field name) and `original_display_label` for
   alias-free hover/profile context. React must not recover original names by
@@ -797,7 +800,14 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   load terminal and the returned settings snapshot, while React must distinguish
   same-room People/Profile intents (including equal snapshot generations) and
   suppress duplicate mount-effect dispatch because Rust intentionally projects no
-  panel-open or settings-load Pending state. A rejected effect load may release
+  panel-open or settings-load Pending state. People navigation opens the pane
+  before its settings read settles; a newer Threads intent retires that People
+  request before either focused-context closure or settings settlement, and a
+  late load may refresh only still-current data. Main-timeline sender Profile
+  navigation forwards the Rust-projected `(room_id, sender user_id)`, never a
+  display label, and opens Profile only after an exact room-settings snapshot;
+  its renderer request/navigation fences make rapid clicks and room changes
+  latest-wins without visibly opening People first. A rejected effect load may release
   only its still-current request/target marker; it must not log the raw error,
   clear a newer same-target demand, or add retry/backoff. Navigation and panel
   replacement continue to fence completion before the Rust-shaped snapshot enters

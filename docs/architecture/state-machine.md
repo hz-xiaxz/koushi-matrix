@@ -398,6 +398,15 @@ stateDiagram-v2
   degradation retain normal use; an inconclusive initial inspection does not.
   Account/session generation fencing occurs in `AccountActor` before reducer
   projection.
+- Nonessential secure-backup server inspection runs only while the accepted
+  sync projection is `Running`. An unproven connectivity edge aborts and
+  coalesces inspection/monitor work; the first proven edge in one recovery
+  epoch admits one inspection. Post-authority recoverable failures use bounded
+  exponential backoff with jitter (5 seconds through 5 minutes), preserving the
+  attempt across connectivity flaps until a successful backup inspection resets
+  the epoch. A pre-authority inconclusive inspection is `BlockedFailed`, has no
+  automatic monitor, and requires the explicit typed retry. Successful
+  authoritative inspection resumes periodic monitoring.
 - Secure-backup setup admission is Rust-owned and uses the closed
   `SecureBackupSetupIntent`. `InitialSetup` is admitted only by `SetupRequired`
   or recovery-key delivery retry; `Reenable { confirmed: true }` is admitted
@@ -432,11 +441,13 @@ not promote, demote, unlock, or otherwise alter `SessionState`.
 stateDiagram-v2
     [*] --> Idle
     Idle --> Checking: RefreshRequested(open/manual)
-    Ready --> Checking: RefreshRequested(open/manual)
-    Failed --> Checking: RefreshRequested(open/manual)
+    Ready --> Checking: RefreshRequested(open/manual) / retain details
+    Failed --> Checking: RefreshRequested(open/manual) / retain last-known details
+    Failed --> Checking: accepted SyncStatusChanged(unproven→Running) and transport failure / Recovery
     Checking --> Ready: Refreshed(matching request)
-    Checking --> Failed: RefreshFailed(matching request)
-    Checking --> Checking: duplicate/stale request ignored
+    Checking --> Failed: RefreshFailed(matching request) / retain last-known details
+    Checking --> Checking: duplicate manual request / correlated benign-no-op
+    Checking --> Checking: stale request ignored
     Ready --> Ready: stale completion ignored
     Failed --> Failed: stale completion ignored
     Checking --> Idle: LogoutRequested/session clear
@@ -444,28 +455,41 @@ stateDiagram-v2
     Failed --> Idle: LogoutRequested/session clear
 ```
 
-- Only a Ready session admits a refresh, and only one refresh may be active.
+- Only a Ready session admits a refresh, and only one network refresh may be
+  active. Open/manual work admitted while sync connectivity is unproven settles
+  as coarse `ConnectivityUnavailable` without starting an SDK probe. A manual
+  request coalesced behind `Checking(Recovery)` receives a full-request-id
+  `IntentLifecycle::BenignNoOp(AlreadyActive)`; it never replaces the automatic
+  request or waits opaquely.
 - `Ready.details.verification` is the app-owned three-state mapping of the same
   SDK current-device `VerificationState` used by admission. It is never derived
   from cross-signing, own-identity, backup, or sync facts. Those facts remain
   explicit supplemental diagnostics and do not form a second verification
   verdict. A refresh that observes non-Verified trust routes through the
   session gate and cannot publish Ready-session diagnostics.
-- A matching failure replaces prior successful details with a coarse `Failed`
-  state. Identifiers and raw SDK errors are excluded from generic diagnostics
-  and redacted from custom `Debug`.
+- A matching failure replaces the current inspection verdict with coarse
+  `Failed`, but `Checking.last_known_details` and `Failed.last_known_details`
+  retain the preceding successful observational facts. UI may label those facts
+  stale; it must not visually downgrade them into an authentication/trust loss.
+  Identifiers and raw SDK errors are excluded from generic diagnostics and
+  redacted from custom `Debug`.
+- `TimedOut`, `Network`, and `ConnectivityUnavailable` are
+  transport/reachability outcomes, not session invalidation. SDK request errors
+  are classified into coarse `Authentication`, `Network`, `Server`, or `Sdk`
+  before crossing into app state. `Unavailable` remains reserved for a missing
+  active session/current device required by the inspection.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Stopped
-    Stopped --> Starting: Restore/Login success
-    Starting --> Running: SyncStarted
-    Starting --> Reconnecting: owner reconnecting before first response
-    Running --> Reconnecting: unexpected sync-owner termination
-    Running --> Failed: non-recoverable SyncFailed
-    Failed --> Reconnecting: explicit SyncReconnecting
-    Reconnecting --> Running: SyncStarted/SyncRecovered
-    Running --> Stopped: LogoutRequested
+    Stopped --> Starting: accepted SyncStatusChanged(Starting)
+    Starting --> Running: accepted SyncStatusChanged(Running) / connectivity proven
+    Starting --> Reconnecting: accepted SyncStatusChanged(Reconnecting)
+    Running --> Reconnecting: accepted SyncStatusChanged(Reconnecting) / connectivity unproven
+    Running --> Failed: accepted SyncStatusChanged(Failed) / connectivity unproven
+    Failed --> Reconnecting: accepted SyncStatusChanged(Reconnecting)
+    Reconnecting --> Running: accepted SyncStatusChanged(Running) / one Recovery refresh if stale transport failure
+    Running --> Stopped: accepted SyncStatusChanged(Stopped) / connectivity unproven
     Failed --> Stopped: LogoutRequested
     Reconnecting --> Stopped: LogoutRequested
 ```
@@ -693,6 +717,13 @@ code without a matching command-success correlation.
   effect. It hydrates the selected room's active composer from the Rust-owned
   draft store; it does not reset the draft to an empty composer unless no stored
   draft exists.
+- The renderer switches its primary pane to the timeline only after the typed
+  `SelectRoom` settlement survives the current room-intent epoch and the
+  authoritative snapshot has both `active_room_id` and `timeline.room_id` equal
+  to the target. Composer-drain refusal, supersession, failed/no-op settlement,
+  or a mismatched snapshot must not reveal the previously committed room as if
+  the newer navigation succeeded. Invite acceptance and direct join delegate to
+  this shared selection path and never switch the pane independently.
 
 ```mermaid
 stateDiagram-v2
@@ -2254,11 +2285,13 @@ stateDiagram-v2
   an MXC URI directly; it renders an image only when Rust/platform-owned media
   handling has settled `AvatarThumbnailState::Ready { source_url, .. }`.
   `NotRequested`, `Loading`, and `Failed` render the colored-initial fallback.
-- In the #17 reducer slice, avatar thumbnail fields are replaced through the
-  Rust-owned snapshot actions (`OwnProfileUpdated`, `UserProfilesUpdated`, room
-  list updates, and invite updates). A future explicit avatar-thumbnail download
-  workflow must add its own `AppAction` transitions and update this document in
-  the same change.
+- Avatar thumbnail fields settle through Rust-owned snapshot actions. The
+  existing `AvatarThumbnailUpdated` action updates every matching avatar copy by
+  exact MXC URI across own/global/relevant-room user profiles, rooms, Spaces,
+  invites, and live-signal receipt readers. When any receipt copy changes, the reducer emits one
+  `LiveSignalsChanged` after existing profile/room-list effects. Duplicate
+  thumbnail state and unrelated MXCs are inert; no new action or renderer-side
+  profile join is required.
 - The existing timeline media download contract emits byte counts only and does
   not put downloaded bytes in React state. Avatar thumbnail source URLs must
   remain app-owned handles or source URLs produced by Rust/platform media
@@ -2353,6 +2386,9 @@ stateDiagram-v2
   removes receipt entries in that scope, then inserts the replacement snapshot;
   receipt state outside the scope is preserved.
 - Receipt reader display data is resolved in Rust before it reaches the GUI.
+  `AvatarThumbnailUpdated` also settles already-enriched reader avatar copies by
+  exact MXC URI and emits `LiveSignalsChanged` when at least one copy changes, so
+  pending initials can become the ready image without a new receipt event.
   Each event's receipt projection deduplicates by reader user id using the
   newest timestamp, fills missing display labels and avatar DTOs from
   `AppState.profile`, orders readers most-recent-first with deterministic
@@ -2684,6 +2720,13 @@ stateDiagram-v2
   visible snapshot while preserving any pending settings, moderation, or role
   operation. Loading a different room settings view replaces the selected
   settings state and clears the prior selected-room operation.
+- `RoomSettingsLoaded` is an idempotent read terminal. After its correlated event
+  progress is observed, an already-matching settings snapshot may settle at the
+  baseline generation because RoomActor reliably reduces that snapshot before
+  emitting the event. No-event timeouts and mutation operations, including
+  `RoomSettingUpdated`, still require their normal terminal/generation evidence.
+  The People pane opens from renderer intent before this read settles and never
+  changes pane mode from the late completion; a later Threads/panel intent wins.
 - Settings and moderation completions are request-correlated. Stale successes,
   stale failures, duplicate completions, and completions for a room that is no
   longer selected are ignored.

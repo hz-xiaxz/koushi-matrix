@@ -443,6 +443,89 @@ test("Space member roles use authoritative success, failure retry, confirmation,
   console.log("space_member_role=ok");
 });
 
+test("invite acceptance does not expose the previous timeline when room selection is uncommitted", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+
+  await page.evaluate(() => {
+    const base = window.__harness.currentSnapshot();
+    const roomId = "!invite-navigation-refused:example.invalid";
+    const invite = {
+      room_id: roomId,
+      display_name: "Refused Navigation Invite",
+      avatar: null,
+      topic: null,
+      inviter_display_name: "Synthetic Inviter",
+      is_dm: false
+    };
+    window.__harness.setSnapshot({
+      ...base,
+      state: {
+        ...base.state,
+        domain: { ...base.state.domain, invites: [invite] }
+      }
+    });
+    window.__harness.setCommandResponse("accept_invite", () => {
+      const snapshot = window.__harness.currentSnapshot();
+      const joinedRoom = {
+        room_id: roomId,
+        display_name: invite.display_name,
+        avatar: null,
+        is_dm: false,
+        tags: { favourite: null, low_priority: null },
+        unread_count: 0,
+        notification_count: 0,
+        highlight_count: 0,
+        parent_space_ids: []
+      };
+      const joinedItem = {
+        room_id: roomId,
+        display_name: invite.display_name,
+        avatar: null,
+        tags: { favourite: null, low_priority: null },
+        unread_count: 0,
+        highlight_count: 0
+      };
+      const next = {
+        ...snapshot,
+        state: {
+          ...snapshot.state,
+          domain: {
+            ...snapshot.state.domain,
+            rooms: [...snapshot.state.domain.rooms, joinedRoom],
+            invites: []
+          }
+        },
+        sidebar: {
+          ...snapshot.sidebar,
+          space_rooms: [...snapshot.sidebar.space_rooms, joinedItem],
+          sections: {
+            ...snapshot.sidebar.sections,
+            rooms: [...snapshot.sidebar.sections.rooms, joinedItem]
+          }
+        }
+      };
+      window.__harness.setSnapshot(next);
+      return next;
+    });
+    window.__harness.setCommandResponse("select_room", () =>
+      window.__harness.currentSnapshot()
+    );
+    window.__harness.pushStateUpdate();
+    window.__harness.clearInvocations();
+  });
+
+  await selectAccountHome(page);
+  await page.getByRole("button", { name: "Invites", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Invites" })).toBeVisible();
+  await page.getByRole("button", { name: "Accept invite" }).click();
+
+  await expect.poll(() => invocationCount(page, "select_room")).toBe(1);
+  await expect(page.getByRole("heading", { name: "Invites" })).toBeVisible();
+  await expect(page.getByRole("main", { name: "Conversation timeline" })).toBeHidden();
+});
+
 test("invites view accepts a seeded invite and New DM renders the returned direct room", async ({
   page
 }) => {
@@ -451,7 +534,7 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
   await page.evaluate(() => {
     const base = window.__harness.currentSnapshot();
     const invite = {
-      room_id: "!invite-seed:example.invalid",
+      room_id: "!joined-from-invite:example.invalid",
       display_name: "Seeded Invite",
       avatar: null,
       topic: "Synthetic invite topic",
@@ -497,18 +580,6 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
             ...snapshot.state.domain,
             rooms: [...snapshot.state.domain.rooms, joinedRoom],
             invites: []
-          },
-          ui: {
-            ...snapshot.state.ui,
-            navigation: {
-              ...snapshot.state.ui.navigation,
-              active_room_id: joinedRoom.room_id
-            },
-            timeline: {
-              ...snapshot.state.ui.timeline,
-              room_id: joinedRoom.room_id,
-              is_subscribed: true
-            }
           }
         },
         sidebar: {
@@ -709,7 +780,19 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
     .poll(async () =>
       page.evaluate(() => window.__harness.invocationsOf("accept_invite")[0]?.args)
     )
-    .toEqual({ roomId: "!invite-seed:example.invalid" });
+    .toEqual({ roomId: "!joined-from-invite:example.invalid" });
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__harness.invocationsOf("select_room").at(-1)?.args)
+    )
+    .toEqual({ roomId: "!joined-from-invite:example.invalid" });
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () => window.__harness.currentSnapshot().state.ui.navigation.active_room_id
+      )
+    )
+    .toBe("!joined-from-invite:example.invalid");
   await expect(page.getByRole("button", { name: "Seeded Invite" })).toBeVisible();
 
   await page.getByRole("button", { name: "Seeded Invite" }).click();
@@ -2617,6 +2700,194 @@ test("room context menu reports room with a reason", async ({ page }) => {
     });
 });
 
+test("timeline sender profile navigation uses stable user ids and latest-wins settings", async ({ page }) => {
+  await gotoReadyShell(page);
+  const firstUserId = "@duplicate-first:example.invalid";
+  const secondUserId = "@duplicate-second:example.invalid";
+  await seedTimelineItems(page, [
+    {
+      id: { Event: { event_id: "$duplicate-first:example.invalid" } },
+      sender: firstUserId,
+      sender_label: "Duplicate Name",
+      body: "First duplicate sender",
+      timestamp_ms: 1_800_000_020_000,
+      in_reply_to_event_id: null,
+      thread_root: null,
+      thread_summary: null,
+      media: null,
+      is_redacted: false,
+      is_hidden: false,
+      can_redact: false,
+      is_edited: false,
+      can_edit: false,
+      reactions: []
+    },
+    {
+      id: { Event: { event_id: "$duplicate-second:example.invalid" } },
+      sender: secondUserId,
+      sender_label: "Duplicate Name",
+      body: "Second duplicate sender",
+      timestamp_ms: 1_800_000_021_000,
+      in_reply_to_event_id: null,
+      thread_root: null,
+      thread_summary: null,
+      media: null,
+      is_redacted: false,
+      is_hidden: false,
+      can_redact: false,
+      is_edited: false,
+      can_edit: false,
+      reactions: []
+    },
+    {
+      id: { Event: { event_id: "$duplicate-continuation:example.invalid" } },
+      sender: secondUserId,
+      sender_label: "Duplicate Name",
+      body: "Continuation sender",
+      timestamp_ms: 1_800_000_021_500,
+      in_reply_to_event_id: null,
+      thread_root: null,
+      thread_summary: null,
+      media: null,
+      is_redacted: false,
+      is_hidden: false,
+      can_redact: false,
+      is_edited: false,
+      can_edit: false,
+      reactions: []
+    },
+    {
+      id: { Event: { event_id: "$missing-sender:example.invalid" } },
+      sender: null,
+      sender_label: "Unbound Sender",
+      body: "Missing stable sender id",
+      timestamp_ms: 1_800_000_022_000,
+      in_reply_to_event_id: null,
+      thread_root: null,
+      thread_summary: null,
+      media: null,
+      is_redacted: false,
+      is_hidden: false,
+      can_redact: false,
+      is_edited: false,
+      can_edit: false,
+      reactions: []
+    }
+  ]);
+  await page.evaluate(
+    ({ firstUserId: first, secondUserId: second }) => {
+      const pending: Array<{ roomId: string; resolve: (snapshot: ReturnType<typeof window.__harness.currentSnapshot>) => void }> = [];
+      window.__harness.setCommandResponse("load_room_settings", ({ roomId }) =>
+        new Promise((resolve) => pending.push({ roomId: String(roomId), resolve }))
+      );
+      const release = (index: number) => {
+        const request = pending[index];
+        if (!request) throw new Error(`missing profile load ${index}`);
+        const current = window.__harness.currentSnapshot();
+        const member = (user_id: string) => ({
+          user_id,
+          display_name: "Duplicate Name",
+          display_label: "Duplicate Name",
+          original_display_label: "Duplicate Name",
+          avatar_url: null,
+          power_level: 0,
+          role: "user" as const,
+          role_options: []
+        });
+        const next = {
+          ...current,
+          state: {
+            ...current.state,
+            domain: {
+              ...current.state.domain,
+              room_management: {
+                selected_room_id: request.roomId,
+                settings: {
+                  room_id: request.roomId,
+                  name: "Harness Room",
+                  topic: null,
+                  avatar_url: null,
+                  join_rule: "invite" as const,
+                  history_visibility: "shared" as const,
+                  permissions: {
+                    can_edit_settings: true,
+                    can_edit_roles: true,
+                    can_invite: true,
+                    can_kick: true,
+                    can_ban: false,
+                    can_unban: false
+                  },
+                  members: [member(first), member(second)]
+                },
+                operation: { kind: "idle" as const }
+              }
+            }
+          }
+        };
+        window.__harness.setSnapshot(next);
+        request.resolve(next);
+      };
+      (window as unknown as { __releaseProfileLoad: (index: number) => void }).__releaseProfileLoad = release;
+      window.__harness.clearInvocations();
+    },
+    { firstUserId, secondUserId }
+  );
+
+  const firstRow = page.locator("article.message").filter({ hasText: "First duplicate sender" });
+  const secondRow = page.locator("article.message").filter({ hasText: "Second duplicate sender" });
+  const missingSenderRow = page.locator("article.message").filter({ hasText: "Missing stable sender id" });
+  const continuationRow = page.locator("article.message").filter({ hasText: "Continuation sender" });
+  await expect(missingSenderRow).toBeVisible();
+  await expect(continuationRow).toBeVisible();
+  await expect(missingSenderRow.getByRole("button", { name: /Open profile for/ })).toHaveCount(0);
+  await expect(continuationRow.getByRole("button", { name: /Open profile for/ })).toHaveCount(0);
+  const firstSender = firstRow.getByRole("button", { name: "Open profile for Duplicate Name" });
+  await page.keyboard.press("Tab");
+  await firstSender.focus();
+  await expect(firstSender).toBeFocused();
+  expect(await firstSender.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+  expect(await firstSender.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none");
+  await firstSender.press("Enter");
+  await expect(page.getByRole("heading", { name: t("panel.profile") })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: t("panel.people") })).toHaveCount(0);
+  await secondRow.getByRole("button", { name: "Open profile for Duplicate Name" }).click();
+  await expect.poll(() => invocationCount(page, "load_room_settings")).toBe(2);
+
+  await page.evaluate(() =>
+    (window as unknown as { __releaseProfileLoad: (index: number) => void }).__releaseProfileLoad(1)
+  );
+  await expect(page.getByRole("heading", { name: t("panel.profile") })).toBeVisible();
+  await expect(page.locator(".profile-identity")).toContainText(secondUserId);
+  await page.evaluate(() =>
+    (window as unknown as { __releaseProfileLoad: (index: number) => void }).__releaseProfileLoad(0)
+  );
+  await expect(page.locator(".profile-identity")).toContainText(secondUserId);
+
+  await page.getByRole("button", { name: t("action.back"), exact: true }).click();
+  await expect(page.getByRole("heading", { name: t("panel.people") })).toBeVisible();
+  await expect(
+    page
+      .locator('aside[aria-label="Context panel"]')
+      .getByRole("button", { name: "Open profile for Duplicate Name" })
+  ).toHaveCount(2);
+  await page.getByRole("button", {
+    name: t("action.close", { title: t("panel.people") }),
+    exact: true
+  }).click();
+
+  await firstSender.focus();
+  await firstSender.press("Space");
+  await expect.poll(() => invocationCount(page, "load_room_settings")).toBe(3);
+  await page
+    .getByRole("navigation", { name: t("workspace.workspaces") })
+    .getByRole("button", { name: /^Home/ })
+    .click();
+  await page.evaluate(() =>
+    (window as unknown as { __releaseProfileLoad: (index: number) => void }).__releaseProfileLoad(2)
+  );
+  await expect(page.getByRole("heading", { name: t("panel.profile") })).toHaveCount(0);
+});
+
 test("room member panel ignores, unignores, and reports a user", async ({ page }) => {
   await gotoReadyShell(page);
   const targetUserId = "@target-member:example.invalid";
@@ -2764,6 +3035,64 @@ test("room header People button opens People panel and shows the Rust-owned memb
 
   await expect(page.getByRole("heading", { name: t("panel.people") })).toBeVisible();
   await expect(page.getByText(t("people.memberCount", { count: "3" }))).toBeVisible();
+});
+
+test("People reopens immediately and a late settings load cannot override Threads", async ({ page }) => {
+  await gotoReadyShell(page);
+  await page.evaluate(() => {
+    const releases: Array<() => void> = [];
+    window.__harness.setCommandResponse("load_room_settings", () =>
+      new Promise((resolve) => {
+        releases.push(() => resolve(window.__harness.currentSnapshot()));
+      })
+    );
+    window.__harness.setCommandResponse("open_threads_list", () => {
+      const snapshot = window.__harness.currentSnapshot();
+      const next = {
+        ...snapshot,
+        state: {
+          ...snapshot.state,
+          ui: {
+            ...snapshot.state.ui,
+            threads_list: {
+              kind: "open" as const,
+              room_id: "!harness-room:example.invalid",
+              request_id: 1,
+              items: [],
+              is_paginating: false,
+              end_reached: true
+            }
+          }
+        }
+      };
+      window.__harness.setSnapshot(next);
+      return next;
+    });
+    (window as unknown as { __releasePeopleLoads: () => void }).__releasePeopleLoads = () => {
+      releases.splice(0).forEach((release) => release());
+    };
+  });
+
+  const actions = page.locator(".channel-actions");
+  const peopleButton = actions.getByRole("button", { name: t("panel.people") });
+  await peopleButton.click();
+  await expect(page.getByRole("heading", { name: t("panel.people") })).toBeVisible();
+  await page.getByLabel("Context panel").getByRole("button", { name: "Close" }).click();
+  await expect(page.getByRole("heading", { name: t("panel.people") })).toBeHidden();
+
+  await peopleButton.click();
+  await expect(page.getByRole("heading", { name: t("panel.people") })).toBeVisible();
+  await actions.getByRole("button", { name: "Threads" }).click();
+  const threadsTitle = page
+    .locator('aside[aria-label="Context panel"]')
+    .getByText(t("threads.title"), { exact: true });
+  await expect(threadsTitle).toBeVisible();
+
+  await page.evaluate(() =>
+    (window as unknown as { __releasePeopleLoads: () => void }).__releasePeopleLoads()
+  );
+  await expect(threadsTitle).toBeVisible();
+  await expect(page.getByRole("heading", { name: t("panel.people") })).toBeHidden();
 });
 
 test("room info People entry opens the standalone People panel", async ({ page }) => {

@@ -181,6 +181,7 @@ import { createOrderedEventBatcher } from "./domain/orderedEventBatcher";
 import { createStateUpdateConsumer } from "./domain/stateUpdateConsumer";
 import { createCommandReceiptReconciler } from "./domain/commandWatermark";
 import { SNAPSHOT_SCHEMA_VERSION } from "./domain/types";
+import { selectJoinedRoomIfPresent } from "./domain/joinedRoomNavigation";
 import { createViewportSyncReporter } from "./app/viewportSyncReporter";
 import { EMOJI_BY_CATEGORY, EMOJI_CATEGORIES } from "./components/emojiData";
 import {
@@ -634,7 +635,16 @@ export function retainedTimelineStoreKeyIds(snapshot: DesktopSnapshot | null): S
   return retained;
 }
 
-function currentSessionStatusFailureLabel(kind: "sdk" | "timed_out" | "unavailable"): string {
+function currentSessionStatusFailureLabel(
+  kind:
+    | "sdk"
+    | "timed_out"
+    | "unavailable"
+    | "connectivity_unavailable"
+    | "authentication"
+    | "network"
+    | "server"
+): string {
   switch (kind) {
     case "sdk":
       return t("sessionStatus.failureSdk");
@@ -642,6 +652,14 @@ function currentSessionStatusFailureLabel(kind: "sdk" | "timed_out" | "unavailab
       return t("sessionStatus.failureTimedOut");
     case "unavailable":
       return t("sessionStatus.failureUnavailable");
+    case "connectivity_unavailable":
+      return t("sessionStatus.failureConnectivityUnavailable");
+    case "authentication":
+      return t("sessionStatus.failureAuthentication");
+    case "network":
+      return t("sessionStatus.failureNetwork");
+    case "server":
+      return t("sessionStatus.failureServer");
   }
 }
 
@@ -2868,6 +2886,26 @@ export function App() {
     if (roomNavigationIntentEpochRef.current !== navigationRequestId) {
       return false;
     }
+    appendDiagnosticLog({
+      timestampMs: Date.now(),
+      source: "room.transition",
+      message: `stage=before_api_select elapsed_ms_since_start=${Date.now() - transitionStartedAt}`
+    });
+    const nextSnapshot = await settleCommandSnapshot(api.selectRoom(roomId));
+    if (roomNavigationIntentEpochRef.current !== navigationRequestId) {
+      return false;
+    }
+    const committed =
+      nextSnapshot.state.ui.navigation.active_room_id === roomId &&
+      nextSnapshot.state.ui.timeline.room_id === roomId;
+    appendDiagnosticLog({
+      timestampMs: Date.now(),
+      source: "room.transition",
+      message: `stage=after_api_select elapsed_ms=${Date.now() - transitionStartedAt} committed_active=${nextSnapshot.state.ui.navigation.active_room_id === roomId} timeline_matches=${nextSnapshot.state.ui.timeline.room_id === nextSnapshot.state.ui.navigation.active_room_id}`
+    });
+    if (!committed) {
+      return false;
+    }
     const primaryViewUpdateStartedAt = Date.now();
     appendDiagnosticLog({
       timestampMs: primaryViewUpdateStartedAt,
@@ -2883,20 +2921,6 @@ export function App() {
     appendDiagnosticLog({
       timestampMs: Date.now(),
       source: "room.transition",
-      message: `stage=before_api_select elapsed_ms_since_start=${Date.now() - transitionStartedAt}`
-    });
-    const nextSnapshot = await settleCommandSnapshot(api.selectRoom(roomId));
-    if (roomNavigationIntentEpochRef.current !== navigationRequestId) {
-      return false;
-    }
-    appendDiagnosticLog({
-      timestampMs: Date.now(),
-      source: "room.transition",
-      message: `stage=after_api_select elapsed_ms=${Date.now() - transitionStartedAt} committed_active=${nextSnapshot.state.ui.navigation.active_room_id === roomId} timeline_matches=${nextSnapshot.state.ui.timeline.room_id === nextSnapshot.state.ui.navigation.active_room_id}`
-    });
-    appendDiagnosticLog({
-      timestampMs: Date.now(),
-      source: "room.transition",
       message: `stage=after_state_reconcile elapsed_ms_since_start=${Date.now() - transitionStartedAt}`
     });
     appendDiagnosticLog({
@@ -2907,20 +2931,32 @@ export function App() {
     return true;
   }
 
-  async function openDmUserInfo(roomId: string, userId: string) {
-    if (!(await selectRoom(roomId))) {
+  async function openRoomUserProfile(roomId: string, userId: string) {
+    const current = getAppStoreSnapshot();
+    if (
+      current?.state.ui.navigation.active_room_id !== roomId ||
+      current.state.ui.timeline.room_id !== roomId
+    ) {
       return;
     }
     const navigationRequestId = roomNavigationIntentEpochRef.current;
-    roomSettingsLoadRef.current = null;
     const settingsRequestId = ++roomSettingsRequestRef.current;
+    const isCurrent = () => {
+      const latest = getAppStoreSnapshot();
+      return (
+        roomNavigationIntentEpochRef.current === navigationRequestId &&
+        roomSettingsRequestRef.current === settingsRequestId &&
+        latest?.state.ui.navigation.active_room_id === roomId &&
+        latest.state.ui.timeline.room_id === roomId
+      );
+    };
+
+    roomSettingsLoadRef.current = null;
     const next = await settleCommandSnapshot(api.loadRoomSettings(roomId));
-    const isCurrent = () =>
-      roomNavigationIntentEpochRef.current === navigationRequestId &&
-      roomSettingsRequestRef.current === settingsRequestId;
     if (
       !isCurrent() ||
       next.state.ui.navigation.active_room_id !== roomId ||
+      next.state.ui.timeline.room_id !== roomId ||
       !exactRoomSettingsForRoom(next, roomId)
     ) {
       return;
@@ -2928,6 +2964,37 @@ export function App() {
     setPeoplePanelScope({ kind: "room", roomId });
     setSelectedProfileUserId(userId);
     await setRightPanelModeClosingFocusedContext("profile", isCurrent);
+  }
+
+  async function openDmUserInfo(roomId: string, userId: string) {
+    if (await selectRoom(roomId)) {
+      await openRoomUserProfile(roomId, userId);
+    }
+  }
+
+  async function openPeoplePanel() {
+    const roomId = snapshotRef.current?.state.ui.navigation.active_room_id;
+    const navigationRequestId = roomNavigationIntentEpochRef.current;
+    const requestId = ++roomSettingsRequestRef.current;
+    const isCurrent = () =>
+      roomSettingsRequestRef.current === requestId &&
+      roomNavigationIntentEpochRef.current === navigationRequestId &&
+      snapshotRef.current?.state.ui.navigation.active_room_id === roomId;
+
+    setPeoplePanelScope(roomId ? { kind: "room", roomId } : null);
+    setSelectedProfileUserId(null);
+    await setRightPanelModeClosingFocusedContext("people", isCurrent);
+    if (!roomId || !isCurrent()) return;
+
+    roomSettingsLoadRef.current = null;
+    const next = await settleCommandSnapshot(api.loadRoomSettings(roomId));
+    if (
+      !isCurrent() ||
+      next.state.ui.navigation.active_room_id !== roomId ||
+      !exactRoomSettingsForRoom(next, roomId)
+    ) {
+      return;
+    }
   }
 
   async function openHomeActivityView(trigger: ActivityOpenTrigger = "activity_sidebar") {
@@ -3357,10 +3424,9 @@ export function App() {
     setIsBusy(true);
     try {
       const nextSnapshot = await settleCommandSnapshot(api.acceptInvite(roomId));
-      if (nextSnapshot.state.domain.rooms.some((room) => room.room_id === roomId)) {
-        await selectRoom(roomId);
+      if (!(await selectJoinedRoomIfPresent(nextSnapshot.state.domain.rooms, roomId, selectRoom))) {
+        return;
       }
-      setPrimaryView("timeline");
     } finally {
       setIsBusy(false);
     }
@@ -3386,10 +3452,15 @@ export function App() {
     setIsBusy(true);
     try {
       const nextSnapshot = await settleCommandSnapshot(api.joinRoom(trimmedRoomId));
-      if (nextSnapshot.state.domain.rooms.some((room) => room.room_id === trimmedRoomId)) {
-        await selectRoom(trimmedRoomId);
+      if (
+        !(await selectJoinedRoomIfPresent(
+          nextSnapshot.state.domain.rooms,
+          trimmedRoomId,
+          selectRoom
+        ))
+      ) {
+        return;
       }
-      setPrimaryView("timeline");
     } finally {
       setIsBusy(false);
     }
@@ -4114,6 +4185,9 @@ export function App() {
   }
 
   async function openThreadsListPanel(scope: ThreadsListScope) {
+    // A newer Threads intent must also retire a People open still awaiting
+    // focused-context closure or room-settings settlement.
+    roomSettingsRequestRef.current += 1;
     await closeFocusedContextIfHiddenBy("threads");
     await settleCommand(api.openThreadsList(scope));
     setRightPanelMode("threads");
@@ -5438,8 +5512,18 @@ export function App() {
   if (snapshot.state.domain.current_session_status.status === "failed") {
     runtimeAlerts.push({
       kind: "session",
-      severity: "error",
-      title: t("sessionStatus.failed"),
+      severity:
+        snapshot.state.domain.current_session_status.kind === "timed_out" ||
+        snapshot.state.domain.current_session_status.kind === "connectivity_unavailable" ||
+        snapshot.state.domain.current_session_status.kind === "network"
+          ? "warning"
+          : "error",
+      title:
+        snapshot.state.domain.current_session_status.kind === "timed_out" ||
+        snapshot.state.domain.current_session_status.kind === "connectivity_unavailable" ||
+        snapshot.state.domain.current_session_status.kind === "network"
+          ? t("sessionStatus.connectionUnavailable")
+          : t("sessionStatus.failed"),
       detail: currentSessionStatusFailureLabel(snapshot.state.domain.current_session_status.kind),
       retryable: false
     });
@@ -5854,6 +5938,9 @@ export function App() {
             onOpenMatrixTarget={(target) => {
               runInBackground(openMatrixTarget(target));
             }}
+            onOpenSenderProfile={(roomId, userId) => {
+              runInBackground(openRoomUserProfile(roomId, userId));
+            }}
             onReply={(roomId, eventId) => {
               runInBackground(setComposerReplyTarget(roomId, eventId));
             }}
@@ -5877,28 +5964,8 @@ export function App() {
                 runInBackground(openPinnedMessagesPanel(roomId));
               }
             }}
-            onOpenPeople={async () => {
-              const roomId = snapshotRef.current?.state.ui.navigation.active_room_id;
-              const navigationRequestId = roomNavigationIntentEpochRef.current;
-              const requestId = ++roomSettingsRequestRef.current;
-              if (roomId) {
-                roomSettingsLoadRef.current = null;
-                const next = await settleCommandSnapshot(api.loadRoomSettings(roomId));
-                if (
-                  roomSettingsRequestRef.current !== requestId ||
-                  roomNavigationIntentEpochRef.current !== navigationRequestId ||
-                  snapshotRef.current?.state.ui.navigation.active_room_id !== roomId ||
-                  next.state.ui.navigation.active_room_id !== roomId ||
-                  !exactRoomSettingsForRoom(next, roomId)
-                ) {
-                  return;
-                }
-                setPeoplePanelScope({ kind: "room", roomId });
-              } else {
-                setPeoplePanelScope(null);
-              }
-              setSelectedProfileUserId(null);
-              await setRightPanelModeClosingFocusedContext("people");
+            onOpenPeople={() => {
+              runInBackground(openPeoplePanel());
             }}
             onOpenThreads={() => {
               const roomId = snapshot.state.ui.navigation.active_room_id;
@@ -6000,29 +6067,8 @@ export function App() {
           onReloadSpaceMemberRoles={() => {
             runInBackground(reloadSpaceMemberRoles());
           }}
-          onOpenPeople={async () => {
-            const roomId = snapshotRef.current?.state.ui.navigation.active_room_id;
-            const navigationRequestId = roomNavigationIntentEpochRef.current;
-            const requestId = ++roomSettingsRequestRef.current;
-            if (roomId) {
-              roomSettingsLoadRef.current = null;
-              const next = await settleCommandSnapshot(api.loadRoomSettings(roomId));
-              if (
-                roomSettingsRequestRef.current !== requestId ||
-                roomNavigationIntentEpochRef.current !== navigationRequestId ||
-                snapshotRef.current?.state.ui.navigation.active_room_id !== roomId ||
-                next.state.ui.navigation.active_room_id !== roomId ||
-                !exactRoomSettingsForRoom(next, roomId)
-              ) {
-                return;
-              }
-              setSnapshot(next);
-              setPeoplePanelScope({ kind: "room", roomId });
-            } else {
-              setPeoplePanelScope(null);
-            }
-            setSelectedProfileUserId(null);
-            await setRightPanelModeClosingFocusedContext("people");
+          onOpenPeople={() => {
+            runInBackground(openPeoplePanel());
           }}
           onOpenProfile={(userId) => {
             setSelectedProfileUserId(userId);
