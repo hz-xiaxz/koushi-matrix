@@ -50,6 +50,42 @@ or SDK boundary without logging private Matrix payloads.
 
 ## Upstreamable Patch Material
 
+The [2026-09-14 thread unread evidence packet](2026-09-14-thread-unread-regressions.md) records exact historical revisions, separate reproduction cases, sanitized RED/GREEN results, and patch export instructions. It distinguishes fork test evidence from still-pending clean upstream verification.
+
+- Thread-related edit notification ownership (2026-09-14, local SDK topic
+  `9aac22df2`) follows the receipt-boundary fix below. A read main message
+  followed by a thread reply and a notifying edit of that reply reproduced
+  `num_unread=0` with `num_notifications=1`: the Room filter excluded the reply
+  but admitted its `m.replace`. The filter now resolves one-hop relation targets
+  with the same ownership convention as the thread aggregator. It scans loaded
+  events once, checks each unique missing target in the already-locked event
+  store, and retains unknown/main targets. No network or additional outer lock
+  is introduced. Explicit receipts still match excluded event boundaries;
+  implicit own-event receipts use the scoped filter. A client wrapper cannot
+  correct these authoritative SDK counters without hiding valid notifications.
+  Tests cover loaded/stored reply targets, Thread notifications, main/unknown
+  edit notifications, own thread edits, threading disabled, and explicit edit
+  boundaries. The original reproducer failed before the fix; the focused
+  receipt suite passes 22 tests. Independent review approved the change.
+  Upstream intent: submit the ownership fix with regressions and remove the
+  topic once upstream includes it. No upstream PR has been submitted here.
+
+- Unthreaded receipt boundaries on thread replies (2026-09-14, local SDK
+  topic commit `b65d72ba8`, based on `f9d55baf7`) fixes
+  `crates/matrix-sdk/src/event_cache/caches/read_receipts.rs`. With threading
+  enabled, filtering replies before receipt matching loses explicit room
+  receipts whose event ID is a reply. Match active, incoming and persisted
+  receipts against all event IDs, and pass the selected boundary through count
+  reset; keep replies excluded from room counts and implicit own-message read
+  advancement. This cannot be repaired through a public client wrapper because
+  SDK event-cache recomputation owns receipt selection and local notification
+  counts. Sending a newer receipt merely hides the failure and can incorrectly
+  read unseen messages. Upstream intent: submit this minimal matching fix and
+  synthetic regressions as one SDK bugfix, then drop the topic patch when
+  incorporated upstream. The focused read-receipt suite passes all 20 tests;
+  the new boundary regression failed before the fix. Independent review found
+  no blockers. No upstream PR has been opened by this local installation task.
+
 - Element X Megolm send parity cleanup (issue #795, 2026-09-05) removes the
   Koushi-only readiness fence, repeated/duplicate pre-share, initial-share
   repair, manual force-new/discard/share-index-0/resend-index-0 APIs, and their

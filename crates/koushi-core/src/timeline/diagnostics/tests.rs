@@ -92,6 +92,9 @@ fn event_cache_structured_fields_include_relation_presence_without_ids() {
                 DiagnosticValue::Count(1_783_076_820_000 / 60_000),
             ),
             ("timestamp_present", DiagnosticValue::Boolean(true)),
+            ("push_actions_present", DiagnosticValue::Boolean(false)),
+            ("push_notify", DiagnosticValue::Boolean(false)),
+            ("push_highlight", DiagnosticValue::Boolean(false)),
             ("relation", DiagnosticValue::Token("m.thread")),
             ("relates_to_present", DiagnosticValue::Boolean(true)),
             ("relation_event_present", DiagnosticValue::Boolean(true)),
@@ -99,6 +102,10 @@ fn event_cache_structured_fields_include_relation_presence_without_ids() {
             ("thread_root_present", DiagnosticValue::Boolean(true)),
         ]
     );
+    let mut notifying_item = item.clone();
+    notifying_item.set_push_actions(vec![matrix_sdk::ruma::push::Action::Notify]);
+    let notifying = event_cache_item_diagnostic_event("cache_initial", &key, "item", Some(4), &notifying_item);
+    assert!(notifying.fields.iter().any(|field| field.key == "push_notify" && field.value == DiagnosticValue::Boolean(true)));
     let serialized = serde_json::to_string(&event).expect("diagnostic event serializes");
     for private_value in [
         "$private-cache-event:test",
@@ -998,4 +1005,35 @@ fn manager_coordinator_fails_new_registration_on_exact_correlation_collision() {
         Some(TimelineSendCompletionDelivery { request_id, .. })
             if request_id == fake_rid(7422)
     ));
+}
+
+#[tokio::test]
+async fn read_receipt_repair_uses_local_notification_count() {
+    use matrix_sdk::ruma::room_id;
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let room = server
+        .sync_joined_room(&client, room_id!("!local-count:example.test"))
+        .await;
+    room.update_room_info(|mut info| {
+        info.set_read_receipts(matrix_sdk_base::read_receipts::ReadReceipts {
+            num_unread: 0,
+            num_notifications: 1,
+            num_mentions: 1,
+            ..Default::default()
+        });
+        (
+            info,
+            matrix_sdk_base::RoomInfoNotableUpdateReasons::READ_RECEIPT,
+        )
+    })
+    .await;
+    assert_eq!(
+        u64::from(room.unread_notification_counts().notification_count),
+        0
+    );
+    assert_eq!(room.num_unread_notifications(), 1);
+    let context = super::room_latest_receipt_context(&room);
+    assert_eq!(context.notification_count, 1);
 }
