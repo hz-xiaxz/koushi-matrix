@@ -1419,12 +1419,18 @@ stateDiagram-v2
   The production runtime must also subscribe the corresponding
   `TimelineKind::Thread { room_id, root_event_id }`. For `ExistingThread` and
   `PinnedReply`, an empty first SDK snapshot triggers one bounded scheduler-owned
-  backward page before any InitialItems or success action is published. The
+  backward hydration request before any InitialItems or success action is published.
+  The public Thread event-cache paginator targets 100 raw events across
+  cached chunks, so an edit/reaction-only chunk does not stop hydration. The
   reducer copies its accepted `ThreadOpenIntent` into the AppEffect; runtime and
-  manager carry a typed Core policy instead of rereading mutable state. Only a
-  settled page (including authoritative end-reached empty) and actual thread
-  timeline subscription success may drive `ThreadSubscribed` and move the pane
-  to `Open`. Non-end empty, pagination error, or subscription failure publishes
+  manager carry a typed Core policy instead of rereading mutable state. Only successful pagination plus either authoritative end-reached or visible
+  content observed on the pre-pagination SDK subscription, and actual thread
+  timeline subscription success, may drive `ThreadSubscribed` and move the pane
+  to `Open`. Pagination and visible-content readiness share one 10-second
+  deadline; a non-end result waits for visible content on that same stream; an immediate empty snapshot is not failure. This is
+  content readiness, not an exact page-publication barrier. Remaining updates
+  continue through the actor subscription. Stream closure, deadline expiry,
+  pagination error, or subscription failure publishes
   no InitialItems and drives `ThreadSubscriptionFailed`,
   closes the pane, clears pane-level thread attention, and records a
   private-data-free recoverable error. `NewThreadDraft` skips this page.
