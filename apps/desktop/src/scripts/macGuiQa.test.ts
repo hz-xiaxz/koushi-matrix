@@ -360,8 +360,9 @@ describe("desktop release scripts", () => {
     expect(source).toContain("--macos-signing");
     expect(source).toContain("Application Support/koushi-desktop");
     expect(source).toContain("koushi-desktop");
-    expect(source).toContain("target\", \"release\", \"bundle\", \"dmg");
-    expect(source).not.toContain("src-tauri\", \"target\", \"release\", \"bundle\", \"dmg");
+    expect(source).toContain('target", "release", "bundle');
+    expect(source).toContain('join(bundleDir, "dmg")');
+    expect(source).not.toContain('src-tauri", "target", "release", "bundle');
     expect(source).not.toContain("Application Support/matrix-desktop");
   });
 
