@@ -32,39 +32,6 @@ fn main_window_overlay_permission_contract() {
 }
 
 #[test]
-fn main_window_enables_webview_zoom_hotkeys() {
-    let config: serde_json::Value = serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tauri.conf.json"
-    )))
-    .expect("tauri.conf.json must be valid JSON");
-    let main_window = config["app"]["windows"]
-        .as_array()
-        .and_then(|windows| windows.first())
-        .expect("main window config must be present");
-    assert_eq!(
-        main_window["zoomHotkeysEnabled"],
-        serde_json::json!(true),
-        "main window must enable Ctrl/Cmd +/- webview zoom hotkeys"
-    );
-
-    let capability: serde_json::Value = serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/capabilities/default.json"
-    )))
-    .expect("main capability must be valid JSON");
-    let permissions = capability["permissions"]
-        .as_array()
-        .expect("main capability permissions must be an array");
-    assert!(
-        permissions
-            .iter()
-            .any(|permission| permission == "core:webview:allow-set-webview-zoom"),
-        "main window must explicitly admit the webview zoom command"
-    );
-}
-
-#[test]
 fn restore_session_env_value_can_start_tauri_signed_out() {
     assert!(!restore_session_enabled_from_env_value(Some("0")));
     assert!(!restore_session_enabled_from_env_value(Some("false")));

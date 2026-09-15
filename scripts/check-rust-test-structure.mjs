@@ -11,8 +11,6 @@ export const FIRST_PARTY_ROOTS = ["crates", "apps/desktop/src-tauri"];
 export const ALLOWED_NON_RUST_TARGETS = new Set([
   "docs/architecture/state-machine.md",
   "apps/desktop/src-tauri/capabilities/windows-overlay.json",
-  "apps/desktop/src-tauri/capabilities/default.json",
-  "apps/desktop/src-tauri/tauri.conf.json",
   "apps/desktop/src/domain/coreEvents.generated.json"
 ]);
 
