@@ -10,6 +10,17 @@ function safeDownloadFilename(filename: string): string {
   return (trimmed || "download").replace(/[\\/:*?"<>|]+/g, "_");
 }
 
+function renderableThumbnailProtocolBase(): string {
+  const platform =
+    typeof navigator === "undefined"
+      ? ""
+      : ((navigator as Navigator & { userAgentData?: { platform?: string } })
+          .userAgentData?.platform ?? navigator.platform);
+  return /win/i.test(platform)
+    ? "http://koushi-thumbnail.localhost/"
+    : "koushi-thumbnail://localhost/";
+}
+
 export const tauriLinkMediaPort: LinkMediaPort = {
   async openHttpUrl(url) {
     try {
@@ -44,7 +55,7 @@ export const tauriLinkMediaPort: LinkMediaPort = {
     if (!/^(?:avatar|link-preview)\/[0-9a-f]{16}$/.test(sourceRef)) {
       return null;
     }
-    return `koushi-thumbnail://localhost/${sourceRef}`;
+    return `${renderableThumbnailProtocolBase()}${sourceRef}`;
   },
   async saveMediaFile(sourceUrl, filename) {
     const safeFilename = safeDownloadFilename(filename);
