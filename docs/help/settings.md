@@ -33,6 +33,10 @@ Japanese category names are included to help find them in a translated app.
 | Search history (検索履歴) | Crawl speed; indexing of media captions and file names; pause/resume crawler; crawler activity, per-room progress and start/stop actions; rebuild search database. |
 | Help & About (ヘルプと情報) | Public GitHub repository URL, copy button, and instructions for asking ChatGPT or another AI assistant. |
 
+Window zoom is not a setting: use **Ctrl + -** / **Ctrl + +** (on macOS
+**Cmd + -** / **Cmd + +**) to shrink or enlarge the whole interface, and
+**Ctrl + 0** (macOS **Cmd + 0**) to reset it.
+
 The category order follows Element where Koushi has corresponding settings.
 Koushi-specific local indexing lives in **Search history**. Koushi does not have
 all Element settings; consult this table instead of assuming exact parity.
