@@ -1758,6 +1758,10 @@ fn event_cache_item_diagnostic_event(
         event_id_present,
     ))
     .field(DiagnosticField::boolean("sender_present", sender_present))
+    .field(DiagnosticField::boolean(
+        "redacted",
+        item.raw().deserialize().is_ok_and(|event| event.is_redacted()),
+    ))
     .field(DiagnosticField::count(
         "timestamp_minute",
         timestamp_ms.unwrap_or(0) / 60_000,

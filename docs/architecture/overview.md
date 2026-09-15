@@ -1232,6 +1232,10 @@ notification dispatcher replaces the webview/window sound port,
 exception: it may retain positive-edge, three-second cooldown and one in-flight
 call state, but receives Rust-owned count/candidate/capability/settings facts and
 must not classify Matrix attention or carry identifiers/content.
+Redacted events contribute no unread, notification, or mention count, even if
+cached push actions predate their redaction. They remain usable as receipt
+boundaries. This does not suppress valid push actions on non-redacted edits,
+reactions, or state events.
 Pane-level thread attention is also Rust-owned: `AppState.thread_attention`
 tracks the open thread's notification, highlight, and live-event marker counts
 and reaches React only through the Tauri/TypeScript DTO.

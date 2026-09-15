@@ -2774,3 +2774,70 @@ fn room_navigation_preserves_hidden_receipt_position_and_thread_scope() {
     assert_eq!(thread.unread_event_count, 1);
     assert_eq!(thread.newer_event_count, 1);
 }
+
+
+#[test]
+fn confirmed_thread_receipt_cannot_display_before_an_older_local_boundary() {
+    let mut own = timeline_item("$own:test", Some("edited own reply"), "@me:test", false);
+    let mut latest = timeline_item("$latest:test", Some("latest reply"), "@other:test", false);
+    own.thread_root = Some("$root:test".into());
+    latest.thread_root = Some("$root:test".into());
+    let kind = koushi_protocol::TimelineKind::Thread {
+        room_id: "!room:test".into(),
+        root_event_id: "$root:test".into(),
+    };
+    for (server, local, expected) in [
+        ("$latest:test", "$own:test", "$latest:test"),
+        ("$own:test", "$latest:test", "$latest:test"),
+        ("$latest:test", "$latest:test", "$latest:test"),
+        ("$latest:test", "$missing:test", "$latest:test"),
+        ("$missing:test", "$own:test", "$own:test"),
+    ] {
+        let snapshot = derive_timeline_navigation_snapshot_with_read_state(
+            &kind,
+            &[own.clone(), latest.clone()],
+            Some(server),
+            Some(server),
+            Some(local),
+            TimelineReadStateSync::Synced,
+            &TimelineViewportObservation::default(),
+            Some("@me:test"),
+        );
+        assert_eq!(
+            snapshot
+                .read_marker_display_event_id
+                .as_deref()
+                .or(snapshot.read_marker_event_id.as_deref()),
+            Some(expected),
+            "the divider must use the newest proven boundary, whether local or confirmed"
+        );
+    }
+}
+
+#[test]
+fn confirmed_hidden_thread_boundary_uses_a_visible_divider() {
+    let mut own = timeline_item("$own:test", Some("own"), "@me:test", false);
+    let mut edit = timeline_item("$edit:test", Some("edit"), "@me:test", false);
+    own.thread_root = Some("$root:test".into());
+    edit.thread_root = Some("$root:test".into());
+    edit.is_hidden = true;
+    let kind = koushi_protocol::TimelineKind::Thread {
+        room_id: "!room:test".into(),
+        root_event_id: "$root:test".into(),
+    };
+    let snapshot = derive_timeline_navigation_snapshot_with_read_state(
+        &kind,
+        &[own, edit],
+        Some("$edit:test"),
+        Some("$edit:test"),
+        Some("$own:test"),
+        TimelineReadStateSync::Synced,
+        &TimelineViewportObservation::default(),
+        Some("@me:test"),
+    );
+    assert_eq!(snapshot.read_marker_event_id.as_deref(), Some("$edit:test"));
+    assert_eq!(
+        snapshot.read_marker_display_event_id.as_deref(),
+        Some("$own:test")
+    );
+}

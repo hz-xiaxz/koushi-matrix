@@ -87,6 +87,7 @@ fn event_cache_structured_fields_include_relation_presence_without_ids() {
             ("index_present", DiagnosticValue::Boolean(true)),
             ("event_id_present", DiagnosticValue::Boolean(true)),
             ("sender_present", DiagnosticValue::Boolean(true)),
+            ("redacted", DiagnosticValue::Boolean(false)),
             (
                 "timestamp_minute",
                 DiagnosticValue::Count(1_783_076_820_000 / 60_000),

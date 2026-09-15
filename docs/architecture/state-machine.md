@@ -847,6 +847,11 @@ stateDiagram-v2
 ```
 
 Rust keeps the local viewed boundary separate from server-confirmed read state.
+For the displayed read divider, comparable local and confirmed boundaries in the
+same canonical window use the newer position, mapped to a visible event at or
+before that position. A stale local boundary cannot override a newer confirmed
+one. Missing positions retain conservative fallback behavior. This display
+choice does not acknowledge unsent receipts or change server-based unread counts.
 Only a current Room or Thread actor may admit an at-bottom, gap-free, latest
 attention-eligible event with exact position and actor-generation evidence.
 Room observations require the atomic fully-read/private-unthreaded key and, when
