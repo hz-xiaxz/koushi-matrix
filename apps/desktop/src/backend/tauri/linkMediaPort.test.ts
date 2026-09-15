@@ -73,6 +73,26 @@ describe("Tauri link/media port", () => {
     ).toBeNull();
   });
 
+  it("mints the Windows localhost thumbnail URI on Windows", () => {
+    const platform = Object.getOwnPropertyDescriptor(window.navigator, "platform");
+    Object.defineProperty(window.navigator, "platform", {
+      value: "Win32",
+      configurable: true
+    });
+    try {
+      expect(tauriLinkMediaPort.renderableThumbnailSourceUrl("avatar/0123456789abcdef")).toBe(
+        "http://koushi-thumbnail.localhost/avatar/0123456789abcdef"
+      );
+      expect(
+        tauriLinkMediaPort.renderableThumbnailSourceUrl("link-preview/fedcba9876543210")
+      ).toBe("http://koushi-thumbnail.localhost/link-preview/fedcba9876543210");
+    } finally {
+      if (platform) {
+        Object.defineProperty(window.navigator, "platform", platform);
+      }
+    }
+  });
+
   it("preserves the default-path, dialog and save command contract", async () => {
     await tauriLinkMediaPort.saveMediaFile("asset://media", ' report:*?.png ');
 
