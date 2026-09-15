@@ -197,6 +197,19 @@ build completes. Bundling requires the Tauri Linux system dependencies
 `~/.local/share/koushi-desktop`; credentials use the freedesktop Secret
 Service (GNOME Keyring / KWallet) with the service name `koushi-desktop`.
 
+### Windows users
+
+Just run the following commands.
+
+```powershell
+git submodule update --init --recursive vendor/matrix-rust-sdk
+node scripts/check-sdk-submodule.mjs
+npm --prefix apps/desktop ci
+npm --prefix apps/desktop run build:windows
+$installer = Get-ChildItem "target/x86_64-pc-windows-msvc/release/bundle/nsis" -Filter *.exe | Select-Object -First 1
+Start-Process $installer.FullName -ArgumentList '/S' -Wait
+```
+
 ## Deterministic README screenshot
 
 From the repository root, regenerate the checked-in screenshot in the pinned
