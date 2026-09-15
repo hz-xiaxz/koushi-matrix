@@ -7,6 +7,7 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:webview:allow-set-webview-zoom",
     "core:window:allow-set-title",
     "core:window:allow-set-badge-count",
     "core:window:allow-start-dragging",
