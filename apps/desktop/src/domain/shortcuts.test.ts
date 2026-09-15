@@ -77,6 +77,13 @@ describe("shortcut registry", () => {
     });
   });
 
+  test("zoom remains reachable through native menus when fullscreen redirects keys away from the DOM", () => {
+    for (const id of ["zoomIn", "zoomOut", "resetZoom"]) {
+      expect(menuAccelerators()).toContainEqual(expect.objectContaining({ id, nativeMenu: "view" }));
+      expect(shortcutActionFromMenuPayload(id)).toBe(id);
+    }
+  });
+
   test("resolves implemented Element-compatible keyboard events", () => {
     expect(
       shortcutIdForKeyboardEvent({
@@ -171,6 +178,19 @@ describe("shortcut registry", () => {
         "macos"
       )
     ).toBe("filterRooms");
+  });
+
+  test.each(["macos", "windows", "linux"] as const)("resolves zoom with the %s primary modifier", (platform) => {
+    const modifiers = {
+      metaKey: platform === "macos", ctrlKey: platform !== "macos", altKey: false, shiftKey: false
+    };
+    expect(shortcutIdForKeyboardEvent({ ...modifiers, key: "-" }, platform)).toBe("zoomOut");
+    expect(shortcutIdForKeyboardEvent({ ...modifiers, key: "=" }, platform)).toBe("zoomIn");
+    expect(shortcutIdForKeyboardEvent({ ...modifiers, key: "+", shiftKey: true }, platform)).toBe("zoomIn");
+    expect(shortcutIdForKeyboardEvent({ ...modifiers, key: "0" }, platform)).toBe("resetZoom");
+    expect(shortcutIdForKeyboardEvent({ ...modifiers, key: "+", altKey: true }, platform)).toBeNull();
+    expect(shortcutIdForKeyboardEvent({ ...modifiers, key: "-", metaKey: false, ctrlKey: false }, platform)).toBeNull();
+    expect(shortcutIdForKeyboardEvent({ key: "-", metaKey: false, ctrlKey: true, altKey: false, shiftKey: false }, "macos")).toBeNull();
   });
 
   test("formats modifier labels through explicit platform profiles", () => {

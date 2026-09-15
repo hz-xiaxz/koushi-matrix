@@ -1,8 +1,8 @@
 //! Contract for the main window's Ctrl/Cmd +/- webview zoom.
 //!
-//! The zoom hotkeys are provided by the Tauri runtime, so the repository-owned
-//! contract is narrow: the main window opts in, and the default capability
-//! admits the zoom command that the injected hotkey script calls.
+//! The app captures zoom keys before focused widgets can stop propagation.
+//! Disable Tauri's bubbling listener to avoid two independent zoom scales,
+//! and admit the webview command used by the app's window/dialog port.
 
 use std::fs;
 use std::path::Path;
@@ -16,7 +16,7 @@ fn read_json(file: &str) -> serde_json::Value {
 }
 
 #[test]
-fn main_window_enables_webview_zoom_hotkeys() {
+fn main_window_leaves_zoom_hotkeys_to_the_app() {
     let config = read_json("tauri.conf.json");
     let main_window = config["app"]["windows"]
         .as_array()
@@ -25,8 +25,8 @@ fn main_window_enables_webview_zoom_hotkeys() {
 
     assert_eq!(
         main_window["zoomHotkeysEnabled"],
-        serde_json::json!(true),
-        "main window must enable Ctrl/Cmd +/- webview zoom hotkeys"
+        serde_json::json!(false),
+        "Tauri's injected zoom handler must not compete with the app's capture handler"
     );
 }
 

@@ -97,10 +97,8 @@ import {
   type ContextMenuActionId,
   type ContextMenuItem
 } from "./domain/contextMenus";
-import {
-  shortcutActionFromMenuPayload,
-  shortcutIdForKeyboardEvent
-} from "./domain/shortcuts";
+import { shortcutActionFromMenuPayload } from "./domain/shortcuts";
+import { listenForAppShortcuts } from "./app/keyboardShortcuts";
 import {
   effectiveRightPanelModeForSnapshot,
   type PeoplePanelScope,
@@ -1702,6 +1700,14 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
       case "toggleFullscreen":
         runInBackground(windowDialogPort.toggleFullscreen());
         return true;
+      case "zoomIn":
+      case "zoomOut":
+      case "resetZoom":
+        if (!isTauriRuntime()) return false;
+        runInBackground(windowDialogPort.changeZoom(
+          shortcutId === "zoomIn" ? "in" : shortcutId === "zoomOut" ? "out" : "reset"
+        ));
+        return true;
       default:
         return false;
     }
@@ -2046,22 +2052,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     };
   }, []);
 
-  useEffect(() => {
-    function onKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.defaultPrevented || document.querySelector("dialog[open]")) return;
-      const shortcutId = shortcutIdForKeyboardEvent(event);
-      if (!shortcutId) {
-        return;
-      }
-
-      if (handleShortcutAction(shortcutId)) {
-        event.preventDefault();
-      }
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  useEffect(() => listenForAppShortcuts(handleShortcutAction), []);
 
   useEffect(() => {
     if (!isTauriRuntime()) {

@@ -253,6 +253,36 @@ const shortcuts: KeyboardShortcut[] = [
     accelerator: "Ctrl+Command+F"
   },
   {
+    id: "zoomIn",
+    category: "navigation",
+    labelMessageId: "shortcut.zoomIn",
+    keys: ["Ctrl/Cmd", "+"],
+    nativeMenu: "view",
+    accelerator: "CmdOrCtrl+NumpadAdd",
+    parity: "same",
+    implemented: true
+  },
+  {
+    id: "zoomOut",
+    category: "navigation",
+    labelMessageId: "shortcut.zoomOut",
+    keys: ["Ctrl/Cmd", "-"],
+    nativeMenu: "view",
+    accelerator: "CmdOrCtrl+-",
+    parity: "same",
+    implemented: true
+  },
+  {
+    id: "resetZoom",
+    category: "navigation",
+    labelMessageId: "shortcut.resetZoom",
+    keys: ["Ctrl/Cmd", "0"],
+    nativeMenu: "view",
+    accelerator: "CmdOrCtrl+0",
+    parity: "same",
+    implemented: true
+  },
+  {
     id: "openUserSettings",
     category: "navigation",
     labelMessageId: "shortcut.openUserSettings",
@@ -416,7 +446,10 @@ const globalKeyboardHandlerIds = [
   "searchInRoom",
   "filterRooms",
   "toggleRightPanel",
-  "toggleFullscreen"
+  "toggleFullscreen",
+  "zoomIn",
+  "zoomOut",
+  "resetZoom"
 ];
 
 export const keyboardShortcutGroups: KeyboardShortcutGroup[] = categoryOrder.map(
@@ -484,6 +517,13 @@ export function shortcutIdForKeyboardEvent(
   // keys must use Cmd (metaKey) only so that Ctrl+key reaches the text system.
   const primaryMod =
     platform === "macos" ? event.metaKey && !event.ctrlKey : ctrlOrCmd;
+
+  if (primaryMod && !event.altKey) {
+    // Accept both the unshifted US '=' and '+' on US/JIS layouts.
+    if (key === "+" || key === "=") return "zoomIn";
+    if (!event.shiftKey && key === "-") return "zoomOut";
+    if (!event.shiftKey && key === "0") return "resetZoom";
+  }
 
   if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && key === ",") {
     return "openUserSettings";

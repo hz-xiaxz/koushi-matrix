@@ -23,6 +23,7 @@ export interface WindowOpenFileOptions {
 
 export interface WindowDialogPort {
   toggleFullscreen(): Promise<void>;
+  changeZoom(direction: "in" | "out" | "reset"): Promise<void>;
   startDragging(): Promise<void>;
   confirm(message: string, options: WindowConfirmOptions): Promise<boolean>;
   saveFile(options: WindowSaveFileOptions): Promise<string | null>;

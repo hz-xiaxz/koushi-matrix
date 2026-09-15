@@ -12,9 +12,10 @@ if (target && !["aarch64-apple-darwin", "x86_64-apple-darwin"].includes(target))
   console.error(`desktop-build-dmg: unsupported macOS target: ${target}`);
   process.exit(1);
 }
-const dmgDir = target
-  ? join(repoRoot, "target", target, "release", "bundle", "dmg")
-  : join(repoRoot, "target", "release", "bundle", "dmg");
+const bundleDir = target
+  ? join(repoRoot, "target", target, "release", "bundle")
+  : join(repoRoot, "target", "release", "bundle");
+const dmgDir = join(bundleDir, "dmg");
 
 if (args.has("--help")) {
   printUsage();
@@ -33,7 +34,17 @@ const buildEnvironment = localSigningEnvironment();
 const updaterPublicKey = buildEnvironment.KOUSHI_UPDATER_PUBLIC_KEY?.trim();
 const buildConfig = {
   bundle: {
-    macOS: { bundleVersion },
+    macOS: {
+      bundleVersion,
+      // A linker-signed executable is not a signed app bundle. With no identity,
+      // Tauri otherwise skips sealing Contents/Info.plist and Resources entirely.
+      ...(!args.has("--signed") &&
+      !buildEnvironment.APPLE_SIGNING_IDENTITY &&
+      !buildEnvironment.APPLE_CERTIFICATE &&
+      !buildEnvironment.APPLE_CERTIFICATE_PASSWORD
+        ? { signingIdentity: "-" }
+        : {})
+    },
     createUpdaterArtifacts: args.has("--signed") || Boolean(updaterPublicKey)
   },
   ...(updaterPublicKey ? { plugins: { updater: { pubkey: updaterPublicKey } } } : {})
@@ -71,6 +82,7 @@ if (args.has("--signed")) {
 }
 
 run("npm", buildCommand, desktopDir);
+run("codesign", ["--verify", "--deep", "--strict", join(bundleDir, "macos", "Koushi.app")], repoRoot);
 
 const dmgFiles = listDmgArtifacts();
 if (dmgFiles.length === 0) {

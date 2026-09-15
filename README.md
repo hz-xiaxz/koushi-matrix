@@ -174,10 +174,21 @@ npm --prefix apps/desktop run build:dmg:signed
 ./scripts/desktop-build-dmg.sh --signed
 ```
 
-The script prints the generated `.dmg` artifact path when the build completes.
+The script verifies the app bundle's signature, then prints the generated `.dmg`
+artifact path when the build completes.
 Installed-app data is stored under
 `~/Library/Application Support/koushi-desktop`; credentials use the macOS
 Keychain service `koushi-desktop`.
+
+To keep Keychain access across app replacements, use the signed release from
+[Downloads](#downloads), or sign successive local builds with the same signing
+identity. The local wrapper selects a Developer ID Application identity when
+exactly one is available; without one, it explicitly signs the entire app bundle
+ad hoc. An ad-hoc signature identifies one particular build, so replacing it can
+require Keychain authorization again. See the
+[local signing setup](docs/agents/environment.md#signed-macos-dmg).
+Replacing the `.app` does not require signing out or deleting the application
+data directory or Keychain entries.
 
 ### Build Linux packages
 

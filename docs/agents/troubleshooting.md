@@ -5,6 +5,27 @@ the lane that shows the symptom. Lane commands are in
 [qa-lanes.md](qa-lanes.md); dated investigation records are in
 [history.md](history.md).
 
+## Local macOS app signing
+
+On 2026-09-15, `build:dmg` reported ad-hoc signing when no Developer ID identity
+was available, but did not actually pass a signing identity to Tauri. The
+resulting app failed `codesign --verify --deep --strict` with a missing resource
+seal. A linker-signed executable does not establish a valid app bundle.
+
+`scripts/desktop-build-dmg.mjs` now passes `signingIdentity: "-"` only for local
+builds without an explicit identity or certificate configuration, and verifies
+the complete app before reporting success. Signed-release preflight remains
+unchanged; see the [signing contract](environment.md#signed-macos-dmg) and
+[release runbook](../releases/desktop-release.md). The headless reproduction in
+`apps/desktop/src/scripts/dmgSigning.test.ts` failed before the fix and checks
+that release and supplied-certificate configurations never receive this
+fallback. The corrected local DMG build and whole-app verification passed.
+
+Ad-hoc signatures still do not establish one signing identity across rebuilds.
+This fix proves bundle integrity, not uninterrupted Keychain access after an
+app replacement. Do not delete credentials or weaken Keychain access controls
+to work around that distinction.
+
 ## Browser-headless harness
 
 - **Timeline rows vanish mid-assertion, with harness seed content in the failure

@@ -6,6 +6,7 @@ test("constructs one window/dialog adapter without performing platform operation
   vi.resetModules();
   const port = {
     toggleFullscreen: vi.fn(),
+    changeZoom: vi.fn(),
     startDragging: vi.fn(),
     confirm: vi.fn(),
     saveFile: vi.fn(),
@@ -19,6 +20,7 @@ test("constructs one window/dialog adapter without performing platform operation
   expect(runtime.windowDialogPort).toBe(port);
   expect(createTauriWindowDialogPort).toHaveBeenCalledOnce();
   expect(port.toggleFullscreen).not.toHaveBeenCalled();
+  expect(port.changeZoom).not.toHaveBeenCalled();
   expect(port.startDragging).not.toHaveBeenCalled();
   expect(port.confirm).not.toHaveBeenCalled();
   expect(port.saveFile).not.toHaveBeenCalled();

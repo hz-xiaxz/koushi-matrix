@@ -968,6 +968,9 @@ export type MessageId =
   | "shortcut.scrollTimelineDown"
   | "shortcut.scrollTimelineUp"
   | "shortcut.toggleFullscreen"
+  | "shortcut.zoomIn"
+  | "shortcut.zoomOut"
+  | "shortcut.resetZoom"
   | "shortcut.toggleMicrophone"
   | "shortcut.toggleRightPanel"
   | "shortcut.toggleSpacePanel"
@@ -2336,6 +2339,9 @@ const en: Catalog = {
   "shortcut.scrollTimelineDown": "Scroll timeline down",
   "shortcut.scrollTimelineUp": "Scroll timeline up",
   "shortcut.toggleFullscreen": "Toggle fullscreen",
+  "shortcut.zoomIn": "Zoom in",
+  "shortcut.zoomOut": "Zoom out",
+  "shortcut.resetZoom": "Reset zoom",
   "shortcut.toggleMicrophone": "Toggle microphone in call",
   "shortcut.toggleRightPanel": "Toggle right panel",
   "shortcut.toggleSpacePanel": "Toggle space panel",
@@ -3590,6 +3596,9 @@ const ja: Catalog = {
   "shortcut.scrollTimelineDown": "タイムラインを下へスクロール",
   "shortcut.scrollTimelineUp": "タイムラインを上へスクロール",
   "shortcut.toggleFullscreen": "全画面を切り替え",
+  "shortcut.zoomIn": "拡大",
+  "shortcut.zoomOut": "縮小",
+  "shortcut.resetZoom": "拡大率をリセット",
   "shortcut.toggleMicrophone": "通話中のマイクを切り替え",
   "shortcut.toggleRightPanel": "右パネルを切り替え",
   "shortcut.toggleSpacePanel": "スペースパネルを切り替え",
