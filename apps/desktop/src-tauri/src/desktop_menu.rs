@@ -9,6 +9,9 @@ const MENU_ID_OPEN_USER_SETTINGS: &str = "open_user_settings";
 const MENU_ID_SIGN_OUT: &str = "sign_out";
 const MENU_ID_SHOW_HELP: &str = "show_help";
 const MENU_ID_TOGGLE_RIGHT_PANEL: &str = "toggle_right_panel";
+const MENU_ID_ZOOM_IN: &str = "zoom_in";
+const MENU_ID_ZOOM_OUT: &str = "zoom_out";
+const MENU_ID_RESET_ZOOM: &str = "reset_zoom";
 pub(super) const MENU_ID_TOGGLE_FULLSCREEN: &str = "toggle_fullscreen";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -60,6 +63,26 @@ pub(crate) fn desktop_menu_items() -> Vec<DesktopMenuItem> {
             menu: "help",
             accelerator: "",
         },
+        DesktopMenuItem {
+            id: MENU_ID_ZOOM_IN,
+            label: "Zoom In",
+            menu: "view",
+            // AppKit receives the '+' character for NumpadAdd, including '+'
+            // typed on the main US/JIS keyboard. Muda has no literal Plus token.
+            accelerator: "CmdOrCtrl+NumpadAdd",
+        },
+        DesktopMenuItem {
+            id: MENU_ID_ZOOM_OUT,
+            label: "Zoom Out",
+            menu: "view",
+            accelerator: "CmdOrCtrl+-",
+        },
+        DesktopMenuItem {
+            id: MENU_ID_RESET_ZOOM,
+            label: "Actual Size",
+            menu: "view",
+            accelerator: "CmdOrCtrl+0",
+        },
         #[cfg(target_os = "macos")]
         DesktopMenuItem {
             id: MENU_ID_TOGGLE_FULLSCREEN,
@@ -95,6 +118,9 @@ pub(super) fn desktop_menu_action_id(menu_id: &str) -> Option<&'static str> {
         MENU_ID_TOGGLE_RIGHT_PANEL => Some("toggleRightPanel"),
         MENU_ID_SHOW_HELP => Some("showHelp"),
         MENU_ID_TOGGLE_FULLSCREEN => Some("toggleFullscreen"),
+        MENU_ID_ZOOM_IN => Some("zoomIn"),
+        MENU_ID_ZOOM_OUT => Some("zoomOut"),
+        MENU_ID_RESET_ZOOM => Some("resetZoom"),
         _ => None,
     }
 }
@@ -106,6 +132,9 @@ pub(super) fn build_desktop_menu<R: tauri::Runtime, M: Manager<R>>(
     let sign_out = menu_item(manager, MENU_ID_SIGN_OUT)?;
     let toggle_right_panel = menu_item(manager, MENU_ID_TOGGLE_RIGHT_PANEL)?;
     let show_help = menu_item(manager, MENU_ID_SHOW_HELP)?;
+    let zoom_in = menu_item(manager, MENU_ID_ZOOM_IN)?;
+    let zoom_out = menu_item(manager, MENU_ID_ZOOM_OUT)?;
+    let reset_zoom = menu_item(manager, MENU_ID_RESET_ZOOM)?;
 
     #[cfg(target_os = "macos")]
     let toggle_fullscreen = menu_item(manager, MENU_ID_TOGGLE_FULLSCREEN)?;
@@ -145,7 +174,13 @@ pub(super) fn build_desktop_menu<R: tauri::Runtime, M: Manager<R>>(
         .select_all()
         .build()?;
     let view_menu = {
-        let builder = SubmenuBuilder::new(manager, "View").item(&toggle_right_panel);
+        let builder = SubmenuBuilder::new(manager, "View")
+            .item(&toggle_right_panel)
+            .separator()
+            .item(&zoom_in)
+            .item(&zoom_out)
+            .item(&reset_zoom)
+            .separator();
         #[cfg(target_os = "macos")]
         let builder = builder.item(&toggle_fullscreen);
         builder.build()?
@@ -191,6 +226,21 @@ fn menu_item<R: tauri::Runtime, M: Manager<R>>(
 #[cfg(test)]
 mod tests {
     use super::{desktop_menu_action_id, desktop_menu_items};
+
+    #[test]
+    fn native_zoom_keys_dispatch_to_the_shared_webview_zoom_owner() {
+        let items = desktop_menu_items();
+        for (id, action, accelerator) in [
+            ("zoom_in", "zoomIn", "CmdOrCtrl+NumpadAdd"),
+            ("zoom_out", "zoomOut", "CmdOrCtrl+-"),
+            ("reset_zoom", "resetZoom", "CmdOrCtrl+0"),
+        ] {
+            let item = items.iter().find(|item| item.id == id).unwrap();
+            assert_eq!(item.menu, "view");
+            assert_eq!(item.accelerator, accelerator);
+            assert_eq!(desktop_menu_action_id(item.id), Some(action));
+        }
+    }
 
     #[test]
     fn help_menu_dispatches_help_without_a_keyboard_shortcut() {
