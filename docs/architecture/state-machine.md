@@ -852,6 +852,10 @@ same canonical window use the newer position, mapped to a visible event at or
 before that position. A stale local boundary cannot override a newer confirmed
 one. Missing positions retain conservative fallback behavior. This display
 choice does not acknowledge unsent receipts or change server-based unread counts.
+Replaying `InitialItems` for a new or returning subscriber also republishes the
+current `NavigationUpdated` snapshot, even when it is unchanged within the actor.
+An earlier consumer having received that snapshot is not evidence that the new
+consumer has it; room-level fallback must not substitute for thread read state.
 Only a current Room or Thread actor may admit an at-bottom, gap-free, latest
 attention-eligible event with exact position and actor-generation evidence.
 Room observations require the atomic fully-read/private-unthreaded key and, when

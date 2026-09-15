@@ -45,3 +45,17 @@ in rustls 0.23.41. The follow-up updates rustls to the advisory's fixed 0.23.45,
 with its resolved aws-lc-rs/aws-lc-sys and rustls-webpki dependencies. No advisory
 exception or disabled gate is added. The final local build must include this
 security update rather than retaining build 2741.
+
+Follow-up after native confirmation: the user and CUA subsequently observed a
+divider before the latest reply. Reopen/restart restored it. The earlier native
+check was therefore insufficient to close the divider issue. Diagnostic replay
+records and a real-actor RED test established that returning subscribers could
+receive InitialItems without the unchanged navigation snapshot. Successful replay
+now republishes it (four production lines); the same test passes (0.12 seconds).
+Independent reviewer approved the replay completeness canon and implementation.
+No SDK authority changes were made for this follow-up.
+
+After the rustls update, Core tests and both local homeserver QA passed, and
+cargo-deny passed all four categories. SDK fork PR18 was merged after the Linux
+and macOS all-crates stable test jobs passed. Its broad optional lint/docs jobs
+remain non-green due to existing fork-wide differences, recorded separately.

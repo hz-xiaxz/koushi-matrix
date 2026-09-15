@@ -53,3 +53,21 @@ divider movement has this cause. Native confirmation remains a separate step.
 Sanitized diagnostic fields now identify redacted cache entries and whether
 local/display boundaries precede a confirmed canonical position, without
 logging event IDs or message contents.
+
+## Follow-up: returning subscribers miss the read snapshot
+
+After initial native success, the user and a second native check observed the
+divider above the latest reply. Reopening/restarting restored it. The new private
+diagnostic showed thread `replay_initial_emitted` without a corresponding new
+navigation publication; it did not establish a backward server receipt update.
+
+The real-actor regression
+`replay_initial_items_republishes_unchanged_read_navigation` creates a new
+subscriber after a confirmed snapshot, requests a replay, and requires
+`InitialItems` followed by the same `NavigationUpdated`. It failed before the
+fix: only items arrived. A returning frontend clears its view-local navigation
+and can then fall back to the room marker instead of the thread marker.
+
+The successful replay branch now forces publication of the current navigation
+snapshot. Ordinary incremental deduplication and the actor generation guard
+remain in force. This follow-up changes no SDK receipt-authority semantics.

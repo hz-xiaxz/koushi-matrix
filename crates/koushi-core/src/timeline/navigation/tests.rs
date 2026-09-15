@@ -2841,3 +2841,127 @@ fn confirmed_hidden_thread_boundary_uses_a_visible_divider() {
         Some("$own:test")
     );
 }
+
+#[tokio::test]
+async fn replay_initial_items_republishes_unchanged_read_navigation() {
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use matrix_sdk_test::{ALICE, JoinedRoomBuilder, event_factory::EventFactory};
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    client.event_cache().subscribe().unwrap();
+    let room_id = matrix_sdk::ruma::room_id!("!read-replay:example.org");
+    let latest = matrix_sdk::ruma::event_id!("$latest:example.org");
+    let room = server.sync_joined_room(&client, room_id).await;
+    let factory = EventFactory::new().room(room_id).sender(&ALICE);
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(room_id)
+                .add_timeline_event(factory.text_msg("latest").event_id(latest).into_raw_sync()),
+        )
+        .await;
+    server.mock_get_members().ok(vec![]).mount().await;
+    let timeline = Arc::new(
+        koushi_timeline_builder(
+            &room,
+            TimelineFocus::Live {
+                hide_threaded_events: false,
+            },
+        )
+        .build()
+        .await
+        .unwrap(),
+    );
+    let session = Arc::new(MatrixClientSession::from_client_for_testing(
+        client,
+        SessionInfo {
+            homeserver: "http://example.invalid".into(),
+            user_id: ALICE.to_string(),
+            device_id: "DEVICE".into(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        },
+    ));
+    let key = TimelineKey::room(AccountKey(ALICE.to_string()), room_id.to_string());
+    let mut manager = live_tail_test_manager(HashMap::new());
+    let (action_tx, mut action_rx) = mpsc::channel(8);
+    manager.action_tx = action_tx;
+    let _drain = executor::spawn(async move { while action_rx.recv().await.is_some() {} });
+    let mut events = manager.event_tx.subscribe();
+    let generation = manager
+        .timeline_actor_generations
+        .activate_after_quiescence(&key)
+        .await
+        .generation;
+    let actor = TimelineActor::spawn(
+        key.clone(),
+        timeline,
+        session,
+        fake_rid(80),
+        true,
+        manager.action_tx.clone(),
+        manager.event_tx.clone(),
+        None,
+        Default::default(),
+        None,
+        LinkPreviewContext::default(),
+        manager.account_work.clone(),
+        Arc::clone(&manager.thread_root_projection_service),
+        manager.thread_root_order,
+        Arc::clone(&manager.timeline_actor_generations),
+        generation,
+        None,
+        Default::default(),
+        manager.terminal_ingress.clone(),
+        manager.msg_tx.clone(),
+    )
+    .await;
+    assert!(
+        actor
+            .send_control(TimelineActorControl::ReadStateProjection {
+                local_viewed_event_id: Some(latest.to_string()),
+                server_confirmed_read_event_id: Some(latest.to_string()),
+                sync: TimelineReadStateSync::Synced,
+            })
+            .await
+    );
+    let expected = executor::timeout(Duration::from_secs(2), async {
+        loop {
+            if let CoreEvent::Timeline(TimelineEvent::NavigationUpdated { snapshot, .. }) =
+                events.recv().await.unwrap()
+            {
+                if snapshot.local_viewed_event_id.as_deref() == Some(latest.as_str()) {
+                    break snapshot;
+                }
+            }
+        }
+    })
+    .await
+    .expect("initial read projection");
+    // A new subscriber did not receive the old NavigationUpdated. Replaying
+    // just messages forces it to fall back to a different room read marker.
+    let mut reopened = manager.event_tx.subscribe();
+    assert!(
+        actor
+            .send_control(TimelineActorControl::ReplayInitialItems {
+                cause_request_id: fake_rid(81),
+            })
+            .await
+    );
+    let replayed = executor::timeout(Duration::from_secs(2), async {
+        let mut initial_seen = false;
+        loop {
+            match reopened.recv().await.unwrap() {
+                CoreEvent::Timeline(TimelineEvent::InitialItems { .. }) => initial_seen = true,
+                CoreEvent::Timeline(TimelineEvent::NavigationUpdated { snapshot, .. })
+                    if initial_seen =>
+                {
+                    break snapshot;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("replayed items must include unchanged read navigation for a new subscriber");
+    assert_eq!(replayed, expected);
+}

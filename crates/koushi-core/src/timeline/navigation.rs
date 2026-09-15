@@ -1647,6 +1647,10 @@ impl TimelineActor {
                 self.own_user_id.as_ref().map(|user_id| user_id.as_str()),
                 ThreadAttentionObservation::Replay,
             );
+            // A replay may serve a new subscriber that never received the last
+            // navigation snapshot. Incremental change suppression does not apply.
+            self.last_navigation_snapshot = None;
+            self.emit_navigation_if_changed();
         }
         record_subscribe_stage(
             if emitted {
