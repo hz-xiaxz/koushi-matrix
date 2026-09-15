@@ -1090,3 +1090,13 @@ duration of that bounded store work — not, as the earlier note in this file
 claimed, for the duration of a network request. Decision: **no change** (it is
 upstream's design, the effect is bounded, and a fork-side per-cache lock would
 diverge from upstream); the earlier note is corrected above.
+
+## 2026-09-15: Redacted entries retain cached notification actions
+
+`ReadReceipts::process_event` now excludes redacted events from all counters,
+while retaining their receipt-boundary identity. Cached push actions can
+survive `replace_raw`; filtering only `marks_as_unread` left notifications and
+mentions behind. A wrapper cannot correct SDK-owned aggregate counts without
+duplicating cache ownership. This minimal fork fix is intended for upstream
+submission with its production-redaction and cache-restoration regression.
+See [reproduction and historical limits](2026-09-15-redacted-notifications.md).

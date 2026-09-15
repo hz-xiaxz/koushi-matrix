@@ -1647,6 +1647,10 @@ impl TimelineActor {
                 self.own_user_id.as_ref().map(|user_id| user_id.as_str()),
                 ThreadAttentionObservation::Replay,
             );
+            // A replay may serve a new subscriber that never received the last
+            // navigation snapshot. Incremental change suppression does not apply.
+            self.last_navigation_snapshot = None;
+            self.emit_navigation_if_changed();
         }
         record_subscribe_stage(
             if emitted {
@@ -1920,14 +1924,26 @@ pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
         .or(fully_read_event_id)
         .map(ToOwned::to_owned);
     let local_viewed_event_id = local_viewed_event_id.map(ToOwned::to_owned);
-    let local_viewed_is_canonical = local_viewed_event_id
-        .as_deref()
-        .is_some_and(|event_id| item_index_for_event_id(items, event_id).is_some());
+    let local_position = local_viewed_event_id.as_deref()
+        .and_then(|event_id| item_index_for_event_id(items, event_id));
+    let confirmed_position = server_confirmed_read_event_id.as_deref()
+        .and_then(|event_id| item_index_for_event_id(items, event_id));
+    let display_marker = match (local_position, confirmed_position) {
+        (Some(local), Some(confirmed)) if confirmed > local => {
+            // A stored local observation may predate a successful receipt from
+            // this or another view. Never place the divider behind that receipt.
+            // Hidden edits remain boundaries but are not rendered divider rows.
+            items[local..=confirmed].iter().rev()
+                .find(|item| !item.is_hidden && navigation_item_in_scope(kind, item)
+                    && timeline_item_event_id(item).is_some())
+                .and_then(timeline_item_event_id).map(ToOwned::to_owned)
+        }
+        (Some(_), _) => local_viewed_event_id.clone(),
+        _ => None,
+    };
     let mut snapshot = TimelineNavigationSnapshot {
         read_marker_event_id: server_confirmed_read_event_id.clone(),
-        read_marker_display_event_id: local_viewed_is_canonical
-            .then(|| local_viewed_event_id.clone())
-            .flatten(),
+        read_marker_display_event_id: display_marker,
         first_unread_event_id: None,
         unread_event_count: 0,
         unread_position: TimelineUnreadPosition::None,
@@ -2022,6 +2038,9 @@ fn timeline_unread_consistency_diagnostic_event(
         .read_marker_event_id
         .as_deref()
         .and_then(event_position);
+    let local_position = snapshot.local_viewed_event_id.as_deref().and_then(event_position);
+    let confirmed_position = snapshot.server_confirmed_read_event_id.as_deref().and_then(event_position);
+    let marker_display_position = snapshot.read_marker_display_event_id.as_deref().and_then(event_position);
     let first_unread_item = snapshot
         .first_unread_event_id
         .as_deref()
@@ -2096,6 +2115,13 @@ fn timeline_unread_consistency_diagnostic_event(
         "fully_read_in_canonical",
         fully_read_position.is_some(),
     ))
+    .field(DiagnosticField::boolean("local_viewed_in_canonical", local_position.is_some()))
+    .field(DiagnosticField::boolean("confirmed_in_canonical", confirmed_position.is_some()))
+    .field(DiagnosticField::boolean("display_marker_in_canonical", marker_display_position.is_some()))
+    .field(DiagnosticField::boolean("local_before_confirmed",
+        matches!((local_position, confirmed_position), (Some(local), Some(confirmed)) if local < confirmed)))
+    .field(DiagnosticField::boolean("display_before_confirmed",
+        matches!((marker_display_position, confirmed_position), (Some(display), Some(confirmed)) if display < confirmed)))
     .field(DiagnosticField::boolean(
         "first_unread_present",
         snapshot.first_unread_event_id.is_some(),
