@@ -16,6 +16,7 @@ pub enum DesktopUpdateState {
     Unsupported,
     Idle,
     Checking,
+    Available { version: String },
     Downloading { version: String },
     Ready { version: String },
     Failed { stage: DesktopUpdateFailureStage },
@@ -33,7 +34,7 @@ pub enum DesktopUpdateFailureStage {
 #[cfg(target_os = "macos")]
 struct PendingUpdate {
     update: Update,
-    bytes: Vec<u8>,
+    bytes: Option<Vec<u8>>,
 }
 
 pub struct DesktopUpdateManager {
@@ -91,7 +92,7 @@ pub fn spawn_auto_update_loop(app: AppHandle, mut connection: CoreConnection) {
         }
         let mut auto_check = connection.snapshot().settings.values.updates.auto_check;
         if auto_check {
-            check_and_download(&app).await;
+            check_for_update(&app).await;
         }
 
         let mut interval = tokio::time::interval_at(
@@ -102,14 +103,14 @@ pub fn spawn_auto_update_loop(app: AppHandle, mut connection: CoreConnection) {
             tokio::select! {
                 _ = interval.tick() => {
                     if auto_check {
-                        check_and_download(&app).await;
+                        check_for_update(&app).await;
                     }
                 }
                 snapshot = connection.next_versioned_snapshot() => {
                     let Some(snapshot) = snapshot else { break };
                     let next = snapshot.state.settings.values.updates.auto_check;
                     if next && !auto_check {
-                        check_and_download(&app).await;
+                        check_for_update(&app).await;
                     }
                     auto_check = next;
                 }
@@ -124,7 +125,7 @@ pub fn spawn_auto_update_loop(app: AppHandle, mut connection: CoreConnection) {
 }
 
 #[cfg(target_os = "macos")]
-async fn check_and_download(app: &AppHandle) {
+async fn check_for_update(app: &AppHandle) {
     let manager = app.state::<DesktopUpdateManager>();
     if !manager.check_is_admissible() {
         return;
@@ -161,27 +162,62 @@ async fn check_and_download(app: &AppHandle) {
         return;
     };
     let version = update.version.clone();
+    *manager
+        .pending
+        .lock()
+        .expect("desktop pending update mutex") = Some(PendingUpdate {
+        update,
+        bytes: None,
+    });
+    manager.publish(app, DesktopUpdateState::Available { version });
+}
+
+#[cfg(target_os = "macos")]
+pub async fn download_and_prepare(app: &AppHandle) -> Result<(), ()> {
+    let manager = app.state::<DesktopUpdateManager>();
+    if !matches!(manager.state(), DesktopUpdateState::Available { .. }) {
+        return Err(());
+    }
+    let pending = manager
+        .pending
+        .lock()
+        .expect("desktop pending update mutex")
+        .take()
+        .ok_or(())?;
+    let version = pending.update.version.clone();
     manager.publish(
         app,
         DesktopUpdateState::Downloading {
             version: version.clone(),
         },
     );
-    match update.download(|_, _| {}, || {}).await {
+    match pending.update.download(|_, _| {}, || {}).await {
         Ok(bytes) => {
             *manager
                 .pending
                 .lock()
-                .expect("desktop pending update mutex") = Some(PendingUpdate { update, bytes });
+                .expect("desktop pending update mutex") = Some(PendingUpdate {
+                update: pending.update,
+                bytes: Some(bytes),
+            });
             manager.publish(app, DesktopUpdateState::Ready { version });
+            Ok(())
         }
-        Err(_) => manager.publish(
-            app,
-            DesktopUpdateState::Failed {
-                stage: DesktopUpdateFailureStage::DownloadOrVerify,
-            },
-        ),
+        Err(_) => {
+            manager.publish(
+                app,
+                DesktopUpdateState::Failed {
+                    stage: DesktopUpdateFailureStage::DownloadOrVerify,
+                },
+            );
+            Err(())
+        }
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub async fn download_and_prepare(_app: &AppHandle) -> Result<(), ()> {
+    Err(())
 }
 
 #[cfg(target_os = "macos")]
@@ -193,13 +229,14 @@ pub fn install_and_restart(app: &AppHandle) -> Result<(), ()> {
         .expect("desktop pending update mutex")
         .take()
         .ok_or(())?;
+    let bytes = pending.bytes.ok_or(())?;
     manager.publish(
         app,
         DesktopUpdateState::Installing {
             version: pending.update.version.clone(),
         },
     );
-    if pending.update.install(&pending.bytes).is_err() {
+    if pending.update.install(&bytes).is_err() {
         manager.publish(
             app,
             DesktopUpdateState::Failed {
@@ -226,6 +263,9 @@ mod tests {
         for state in [
             DesktopUpdateState::Checking,
             DesktopUpdateState::Downloading {
+                version: "1.2.3".to_owned(),
+            },
+            DesktopUpdateState::Available {
                 version: "1.2.3".to_owned(),
             },
             DesktopUpdateState::Ready {
@@ -259,6 +299,13 @@ mod tests {
             })
             .expect("serialize update state"),
             serde_json::json!({ "kind": "ready", "version": "1.2.3" })
+        );
+        assert_eq!(
+            serde_json::to_value(DesktopUpdateState::Available {
+                version: "1.2.3".to_owned(),
+            })
+            .expect("serialize available update"),
+            serde_json::json!({ "kind": "available", "version": "1.2.3" })
         );
         assert_eq!(
             serde_json::to_value(DesktopUpdateState::Failed {

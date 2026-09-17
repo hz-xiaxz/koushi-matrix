@@ -4340,7 +4340,8 @@ stateDiagram-v2
     [*] --> Idle: platform is enabled
     Idle --> Checking: startup/24h/setting enabled
     Checking --> Idle: no newer release
-    Checking --> Downloading: newer release found
+    Checking --> Available: newer release found
+    Available --> Downloading: DownloadUpdate confirmed
     Checking --> Failed: check failed
     Downloading --> Ready: download and signature verification succeeded
     Downloading --> Failed: download or verification failed
@@ -4350,9 +4351,9 @@ stateDiagram-v2
 
 - A disabled `auto_check` preference issues no network request. Turning it off
   suppresses later scheduled checks; turning it on triggers one check.
-- Duplicate triggers while checking, downloading, ready, or installing are
+- Duplicate triggers while checking, available, downloading, ready, or installing are
   ignored. There is one verified pending artifact slot.
-- `ready` exposes only the release version. `failed` exposes only a coarse
+- `available` and `ready` expose only the release version. `failed` exposes only a coarse
   stage/kind and is recoverable; it never blocks startup or login.
 - Installation and relaunch require explicit user intent. macOS is the only
   enabled platform in this phase; Windows and Linux remain `unsupported`.

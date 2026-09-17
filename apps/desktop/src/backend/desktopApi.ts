@@ -113,6 +113,7 @@ export interface ReceiptReaderResourceContent {
 export interface DesktopApi {
   getSnapshot(): Promise<DesktopSnapshot>;
   getDesktopUpdateState(): Promise<DesktopUpdateState>;
+  downloadDesktopUpdate(): Promise<void>;
   restartToInstallDesktopUpdate(): Promise<void>;
   settlementSnapshot(): Promise<DesktopSnapshot>;
   resyncSnapshot(): Promise<DesktopSnapshot>;

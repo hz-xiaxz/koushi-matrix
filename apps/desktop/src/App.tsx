@@ -809,6 +809,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
   const [desktopUpdate, setDesktopUpdate] = useState<DesktopUpdateState>({
     kind: isTauriRuntime() ? "idle" : "unsupported"
   });
+  const updateConfirmationVersionRef = useRef<string | null>(null);
   // #87 Phase 4 IPC contract guard (fail-closed at the data boundary): every snapshot enters
   // render state through this setter, so we reject one whose schema_version does not match the
   // renderer's SNAPSHOT_SCHEMA_VERSION — a stale flat (v1) snapshot or a mismatched Rust/TS
@@ -1039,6 +1040,33 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
       composerNoticeTimerRef.current = null;
     }, 4000);
   }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime() || desktopUpdate.kind !== "available") {
+      return;
+    }
+    if (updateConfirmationVersionRef.current === desktopUpdate.version) {
+      return;
+    }
+    updateConfirmationVersionRef.current = desktopUpdate.version;
+    let disposed = false;
+    runInBackground(
+      windowDialogPort
+        .confirm(t("settings.updateAvailableConfirm", { version: desktopUpdate.version }), {
+          title: t("settings.updateAvailableTitle"),
+          kind: "warning"
+        })
+        .then((confirmed) => {
+          if (!disposed && confirmed) {
+            return api.downloadDesktopUpdate();
+          }
+          return undefined;
+        })
+    );
+    return () => {
+      disposed = true;
+    };
+  }, [desktopUpdate]);
   useEffect(() => {
     return () => {
       if (composerNoticeTimerRef.current !== null) {
@@ -6451,6 +6479,9 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           }}
           onUpdateSettings={(patch) => {
             runInBackground(updateSettings(patch));
+          }}
+          onDownloadDesktopUpdate={() => {
+            runInBackground(api.downloadDesktopUpdate());
           }}
           onRestartToInstallDesktopUpdate={() => {
             runInBackground(api.restartToInstallDesktopUpdate());
