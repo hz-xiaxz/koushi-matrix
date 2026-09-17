@@ -13,7 +13,7 @@ Only macOS is enabled in this phase.
 - Keep the persisted `auto_check` preference in Rust settings. Existing stores
   backfill it to `true`.
 - Keep the updater lifecycle in one Rust-owned desktop adapter module. React
-  receives typed state and sends only settings/restart intents.
+  receives typed state and sends only settings/download/restart intents.
 - Do not enable Windows or Linux until their signed release artifact contracts
   are separately approved.
 - A failed check or install stays non-fatal and never delays startup or login.
@@ -22,9 +22,9 @@ Only macOS is enabled in this phase.
 
 The adapter exposes one tagged state:
 
-`unsupported | idle | checking | downloading | ready | failed | installing`
+`unsupported | idle | checking | available | downloading | ready | failed | installing`
 
-`ready` carries only the public version string. `failed` carries a coarse stage
+`available` and `ready` carry only the public version string. `failed` carries a coarse stage
 and kind, never a raw URL, response, local path, or library error. A single
 managed updater slot owns the verified bytes and matching Tauri `Update` value.
 No backend trait or multi-provider registry is introduced in this phase.
@@ -41,8 +41,9 @@ desktop event and are also available from one initial-state command.
    the exact TypeScript mirror.
 3. Add the updater plugin and one `app_updates` adapter module with focused unit
    tests for platform support and state transitions.
-4. Wire typed state/events through the desktop backend and render the macOS
-   toggle plus the restart-to-install affordance in User Settings.
+4. Wire typed state/events through the desktop backend, ask for confirmation
+   when an automatic check finds an update, and render download/restart actions
+   in User Settings.
 5. Generate macOS updater artifacts only, verify the extracted app, upload the
    archive/signature, and publish `latest.json` with the release.
 6. Extend release configuration tests, preflight checks, and the release

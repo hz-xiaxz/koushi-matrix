@@ -8,6 +8,11 @@ pub fn get_desktop_update_state(state: State<'_, DesktopUpdateManager>) -> Deskt
 }
 
 #[tauri::command]
+pub async fn download_desktop_update(app: AppHandle) -> Result<(), ()> {
+    crate::app_updates::download_and_prepare(&app).await
+}
+
+#[tauri::command]
 pub fn restart_to_install_desktop_update(app: AppHandle) {
     let _ = crate::app_updates::install_and_restart(&app);
 }

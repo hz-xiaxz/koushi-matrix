@@ -15,6 +15,7 @@ describe("DesktopUpdateControls", () => {
         current={{ auto_check: true }}
         state={{ kind: "idle" }}
         onSelect={onSelect}
+        onDownload={() => undefined}
         onRestart={() => undefined}
       />
     );
@@ -30,6 +31,7 @@ describe("DesktopUpdateControls", () => {
         current={{ auto_check: true }}
         state={{ kind: "downloading", version: "1.2.3" }}
         onSelect={() => undefined}
+        onDownload={() => undefined}
         onRestart={onRestart}
       />
     );
@@ -40,10 +42,27 @@ describe("DesktopUpdateControls", () => {
         current={{ auto_check: true }}
         state={{ kind: "ready", version: "1.2.3" }}
         onSelect={() => undefined}
+        onDownload={() => undefined}
         onRestart={onRestart}
       />
     );
     fireEvent.click(screen.getByRole("button", { name: "Restart to install" }));
     expect(onRestart).toHaveBeenCalledOnce();
+  });
+
+  test("asks the user to download after an update is found", () => {
+    const onDownload = vi.fn();
+    render(
+      <DesktopUpdateControls
+        current={{ auto_check: true }}
+        state={{ kind: "available", version: "1.2.3" }}
+        onSelect={() => undefined}
+        onDownload={onDownload}
+        onRestart={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Download update" }));
+    expect(onDownload).toHaveBeenCalledOnce();
   });
 });
