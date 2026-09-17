@@ -76,6 +76,10 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<DesktopUpdateState>("get_desktop_update_state");
   }
 
+  async downloadDesktopUpdate(): Promise<void> {
+    return this.invokeCommand<void>("download_desktop_update");
+  }
+
   async restartToInstallDesktopUpdate(): Promise<void> {
     return this.invokeCommand<void>("restart_to_install_desktop_update");
   }

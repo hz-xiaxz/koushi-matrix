@@ -67,6 +67,7 @@ export function UserSettingsPanel({
   accountManagementCapabilities,
   keyboardLabelProfile,
   onUpdateSettings,
+  onDownloadDesktopUpdate = () => undefined,
   onRestartToInstallDesktopUpdate = () => undefined,
   onRebuildSearchIndex,
   onSetDisplayName,
@@ -120,6 +121,7 @@ export function UserSettingsPanel({
   accountManagementCapabilities: AccountManagementCapabilities;
   keyboardLabelProfile?: ShortcutLabelProfile;
   onUpdateSettings: (patch: SettingsPatch) => void;
+  onDownloadDesktopUpdate?: () => void;
   onRestartToInstallDesktopUpdate?: () => void;
   onRebuildSearchIndex?: () => void;
   onSetDisplayName: (displayName: string | null) => void;
@@ -475,6 +477,7 @@ export function UserSettingsPanel({
                   current={selectedUpdates}
                   state={desktopUpdate}
                   onSelect={onUpdateSettings}
+                  onDownload={onDownloadDesktopUpdate}
                   onRestart={onRestartToInstallDesktopUpdate}
                 />
               ) : null}
@@ -930,11 +933,13 @@ export function DesktopUpdateControls({
   current,
   state,
   onSelect,
+  onDownload,
   onRestart
 }: {
   current: UpdatesSettings;
   state: DesktopUpdateState;
   onSelect: (patch: SettingsPatch) => void;
+  onDownload: () => void;
   onRestart: () => void;
 }) {
   return (
@@ -963,6 +968,12 @@ export function DesktopUpdateControls({
       {state.kind !== "unsupported" ? (
         <div className="settings-update-status" aria-live="polite">
           <p className="settings-status-text">{desktopUpdateStatusText(state)}</p>
+          {state.kind === "available" ? (
+            <button className="profile-settings-action" type="button" onClick={onDownload}>
+              <RefreshCcw size={14} aria-hidden="true" />
+              {t("settings.updateDownload")}
+            </button>
+          ) : null}
           {state.kind === "ready" ? (
             <button className="profile-settings-action" type="button" onClick={onRestart}>
               <RefreshCcw size={14} aria-hidden="true" />
@@ -981,6 +992,8 @@ function desktopUpdateStatusText(state: DesktopUpdateState): string {
       return t("settings.updateIdle");
     case "checking":
       return t("settings.updateChecking");
+    case "available":
+      return t("settings.updateAvailable", { version: state.version });
     case "downloading":
       return t("settings.updateDownloading", { version: state.version });
     case "ready":
