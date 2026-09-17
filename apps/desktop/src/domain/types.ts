@@ -280,6 +280,7 @@ export type DesktopUpdateState =
   | { kind: "unsupported" }
   | { kind: "idle" }
   | { kind: "checking" }
+  | { kind: "available"; version: string }
   | { kind: "downloading"; version: string }
   | { kind: "ready"; version: string }
   | { kind: "failed"; stage: "check" | "download_or_verify" | "install" }
