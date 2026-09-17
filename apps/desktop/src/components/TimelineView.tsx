@@ -174,6 +174,7 @@ import {
 applyGlobalResync,
 applyRoomKeyRequestStateChanged,
 applyTimelineEvent,
+batchContainsBackfillProjection,
 batchContainsPrepend,
 classifyTimelineItemsUpdatedApplication,
 createTimelineStore,
@@ -1482,11 +1483,15 @@ export const TimelineView = memo(function TimelineView({
         }
       }
 
-      // Prepend batches: capture the anchor BEFORE the diff is applied to
-      // React state, so the layout effect can restore it after commit.
+      // Backfill projections release the pending request epoch. This must
+      // accept Insert at any index: a thread timeline pins its root at index 0,
+      // so its older replies never arrive as a PushFront/Insert-at-0 prepend.
+      // Prepend batches additionally capture the anchor BEFORE the diff is
+      // applied to React state, so the layout effect can restore it after
+      // commit.
       if (
         "ItemsUpdated" in event &&
-        (batchContainsPrepend(event.ItemsUpdated.diffs) ||
+        (batchContainsBackfillProjection(event.ItemsUpdated.diffs) ||
           timelineDiffsContainReset(event.ItemsUpdated.diffs))
       ) {
         const epoch = backfillRequestEpochRef.current;
