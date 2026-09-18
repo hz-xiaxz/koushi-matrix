@@ -26,6 +26,8 @@ export type {
 export interface SpaceMembersPanelProps {
   state: SpaceMembersState;
   canInvite: boolean;
+  spaceName?: string;
+  startInInviteMode?: boolean;
   onClose?: () => void;
   profileUsers?: Record<string, UserProfile>;
   onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void | (() => void)>;
@@ -180,6 +182,8 @@ function childRoomContext(
 export function SpaceMembersPanel({
   state,
   canInvite,
+  spaceName,
+  startInInviteMode = false,
   onClose = () => undefined,
   profileUsers = {},
   onRequestAvatarThumbnail,
@@ -203,10 +207,11 @@ export function SpaceMembersPanel({
   const [query, setQuery] = useState("");
   // #508: space-only invite search — inviting a brand-new user to the Space
   // room (space membership only, no child-room membership).
-  const [inviteMode, setInviteMode] = useState(false);
+  const [inviteMode, setInviteMode] = useState(startInInviteMode);
   const [inviteQuery, setInviteQuery] = useState("");
   const [inviteCandidates, setInviteCandidates] = useState<InviteTargetCandidate[]>([]);
   const [inviteSearching, setInviteSearching] = useState(false);
+  const [inviteSearchFailed, setInviteSearchFailed] = useState(false);
   const [pendingRoleChange, setPendingRoleChange] = useState<{
     userId: string;
     option: SpaceMemberRoleOption;
@@ -215,6 +220,11 @@ export function SpaceMembersPanel({
   const panelRef = useRef<HTMLElement | null>(null);
   const roleSelectRefs = useRef(new Map<string, HTMLSelectElement>());
   const previousOperationRef = useRef(state.operation);
+
+  useEffect(() => {
+    setInviteMode(startInInviteMode);
+  }, [startInInviteMode]);
+
   const sections = useMemo<SpaceMembersSection[]>(
     () => [
       {
@@ -308,6 +318,7 @@ export function SpaceMembersPanel({
   useEffect(() => {
     const requestId = ++inviteSearchRequestRef.current;
     const trimmed = inviteQuery.trim();
+    setInviteSearchFailed(false);
     if (!inviteMode) {
       setInviteCandidates([]);
       setInviteSearching(false);
@@ -326,6 +337,11 @@ export function SpaceMembersPanel({
         }
         setInviteCandidates(candidates);
         setInviteSearching(false);
+      }).catch(() => {
+        if (inviteSearchRequestRef.current !== requestId) return;
+        setInviteCandidates([]);
+        setInviteSearching(false);
+        setInviteSearchFailed(true);
       });
     }, 250);
     return () => {
@@ -340,12 +356,12 @@ export function SpaceMembersPanel({
       aria-labelledby="space-members-title"
     >
       <header className="space-members-header">
-        <h2 id="space-members-title">{t("spaceMembers.title")}</h2>
-        <span className="space-members-count" aria-label={t("spaceMembers.joinedCount", {
+        <h2 id="space-members-title" dir="auto">{inviteMode ? (spaceName ? t("dialog.invitePeopleTitle", { name: spaceName }) : t("room.invitePeople")) : t("spaceMembers.title")}</h2>
+        {!inviteMode && <span className="space-members-count" aria-label={t("spaceMembers.joinedCount", {
           count: state.space_joined.length
         })}>
           {state.space_joined.length}
-        </span>
+        </span>}
         {canInvite && !inviteMode ? (
           <button
             className="icon-button space-members-invite-trigger"
@@ -360,7 +376,7 @@ export function SpaceMembersPanel({
         <button
           className="icon-button space-members-close"
           type="button"
-          aria-label={t("action.close", { title: t("spaceMembers.title") })}
+          aria-label={t("action.close", { title: inviteMode ? t("room.invitePeople") : t("spaceMembers.title") })}
           onClick={onClose}
         >
           <X size={ICON_SIZE.control} />
@@ -412,34 +428,42 @@ export function SpaceMembersPanel({
 
       {inviteMode ? (
         <div className="space-members-invite-results" aria-label={t("dialog.inviteCandidates")}>
-          {inviteSearching && inviteCandidates.length === 0 ? (
+          <p className="space-members-empty">{t("dialog.inviteSearchHelp")}</p>
+          {inviteSearchFailed ? (
+            <p className="space-members-empty" role="alert">{t("dialog.inviteSearchFailed")}</p>
+          ) : inviteSearching && inviteCandidates.length === 0 ? (
             <p className="space-members-empty" role="status">
-              {t("activity.loading")}
+              {t("dialog.inviteSearching")}
             </p>
           ) : inviteCandidates.length === 0 && inviteQuery.trim() ? (
             <p className="space-members-empty" role="status">
-              {t("spaceMembers.noResults")}
+              {t("dialog.inviteNoResults")}
             </p>
           ) : null}
           {inviteCandidates.map((candidate) => {
             const selectable = candidate.status === "selectable";
             return (
-              <button
+              <div
                 className="space-members-invite-candidate"
-                type="button"
                 key={candidate.user_id}
-                disabled={!selectable || hasPendingOperation(state)}
+              >
+                <div>
+                  <div dir="auto">{candidate.display_label}</div>
+                  <div className="space-members-invite-candidate-id" dir="auto">{candidate.user_id}</div>
+                </div>
+                <button
+                type="button"
+                aria-label={t("dialog.invitePerson", { name: candidate.display_label })}
+                disabled={!canInvite || !selectable || hasPendingOperation(state)}
                 onClick={() => {
                   if (selectable) {
                     onInviteSearchCandidate(candidate.user_id);
                   }
                 }}
               >
-                <span>{candidate.display_label}</span>
-                <span className="space-members-invite-candidate-id" dir="auto">
-                  {candidate.user_id}
-                </span>
+                {t("space.invite")}
               </button>
+              </div>
             );
           })}
         </div>
@@ -462,7 +486,7 @@ export function SpaceMembersPanel({
         </button>
       ) : null}
 
-      {state.incomplete_child_room_count > 0 ? (
+      {!inviteMode && state.incomplete_child_room_count > 0 ? (
         <p className="space-members-sync-notice" role="status">
           {t("spaceMembers.syncIncomplete")}
         </p>
