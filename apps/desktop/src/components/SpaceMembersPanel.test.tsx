@@ -159,6 +159,11 @@ describe("SpaceMembersPanel space invite search (#508)", () => {
     );
     expect(onSearchInviteTargets).toHaveBeenCalledWith("new");
 
+    expect(screen.getByRole("heading", { name: "Invite people" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Invite New Person" }).textContent).toBe("Invite");
+    fireEvent.click(screen.getByText("New Person"));
+    expect(onInviteSearchCandidate).not.toHaveBeenCalled();
+
     fireEvent.click(screen.getByRole("button", { name: /New Person/ }));
     expect(onInviteSearchCandidate).toHaveBeenCalledWith("@new:example.invalid");
     expect(onInviteUser).not.toHaveBeenCalled();
@@ -301,6 +306,16 @@ describe("SpaceMembersPanel space invite search (#508)", () => {
 });
 
 describe("SpaceMembersPanel", () => {
+  it("shows a search failure instead of reporting no members", async () => {
+    render(<SpaceMembersPanel state={state()} canInvite={true} startInInviteMode
+      onInviteUser={vi.fn()} onOpenProfile={vi.fn()}
+      onSearchInviteTargets={async () => { throw new Error("transport timeout"); }} />);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Name, alias, or Matrix ID" }), {
+      target: { value: "@new-person:example.invalid" }
+    });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Could not search"));
+    expect(screen.queryByText(/No invite candidates found/)).toBeNull();
+  });
   it("renders cancellation only for invited rows and forwards the invited user", () => {
     const onCancelInvite = vi.fn();
     const diagnostics: string[] = [];
