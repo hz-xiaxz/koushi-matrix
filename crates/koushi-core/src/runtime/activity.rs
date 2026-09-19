@@ -76,7 +76,8 @@ pub(super) struct ActivityMarkReadResult {
     pub(super) cleared_placeholder_room_ids: Vec<String>,
 }
 
-fn activity_latest_display_event_id(latest: &RoomLatestEventSummary) -> Option<&str> {
+fn activity_latest_display_event(room: &RoomSummary) -> Option<&RoomLatestEventSummary> {
+    let latest = room.latest_event.as_ref()?;
     if latest.is_redacted
         || matches!(
             latest.relation_type.as_deref(),
@@ -85,6 +86,20 @@ fn activity_latest_display_event_id(latest: &RoomLatestEventSummary) -> Option<&
     {
         return None;
     }
+    if let Some(conversation_activity) = room.conversation_activity {
+        if conversation_activity.timestamp_ms != latest.timestamp_ms {
+            return None;
+        }
+    }
+    // Older room-list injectors only provide the already-filtered latest event
+    // and omit the separate conversation-activity projection. Production
+    // projections keep that field in sync, while the producer-side filter in
+    // koushi-sdk ensures state/profile events never reach this fallback.
+    Some(latest)
+}
+
+fn activity_latest_display_event_id(room: &RoomSummary) -> Option<&str> {
+    let latest = activity_latest_display_event(room)?;
     (!latest.event_id.trim().is_empty()).then_some(latest.event_id.as_str())
 }
 
@@ -538,8 +553,7 @@ impl ActivityProjection {
                         ActivityRowKind::Event => row.event_id,
                         ActivityRowKind::RoomUnread => rooms_by_id
                             .get(row.room_id.as_str())
-                            .and_then(|room| room.latest_event.as_ref())
-                            .and_then(activity_latest_display_event_id)
+                            .and_then(|room| activity_latest_display_event_id(room))
                             .map(str::to_owned),
                     };
                     if let Some(event_id) = event_id {
@@ -724,10 +738,10 @@ impl ActivityProjection {
             if excluded.contains(room.room_id.as_str()) {
                 continue;
             }
-            let Some(latest_event) = &room.latest_event else {
+            let Some(display_event_id) = activity_latest_display_event_id(room) else {
                 continue;
             };
-            let Some(display_event_id) = activity_latest_display_event_id(latest_event) else {
+            let Some(latest_event) = &room.latest_event else {
                 continue;
             };
             if recent_event_ids.contains(display_event_id) {
@@ -812,10 +826,7 @@ impl ActivityProjection {
                 );
                 continue;
             }
-            let latest_display_event_id = room
-                .latest_event
-                .as_ref()
-                .and_then(activity_latest_display_event_id);
+            let latest_display_event_id = activity_latest_display_event_id(room);
             let fully_read_event_id = state
                 .live_signals
                 .rooms
@@ -850,10 +861,7 @@ impl ActivityProjection {
                 continue;
             }
             let highlight = room.highlight_count > 0;
-            let timestamp_ms = room
-                .latest_event
-                .as_ref()
-                .filter(|event| activity_latest_display_event_id(event).is_some())
+            let timestamp_ms = activity_latest_display_event(room)
                 .map(|event| event.timestamp_ms)
                 .or_else(|| {
                     room.conversation_activity
