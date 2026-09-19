@@ -856,7 +856,13 @@ fn project_sdk_batch(
     for diff in canonical_diffs {
         if let TimelineDiff::PushFront { item } = diff {
             pending_push_fronts.push(item.clone());
-            if !membership.insert(0, item.clone(), Some(context.include_prepend)) {
+            // The bounded live edge still takes a page that extends its window:
+            // a short room is at the bottom and near the top at once, and Core
+            // reports that page as an expected prepend. Boundary adjacency keeps
+            // the window a contiguous canonical suffix, so a page behind an
+            // already trimmed prefix stays out, and the trim below keeps the cap.
+            let include = context.include_prepend.then_some(true);
+            if !membership.insert(0, item.clone(), include) {
                 translation_ambiguous = true;
             }
             membership.trim_to_live_edge(context.max_live_edge_items);
