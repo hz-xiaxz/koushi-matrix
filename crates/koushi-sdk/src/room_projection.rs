@@ -232,6 +232,7 @@ pub struct MatrixInvitePreview {
     pub inviter_display_name: Option<String>,
     pub inviter_user_id: Option<String>,
     pub is_dm: bool,
+    pub is_space: bool,
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -2395,6 +2396,7 @@ async fn matrix_invite_previews_from_rooms(
             .and_then(|inviter| inviter.display_name().map(ToOwned::to_owned));
         let inviter_user_id = inviter.map(|inviter| inviter.user_id().to_string());
         let is_dm = room.is_direct().await.unwrap_or(false);
+        let is_space = room.is_space();
 
         invites.push(MatrixInvitePreview {
             room_id: room.room_id().to_string(),
@@ -2404,6 +2406,7 @@ async fn matrix_invite_previews_from_rooms(
             inviter_display_name,
             inviter_user_id,
             is_dm,
+            is_space,
         });
     }
     invites

@@ -1083,6 +1083,7 @@ export interface InvitePreview {
   inviter_display_name: string | null;
   inviter_user_id: string | null;
   is_dm: boolean;
+  is_space: boolean;
 }
 
 export interface InviteWorkflowState {

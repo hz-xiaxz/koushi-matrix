@@ -694,6 +694,7 @@ fn invite_changes_use_a_scoped_delta_when_order_is_stable() {
         inviter_display_name: Some("Inviter".into()),
         inviter_user_id: Some("@inviter:example.invalid".into()),
         is_dm: false,
+        is_space: false,
     });
     let mut next = previous.clone();
     next.invites[0].topic = Some("Updated topic".into());

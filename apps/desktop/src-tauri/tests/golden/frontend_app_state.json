@@ -302,6 +302,7 @@
           "inviter_display_name": "Inviter",
           "inviter_user_id": "@inviter:example.invalid",
           "is_dm": false,
+          "is_space": false,
           "room_id": "!invite:example.invalid",
           "topic": "Fixture invite topic"
         }

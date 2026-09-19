@@ -176,7 +176,8 @@ describe("Rust-projected workspace shell", () => {
       topic: null,
       inviter_display_name: "Alice",
       inviter_user_id: "@alice:example.invalid",
-      is_dm: false
+      is_dm: false,
+      is_space: false
     }];
     snapshot.sidebar.account_home.invite_count = 1;
     snapshot.sidebar.account_home.attention_count = 1;

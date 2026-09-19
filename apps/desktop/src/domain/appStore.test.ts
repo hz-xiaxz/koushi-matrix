@@ -916,7 +916,8 @@ describe("appStore projection cache", () => {
       topic: null,
       inviter_display_name: "Inviter",
       inviter_user_id: "@inviter:example.invalid",
-      is_dm: false
+      is_dm: false,
+      is_space: false
     };
     previous.state.domain.invites.push(invite);
     const updatedInvite = { ...invite, topic: "Updated topic" };

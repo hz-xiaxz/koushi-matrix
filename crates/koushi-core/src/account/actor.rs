@@ -385,6 +385,10 @@ pub(crate) enum AccountMessage {
         observation: koushi_sdk::CurrentDeviceTrustObservation,
     },
     #[cfg(test)]
+    InspectSecureBackupScheduling {
+        response: oneshot::Sender<(bool, bool, bool, bool)>,
+    },
+    #[cfg(test)]
     InspectSessionRuntime {
         response: oneshot::Sender<(bool, bool, bool, bool)>,
     },
@@ -2137,6 +2141,15 @@ impl AccountActor {
                         .trust_observation_override
                         .lock()
                         .expect("trust observation override lock") = Some(observation);
+                }
+                #[cfg(test)]
+                AccountMessage::InspectSecureBackupScheduling { response } => {
+                    let _ = response.send((
+                        self.sync_connectivity_proven,
+                        self.secure_backup_inspection_pending,
+                        self.secure_backup_inspection_task.is_some(),
+                        self.secure_backup_monitor_task.is_some(),
+                    ));
                 }
                 #[cfg(test)]
                 AccountMessage::InspectSessionRuntime { response } => {

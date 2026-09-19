@@ -621,6 +621,7 @@ fn frontend_snapshot_serializes_invite_previews() {
         inviter_display_name: Some("Inviter".to_owned()),
         inviter_user_id: Some("@inviter:matrix.org".to_owned()),
         is_dm: true,
+        is_space: false,
     });
 
     let value = serde_json::to_value(FrontendDesktopSnapshot::from(state))
@@ -636,7 +637,8 @@ fn frontend_snapshot_serializes_invite_previews() {
                     "topic": "Project topic",
                     "inviter_display_name": "Inviter",
                     "inviter_user_id": "@inviter:matrix.org",
-                    "is_dm": true
+                    "is_dm": true,
+                    "is_space": false
             }
         ])
     );
@@ -786,6 +788,7 @@ fn frontend_snapshot_serializes_home_invite_and_attention_counts() {
             inviter_display_name: None,
             inviter_user_id: None,
             is_dm: false,
+            is_space: false,
         });
     }
 
@@ -1325,6 +1328,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         inviter_display_name: Some("Inviter".to_owned()),
         inviter_user_id: Some("@inviter:example.invalid".to_owned()),
         is_dm: false,
+        is_space: false,
     });
 
     // navigation — active room + space

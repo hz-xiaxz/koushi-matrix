@@ -6,7 +6,7 @@ glue. Vendored upstream code must keep its original license and copyright
 notices; local changes to vendored code must remain easy to upstream or
 revert.
 
-Last amended: 2026-09-12.
+Last amended: 2026-09-19.
 
 ## Read Order And Authority
 
@@ -90,6 +90,16 @@ conflict is being resolved.
 - `npm --prefix apps/desktop run lint` enforces the surface inventory through
   `scripts/check-ime-text-inputs.mjs`. New text-entry variants extend the
   shared primitive and its behavioral tests instead of adding local IME fixes.
+
+## User-Visible Text
+
+- Visible action labels use the shortest wording that remains unambiguous in
+  the current context. When the target or mode is already clear from the
+  surrounding UI, use the action verb alone (`Accept`, `Decline`, `Cancel`,
+  `Save`) instead of repeating it (`Accept invite`, `Decline invite`,
+  `Cancel edit`). Keep a descriptive accessible name when the visible context
+  is insufficient for assistive technology; concise visible text must not
+  remove necessary accessibility context.
 
 ## Architecture And Ownership
 

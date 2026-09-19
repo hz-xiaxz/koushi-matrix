@@ -479,6 +479,7 @@ fn transient_room_list_snapshots_are_whole_state_inert_before_invites_write() {
         inviter_display_name: None,
         inviter_user_id: None,
         is_dm: false,
+        is_space: false,
     };
 
     for session in [

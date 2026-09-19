@@ -262,6 +262,7 @@ pub(super) fn normalize_invites(
             inviter_display_name: invite.inviter_display_name.clone(),
             inviter_user_id: invite.inviter_user_id.clone(),
             is_dm: invite.is_dm,
+            is_space: invite.is_space,
         })
         .collect()
 }

@@ -192,7 +192,8 @@ function readySnapshot(
     topic: null,
     inviter_display_name: "Inviter",
     inviter_user_id: "@inviter:example.invalid",
-    is_dm: false
+    is_dm: false,
+    is_space: false
   }];
   const sidebarRoom = {
     room_id: ROOM_ID,

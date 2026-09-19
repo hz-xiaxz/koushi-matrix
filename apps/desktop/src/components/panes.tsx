@@ -528,12 +528,18 @@ export function ExplorePane({
 
 export function InvitesPane({
   isBusy,
+  inviteActionError,
   snapshot,
   onAcceptInvite,
   onDeclineInvite,
   onNewDm
 }: {
   isBusy: boolean;
+  inviteActionError: {
+    roomId: string;
+    action: "accept" | "decline";
+    kind: "invalidInvite" | "forbidden" | "generic";
+  } | null;
   snapshot: DesktopSnapshot;
   onAcceptInvite: (roomId: string) => void;
   onDeclineInvite: (roomId: string) => void;
@@ -543,6 +549,10 @@ export function InvitesPane({
   const [selectedInviteId, setSelectedInviteId] = useState<string | null>(null);
   const selectedInvite =
     invites.find((invite) => invite.room_id === selectedInviteId) ?? invites[0] ?? null;
+  const selectedInviteActionError =
+    selectedInvite && inviteActionError?.roomId === selectedInvite.room_id
+      ? inviteActionError
+      : null;
 
   return (
     <main className="main-pane invites-pane" aria-labelledby="invites-title">
@@ -626,7 +636,9 @@ export function InvitesPane({
                   value={
                     selectedInvite.is_dm
                       ? t("room.directMessage")
-                      : t("search.scopeRoom")
+                      : selectedInvite.is_space
+                        ? t("search.scopeSpace")
+                        : t("search.scopeRoom")
                   }
                 />
                 <SummaryTile
@@ -634,6 +646,17 @@ export function InvitesPane({
                   value={selectedInvite.topic ?? t("invite.noTopic")}
                 />
               </div>
+              {selectedInviteActionError ? (
+                <div className="invite-status" role="alert">
+                  {selectedInviteActionError.action === "decline"
+                    ? t("invite.declineFailed")
+                    : selectedInviteActionError.kind === "invalidInvite"
+                      ? t("invite.invalidInvite")
+                      : selectedInviteActionError.kind === "forbidden"
+                        ? t("invite.forbidden")
+                        : t("invite.acceptFailed")}
+                </div>
+              ) : null}
               <div className="invite-actions">
                 <button
                   className="dialog-button"

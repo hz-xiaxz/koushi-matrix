@@ -26,6 +26,7 @@ fn invite_preview(room_id: &str, is_dm: bool) -> InvitePreview {
         inviter_display_name: Some("Inviter".to_owned()),
         inviter_user_id: Some("@inviter:localhost".to_owned()),
         is_dm,
+        is_space: false,
     }
 }
 
@@ -184,6 +185,7 @@ fn invite_list_filters_invites_from_ignored_inviters_in_room_list_projection() {
         inviter_display_name: Some("Blocked".to_owned()),
         inviter_user_id: Some("@blocked:localhost".to_owned()),
         is_dm: false,
+        is_space: false,
     };
     let invite_from_normal = InvitePreview {
         room_id: "!normal-room:localhost".to_owned(),
@@ -193,6 +195,7 @@ fn invite_list_filters_invites_from_ignored_inviters_in_room_list_projection() {
         inviter_display_name: Some("Normal".to_owned()),
         inviter_user_id: Some("@normal:localhost".to_owned()),
         is_dm: false,
+        is_space: false,
     };
     reduce(
         &mut state,

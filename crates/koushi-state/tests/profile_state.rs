@@ -1214,6 +1214,7 @@ fn room_space_and_invite_summaries_surface_avatar_mxc() {
                 inviter_display_name: Some("Inviter".to_owned()),
                 inviter_user_id: Some("@inviter:localhost".to_owned()),
                 is_dm: false,
+                is_space: false,
             }],
         },
     );
@@ -1243,6 +1244,7 @@ fn ignored_users_load_filters_invites_and_presence() {
         inviter_display_name: Some("Inviter".to_owned()),
         inviter_user_id: Some("@ignored:localhost".to_owned()),
         is_dm: false,
+        is_space: false,
     }];
     state.live_signals.presence.insert(
         "@ignored:localhost".to_owned(),
