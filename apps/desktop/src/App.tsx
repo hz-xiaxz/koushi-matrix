@@ -2115,6 +2115,15 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     runInBackground(
       desktopEventPort
         .listenMenuActions((payload) => {
+          if (payload === "checkForUpdates") {
+            runInBackground(
+              (async () => {
+                await setRightPanelModeClosingFocusedContext("userSettings");
+                await api.checkForDesktopUpdate();
+              })()
+            );
+            return;
+          }
           const shortcutId = shortcutActionFromMenuPayload(payload);
           if (shortcutId) {
             handleShortcutAction(shortcutId);
@@ -6539,6 +6548,9 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           }}
           onUpdateSettings={(patch) => {
             runInBackground(updateSettings(patch));
+          }}
+          onCheckDesktopUpdate={() => {
+            runInBackground(api.checkForDesktopUpdate());
           }}
           onDownloadDesktopUpdate={() => {
             runInBackground(api.downloadDesktopUpdate());

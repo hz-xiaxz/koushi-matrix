@@ -164,6 +164,7 @@ export function ContextualRightPanel({
   onSubmitIdentityResetOAuth,
   onSubmitIdentityResetPassword,
   onUpdateSettings = () => undefined,
+  onCheckDesktopUpdate = () => undefined,
   onDownloadDesktopUpdate = () => undefined,
   onRestartToInstallDesktopUpdate = () => undefined,
   onRebuildSearchIndex = () => undefined,
@@ -312,6 +313,7 @@ export function ContextualRightPanel({
   onSubmitIdentityResetOAuth: (flowId: number) => void;
   onSubmitIdentityResetPassword: (flowId: number, password: string) => void;
   onUpdateSettings?: (patch: SettingsPatch) => void;
+  onCheckDesktopUpdate?: () => void;
   onDownloadDesktopUpdate?: () => void;
   onRestartToInstallDesktopUpdate?: () => void;
   onRebuildSearchIndex?: () => void;
@@ -486,6 +488,7 @@ export function ContextualRightPanel({
           onSubmitIdentityResetOAuth={onSubmitIdentityResetOAuth}
           onSubmitIdentityResetPassword={onSubmitIdentityResetPassword}
           onUpdateSettings={onUpdateSettings}
+          onCheckDesktopUpdate={onCheckDesktopUpdate}
           onDownloadDesktopUpdate={onDownloadDesktopUpdate}
           onRestartToInstallDesktopUpdate={onRestartToInstallDesktopUpdate}
           onRebuildSearchIndex={onRebuildSearchIndex}
