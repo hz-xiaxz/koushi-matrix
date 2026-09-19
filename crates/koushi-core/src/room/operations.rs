@@ -154,6 +154,7 @@ pub(super) fn operation_failure_kind(kind: RoomFailureKind) -> OperationFailureK
     match kind {
         RoomFailureKind::AliasInUse => OperationFailureKind::Invalid,
         RoomFailureKind::Forbidden => OperationFailureKind::Forbidden,
+        RoomFailureKind::InvalidInvite => OperationFailureKind::Invalid,
         RoomFailureKind::Network => OperationFailureKind::Network,
         RoomFailureKind::NotFound => OperationFailureKind::NotFound,
         RoomFailureKind::Sdk => OperationFailureKind::Sdk,
@@ -196,11 +197,13 @@ pub(crate) fn classify_room_error(error: &MatrixRoomOperationError) -> RoomFailu
         | MatrixRoomOperationError::InvalidUserId
         | MatrixRoomOperationError::InvalidServerName
         | MatrixRoomOperationError::RoomUnavailable => RoomFailureKind::NotFound,
+        MatrixRoomOperationError::InvalidInvite => RoomFailureKind::InvalidInvite,
         MatrixRoomOperationError::Sdk(kind) => match kind {
             MatrixRoomOperationFailureKind::AliasInUse => RoomFailureKind::AliasInUse,
             MatrixRoomOperationFailureKind::Forbidden
             | MatrixRoomOperationFailureKind::AuthenticationRequired => RoomFailureKind::Forbidden,
             MatrixRoomOperationFailureKind::Http => RoomFailureKind::Network,
+            MatrixRoomOperationFailureKind::InvalidInvite => RoomFailureKind::InvalidInvite,
             MatrixRoomOperationFailureKind::Sdk
             | MatrixRoomOperationFailureKind::Encryption
             | MatrixRoomOperationFailureKind::Store
@@ -673,7 +676,7 @@ impl RoomActor {
         match self
             .call_room_operation(
                 RoomOperationKind::AcceptInvite,
-                koushi_sdk::join_room_by_id(&operation.session, &room_id),
+                koushi_sdk::accept_invited_room(&operation.session, &room_id),
             )
             .await
         {

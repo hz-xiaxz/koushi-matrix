@@ -474,7 +474,8 @@ fn normalize_invites_preserves_preview_fields() {
             topic: Some("Project topic".to_owned()),
             inviter_display_name: Some("Inviter".to_owned()),
             inviter_user_id: Some("@inviter:example.test".to_owned()),
-            is_dm: true,
+            is_dm: false,
+            is_space: true,
         }],
         ..MatrixRoomListSnapshot::default()
     };
@@ -485,7 +486,8 @@ fn normalize_invites_preserves_preview_fields() {
     assert_eq!(invites[0].display_name, "Project invite");
     assert_eq!(invites[0].topic.as_deref(), Some("Project topic"));
     assert_eq!(invites[0].inviter_display_name.as_deref(), Some("Inviter"));
-    assert!(invites[0].is_dm);
+    assert!(!invites[0].is_dm);
+    assert!(invites[0].is_space);
 }
 
 #[test]
@@ -499,6 +501,7 @@ fn normalize_invites_preserves_avatar_mxc_as_unrequested_thumbnail() {
             inviter_display_name: None,
             inviter_user_id: None,
             is_dm: false,
+            is_space: false,
         }],
         ..MatrixRoomListSnapshot::default()
     };

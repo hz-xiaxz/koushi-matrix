@@ -75,6 +75,7 @@ pub enum SyncFailureKind {
 pub enum RoomFailureKind {
     AliasInUse,
     Forbidden,
+    InvalidInvite,
     NotFound,
     Network,
     Sdk,

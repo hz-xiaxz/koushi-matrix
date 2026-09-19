@@ -247,6 +247,8 @@ pub struct InvitePreview {
     #[serde(default)]
     pub inviter_user_id: Option<String>,
     pub is_dm: bool,
+    #[serde(default)]
+    pub is_space: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

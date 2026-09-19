@@ -59,6 +59,19 @@ export function reconcileComposerSubmissionSnapshot(
   );
 }
 
+type InviteActionFailureKind = "invalidInvite" | "forbidden" | "generic";
+
+function inviteActionFailureKind(error: unknown): InviteActionFailureKind {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("kind: InvalidInvite")) {
+    return "invalidInvite";
+  }
+  if (message.includes("kind: Forbidden")) {
+    return "forbidden";
+  }
+  return "generic";
+}
+
 import { ContextMenuSurface } from "./components/ContextMenuSurface";
 import {
   SessionVerificationGate,
@@ -1130,6 +1143,11 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
   const [directoryAddressNotice, setDirectoryAddressNotice] = useState<
     "user" | "notRecognized" | null
   >(null);
+  const [inviteActionError, setInviteActionError] = useState<{
+    roomId: string;
+    action: "accept" | "decline";
+    kind: InviteActionFailureKind;
+  } | null>(null);
   const [newDmDialogOpen, setNewDmDialogOpen] = useState(false);
   const [resetLocalDataConfirmOpen, setResetLocalDataConfirmOpen] = useState(false);
   const logoutConfirmationInFlightRef = useRef(false);
@@ -2085,6 +2103,25 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
   }, []);
 
   useEffect(() => listenForAppShortcuts(handleShortcutAction), []);
+
+  useEffect(() => {
+    // A file dropped outside a Composer otherwise triggers the WebView's
+    // default navigation to that file, replacing the whole desktop window.
+    // Composer drop handlers still ingest the file; this guard only cancels
+    // the browser default for file-bearing transfers.
+    function preventUnhandledFileDropNavigation(event: globalThis.DragEvent) {
+      if (event.dataTransfer && attachmentTransferHasFiles(event.dataTransfer)) {
+        event.preventDefault();
+      }
+    }
+
+    window.addEventListener("dragover", preventUnhandledFileDropNavigation, true);
+    window.addEventListener("drop", preventUnhandledFileDropNavigation, true);
+    return () => {
+      window.removeEventListener("dragover", preventUnhandledFileDropNavigation, true);
+      window.removeEventListener("drop", preventUnhandledFileDropNavigation, true);
+    };
+  }, []);
 
   useEffect(() => {
     // A file dropped outside a Composer otherwise triggers the WebView's
@@ -3671,12 +3708,27 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     if (isBusy) {
       return;
     }
+    setInviteActionError(null);
     setIsBusy(true);
     try {
       const nextSnapshot = await settleCommandSnapshot(api.acceptInvite(roomId));
+      // Element X presents an accepted Space through the Space room list,
+      // rather than opening the Space as an ordinary room timeline. The
+      // joined-room projection is the authoritative post-join signal here.
+      if (nextSnapshot.state.domain.spaces.some((space) => space.space_id === roomId)) {
+        await selectSpace(roomId);
+        return;
+      }
       if (!(await selectJoinedRoomIfPresent(nextSnapshot.state.domain.rooms, roomId, selectRoom))) {
         return;
       }
+    } catch (error) {
+      setInviteActionError({ roomId, action: "accept", kind: inviteActionFailureKind(error) });
+      appendDiagnosticLog({
+        timestampMs: Date.now(),
+        source: "invite.action",
+        message: "action=accept outcome=failed"
+      });
     } finally {
       setIsBusy(false);
     }
@@ -3686,9 +3738,17 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     if (isBusy) {
       return;
     }
+    setInviteActionError(null);
     setIsBusy(true);
     try {
       await settleCommand(api.declineInvite(roomId));
+    } catch {
+      setInviteActionError({ roomId, action: "decline", kind: "generic" });
+      appendDiagnosticLog({
+        timestampMs: Date.now(),
+        source: "invite.action",
+        message: "action=decline outcome=failed"
+      });
     } finally {
       setIsBusy(false);
     }
@@ -6129,6 +6189,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           />
         ) : primaryView === "invites" ? (
           <InvitesPane
+            inviteActionError={inviteActionError}
             isBusy={isBusy}
             snapshot={snapshot}
             onAcceptInvite={(roomId) => {

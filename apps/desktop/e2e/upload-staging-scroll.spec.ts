@@ -176,7 +176,6 @@ for (const count of [1, 3]) {
     expect((await stagingGeometry(page))!.pageScrollY).toBe(0);
   });
 }
-
 for (const height of [800, 520]) {
   test(`macOS attachment dialogs stay below the native titlebar at ${height}px`, async ({ page }) => {
     await page.setViewportSize({ width: 1200, height });

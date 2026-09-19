@@ -9,7 +9,7 @@ use crate::room_projection::{
 use crate::{
     MatrixClientSession, MatrixRoomMemberSummary, MatrixRoomTagKind, MatrixSpaceMembersProjection,
 };
-use koushi_diagnostics::{DiagnosticEvent, DiagnosticLevel};
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
 #[cfg(test)]
 use koushi_state::SessionInfo;
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,8 @@ pub enum MatrixRoomOperationError {
     InvalidServerName,
     #[error("Matrix room is not available")]
     RoomUnavailable,
+    #[error("Matrix invitation is invalid")]
+    InvalidInvite,
     #[error("Matrix room operation failed: {0}")]
     Sdk(MatrixRoomOperationFailureKind),
 }
@@ -46,12 +48,29 @@ impl MatrixRoomOperationError {
             | Self::InvalidEventId
             | Self::InvalidUserId
             | Self::InvalidServerName
-            | Self::RoomUnavailable => None,
+            | Self::RoomUnavailable
+            | Self::InvalidInvite => None,
         }
     }
 
     pub(super) fn from_sdk_error(error: matrix_sdk::Error) -> Self {
         Self::Sdk(matrix_room_operation_failure_kind(&error))
+    }
+
+    fn from_invite_accept_error(error: matrix_sdk::Error) -> Self {
+        let invalid_invite = matches!(
+            &error,
+            matrix_sdk::Error::Http(error)
+                if matches!(
+                    error.client_api_error_kind(),
+                    Some(matrix_sdk::ruma::api::error::ErrorKind::Unknown)
+                )
+        );
+        if invalid_invite {
+            Self::InvalidInvite
+        } else {
+            Self::from_sdk_error(error)
+        }
     }
 }
 
@@ -65,6 +84,7 @@ pub enum MatrixRoomOperationFailureKind {
     Store,
     SecureBackupRequired,
     WrongRoomState,
+    InvalidInvite,
     Sdk,
 }
 
@@ -95,7 +115,13 @@ pub struct MatrixSpaceMemberRoleUpdateResult {
 
 impl fmt::Display for MatrixRoomOperationFailureKind {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let label = match self {
+        formatter.write_str(self.token())
+    }
+}
+
+impl MatrixRoomOperationFailureKind {
+    pub fn token(self) -> &'static str {
+        match self {
             Self::AliasInUse => "alias_in_use",
             Self::AuthenticationRequired => "authentication_required",
             Self::Encryption => "encryption",
@@ -104,9 +130,9 @@ impl fmt::Display for MatrixRoomOperationFailureKind {
             Self::Store => "store",
             Self::SecureBackupRequired => "secure_backup_required",
             Self::WrongRoomState => "wrong_room_state",
+            Self::InvalidInvite => "invalid_invite",
             Self::Sdk => "sdk",
-        };
-        formatter.write_str(label)
+        }
     }
 }
 
@@ -1122,6 +1148,92 @@ pub async fn join_room_by_id(
         "join_completed",
     ));
     Ok(room.room_id().to_string())
+}
+
+/// Accept an invitation for a room that is already known to the client.
+///
+/// Element X keeps invitation acceptance separate from joining an arbitrary
+/// room: it joins the known room by id and then gives sync a short opportunity
+/// to publish the joined membership. The Matrix SDK's `join_room_by_id` is the
+/// underlying operation for both flows; this wrapper supplies the invitation
+/// semantics and sync timing expected by the UI.
+pub async fn accept_invited_room(
+    session: &MatrixClientSession,
+    room_id: &str,
+) -> Result<String, MatrixRoomOperationError> {
+    koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "sdk.room_operation",
+        "join_started",
+    ));
+
+    let room_id = matrix_sdk::ruma::RoomId::parse(room_id)
+        .map_err(|_| MatrixRoomOperationError::InvalidRoomId)?;
+    let client = session.client();
+    let Some(room) = client.get_room(&room_id) else {
+        koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+            DiagnosticLevel::Warn,
+            "sdk.room_operation",
+            "invite_join_room_unavailable",
+        ));
+        return Err(MatrixRoomOperationError::RoomUnavailable);
+    };
+    if room.state() != matrix_sdk::RoomState::Invited {
+        koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+            DiagnosticLevel::Warn,
+            "sdk.room_operation",
+            "invite_join_wrong_room_state",
+        ));
+        return Err(MatrixRoomOperationError::Sdk(
+            MatrixRoomOperationFailureKind::WrongRoomState,
+        ));
+    }
+
+    let joined_room = match client.join_room_by_id(&room_id).await {
+        Ok(room) => room,
+        Err(error) => {
+            let operation_error = MatrixRoomOperationError::from_invite_accept_error(error);
+            let failure_kind = match &operation_error {
+                MatrixRoomOperationError::InvalidInvite => "invalid_invite",
+                MatrixRoomOperationError::Sdk(kind) => kind.token(),
+                _ => "unknown",
+            };
+            koushi_diagnostics::record_and_stderr(
+                DiagnosticEvent::new(
+                    DiagnosticLevel::Warn,
+                    "sdk.room_operation",
+                    "join_failed",
+                )
+                .field(DiagnosticField::token("failure_kind", failure_kind)),
+            );
+            return Err(operation_error);
+        }
+    };
+
+    // `join_room_by_id` returns a locally joined Room immediately. As in
+    // Element X, wait briefly for the membership to arrive through sync, but
+    // do not turn a slow sync into a failed join—the homeserver request has
+    // already succeeded.
+    if tokio::time::timeout(
+        Duration::from_secs(10),
+        client.await_room_remote_echo(&room_id),
+    )
+    .await
+    .is_err()
+    {
+        koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+            DiagnosticLevel::Warn,
+            "sdk.room_operation",
+            "join_sync_timeout",
+        ));
+    }
+
+    koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "sdk.room_operation",
+        "join_completed",
+    ));
+    Ok(joined_room.room_id().to_string())
 }
 
 pub async fn query_public_room_directory(

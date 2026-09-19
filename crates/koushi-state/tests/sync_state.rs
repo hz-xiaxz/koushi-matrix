@@ -134,3 +134,59 @@ fn app_state_wire_has_no_redundant_sync_mode() {
 
     assert!(value.get("sync_mode").is_none());
 }
+
+// Diagnostic characterization for #860, using the production reducer.
+#[test]
+fn issue860_running_before_promotion_is_swallowed_but_fresh_projection_recovers() {
+    let mut state = AppState {
+        session: SessionState::Provisional {
+            info: session_info(),
+            phase: koushi_state::ProvisionalPhase::CheckingTrust,
+        },
+        ..AppState::default()
+    };
+    let effects = reduce(
+        &mut state,
+        AppAction::SyncStatusChanged {
+            generation: 1,
+            status: SyncLifecycleStatus::Running,
+        },
+    );
+    assert!(effects.is_empty());
+    assert_eq!(state.sync, SyncState::Stopped);
+    let effects = reduce(
+        &mut state,
+        AppAction::AuthoritativeDeviceTrustChanged {
+            generation: 2,
+            transition_id: 1,
+            trust: koushi_state::CurrentDeviceTrustState::Verified,
+        },
+    );
+    assert!(matches!(state.session, SessionState::Ready(_)));
+    assert_eq!(state.sync, SyncState::Starting);
+    assert_eq!(
+        state.secure_backup_gate,
+        koushi_state::SecureBackupGateState::Checking
+    );
+    assert!(effects.contains(&AppEffect::StartSync));
+    assert!(effects.contains(&AppEffect::InspectSecureBackup));
+    assert!(!effects.contains(&AppEffect::SyncConnectivityChanged { proven: true }));
+    let effects = reduce(
+        &mut state,
+        AppAction::SyncStatusChanged {
+            generation: 1,
+            status: SyncLifecycleStatus::Running,
+        },
+    );
+    assert!(effects.is_empty());
+    assert_eq!(state.sync, SyncState::Starting);
+    let effects = reduce(
+        &mut state,
+        AppAction::SyncStatusChanged {
+            generation: 2,
+            status: SyncLifecycleStatus::Running,
+        },
+    );
+    assert!(effects.contains(&AppEffect::SyncConnectivityChanged { proven: true }));
+    assert_eq!(state.sync, SyncState::Running);
+}

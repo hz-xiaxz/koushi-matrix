@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createDesktopApiFixture } from "../test/desktopApiFixture";
-import { ActivityPane, ExplorePane } from "./panes";
+import { ActivityPane, ExplorePane, InvitesPane } from "./panes";
 import { setActiveLocaleProfile } from "../i18n/messages";
 import type {
   ActivityRow,
@@ -300,5 +300,86 @@ describe("ExplorePane public discovery", () => {
 
     expect(screen.getByText("Unnamed space")).toBeTruthy();
     expect(screen.getByText("Unnamed room")).toBeTruthy();
+  });
+});
+
+describe("InvitesPane actions", () => {
+  beforeEach(() => {
+    setActiveLocaleProfile("en", "none");
+  });
+
+  afterEach(() => {
+    cleanup();
+    setActiveLocaleProfile("en", "none");
+  });
+
+  it("shows a safe error when accepting an invite fails", async () => {
+    const snapshot = await createDesktopApiFixture().getSnapshot();
+    snapshot.state.domain.invites = [
+      {
+        room_id: "!invite:example.invalid",
+        display_name: "Invite room",
+        avatar: null,
+        topic: null,
+        inviter_display_name: "Inviter",
+        inviter_user_id: "@inviter:example.invalid",
+        is_dm: false,
+        is_space: false
+      }
+    ];
+
+    render(
+      <InvitesPane
+        inviteActionError={{
+          roomId: "!invite:example.invalid",
+          action: "accept",
+          kind: "generic"
+        }}
+        isBusy={false}
+        snapshot={snapshot}
+        onAcceptInvite={vi.fn()}
+        onDeclineInvite={vi.fn()}
+        onNewDm={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Couldn't accept the invite. Try again."
+    );
+  });
+
+  it("explains when an invite is no longer valid", async () => {
+    const snapshot = await createDesktopApiFixture().getSnapshot();
+    snapshot.state.domain.invites = [
+      {
+        room_id: "!invite:example.invalid",
+        display_name: "Invite room",
+        avatar: null,
+        topic: null,
+        inviter_display_name: "Inviter",
+        inviter_user_id: "@inviter:example.invalid",
+        is_dm: false,
+        is_space: false
+      }
+    ];
+
+    render(
+      <InvitesPane
+        inviteActionError={{
+          roomId: "!invite:example.invalid",
+          action: "accept",
+          kind: "invalidInvite"
+        }}
+        isBusy={false}
+        snapshot={snapshot}
+        onAcceptInvite={vi.fn()}
+        onDeclineInvite={vi.fn()}
+        onNewDm={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      "This room doesn't exist or the invite is invalid."
+    );
   });
 });

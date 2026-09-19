@@ -321,8 +321,12 @@ export type MessageId =
   | "directory.unnamedSpace"
   | "directory.worldReadable"
   | "invite.accept"
+  | "invite.acceptFailed"
   | "invite.decline"
+  | "invite.declineFailed"
+  | "invite.forbidden"
   | "invite.fromInviter"
+  | "invite.invalidInvite"
   | "invite.noPending"
   | "invite.noTopic"
   | "invite.pendingInvites"
@@ -1689,9 +1693,13 @@ const en: Catalog = {
   "directory.unnamedRoom": "Unnamed room",
   "directory.unnamedSpace": "Unnamed space",
   "directory.worldReadable": "World readable",
-  "invite.accept": "Accept invite",
-  "invite.decline": "Decline invite",
+  "invite.accept": "Accept",
+  "invite.acceptFailed": "Couldn't accept the invite. Try again.",
+  "invite.decline": "Decline",
+  "invite.declineFailed": "Couldn't decline the invite. Try again.",
+  "invite.forbidden": "You don't have permission to join this room.",
   "invite.fromInviter": "From {inviter}",
+  "invite.invalidInvite": "This room doesn't exist or the invite is invalid.",
   "invite.noPending": "No pending invites",
   "invite.noTopic": "No topic",
   "invite.pendingInvites": "Pending invites",
@@ -2963,9 +2971,13 @@ const ja: Catalog = {
   "directory.unnamedRoom": "名前のないルーム",
   "directory.unnamedSpace": "名前のないスペース",
   "directory.worldReadable": "誰でも閲覧可",
-  "invite.accept": "招待を承認",
-  "invite.decline": "招待を辞退",
+  "invite.accept": "承認",
+  "invite.acceptFailed": "招待を承認できませんでした。もう一度お試しください。",
+  "invite.decline": "辞退",
+  "invite.declineFailed": "招待を辞退できませんでした。もう一度お試しください。",
+  "invite.forbidden": "このルームに参加する権限がありません。",
   "invite.fromInviter": "{inviter}から",
+  "invite.invalidInvite": "このルームは存在しないか、招待が無効です。",
   "invite.noPending": "保留中の招待はありません",
   "invite.noTopic": "トピックなし",
   "invite.pendingInvites": "保留中の招待",

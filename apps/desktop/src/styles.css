@@ -2656,6 +2656,12 @@ button:disabled {
   font-size: 13px;
 }
 
+.invite-status {
+  margin-block: 12px;
+  color: var(--danger);
+  font-size: 13px;
+}
+
 .invites-layout {
   flex: 1 1 auto;
   display: grid;

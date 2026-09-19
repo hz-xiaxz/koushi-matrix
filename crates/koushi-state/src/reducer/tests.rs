@@ -369,6 +369,7 @@ fn room_list_bootstrap_does_not_clear_cached_rooms_for_invite_only_provisional_s
                 inviter_display_name: None,
                 inviter_user_id: None,
                 is_dm: false,
+                is_space: false,
             }],
         },
     );
@@ -572,6 +573,7 @@ fn avatar_thumbnail_updates_rust_owned_snapshots() {
         inviter_display_name: None,
         inviter_user_id: None,
         is_dm: false,
+        is_space: false,
     }];
 
     let thumbnail = ready_avatar_thumbnail("avatar");

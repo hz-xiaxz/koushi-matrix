@@ -75,6 +75,12 @@ fn room_unavailable_classifies_as_not_found() {
 }
 
 #[test]
+fn invalid_invite_classifies_as_invalid_invite() {
+    let error = MatrixRoomOperationError::InvalidInvite;
+    assert_eq!(classify_room_error(&error), RoomFailureKind::InvalidInvite);
+}
+
+#[test]
 fn sdk_error_classifies_as_sdk() {
     let error = MatrixRoomOperationError::Sdk(koushi_sdk::MatrixRoomOperationFailureKind::Sdk);
     assert_eq!(classify_room_error(&error), RoomFailureKind::Sdk);

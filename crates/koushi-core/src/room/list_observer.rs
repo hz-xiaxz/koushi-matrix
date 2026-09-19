@@ -1630,6 +1630,7 @@ async fn invite_previews_from_service_entries(
             .and_then(|inviter| inviter.display_name().map(ToOwned::to_owned));
         let inviter_user_id = inviter.map(|inviter| inviter.user_id().to_string());
         let is_dm = room.is_direct().await.unwrap_or(false);
+        let is_space = room.is_space();
 
         invites.push(koushi_sdk::MatrixInvitePreview {
             room_id: room.room_id().to_string(),
@@ -1639,6 +1640,7 @@ async fn invite_previews_from_service_entries(
             inviter_display_name,
             inviter_user_id,
             is_dm,
+            is_space,
         });
     }
     invites
