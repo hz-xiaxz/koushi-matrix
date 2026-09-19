@@ -527,6 +527,121 @@ fn display_projection_live_edge_push_back_stays_bounded() {
 }
 
 #[test]
+fn display_projection_live_edge_backfill_fills_an_underfilled_window() {
+    // A short room is at the bottom and near the top at once, so its backward
+    // page arrives under the bounded live-edge context. Core reports that page
+    // as an expected prepend; dropping it leaves the desktop request epoch open.
+    let mut canonical_items = synthetic_projection_items(12);
+    let mut state = DisplayProjectionState::from_canonical_window(&canonical_items, 0..12);
+    let display_before = state.display_items().to_vec();
+    let diffs = (0..50)
+        .map(|index| TimelineDiff::PushFront {
+            item: timeline_item(
+                &format!("$older-{index}:test"),
+                Some("older"),
+                "@sender:test",
+                false,
+            ),
+        })
+        .collect::<Vec<_>>();
+
+    let projection = project_sdk_batch(
+        &mut canonical_items,
+        &mut state,
+        &diffs,
+        &DisplayProjectionContext::bounded_live_edge(),
+    );
+
+    assert!(!projection.used_reset_fallback);
+    assert_display_projection_converges(display_before, &projection);
+    assert_eq!(canonical_items.len(), 62);
+    assert_eq!(state.display_items().len(), 62);
+    assert_eq!(
+        state
+            .display_items()
+            .first()
+            .and_then(timeline_item_event_id),
+        Some("$older-49:test")
+    );
+}
+
+#[test]
+fn display_projection_first_page_does_not_depend_on_viewport_observation_order() {
+    // The first `ObserveViewport` and the first backward page race to the actor.
+    // The page is projected under the historical context when it wins and under
+    // the bounded live-edge context when it loses; both must agree.
+    let page = (0..50)
+        .map(|index| TimelineDiff::PushFront {
+            item: timeline_item(
+                &format!("$older-{index}:test"),
+                Some("older"),
+                "@sender:test",
+                false,
+            ),
+        })
+        .collect::<Vec<_>>();
+    let project = |context: &DisplayProjectionContext| {
+        let mut canonical_items = synthetic_projection_items(12);
+        let mut state = DisplayProjectionState::from_canonical_window(&canonical_items, 0..12);
+        let projection = project_sdk_batch(&mut canonical_items, &mut state, &page, context);
+        (projection.display_diffs, state.display_items().to_vec())
+    };
+
+    let page_first = project(&historical_display_projection_context());
+    let observation_first = project(&DisplayProjectionContext::bounded_live_edge());
+
+    assert_eq!(page_first, observation_first);
+    assert!(
+        super::timeline_diffs_include_prepend(&observation_first.0),
+        "the desktop request epoch settles on a projected front insertion"
+    );
+}
+
+#[test]
+fn display_projection_live_edge_backfill_stays_bounded_and_contiguous() {
+    let mut canonical_items = synthetic_projection_items(100);
+    let mut state = DisplayProjectionState::from_canonical_window(&canonical_items, 0..100);
+    let display_before = state.display_items().to_vec();
+    let diffs = (0..50)
+        .map(|index| TimelineDiff::PushFront {
+            item: timeline_item(
+                &format!("$older-{index}:test"),
+                Some("older"),
+                "@sender:test",
+                false,
+            ),
+        })
+        .collect::<Vec<_>>();
+
+    let projection = project_sdk_batch(
+        &mut canonical_items,
+        &mut state,
+        &diffs,
+        &DisplayProjectionContext::bounded_live_edge(),
+    );
+
+    assert!(!projection.used_reset_fallback);
+    assert_display_projection_converges(display_before, &projection);
+    assert_eq!(state.display_items().len(), ROOM_REPLAY_INITIAL_ITEMS_MAX);
+    // The window is the contiguous canonical suffix: 20 of the older page, then
+    // the original 100 rows. A page behind an already trimmed prefix stays out.
+    assert_eq!(
+        state
+            .display_items()
+            .first()
+            .and_then(timeline_item_event_id),
+        Some("$older-19:test")
+    );
+    assert_eq!(
+        state
+            .display_items()
+            .get(20)
+            .and_then(timeline_item_event_id),
+        Some("$canonical-0:test")
+    );
+}
+
+#[test]
 fn display_projection_payload_work_does_not_rescan_window_per_prepend() {
     let (mut canonical_items, mut state) = deep_display_projection_fixture();
     let diffs = (0..512)
