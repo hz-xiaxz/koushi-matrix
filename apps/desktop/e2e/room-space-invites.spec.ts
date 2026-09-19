@@ -519,7 +519,7 @@ test("invite acceptance does not expose the previous timeline when room selectio
   await selectAccountHome(page);
   await page.getByRole("button", { name: "Invites", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Invites" })).toBeVisible();
-  await page.getByRole("button", { name: "Accept invite" }).click();
+  await page.getByRole("button", { name: "Accept" }).click();
 
   await expect.poll(() => invocationCount(page, "select_room")).toBe(1);
   await expect(page.getByRole("heading", { name: "Invites" })).toBeVisible();
@@ -773,7 +773,7 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
   await expect(page.getByRole("button", { name: "Seeded Invite" })).toBeVisible();
   await expect(page.getByText("Synthetic Inviter", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Accept invite" }).click();
+  await page.getByRole("button", { name: "Accept" }).click();
 
   await expect.poll(() => invocationCount(page, "accept_invite")).toBeGreaterThanOrEqual(1);
   await expect
