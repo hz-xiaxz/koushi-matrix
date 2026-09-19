@@ -566,6 +566,38 @@ fn display_projection_live_edge_backfill_fills_an_underfilled_window() {
 }
 
 #[test]
+fn display_projection_first_page_does_not_depend_on_viewport_observation_order() {
+    // The first `ObserveViewport` and the first backward page race to the actor.
+    // The page is projected under the historical context when it wins and under
+    // the bounded live-edge context when it loses; both must agree.
+    let page = (0..50)
+        .map(|index| TimelineDiff::PushFront {
+            item: timeline_item(
+                &format!("$older-{index}:test"),
+                Some("older"),
+                "@sender:test",
+                false,
+            ),
+        })
+        .collect::<Vec<_>>();
+    let project = |context: &DisplayProjectionContext| {
+        let mut canonical_items = synthetic_projection_items(12);
+        let mut state = DisplayProjectionState::from_canonical_window(&canonical_items, 0..12);
+        let projection = project_sdk_batch(&mut canonical_items, &mut state, &page, context);
+        (projection.display_diffs, state.display_items().to_vec())
+    };
+
+    let page_first = project(&historical_display_projection_context());
+    let observation_first = project(&DisplayProjectionContext::bounded_live_edge());
+
+    assert_eq!(page_first, observation_first);
+    assert!(
+        super::timeline_diffs_include_prepend(&observation_first.0),
+        "the desktop request epoch settles on a projected front insertion"
+    );
+}
+
+#[test]
 fn display_projection_live_edge_backfill_stays_bounded_and_contiguous() {
     let mut canonical_items = synthetic_projection_items(100);
     let mut state = DisplayProjectionState::from_canonical_window(&canonical_items, 0..100);
