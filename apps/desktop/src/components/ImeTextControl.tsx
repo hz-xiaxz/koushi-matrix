@@ -549,6 +549,28 @@ export const ImeInlineMentionEditor = forwardRef<
             submitFence?.mark();
             return;
           }
+          // Issue #956: step over a #875 caret anchor so a mention pill costs
+          // one arrow press, not two. An IME conversion window owns the arrow
+          // keys while composing, so this never runs then.
+          if (
+            (event.key === "ArrowLeft" || event.key === "ArrowRight") &&
+            !event.ctrlKey &&
+            !event.altKey &&
+            !event.metaKey &&
+            !composingRef.current &&
+            !event.nativeEvent.isComposing
+          ) {
+            const control = controlRef.current;
+            const target = control
+              ? caretAnchorSkipTarget(control, event.key, event.shiftKey)
+              : null;
+            if (control && target) {
+              event.preventDefault();
+              applyCaretAnchorSkip(control, target);
+              onSelectionChange?.(selection());
+              return;
+            }
+          }
           onKeyDown?.(event);
         }}
         onPaste={handlePaste}
@@ -653,6 +675,106 @@ function isSentinelBr(node: Node): boolean {
     node.tagName === "BR" &&
     node.hasAttribute("data-composer-sentinel")
   );
+}
+
+/**
+ * Issue #956: the #875 caret anchors are real caret stops for the engine, but
+ * the composer collapses each one to the document offset it sits at. An arrow
+ * press that lands on an anchor therefore moves the DOM caret without moving
+ * the document caret, and without moving anything the user can see — a dead
+ * press at every mention pill boundary.
+ *
+ * Only that case is taken over from the browser. Everything else, including
+ * every modified arrow and every press inside ordinary text, is left to the
+ * engine, whose grapheme-cluster and bidi handling this must not reimplement.
+ */
+export function caretAnchorSkipTarget(
+  control: HTMLDivElement,
+  key: "ArrowLeft" | "ArrowRight",
+  extend: boolean
+): { anchor: number; focus: number } | null {
+  const selection = control.ownerDocument.getSelection();
+  if (!selection || selection.rangeCount === 0) return null;
+  const { anchorNode, anchorOffset, focusNode, focusOffset } = selection;
+  if (!focusNode || !control.contains(focusNode)) return null;
+  // ArrowRight travels toward the end of the document in a left-to-right
+  // editor and toward its start in a right-to-left one.
+  const forward = (key === "ArrowRight") === (editorDirection(control) !== "rtl");
+  if (!caretStepCrossesAnchor(control, focusNode, focusOffset, forward)) return null;
+
+  const currentFocus = documentOffsetFromDomPoint(control, focusNode, focusOffset);
+  const target = Math.max(
+    0,
+    Math.min(editorDocumentLength(control), currentFocus + (forward ? 1 : -1))
+  );
+  if (target === currentFocus) {
+    // The document edge: there is nothing to move to, and the engine would
+    // only move the caret into the anchor again.
+    return { anchor: extend && anchorNode ? documentOffsetFromDomPoint(control, anchorNode, anchorOffset) : target, focus: target };
+  }
+  const anchorTarget =
+    extend && anchorNode && control.contains(anchorNode)
+      ? documentOffsetFromDomPoint(control, anchorNode, anchorOffset)
+      : target;
+  return { anchor: anchorTarget, focus: target };
+}
+
+export function applyCaretAnchorSkip(
+  control: HTMLDivElement,
+  target: { anchor: number; focus: number }
+) {
+  const anchorPoint = domPointFromDocumentOffset(control, target.anchor);
+  const focusPoint = domPointFromDocumentOffset(control, target.focus);
+  const selection = control.ownerDocument.getSelection();
+  selection?.setBaseAndExtent(
+    anchorPoint.node,
+    anchorPoint.offset,
+    focusPoint.node,
+    focusPoint.offset
+  );
+}
+
+function editorDirection(control: HTMLDivElement): string {
+  const view = control.ownerDocument.defaultView;
+  return view?.getComputedStyle(control).direction ?? "ltr";
+}
+
+function editorDocumentLength(control: HTMLDivElement): number {
+  return Array.from(control.childNodes).reduce(
+    (total, child) => total + editorNodeLength(child),
+    0
+  );
+}
+
+/** True when the next caret stop in `forward`'s direction is a caret anchor. */
+function caretStepCrossesAnchor(
+  control: HTMLDivElement,
+  node: Node,
+  offset: number,
+  forward: boolean
+): boolean {
+  if (node === control) {
+    const neighbour: Node | undefined = control.childNodes[forward ? offset : offset - 1];
+    return neighbour !== undefined && isCaretAnchor(neighbour);
+  }
+  const child = Array.from(control.childNodes).find(
+    (candidate) => candidate === node || candidate.contains(node)
+  );
+  if (!child) return false;
+  // A caret sitting inside an anchor is already on the dead stop: the engine's
+  // next move within it produces no document movement either.
+  if (isCaretAnchor(child)) return true;
+  const atEdge =
+    node.nodeType === Node.TEXT_NODE
+      ? forward
+        ? offset === (node.textContent?.length ?? 0)
+        : offset === 0
+      : forward
+        ? offset > 0
+        : offset === 0;
+  if (!atEdge) return false;
+  const neighbour = forward ? child.nextSibling : child.previousSibling;
+  return neighbour !== null && isCaretAnchor(neighbour);
 }
 
 export function inlineMentionEditorSelection(control: HTMLDivElement): DocumentSelection {

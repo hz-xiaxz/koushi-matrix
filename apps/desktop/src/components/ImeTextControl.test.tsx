@@ -111,6 +111,109 @@ describe("mention caret anchors (#875)", () => {
     expect(children[2].hasAttribute("data-composer-caret-anchor")).toBe(true);
   });
 
+  // Issue #956: an anchor is a real caret stop for the engine but collapses to
+  // the offset beside it, so before the fix an arrow press at a pill boundary
+  // consumed a press without moving the document caret. These assertions are on
+  // document offsets, which is what the user sees move; the native caret itself
+  // is covered by the Playwright regression, since jsdom has no caret motion.
+  describe("arrow traversal (#956)", () => {
+    const adjacentMentionsDocument: ComposerDocument = {
+      version: 2,
+      inlines: [
+        {
+          kind: "mention",
+          target: { kind: "user", user_id: "@alice:example.invalid", display_label: "Alice" },
+          display_label: "Alice"
+        },
+        {
+          kind: "mention",
+          target: { kind: "user", user_id: "@bob:example.invalid", display_label: "Bob" },
+          display_label: "Bob"
+        }
+      ]
+    };
+
+    function mentionEditor(initial: ComposerDocument) {
+      render(<ControlledMentionEditor initial={initial} />);
+      return screen.getByRole("textbox", { name: "message" }) as HTMLDivElement;
+    }
+
+    it("crosses two adjacent pills in one press each", () => {
+      const control = mentionEditor(adjacentMentionsDocument);
+      // Three anchors — leading, shared, trailing — are what produced the three
+      // dead presses in the report.
+      expect(control.querySelectorAll("[data-composer-caret-anchor]")).toHaveLength(3);
+
+      setInlineMentionEditorSelection(control, 0);
+      fireEvent.keyDown(control, { key: "ArrowRight" });
+      expect(inlineMentionEditorSelection(control)).toEqual({ start: 1, end: 1 });
+
+      fireEvent.keyDown(control, { key: "ArrowRight" });
+      expect(inlineMentionEditorSelection(control)).toEqual({ start: 2, end: 2 });
+    });
+
+    it("does not move past either document edge", () => {
+      const control = mentionEditor(adjacentMentionsDocument);
+
+      setInlineMentionEditorSelection(control, 2);
+      fireEvent.keyDown(control, { key: "ArrowRight" });
+      expect(inlineMentionEditorSelection(control)).toEqual({ start: 2, end: 2 });
+
+      setInlineMentionEditorSelection(control, 0);
+      fireEvent.keyDown(control, { key: "ArrowLeft" });
+      expect(inlineMentionEditorSelection(control)).toEqual({ start: 0, end: 0 });
+    });
+
+    it("crosses pills backward one press at a time", () => {
+      const control = mentionEditor(adjacentMentionsDocument);
+
+      setInlineMentionEditorSelection(control, 2);
+      fireEvent.keyDown(control, { key: "ArrowLeft" });
+      expect(inlineMentionEditorSelection(control)).toEqual({ start: 1, end: 1 });
+
+      fireEvent.keyDown(control, { key: "ArrowLeft" });
+      expect(inlineMentionEditorSelection(control)).toEqual({ start: 0, end: 0 });
+    });
+
+    it("extends the selection over a pill under Shift", () => {
+      const control = mentionEditor(adjacentMentionsDocument);
+
+      setInlineMentionEditorSelection(control, 0);
+      fireEvent.keyDown(control, { key: "ArrowRight", shiftKey: true });
+      expect(inlineMentionEditorSelection(control)).toEqual({ start: 0, end: 1 });
+    });
+
+    it("leaves a modified arrow to the engine", () => {
+      const control = mentionEditor(adjacentMentionsDocument);
+
+      setInlineMentionEditorSelection(control, 0);
+      for (const modifier of ["ctrlKey", "altKey", "metaKey"] as const) {
+        fireEvent.keyDown(control, { key: "ArrowRight", [modifier]: true });
+        expect(inlineMentionEditorSelection(control)).toEqual({ start: 0, end: 0 });
+      }
+    });
+
+    it("leaves ordinary text beside a pill to the engine", () => {
+      const control = mentionEditor(mentionDocument);
+      expect(control.querySelectorAll("[data-composer-caret-anchor]")).toHaveLength(0);
+
+      setInlineMentionEditorSelection(control, 0);
+      fireEvent.keyDown(control, { key: "ArrowRight" });
+      // jsdom moves no caret of its own, so an unchanged offset proves the
+      // composer did not take the press over.
+      expect(inlineMentionEditorSelection(control)).toEqual({ start: 0, end: 0 });
+    });
+
+    it("leaves the arrow keys to the IME while composing", () => {
+      const control = mentionEditor(adjacentMentionsDocument);
+
+      setInlineMentionEditorSelection(control, 0);
+      fireEvent.compositionStart(control);
+      fireEvent.keyDown(control, { key: "ArrowRight" });
+      expect(inlineMentionEditorSelection(control)).toEqual({ start: 0, end: 0 });
+    });
+  });
+
   it("keeps a mention flanked by text free of caret anchors", () => {
     render(<ControlledMentionEditor />);
     const control = screen.getByRole("textbox", { name: "message" }) as HTMLDivElement;
