@@ -15,8 +15,12 @@ import type {
   UserProfile
 } from "../domain/types";
 import { documentFromText } from "../domain/composerDocument";
+import { threadTimelineKey } from "../domain/coreEvents";
+import { applyTimelineEvent, createTimelineStore } from "../domain/timelineStore";
 import { t } from "../i18n/messages";
 import { ContextualRightPanel, PanelHeader } from "./rightPanel";
+import { TimelineStoreContext } from "./timelineStoreContext";
+import { baseTransport, message } from "./timelineViewTestSupport";
 
 class MockIntersectionObserver {
   static callback: IntersectionObserverCallback | null = null;
@@ -608,5 +612,66 @@ describe("ContextualRightPanel secure-backup degradation", () => {
     expect(
       (screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled
     ).toBe(true);
+  });
+});
+
+// Issue #959: the thread pane is the same timeline surface as the room pane, so
+// the sender profile handler must reach its rows through the shared route
+// rightPanel -> TimelineView -> TimelineItemRow rather than a thread-local
+// implementation.
+describe("ContextualRightPanel thread sender profiles", () => {
+  test("opens the sender profile from a thread reply", () => {
+    const onOpenSenderProfile = vi.fn();
+    const currentUserId = "@current:example.invalid";
+    const rootEventId = "$root:example.invalid";
+    const key = threadTimelineKey(currentUserId, room.room_id, rootEventId);
+    const base = threadSnapshot("");
+    const threadTimelineSnapshot = {
+      ...base,
+      state: {
+        ...base.state,
+        domain: {
+          ...base.state.domain,
+          live_signals: { presence: {}, rooms: {} },
+          profile: { ...base.state.domain.profile, own: { avatar: null } },
+          settings: {
+            ...base.state.domain.settings,
+            values: {
+              ...base.state.domain.settings.values,
+              appearance: { density: "default" }
+            }
+          }
+        }
+      }
+    } as unknown as DesktopSnapshot;
+    const store = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key,
+        generation: 1,
+        items: [
+          {
+            ...message("$reply:example.invalid", "Thread reply"),
+            sender: "@other:example.invalid",
+            sender_label: "Other Person"
+          }
+        ]
+      }
+    });
+
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <ContextualRightPanel
+          {...defaultProps}
+          mode="thread"
+          snapshot={threadTimelineSnapshot}
+          timelineTransport={baseTransport({})}
+          onOpenSenderProfile={onOpenSenderProfile}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open profile for Other Person" }));
+    expect(onOpenSenderProfile).toHaveBeenCalledWith(room.room_id, "@other:example.invalid");
   });
 });

@@ -6422,6 +6422,9 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
             runInBackground(repairRoomTimeline(roomId));
           }}
           onForceRotateOutboundSession={forceRotateOutboundSession}
+          onOpenSenderProfile={(roomId, userId) => {
+            runInBackground(openRoomUserProfile(roomId, userId));
+          }}
           onStartDirectMessage={(userId) => {
             runInBackground(startDirectMessage(userId));
           }}
