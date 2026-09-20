@@ -392,7 +392,7 @@ fn native_attention_suppresses_initial_backfill_self_and_focused_room() {
 }
 
 #[test]
-fn native_attention_projection_excludes_explicit_muting_but_keeps_low_priority_badge() {
+fn native_attention_projection_excludes_explicit_muting_and_low_priority_from_the_badge() {
     let mut low_priority = room("!low:example.invalid", "Low", false, 5, 5, 1);
     low_priority.tags.low_priority = Some(RoomTagInfo {
         order: Some("0.9".to_owned()),
@@ -411,9 +411,10 @@ fn native_attention_projection_excludes_explicit_muting_but_keeps_low_priority_b
         capabilities: available_capabilities(),
     });
 
+    // #955: low priority no longer contributes to the persistent Dock badge.
     assert_eq!(state.summary.unread_count, 0);
     assert_eq!(state.summary.highlight_count, 0);
-    assert_eq!(state.summary.badge_count, 5);
+    assert_eq!(state.summary.badge_count, 0);
     assert_eq!(state.summary.candidate, None);
     assert_eq!(state.dispatch, NativeAttentionDispatchState::Idle);
 }

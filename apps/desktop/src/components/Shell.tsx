@@ -889,12 +889,16 @@ export function Sidebar({
   const [roomFilter, setRoomFilter] = useState("");
   const activeSpaceId = snapshot.state.ui.navigation.active_space_id;
   const scopeKey = activeSpaceId ?? HOME_SCOPE_KEY;
-  const visibleRooms = filterSidebarRooms(snapshot.sidebar.space_rooms, roomFilter);
-  const visibleDms = filterSidebarRooms(snapshot.sidebar.global_dms, roomFilter);
+  // Rust projects mutually exclusive sections; React only applies the search
+  // filter to them (state-machine.md, "Sidebar Sections And Low Priority").
+  const visibleRooms = filterSidebarRooms(sections.rooms, roomFilter);
+  const visibleDms = filterSidebarRooms(sections.people, roomFilter);
+  const visibleLowPriority = filterSidebarRooms(sections.low_priority, roomFilter);
   const roomsSort = snapshot.sidebar.rooms_sort ?? snapshot.state.domain.settings.values.room_list_sort;
   const dmsSort = snapshot.sidebar.dms_sort ?? snapshot.state.domain.settings.values.room_list_sort;
   const roomsCollapsed = snapshot.sidebar.rooms_collapsed ?? false;
   const dmsCollapsed = snapshot.sidebar.dms_collapsed ?? false;
+  const lowPriorityCollapsed = snapshot.sidebar.low_priority_collapsed ?? false;
   const resolvedSpaceMemberCounts = spaceMemberCounts ?? {
     joined: snapshot.state.domain.space_members.space_joined.length,
     childOnly: snapshot.state.domain.space_members.child_room_only.length
@@ -996,6 +1000,7 @@ export function Sidebar({
           presence={presence}
           roomById={roomById}
           rooms={visibleRooms}
+          unreadCount={snapshot.sidebar.space_unread_count}
           emptyMessage={roomFilter ? t("roomList.noMatchingConversations") : undefined}
           showWhenEmpty={true}
           onCreate={onCreateRoom}
@@ -1017,6 +1022,7 @@ export function Sidebar({
           presence={presence}
           roomById={roomById}
           rooms={visibleDms}
+          unreadCount={snapshot.sidebar.dm_unread_count}
           emptyMessage={roomFilter ? t("roomList.noMatchingConversations") : undefined}
           showWhenEmpty={true}
           onCreate={onNewDm}
@@ -1027,6 +1033,26 @@ export function Sidebar({
           selectedSort={dmsSort}
           onRequestAvatarThumbnail={onRequestAvatarThumbnail}
         />
+        {sections.low_priority.length > 0 ? (
+          <RoomSection
+            activeRoomId={activeRoomId}
+            collapsed={lowPriorityCollapsed}
+            id="low-priority"
+            kind="room"
+            label={t("workspace.lowPriority")}
+            presence={presence}
+            roomById={roomById}
+            rooms={visibleLowPriority}
+            emptyMessage={roomFilter ? t("roomList.noMatchingConversations") : undefined}
+            showWhenEmpty={true}
+            onOpenContextMenu={onOpenContextMenu}
+            onSelectRoom={onSelectRoom}
+            onToggleCollapsed={() =>
+              updateSectionPreference("lowPriority", { collapsed: !lowPriorityCollapsed })
+            }
+            onRequestAvatarThumbnail={onRequestAvatarThumbnail}
+          />
+        ) : null}
         {sections.not_joined.length > 0 ? (
           <RoomSection
             activeRoomId={activeRoomId}
@@ -1054,7 +1080,10 @@ export function Sidebar({
             onRequestAvatarThumbnail={onRequestAvatarThumbnail}
           />
         ) : null}
-        {roomFilter.trim().length > 0 && visibleRooms.length === 0 && visibleDms.length === 0 ? (
+        {roomFilter.trim().length > 0 &&
+        visibleRooms.length === 0 &&
+        visibleDms.length === 0 &&
+        visibleLowPriority.length === 0 ? (
           <div className="room-list-no-matches" role="status">
             {t("roomList.noMatchingConversations")}
           </div>
@@ -1118,6 +1147,7 @@ function RoomSection({
   emptyMessage,
   showHeader = true,
   showWhenEmpty = false,
+  unreadCount,
   onCreate,
   onOpenContextMenu,
   onJoinRoom,
@@ -1139,6 +1169,12 @@ function RoomSection({
   rooms: RoomListItem[];
   showHeader?: boolean;
   showWhenEmpty?: boolean;
+  /**
+   * Rust-owned unread total for this section's whole scope. When present it
+   * replaces the conversation-count meta with the red unread badge; it is not
+   * derived from `rooms`, so search and collapse never change it.
+   */
+  unreadCount?: number;
   onCreate?: () => void;
   onOpenContextMenu: OpenContextMenu;
   onJoinRoom?: (roomId: string) => void;
@@ -1159,6 +1195,7 @@ function RoomSection({
         <SectionTitle
           collapsed={collapsed}
           count={rooms.length}
+          unreadCount={unreadCount}
           label={label}
           onCreate={onCreate}
           createLabel={kind === "dm" ? t("workspace.newDm") : t("action.createRoom")}
@@ -1265,12 +1302,14 @@ function SectionTitle({
   onSelectSort,
   onToggle,
   sectionId,
-  selectedSort
+  selectedSort,
+  unreadCount
 }: {
   collapsed: boolean;
   count: number;
   createLabel?: string;
   label: string;
+  unreadCount?: number;
   onCreate?: () => void;
   onSelectSort?: (sort: RoomListSort) => void;
   onToggle: () => void;
@@ -1313,7 +1352,19 @@ function SectionTitle({
         <ChevronDown size={ICON_SIZE.compact} aria-hidden="true" />
       </button>
       <span className="section-title-meta">
-        <span className="section-count">{count}</span>
+        {unreadCount === undefined ? (
+          <span className="section-count">{count}</span>
+        ) : unreadCount > 0 ? (
+          <span
+            className="section-unread-count"
+            aria-label={t("roomList.sectionUnreadAccessible", {
+              section: label,
+              count: unreadCount
+            })}
+          >
+            {unreadCount > 99 ? "99+" : unreadCount}
+          </span>
+        ) : null}
         {onCreate ? (
           <button
             className="section-title-action"

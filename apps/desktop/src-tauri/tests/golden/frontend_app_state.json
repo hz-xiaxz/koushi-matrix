@@ -16,6 +16,7 @@
       "kind": "activity"
     },
     "global_dms": [],
+    "low_priority_collapsed": true,
     "not_joined_space_rooms": [],
     "rooms_collapsed": false,
     "rooms_sort": {
@@ -23,7 +24,27 @@
     },
     "sections": {
       "favourites": [],
-      "low_priority": [],
+      "low_priority": [
+        {
+          "avatar": null,
+          "display_count": 7,
+          "display_name": "Fixture Low Priority Room",
+          "has_unread_content": true,
+          "has_unread_mention": true,
+          "highlight_count": 2,
+          "is_attention_highlighted": true,
+          "is_muted": false,
+          "notification_count": 7,
+          "room_id": "!low-priority-room:example.invalid",
+          "tags": {
+            "favourite": null,
+            "low_priority": {
+              "order": "0.25"
+            }
+          },
+          "unread_count": 7
+        }
+      ],
       "not_joined": [],
       "people": [],
       "rooms": [
@@ -68,6 +89,25 @@
       }
     ],
     "space_rooms": [
+      {
+        "avatar": null,
+        "display_count": 7,
+        "display_name": "Fixture Low Priority Room",
+        "has_unread_content": true,
+        "has_unread_mention": true,
+        "highlight_count": 2,
+        "is_attention_highlighted": true,
+        "is_muted": false,
+        "notification_count": 7,
+        "room_id": "!low-priority-room:example.invalid",
+        "tags": {
+          "favourite": null,
+          "low_priority": {
+            "order": "0.25"
+          }
+        },
+        "unread_count": 7
+      },
       {
         "avatar": {
           "mxc_uri": "mxc://example.invalid/fixture-avatar",
@@ -597,6 +637,34 @@
         {
           "avatar": null,
           "conversation_activity": null,
+          "display_label": "Fixture Low Priority Room",
+          "display_name": "Fixture Low Priority Room",
+          "dm_space_ids": [],
+          "dm_user_ids": [],
+          "highlight_count": 2,
+          "is_dm": false,
+          "is_encrypted": false,
+          "joined_members": 3,
+          "latest_event": null,
+          "marked_unread": false,
+          "notification_count": 7,
+          "original_display_label": "Fixture Low Priority Room",
+          "parent_space_ids": [
+            "!space:example.invalid"
+          ],
+          "recency_stamp": 950000,
+          "room_id": "!low-priority-room:example.invalid",
+          "tags": {
+            "favourite": null,
+            "low_priority": {
+              "order": "0.25"
+            }
+          },
+          "unread_count": 7
+        },
+        {
+          "avatar": null,
+          "conversation_activity": null,
           "display_label": "Redacted Fixture Room",
           "display_name": "Redacted Fixture Room",
           "dm_space_ids": [],
@@ -722,10 +790,31 @@
             "category": "rooms",
             "collapsed": {
               "favourites": false,
-              "low_priority": false,
+              "low_priority": true,
               "not_joined": false
             },
-            "scope_preferences": {}
+            "scope_preferences": {
+              "!space:example.invalid": {
+                "dms": {
+                  "collapsed": false,
+                  "sort": {
+                    "kind": "activity"
+                  }
+                },
+                "low_priority": {
+                  "collapsed": true,
+                  "sort": {
+                    "kind": "activity"
+                  }
+                },
+                "rooms": {
+                  "collapsed": false,
+                  "sort": {
+                    "kind": "activity"
+                  }
+                }
+              }
+            }
           },
           "thread_list_order": {
             "kind": "latestReply"
@@ -771,7 +860,8 @@
         {
           "avatar": null,
           "child_room_ids": [
-            "!room:example.invalid"
+            "!room:example.invalid",
+            "!low-priority-room:example.invalid"
           ],
           "display_name": "Fixture Space",
           "space_id": "!space:example.invalid"

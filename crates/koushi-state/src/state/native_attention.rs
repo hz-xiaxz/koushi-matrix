@@ -160,16 +160,24 @@ pub fn native_attention_projection_from_rooms(
             badge_excluded_room_count += 1;
             continue;
         }
+        // Low priority is excluded from the persistent Dock badge as well as
+        // from candidates, matching the Home/Space aggregates
+        // (state-machine.md, "Sidebar Sections And Low Priority").
+        if room.tags.low_priority.is_some() {
+            badge_excluded_room_count += 1;
+            continue;
+        }
         badge_room_count += 1;
         badge_count += room.unread_count;
 
-        let excluded_from_attention = room.tags.low_priority.is_some()
-            || (room.is_dm
-                && room
-                    .dm_user_ids
-                    .iter()
-                    .any(|user_id| input.ignored_user_ids.contains(user_id)));
-        if excluded_from_attention {
+        // An ignored-user DM keeps its raw Dock contribution and is excluded
+        // from transient candidates and attention totals only.
+        let ignored_user_dm = room.is_dm
+            && room
+                .dm_user_ids
+                .iter()
+                .any(|user_id| input.ignored_user_ids.contains(user_id));
+        if ignored_user_dm {
             continue;
         }
 

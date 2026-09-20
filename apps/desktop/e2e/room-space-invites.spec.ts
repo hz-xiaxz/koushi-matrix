@@ -1636,7 +1636,11 @@ test("room tag context menu dispatches typed commands and waits for Rust section
         ),
         sections: {
           ...snapshot.sidebar.sections,
-          rooms: snapshot.sidebar.sections.rooms.filter((room) => room.room_id !== roomId),
+          // #955: a favourite stays in the visible Rooms section; `favourites`
+          // is the derived subset, not a separate section.
+          rooms: snapshot.sidebar.sections.rooms.map((room) =>
+            room.room_id === roomId ? favouriteItem : room
+          ),
           favourites: [
             ...snapshot.sidebar.sections.favourites,
             favouriteItem
@@ -1721,10 +1725,9 @@ test("room tag context menu dispatches typed commands and waits for Rust section
           favourites: snapshot.sidebar.sections.favourites.filter(
             (room) => room.room_id !== roomId
           ),
-          rooms: [
-            ...snapshot.sidebar.sections.rooms,
-            roomItem
-          ]
+          rooms: snapshot.sidebar.sections.rooms.map((room) =>
+            room.room_id === roomId ? roomItem : room
+          )
         }
       }
     });
@@ -1889,10 +1892,13 @@ test("room sections follow Element-aligned order and render Rust-owned counts", 
         dm_highlight_count: 0,
         sections: {
           favourites: rooms.filter((room) => room.tags.favourite).map(toRoomListItem),
+          // #955: Rooms carries favourites; low priority is its own section.
           rooms: rooms
-            .filter((room) => !room.is_dm && !room.tags.favourite && !room.tags.low_priority)
+            .filter((room) => !room.is_dm && !room.tags.low_priority)
             .map(toRoomListItem),
-          people: rooms.filter((room) => room.is_dm).map(toRoomListItem),
+          people: rooms
+            .filter((room) => room.is_dm && !room.tags.low_priority)
+            .map(toRoomListItem),
           low_priority: rooms.filter((room) => room.tags.low_priority).map(toRoomListItem),
           not_joined: []
         }
@@ -1907,19 +1913,28 @@ test("room sections follow Element-aligned order and render Rust-owned counts", 
   await expect(roomsSection).toBeVisible();
   await expect(dmsSection.getByRole("button", { name: "Direct Person" })).toBeVisible();
 
+  const lowPrioritySection = page.locator('[data-room-section="low-priority"]');
   await expect
     .poll(() =>
       page.locator(".sidebar .room-section").evaluateAll((sections) =>
         sections.map((section) => section.getAttribute("data-room-section"))
       )
     )
-    .toEqual(["rooms", "dms"]);
+    .toEqual(["rooms", "dms", "low-priority"]);
 
-  await expect(roomsSection.locator(".section-count")).toHaveText("3");
-  await expect(dmsSection.locator(".section-count")).toHaveText("1");
+  // #955: Rooms/DMs headings carry the Rust unread total, not a room count,
+  // and low priority is a separate section that never contributes to it.
+  await expect(roomsSection.locator(".section-unread-count")).toHaveText("1");
+  await expect(dmsSection.locator(".section-unread-count")).toHaveText("2");
+  await expect(roomsSection.locator(".section-count")).toHaveCount(0);
+  await expect(lowPrioritySection.locator(".section-unread-count")).toHaveCount(0);
   await expect(
     roomsSection.getByRole("button", { name: "Plain Room" })
   ).toBeVisible();
+  await expect(
+    lowPrioritySection.getByRole("button", { name: "Low Priority Room" })
+  ).toBeVisible();
+  await expect(roomsSection.getByRole("button", { name: "Low Priority Room" })).toHaveCount(0);
 
   const favouriteRoom = roomsSection.getByRole("button", { name: "Favourite Room" });
   await expect(favouriteRoom).toHaveAttribute("data-mention-count", "1");
@@ -1945,7 +1960,7 @@ test("room sections follow Element-aligned order and render Rust-owned counts", 
     });
     window.__harness.pushStateUpdate();
   });
-  await expect(roomsSection.getByRole("button", { name: "Low Priority Room" })).toBeVisible();
+  await expect(lowPrioritySection.getByRole("button", { name: "Low Priority Room" })).toBeVisible();
 });
 
 test("category unread badges keep DMs and Rooms attention visible from Rust sidebar counts", async ({
@@ -1964,20 +1979,22 @@ test("category unread badges keep DMs and Rooms attention visible from Rust side
         unread_count: 0,
         highlight_count: 0
       }));
+    // The conversation totals (67 / 63) are deliberately unrelated to the Rust
+    // unread totals (5 / 3) so a badge computed from visible rows would fail.
     window.__harness.setSnapshot({
       ...snapshot,
       sidebar: {
         ...snapshot.sidebar,
-        global_dms: roomListItems("dm", 58),
-        space_rooms: roomListItems("room", 46),
+        global_dms: roomListItems("dm", 63),
+        space_rooms: roomListItems("room", 67),
         dm_unread_count: 3,
         space_unread_count: 5,
         dm_highlight_count: 0,
         space_highlight_count: 2,
         sections: {
           favourites: [],
-          rooms: roomListItems("room", 46),
-          people: roomListItems("dm", 58),
+          rooms: roomListItems("room", 67),
+          people: roomListItems("dm", 63),
           low_priority: [],
           not_joined: []
         }
@@ -1990,8 +2007,38 @@ test("category unread badges keep DMs and Rooms attention visible from Rust side
   const rooms = page.locator('[data-room-section="rooms"]');
   await expect(dms).toBeVisible();
   await expect(rooms).toBeVisible();
-  await expect(dms.locator(".section-count")).toHaveText("58");
-  await expect(rooms.locator(".section-count")).toHaveText("46");
+  await expect(rooms.locator(".section-unread-count")).toHaveText("5");
+  await expect(dms.locator(".section-unread-count")).toHaveText("3");
+  await expect(rooms.locator(".section-count")).toHaveCount(0);
+  await expect(dms.locator(".section-count")).toHaveCount(0);
+  await expect(rooms.getByLabel("Rooms unread: 5")).toBeVisible();
+  await expect(dms.getByLabel("DMs unread: 3")).toBeVisible();
+  // The badge uses the shared danger token in both themes rather than a
+  // hard-coded colour, and never conveys the count by colour alone.
+  const badgeMatchesDangerToken = async () =>
+    rooms.locator(".section-unread-count").evaluate((node) => {
+      const probe = document.createElement("span");
+      probe.style.backgroundColor = "var(--danger)";
+      document.body.append(probe);
+      const expected = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      const actual = getComputedStyle(node).backgroundColor;
+      return { actual, expected };
+    });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    const { actual, expected } = await badgeMatchesDangerToken();
+    expect(actual).toBe(expected);
+    expect(actual).not.toBe("rgba(0, 0, 0, 0)");
+  }
+  await page.emulateMedia({ colorScheme: "light" });
+
+  // Collapsing keeps the Rust total visible; filtering rows must not change it.
+  await rooms.getByRole("button", { name: "Rooms", exact: true }).click();
+  await expect(rooms.locator(".section-unread-count")).toHaveText("5");
+  await page.getByRole("searchbox", { name: /filter/i }).fill("no-such-conversation");
+  await expect(dms.locator(".section-unread-count")).toHaveText("3");
+  await page.getByRole("searchbox", { name: /filter/i }).fill("");
 
   await page.evaluate(() => {
     const snapshot = window.__harness.currentSnapshot();
@@ -2008,8 +2055,9 @@ test("category unread badges keep DMs and Rooms attention visible from Rust side
     window.__harness.pushStateUpdate();
   });
 
-  await expect(dms.locator(".section-count")).toHaveText("58");
-  await expect(rooms.locator(".section-count")).toHaveText("46");
+  await expect(rooms.locator(".section-unread-count")).toHaveText("99+");
+  await expect(rooms.getByLabel("Rooms unread: 120")).toBeVisible();
+  await expect(dms.locator(".section-unread-count")).toHaveCount(0);
 });
 
 test("notification attention snapshot drives room, space, thread, and click routing headlessly", async ({
@@ -2189,9 +2237,20 @@ test("notification attention snapshot drives room, space, thread, and click rout
   });
 
   await expect(page.locator('[data-room-section="rooms"]')).toBeVisible();
+  // #955: the low-priority room lives in its own section and its 8 unread
+  // messages stay out of the Rooms heading badge, the Space rail count, and
+  // the Dock-mirroring window title.
+  await expect(
+    page
+      .locator('[data-room-section="low-priority"]')
+      .getByRole("button", { name: "Quiet Low Priority" })
+  ).toBeVisible();
   await expect(
     page.locator('[data-room-section="rooms"]').getByRole("button", { name: "Quiet Low Priority" })
-  ).toBeVisible();
+  ).toHaveCount(0);
+  await expect(
+    page.locator('[data-room-section="rooms"] .section-unread-count')
+  ).toHaveText("4");
   const attentionRoom = page.getByRole("button", { name: "Attention Room" });
   const lowPriorityRoom = page.getByRole("button", { name: "Quiet Low Priority" });
   await expect(attentionRoom.locator(".room-count")).toHaveText("4");

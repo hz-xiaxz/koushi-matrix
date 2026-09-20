@@ -483,7 +483,13 @@ An in-process actor system in `koushi-core`:
   `RoomSummary.tags` by the same Rust-owned room-list normalization path, and
   sidebar unread/mention affordances consume Rust-owned unread/highlight counts
   from `SidebarModel`. React must not derive favourite, low-priority, unread,
-  or mention membership from local UI state. Selecting a Space demands direct
+  or mention membership from local UI state. The visible Rooms / DMs / Low
+  priority sections are the mutually exclusive `SidebarModel.sections`
+  projection, and low-priority conversations are excluded from every
+  notification, Dock badge, and sidebar unread/highlight aggregate while keeping
+  their own raw room counts; see the state-machine
+  [Sidebar Sections And Low Priority](state-machine.md#sidebar-sections-and-low-priority)
+  contract. Selecting a Space demands direct
   Space-member hydration through the existing SDK member API and the same live
   room-list observer; the members panel consumes that source and is never the
   hydration trigger. Partial direct-member snapshots preserve last-known

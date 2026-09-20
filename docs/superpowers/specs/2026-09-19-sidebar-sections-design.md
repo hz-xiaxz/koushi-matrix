@@ -1,8 +1,18 @@
 # Rooms / DMs セクション型サイドバー詳細設計
 
 Status: implemented baseline — Rooms / DMs の基本 UI、セクション別設定、会話時刻の保護を実装済み。
+Superseded in part by #955 (2026-09-20)。
 Date: 2026-09-19
 Implementation base: `origin/main`。この文書の現状調査と実装は現在の checkout に基づく。
+
+> **2026-09-20 追記 (#955)**: §3.1 で Low priority セクションを削除した決定は取り消した。
+> Rooms / DMs の下に低優先度セクションを復活させ、`SidebarModel.sections` の
+> Rooms / People / Low priority を排他的な表示セクションとする。低優先度は通知・音・
+> Dock バッジ・Home / Space / Rooms / DMs の未読集計へ寄与しない。開閉は
+> `SidebarSectionKind::LowPriority` の scope 設定で保存し、旧
+> `SidebarCollapsedSections.low_priority` を未設定時の互換 fallback に使う。
+> 正となる契約は
+> [state-machine.md](../../architecture/state-machine.md#sidebar-sections-and-low-priority)。
 
 実装済み範囲は、Rust の `SidebarModel` による Rooms / DMs の対象・順序・開閉状態の投影、
 `SettingsPatch.sidebar_section` による Home / Space ごとの設定保存、React の共通見出しと
@@ -101,8 +111,9 @@ Home の Activity / Explore / Invites は既存位置に残し、Space に全ア
 
 ### 3.1 お気に入り・低優先・未参加との整合
 
-二つの主セクションに統一するため、お気に入り・低優先の独立セクションは廃止する。
-tag は削除せず、元の Rooms または DMs の行に既存の意味を持つ印として表示する。
+二つの主セクションに統一するため、お気に入りの独立セクションは廃止する。
+低優先の独立セクションも当初は廃止したが、#955 で復活させた（冒頭の追記を参照）。
+tag は削除せず、お気に入りは元の Rooms または DMs の行に既存の意味を持つ印として表示する。
 お気に入りを先頭へ固定する隠れた順位は入れず、選んだ並べ替えをセクション全体に適用する。
 低優先 tag を通知ミュートへ変換しない。tag 変更操作・通知設定は既存 Rust 契約を使う。
 この分類変更は本設計で提案する製品判断であり、実装時に規範と tag 移動テストを更新する。
@@ -293,8 +304,9 @@ account default へ一度だけ移す。旧 `Activity` は新メニューでも�
 既存設定から意図的な選択か旧既定値かを判別できない場合も、勝手に新着順へ変えない。
 
 `sidebar.category` は両方を同時表示するため廃止し、旧選択から片方を格納しない。
-旧 favourites / low_priority の格納状態は、会話本体を隠さないため新 Rooms/DMs の格納に転用しない。
-tag 自体は保持する。
+旧 favourites の格納状態は、会話本体を隠さないため新 Rooms/DMs の格納に転用しない。
+tag 自体は保持する。旧 `low_priority` の格納状態は、#955 で復活した低優先度セクションの
+scope 設定が未保存のときの互換 fallback として引き続き読む。
 
 移行済み marker と新設定は同じ暗号化保存で原子的に確定する。
 失敗時は移行完了とせず、旧値の互換読取で表示し、次回再試行する。

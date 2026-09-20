@@ -1944,6 +1944,23 @@ button:disabled {
   color: var(--text-faint);
 }
 
+/* Rust-owned section unread total (#955). It reuses the room-row count tokens
+   so the sidebar keeps one badge size, and it carries an accessible name with
+   the exact count because color alone must not convey the meaning. */
+.section-unread-count {
+  min-inline-size: var(--room-count-min-inline-size);
+  block-size: var(--room-count-block-size);
+  padding-inline: var(--room-count-padding-inline);
+  border-radius: var(--r-pill);
+  font-size: var(--room-count-font-size);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--room-count-block-size);
+  text-align: center;
+  color: var(--brand-contrast);
+  background: var(--danger);
+}
+
 .room-list-empty {
   padding: 6px 12px 8px;
   color: var(--text-faint);

@@ -61,6 +61,28 @@ history access. In encrypted rooms, reading older history also requires the
 appropriate encryption keys. Changing a setting does not revoke events or keys
 already shared.
 
+## Conversation list sections
+
+The conversation list shows **Rooms** above **DMs**. Each heading can be
+collapsed and sorted from its own menu. The number to the right of a heading is
+its unread total for the current Home or Space view; it turns into a red badge
+when there is something unread, shows `99+` above 99, and disappears at zero. It
+stays on the Rust-reported total for the whole view, so filtering the list or
+collapsing the section does not change it.
+
+A **Low priority** section appears below **DMs** when any conversation in the
+current view carries the low-priority tag. Low-priority rooms and DMs are listed
+there instead of in **Rooms** or **DMs**. Set or clear the tag from a
+conversation's context menu; the section is hidden when it is empty and can be
+collapsed like the others.
+
+Low priority quiets a conversation without muting or reading it: it raises no
+desktop notification or sound, and it is excluded from the Dock or taskbar
+badge, the Home and Space rail counts, and the **Rooms** and **DMs** heading
+badges, mentions included. The conversation's own row still shows its real
+unread count, nothing is marked as read, and removing the tag restores its
+contribution without replaying old notifications.
+
 ## Room information and notifications
 
 Open **Room info** to find members, files, room notification options, and settings

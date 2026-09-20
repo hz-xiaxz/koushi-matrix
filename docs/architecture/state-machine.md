@@ -914,6 +914,54 @@ stateDiagram-v2
 - Successful tag changes emit `RoomListChanged`. Phase B room-list sections
   (Favourites / People / Rooms / Low priority) are derived from this Rust-owned
   snapshot, not from React-local menu state.
+
+### Sidebar Sections And Low Priority
+
+`SidebarModel.sections` is the Rust-owned projection React renders. The three
+visible conversation sections are mutually exclusive over the current Home or
+Space scope, so one conversation appears exactly once:
+
+- `sections.rooms`: in-scope non-DM rooms without the low-priority tag.
+  Favourites stay in this section; `sections.favourites` remains a derived
+  convenience list of the same items and is not a separate visible section.
+- `sections.people`: in-scope DMs without the low-priority tag.
+- `sections.low_priority`: in-scope low-priority conversations, rooms and DMs
+  together, in the Rooms sort order.
+
+`space_rooms` and `global_dms` remain the unsectioned in-scope lists. They are
+inputs to the sections and to Rust-owned aggregates; they are not the render
+source for a visible section. Home covers every joined conversation, a Space
+covers its child rooms plus `dm_space_ids`-scoped DMs, and a low-priority
+conversation outside the active Space is not mixed in. React must not classify
+tags, merge sections, or hide a section by tag.
+
+Low priority is an attention-suppression tag, not a mute and not a read action:
+
+- Low-priority conversations do not contribute to OS notifications, notification
+  sound, the Dock/taskbar badge count, the Home and Space rail unread/highlight
+  totals, or the Rooms/DMs section unread/highlight aggregates, including their
+  mentions. The existing Activity recent/unread exclusion is unchanged. Pending
+  invites are counted separately and stay unaffected.
+- The room's own raw `unread_count`, notification/highlight counts, and read
+  receipts are preserved, so the low-priority row still shows real unread state.
+  Setting the tag never marks the room read and never writes a server push-rule
+  mute.
+- Tag set, tag removal, and other-client account-data sync recompute sections
+  and aggregates from the next Rust snapshot. Removing the tag restores badge
+  contribution without replaying notifications or sound for existing messages,
+  because a metadata-only observation raises no transient candidate.
+- `SidebarModel.space_unread_count` / `dm_unread_count` /
+  `space_highlight_count` / `dm_highlight_count` are the Rooms and DMs section
+  aggregates for the current scope. They exclude low-priority and muted
+  conversations and are not recomputed from visible rows: React renders the
+  Rust value even when search hides rows or a section is collapsed, and it must
+  not sum per-room counts or add highlights on top of the unread total. The
+  low-priority section itself gets no aggregate attention badge.
+- The low-priority section is collapsible per scope through
+  `SidebarSectionKind::LowPriority` and `SidebarScopeSettings.low_priority`.
+  When that scoped preference is unset, the legacy device-global
+  `SidebarCollapsedSections.low_priority` flag is the compatibility fallback.
+  The section has no independent sort; it follows the scope's Rooms sort.
 - `RoomActor` routes `RoomCommand::SetTag` / `RemoveTag` through
   `koushi-sdk` tag wrappers, emits `RoomEvent::RoomTagSet` /
   `RoomTagRemoved`, reliably dispatches the reducer action that updates
@@ -3837,13 +3885,16 @@ stateDiagram-v2
 - Windows taskbar overlay icon routing is represented by the
   `overlay_icon` capability, separate from generic badge count capability.
 - The Phase A core projection is `native_attention_state_from_rooms`. Its
-  persistent Dock badge sums raw unread messages once per unique non-muted room;
-  a manual marked-unread flag without raw unread does not fabricate a native
-  count. Low-priority rooms and ignored-user DMs remain in that persistent raw
-  account count, matching Home, but are excluded from transient candidates and
-  notification/highlight attention totals. Muted rooms are excluded from both
-  persistent and transient native attention. Mention-only rooms retain their raw
-  Dock contribution while candidate eligibility still requires a highlight.
+  persistent Dock badge sums raw unread messages once per unique non-muted,
+  non-low-priority room; a manual marked-unread flag without raw unread does not
+  fabricate a native count. Low-priority rooms are excluded from the persistent
+  raw account count as well as from transient candidates and
+  notification/highlight attention totals, matching the Home and Space
+  aggregates in "Sidebar Sections And Low Priority". Ignored-user DMs stay in
+  the persistent raw count and are excluded from candidates and attention totals
+  only. Muted rooms are excluded from both persistent and transient native
+  attention. Mention-only rooms retain their raw Dock contribution while
+  candidate eligibility still requires a highlight.
   The projection prefers `mention` over `dm` over `message` candidates,
   suppresses initial sync/backfill/self/focused-room observations, suppresses
   duplicate candidates, and clears badge/candidate state when eligible unread
@@ -4318,6 +4369,10 @@ stateDiagram-v2
 - Density defaults to Comfortable; sidebar category defaults to Rooms; collapse
   flags default open; recent emoji is a stable distinct MRU capped at 24. Legacy
   settings JSON backfills all four defaults before projection.
+- `SidebarScopeSettings` holds the per-scope Rooms, DMs, and Low priority
+  section preferences. An absent `low_priority` entry inherits the legacy
+  device-global `SidebarCollapsedSections.low_priority` flag and the scope's
+  Rooms sort, so an older persisted settings file keeps its collapse choice.
 - Settings values are non-secret by construction. They must never include
   access tokens, refresh tokens, passwords, recovery material, SDK store keys,
   search index keys, local unlock secrets, raw homeserver credentials, raw

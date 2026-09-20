@@ -24,6 +24,10 @@ feasibility gate. Historical plans below are not the new implementation brief.
 
 - Rooms / DMs collapsible sidebar sections (design and implementation record):
   [2026-09-19-sidebar-sections-design.md](../superpowers/specs/2026-09-19-sidebar-sections-design.md)
+  — its Low priority removal is superseded by #955 below.
+
+- Low priority section restoration and Rooms / DMs unread badges (#955):
+  [2026-09-20-issue955-low-priority-and-section-unread.md](../superpowers/plans/2026-09-20-issue955-low-priority-and-section-unread.md)
 
 - macOS auto-update with portable desktop state (#878):
   [2026-09-12-issue878-macos-auto-update.md](../superpowers/plans/2026-09-12-issue878-macos-auto-update.md)

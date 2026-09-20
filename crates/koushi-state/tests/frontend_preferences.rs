@@ -207,7 +207,8 @@ fn rust_sidebar_projects_complete_sections_order_and_local_space_presentation() 
             .iter()
             .map(|item| item.display_name.as_str())
             .collect::<Vec<_>>(),
-        ["Beta", "Alpha"]
+        // #955: `sections.rooms` carries favourites and excludes low priority.
+        ["Favourite", "Beta", "Alpha"]
     );
     assert_eq!(recent.sections.favourites.len(), 1);
     assert_eq!(recent.sections.low_priority.len(), 1);
@@ -222,7 +223,7 @@ fn rust_sidebar_projects_complete_sections_order_and_local_space_presentation() 
             .iter()
             .map(|item| item.display_name.as_str())
             .collect::<Vec<_>>(),
-        ["Alpha", "Beta"]
+        ["Alpha", "Beta", "Favourite"]
     );
 
     state.settings.values.room_list_sort = RoomListSort::Activity;
@@ -237,6 +238,7 @@ fn rust_sidebar_projects_complete_sections_order_and_local_space_presentation() 
                 sort: RoomListSort::RecentFirst,
                 ..SidebarSectionSettings::default()
             },
+            low_priority: None,
         },
     );
     let independently_sorted = compose_sidebar_for_state(&state);

@@ -258,6 +258,11 @@ export interface SidebarSettings {
 export interface SidebarScopeSettings {
   rooms: SidebarSectionSettings;
   dms: SidebarSectionSettings;
+  /**
+   * Absent until this scope's Low priority section is edited; the legacy
+   * device-global `SidebarCollapsedSections.low_priority` flag is the fallback.
+   */
+  low_priority?: SidebarSectionSettings | null;
 }
 
 export interface SidebarSectionSettings {
@@ -265,7 +270,7 @@ export interface SidebarSectionSettings {
   sort: RoomListSort;
 }
 
-export type SidebarSectionKind = "rooms" | "dms";
+export type SidebarSectionKind = "rooms" | "dms" | "lowPriority";
 
 export interface SidebarSectionPatch {
   scope: string;
@@ -2271,9 +2276,14 @@ export interface SidebarModel {
   dms_sort?: RoomListSort;
   rooms_collapsed?: boolean;
   dms_collapsed?: boolean;
+  low_priority_collapsed?: boolean;
   sections: SidebarSections;
 }
 
+/**
+ * `rooms`, `people`, and `low_priority` are the mutually exclusive visible
+ * sections projected by Rust. `favourites` is a derived subset of `rooms`.
+ */
 export interface SidebarSections {
   favourites: RoomListItem[];
   rooms: RoomListItem[];

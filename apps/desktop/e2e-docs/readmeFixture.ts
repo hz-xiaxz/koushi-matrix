@@ -132,10 +132,11 @@ export function createReadmeFixture(source: DesktopSnapshot): ReadmeFixture {
   const roomItems = [
     roomListItem(general),
     roomListItem(design, { displayCount: 3 }),
+    roomListItem(papers),
     roomListItem(random)
   ];
   const favouriteItems = [roomListItem(papers)];
-  const dmItems = [roomListItem(aki, { kind: "dm" })];
+  const dmItems = [roomListItem(aki, { kind: "dm", displayCount: 1 })];
   const generation = (source.state_generation ?? 0) + 1;
   const snapshot: DesktopSnapshot = {
     ...source,
@@ -220,16 +221,18 @@ export function createReadmeFixture(source: DesktopSnapshot): ReadmeFixture {
         { space_id: PHOTON_SPACE_ID, display_name: "Photon Reading Group", avatar: null, unread_count: 0, highlight_count: 0, is_active: false },
         { space_id: RELEASE_SPACE_ID, display_name: "Release Crew", avatar: null, unread_count: 0, highlight_count: 0, is_active: false }
       ],
-      space_rooms: [roomListItem(general), roomListItem(design, { displayCount: 3 }), roomListItem(papers), roomListItem(random)],
+      space_rooms: roomItems,
       not_joined_space_rooms: [],
       global_dms: dmItems,
       space_unread_count: 3,
-      dm_unread_count: 0,
+      dm_unread_count: 1,
       space_highlight_count: 0,
       dm_highlight_count: 0,
       sections: {
+        // Rooms carries favourites; People carries DMs; the sections are
+        // mutually exclusive (#955).
         favourites: favouriteItems,
-        rooms: [...roomItems, ...dmItems],
+        rooms: roomItems,
         people: dmItems,
         low_priority: [],
         not_joined: []

@@ -132,6 +132,9 @@ fn home_and_active_space_sorts_publish_order_and_preserve_other_section() {
                         assert_eq!(sidebar.rooms_sort, before.rooms_sort);
                         &sidebar.global_dms
                     }
+                    // Low priority carries no independent sort (#955); it is
+                    // covered by `low_priority_collapse_publishes_per_scope`.
+                    SidebarSectionKind::LowPriority => unreachable!(),
                 };
                 assert_eq!(
                     rows.iter()
@@ -252,4 +255,113 @@ fn serialized_settings_reload_publishes_current_scope_preferences() {
         assert_eq!(sidebar.rooms_sort, RoomListSort::NormalLocale);
         assert_eq!(sidebar.dms_sort, RoomListSort::RecentFirst);
     }
+}
+
+/// #955: the Low priority section stores only a per-scope collapse choice and
+/// publishes it on the same immediate delta lane as Rooms and DMs.
+#[test]
+fn low_priority_collapse_publishes_per_scope() {
+    for active in [None, Some(SPACE)] {
+        let mut previous = fixture(active);
+        previous
+            .rooms
+            .iter_mut()
+            .for_each(|room| room.tags.low_priority = None);
+        for collapsed in [true, false] {
+            let mut next = previous.clone();
+            update(
+                &mut next,
+                patch(
+                    active,
+                    SidebarSectionKind::LowPriority,
+                    Some(collapsed),
+                    None,
+                ),
+            );
+            let sidebar = build_state_delta(1, &previous, &next)
+                .unwrap()
+                .changed
+                .sidebar
+                .expect("Low priority collapse must publish without switching spaces");
+            assert_eq!(sidebar, compose_sidebar_for_state(&next));
+            assert_eq!(sidebar.low_priority_collapsed, collapsed);
+            assert!(!sidebar.rooms_collapsed);
+            assert!(!sidebar.dms_collapsed);
+            previous = next;
+        }
+
+        // An inactive scope's Low priority choice must not change this view.
+        let inactive = if active.is_none() { Some(OTHER) } else { None };
+        let mut next = previous.clone();
+        update(
+            &mut next,
+            patch(inactive, SidebarSectionKind::LowPriority, Some(true), None),
+        );
+        let delta = build_state_delta(1, &previous, &next).unwrap();
+        assert!(delta.changed.settings.is_some());
+        assert!(delta.changed.sidebar.is_none());
+    }
+}
+
+/// #955: a tag-only account-data change re-projects the sidebar sections and
+/// the native attention totals, without replaying a notification candidate.
+#[test]
+fn a_low_priority_tag_change_republishes_sections_and_native_attention() {
+    let mut previous = fixture(None);
+    // Tag actions are accepted only for a Ready session.
+    previous.session = koushi_state::SessionState::Ready(koushi_state::SessionInfo {
+        homeserver: "https://matrix.example.invalid".to_owned(),
+        user_id: "@fixture:example.invalid".to_owned(),
+        device_id: "FIXTURE_DEVICE".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    });
+    let tagged_room_id = "!C-false:example.invalid";
+    let before = compose_sidebar_for_state(&previous);
+    assert_eq!(before.space_unread_count, 1);
+    assert!(
+        before
+            .sections
+            .rooms
+            .iter()
+            .any(|room| room.room_id == tagged_room_id)
+    );
+    assert!(before.sections.low_priority.is_empty());
+
+    let mut next = previous.clone();
+    reduce(
+        &mut next,
+        AppAction::RoomTagsUpdated {
+            room_id: tagged_room_id.to_owned(),
+            tags: koushi_state::RoomTags {
+                favourite: None,
+                low_priority: Some(koushi_state::RoomTagInfo { order: None }),
+            },
+        },
+    );
+
+    let delta = build_state_delta(1, &previous, &next).unwrap();
+    let sidebar = delta
+        .changed
+        .sidebar
+        .expect("a tag-only change must republish the sidebar");
+    assert_eq!(sidebar, compose_sidebar_for_state(&next));
+    assert_eq!(
+        sidebar
+            .sections
+            .low_priority
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<Vec<_>>(),
+        [tagged_room_id]
+    );
+    assert!(
+        !sidebar
+            .sections
+            .rooms
+            .iter()
+            .any(|room| room.room_id == tagged_room_id)
+    );
+    assert_eq!(sidebar.space_unread_count, 0);
+    assert_eq!(sidebar.account_home.unread_count, 1, "the DM still counts");
+    assert!(next.native_attention.summary.candidate.is_none());
 }

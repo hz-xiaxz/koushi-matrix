@@ -54,6 +54,8 @@ import {
   type RoomNotificationSettings,
   type StageUploadBytesRequestItem,
   type SettingsPatch,
+  type SidebarScopeSettings,
+  type SidebarSectionKind,
   type StagedUploadItem,
   type StagedUploadOutputSelection,
   type StagedUploadCompressionChoice
@@ -434,6 +436,12 @@ function defaultCjkTextPolicyState(): DesktopSnapshot["state"]["domain"]["cjk_te
   };
 }
 
+const SIDEBAR_SECTION_FIELD = {
+  rooms: "rooms",
+  dms: "dms",
+  lowPriority: "low_priority"
+} as const satisfies Record<SidebarSectionKind, keyof SidebarScopeSettings>;
+
 function applySettingsPatch(
   values: DesktopSnapshot["state"]["domain"]["settings"]["values"],
   patch: SettingsPatch
@@ -446,14 +454,18 @@ function applySettingsPatch(
           rooms: { collapsed: false, sort: values.room_list_sort },
           dms: { collapsed: false, sort: values.room_list_sort }
         };
-        const currentSection = scope[sidebarSection.section];
+        // `SidebarSectionKind` is camelCase on the wire; the stored scope keys
+        // are the snake_case Rust field names.
+        const field = SIDEBAR_SECTION_FIELD[sidebarSection.section];
+        const currentSection =
+          scope[field] ?? { collapsed: false, sort: scope.rooms?.sort ?? values.room_list_sort };
         return {
           ...sidebar,
           scope_preferences: {
             ...sidebar.scope_preferences,
             [sidebarSection.scope]: {
               ...scope,
-              [sidebarSection.section]: {
+              [field]: {
                 ...currentSection,
                 ...(sidebarSection.collapsed === undefined
                   ? {}
@@ -1662,11 +1674,18 @@ mock.setCommandResponse("update_settings", ({ patch }: { patch: SettingsPatch })
                   sidebarSection.collapsed ?? currentSnapshot.sidebar.rooms_collapsed ?? false,
                 rooms_sort: sidebarSection.sort ?? currentSnapshot.sidebar.rooms_sort
               }
-            : {
-                dms_collapsed:
-                  sidebarSection.collapsed ?? currentSnapshot.sidebar.dms_collapsed ?? false,
-                dms_sort: sidebarSection.sort ?? currentSnapshot.sidebar.dms_sort
-              })
+            : sidebarSection.section === "lowPriority"
+              ? {
+                  low_priority_collapsed:
+                    sidebarSection.collapsed ??
+                    currentSnapshot.sidebar.low_priority_collapsed ??
+                    false
+                }
+              : {
+                  dms_collapsed:
+                    sidebarSection.collapsed ?? currentSnapshot.sidebar.dms_collapsed ?? false,
+                  dms_sort: sidebarSection.sort ?? currentSnapshot.sidebar.dms_sort
+                })
         }
       : currentSnapshot.sidebar;
   return setCurrentSnapshot({

@@ -29,9 +29,18 @@ pub struct SidebarModel {
     pub rooms_collapsed: bool,
     #[serde(default)]
     pub dms_collapsed: bool,
+    #[serde(default)]
+    pub low_priority_collapsed: bool,
     pub sections: SidebarSections,
 }
 
+/// The Rust-owned visible sidebar sections.
+///
+/// `rooms`, `people`, and `low_priority` are mutually exclusive over the
+/// current Home/Space scope, so one conversation renders exactly once
+/// (state-machine.md, "Sidebar Sections And Low Priority"). `favourites` is a
+/// derived convenience list of favourite rooms that also appear in `rooms`; it
+/// is not a separate visible section.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SidebarSections {
     pub favourites: Vec<RoomListItem>,
@@ -200,7 +209,7 @@ fn compose_sidebar_with_preferences(
 
     let home_unread_count: u64 = rooms
         .iter()
-        .filter(|room| !room_is_muted(&room.room_id, room_notification_settings))
+        .filter(|room| contributes_attention(room, room_notification_settings))
         .map(room_activity_unread_count)
         .sum();
     let account_home = AccountHomeItem {
@@ -208,7 +217,7 @@ fn compose_sidebar_with_preferences(
         unread_count: home_unread_count,
         highlight_count: rooms
             .iter()
-            .filter(|room| !room_is_muted(&room.room_id, room_notification_settings))
+            .filter(|room| contributes_attention(room, room_notification_settings))
             .map(|room| room.highlight_count)
             .sum(),
         invite_count: pending_invite_count,
@@ -216,7 +225,7 @@ fn compose_sidebar_with_preferences(
         is_active: active_space_id.is_none(),
     };
 
-    let mut space_rooms: Vec<_> = active_space_id
+    let mut space_room_summaries: Vec<&RoomSummary> = active_space_id
         .and_then(|space_id| spaces.iter().find(|space| space.space_id == space_id))
         .map(|space| {
             space
@@ -227,15 +236,19 @@ fn compose_sidebar_with_preferences(
                 .collect()
         })
         .unwrap_or_else(|| rooms.iter().filter(|room| !room.is_dm).collect());
-    sort_room_summaries(&mut space_rooms, rooms_sort, room_notification_settings);
-    let space_rooms: Vec<_> = space_rooms
-        .into_iter()
+    sort_room_summaries(
+        &mut space_room_summaries,
+        rooms_sort,
+        room_notification_settings,
+    );
+    let space_rooms: Vec<_> = space_room_summaries
+        .iter()
         .map(|room| room_list_item(room, room_notification_settings))
         .collect();
 
     let not_joined_space_rooms = Vec::new();
 
-    let mut global_dm_rooms: Vec<_> = rooms
+    let mut global_dm_summaries: Vec<&RoomSummary> = rooms
         .iter()
         .filter(|room| {
             room.is_dm
@@ -246,27 +259,48 @@ fn compose_sidebar_with_preferences(
                         .any(|space_id| Some(space_id.as_str()) == active_space_id))
         })
         .collect();
-    sort_room_summaries(&mut global_dm_rooms, dms_sort, room_notification_settings);
-    let global_dms: Vec<_> = global_dm_rooms
-        .into_iter()
+    sort_room_summaries(
+        &mut global_dm_summaries,
+        dms_sort,
+        room_notification_settings,
+    );
+    let global_dms: Vec<_> = global_dm_summaries
+        .iter()
         .map(|room| room_list_item(room, room_notification_settings))
         .collect();
+    // Low priority spans both scope lists and is shown once, in the Rooms
+    // order, so a low-priority DM and room interleave by the same comparator.
+    let mut low_priority_summaries: Vec<&RoomSummary> = space_room_summaries
+        .iter()
+        .chain(global_dm_summaries.iter())
+        .copied()
+        .filter(|room| room.tags.low_priority.is_some())
+        .collect();
+    sort_room_summaries(
+        &mut low_priority_summaries,
+        rooms_sort,
+        room_notification_settings,
+    );
+
     let sections = SidebarSections {
         favourites: space_rooms
             .iter()
-            .filter(|room| room.tags.favourite.is_some())
+            .filter(|room| room.tags.favourite.is_some() && room.tags.low_priority.is_none())
             .cloned()
             .collect(),
         rooms: space_rooms
             .iter()
-            .filter(|room| room.tags.favourite.is_none() && room.tags.low_priority.is_none())
+            .filter(|room| room.tags.low_priority.is_none())
             .cloned()
             .collect(),
-        people: global_dms.clone(),
-        low_priority: space_rooms
+        people: global_dms
             .iter()
-            .filter(|room| room.tags.low_priority.is_some())
+            .filter(|room| room.tags.low_priority.is_none())
             .cloned()
+            .collect(),
+        low_priority: low_priority_summaries
+            .into_iter()
+            .map(|room| room_list_item(room, room_notification_settings))
             .collect(),
         not_joined: not_joined_space_rooms.clone(),
     };
@@ -274,14 +308,15 @@ fn compose_sidebar_with_preferences(
     SidebarModel {
         active_space_id: active_space_id.map(str::to_owned),
         account_home,
-        space_unread_count: unread_count(&space_rooms, room_notification_settings),
-        dm_unread_count: unread_count(&global_dms, room_notification_settings),
-        space_highlight_count: highlight_count(&space_rooms, room_notification_settings),
-        dm_highlight_count: highlight_count(&global_dms, room_notification_settings),
+        space_unread_count: unread_count(&sections.rooms, room_notification_settings),
+        dm_unread_count: unread_count(&sections.people, room_notification_settings),
+        space_highlight_count: highlight_count(&sections.rooms, room_notification_settings),
+        dm_highlight_count: highlight_count(&sections.people, room_notification_settings),
         rooms_sort,
         dms_sort,
         rooms_collapsed: section_settings.rooms.collapsed,
         dms_collapsed: section_settings.dms.collapsed,
+        low_priority_collapsed: section_settings.low_priority.unwrap_or_default().collapsed,
         sections,
         space_rail,
         space_rooms,
@@ -325,7 +360,7 @@ fn space_unread_count(
         .iter()
         .filter_map(|room_id| rooms_by_id.get(room_id.as_str()).copied())
         .filter(|room| !room.is_dm)
-        .filter(|room| !room_is_muted(&room.room_id, room_notification_settings))
+        .filter(|room| contributes_attention(room, room_notification_settings))
         .map(room_activity_unread_count)
         .sum()
 }
@@ -340,7 +375,7 @@ fn space_highlight_count(
         .iter()
         .filter_map(|room_id| rooms_by_id.get(room_id.as_str()).copied())
         .filter(|room| !room.is_dm)
-        .filter(|room| !room_is_muted(&room.room_id, room_notification_settings))
+        .filter(|room| contributes_attention(room, room_notification_settings))
         .map(|room| room.highlight_count)
         .sum()
 }
@@ -389,6 +424,18 @@ fn highlight_count(
         .filter(|room| !room_is_muted(&room.room_id, room_notification_settings))
         .map(|room| room.highlight_count)
         .sum()
+}
+
+/// Whether a room feeds the Home/Space/Rooms/DMs attention aggregates.
+///
+/// Muted and low-priority conversations keep their own raw counts but never
+/// contribute to an aggregate badge (state-machine.md, "Sidebar Sections And
+/// Low Priority").
+fn contributes_attention(
+    room: &RoomSummary,
+    room_notification_settings: &HashMap<String, RoomNotificationSettings>,
+) -> bool {
+    room.tags.low_priority.is_none() && !room_is_muted(&room.room_id, room_notification_settings)
 }
 
 fn room_is_muted(

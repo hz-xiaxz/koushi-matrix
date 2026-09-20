@@ -332,6 +332,12 @@ pub struct SidebarScopeSettings {
     pub rooms: SidebarSectionSettings,
     #[serde(default)]
     pub dms: SidebarSectionSettings,
+    /// Absent until this scope's Low priority section is edited. `None` keeps
+    /// the legacy device-global [`SidebarCollapsedSections::low_priority`] flag
+    /// authoritative for the collapse state, so an older persisted settings
+    /// file does not silently expand a section the user had collapsed.
+    #[serde(default)]
+    pub low_priority: Option<SidebarSectionSettings>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -339,6 +345,7 @@ pub struct SidebarScopeSettings {
 pub enum SidebarSectionKind {
     Rooms,
     Dms,
+    LowPriority,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -354,7 +361,8 @@ pub struct SidebarSectionPatch {
 impl SidebarSettings {
     pub fn scope(&self, scope: Option<&str>, fallback_sort: RoomListSort) -> SidebarScopeSettings {
         let scope = scope.unwrap_or("__home__");
-        self.scope_preferences
+        let mut resolved = self
+            .scope_preferences
             .get(scope)
             .copied()
             .unwrap_or_else(|| SidebarScopeSettings {
@@ -366,7 +374,18 @@ impl SidebarSettings {
                     sort: fallback_sort,
                     ..SidebarSectionSettings::default()
                 },
-            })
+                low_priority: None,
+            });
+        // The Low priority section has no independent sort: it follows the
+        // scope's Rooms order. Its unset collapse state falls back to the
+        // legacy device-global flag (state-machine.md, Settings).
+        resolved.low_priority = Some(SidebarSectionSettings {
+            collapsed: resolved
+                .low_priority
+                .map_or(self.collapsed.low_priority, |section| section.collapsed),
+            sort: resolved.rooms.sort,
+        });
+        resolved
     }
 
     pub fn apply_section_patch(&mut self, patch: SidebarSectionPatch, fallback_sort: RoomListSort) {
@@ -378,6 +397,9 @@ impl SidebarSettings {
         let section = match patch.section {
             SidebarSectionKind::Rooms => &mut settings.rooms,
             SidebarSectionKind::Dms => &mut settings.dms,
+            SidebarSectionKind::LowPriority => settings
+                .low_priority
+                .get_or_insert(SidebarSectionSettings::default()),
         };
         if let Some(collapsed) = patch.collapsed {
             section.collapsed = collapsed;
