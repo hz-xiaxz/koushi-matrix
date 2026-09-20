@@ -923,6 +923,11 @@ export type LocalUserAliasUpdateState =
 
 export interface SpaceSummary {
   space_id: string;
+  /**
+   * The Space's canonical `m.room.name`, or null when it has none. An alias or
+   * a computed name is never promoted into it; `display_name` owns those.
+   */
+  raw_name: string | null;
   display_name: string;
   avatar: AvatarImage | null;
   child_room_ids: string[];

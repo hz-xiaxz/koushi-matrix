@@ -71,6 +71,7 @@ fn scale_spaces() -> Vec<SpaceSummary> {
                 .collect();
             SpaceSummary {
                 space_id: space_id(s),
+                raw_name: None,
                 display_name: format!("Space {s}"),
                 avatar: None,
                 child_room_ids: children,

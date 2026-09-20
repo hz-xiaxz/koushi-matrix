@@ -58,6 +58,7 @@ describe("SpaceInfoPanel", () => {
         ]}
         space={{
           space_id: "!space-work:example.invalid",
+          raw_name: null,
           display_name: "Synthetic Workspace",
           avatar: null,
           child_room_ids: ["!room-alpha:example.invalid", "!room-beta:example.invalid"]
@@ -137,6 +138,7 @@ describe("SpaceInfoPanel", () => {
         rooms={[]}
         space={{
           space_id: "!space-work:example.invalid",
+          raw_name: null,
           display_name: "Synthetic Workspace",
           avatar: null,
           child_room_ids: []
@@ -189,6 +191,7 @@ describe("SpaceInfoPanel", () => {
         rooms={[]}
         space={{
           space_id: "!space-work:example.invalid",
+          raw_name: null,
           display_name: "Synthetic Workspace",
           avatar: null,
           child_room_ids: []
@@ -211,6 +214,7 @@ describe("SpaceInfoPanel", () => {
         rooms={[]}
         space={{
           space_id: "!space-work:example.invalid",
+          raw_name: null,
           display_name: "Synthetic Workspace",
           avatar: null,
           child_room_ids: []
@@ -236,5 +240,52 @@ describe("SpaceInfoPanel", () => {
       name: "Research",
       icon: "R"
     });
+  });
+
+  // Issue #960: a local presentation name must not hide what the Space is
+  // called on Matrix, and a Space without an `m.room.name` must not have an
+  // alias or a computed name presented as its canonical one.
+  test("shows the canonical Matrix name and the local name as separate facts", () => {
+    render(
+      <SpaceInfoPanel
+        fallbackName="Fallback"
+        localName="My Shortcut"
+        rooms={[]}
+        space={{
+          space_id: "!space-work:example.invalid",
+          raw_name: "Research Group",
+          display_name: "Research Group",
+          avatar: null,
+          child_room_ids: []
+        }}
+      />
+    );
+
+    const canonical = screen.getByText("Matrix name").closest(".settings-detail-row");
+    expect(canonical?.textContent).toContain("Research Group");
+    const local = screen.getByText("Local name", { selector: "span" }).closest(".settings-detail-row");
+    expect(local?.textContent).toContain("My Shortcut");
+    // The local name still wins the panel title, as it did before.
+    expect(screen.getByRole("heading", { name: "My Shortcut" })).toBeTruthy();
+  });
+
+  test("reports a Space with no m.room.name as unnamed rather than borrowing its computed name", () => {
+    render(
+      <SpaceInfoPanel
+        fallbackName="Fallback"
+        rooms={[]}
+        space={{
+          space_id: "!space-work:example.invalid",
+          raw_name: null,
+          display_name: "Alice and Bob",
+          avatar: null,
+          child_room_ids: []
+        }}
+      />
+    );
+
+    const canonical = screen.getByText("Matrix name").closest(".settings-detail-row");
+    expect(canonical?.textContent).toContain("Not set");
+    expect(canonical?.textContent).not.toContain("Alice and Bob");
   });
 });

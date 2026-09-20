@@ -142,6 +142,7 @@ function readySnapshot(
   const spaces = [
     {
       space_id: SPACE_ID,
+      raw_name: null,
       display_name: SPACE_NAME,
       avatar: null,
       child_room_ids: [ROOM_ID]
@@ -706,6 +707,7 @@ function afterCreateSpaceSnapshot(): DesktopSnapshot {
   const newSpaceId = "!created-space:example.invalid";
   snapshot.state.domain.spaces.push({
     space_id: newSpaceId,
+    raw_name: null,
     display_name: "Created Space",
     avatar: null,
     child_room_ids: []

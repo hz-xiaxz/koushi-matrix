@@ -687,6 +687,7 @@ fn frontend_snapshot_serializes_profile_and_summary_avatars() {
     );
     state.spaces.push(SpaceSummary {
         space_id: "!space:matrix.org".to_owned(),
+        raw_name: None,
         display_name: "Space".to_owned(),
         avatar: Some(room_avatar.clone()),
         child_room_ids: vec![],
@@ -1248,6 +1249,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
     // spaces + rooms
     state.spaces.push(SpaceSummary {
         space_id: "!space:example.invalid".to_owned(),
+        raw_name: None,
         display_name: "Fixture Space".to_owned(),
         avatar: None,
         child_room_ids: vec![

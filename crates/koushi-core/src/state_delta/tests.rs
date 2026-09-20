@@ -664,6 +664,7 @@ fn space_changes_use_a_scoped_delta_when_order_is_stable() {
     let mut previous = AppState::default();
     previous.spaces.push(SpaceSummary {
         space_id: "!space:example.invalid".into(),
+        raw_name: None,
         display_name: "Space".into(),
         avatar: None,
         child_room_ids: Vec::new(),

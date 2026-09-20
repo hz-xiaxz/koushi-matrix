@@ -667,6 +667,7 @@ fn room_list_update_moves_active_room_when_it_leaves_selected_space() {
         session: SessionState::Ready(session_info()),
         spaces: vec![SpaceSummary {
             space_id: "space-a".to_owned(),
+            raw_name: None,
             display_name: "Space A".to_owned(),
             avatar: None,
             child_room_ids: vec!["room-a".to_owned()],
@@ -749,6 +750,7 @@ fn room_list_update_moves_active_room_when_it_leaves_selected_space() {
         AppAction::RoomListUpdated {
             spaces: vec![SpaceSummary {
                 space_id: "space-a".to_owned(),
+                raw_name: None,
                 display_name: "Space A".to_owned(),
                 avatar: None,
                 child_room_ids: vec!["room-b".to_owned()],
@@ -832,6 +834,7 @@ fn room_list_update_moves_active_room_when_it_disappears_from_selected_space() {
         session: SessionState::Ready(session_info()),
         spaces: vec![SpaceSummary {
             space_id: "space-a".to_owned(),
+            raw_name: None,
             display_name: "Space A".to_owned(),
             avatar: None,
             child_room_ids: vec!["room-a".to_owned()],
@@ -883,6 +886,7 @@ fn room_list_update_moves_active_room_when_it_disappears_from_selected_space() {
         AppAction::RoomListUpdated {
             spaces: vec![SpaceSummary {
                 space_id: "space-a".to_owned(),
+                raw_name: None,
                 display_name: "Space A".to_owned(),
                 avatar: None,
                 child_room_ids: vec!["room-b".to_owned()],
@@ -970,6 +974,7 @@ fn room_list_update_keeps_active_dm_global_with_selected_space() {
         AppAction::RoomListUpdated {
             spaces: vec![SpaceSummary {
                 space_id: "space-a".to_owned(),
+                raw_name: None,
                 display_name: "Space A".to_owned(),
                 avatar: None,
                 child_room_ids: vec!["room-a".to_owned()],

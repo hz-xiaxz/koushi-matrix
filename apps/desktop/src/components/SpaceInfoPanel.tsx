@@ -82,6 +82,29 @@ export function SpaceInfoPanel({
         <SummaryTile label={t("room.unread")} value={String(unreadTotal)} />
       </div>
 
+      {space ? (
+        <section className="settings-section" aria-label={t("space.names")}>
+          <h3>{t("space.names")}</h3>
+          <div className="settings-detail-list">
+            {/*
+              Issue #960: the canonical `m.room.name` and the local label this
+              device shows are different facts. A Space with no name event has
+              no canonical name — its alias or computed name is not one.
+            */}
+            <DetailRow
+              label={t("space.canonicalName")}
+              userText={Boolean(space.raw_name?.trim())}
+              value={space.raw_name?.trim() || t("space.nameUnset")}
+            />
+            <DetailRow
+              label={t("space.localName")}
+              userText={Boolean(localName.trim())}
+              value={localName.trim() || t("space.nameUnset")}
+            />
+          </div>
+        </section>
+      ) : null}
+
       {space && onSetLocalPresentation ? (
         <section className="settings-section" aria-label={t("space.localPresentation")}>
           <h3>{t("space.localPresentation")}</h3>
@@ -168,11 +191,20 @@ export function SpaceInfoPanel({
   );
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function DetailRow({
+  label,
+  value,
+  userText = false
+}: {
+  label: string;
+  value: string;
+  /** Set for values that carry user-provided text, which needs `dir="auto"`. */
+  userText?: boolean;
+}) {
   return (
     <div className="settings-detail-row">
       <span>{label}</span>
-      <small>{value}</small>
+      <small dir={userText ? "auto" : undefined}>{value}</small>
     </div>
   );
 }

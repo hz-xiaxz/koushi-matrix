@@ -296,6 +296,7 @@ async fn activity_context_label_reflects_dm_or_space_room() {
             AppAction::RoomListUpdated {
                 spaces: vec![SpaceSummary {
                     space_id: "!space:example.test".to_owned(),
+                    raw_name: None,
                     display_name: "QA Space".to_owned(),
                     avatar: None,
                     child_room_ids: vec!["!room-in-space:example.test".to_owned()],

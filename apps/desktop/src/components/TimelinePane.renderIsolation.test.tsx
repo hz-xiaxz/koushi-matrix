@@ -460,6 +460,7 @@ function makeSnapshot(): DesktopSnapshot {
         spaces: [
           {
             space_id: "!space-alpha:example.invalid",
+            raw_name: null,
             display_name: "Alpha Space",
             avatar: null,
             child_room_ids: ["!room-alpha:example.invalid"]

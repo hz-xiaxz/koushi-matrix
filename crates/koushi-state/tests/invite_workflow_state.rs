@@ -109,6 +109,7 @@ fn ready_room_with_parent_space() -> AppState {
     state.navigation.active_space_id = Some(SPACE_A.to_owned());
     state.spaces.push(SpaceSummary {
         space_id: SPACE_A.to_owned(),
+        raw_name: None,
         display_name: "Project Space".to_owned(),
         avatar: None,
         child_room_ids: vec![ROOM_A.to_owned()],
@@ -1139,6 +1140,7 @@ fn invite_space_open_first_query_select_and_batch_flow_is_admitted() {
     let mut opened = ready_state();
     opened.spaces.push(SpaceSummary {
         space_id: SPACE_A.to_owned(),
+        raw_name: None,
         display_name: "Project Space".to_owned(),
         avatar: None,
         child_room_ids: Vec::new(),
@@ -1162,6 +1164,7 @@ fn invite_space_open_first_query_select_and_batch_flow_is_admitted() {
     let mut first_query = ready_state();
     first_query.spaces.push(SpaceSummary {
         space_id: SPACE_A.to_owned(),
+        raw_name: None,
         display_name: "Project Space".to_owned(),
         avatar: None,
         child_room_ids: Vec::new(),

@@ -912,7 +912,10 @@ export type MessageId =
   | "gate.rejectNoProof"
   | "gate.rejectUser"
   | "space.allRooms"
+  | "space.canonicalName"
   | "space.childRooms"
+  | "space.names"
+  | "space.nameUnset"
   | "space.directMessages"
   | "space.home"
   | "space.invite"
@@ -2313,7 +2316,10 @@ const en: Catalog = {
   "gate.rejectNoProof": "This existing identity has no acceptable proof method.",
   "gate.rejectUser": "This session was rejected.",
   "space.allRooms": "All rooms",
+  "space.canonicalName": "Matrix name",
   "space.childRooms": "Child rooms",
+  "space.names": "Names",
+  "space.nameUnset": "Not set",
   "space.directMessages": "Direct Messages",
   "space.home": "Home",
   "space.invite": "Invite",
@@ -3600,7 +3606,10 @@ const ja: Catalog = {
   "gate.rejectNoProof": "既存の識別情報に利用可能な証明方法がありません。",
   "gate.rejectUser": "このセッションは拒否されました。",
   "space.allRooms": "すべてのルーム",
+  "space.canonicalName": "Matrix上の名前",
   "space.childRooms": "子ルーム",
+  "space.names": "名前",
+  "space.nameUnset": "未設定",
   "space.directMessages": "Direct Messages",
   "space.home": "ホーム",
   "space.invite": "招待",

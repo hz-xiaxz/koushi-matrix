@@ -165,12 +165,14 @@ fn room_list_update_keeps_empty_selected_space_empty() {
         spaces: vec![
             SpaceSummary {
                 space_id: "space-empty".to_owned(),
+                raw_name: None,
                 display_name: "Empty Space".to_owned(),
                 avatar: None,
                 child_room_ids: Vec::new(),
             },
             SpaceSummary {
                 space_id: "space-a".to_owned(),
+                raw_name: None,
                 display_name: "Space A".to_owned(),
                 avatar: None,
                 child_room_ids: vec!["room-a".to_owned()],
@@ -253,6 +255,7 @@ fn selecting_space_restores_last_non_dm_room_for_that_space() {
     });
     let all_spaces = vec![SpaceSummary {
         space_id: "space-a".to_owned(),
+        raw_name: None,
         display_name: "Space A".to_owned(),
         avatar: None,
         child_room_ids: vec!["room-a".to_owned(), "room-b".to_owned(), "dm-a".to_owned()],

@@ -1176,6 +1176,7 @@ fn room_space_and_invite_summaries_surface_avatar_mxc() {
         AppAction::RoomListUpdated {
             spaces: vec![SpaceSummary {
                 space_id: "!space:localhost".to_owned(),
+                raw_name: None,
                 display_name: "Space".to_owned(),
                 avatar: Some(avatar("mxc://localhost/space-avatar")),
                 child_room_ids: vec!["!room:localhost".to_owned()],

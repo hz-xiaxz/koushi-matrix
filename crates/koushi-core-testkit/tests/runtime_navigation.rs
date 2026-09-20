@@ -199,6 +199,7 @@ async fn legacy_navigation_import_persists_once_in_the_encrypted_store() {
 fn space_summary(space_id: &str, child_room_ids: &[&str]) -> SpaceSummary {
     SpaceSummary {
         space_id: space_id.to_owned(),
+        raw_name: None,
         display_name: "QA Space".to_owned(),
         avatar: None,
         child_room_ids: child_room_ids

@@ -27,6 +27,7 @@ async fn space_invite_explicit_id_search_settles_after_publishing_candidate() {
                 rooms: vec![],
                 spaces: vec![koushi_state::SpaceSummary {
                     space_id: space_id.into(),
+                    raw_name: None,
                     display_name: "Invite test".into(),
                     avatar: None,
                     child_room_ids: vec![],

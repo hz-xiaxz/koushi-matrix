@@ -206,6 +206,7 @@ fn compose_sidebar_without_invites_reports_no_pending_invites() {
 fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
     let spaces = vec![SpaceSummary {
         space_id: "space-a".to_owned(),
+        raw_name: None,
         display_name: "Space A".to_owned(),
         avatar: None,
         child_room_ids: vec!["plain".to_owned(), "notified".to_owned()],
@@ -392,12 +393,14 @@ fn dm_in_multiple_spaces_appears_under_each() {
     let multi_spaces = vec![
         SpaceSummary {
             space_id: "space-a".to_owned(),
+            raw_name: None,
             display_name: "Space A".to_owned(),
             avatar: None,
             child_room_ids: vec!["room-a".to_owned(), "dm-multi".to_owned()],
         },
         SpaceSummary {
             space_id: "space-b".to_owned(),
+            raw_name: None,
             display_name: "Space B".to_owned(),
             avatar: None,
             child_room_ids: vec!["dm-multi".to_owned()],
@@ -492,6 +495,7 @@ fn sidebar_projection_carries_rust_owned_highlight_counts_for_mention_affordance
 fn sidebar_items_carry_rust_owned_room_and_space_avatars() {
     let spaces = vec![SpaceSummary {
         space_id: "space-a".to_owned(),
+        raw_name: None,
         display_name: "Space A".to_owned(),
         avatar: Some(avatar("mxc://example.invalid/space-a")),
         child_room_ids: vec!["room-a".to_owned(), "dm-a".to_owned()],
@@ -996,6 +1000,7 @@ fn active_sort_prioritizes_attention_before_newer_activity_and_keeps_stable_fall
 fn active_sort_orders_sidebar_rooms_and_dms_in_home_and_active_space() {
     let spaces = vec![SpaceSummary {
         space_id: "space-a".to_owned(),
+        raw_name: None,
         display_name: "Space A".to_owned(),
         avatar: None,
         child_room_ids: vec![

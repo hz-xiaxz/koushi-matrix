@@ -102,11 +102,46 @@ fn normalize_rooms_preserves_latest_redaction_fact() {
     );
 }
 
+/// Issue #960: the canonical `m.room.name` travels beside the display name so
+/// the UI can tell a Space's Matrix name from its local label. A Space without
+/// a name event carries `None`, never its computed display name.
+#[test]
+fn normalize_spaces_keeps_the_canonical_name_separate_from_the_display_name() {
+    let snapshot = MatrixRoomListSnapshot {
+        spaces: vec![
+            MatrixRoomListSpace {
+                space_id: "!named:example.test".to_owned(),
+                raw_name: Some("Research Group".to_owned()),
+                display_name: "Research Group".to_owned(),
+                avatar_mxc_uri: None,
+                child_room_ids: Vec::new(),
+                member_user_ids: Vec::new(),
+            },
+            MatrixRoomListSpace {
+                space_id: "!unnamed:example.test".to_owned(),
+                raw_name: None,
+                display_name: "Alice and Bob".to_owned(),
+                avatar_mxc_uri: None,
+                child_room_ids: Vec::new(),
+                member_user_ids: Vec::new(),
+            },
+        ],
+        ..Default::default()
+    };
+
+    let spaces = normalize_spaces(&snapshot);
+
+    assert_eq!(spaces[0].raw_name.as_deref(), Some("Research Group"));
+    assert_eq!(spaces[1].raw_name, None);
+    assert_eq!(spaces[1].display_name, "Alice and Bob");
+}
+
 #[test]
 fn normalize_spaces_with_child_rooms() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: vec![MatrixRoomListSpace {
             space_id: "!space1:example.test".to_owned(),
+            raw_name: None,
             display_name: "My Space".to_owned(),
             avatar_mxc_uri: None,
             child_room_ids: Vec::new(),
@@ -163,6 +198,7 @@ fn normalize_spaces_uses_direct_space_child_state() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: vec![MatrixRoomListSpace {
             space_id: "!space1:example.test".to_owned(),
+            raw_name: None,
             display_name: "My Space".to_owned(),
             avatar_mxc_uri: None,
             child_room_ids: vec!["!room1:example.test".to_owned()],
@@ -200,6 +236,7 @@ fn normalize_spaces_no_children() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: vec![MatrixRoomListSpace {
             space_id: "!space:example.test".to_owned(),
+            raw_name: None,
             display_name: "Empty Space".to_owned(),
             avatar_mxc_uri: None,
             child_room_ids: Vec::new(),
@@ -218,6 +255,7 @@ fn normalize_spaces_preserves_avatar_mxc_as_unrequested_thumbnail() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: vec![MatrixRoomListSpace {
             space_id: "!space:example.test".to_owned(),
+            raw_name: None,
             display_name: "Space".to_owned(),
             avatar_mxc_uri: Some("mxc://example.test/space-avatar".to_owned()),
             child_room_ids: Vec::new(),
@@ -302,6 +340,7 @@ fn normalize_rooms_uses_direct_space_child_state_as_parent() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: vec![MatrixRoomListSpace {
             space_id: "!space:example.test".to_owned(),
+            raw_name: None,
             display_name: "Space".to_owned(),
             avatar_mxc_uri: None,
             child_room_ids: vec!["!room:example.test".to_owned()],
@@ -339,6 +378,7 @@ fn partial_space_membership_preserves_known_dm_association_until_complete() {
     let snapshot = |members_complete: bool, member_user_ids: Vec<String>| MatrixRoomListSnapshot {
         spaces: vec![MatrixRoomListSpace {
             space_id: "space-a".to_owned(),
+            raw_name: None,
             display_name: "Space A".to_owned(),
             avatar_mxc_uri: None,
             child_room_ids: Vec::new(),
@@ -382,6 +422,7 @@ fn normalize_rooms_assigns_dm_space_ids_by_counterpart_membership() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: vec![MatrixRoomListSpace {
             space_id: "space-a".to_owned(),
+            raw_name: None,
             display_name: "Space A".to_owned(),
             avatar_mxc_uri: None,
             child_room_ids: Vec::new(),

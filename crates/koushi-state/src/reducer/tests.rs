@@ -103,6 +103,7 @@ fn recovery_submission_clears_stale_device_verification_failure() {
 fn test_space(space_id: &str) -> crate::state::SpaceSummary {
     crate::state::SpaceSummary {
         space_id: space_id.to_owned(),
+        raw_name: None,
         display_name: space_id.to_owned(),
         avatar: None,
         child_room_ids: Vec::new(),

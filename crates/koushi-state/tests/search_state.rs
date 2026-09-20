@@ -336,12 +336,14 @@ fn search_results_carry_rust_owned_space_context_label() {
     state.spaces = vec![
         SpaceSummary {
             space_id: "space-fallback".to_owned(),
+            raw_name: None,
             display_name: "Fallback Space".to_owned(),
             avatar: None,
             child_room_ids: vec!["room-a".to_owned()],
         },
         SpaceSummary {
             space_id: "space-active".to_owned(),
+            raw_name: None,
             display_name: "Active Space".to_owned(),
             avatar: None,
             child_room_ids: vec!["room-a".to_owned()],

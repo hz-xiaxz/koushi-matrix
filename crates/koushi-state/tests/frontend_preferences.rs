@@ -149,6 +149,7 @@ fn rust_sidebar_projects_complete_sections_order_and_local_space_presentation() 
     )]));
     state.spaces = vec![SpaceSummary {
         space_id: "!space:example.invalid".to_owned(),
+        raw_name: None,
         display_name: "Server Space".to_owned(),
         avatar: None,
         child_room_ids: vec![
@@ -263,6 +264,7 @@ fn rust_sidebar_projects_complete_sections_order_and_local_space_presentation() 
 
     state.spaces.push(SpaceSummary {
         space_id: "!other:example.invalid".to_owned(),
+        raw_name: None,
         display_name: "Other".to_owned(),
         avatar: None,
         child_room_ids: Vec::new(),
@@ -295,4 +297,21 @@ fn appearance_patch_accepts_density_without_replacing_theme() {
     });
     assert_eq!(values.appearance.theme, theme);
     assert_eq!(values.appearance.density, DisplayDensity::Compact);
+}
+
+/// Issue #960: `raw_name` is additive. A snapshot written before the field
+/// existed must still load, with no canonical name rather than a borrowed one.
+#[test]
+fn space_summary_without_raw_name_loads_from_an_older_snapshot() {
+    let older = serde_json::json!({
+        "space_id": "!space:example.test",
+        "display_name": "Alice and Bob",
+        "avatar": null,
+        "child_room_ids": []
+    });
+
+    let space: SpaceSummary = serde_json::from_value(older).expect("older snapshot loads");
+
+    assert_eq!(space.raw_name, None);
+    assert_eq!(space.display_name, "Alice and Bob");
 }

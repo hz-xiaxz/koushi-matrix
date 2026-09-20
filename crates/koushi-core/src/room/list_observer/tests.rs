@@ -186,6 +186,7 @@ fn missing_space_child_links_detects_parent_only_relationship() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: vec![MatrixRoomListSpace {
             space_id: "!space:example.test".to_owned(),
+            raw_name: None,
             display_name: "My Space".to_owned(),
             avatar_mxc_uri: None,
             child_room_ids: Vec::new(),
@@ -227,6 +228,7 @@ fn missing_space_child_links_skips_reciprocal_relationship() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: vec![MatrixRoomListSpace {
             space_id: "!space:example.test".to_owned(),
+            raw_name: None,
             display_name: "My Space".to_owned(),
             avatar_mxc_uri: None,
             child_room_ids: vec!["!room:example.test".to_owned()],

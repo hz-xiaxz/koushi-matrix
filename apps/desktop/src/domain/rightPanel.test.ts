@@ -143,6 +143,7 @@ function roomSummary(roomId: string, label: string): RoomSummary {
 function spaceSummary(spaceId: string, label: string): SpaceSummary {
   return {
     space_id: spaceId,
+    raw_name: null,
     display_name: label,
     avatar: null,
     child_room_ids: []

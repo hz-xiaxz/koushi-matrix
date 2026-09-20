@@ -71,6 +71,7 @@ export function readyDesktopSnapshotFixture(): DesktopSnapshot {
   };
   snapshot.state.domain.spaces = [{
     space_id: "!space-alpha:example.invalid",
+    raw_name: null,
     display_name: "Synthetic Workspace",
     avatar: null,
     child_room_ids: ["!room-alpha:example.invalid"]

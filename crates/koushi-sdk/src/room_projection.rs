@@ -47,6 +47,9 @@ pub struct MatrixRoomListSnapshot {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MatrixRoomListSpace {
     pub space_id: String,
+    /// The Space's canonical `m.room.name`, when the Space has one. Never an
+    /// alias or a computed name: those belong to `display_name` alone.
+    pub raw_name: Option<String>,
     pub display_name: String,
     pub avatar_mxc_uri: Option<String>,
     pub child_room_ids: Vec<String>,
@@ -2169,6 +2172,10 @@ async fn matrix_room_list_snapshot_from_rooms(
             }
             snapshot.spaces.push(MatrixRoomListSpace {
                 space_id: room_id,
+                raw_name: room
+                    .name()
+                    .map(|name| name.trim().to_owned())
+                    .filter(|name| !name.is_empty()),
                 display_name,
                 avatar_mxc_uri: room.avatar_url().map(|uri| uri.to_string()),
                 child_room_ids,

@@ -327,6 +327,7 @@ fn space_scope_resolves_to_attachment_scope_with_child_room_ids() {
     let mut state = ready_state();
     state.spaces = vec![SpaceSummary {
         space_id: "!space:example.invalid".to_owned(),
+        raw_name: None,
         display_name: "Synthetic Space".to_owned(),
         avatar: None,
         child_room_ids: vec![
