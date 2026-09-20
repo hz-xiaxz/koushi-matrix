@@ -63,6 +63,10 @@ pub enum RoomOperationKind {
     SpaceMembersLoaded {
         generation: u64,
     },
+    /// Issue #961: the Space's advertised children settled under `generation`.
+    SpaceChildrenLoaded {
+        generation: u64,
+    },
     MemberModerated {
         target_user_id: String,
         action: koushi_state::RoomModerationAction,
@@ -361,6 +365,7 @@ impl fmt::Debug for RoomOperationKind {
             Self::RoomSettingsLoaded => "RoomSettingsLoaded",
             Self::RoomSettingUpdated => "RoomSettingUpdated",
             Self::SpaceMembersLoaded { .. } => "SpaceMembersLoaded",
+            Self::SpaceChildrenLoaded { .. } => "SpaceChildrenLoaded",
             Self::MemberModerated { .. } => "MemberModerated",
             Self::MemberRoleUpdated { .. } => "MemberRoleUpdated",
             Self::SpaceMemberInviteSettled { .. } => "SpaceMemberInviteSettled",
@@ -1456,6 +1461,19 @@ fn room_operation_progress(
                 generation: None,
             }
         }
+        RoomEvent::SpaceChildrenLoaded {
+            request_id: event_request_id,
+            generation,
+            ..
+        } if event_request_id == request_id
+            && matches!(operation, RoomOperationKind::SpaceChildrenLoaded { generation: expected } if *expected == generation) =>
+        {
+            EventProgress::RoomOperation {
+                request_id,
+                room_id: expected_room_id.clone(),
+                generation: Some(generation),
+            }
+        }
         RoomEvent::SpaceMembersLoaded {
             request_id: event_request_id,
             generation,
@@ -2245,6 +2263,7 @@ fn room_operation_is_event_terminal(operation: &RoomOperationKind) -> bool {
             | RoomOperationKind::RoomSettingsLoaded
             | RoomOperationKind::RoomSettingUpdated
             | RoomOperationKind::SpaceMembersLoaded { .. }
+            | RoomOperationKind::SpaceChildrenLoaded { .. }
             | RoomOperationKind::SpaceMemberInviteSettled { .. }
             | RoomOperationKind::SpaceMemberInviteCancellationSettled { .. }
             | RoomOperationKind::SpaceMemberRoleUpdated { .. }
@@ -2270,6 +2289,13 @@ fn room_operation_snapshot_matches(
             .settings
             .as_ref()
             .is_some_and(|settings| settings.room_id == room_id),
+        RoomOperationKind::SpaceChildrenLoaded {
+            generation: expected_generation,
+        } => {
+            state.space_children.selected_space_id.as_deref() == Some(room_id)
+                && state.space_children.generation == *expected_generation
+                && generation == &Some(*expected_generation)
+        }
         RoomOperationKind::SpaceMembersLoaded {
             generation: expected_generation,
         }

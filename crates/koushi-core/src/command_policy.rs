@@ -23,6 +23,18 @@ pub(crate) fn space_member_forward_failure_action(
                 kind: OperationFailureKind::Sdk,
             },
         )),
+        koushi_protocol::command::RoomCommand::LoadSpaceChildren {
+            request_id,
+            space_id,
+            generation,
+        } => Some((
+            *request_id,
+            AppAction::SpaceChildrenLoadFailed {
+                space_id: space_id.clone(),
+                generation: *generation,
+                failure: OperationFailureKind::Sdk,
+            },
+        )),
         koushi_protocol::command::RoomCommand::InviteUserToSpace {
             request_id,
             space_id,

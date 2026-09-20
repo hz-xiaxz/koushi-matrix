@@ -24,7 +24,7 @@ use crate::state::{
     RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability,
     ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope, SessionInfo,
     SessionStatusRefreshTrigger, SettingsPatch, SettingsValues, SpaceMemberInviteOutcome,
-    SpaceMemberRoleUpdateOutcome, SpaceMembersProjection, SpaceSummary,
+    SpaceChildSummary, SpaceMemberRoleUpdateOutcome, SpaceMembersProjection, SpaceSummary,
     StagedUploadCompressionChoice, StagedUploadItem, StagedUploadOutputSelection,
     SyncLifecycleStatus, TimelineContinuityInspection, TimelineGapRepairFailureKind,
     TimelineMediaDownloadState, TimelineMediaGalleryItem, TimelineScrollAnchor,
@@ -184,6 +184,21 @@ pub enum AppAction {
     },
     UserProfilesUpdated {
         profiles: Vec<UserProfile>,
+    },
+    /// Issue #961: a Space's advertised children are being fetched.
+    SpaceChildrenLoadRequested {
+        space_id: String,
+        generation: u64,
+    },
+    SpaceChildrenLoaded {
+        space_id: String,
+        generation: u64,
+        children: Vec<SpaceChildSummary>,
+    },
+    SpaceChildrenLoadFailed {
+        space_id: String,
+        generation: u64,
+        failure: OperationFailureKind,
     },
     SpaceMembersLoadRequested {
         request_id: u64,

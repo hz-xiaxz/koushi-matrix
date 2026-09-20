@@ -2374,6 +2374,39 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     snapshot?.state.ui.navigation.active_space_id
   ]);
 
+  // Issue #961: the selected Space's advertised children back the sidebar's
+  // not-joined lane and the Space info panel. Rust owns the generation: it
+  // bumps on selection, so quoting it here fences a response that arrives
+  // after the user has moved to another Space.
+  const spaceChildrenLoadRef = useRef<string | null>(null);
+  useEffect(() => {
+    const spaceChildren = snapshot?.state.domain.space_children;
+    const spaceId = spaceChildren?.selected_space_id ?? null;
+    if (snapshot?.state.domain.session.kind !== "ready" || !spaceId || !spaceChildren) {
+      spaceChildrenLoadRef.current = null;
+      return;
+    }
+    const key = `${spaceId}:${spaceChildren.generation}`;
+    if (spaceChildrenLoadRef.current === key || spaceChildren.load.kind !== "idle") {
+      return;
+    }
+    if (spaceChildren.children.length > 0) {
+      return;
+    }
+    spaceChildrenLoadRef.current = key;
+    // A rejected command keeps the key: retrying it on every snapshot would be
+    // a request storm, and selecting the Space again produces a new generation
+    // that asks once more.
+    void settleCommand(api.loadSpaceChildren(spaceId, spaceChildren.generation)).catch(
+      () => undefined
+    );
+  }, [
+    snapshot?.state.domain.session.kind,
+    snapshot?.state.domain.space_children,
+    snapshot?.state.domain.space_children?.generation,
+    snapshot?.state.domain.space_children?.selected_space_id
+  ]);
+
   async function refreshSavedSessions() {
     setSavedSessions(await api.listSavedSessions());
   }
@@ -6288,6 +6321,9 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           />
         )}
         <ContextualRightPanel
+          onJoinRoom={(roomId) => {
+            runInBackground(joinRoom(roomId));
+          }}
           activeRoom={activeRoom ?? null}
           activeSpace={activeSpace ?? null}
           activeSpaceName={activeSpaceName}

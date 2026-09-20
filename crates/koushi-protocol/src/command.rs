@@ -139,6 +139,7 @@ impl CoreCommand {
                 | RoomCommand::SetSpaceChild { request_id, .. }
                 | RoomCommand::InviteUser { request_id, .. }
                 | RoomCommand::LoadSpaceMembers { request_id, .. }
+                | RoomCommand::LoadSpaceChildren { request_id, .. }
                 | RoomCommand::InviteUserToSpace { request_id, .. }
                 | RoomCommand::CancelSpaceInvite { request_id, .. }
                 | RoomCommand::InviteTargets { request_id, .. }

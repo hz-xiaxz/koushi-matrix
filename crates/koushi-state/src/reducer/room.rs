@@ -143,6 +143,9 @@ fn handle_room_list_updated_with_crawler(
         if super::space_members::handle_selected(state, None) {
             effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
         }
+        if super::space_children::handle_selected(state, None) {
+            effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceChildrenChanged));
+        }
     }
 
     if let Some(active_room_id) = state.navigation.active_room_id.clone() {

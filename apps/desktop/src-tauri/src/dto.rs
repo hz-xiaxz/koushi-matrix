@@ -27,7 +27,7 @@ use koushi_state::{
     RoomPreferencesState, RoomSummary, SearchCrawlerLastActive, SearchCrawlerRoomState,
     SearchCrawlerState, SearchMatchField, SearchMatchKind, SearchResult, SearchScope, SearchState,
     SecureBackupGateState, SessionLockReason, SessionState, SettingsState, SidebarModel,
-    SoftLogoutReauthState, SpaceMembersState, SpaceSummary, StagedUploadItem, SyncState,
+    SoftLogoutReauthState, SpaceChildrenState, SpaceMembersState, SpaceSummary, StagedUploadItem, SyncState,
     ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
     TypographyDisplayProfile, UserProfile, VerificationGateRejectReason, VerificationGateState,
     VerificationMethod, native_attention_capabilities_for_platform, resolve_locale_display_profile,
@@ -253,6 +253,8 @@ pub struct FrontendDomainStateChangedSlices {
     pub profile_room_users_by_room:
         Option<BTreeMap<String, Option<BTreeMap<String, Option<UserProfile>>>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub space_children: Option<SpaceChildrenState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub space_members: Option<SpaceMembersState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sync: Option<FrontendSyncState>,
@@ -346,6 +348,7 @@ impl FrontendDomainStateChangedSlices {
             && self.profile_local_alias_update.is_none()
             && self.profile_ignored_user_update.is_none()
             && self.profile_update.is_none()
+            && self.space_children.is_none()
             && self.space_members.is_none()
             && self.sync.is_none()
             && self.spaces.is_none()
@@ -456,6 +459,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         domain.profile_local_alias_update = changed.profile_local_alias_update;
         domain.profile_ignored_user_update = changed.profile_ignored_user_update;
         domain.profile_update = changed.profile_update;
+        domain.space_children = changed.space_children;
         domain.space_members = changed.space_members;
         domain.sync = changed.sync.map(Into::into);
         domain.spaces = changed.spaces;
@@ -557,6 +561,7 @@ pub struct FrontendDomainState {
     pub locale_profile: LocaleDisplayProfile,
     pub typography_profile: TypographyDisplayProfile,
     pub profile: ProfileState,
+    pub space_children: SpaceChildrenState,
     pub space_members: SpaceMembersState,
     pub sync: FrontendSyncState,
     pub spaces: Vec<SpaceSummary>,
@@ -629,6 +634,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
             locale_profile,
             typography_profile,
             profile: state.profile,
+            space_children: state.space_children,
             space_members: state.space_members,
             sync: state.sync.into(),
             spaces: state.spaces,

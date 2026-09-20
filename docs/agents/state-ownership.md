@@ -589,6 +589,16 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   vector but must not classify tags/DMs, join room/Space membership, compute
   attention or sort. Account-global invites remain the Home navigation/count and
   are not a room section.
+- The Not joined section is fed by `AppState.space_children`, the selected
+  Space's `/hierarchy` projection (#961). Rust owns it end to end: the reducer
+  clears it and bumps its generation wherever the active Space changes
+  (`navigation`, `room`, `directory`), the frontend asks for it by quoting that
+  generation through `load_space_children`, and a response is admitted only for
+  the Space selected now. The joined room list stays authoritative: a child that
+  is already a joined room never appears in the lane, and a pending invitation is
+  reported from `AppState.invites`, not from the server summary. A child the
+  server did not describe is `unknown` with no join action — the permission model
+  is never worked around.
 - Room-tag GUI tests should stub `set_room_tag` / `remove_room_tag` to return the
   current snapshot first, assert the row does not move immediately, then push a
   Rust-shaped snapshot with updated `RoomSummary.tags` / sidebar room tags and

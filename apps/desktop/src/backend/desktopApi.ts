@@ -383,6 +383,7 @@ export interface DesktopApi {
   joinRoom(roomId: string): Promise<CommandSettlement>;
   loadRoomSettings(roomId: string): Promise<CommandSettlement>;
   loadSpaceMembers(spaceId: string, generation: number): Promise<CommandSettlement>;
+  loadSpaceChildren(spaceId: string, generation: number): Promise<CommandSettlement>;
   inviteUserToSpace(
     spaceId: string,
     userId: string,

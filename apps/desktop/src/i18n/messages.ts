@@ -1184,6 +1184,10 @@ export type MessageId =
   | "workspace.lowPriority"
   | "workspace.newDm"
   | "workspace.notJoined"
+  | "roomList.membershipInvited"
+  | "roomList.membershipKnocked"
+  | "roomList.membershipNotJoined"
+  | "roomList.membershipUnknown"
   | "workspace.people"
   | "workspace.rooms"
   | "workspace.resizeRoomList"
@@ -2588,6 +2592,10 @@ const en: Catalog = {
   "workspace.lowPriority": "Low priority",
   "workspace.newDm": "New DM",
   "workspace.notJoined": "Not joined",
+  "roomList.membershipInvited": "Invited",
+  "roomList.membershipKnocked": "Knock requested",
+  "roomList.membershipNotJoined": "Not joined",
+  "roomList.membershipUnknown": "Unavailable",
   "workspace.people": "Direct Messages",
   "workspace.rooms": "Rooms",
   "workspace.resizeRoomList": "Resize room list",
@@ -3877,6 +3885,10 @@ const ja: Catalog = {
   "workspace.lowPriority": "低優先度",
   "workspace.newDm": "新しいDM",
   "workspace.notJoined": "未参加",
+  "roomList.membershipInvited": "招待済み",
+  "roomList.membershipKnocked": "参加申請中",
+  "roomList.membershipNotJoined": "未入室",
+  "roomList.membershipUnknown": "参照不可",
   "workspace.people": "Direct Messages",
   "workspace.rooms": "ルーム",
   "workspace.resizeRoomList": "ルームリストの幅を変更",

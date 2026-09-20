@@ -11,7 +11,8 @@ use koushi_state::{
     RoomInteractionState, RoomListProjection, RoomLiveSignals, RoomManagementState,
     RoomNotificationSettings, RoomPreferencesState, RoomSummary, SearchCrawlerLastActive,
     SearchCrawlerRoomState, SearchCrawlerState, SearchState, SecureBackupGateState, SessionState,
-    SettingsState, SidebarModel, SoftLogoutReauthState, SpaceMembersState, SpaceSummary, SyncState,
+    SettingsState, SidebarModel, SoftLogoutReauthState, SpaceChildrenState, SpaceMembersState,
+    SpaceSummary, SyncState,
     ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState, UserProfile,
 };
 use serde::{Deserialize, Serialize};
@@ -74,6 +75,7 @@ pub struct StateDeltaChangedSlices {
     pub profile_local_alias_update: Option<LocalUserAliasUpdateState>,
     pub profile_ignored_user_update: Option<IgnoredUserUpdateState>,
     pub profile_update: Option<ProfileUpdateState>,
+    pub space_children: Option<SpaceChildrenState>,
     pub space_members: Option<SpaceMembersState>,
     pub sync: Option<SyncState>,
     pub navigation: Option<NavigationState>,

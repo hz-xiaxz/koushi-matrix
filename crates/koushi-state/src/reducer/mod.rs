@@ -33,6 +33,7 @@ mod session;
 mod session_status;
 mod settings;
 mod sliding_sync;
+mod space_children;
 mod space_members;
 mod submission;
 mod sync;
@@ -509,6 +510,20 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::UserProfilesUpdated { profiles } => {
             profile::handle_user_profiles_updated(state, profiles)
         }
+        AppAction::SpaceChildrenLoadRequested {
+            space_id,
+            generation,
+        } => space_children::handle_load_requested(state, space_id, generation),
+        AppAction::SpaceChildrenLoaded {
+            space_id,
+            generation,
+            children,
+        } => space_children::handle_loaded(state, space_id, generation, children),
+        AppAction::SpaceChildrenLoadFailed {
+            space_id,
+            generation,
+            failure,
+        } => space_children::handle_load_failed(state, space_id, generation, failure),
         AppAction::SpaceMembersLoadRequested {
             request_id,
             space_id,

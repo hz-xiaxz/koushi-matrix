@@ -196,6 +196,7 @@ pub(crate) fn handle_directory_join_succeeded(
     state.directory.join = DirectoryJoinState::Idle;
     state.navigation.active_space_id = None;
     let space_members_changed = super::space_members::handle_selected(state, None);
+    let space_children_changed = super::space_children::handle_selected(state, None);
     state.navigation.active_room_id = Some(room_id.clone());
     state.timeline = TimelinePaneState {
         room_id: Some(room_id.clone()),
@@ -221,6 +222,9 @@ pub(crate) fn handle_directory_join_succeeded(
     }
     if space_members_changed {
         effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+    }
+    if space_children_changed {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceChildrenChanged));
     }
     effects.push(AppEffect::SubscribeTimeline {
         room_id: room_id.clone(),

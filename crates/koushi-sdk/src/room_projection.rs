@@ -927,7 +927,7 @@ pub fn room_attention_summary_from_counts(
     )
 }
 
-pub(super) fn matrix_room(
+pub(crate) fn matrix_room(
     session: &MatrixClientSession,
     room_id: &str,
 ) -> Result<matrix_sdk::Room, MatrixRoomOperationError> {
@@ -3033,7 +3033,7 @@ async fn matrix_parent_space_ids(room: &matrix_sdk::Room) -> Vec<String> {
         .await
 }
 
-async fn matrix_space_child_room_ids(room: &matrix_sdk::Room) -> Vec<String> {
+pub(crate) async fn matrix_space_child_room_ids(room: &matrix_sdk::Room) -> Vec<String> {
     let Ok(child_events) = room
         .get_state_events_static::<SpaceChildEventContent>()
         .await

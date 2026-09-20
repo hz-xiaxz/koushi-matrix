@@ -20,6 +20,8 @@ mod room_operations;
 
 mod room_projection;
 
+mod space_children;
+
 mod search;
 
 mod sync;
@@ -133,6 +135,10 @@ pub use room_operations::{
     room_is_joined, set_room_notification_mode, set_room_tag, set_space_child,
     start_direct_message, unpin_event, update_room_member_power_level, update_room_setting,
     update_space_member_power_level,
+};
+
+pub use space_children::{
+    MatrixSpaceChildEntry, MatrixSpaceChildMembership, matrix_space_children_projection,
 };
 
 pub use room_projection::{

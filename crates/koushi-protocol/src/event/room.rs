@@ -28,6 +28,13 @@ pub enum RoomEvent {
         room_id: String,
         user_id: String,
     },
+    /// Issue #961: the Space's advertised children settled. Only a count
+    /// travels: room identities belong to the state snapshot.
+    SpaceChildrenLoaded {
+        request_id: RequestId,
+        generation: u64,
+        child_count: usize,
+    },
     SpaceMembersLoaded {
         request_id: RequestId,
         generation: u64,
@@ -199,6 +206,16 @@ impl fmt::Debug for RoomEvent {
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
                 .field("user_id", &"UserId(..)")
+                .finish(),
+            Self::SpaceChildrenLoaded {
+                request_id,
+                generation,
+                child_count,
+            } => formatter
+                .debug_struct("SpaceChildrenLoaded")
+                .field("request_id", request_id)
+                .field("generation", generation)
+                .field("child_count", child_count)
                 .finish(),
             Self::SpaceMembersLoaded {
                 request_id,

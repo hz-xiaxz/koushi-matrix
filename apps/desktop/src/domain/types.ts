@@ -77,6 +77,7 @@ export interface AppDomainState {
   typography_profile: TypographyDisplayProfile;
   profile: ProfileState;
   space_members: SpaceMembersState;
+  space_children: SpaceChildrenState;
   sync: SyncState;
   spaces: SpaceSummary[];
   rooms: RoomSummary[];
@@ -931,6 +932,44 @@ export interface SpaceSummary {
   display_name: string;
   avatar: AvatarImage | null;
   child_room_ids: string[];
+}
+
+/**
+ * Issue #961: the viewer's relationship to a Space child room. "unknown" is the
+ * honest answer for a child the server did not describe — a room the account
+ * may not see is reported as such, never probed around.
+ */
+export type SpaceChildMembership =
+  | "joined"
+  | "invited"
+  | "knocked"
+  | "left"
+  | "banned"
+  | "not_joined"
+  | "unknown";
+
+export interface SpaceChildSummary {
+  room_id: string;
+  display_name: string;
+  avatar: AvatarImage | null;
+  membership: SpaceChildMembership;
+  /** Whether the join rule the server reported permits an attempt to join. */
+  can_join: boolean;
+  is_space: boolean;
+  joined_members: number;
+}
+
+export type SpaceChildrenLoadState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "failed"; failure: OperationFailureKind };
+
+/** The advertised children of the currently selected Space. */
+export interface SpaceChildrenState {
+  selected_space_id: string | null;
+  generation: number;
+  children: SpaceChildSummary[];
+  load: SpaceChildrenLoadState;
 }
 
 export interface SpaceMembersState {
@@ -2321,6 +2360,12 @@ export interface SpaceRailItem {
 
 export interface RoomListItem {
   room_id: string;
+  /**
+   * Issue #961: the viewer's relationship to this room. Rows the joined room
+   * list produces are always "joined"; the not-joined lane is the only source
+   * of anything else.
+   */
+  membership?: SpaceChildMembership;
   display_name: string;
   avatar: AvatarImage | null;
   tags: RoomTags;

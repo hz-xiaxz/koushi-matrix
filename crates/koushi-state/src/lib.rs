@@ -111,6 +111,7 @@ pub use state::{
     SettingsValues, SidebarCategory, SidebarCollapsedSections, SidebarScopeSettings,
     SidebarSectionKind, SidebarSectionPatch, SidebarSectionSettings, SidebarSettings,
     SoftLogoutReauthState, SpaceConversationSurface, SpaceLocalPresentation,
+    SpaceChildMembership, SpaceChildSummary, SpaceChildrenLoadState, SpaceChildrenState,
     SpaceLocalPresentations, SpaceMemberEntry, SpaceMemberInviteOutcome, SpaceMemberMembership,
     SpaceMemberRoleFailureKind, SpaceMemberRoleOption, SpaceMemberRoleUpdateOutcome,
     SpaceMembersCommandRejection, SpaceMembersOperationState, SpaceMembersProjection,
