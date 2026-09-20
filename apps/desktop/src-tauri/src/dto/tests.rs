@@ -1250,7 +1250,10 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         space_id: "!space:example.invalid".to_owned(),
         display_name: "Fixture Space".to_owned(),
         avatar: None,
-        child_room_ids: vec!["!room:example.invalid".to_owned()],
+        child_room_ids: vec![
+            "!room:example.invalid".to_owned(),
+            "!low-priority-room:example.invalid".to_owned(),
+        ],
     });
     state.rooms.push(RoomSummary {
         room_id: "!room:example.invalid".to_owned(),
@@ -1283,6 +1286,34 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         is_encrypted: true,
         joined_members: 4,
     });
+    // A low-priority conversation populates `sections.low_priority` so the
+    // golden proves the #955 section split, not just the field's presence.
+    state.rooms.push(RoomSummary {
+        room_id: "!low-priority-room:example.invalid".to_owned(),
+        display_name: "Fixture Low Priority Room".to_owned(),
+        display_label: "Fixture Low Priority Room".to_owned(),
+        original_display_label: "Fixture Low Priority Room".to_owned(),
+        avatar: None,
+        is_dm: false,
+        dm_user_ids: Vec::new(),
+        tags: RoomTags {
+            favourite: None,
+            low_priority: Some(koushi_state::RoomTagInfo {
+                order: Some("0.25".to_owned()),
+            }),
+        },
+        unread_count: 7,
+        notification_count: 7,
+        highlight_count: 2,
+        marked_unread: false,
+        recency_stamp: Some(950_000),
+        conversation_activity: None,
+        latest_event: None,
+        parent_space_ids: vec!["!space:example.invalid".to_owned()],
+        dm_space_ids: vec![],
+        is_encrypted: false,
+        joined_members: 3,
+    });
     state.rooms.push(RoomSummary {
         room_id: "!redacted-room:example.invalid".to_owned(),
         display_name: "Redacted Fixture Room".to_owned(),
@@ -1314,6 +1345,18 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         is_encrypted: false,
         joined_members: 2,
     });
+    // A scoped Low priority preference exercises the optional
+    // `SidebarScopeSettings.low_priority` entry and `low_priority_collapsed`.
+    state.settings.values.sidebar.collapsed.low_priority = true;
+    state.settings.values.sidebar.apply_section_patch(
+        koushi_state::SidebarSectionPatch {
+            scope: "!space:example.invalid".to_owned(),
+            section: koushi_state::SidebarSectionKind::LowPriority,
+            collapsed: Some(true),
+            sort: None,
+        },
+        state.settings.values.room_list_sort,
+    );
     state.room_list.readiness = koushi_state::RoomListReadiness::Ready {
         source: koushi_state::RoomListSource::Live,
         generation: 9,

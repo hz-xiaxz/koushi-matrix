@@ -504,6 +504,7 @@ export type MessageId =
   | "roomList.sortRecent"
   | "roomList.sortName"
   | "roomList.sectionOptions"
+  | "roomList.sectionUnreadAccessible"
   | "roomList.loading"
   | "roomList.failed"
   | "room.markAsRead"
@@ -1886,6 +1887,7 @@ const en: Catalog = {
   "roomList.sortRecent": "Recent messages",
   "roomList.sortName": "Name",
   "roomList.sectionOptions": "Options for {section}",
+  "roomList.sectionUnreadAccessible": "{section} unread: {count}",
   "roomList.loading": "Loading rooms…",
   "roomList.failed": "Rooms could not be loaded",
   "room.markAsRead": "Mark as read",
@@ -3172,6 +3174,7 @@ const ja: Catalog = {
   "roomList.sortRecent": "新着メッセージ",
   "roomList.sortName": "名前",
   "roomList.sectionOptions": "{section}のオプション",
+  "roomList.sectionUnreadAccessible": "{section}の未読 {count} 件",
   "roomList.loading": "ルームを読み込み中…",
   "roomList.failed": "ルームを読み込めませんでした",
   "room.markAsRead": "既読にする",

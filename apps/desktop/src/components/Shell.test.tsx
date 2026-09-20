@@ -176,6 +176,104 @@ describe("Rust-projected workspace shell", () => {
     });
   });
 
+  it("renders Low priority below DMs from the Rust section split", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    const low = room("!low:example.invalid", "Quiet Room");
+    low.tags = { favourite: null, low_priority: { order: null } };
+    low.unread_count = 9;
+    low.has_unread_content = true;
+    snapshot.sidebar.sections.low_priority = [low];
+
+    render(<Sidebar snapshot={snapshot} {...sidebarProps()} />);
+
+    const dms = screen.getByRole("region", { name: "DMs" });
+    const lowPriority = screen.getByRole("region", { name: "Low priority" });
+    expect(dms.compareDocumentPosition(lowPriority) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The row keeps its own raw unread count even though the section is quiet.
+    expect(within(lowPriority).getByRole("button", { name: /Quiet Room/ })).toBeTruthy();
+    // No create action and no aggregate unread badge on this heading.
+    expect(within(lowPriority).queryByRole("button", { name: /create room/i })).toBeNull();
+    expect(lowPriority.querySelector(".section-unread-count")).toBeNull();
+  });
+
+  it("hides Low priority when the Rust section is empty", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    snapshot.sidebar.sections.low_priority = [];
+
+    render(<Sidebar snapshot={snapshot} {...sidebarProps()} />);
+
+    expect(screen.queryByRole("region", { name: "Low priority" })).toBeNull();
+  });
+
+  it("dispatches a typed Low priority collapse patch", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    snapshot.state.ui.navigation.active_space_id = null;
+    snapshot.sidebar.active_space_id = null;
+    snapshot.sidebar.account_home.is_active = true;
+    snapshot.sidebar.space_rail.forEach((space) => { space.is_active = false; });
+    snapshot.sidebar.sections.low_priority = [room("!low:example.invalid", "Quiet Room")];
+    snapshot.sidebar.low_priority_collapsed = false;
+    const onUpdateSettings = vi.fn();
+
+    render(
+      <Sidebar snapshot={snapshot} {...sidebarProps()} onUpdateSettings={onUpdateSettings} />
+    );
+
+    fireEvent.click(
+      within(screen.getByRole("region", { name: "Low priority" })).getByRole("button", {
+        name: "Low priority"
+      })
+    );
+    expect(onUpdateSettings).toHaveBeenCalledWith({
+      sidebar_section: { scope: "__home__", section: "lowPriority", collapsed: true }
+    });
+  });
+
+  it("renders Rust unread totals as heading badges independent of visible rows", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    snapshot.sidebar.sections.rooms = [
+      room("!r1:example.invalid", "Alpha"),
+      room("!r2:example.invalid", "Beta")
+    ];
+    snapshot.sidebar.sections.people = [room("!d1:example.invalid", "Person")];
+    // Deliberately unequal to the visible row counts: the badge is the Rust
+    // aggregate, not a sum over rendered rows.
+    snapshot.sidebar.space_unread_count = 5;
+    snapshot.sidebar.dm_unread_count = 3;
+
+    render(<Sidebar snapshot={snapshot} {...sidebarProps()} />);
+
+    const rooms = screen.getByRole("region", { name: "Rooms" });
+    const dms = screen.getByRole("region", { name: "DMs" });
+    expect(rooms.querySelector(".section-unread-count")?.textContent).toBe("5");
+    expect(dms.querySelector(".section-unread-count")?.textContent).toBe("3");
+    expect(within(rooms).getByLabelText("Rooms unread: 5")).toBeTruthy();
+    expect(within(dms).getByLabelText("DMs unread: 3")).toBeTruthy();
+    // The conversation-count meta is replaced, not recoloured.
+    expect(rooms.querySelector(".section-count")).toBeNull();
+
+    // Filtering hides rows but must not change the Rust-owned totals.
+    fireEvent.change(screen.getByRole("searchbox", { name: /filter/i }), {
+      target: { value: "zzz" }
+    });
+    expect(rooms.querySelector(".section-unread-count")?.textContent).toBe("5");
+    expect(dms.querySelector(".section-unread-count")?.textContent).toBe("3");
+  });
+
+  it("hides a zero unread badge and clamps large totals to 99+", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    snapshot.sidebar.space_unread_count = 100;
+    snapshot.sidebar.dm_unread_count = 0;
+
+    render(<Sidebar snapshot={snapshot} {...sidebarProps()} />);
+
+    const rooms = screen.getByRole("region", { name: "Rooms" });
+    const dms = screen.getByRole("region", { name: "DMs" });
+    expect(rooms.querySelector(".section-unread-count")?.textContent).toBe("99+");
+    expect(within(rooms).getByLabelText("Rooms unread: 100")).toBeTruthy();
+    expect(dms.querySelector(".section-unread-count")).toBeNull();
+  });
+
   it("renders Rooms above DMs as independent sections", () => {
     const snapshot = readyDesktopSnapshotFixture();
 

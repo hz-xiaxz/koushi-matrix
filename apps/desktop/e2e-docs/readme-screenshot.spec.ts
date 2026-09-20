@@ -45,7 +45,9 @@ test("generates the deterministic README application composition", async ({ page
   await expect(page.getByRole("button", { name: "Design", exact: true })).toContainText("3");
   await expect(page.locator('[data-room-section="rooms"]')).toContainText("Papers");
   await expect(page.locator('[data-room-section="dms"]')).toContainText("Aki");
-  await expect(page.locator('[data-room-section="dms"] .section-count')).toHaveText("1");
+  // #955: the section headings carry the Rust-owned unread totals.
+  await expect(page.locator('[data-room-section="rooms"] .section-unread-count')).toHaveText("3");
+  await expect(page.locator('[data-room-section="dms"] .section-unread-count')).toHaveText("1");
   await expect(page.locator("article.message[data-event-id]")).toHaveCount(9);
   const dateLabel = new Intl.DateTimeFormat("en-US", {
     weekday: "short",
