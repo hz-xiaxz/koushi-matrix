@@ -133,6 +133,7 @@ export function ContextualRightPanel({
   onModerateMember = () => undefined,
   onSetLocalUserAlias = () => undefined,
   onSetRoomNotificationMode = () => undefined,
+  onOpenSenderProfile,
   onStartDirectMessage = () => undefined,
   onUpdateMemberRole = () => undefined,
   onUpdateSpaceMemberRole = () => undefined,
@@ -266,6 +267,7 @@ export function ContextualRightPanel({
   onSetLocalUserAlias?: (userId: string, alias: string | null) => void;
   onRequestMemberAvatarThumbnail?: (mxcUri: string) => void | Promise<void | (() => void)>;
   onSetRoomNotificationMode?: (roomId: string, mode: RoomNotificationMode) => void;
+  onOpenSenderProfile?: TimelineRowActionHandlers["onOpenSenderProfile"];
   onStartDirectMessage?: (userId: string) => void;
   onUpdateMemberRole?: (
     roomId: string,
@@ -893,6 +895,8 @@ export function ContextualRightPanel({
             transport={timelineTransport}
             onReply={onReply}
             onOpenMatrixTarget={onOpenMatrixTarget}
+            onOpenSenderProfile={onOpenSenderProfile}
+            onStartDirectMessage={onStartDirectMessage}
             onOpenThread={() => undefined}
             resolveComposerKeyAction={onResolveComposerKeyAction}
             liveSignals={snapshot.state.domain.live_signals}
