@@ -322,8 +322,12 @@ describe("Rust-projected workspace shell", () => {
     snapshot.sidebar.space_rooms = [...snapshot.sidebar.sections.rooms];
     snapshot.sidebar.sections.low_priority = [room("!low:example.invalid", "Low Room")];
     snapshot.sidebar.sections.not_joined = [
-      { ...room("!open:example.invalid", "Open Room"), membership: "not_joined" },
-      { ...room("!invited:example.invalid", "Invited Room"), membership: "invited" }
+      { ...room("!open:example.invalid", "Open Room"), membership: "not_joined", can_join: true },
+      {
+        ...room("!invited:example.invalid", "Invited Room"),
+        membership: "invited",
+        can_join: true
+      }
     ];
 
     render(<Sidebar snapshot={snapshot} {...sidebarProps()} onJoinRoom={onJoinRoom} />);
@@ -341,5 +345,47 @@ describe("Rust-projected workspace shell", () => {
     fireEvent.click(open);
     expect(onJoinRoom).toHaveBeenCalledWith("!open:example.invalid");
     expect(sidebarProps().onSelectRoom).not.toHaveBeenCalled();
+  });
+
+  // Issue #961: a click must never fire a request the server would reject, and
+  // an invitation is answered where accept and decline live, not by a single
+  // click that silently joins.
+  it("joins only joinable rows and sends an invited row to the invites view", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    const onJoinRoom = vi.fn();
+    const onOpenInvites = vi.fn();
+    snapshot.sidebar.sections.not_joined = [
+      { ...room("!open:example.invalid", "Open Room"), membership: "not_joined", can_join: true },
+      {
+        ...room("!closed:example.invalid", "Invite Only"),
+        membership: "not_joined",
+        can_join: false
+      },
+      {
+        ...room("!invited:example.invalid", "Invited Room"),
+        membership: "invited",
+        can_join: true
+      }
+    ];
+
+    render(
+      <Sidebar
+        snapshot={snapshot}
+        {...sidebarProps()}
+        onJoinRoom={onJoinRoom}
+        onOpenInvites={onOpenInvites}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Invite Only").closest("button") as HTMLButtonElement);
+    expect(onJoinRoom).not.toHaveBeenCalled();
+    expect(onOpenInvites).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Invited Room").closest("button") as HTMLButtonElement);
+    expect(onOpenInvites).toHaveBeenCalledTimes(1);
+    expect(onJoinRoom).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Open Room").closest("button") as HTMLButtonElement);
+    expect(onJoinRoom).toHaveBeenCalledWith("!open:example.invalid");
   });
 });

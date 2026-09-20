@@ -90,6 +90,10 @@ pub struct RoomListItem {
     /// producer of anything else, so an older snapshot loads as joined.
     #[serde(default = "joined_membership")]
     pub membership: SpaceChildMembership,
+    /// Whether this row offers a join. Always false for a joined room; the
+    /// not-joined lane is the only producer of a true.
+    #[serde(default)]
+    pub can_join: bool,
     pub display_name: String,
     pub avatar: Option<AvatarImage>,
     pub tags: RoomTags,
@@ -271,8 +275,15 @@ fn compose_sidebar_with_preferences(
         .map(|space_id| space_children.children_for(space_id))
         .unwrap_or_default()
         .iter()
+        // Absence from the joined room list is what decides, not the cached
+        // `/hierarchy` membership: a room the user just left is gone from
+        // `rooms` long before the next hierarchy fetch would say so, and it
+        // must reappear here rather than vanish from the Space entirely.
         .filter(|child| !rooms_by_id.contains_key(child.room_id.as_str()))
-        .filter(|child| child.membership.is_outside_joined_rooms())
+        // A child the server declined to describe has only a room ID for a
+        // label and no action the user could take, so it stays in the Space
+        // info panel rather than the room list (see #192's reverted lane).
+        .filter(|child| child.membership != SpaceChildMembership::Unknown)
         .collect();
     not_joined_children.sort_by(|left, right| {
         left.display_name
@@ -423,14 +434,23 @@ fn not_joined_room_list_item(
     child: &SpaceChildSummary,
     invited_room_ids: &HashSet<&str>,
 ) -> RoomListItem {
-    let membership = if invited_room_ids.contains(child.room_id.as_str()) {
-        SpaceChildMembership::Invited
-    } else {
-        child.membership
+    // The account's own lists outrank the cached server summary in both
+    // directions: an invitation it no longer holds is not an invitation, and a
+    // room it is no longer in is not joined.
+    let invited = invited_room_ids.contains(child.room_id.as_str());
+    let membership = match (invited, child.membership) {
+        (true, _) => SpaceChildMembership::Invited,
+        (false, SpaceChildMembership::Joined | SpaceChildMembership::Invited) => {
+            SpaceChildMembership::NotJoined
+        }
+        (false, membership) => membership,
     };
     RoomListItem {
         room_id: child.room_id.clone(),
         membership,
+        // Accepting an invitation this account holds is always available; for
+        // everything else the server's join rule decides.
+        can_join: invited || child.can_join,
         display_name: child.display_name.clone(),
         avatar: child.avatar.clone(),
         tags: RoomTags::default(),
@@ -460,6 +480,7 @@ fn room_list_item(
     RoomListItem {
         room_id: room.room_id.clone(),
         membership: SpaceChildMembership::Joined,
+        can_join: false,
         display_name: room.display_label.clone(),
         avatar: room.avatar.clone(),
         tags: room.tags.clone(),

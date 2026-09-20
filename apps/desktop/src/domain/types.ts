@@ -2366,6 +2366,8 @@ export interface RoomListItem {
    * of anything else.
    */
   membership?: SpaceChildMembership;
+  /** Whether this row offers a join. Always false for a joined room. */
+  can_join?: boolean;
   display_name: string;
   avatar: AvatarImage | null;
   tags: RoomTags;

@@ -1249,14 +1249,34 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
     // spaces + rooms
     state.spaces.push(SpaceSummary {
         space_id: "!space:example.invalid".to_owned(),
-        raw_name: None,
+        raw_name: Some("Fixture Space Canonical Name".to_owned()),
         display_name: "Fixture Space".to_owned(),
         avatar: None,
         child_room_ids: vec![
             "!room:example.invalid".to_owned(),
             "!low-priority-room:example.invalid".to_owned(),
+            "!not-joined-room:example.invalid".to_owned(),
         ],
     });
+    // #961: the Space's advertised children, populated so the golden proves the
+    // shape of a real entry rather than an empty list.
+    state.space_children = koushi_state::SpaceChildrenState {
+        selected_space_id: Some("!space:example.invalid".to_owned()),
+        generation: 3,
+        children: vec![koushi_state::SpaceChildSummary {
+            room_id: "!not-joined-room:example.invalid".to_owned(),
+            display_name: "Fixture Not Joined Room".to_owned(),
+            avatar: Some(AvatarImage {
+                mxc_uri: "mxc://example.invalid/not-joined".to_owned(),
+                thumbnail: AvatarThumbnailState::NotRequested,
+            }),
+            membership: koushi_state::SpaceChildMembership::NotJoined,
+            can_join: true,
+            is_space: false,
+            joined_members: 12,
+        }],
+        load: koushi_state::SpaceChildrenLoadState::Idle,
+    };
     state.rooms.push(RoomSummary {
         room_id: "!room:example.invalid".to_owned(),
         display_name: "Fixture Room".to_owned(),

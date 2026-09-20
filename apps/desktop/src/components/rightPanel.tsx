@@ -124,6 +124,7 @@ export function ContextualRightPanel({
   onResetLocalData,
   onLogout = () => undefined,
   onInviteUser = () => undefined,
+  onAcceptInvite,
   onJoinRoom,
   onReturnToInvite = () => undefined,
   onInviteUserToSpace = () => undefined,
@@ -268,6 +269,7 @@ export function ContextualRightPanel({
   onSetLocalUserAlias?: (userId: string, alias: string | null) => void;
   onRequestMemberAvatarThumbnail?: (mxcUri: string) => void | Promise<void | (() => void)>;
   onSetRoomNotificationMode?: (roomId: string, mode: RoomNotificationMode) => void;
+  onAcceptInvite?: (roomId: string) => void;
   onJoinRoom?: (roomId: string) => void;
   onOpenSenderProfile?: TimelineRowActionHandlers["onOpenSenderProfile"];
   onStartDirectMessage?: (userId: string) => void;
@@ -672,6 +674,7 @@ export function ContextualRightPanel({
               ? snapshot.state.domain.space_children.children
               : []
           }
+          onAcceptInvite={onAcceptInvite}
           onJoinRoom={onJoinRoom}
           onInvitePeople={
             activeSpace

@@ -31,14 +31,6 @@ pub enum SpaceChildMembership {
     Unknown,
 }
 
-impl SpaceChildMembership {
-    /// True while the room is not part of the account's joined room list, which
-    /// is what decides whether the sidebar shows it in its own lane.
-    pub fn is_outside_joined_rooms(self) -> bool {
-        !matches!(self, Self::Joined)
-    }
-}
-
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SpaceChildSummary {
     pub room_id: String,

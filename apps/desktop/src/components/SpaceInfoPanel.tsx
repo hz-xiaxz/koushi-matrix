@@ -28,6 +28,7 @@ export function SpaceInfoPanel({
   roomManagement,
   space,
   spaceChildren = [],
+  onAcceptInvite,
   onInvitePeople,
   onJoinRoom,
   onOpenFiles,
@@ -42,6 +43,7 @@ export function SpaceInfoPanel({
   space: SpaceSummary | null;
   /** Issue #961: every child the Space advertises, joined or not. */
   spaceChildren?: readonly SpaceChildSummary[];
+  onAcceptInvite?: (roomId: string) => void;
   onInvitePeople?: () => void;
   onJoinRoom?: (roomId: string) => void;
   onOpenFiles?: () => void;
@@ -193,7 +195,20 @@ export function SpaceInfoPanel({
                 <span className="room-membership-badge">
                   {spaceChildMembershipLabel(child.membership)}
                 </span>
-                {child.can_join && onJoinRoom ? (
+                {/*
+                  An invitation is answered through the invite workflow, which
+                  owns the account's invite list; only a room with no
+                  invitation is entered with a join.
+                */}
+                {child.membership === "invited" && onAcceptInvite ? (
+                  <button
+                    className="profile-settings-action"
+                    type="button"
+                    onClick={() => onAcceptInvite(child.room_id)}
+                  >
+                    {t("invite.accept")}
+                  </button>
+                ) : child.can_join && onJoinRoom ? (
                   <button
                     className="profile-settings-action"
                     type="button"

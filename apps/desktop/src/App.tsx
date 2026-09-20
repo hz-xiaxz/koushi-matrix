@@ -6321,6 +6321,9 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           />
         )}
         <ContextualRightPanel
+          onAcceptInvite={(roomId) => {
+            runInBackground(acceptInvite(roomId));
+          }}
           onJoinRoom={(roomId) => {
             runInBackground(joinRoom(roomId));
           }}
