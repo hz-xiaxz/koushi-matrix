@@ -354,6 +354,44 @@ describe("SpaceInfoPanel", () => {
     expect(onJoinRoom).toHaveBeenCalledWith("!open:example.invalid");
   });
 
+  // An invitation belongs to the invite workflow, which owns the account's
+  // invite list; joining around it would leave that list stale.
+  test("answers an invited child through the invite workflow, not a join", () => {
+    const onAcceptInvite = vi.fn();
+    const onJoinRoom = vi.fn();
+    render(
+      <SpaceInfoPanel
+        fallbackName="Fallback"
+        rooms={[]}
+        space={{
+          space_id: "!space-work:example.invalid",
+          raw_name: "Work",
+          display_name: "Work",
+          avatar: null,
+          child_room_ids: []
+        }}
+        spaceChildren={[
+          {
+            room_id: "!invited:example.invalid",
+            display_name: "Invited Room",
+            avatar: null,
+            membership: "invited",
+            can_join: true,
+            is_space: false,
+            joined_members: 2
+          }
+        ]}
+        onAcceptInvite={onAcceptInvite}
+        onJoinRoom={onJoinRoom}
+      />
+    );
+
+    const invited = screen.getByText("Invited Room").closest(".settings-detail-row");
+    fireEvent.click(invited?.querySelector("button") as HTMLButtonElement);
+    expect(onAcceptInvite).toHaveBeenCalledWith("!invited:example.invalid");
+    expect(onJoinRoom).not.toHaveBeenCalled();
+  });
+
   test("never repeats a joined room in the not-joined part of the list", () => {
     render(
       <SpaceInfoPanel

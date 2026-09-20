@@ -17,7 +17,32 @@
     },
     "global_dms": [],
     "low_priority_collapsed": true,
-    "not_joined_space_rooms": [],
+    "not_joined_space_rooms": [
+      {
+        "avatar": {
+          "mxc_uri": "mxc://example.invalid/not-joined",
+          "thumbnail": {
+            "kind": "notRequested"
+          }
+        },
+        "can_join": true,
+        "display_count": 0,
+        "display_name": "Fixture Not Joined Room",
+        "has_unread_content": false,
+        "has_unread_mention": false,
+        "highlight_count": 0,
+        "is_attention_highlighted": false,
+        "is_muted": false,
+        "membership": "not_joined",
+        "notification_count": 0,
+        "room_id": "!not-joined-room:example.invalid",
+        "tags": {
+          "favourite": null,
+          "low_priority": null
+        },
+        "unread_count": 0
+      }
+    ],
     "rooms_collapsed": false,
     "rooms_sort": {
       "kind": "activity"
@@ -27,6 +52,7 @@
       "low_priority": [
         {
           "avatar": null,
+          "can_join": false,
           "display_count": 7,
           "display_name": "Fixture Low Priority Room",
           "has_unread_content": true,
@@ -46,7 +72,32 @@
           "unread_count": 7
         }
       ],
-      "not_joined": [],
+      "not_joined": [
+        {
+          "avatar": {
+            "mxc_uri": "mxc://example.invalid/not-joined",
+            "thumbnail": {
+              "kind": "notRequested"
+            }
+          },
+          "can_join": true,
+          "display_count": 0,
+          "display_name": "Fixture Not Joined Room",
+          "has_unread_content": false,
+          "has_unread_mention": false,
+          "highlight_count": 0,
+          "is_attention_highlighted": false,
+          "is_muted": false,
+          "membership": "not_joined",
+          "notification_count": 0,
+          "room_id": "!not-joined-room:example.invalid",
+          "tags": {
+            "favourite": null,
+            "low_priority": null
+          },
+          "unread_count": 0
+        }
+      ],
       "people": [],
       "rooms": [
         {
@@ -60,6 +111,7 @@
               "width": 64
             }
           },
+          "can_join": false,
           "display_count": 2,
           "display_name": "Fixture Room",
           "has_unread_content": true,
@@ -93,6 +145,7 @@
     "space_rooms": [
       {
         "avatar": null,
+        "can_join": false,
         "display_count": 7,
         "display_name": "Fixture Low Priority Room",
         "has_unread_content": true,
@@ -122,6 +175,7 @@
             "width": 64
           }
         },
+        "can_join": false,
         "display_count": 2,
         "display_name": "Fixture Room",
         "has_unread_content": true,
@@ -846,12 +900,27 @@
         "kind": "idle"
       },
       "space_children": {
-        "children": [],
-        "generation": 0,
+        "children": [
+          {
+            "avatar": {
+              "mxc_uri": "mxc://example.invalid/not-joined",
+              "thumbnail": {
+                "kind": "notRequested"
+              }
+            },
+            "can_join": true,
+            "display_name": "Fixture Not Joined Room",
+            "is_space": false,
+            "joined_members": 12,
+            "membership": "not_joined",
+            "room_id": "!not-joined-room:example.invalid"
+          }
+        ],
+        "generation": 3,
         "load": {
           "kind": "idle"
         },
-        "selected_space_id": null
+        "selected_space_id": "!space:example.invalid"
       },
       "space_members": {
         "can_edit_roles": false,
@@ -873,10 +942,11 @@
           "avatar": null,
           "child_room_ids": [
             "!room:example.invalid",
-            "!low-priority-room:example.invalid"
+            "!low-priority-room:example.invalid",
+            "!not-joined-room:example.invalid"
           ],
           "display_name": "Fixture Space",
-          "raw_name": null,
+          "raw_name": "Fixture Space Canonical Name",
           "space_id": "!space:example.invalid"
         }
       ],

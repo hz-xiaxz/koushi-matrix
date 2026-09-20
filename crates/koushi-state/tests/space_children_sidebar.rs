@@ -102,10 +102,9 @@ fn not_joined_children_get_their_own_lane_without_touching_the_joined_rooms() {
     let sidebar = compose_sidebar_for_state(&state);
 
     assert_eq!(names(&sidebar.sections.rooms), ["Joined Room"]);
-    assert_eq!(
-        names(&sidebar.sections.not_joined),
-        ["!private:example.invalid", "Open Room"]
-    );
+    // The undescribed child stays in the Space info panel; see
+    // `an_undescribed_child_stays_out_of_the_room_list`.
+    assert_eq!(names(&sidebar.sections.not_joined), ["Open Room"]);
     assert_eq!(
         sidebar.sections.rooms[0].membership,
         SpaceChildMembership::Joined
@@ -177,4 +176,128 @@ fn another_spaces_children_never_leak_into_the_selected_space() {
     let sidebar = compose_sidebar_for_state(&state);
 
     assert!(sidebar.sections.not_joined.is_empty());
+}
+
+/// Issue #961 acceptance: "Roomの参加・退出・招待の状態変化が一覧へ反映される".
+/// The hierarchy projection is a cached server summary; the account's own room
+/// and invite lists move first, and a left room must reappear in the Space
+/// rather than disappear from it.
+#[test]
+fn leaving_a_room_returns_it_to_the_not_joined_lane_before_the_next_hierarchy_fetch() {
+    let mut state = state_with_children(vec![child(
+        "!joined:example.invalid",
+        "Joined Room",
+        SpaceChildMembership::Joined,
+    )]);
+    // The user left; the joined room list no longer carries it, while the
+    // cached projection still says Joined.
+    state.rooms.clear();
+
+    let sidebar = compose_sidebar_for_state(&state);
+
+    assert!(sidebar.sections.rooms.is_empty());
+    assert_eq!(names(&sidebar.sections.not_joined), ["Joined Room"]);
+    assert_eq!(
+        sidebar.sections.not_joined[0].membership,
+        SpaceChildMembership::NotJoined
+    );
+}
+
+#[test]
+fn a_declined_invitation_stops_being_reported_as_invited() {
+    let state = state_with_children(vec![child(
+        "!invited:example.invalid",
+        "Invited Room",
+        SpaceChildMembership::Invited,
+    )]);
+    // `state.invites` is empty: the invitation is gone.
+
+    let sidebar = compose_sidebar_for_state(&state);
+
+    assert_eq!(
+        sidebar.sections.not_joined[0].membership,
+        SpaceChildMembership::NotJoined
+    );
+}
+
+/// A child the server declined to describe has only a room ID for a label and
+/// no action to offer, so it belongs to the Space info panel, not the room list.
+#[test]
+fn an_undescribed_child_stays_out_of_the_room_list() {
+    let state = state_with_children(vec![child(
+        "!private:example.invalid",
+        "!private:example.invalid",
+        SpaceChildMembership::Unknown,
+    )]);
+
+    let sidebar = compose_sidebar_for_state(&state);
+
+    assert!(sidebar.sections.not_joined.is_empty());
+}
+
+/// Only rows that can actually be joined carry the affordance: everything else
+/// would fire a request the server rejects.
+#[test]
+fn only_joinable_rows_carry_a_join_affordance() {
+    let mut state = state_with_children(vec![
+        child(
+            "!open:example.invalid",
+            "Open Room",
+            SpaceChildMembership::NotJoined,
+        ),
+        SpaceChildSummary {
+            can_join: false,
+            ..child(
+                "!banned:example.invalid",
+                "Banned Room",
+                SpaceChildMembership::Banned,
+            )
+        },
+        SpaceChildSummary {
+            can_join: false,
+            ..child(
+                "!invite-only:example.invalid",
+                "Invite Only",
+                SpaceChildMembership::NotJoined,
+            )
+        },
+    ]);
+    state.invites = vec![InvitePreview {
+        room_id: "!pending:example.invalid".to_owned(),
+        display_name: "Pending Room".to_owned(),
+        avatar: None,
+        topic: None,
+        inviter_display_name: None,
+        inviter_user_id: None,
+        is_dm: false,
+        is_space: false,
+    }];
+    state.space_children.children.push(SpaceChildSummary {
+        can_join: false,
+        ..child(
+            "!pending:example.invalid",
+            "Pending Room",
+            SpaceChildMembership::NotJoined,
+        )
+    });
+
+    let sidebar = compose_sidebar_for_state(&state);
+
+    let joinable: Vec<(&str, bool)> = sidebar
+        .sections
+        .not_joined
+        .iter()
+        .map(|item| (item.display_name.as_str(), item.can_join))
+        .collect();
+    assert_eq!(
+        joinable,
+        [
+            ("Banned Room", false),
+            ("Invite Only", false),
+            ("Open Room", true),
+            // An invitation this account holds can always be accepted.
+            ("Pending Room", true),
+        ]
+    );
+    assert!(sidebar.sections.rooms.iter().all(|item| !item.can_join));
 }

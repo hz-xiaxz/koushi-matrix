@@ -858,11 +858,17 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   panel-open or settings-load Pending state. People navigation opens the pane
   before its settings read settles; a newer Threads intent retires that People
   request before either focused-context closure or settings settlement, and a
-  late load may refresh only still-current data. Main-timeline sender Profile
-  navigation forwards the Rust-projected `(room_id, sender user_id)`, never a
-  display label, and opens Profile only after an exact room-settings snapshot;
+  late load may refresh only still-current data. Sender Profile navigation
+  forwards the Rust-projected `(room_id, sender user_id)`, never a display
+  label, and opens Profile only after an exact room-settings snapshot;
   its renderer request/navigation fences make rapid clicks and room changes
-  latest-wins without visibly opening People first. A rejected effect load may release
+  latest-wins without visibly opening People first. Every timeline presentation
+  context supplies it, the thread pane included (#959): the presentation context
+  does not decide whether a sender has a profile — the row's stable sender ID
+  does, and `openRoomUserProfile` still rejects anything whose room is not both
+  the active room and the timeline's room. Profile and thread are the same
+  right-panel surface, so opening a profile from a thread replaces that pane and
+  Back opens the room's People list, not the thread. A rejected effect load may release
   only its still-current request/target marker; it must not log the raw error,
   clear a newer same-target demand, or add retry/backoff. Navigation and panel
   replacement continue to fence completion before the Rust-shaped snapshot enters

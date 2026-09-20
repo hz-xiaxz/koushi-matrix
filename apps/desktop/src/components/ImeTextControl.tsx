@@ -565,6 +565,10 @@ export const ImeInlineMentionEditor = forwardRef<
               ? caretAnchorSkipTarget(control, event.key, event.shiftKey)
               : null;
             if (control && target) {
+              // A consumed arrow is not forwarded to `onKeyDown`: no composer
+              // consumer wants Left/Right today (the autocomplete takes only
+              // Up/Down while open). A consumer that later needs them must be
+              // given the event here rather than reading it around this branch.
               event.preventDefault();
               applyCaretAnchorSkip(control, target);
               onSelectionChange?.(selection());

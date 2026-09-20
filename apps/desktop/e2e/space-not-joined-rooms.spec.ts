@@ -28,6 +28,7 @@ function row(
     room_id,
     display_name,
     membership,
+    can_join: membership !== "joined",
     avatar: null,
     tags: { favourite: null, low_priority: null },
     unread_count: 0,
@@ -47,6 +48,16 @@ const OPEN = row("!open:example.invalid", "Open Room", "not_joined");
 const INVITED = row("!invited:example.invalid", "Invited Room", "invited");
 
 async function openHarness(page: Page): Promise<DesktopSnapshot> {
+  // Sidebar section collapse is a persisted preference, so a spec that ran
+  // earlier in the same worker could otherwise leave the Not joined section
+  // collapsed and hide every row this spec asserts on.
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.clear();
+    } catch {
+      // A blocked storage accessor is not this spec's concern.
+    }
+  });
   await page.goto("/appHarness.html");
   await expect(page.getByRole("complementary", { name: t("workspace.rooms") })).toBeVisible();
   return page.evaluate(() => {
@@ -114,4 +125,12 @@ test("a Space lists the rooms it contains that the account has not joined", asyn
   );
   expect(joins).toHaveLength(1);
   expect(JSON.stringify(joins[0])).toContain("!open:example.invalid");
+
+  // An invitation is answered in the invites view, which owns accept and
+  // decline; a click here never joins around it.
+  await invited.click();
+  const joinsAfterInvite = await page.evaluate(() =>
+    (window as unknown as { __harness: Harness }).__harness.invocationsOf("join_room")
+  );
+  expect(joinsAfterInvite).toHaveLength(1);
 });

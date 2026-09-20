@@ -1064,6 +1064,7 @@ export function Sidebar({
             roomById={roomById}
             rooms={sections.not_joined}
             onJoinRoom={onJoinRoom}
+            onOpenInvites={onOpenInvites}
             onOpenContextMenu={onOpenContextMenu}
             onSelectRoom={onSelectRoom}
             onToggleCollapsed={() =>
@@ -1151,6 +1152,7 @@ function RoomSection({
   onCreate,
   onOpenContextMenu,
   onJoinRoom,
+  onOpenInvites,
   onSelectInvite,
   onSelectRoom,
   onSelectSort,
@@ -1178,6 +1180,7 @@ function RoomSection({
   onCreate?: () => void;
   onOpenContextMenu: OpenContextMenu;
   onJoinRoom?: (roomId: string) => void;
+  onOpenInvites?: () => void;
   onSelectInvite?: () => void;
   onSelectRoom: (roomId: string) => void;
   onSelectSort?: (sort: RoomListSort) => void;
@@ -1216,6 +1219,7 @@ function RoomSection({
                 key={room.room_id}
                 room={room}
                 onJoinRoom={onJoinRoom}
+                onOpenInvites={onOpenInvites}
                 onOpenContextMenu={onOpenContextMenu}
                 onSelectInvite={onSelectInvite}
                 onSelectRoom={onSelectRoom}
@@ -1423,6 +1427,7 @@ function RoomButton({
   roomById,
   room,
   onJoinRoom,
+  onOpenInvites,
   onOpenContextMenu,
   onSelectInvite,
   onSelectRoom,
@@ -1434,6 +1439,7 @@ function RoomButton({
   roomById: Map<string, RoomSummary>;
   room: RoomListItem;
   onJoinRoom?: (roomId: string) => void;
+  onOpenInvites?: () => void;
   onOpenContextMenu: OpenContextMenu;
   onSelectInvite?: () => void;
   onSelectRoom: (roomId: string) => void;
@@ -1464,7 +1470,18 @@ function RoomButton({
           return;
         }
         if (kind === "notJoined") {
-          onJoinRoom?.(room.room_id);
+          // Issue #961: an invitation is answered through the invite workflow,
+          // which owns `state.invites` and the Home invite count; a single
+          // click never silently accepts it. Anything the server's join rule
+          // does not admit offers no action at all rather than firing a join it
+          // would reject.
+          if (room.membership === "invited") {
+            onOpenInvites?.();
+            return;
+          }
+          if (room.can_join) {
+            onJoinRoom?.(room.room_id);
+          }
           return;
         }
         onSelectRoom(room.room_id);
