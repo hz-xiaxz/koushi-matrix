@@ -1412,6 +1412,7 @@ function makeSnapshot(): DesktopSnapshot {
           ignored_user_update: { kind: "idle" },
           update: { kind: "idle" }
         },
+        space_children: { selected_space_id: null, generation: 0, children: [], load: { kind: "idle" } },
         space_members: {
           selected_space_id: null,
           generation: 0,
@@ -1429,6 +1430,7 @@ function makeSnapshot(): DesktopSnapshot {
         spaces: [
           {
             space_id: "!space-alpha:example.invalid",
+            raw_name: null,
             display_name: "Alpha Space",
             avatar: null,
             child_room_ids: ["!room-alpha:example.invalid"]

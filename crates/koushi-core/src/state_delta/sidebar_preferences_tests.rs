@@ -28,6 +28,7 @@ fn fixture(active: Option<&str>) -> AppState {
         .into_iter()
         .map(|space_id| SpaceSummary {
             space_id: space_id.into(),
+            raw_name: None,
             display_name: "Synthetic Space".into(),
             avatar: None,
             child_room_ids: state

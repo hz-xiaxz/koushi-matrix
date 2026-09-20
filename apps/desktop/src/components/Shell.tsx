@@ -1498,6 +1498,16 @@ function RoomButton({
       </span>
       <span className="room-name" dir="auto">{room.display_name}</span>
       <span className="room-trailing">
+        {/*
+          Issue #961: a room outside the account's joined rooms says which
+          relationship it is in, so an invitation is not mistaken for a room
+          that is simply open to join.
+        */}
+        {kind === "notJoined" ? (
+          <span className="room-membership-badge">
+            {roomMembershipLabel(room.membership)}
+          </span>
+        ) : null}
         {mentionCount ? <span className="room-mention-dot" aria-hidden="true" /> : null}
         {hasUnreadContent && displayCount === 0 ? (
           <span className="room-unread-dot" aria-hidden="true" />
@@ -1510,6 +1520,19 @@ function RoomButton({
       </span>
     </button>
   );
+}
+
+function roomMembershipLabel(membership: RoomListItem["membership"]): string {
+  switch (membership) {
+    case "invited":
+      return t("roomList.membershipInvited");
+    case "knocked":
+      return t("roomList.membershipKnocked");
+    case "unknown":
+      return t("roomList.membershipUnknown");
+    default:
+      return t("roomList.membershipNotJoined");
+  }
 }
 
 function useVisibleAvatarThumbnailRequest(

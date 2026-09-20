@@ -539,6 +539,41 @@ pub async fn load_space_members(
     Ok(command_settlement(generation))
 }
 
+/// Issue #961: load every child room the Space advertises.
+#[tauri::command]
+pub async fn load_space_children(
+    space_id: String,
+    generation: u64,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandSettlement, String> {
+    let mut event_conn = state.runtime.attach();
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
+    let request_id = event_conn.next_request_id();
+    event_conn
+        .command(build_load_space_children_command(
+            request_id,
+            space_id.clone(),
+            generation,
+        ))
+        .await
+        .map_err(|e| format!("command submit failed: {e}"))?;
+    let generation = wait_for_room_operation(
+        &mut event_conn,
+        request_id,
+        baseline.generation,
+        account_key,
+        space_id,
+        RoomOperationKind::SpaceChildrenLoaded { generation },
+        ROOM_OPERATION_EVENT_TIMEOUT,
+        "Space children load",
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(command_settlement(generation))
+}
+
 #[tauri::command]
 pub async fn query_mention_candidates(
     room_id: String,
@@ -1266,6 +1301,18 @@ pub(super) fn build_load_space_members_command(
     generation: u64,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::LoadSpaceMembers {
+        request_id,
+        space_id,
+        generation,
+    })
+}
+
+pub(super) fn build_load_space_children_command(
+    request_id: koushi_protocol::RequestId,
+    space_id: String,
+    generation: u64,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::LoadSpaceChildren {
         request_id,
         space_id,
         generation,

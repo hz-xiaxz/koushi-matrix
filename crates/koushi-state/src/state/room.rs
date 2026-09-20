@@ -8,6 +8,11 @@ use super::settings::RoomNotificationMode;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SpaceSummary {
     pub space_id: String,
+    /// The Space's canonical `m.room.name`. `None` means the Space has no
+    /// name event: an alias or a computed name is never promoted into it,
+    /// and snapshots written before this field existed load as `None`.
+    #[serde(default)]
+    pub raw_name: Option<String>,
     pub display_name: String,
     #[serde(default)]
     pub avatar: Option<AvatarImage>,

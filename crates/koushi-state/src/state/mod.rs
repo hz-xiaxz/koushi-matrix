@@ -30,6 +30,7 @@ mod session;
 mod session_status;
 mod settings;
 mod sliding_sync;
+mod space_children;
 mod space_members;
 mod sync;
 mod thread;
@@ -100,6 +101,11 @@ pub use profile::{
     is_ignored_user, normalize_local_user_alias, refresh_profile_user_display_projection,
     refresh_room_settings_member_display_projection, refresh_room_summary_display_projection,
     resolve_optional_user_display_name, resolve_people_label, resolve_user_display_name,
+};
+
+// ── Re-exports: space children ────────────────────────────────────────────
+pub use space_children::{
+    SpaceChildMembership, SpaceChildSummary, SpaceChildrenLoadState, SpaceChildrenState,
 };
 
 // ── Re-exports: space members ─────────────────────────────────────────────
@@ -290,6 +296,8 @@ pub struct AppState {
     pub room_preferences: RoomPreferencesState,
     pub profile: ProfileState,
     #[serde(default)]
+    pub space_children: SpaceChildrenState,
+    #[serde(default)]
     pub space_members: SpaceMembersState,
     pub sync: SyncState,
     #[serde(default)]
@@ -363,6 +371,7 @@ impl Default for AppState {
             link_preview_settings: LinkPreviewSettingsState::default(),
             room_preferences: RoomPreferencesState::default(),
             profile: ProfileState::default(),
+            space_children: SpaceChildrenState::default(),
             space_members: SpaceMembersState::default(),
             sync: SyncState::Stopped,
             sync_generation: 0,

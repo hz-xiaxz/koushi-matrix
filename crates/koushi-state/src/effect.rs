@@ -203,6 +203,7 @@ pub enum UiEvent {
     RoomListChanged,
     InviteWorkflowChanged,
     FocusedContextChanged,
+    SpaceChildrenChanged,
     SpaceMembersChanged,
     TimelineChanged { room_id: String },
     ThreadChanged,

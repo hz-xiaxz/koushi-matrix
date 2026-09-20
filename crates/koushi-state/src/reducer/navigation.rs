@@ -45,12 +45,18 @@ pub(crate) fn handle_navigation_loaded(
     state.navigation = normalize_navigation_state(navigation);
     super::normalize_space_order_preference(&mut state.navigation.space_order);
     apply_space_order_preference(&mut state.spaces, &state.navigation.space_order);
-    let space_members_changed = previous_active_space_id != state.navigation.active_space_id
+    let space_changed = previous_active_space_id != state.navigation.active_space_id;
+    let space_members_changed = space_changed
         && super::space_members::handle_selected(state, state.navigation.active_space_id.clone());
+    let space_children_changed = space_changed
+        && super::space_children::handle_selected(state, state.navigation.active_space_id.clone());
     recompute_room_list_projection(state);
     let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)];
     if space_members_changed {
         effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+    }
+    if space_children_changed {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceChildrenChanged));
     }
     effects
 }
@@ -309,12 +315,21 @@ pub(crate) fn handle_select_space(
             SpaceConversationSurface::Rooms => RoomListFilter::Rooms,
         };
     }
-    let space_members_changed = super::space_members::handle_selected(state, selected_space_id);
+    let space_members_changed =
+        super::space_members::handle_selected(state, selected_space_id.clone());
+    // Issue #961: the new Space's advertised children are not the previous
+    // Space's. Clearing here also bumps the generation the frontend must quote
+    // when it asks for them.
+    let space_children_changed =
+        super::space_children::handle_selected(state, selected_space_id);
     recompute_room_list_projection(state);
     if state.navigation.active_space_id.is_none() {
         let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)];
         if space_members_changed {
             effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+        }
+        if space_children_changed {
+            effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceChildrenChanged));
         }
         close_current_room_search_for_room_change(state, None, &mut effects);
         if let Some(previous_room_id) = previous_room_id {
@@ -326,6 +341,9 @@ pub(crate) fn handle_select_space(
     let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)];
     if space_members_changed {
         effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+    }
+    if space_children_changed {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceChildrenChanged));
     }
     if target_room_id != state.navigation.active_room_id {
         match target_room_id {
@@ -419,10 +437,15 @@ pub(crate) fn handle_select_room(state: &mut AppState, room_id: String) -> Vec<A
     if previous_active_space_id != state.navigation.active_space_id {
         let space_members_changed =
             super::space_members::handle_selected(state, state.navigation.active_space_id.clone());
+        let space_children_changed =
+            super::space_children::handle_selected(state, state.navigation.active_space_id.clone());
         recompute_room_list_projection(state);
         effects.push(AppEffect::EmitUiEvent(UiEvent::RoomListChanged));
         if space_members_changed {
             effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+        }
+        if space_children_changed {
+            effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceChildrenChanged));
         }
     }
     close_current_room_search_for_room_change(state, Some(room_id.as_str()), &mut effects);

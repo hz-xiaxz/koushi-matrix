@@ -26,6 +26,7 @@ fn account_switch_request_enters_switching_state_and_clears_views() {
         },
         spaces: vec![SpaceSummary {
             space_id: "space-a".to_owned(),
+            raw_name: None,
             display_name: "Space A".to_owned(),
             avatar: None,
             child_room_ids: vec!["room-a".to_owned()],
@@ -155,6 +156,7 @@ fn logout_clears_session_views_and_notifies_ui() {
         },
         spaces: vec![SpaceSummary {
             space_id: "space-a".to_owned(),
+            raw_name: None,
             display_name: "Space A".to_owned(),
             avatar: None,
             child_room_ids: vec!["room-a".to_owned()],
@@ -304,6 +306,7 @@ fn authentication_invalidation_locks_ready_with_closed_reason_and_preserves_soft
         };
         state.spaces.push(SpaceSummary {
             space_id: "space-a".to_owned(),
+            raw_name: None,
             display_name: "Space A".to_owned(),
             avatar: None,
             child_room_ids: Vec::new(),
@@ -390,6 +393,7 @@ fn session_locked_stops_sync_and_clears_session_views() {
         sync: SyncState::Running,
         spaces: vec![SpaceSummary {
             space_id: "space-a".to_owned(),
+            raw_name: None,
             display_name: "Space A".to_owned(),
             avatar: None,
             child_room_ids: vec![],

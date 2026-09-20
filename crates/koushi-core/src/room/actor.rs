@@ -802,6 +802,14 @@ impl RoomActor {
                 self.handle_load_space_members(request_id, space_id, generation)
                     .await;
             }
+            RoomCommand::LoadSpaceChildren {
+                request_id,
+                space_id,
+                generation,
+            } => {
+                self.handle_load_space_children(request_id, space_id, generation)
+                    .await;
+            }
             RoomCommand::InviteUserToSpace {
                 request_id,
                 space_id,

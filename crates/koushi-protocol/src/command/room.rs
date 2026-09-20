@@ -98,6 +98,13 @@ pub enum RoomCommand {
         space_id: String,
         generation: u64,
     },
+    /// Issue #961: fetch every child room the Space advertises, with the
+    /// account's membership in each.
+    LoadSpaceChildren {
+        request_id: RequestId,
+        space_id: String,
+        generation: u64,
+    },
     InviteUserToSpace {
         request_id: RequestId,
         space_id: String,
@@ -321,6 +328,16 @@ impl fmt::Debug for RoomCommand {
                 ..
             } => formatter
                 .debug_struct("LoadSpaceMembers")
+                .field("request_id", request_id)
+                .field("space_id", &"RoomId(..)")
+                .field("generation", generation)
+                .finish(),
+            Self::LoadSpaceChildren {
+                request_id,
+                generation,
+                ..
+            } => formatter
+                .debug_struct("LoadSpaceChildren")
                 .field("request_id", request_id)
                 .field("space_id", &"RoomId(..)")
                 .field("generation", generation)

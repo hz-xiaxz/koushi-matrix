@@ -537,6 +537,7 @@ fn activity_projection_context_label_uses_space_and_room_names() {
     let mut state = AppState::default();
     state.spaces = vec![SpaceSummary {
         space_id: "!space:example.invalid".to_owned(),
+        raw_name: None,
         display_name: "Science".to_owned(),
         avatar: None,
         child_room_ids: vec!["!room:example.invalid".to_owned()],

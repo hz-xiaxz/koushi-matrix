@@ -133,6 +133,7 @@ pub fn build_state_delta(
             changed.profile_update = Some(next.profile.update.clone());
         }
     }
+    changed_slice!(space_children);
     changed_slice!(space_members);
     changed_slice!(sync);
     changed_slice!(navigation);
@@ -546,6 +547,7 @@ fn audit_app_state_delta_slices(state: &AppState) {
         link_preview_settings: _,
         room_preferences: _,
         profile: _,
+        space_children: _,
         space_members: _,
         sync: _,
         sync_generation: _,

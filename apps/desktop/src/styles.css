@@ -1784,6 +1784,20 @@ button:disabled {
   display: none;
 }
 
+/*
+  Issue #961: the relationship label on a room outside the account's joined
+  rooms. Quieter than an unread badge — it is a status, not attention.
+*/
+.room-membership-badge {
+  padding-inline: var(--room-count-padding-inline);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line);
+  color: var(--text-muted);
+  font-size: var(--room-count-font-size);
+  line-height: var(--room-count-block-size);
+  white-space: nowrap;
+}
+
 .room-avatar {
   display: grid;
   place-items: center;

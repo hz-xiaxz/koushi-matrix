@@ -715,6 +715,10 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandSettlement>("load_space_members", { spaceId, generation });
   }
 
+  async loadSpaceChildren(spaceId: string, generation: number): Promise<CommandSettlement> {
+    return this.invokeCommand<CommandSettlement>("load_space_children", { spaceId, generation });
+  }
+
   async queryMentionCandidates(
     roomId: string,
     surface: MentionSurface,

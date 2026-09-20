@@ -357,6 +357,7 @@ export function defaultSnapshotResponse() {
         ignored_user_update: { kind: "idle" },
         update: { kind: "idle" }
       },
+      space_children: { selected_space_id: null, generation: 0, children: [], load: { kind: "idle" } },
       space_members: {
         selected_space_id: null,
         generation: 0,

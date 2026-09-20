@@ -358,6 +358,7 @@ fn space_threads_list_resolves_child_and_parent_rooms_in_rust() {
     state.navigation.active_space_id = Some("space-a".to_owned());
     state.spaces = vec![SpaceSummary {
         space_id: "space-a".to_owned(),
+        raw_name: None,
         display_name: "Space A".to_owned(),
         avatar: None,
         child_room_ids: vec!["room-a".to_owned()],

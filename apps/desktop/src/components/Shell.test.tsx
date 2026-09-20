@@ -311,4 +311,35 @@ describe("Rust-projected workspace shell", () => {
     expect(screen.getByRole("button", { name: "Explore" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Invites/ })).toBeTruthy();
   });
+
+  // Issue #961: rooms the account is not in live in their own lane below the
+  // joined ones, each saying which relationship it is in, and clicking one
+  // joins it instead of trying to open a room the account cannot read.
+  it("renders the not-joined lane last, with a membership label and a join action", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    const onJoinRoom = vi.fn();
+    snapshot.sidebar.sections.rooms = [room("!joined:example.invalid", "Joined Room")];
+    snapshot.sidebar.space_rooms = [...snapshot.sidebar.sections.rooms];
+    snapshot.sidebar.sections.low_priority = [room("!low:example.invalid", "Low Room")];
+    snapshot.sidebar.sections.not_joined = [
+      { ...room("!open:example.invalid", "Open Room"), membership: "not_joined" },
+      { ...room("!invited:example.invalid", "Invited Room"), membership: "invited" }
+    ];
+
+    render(<Sidebar snapshot={snapshot} {...sidebarProps()} onJoinRoom={onJoinRoom} />);
+
+    const open = screen.getByText("Open Room").closest("button") as HTMLButtonElement;
+    const invited = screen.getByText("Invited Room").closest("button") as HTMLButtonElement;
+    expect(open.textContent).toContain("Not joined");
+    expect(invited.textContent).toContain("Invited");
+
+    const buttons = screen.getAllByRole("button");
+    expect(buttons.indexOf(open)).toBeGreaterThan(
+      buttons.findIndex((button) => button.textContent?.includes("Low Room"))
+    );
+
+    fireEvent.click(open);
+    expect(onJoinRoom).toHaveBeenCalledWith("!open:example.invalid");
+    expect(sidebarProps().onSelectRoom).not.toHaveBeenCalled();
+  });
 });

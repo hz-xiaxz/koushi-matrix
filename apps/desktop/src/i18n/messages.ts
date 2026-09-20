@@ -912,7 +912,10 @@ export type MessageId =
   | "gate.rejectNoProof"
   | "gate.rejectUser"
   | "space.allRooms"
+  | "space.canonicalName"
   | "space.childRooms"
+  | "space.names"
+  | "space.nameUnset"
   | "space.directMessages"
   | "space.home"
   | "space.invite"
@@ -1181,6 +1184,10 @@ export type MessageId =
   | "workspace.lowPriority"
   | "workspace.newDm"
   | "workspace.notJoined"
+  | "roomList.membershipInvited"
+  | "roomList.membershipKnocked"
+  | "roomList.membershipNotJoined"
+  | "roomList.membershipUnknown"
   | "workspace.people"
   | "workspace.rooms"
   | "workspace.resizeRoomList"
@@ -2313,7 +2320,10 @@ const en: Catalog = {
   "gate.rejectNoProof": "This existing identity has no acceptable proof method.",
   "gate.rejectUser": "This session was rejected.",
   "space.allRooms": "All rooms",
+  "space.canonicalName": "Matrix name",
   "space.childRooms": "Child rooms",
+  "space.names": "Names",
+  "space.nameUnset": "Not set",
   "space.directMessages": "Direct Messages",
   "space.home": "Home",
   "space.invite": "Invite",
@@ -2582,6 +2592,10 @@ const en: Catalog = {
   "workspace.lowPriority": "Low priority",
   "workspace.newDm": "New DM",
   "workspace.notJoined": "Not joined",
+  "roomList.membershipInvited": "Invited",
+  "roomList.membershipKnocked": "Knock requested",
+  "roomList.membershipNotJoined": "Not joined",
+  "roomList.membershipUnknown": "Unavailable",
   "workspace.people": "Direct Messages",
   "workspace.rooms": "Rooms",
   "workspace.resizeRoomList": "Resize room list",
@@ -3600,7 +3614,10 @@ const ja: Catalog = {
   "gate.rejectNoProof": "既存の識別情報に利用可能な証明方法がありません。",
   "gate.rejectUser": "このセッションは拒否されました。",
   "space.allRooms": "すべてのルーム",
+  "space.canonicalName": "Matrix上の名前",
   "space.childRooms": "子ルーム",
+  "space.names": "名前",
+  "space.nameUnset": "未設定",
   "space.directMessages": "Direct Messages",
   "space.home": "ホーム",
   "space.invite": "招待",
@@ -3868,6 +3885,10 @@ const ja: Catalog = {
   "workspace.lowPriority": "低優先度",
   "workspace.newDm": "新しいDM",
   "workspace.notJoined": "未参加",
+  "roomList.membershipInvited": "招待済み",
+  "roomList.membershipKnocked": "参加申請中",
+  "roomList.membershipNotJoined": "未入室",
+  "roomList.membershipUnknown": "参照不可",
   "workspace.people": "Direct Messages",
   "workspace.rooms": "ルーム",
   "workspace.resizeRoomList": "ルームリストの幅を変更",

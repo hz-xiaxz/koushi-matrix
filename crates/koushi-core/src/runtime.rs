@@ -3501,6 +3501,33 @@ impl AppActor {
                         self.handle_ui_event_effects(&effects).await;
                         state_changed = true;
                     }
+                    koushi_protocol::command::RoomCommand::LoadSpaceChildren {
+                        request_id,
+                        space_id,
+                        generation,
+                    } => {
+                        // Issue #961: only the selected Space's current
+                        // generation may ask for children, so a request left
+                        // over from the previous Space settles as a failure
+                        // instead of painting rooms that are no longer shown.
+                        let effects = self
+                            .reduce_app_action(AppAction::SpaceChildrenLoadRequested {
+                                space_id: space_id.clone(),
+                                generation: *generation,
+                            })
+                            .await;
+                        if effects.is_empty() {
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        self.handle_ui_event_effects(&effects).await;
+                        state_changed = true;
+                    }
                     koushi_protocol::command::RoomCommand::InviteUserToSpace {
                         request_id,
                         space_id,

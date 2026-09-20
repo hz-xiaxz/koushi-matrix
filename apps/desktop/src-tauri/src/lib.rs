@@ -1154,6 +1154,7 @@ pub fn run() {
             commands::room::refresh_pinned_events,
             commands::room::load_room_settings,
             commands::room::load_space_members,
+            commands::room::load_space_children,
             commands::room::query_mention_candidates,
             commands::room::repair_room_timeline,
             commands::room::update_room_setting,

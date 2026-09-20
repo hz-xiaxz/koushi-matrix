@@ -30,6 +30,7 @@ pub(super) fn avatar(mxc_uri: &str) -> AvatarImage {
 pub(super) fn spaces() -> Vec<SpaceSummary> {
     vec![SpaceSummary {
         space_id: "space-a".to_owned(),
+        raw_name: None,
         display_name: "Space A".to_owned(),
         avatar: None,
         child_room_ids: vec!["room-a".to_owned(), "dm-a".to_owned()],

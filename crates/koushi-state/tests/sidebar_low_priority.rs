@@ -68,6 +68,7 @@ fn mixed_state() -> AppState {
     let mut state = AppState::default();
     state.spaces = vec![SpaceSummary {
         space_id: SPACE_ID.to_owned(),
+        raw_name: None,
         display_name: "Space".to_owned(),
         avatar: None,
         child_room_ids: vec![

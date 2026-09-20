@@ -28,6 +28,7 @@ const baseRoom: RoomSummary = {
 
 const baseSpace: SpaceSummary = {
   space_id: "!space-work:example.invalid",
+  raw_name: null,
   display_name: "Synthetic Workspace",
   avatar: null,
   child_room_ids: []

@@ -70,6 +70,7 @@ const room: RoomSummary = {
 
 const space: SpaceSummary = {
   space_id: "!space-work:example.invalid",
+  raw_name: null,
   display_name: "Workspace",
   avatar: null,
   child_room_ids: [room.room_id]

@@ -61,6 +61,7 @@ fn room_list_smoke_report_counts_without_private_names() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: vec![MatrixRoomListSpace {
             space_id: "!space:example.invalid".into(),
+            raw_name: None,
             display_name: "Private Space Name".into(),
             avatar_mxc_uri: None,
             child_room_ids: Vec::new(),
@@ -122,6 +123,7 @@ fn real_account_qa_report_counts_without_private_timeline_data() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: vec![MatrixRoomListSpace {
             space_id: "!space:example.invalid".into(),
+            raw_name: None,
             display_name: "Private Space Name".into(),
             avatar_mxc_uri: None,
             child_room_ids: Vec::new(),

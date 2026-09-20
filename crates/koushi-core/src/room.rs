@@ -11,6 +11,7 @@ mod mentions;
 mod normalization;
 mod operations;
 mod pins;
+mod space_children;
 mod space_members;
 #[cfg(test)]
 mod test_source;

@@ -53,7 +53,10 @@ describe("DesktopApi command contract", () => {
     ]);
     const current = planned
       .filter((method) => !removed.has(method))
-      .concat("importLegacySettings", "updateNavigationPreference")
+      // Commands added after the #759 map was written. The plan is a historical
+      // record of that migration, so later commands are listed here instead of
+      // being back-dated into it.
+      .concat("importLegacySettings", "updateNavigationPreference", "loadSpaceChildren")
       .sort();
     expect(new Set(current).size).toBe(current.length);
     expect(current).toEqual(apiMethods());

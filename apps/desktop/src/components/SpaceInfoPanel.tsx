@@ -11,7 +11,13 @@ import {
 import { type ReactNode, useEffect, useState } from "react";
 
 import { t } from "../i18n/messages";
-import type { RoomManagementState, RoomSummary, SpaceSummary } from "../domain/types";
+import type {
+  RoomManagementState,
+  RoomSummary,
+  SpaceChildMembership,
+  SpaceChildSummary,
+  SpaceSummary
+} from "../domain/types";
 import { ImeTextField } from "./ImeTextControl";
 
 export function SpaceInfoPanel({
@@ -21,7 +27,9 @@ export function SpaceInfoPanel({
   rooms,
   roomManagement,
   space,
+  spaceChildren = [],
   onInvitePeople,
+  onJoinRoom,
   onOpenFiles,
   onOpenMembers,
   onSetLocalPresentation
@@ -32,7 +40,10 @@ export function SpaceInfoPanel({
   rooms: RoomSummary[];
   roomManagement?: RoomManagementState;
   space: SpaceSummary | null;
+  /** Issue #961: every child the Space advertises, joined or not. */
+  spaceChildren?: readonly SpaceChildSummary[];
   onInvitePeople?: () => void;
+  onJoinRoom?: (roomId: string) => void;
   onOpenFiles?: () => void;
   onOpenMembers?: () => void;
   onSetLocalPresentation?: (override: { name?: string; icon?: string } | null) => void;
@@ -45,6 +56,12 @@ export function SpaceInfoPanel({
         .filter((room): room is RoomSummary => Boolean(room && !room.is_dm))
     : rooms.filter((room) => !room.is_dm);
   const unreadTotal = childRooms.reduce((sum, room) => sum + room.unread_count, 0);
+  // Joined children are already listed above from the room list, which owns
+  // their labels and unread state; this is the remainder of the Space.
+  const joinedRoomIds = new Set(childRooms.map((room) => room.room_id));
+  const outsideChildren = spaceChildren.filter(
+    (child) => !joinedRoomIds.has(child.room_id) && child.membership !== "joined"
+  );
   const title = localName.trim() || space?.display_name || fallbackName;
   const loadedSpaceSettings =
     space && roomManagement?.selected_room_id === space.space_id
@@ -81,6 +98,29 @@ export function SpaceInfoPanel({
         <SummaryTile label={t("room.members")} value={loadedSpaceSettings ? String(memberCount) : "-"} />
         <SummaryTile label={t("room.unread")} value={String(unreadTotal)} />
       </div>
+
+      {space ? (
+        <section className="settings-section" aria-label={t("space.names")}>
+          <h3>{t("space.names")}</h3>
+          <div className="settings-detail-list">
+            {/*
+              Issue #960: the canonical `m.room.name` and the local label this
+              device shows are different facts. A Space with no name event has
+              no canonical name — its alias or computed name is not one.
+            */}
+            <DetailRow
+              label={t("space.canonicalName")}
+              userText={Boolean(space.raw_name?.trim())}
+              value={space.raw_name?.trim() || t("space.nameUnset")}
+            />
+            <DetailRow
+              label={t("space.localName")}
+              userText={Boolean(localName.trim())}
+              value={localName.trim() || t("space.nameUnset")}
+            />
+          </div>
+        </section>
+      ) : null}
 
       {space && onSetLocalPresentation ? (
         <section className="settings-section" aria-label={t("space.localPresentation")}>
@@ -141,6 +181,30 @@ export function SpaceInfoPanel({
               <small dir="auto">{room.unread_count ? t("room.unreadCount", { count: room.unread_count }) : room.room_id}</small>
             </div>
           ))}
+          {/*
+            Issue #961: the rest of the Space — children the account has not
+            joined — with the relationship it is in, and a join action only
+            where the server's own join rule allows one.
+          */}
+          {outsideChildren.map((child) => (
+            <div className="settings-detail-row" key={child.room_id}>
+              <span dir="auto">{child.display_name}</span>
+              <small className="space-child-status">
+                <span className="room-membership-badge">
+                  {spaceChildMembershipLabel(child.membership)}
+                </span>
+                {child.can_join && onJoinRoom ? (
+                  <button
+                    className="profile-settings-action"
+                    type="button"
+                    onClick={() => onJoinRoom(child.room_id)}
+                  >
+                    {t("directory.join")}
+                  </button>
+                ) : null}
+              </small>
+            </div>
+          ))}
         </div>
       </section>
 
@@ -168,11 +232,33 @@ export function SpaceInfoPanel({
   );
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function spaceChildMembershipLabel(membership: SpaceChildMembership): string {
+  switch (membership) {
+    case "invited":
+      return t("roomList.membershipInvited");
+    case "knocked":
+      return t("roomList.membershipKnocked");
+    case "unknown":
+      return t("roomList.membershipUnknown");
+    default:
+      return t("roomList.membershipNotJoined");
+  }
+}
+
+function DetailRow({
+  label,
+  value,
+  userText = false
+}: {
+  label: string;
+  value: string;
+  /** Set for values that carry user-provided text, which needs `dir="auto"`. */
+  userText?: boolean;
+}) {
   return (
     <div className="settings-detail-row">
       <span>{label}</span>
-      <small>{value}</small>
+      <small dir={userText ? "auto" : undefined}>{value}</small>
     </div>
   );
 }

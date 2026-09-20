@@ -21,6 +21,7 @@ pub(super) fn normalize_spaces(snapshot: &koushi_sdk::MatrixRoomListSnapshot) ->
             let child_room_ids = normalize_space_child_room_ids(snapshot, space);
             SpaceSummary {
                 space_id: space.space_id.clone(),
+                raw_name: space.raw_name.clone(),
                 display_name: space.display_name.clone(),
                 avatar: avatar_from_mxc_uri(space.avatar_mxc_uri.as_deref()),
                 child_room_ids,
