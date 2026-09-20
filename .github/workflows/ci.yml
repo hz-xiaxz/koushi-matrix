@@ -178,6 +178,13 @@ jobs:
             libdbus-1-dev
       - name: Submodule sync guard
         run: node scripts/check-sdk-submodule.mjs
+      - name: Release version checker tests
+        run: node --test scripts/desktop-release-version.test.mjs
+      # Every PR, not only a release PR: a stale Cargo.lock version is rewritten
+      # by the next `cargo` command on any branch, so the release bump would
+      # otherwise land in an unrelated PR (observed after v0.11.1).
+      - name: Release version and lockfile sync guard
+        run: node scripts/desktop-release-version.mjs
       - name: Diagnostic test isolation checker tests
         run: node --test scripts/check-diagnostic-test-isolation.test.mjs
       - name: Diagnostic test isolation guard

@@ -92,9 +92,21 @@ function readVersionsFromDisk(root) {
     cargo: parseCargoVersion(
       readFileSync(join(root, "apps/desktop/src-tauri/Cargo.toml"), "utf8")
     ),
+    // The workspace lockfile pins the same package. Bumping only the three
+    // manifests leaves `Cargo.lock` behind, so the first `cargo` command in any
+    // later branch rewrites it and lands the release bump in an unrelated PR
+    // (observed after v0.11.1, repaired by #955).
+    lock: parseLockVersion(readFileSync(join(root, "Cargo.lock"), "utf8")),
   };
 }
 
+/**
+ * Read the previous commit's manifests.
+ *
+ * `Cargo.lock` is deliberately excluded here: this path only needs a version to
+ * compare against, and a historical commit predating the lockfile rule must not
+ * hard-fail the release workflow. The current-state read above enforces it.
+ */
 function readVersionsFromGit(root, reference) {
   return {
     package: parseJsonVersion(readGitFile(root, reference, "apps/desktop/package.json")),
@@ -144,12 +156,25 @@ function parseCargoVersion(source) {
   return version;
 }
 
+function parseLockVersion(source) {
+  const entry = /\[\[package\]\]\nname = "koushi-desktop"\nversion = "([^"]+)"\n/.exec(
+    source.replace(/\r\n/g, "\n")
+  );
+  if (!entry) {
+    throw new Error("Cargo.lock has no koushi-desktop package version");
+  }
+  return entry[1];
+}
+
 function requireConsistentSemVer(versions, label) {
   const entries = Object.entries(versions);
   const uniqueVersions = new Set(entries.map(([, version]) => version));
   if (uniqueVersions.size !== 1) {
     const summary = entries.map(([manifest, version]) => `${manifest}=${version}`).join(", ");
-    throw new Error(`release versions do not match (${label}): ${summary}`);
+    const hint = versions.lock
+      ? " (refresh Cargo.lock with `cargo metadata --format-version 1 >/dev/null`)"
+      : "";
+    throw new Error(`release versions do not match (${label}): ${summary}${hint}`);
   }
   const version = entries[0][1];
   parseSemVer(version);
