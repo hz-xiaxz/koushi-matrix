@@ -24,10 +24,17 @@ Claude Code and OpenCode have equivalent discovery entry points under
 
 - A release starts with an explicit SemVer target such as `0.2.0` or
   `0.2.0-beta.1`.
-- The version must increase and must match in all three manifests:
+- The version must increase and must match in all four version files:
   - `apps/desktop/package.json`
   - `apps/desktop/src-tauri/tauri.conf.json`
   - `apps/desktop/src-tauri/Cargo.toml`
+  - `Cargo.lock` (the `koushi-desktop` package entry)
+- `Cargo.lock` is part of the release change, not an incidental artifact. The
+  first `cargo` command run on any later branch rewrites the stale entry, so a
+  release that skips it lands its version bump in an unrelated PR. v0.11.1
+  shipped with `Cargo.lock` still on `0.11.0`; #955 had to carry the repair.
+  `node scripts/desktop-release-version.mjs` enforces all four and runs on
+  every PR, not only release PRs.
 - Do not create `v<version>` manually. The publish job creates the tag only
   after every required artifact passes its gates.
 - The macOS arm64 artifact must be Developer ID signed, notarized, stapled,
@@ -60,7 +67,17 @@ update adapter in `unsupported` and does not make update requests.
 2. Create a release branch from the current `origin/main`.
 3. Update the three manifests above to the exact requested version. Do not
    change dependency versions unless that is separately required.
-4. Run the local release checks from the repository root:
+4. Refresh the lockfile entry without touching dependency resolution:
+
+   ```bash
+   cargo metadata --format-version 1 >/dev/null
+   git diff --stat Cargo.lock
+   ```
+
+   The diff must be the single `koushi-desktop` version line. If `cargo`
+   rewrote anything else, restore `Cargo.lock` and resolve that separately —
+   a release PR does not carry a dependency update.
+5. Run the local release checks from the repository root:
 
    ```bash
    npm --prefix apps/desktop run release:version:check
@@ -75,9 +92,10 @@ update adapter in `unsupported` and does not make update requests.
    credentials, or modify the macOS keychain. Packaging and signing happen in
    the protected workflow after merge.
 
-5. Review the diff. The release-only PR should normally contain the three
-   synchronized version changes and no generated installer.
-6. Commit, push, create the PR, make it ready for review, or merge only when the
+6. Review the diff. The release-only PR should normally contain the three
+   synchronized manifest changes plus the one `Cargo.lock` version line, and no
+   generated installer.
+7. Commit, push, create the PR, make it ready for review, or merge only when the
    user has requested the corresponding external action.
 
 ## What happens after merge

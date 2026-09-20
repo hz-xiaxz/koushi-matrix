@@ -12,7 +12,7 @@ Read [`../../../docs/releases/desktop-release.md`](../../../docs/releases/deskto
 Determine which mode the user requested:
 
 - **Explain:** summarize the runbook without changing files or GitHub state.
-- **Prepare:** require an explicit target version, update exactly the three manifests in the runbook, and run its local gates.
+- **Prepare:** require an explicit target version, update exactly the version files listed in the runbook (the three manifests plus the `Cargo.lock` entry), and run its local gates.
 - **Monitor:** inspect the specified or latest release workflow without modifying files.
 - **Troubleshoot:** inspect failed jobs and preserve draft releases, tags, artifacts, and credentials unless the user explicitly authorizes a destructive recovery action.
 

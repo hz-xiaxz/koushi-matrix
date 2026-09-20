@@ -189,7 +189,13 @@ describe("desktop release scripts", () => {
     const desktopDirectory = join(temporaryDirectory, "apps", "desktop");
     const tauriDirectory = join(desktopDirectory, "src-tauri");
     mkdirSync(tauriDirectory, { recursive: true });
-    const writeVersions = (packageVersion: string, tauriVersion: string, cargoVersion: string) => {
+    const writeVersions = (
+      packageVersion: string,
+      tauriVersion: string,
+      cargoVersion: string,
+      // The workspace lockfile is the fourth synchronized version file (#955).
+      lockVersion: string = cargoVersion
+    ) => {
       writeFileSync(
         join(desktopDirectory, "package.json"),
         JSON.stringify({ version: packageVersion })
@@ -201,6 +207,10 @@ describe("desktop release scripts", () => {
       writeFileSync(
         join(tauriDirectory, "Cargo.toml"),
         `[package]\nname = "fixture"\nversion = "${cargoVersion}"\n`
+      );
+      writeFileSync(
+        join(temporaryDirectory, "Cargo.lock"),
+        `version = 4\n\n[[package]]\nname = "koushi-desktop"\nversion = "${lockVersion}"\n`
       );
     };
     writeVersions("1.2.2", "1.2.2", "1.2.2");
@@ -257,6 +267,18 @@ describe("desktop release scripts", () => {
       );
       expect(mismatch.status).toBe(1);
       expect(mismatch.stderr).toContain("release versions do not match");
+
+      // A release that bumped the three manifests but left Cargo.lock behind is
+      // what shipped v0.11.1 and leaked its bump into an unrelated PR (#955).
+      writeVersions("1.2.3", "1.2.3", "1.2.3", "1.2.2");
+      const staleLock = spawnSync(
+        process.execPath,
+        ["scripts/desktop-release-version.mjs", "--root", temporaryDirectory],
+        { cwd: repoRoot, encoding: "utf8" }
+      );
+      expect(staleLock.status).toBe(1);
+      expect(staleLock.stderr).toContain("lock=1.2.2");
+      expect(staleLock.stderr).toContain("refresh Cargo.lock");
 
       writeVersions("1.2.3", "1.2.3", "1.2.3");
       const consistent = spawnSync(
