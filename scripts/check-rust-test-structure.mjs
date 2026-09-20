@@ -1330,6 +1330,7 @@ const sdkLibrarySourcePaths = [
   "src/room_projection.rs",
   "src/search.rs",
   "src/sliding_sync_discovery.rs",
+  "src/space_children.rs",
   "src/sync.rs",
   "src/timeline.rs"
 ];
