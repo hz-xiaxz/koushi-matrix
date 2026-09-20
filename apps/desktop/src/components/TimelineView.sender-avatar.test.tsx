@@ -109,4 +109,54 @@ describe("TimelineView sender avatars", () => {
     expect(screen.getAllByRole("button", { name: "Open profile for Other Person" })).toHaveLength(1);
     expect(screen.getAllByText("Other Person", { selector: "span.sender" })).toHaveLength(1);
   });
+
+  // Issue #959: the thread pane renders the same senders as the room timeline,
+  // so the sender name and avatar carry the same profile and direct-message
+  // contract there. The presentation context never decides whether a sender has
+  // a profile; the row's stable sender ID does.
+  test.each(["room", "thread", "focused"] as const)(
+    "opens the sender profile and messages the sender from the %s presentation context",
+    (presentationContext) => {
+      const onOpenSenderProfile = vi.fn();
+      const onStartDirectMessage = vi.fn();
+      const store = applyTimelineEvent(createTimelineStore(), {
+        InitialItems: {
+          request_id: null,
+          key: KEY,
+          generation: 1,
+          items: [
+            {
+              ...message("$other", "From another person"),
+              sender: "@other:example.invalid",
+              sender_label: "Other Person"
+            }
+          ]
+        }
+      });
+
+      render(
+        <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+          <TimelineView
+            timelineKey={KEY}
+            roomId="!room:example.invalid"
+            presentationContext={presentationContext}
+            transport={baseTransport({})}
+            onReply={vi.fn()}
+            onOpenSenderProfile={onOpenSenderProfile}
+            onStartDirectMessage={onStartDirectMessage}
+            currentUserId="@me:example.invalid"
+          />
+        </TimelineStoreContext.Provider>
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Open profile for Other Person" }));
+      expect(onOpenSenderProfile).toHaveBeenCalledWith(
+        "!room:example.invalid",
+        "@other:example.invalid"
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Message Other Person" }));
+      expect(onStartDirectMessage).toHaveBeenCalledWith("@other:example.invalid");
+    }
+  );
 });

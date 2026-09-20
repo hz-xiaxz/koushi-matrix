@@ -3569,12 +3569,8 @@ export const TimelineView = memo(function TimelineView({
                 onSaveMediaFile={transport.saveMediaFile}
                 forwardDestinations={effectiveForwardDestinations}
                 onOpenMatrixTarget={onOpenMatrixTarget}
-                onOpenSenderProfile={
-                  presentationContext === "room" ? onOpenSenderProfile : undefined
-                }
-                onStartDirectMessage={
-                  presentationContext === "room" ? onStartDirectMessage : undefined
-                }
+                onOpenSenderProfile={onOpenSenderProfile}
+                onStartDirectMessage={onStartDirectMessage}
                 density={density}
                 onRequestAvatarThumbnail={
                   enableAvatarThumbnailDownloads ? onRequestAvatarThumbnail : undefined
