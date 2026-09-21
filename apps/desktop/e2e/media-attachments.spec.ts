@@ -611,9 +611,12 @@ test("macOS media viewer leaves the native window buttons above its toolbar", as
   await page.setViewportSize({ width: 900, height: 520 });
   await gotoReadyShell(page);
   await page.evaluate(() => {
-    const snapshot = window.__harness.currentSnapshot();
+    // A Rust snapshot is always a fresh object; editing the live one in place
+    // only reached the shell through an unrelated render.
+    const snapshot = structuredClone(window.__harness.currentSnapshot());
     snapshot.state.domain.locale_profile.platform = "macos";
     window.__harness.setSnapshot(snapshot);
+    window.__harness.pushStateUpdate();
   });
   const titlebar = page.locator('.titlebar[data-platform="macos"]');
   await expect(titlebar).toBeVisible();

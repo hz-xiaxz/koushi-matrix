@@ -914,6 +914,14 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     revision: ComposerDraftRevision | null;
     debounceHandle: number | null;
   } | null>(null);
+  // The composer documents below are derived from these refs during render, so
+  // dropping an overlay has to ask for a render itself. Typing does not: the
+  // composer echoes keystrokes locally and must not re-render App (#969).
+  const [, setComposerOverlayResetCount] = useState(0);
+  const renderAfterComposerOverlayReset = useCallback(
+    () => setComposerOverlayResetCount((count) => count + 1),
+    []
+  );
   const composerDraftLifecycleRegistryRef = useRef<ComposerDraftLifecycleRegistry | null>(null);
   if (composerDraftLifecycleRegistryRef.current === null) {
     composerDraftLifecycleRegistryRef.current = createComposerDraftLifecycleRegistry({
@@ -943,6 +951,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     submissionRegistryRef.current?.reset();
     mainComposerOverlayRef.current = null;
     threadComposerOverlayRef.current = null;
+    renderAfterComposerOverlayReset();
   }
 
   useEffect(() => {
@@ -1181,7 +1190,12 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
   const [timelineStore, setTimelineStore] = useState<TimelineStoreState>(createTimelineStore);
   const threadStoreDiagnosticSignaturesRef = useRef<Map<string, string>>(new Map());
   const focusedStoreDiagnosticSignaturesRef = useRef<Map<string, string>>(new Map());
-  const readUiLatencyDiagnostics = useUiLatencyDiagnostics({ live: diagnosticsOpen });
+  // QA lanes read DOM tokens from the window title, and those are computed
+  // during an App render, so QA-title mode keeps the once-per-second render it
+  // has always had. Normal sessions only pay for it while the dialog is open.
+  const readUiLatencyDiagnostics = useUiLatencyDiagnostics({
+    live: diagnosticsOpen || qaTitleEnabled()
+  });
   const searchTimer = useRef<number | null>(null);
   const qaSendStarted = useRef(false);
   const qaSendPending = useRef(false);
@@ -2915,6 +2929,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
         registry.setActiveOverlay(scope, null, null);
         if (kind === "main") mainComposerOverlayRef.current = null;
         else threadComposerOverlayRef.current = null;
+        renderAfterComposerOverlayReset();
         break;
       }
     }
@@ -4319,6 +4334,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     if (!overlay || !composerDraftScopesEqual(overlay.scope, scope)) return;
     mainComposerOverlayRef.current = null;
     composerDraftLifecycleRegistryRef.current!.setActiveOverlay(scope, null, null);
+    renderAfterComposerOverlayReset();
   }
 
   async function stageUploadFiles(files: File[]): Promise<void> {
@@ -5021,6 +5037,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     if (!overlay || !composerDraftScopesEqual(overlay.scope, scope)) return;
     threadComposerOverlayRef.current = null;
     composerDraftLifecycleRegistryRef.current!.setActiveOverlay(scope, null, null);
+    renderAfterComposerOverlayReset();
   }
 
   function focusedContextVisibleForMode(mode: RightPanelMode): boolean {
