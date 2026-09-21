@@ -6,6 +6,11 @@
  * format a timestamp on every render, so a formatter built per call shows up
  * as locale parsing in a renderer profile (#969). The key space is the handful
  * of option literals in the source times the UI locales, so it stays small.
+ *
+ * A formatter resolves the system time zone and default locale when it is
+ * built, so the cache is dropped whenever the window regains focus: a laptop
+ * that changed time zone while the app sat in the tray formats correctly again
+ * without a restart.
  */
 const dateTimeFormats = new Map<string, Intl.DateTimeFormat>();
 const listFormats = new Map<string, Intl.ListFormat>();
@@ -38,4 +43,13 @@ export function cachedListFormat(
     listFormats.set(key, format);
   }
   return format;
+}
+
+export function clearIntlFormatCache(): void {
+  dateTimeFormats.clear();
+  listFormats.clear();
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("focus", clearIntlFormatCache);
 }

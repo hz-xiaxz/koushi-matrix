@@ -1,3 +1,4 @@
+import { useNowMs } from "../../app/useNowMs";
 import { t } from "../../i18n/messages";
 import type {
   RoomSummary,
@@ -32,6 +33,8 @@ export function SearchHistorySection({
   onStartCrawlRoom?: (roomId: string) => void;
   onStopCrawlRoom?: (roomId: string) => void;
 }) {
+  // Minute granularity: half a minute keeps "N minutes ago" within one step.
+  const nowMs = useNowMs(30_000);
   const roomEntries = crawlerRoomEntries(crawlerState.rooms, rooms);
   const crawlerSummary = summarizeCrawlerRooms(roomEntries);
   const crawlerPaused = crawlerSettings.speed === "paused";
@@ -136,7 +139,7 @@ export function SearchHistorySection({
           <p className="settings-muted-note">
             {t("settings.searchHistoryActivityLastIndexed", {
               room: lastActiveEntry.displayLabel,
-              age: crawlerActivityAgeLabel(lastActiveEntry.updatedAtMs)
+              age: crawlerActivityAgeLabel(lastActiveEntry.updatedAtMs, nowMs)
             })}
           </p>
         ) : (

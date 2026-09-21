@@ -28,3 +28,12 @@ describe("intlFormatCache", () => {
     expect(first.format(["a", "b", "c"])).toBe("a, b, and c");
   });
 });
+
+describe("clearIntlFormatCache", () => {
+  it("drops cached formatters so a changed system time zone is picked up", async () => {
+    const { clearIntlFormatCache } = await import("./intlFormatCache");
+    const before = cachedDateTimeFormat("en", { timeStyle: "short" });
+    clearIntlFormatCache();
+    expect(cachedDateTimeFormat("en", { timeStyle: "short" })).not.toBe(before);
+  });
+});
