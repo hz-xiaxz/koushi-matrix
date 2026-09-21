@@ -262,6 +262,7 @@ describe("ContextualRightPanel", () => {
       "backend/tauri/desktopAttentionPort.ts",
       "backend/tauri/desktopEventPort.ts",
       "backend/tauri/linkMediaPort.ts",
+      "backend/tauri/nativeFileDropPort.ts",
       "backend/tauri/windowDialogPort.ts",
       "backend/tauriTimelineTransport.ts"
     ]);

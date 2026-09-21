@@ -2182,6 +2182,12 @@ stateDiagram-v2
   platform command (GTK on Linux, empty elsewhere) and feeds the resulting PNG
   `File` into that same adapter; a result that resolves after the composer
   target changed is dropped.
+  Linux is the exception (`tauri.linux.conf.json`): WebKitGTK hides files
+  dragged from a file manager, so native drag/drop stays enabled there. The
+  adapter records the paths of the latest native drop, the Composer under the
+  drop point claims them once through `claim_dropped_files`, and
+  `read_dropped_file` serves each by a single-read token. The renderer never
+  names a path, and the resulting `File`s enter that same ingestion adapter.
   Candidate selection, retry, Use original, caption edits, and preview reads are
   typed target-scoped commands. Send reads the already-selected Rust bytes and
   performs no decode/resize/encode or Ask prompt. Thread sends use a thread

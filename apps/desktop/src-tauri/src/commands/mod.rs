@@ -93,6 +93,7 @@ pub(crate) mod app_updates;
 pub(crate) mod clipboard_image;
 pub(crate) mod diagnostics;
 pub(crate) mod directory;
+pub(crate) mod dropped_files;
 pub(crate) mod e2ee;
 pub(crate) mod live_signals;
 pub(crate) mod local_encryption;

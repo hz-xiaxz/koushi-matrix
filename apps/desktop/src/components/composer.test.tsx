@@ -13,6 +13,11 @@ import type {
   ResolveComposerKeyAction
 } from "../domain/types";
 import { readClipboardImageFile } from "../backend/clipboardImageRuntime";
+import {
+  claimNativeDroppedFiles,
+  subscribeNativeFileDrops,
+  type NativeFileDropEvent
+} from "../backend/nativeFileDropRuntime";
 import { Composer, ThreadComposer } from "./composer";
 import {
   inlineMentionEditorSelection,
@@ -56,11 +61,34 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.mocked(readClipboardImageFile).mockClear();
+  vi.mocked(claimNativeDroppedFiles).mockClear();
+  vi.mocked(subscribeNativeFileDrops).mockClear();
 });
 
 vi.mock("../backend/clipboardImageRuntime", () => ({
   readClipboardImageFile: vi.fn(async () => null)
 }));
+
+const nativeFileDropHandlers = new Set<(event: NativeFileDropEvent) => void>();
+vi.mock("../backend/nativeFileDropRuntime", () => ({
+  claimNativeDroppedFiles: vi.fn(async () => []),
+  subscribeNativeFileDrops: vi.fn((handler: (event: NativeFileDropEvent) => void) => {
+    nativeFileDropHandlers.add(handler);
+    return () => nativeFileDropHandlers.delete(handler);
+  })
+}));
+
+function emitNativeFileDrop(event: NativeFileDropEvent) {
+  act(() => {
+    for (const handler of Array.from(nativeFileDropHandlers)) handler(event);
+  });
+}
+
+function placeComposer(container: HTMLElement) {
+  const section = container.querySelector<HTMLElement>(".composer")!;
+  section.getBoundingClientRect = () => new DOMRect(100, 500, 600, 120);
+  return section;
+}
 
 describe("Composer", () => {
   const mentionCandidates: MentionCandidate[] = [
@@ -249,6 +277,61 @@ describe("Composer", () => {
 
     await act(async () => undefined);
     expect(readClipboardImageFile).not.toHaveBeenCalled();
+    expect(onAttachFiles).not.toHaveBeenCalled();
+  });
+
+  it("stages files from a native drop that lands on the composer", async () => {
+    const dropped = new File(["png"], "shot.png", { type: "image/png" });
+    vi.mocked(claimNativeDroppedFiles).mockResolvedValueOnce([dropped]);
+    const onAttachFiles = vi.fn(async (_files: File[]) => undefined);
+    const { container, unmount } = render(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        roomName="Direct room"
+        document={documentFromText("")}
+        onAttachFiles={onAttachFiles}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
+      />
+    );
+    const section = placeComposer(container);
+
+    emitNativeFileDrop({ kind: "over", x: 300, y: 550 });
+    expect(section.dataset.fileDragOver).toBe("true");
+    emitNativeFileDrop({ kind: "over", x: 300, y: 100 });
+    expect(section.dataset.fileDragOver).toBe("false");
+    emitNativeFileDrop({ kind: "drop", x: 300, y: 550 });
+
+    await waitFor(() => expect(onAttachFiles).toHaveBeenCalledTimes(1));
+    expect(onAttachFiles.mock.calls[0]?.[0]).toEqual([dropped]);
+    expect(section.dataset.fileDragOver).toBe("false");
+
+    unmount();
+    expect(nativeFileDropHandlers.size).toBe(0);
+  });
+
+  it("leaves a native drop outside the composer unclaimed", async () => {
+    const onAttachFiles = vi.fn(async (_files: File[]) => undefined);
+    const { container } = render(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        roomName="Direct room"
+        document={documentFromText("")}
+        onAttachFiles={onAttachFiles}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
+      />
+    );
+    placeComposer(container);
+
+    emitNativeFileDrop({ kind: "drop", x: 300, y: 100 });
+
+    await act(async () => undefined);
+    expect(claimNativeDroppedFiles).not.toHaveBeenCalled();
     expect(onAttachFiles).not.toHaveBeenCalled();
   });
 

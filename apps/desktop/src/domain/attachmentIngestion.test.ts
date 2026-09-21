@@ -81,6 +81,20 @@ describe("attachment ingestion", () => {
     expect(config.app.windows[0]?.dragDropEnabled).toBe(false);
   });
 
+  it("enables native drag/drop only on Linux, where WebKitGTK hides dragged files", () => {
+    const read = (name: string) =>
+      JSON.parse(readFileSync(new URL(`../../src-tauri/${name}`, import.meta.url), "utf8")) as {
+        app: { windows: Array<Record<string, unknown>> };
+      };
+    const base = read("tauri.conf.json").app.windows;
+    const linux = read("tauri.linux.conf.json").app.windows;
+
+    // The platform file replaces the whole windows array, so it must stay an
+    // exact copy of the base window apart from the one Linux difference.
+    expect(linux).toEqual([{ ...base[0], dragDropEnabled: true }]);
+    expect(base).toHaveLength(1);
+  });
+
   it("captures target and bytes immediately before staging", async () => {
     const first = new File([new Uint8Array([1, 2])], "first.pdf", {
       type: "application/pdf"

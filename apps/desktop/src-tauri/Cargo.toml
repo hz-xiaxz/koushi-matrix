@@ -33,7 +33,8 @@ url = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# Same GTK 3 binding Tauri already links; used for the clipboard image read.
+# Same GTK 3 binding Tauri already links; used for the clipboard image read
+# and shared-mime-info lookups.
 gtk = "0.18"
 
 [target.'cfg(target_os = "macos")'.dependencies]
