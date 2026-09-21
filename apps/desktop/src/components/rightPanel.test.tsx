@@ -22,6 +22,35 @@ import { ContextualRightPanel, PanelHeader } from "./rightPanel";
 import { TimelineStoreContext } from "./timelineStoreContext";
 import { baseTransport, message } from "./timelineViewTestSupport";
 
+// Issue #972: count renders of the memoized thread consumers without changing
+// what they render.
+const renderCounts = vi.hoisted(() => ({ composer: 0, timelineView: 0 }));
+
+vi.mock("./composer", async () => {
+  const actual = await vi.importActual<typeof import("./composer")>("./composer");
+  const { createElement, memo } = await import("react");
+  // ThreadComposer is memoized, so this probe renders exactly when it does.
+  const ThreadComposerProbe = memo(function ThreadComposerProbe(
+    props: Parameters<typeof actual.ThreadComposer>[0]
+  ) {
+    renderCounts.composer += 1;
+    return createElement(actual.ThreadComposer, props);
+  });
+  return { ...actual, ThreadComposer: ThreadComposerProbe };
+});
+
+vi.mock("./TimelineView", async () => {
+  const actual = await vi.importActual<typeof import("./TimelineView")>("./TimelineView");
+  const { createElement, memo } = await import("react");
+  const TimelineViewProbe = memo(function TimelineViewProbe(
+    props: Parameters<typeof actual.TimelineView>[0]
+  ) {
+    renderCounts.timelineView += 1;
+    return createElement(actual.TimelineView, props);
+  });
+  return { ...actual, TimelineView: TimelineViewProbe };
+});
+
 class MockIntersectionObserver {
   static callback: IntersectionObserverCallback | null = null;
 
@@ -674,5 +703,80 @@ describe("ContextualRightPanel thread sender profiles", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open profile for Other Person" }));
     expect(onOpenSenderProfile).toHaveBeenCalledWith(room.room_id, "@other:example.invalid");
+  });
+});
+
+describe("ContextualRightPanel thread render isolation", () => {
+  // App hands this panel freshly created closures on every render.
+  function handlersLikeApp(): Partial<RightPanelProps> {
+    return Object.fromEntries(
+      Object.entries(defaultProps)
+        .filter(([, value]) => typeof value === "function")
+        .map(([name, value]) => [
+          name,
+          (...args: unknown[]) => (value as (...inner: unknown[]) => unknown)(...args)
+        ])
+    ) as Partial<RightPanelProps>;
+  }
+
+  test("an App render that changes no thread data leaves the thread timeline and composer alone", () => {
+    const currentUserId = "@current:example.invalid";
+    const rootEventId = "$root:example.invalid";
+    const key = threadTimelineKey(currentUserId, room.room_id, rootEventId);
+    const base = threadSnapshot("");
+    const threadTimelineSnapshot = {
+      ...base,
+      state: {
+        ...base.state,
+        domain: {
+          ...base.state.domain,
+          live_signals: { presence: {}, rooms: {} },
+          profile: { ...base.state.domain.profile, own: { avatar: null } },
+          settings: {
+            ...base.state.domain.settings,
+            values: {
+              ...base.state.domain.settings.values,
+              appearance: { density: "default" }
+            }
+          }
+        }
+      }
+    } as unknown as DesktopSnapshot;
+    const storeContext = {
+      store: applyTimelineEvent(createTimelineStore(), {
+        InitialItems: {
+          request_id: null,
+          key,
+          generation: 1,
+          items: [message("$reply:example.invalid", "Thread reply")]
+        }
+      }),
+      setStore: vi.fn()
+    };
+    const timelineTransport = baseTransport({});
+    const panel = () => (
+      <TimelineStoreContext.Provider value={storeContext}>
+        <ContextualRightPanel
+          {...defaultProps}
+          {...handlersLikeApp()}
+          mode="thread"
+          snapshot={threadTimelineSnapshot}
+          timelineTransport={timelineTransport}
+          onOpenSenderProfile={() => undefined}
+          onStartDirectMessage={() => undefined}
+          onOpenMatrixTarget={() => undefined}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    const { rerender } = render(panel());
+    expect(screen.getByText("Thread reply")).toBeTruthy();
+    const mounted = { ...renderCounts };
+
+    rerender(panel());
+    rerender(panel());
+
+    expect(renderCounts.timelineView).toBe(mounted.timelineView);
+    expect(renderCounts.composer).toBe(mounted.composer);
   });
 });
