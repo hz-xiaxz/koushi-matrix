@@ -105,6 +105,7 @@ async fn create_room_without_session_emits_session_required() {
                 topic: None,
                 alias_localpart: None,
                 encrypted: false,
+                invited_only: false,
                 visibility: CreateRoomVisibility::Private,
                 parent_space: None,
             },

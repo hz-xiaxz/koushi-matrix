@@ -1278,6 +1278,7 @@ fn tauri_command_routes_build_expected_core_commands() {
             topic: Some("Local topic".to_owned()),
             alias_localpart: Some("local-qa-room".to_owned()),
             encrypted: false,
+            invited_only: false,
             visibility: CreateRoomVisibility::Public,
             parent_space: Some(CreateRoomParentSpace {
                 space_id: "!space:example.org".to_owned(),
