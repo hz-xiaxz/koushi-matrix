@@ -6,14 +6,6 @@ export interface UiLatencyDiagnostics {
   longFrameCount: number;
 }
 
-export const EMPTY_UI_LATENCY_DIAGNOSTICS: UiLatencyDiagnostics = {
-  samples: 0,
-  lastFrameGapMs: 0,
-  averageFrameGapMs: 0,
-  maxFrameGapMs: 0,
-  longFrameCount: 0
-};
-
 export function createUiLatencySampler({ longFrameMs = 50 }: { longFrameMs?: number } = {}) {
   let samples = 0;
   let totalFrameGapMs = 0;

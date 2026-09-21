@@ -1,36 +1,32 @@
-import { useEffect, useState } from "react";
-import {
-  createUiLatencySampler,
-  EMPTY_UI_LATENCY_DIAGNOSTICS,
-  type UiLatencyDiagnostics
-} from "../domain/uiLatency";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createUiLatencySampler, type UiLatencyDiagnostics } from "../domain/uiLatency";
 
-export function useUiLatencyDiagnostics(): UiLatencyDiagnostics {
-  const [diagnostics, setDiagnostics] = useState<UiLatencyDiagnostics>(
-    EMPTY_UI_LATENCY_DIAGNOSTICS
-  );
+/**
+ * Samples animation-frame gaps for the diagnostic report and returns a stable
+ * reader for the current totals.
+ *
+ * Issue #969: the samples stay out of React state. This hook lives in `App`,
+ * so publishing a sample re-renders the whole tree, and the totals are only
+ * needed when a report is built. `live` opts into that periodic render while
+ * the Diagnostics dialog is open, so the report on screen keeps moving.
+ */
+export function useUiLatencyDiagnostics({ live }: { live: boolean }): () => UiLatencyDiagnostics {
+  const [sampler] = useState(() => createUiLatencySampler());
+  const [, setPublishedSamples] = useState(0);
+  const liveRef = useRef(live);
+
+  useEffect(() => {
+    liveRef.current = live;
+  }, [live]);
 
   useEffect(() => {
     if (typeof window.requestAnimationFrame !== "function") {
       return;
     }
-    const sampler = createUiLatencySampler();
     let frameId = 0;
     let lastFrameAt = 0;
     let lastPublishedAt = 0;
     let cancelled = false;
-
-    const publishIfChanged = (next: UiLatencyDiagnostics) => {
-      setDiagnostics((current) =>
-        current.samples === next.samples &&
-        current.lastFrameGapMs === next.lastFrameGapMs &&
-        current.averageFrameGapMs === next.averageFrameGapMs &&
-        current.maxFrameGapMs === next.maxFrameGapMs &&
-        current.longFrameCount === next.longFrameCount
-          ? current
-          : next
-      );
-    };
 
     const tick = (now: number) => {
       if (cancelled) {
@@ -42,9 +38,9 @@ export function useUiLatencyDiagnostics(): UiLatencyDiagnostics {
       } else {
         const next = sampler.recordFrame(now - lastFrameAt);
         lastFrameAt = now;
-        if (now - lastPublishedAt >= 1000) {
+        if (liveRef.current && now - lastPublishedAt >= 1000) {
           lastPublishedAt = now;
-          publishIfChanged(next);
+          setPublishedSamples(next.samples);
         }
       }
       frameId = window.requestAnimationFrame(tick);
@@ -55,7 +51,7 @@ export function useUiLatencyDiagnostics(): UiLatencyDiagnostics {
       cancelled = true;
       window.cancelAnimationFrame(frameId);
     };
-  }, []);
+  }, [sampler]);
 
-  return diagnostics;
+  return useCallback(() => sampler.snapshot(), [sampler]);
 }

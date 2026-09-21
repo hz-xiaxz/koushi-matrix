@@ -1181,7 +1181,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
   const [timelineStore, setTimelineStore] = useState<TimelineStoreState>(createTimelineStore);
   const threadStoreDiagnosticSignaturesRef = useRef<Map<string, string>>(new Map());
   const focusedStoreDiagnosticSignaturesRef = useRef<Map<string, string>>(new Map());
-  const uiLatencyDiagnostics = useUiLatencyDiagnostics();
+  const readUiLatencyDiagnostics = useUiLatencyDiagnostics({ live: diagnosticsOpen });
   const searchTimer = useRef<number | null>(null);
   const qaSendStarted = useRef(false);
   const qaSendPending = useRef(false);
@@ -5931,7 +5931,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
       sendStatus: qaSendStatus,
       timelineDiagnostics,
       domDiagnostics: qaRenderedDomDiagnostics(),
-      uiLatencyDiagnostics,
+      uiLatencyDiagnostics: readUiLatencyDiagnostics(),
       stateDeltaStats: getAppStoreDeltaStats(),
       timelineTransportStats: getTimelineTransportStats(),
       jsErrors: getRecentJsErrors(),
