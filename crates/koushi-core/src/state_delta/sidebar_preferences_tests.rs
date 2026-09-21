@@ -220,10 +220,10 @@ fn loading_space_children_publishes_the_not_joined_sidebar_lane() {
         room_id: "!private:example.invalid".to_owned(),
         display_name: "Private Room".to_owned(),
         avatar: None,
-        membership: SpaceChildMembership::Unknown,
+        membership: SpaceChildMembership::NotJoined,
         can_join: false,
         is_space: false,
-        joined_members: 0,
+        joined_members: 1,
     }];
 
     let sidebar = build_state_delta(1, &previous, &next)
