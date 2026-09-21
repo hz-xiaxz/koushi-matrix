@@ -70,6 +70,7 @@ import { Composer } from "./composer";
 import { UploadStagingDialog, uploadStagingItemsAreSendable } from "./dialogs";
 import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
 import { useStableEvent } from "./useStableEvent";
+import { cachedDateTimeFormat } from "../domain/intlFormatCache";
 
 const EMPTY_PINNED_EVENTS: DesktopSnapshot["state"]["domain"]["room_interactions"][string]["pinned_events"] = [];
 
@@ -82,7 +83,7 @@ function activityTabLabel(tab: ActivityTab): string {
 }
 
 function activityTimestamp(timestampMs: number): string {
-  return new Intl.DateTimeFormat(undefined, {
+  return cachedDateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(timestampMs));
