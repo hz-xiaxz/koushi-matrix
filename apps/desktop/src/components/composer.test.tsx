@@ -12,6 +12,7 @@ import type {
   ComposerResolverOptions,
   ResolveComposerKeyAction
 } from "../domain/types";
+import { readClipboardImageFile } from "../backend/clipboardImageRuntime";
 import { Composer, ThreadComposer } from "./composer";
 import {
   inlineMentionEditorSelection,
@@ -54,7 +55,12 @@ function changeEditorText(editor: Element, text: string) {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.mocked(readClipboardImageFile).mockClear();
 });
+
+vi.mock("../backend/clipboardImageRuntime", () => ({
+  readClipboardImageFile: vi.fn(async () => null)
+}));
 
 describe("Composer", () => {
   const mentionCandidates: MentionCandidate[] = [
@@ -126,6 +132,124 @@ describe("Composer", () => {
     for (const [files] of onAttachFiles.mock.calls) {
       expect(files.map((file) => file.name)).toEqual(["document.pdf", "archive.zip"]);
     }
+  });
+
+  it("stages an image the webview exposes on paste without asking the native clipboard", async () => {
+    const onAttachFiles = vi.fn(async (_files: File[]) => undefined);
+    const { container } = render(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        roomName="Direct room"
+        document={documentFromText("")}
+        onAttachFiles={onAttachFiles}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
+      />
+    );
+    const image = new File(["png"], "image.png", { type: "image/png" });
+
+    fireEvent.paste(container.querySelector(".composer-inline-editor")!, {
+      clipboardData: {
+        files: [image],
+        items: [{ kind: "file", type: image.type }],
+        types: ["Files"],
+        getData: () => ""
+      }
+    });
+
+    await waitFor(() => expect(onAttachFiles).toHaveBeenCalledTimes(1));
+    expect(onAttachFiles.mock.calls[0]?.[0]).toEqual([image]);
+    expect(readClipboardImageFile).not.toHaveBeenCalled();
+  });
+
+  it("stages the native clipboard image when the webview paste carries nothing", async () => {
+    const image = new File(["png"], "image.png", { type: "image/png" });
+    vi.mocked(readClipboardImageFile).mockResolvedValueOnce(image);
+    const onAttachFiles = vi.fn(async (_files: File[]) => undefined);
+    const onDocumentChange = vi.fn();
+    const { container } = render(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        roomName="Direct room"
+        document={documentFromText("")}
+        onAttachFiles={onAttachFiles}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(onDocumentChange)}
+      />
+    );
+
+    // WebKitGTK shape for an image-only clipboard: no types, items, or files.
+    fireEvent.paste(container.querySelector(".composer-inline-editor")!, {
+      clipboardData: { files: [], items: [], types: [], getData: () => "" }
+    });
+
+    await waitFor(() => expect(onAttachFiles).toHaveBeenCalledTimes(1));
+    expect(onAttachFiles.mock.calls[0]?.[0]).toEqual([image]);
+    expect(onDocumentChange).not.toHaveBeenCalled();
+  });
+
+  it("drops a native clipboard image that resolves after the composer target changed", async () => {
+    let resolveImage: (file: File | null) => void = () => undefined;
+    vi.mocked(readClipboardImageFile).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveImage = resolve;
+      })
+    );
+    const onAttachFiles = vi.fn(async (_files: File[]) => undefined);
+    const props = {
+      composerMode: { kind: "plain" as const },
+      isSending: false,
+      roomName: "Direct room",
+      document: documentFromText(""),
+      onAttachFiles,
+      onCancelReply: () => undefined,
+      onSend: textSend(() => undefined),
+      onDocumentChange: textChange(() => undefined)
+    };
+    const { container, rerender } = render(<Composer {...props} draftKey="room-a" />);
+
+    fireEvent.paste(container.querySelector(".composer-inline-editor")!, {
+      clipboardData: { files: [], items: [], types: [], getData: () => "" }
+    });
+    rerender(<Composer {...props} draftKey="room-b" />);
+    await act(async () => {
+      resolveImage(new File(["png"], "image.png", { type: "image/png" }));
+    });
+
+    expect(onAttachFiles).not.toHaveBeenCalled();
+  });
+
+  it("keeps text pastes on the editor path and never reads the native clipboard", async () => {
+    const onAttachFiles = vi.fn(async (_files: File[]) => undefined);
+    const { container } = render(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        roomName="Direct room"
+        document={documentFromText("")}
+        onAttachFiles={onAttachFiles}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
+      />
+    );
+
+    fireEvent.paste(container.querySelector(".composer-inline-editor")!, {
+      clipboardData: {
+        files: [],
+        items: [{ kind: "string", type: "text/plain" }],
+        types: ["text/plain"],
+        getData: () => "hello"
+      }
+    });
+
+    await act(async () => undefined);
+    expect(readClipboardImageFile).not.toHaveBeenCalled();
+    expect(onAttachFiles).not.toHaveBeenCalled();
   });
 
   it("ignores non-file drops on the composer surface", () => {

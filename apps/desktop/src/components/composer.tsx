@@ -58,8 +58,10 @@ import {
   type MentionCandidate,
   type ComposerModeProp
 } from "../app/uiShared";
+import { readClipboardImageFile } from "../backend/clipboardImageRuntime";
 import { EntityAvatar } from "./Shell";
 import {
+  attachmentPasteNeedsNativeImageRead,
   attachmentTransferHasFiles,
   filesFromAttachmentTransfer,
   ingestAttachmentFiles
@@ -183,9 +185,11 @@ export const Composer = memo(function Composer({
   const documentEpochRef = useRef(0);
   const keyResolutionPendingRef = useRef(false);
   const mountedRef = useRef(true);
+  const draftKeyRef = useRef(draftKey);
   const autocompleteListboxId = useId();
   if (localDraftKey !== draftKey) {
     const end = documentLength(document);
+    draftKeyRef.current = draftKey;
     setLocalDraftKey(draftKey);
     setLocalDocument(document);
     setDocumentSelection({ start: end, end });
@@ -445,6 +449,16 @@ export const Composer = memo(function Composer({
       await ingestAttachmentFiles(files, onAttachFiles);
     } catch {
       // Upload failure is reported through the Rust-owned operation/event path.
+    }
+  }
+
+  async function attachNativeClipboardImage() {
+    const pasteDraftKey = draftKeyRef.current;
+    const image = await readClipboardImageFile();
+    // The native read is asynchronous; never stage into a conversation the
+    // paste was not aimed at.
+    if (image && mountedRef.current && draftKeyRef.current === pasteDraftKey) {
+      await attachDroppedOrPastedFiles([image]);
     }
   }
 
@@ -867,6 +881,9 @@ export const Composer = memo(function Composer({
           if (files.length > 0) {
             event.preventDefault();
             void attachDroppedOrPastedFiles(files);
+          } else if (canEdit && attachmentPasteNeedsNativeImageRead(event.clipboardData)) {
+            event.preventDefault();
+            void attachNativeClipboardImage();
           }
         }}
       />

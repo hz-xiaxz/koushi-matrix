@@ -2177,6 +2177,11 @@ stateDiagram-v2
   HTML5 drop all enter one ingestion adapter that captures the current
   `ComposerTarget` and bytes before asynchronous staging. Tauri disables native
   drag/drop so packaged WebViews use the same `DataTransfer.files` route.
+  WebKitGTK hides clipboard images from the paste event, so a paste carrying
+  neither files nor plain text asks the stateless `read_clipboard_image_png`
+  platform command (GTK on Linux, empty elsewhere) and feeds the resulting PNG
+  `File` into that same adapter; a result that resolves after the composer
+  target changed is dropped.
   Candidate selection, retry, Use original, caption edits, and preview reads are
   typed target-scoped commands. Send reads the already-selected Rust bytes and
   performs no decode/resize/encode or Ask prompt. Thread sends use a thread

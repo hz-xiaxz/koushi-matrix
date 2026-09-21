@@ -3301,6 +3301,7 @@ name = "koushi-desktop"
 version = "0.12.0"
 dependencies = [
  "dirs",
+ "gtk",
  "keyring",
  "koushi-core",
  "koushi-diagnostics",

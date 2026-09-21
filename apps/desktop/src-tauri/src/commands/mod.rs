@@ -90,6 +90,7 @@ const QA_TITLE_ENV: &str = "KOUSHI_QA_TITLE";
 pub(crate) mod account;
 pub(crate) mod activity;
 pub(crate) mod app_updates;
+pub(crate) mod clipboard_image;
 pub(crate) mod diagnostics;
 pub(crate) mod directory;
 pub(crate) mod e2ee;

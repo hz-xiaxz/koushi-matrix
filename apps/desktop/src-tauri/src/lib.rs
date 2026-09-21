@@ -1116,6 +1116,7 @@ pub fn run() {
             commands::timeline::update_staged_upload_caption,
             commands::timeline::update_staged_upload_compression,
             commands::timeline::clear_upload_staging,
+            commands::clipboard_image::read_clipboard_image_png,
             commands::timeline::cancel_scheduled_send,
             commands::timeline::reschedule_scheduled_send,
             commands::timeline::retry_send,

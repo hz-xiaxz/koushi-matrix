@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  attachmentPasteNeedsNativeImageRead,
   filesFromAttachmentTransfer,
   ingestAttachmentFiles,
   stageAttachmentFiles
@@ -37,6 +38,39 @@ describe("attachment ingestion", () => {
         types: ["text/plain"]
       })
     ).toEqual([]);
+  });
+
+  it("asks the native clipboard only when the paste exposes neither files nor text", () => {
+    const file = new File(["data"], "image.png", { type: "image/png" });
+    // WebKitGTK reports an image-only clipboard as a completely empty transfer.
+    expect(
+      attachmentPasteNeedsNativeImageRead({ files: [], items: [], types: [], getData: () => "" })
+    ).toBe(true);
+    // "Copy image" from a browser adds markup but still no plain text to paste.
+    expect(
+      attachmentPasteNeedsNativeImageRead({
+        files: [],
+        items: [{ kind: "string" }],
+        types: ["text/html"],
+        getData: () => ""
+      })
+    ).toBe(true);
+    expect(
+      attachmentPasteNeedsNativeImageRead({
+        files: [],
+        items: [{ kind: "string" }],
+        types: ["text/plain"],
+        getData: () => "hello"
+      })
+    ).toBe(false);
+    expect(
+      attachmentPasteNeedsNativeImageRead({
+        files: [file],
+        items: [{ kind: "file" }],
+        types: ["Files"],
+        getData: () => ""
+      })
+    ).toBe(false);
   });
 
   it("keeps packaged desktop file drops on the browser File ingestion path", () => {
