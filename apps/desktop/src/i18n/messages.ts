@@ -184,6 +184,8 @@ export type MessageId =
   | "dialog.createRoomTitle"
   | "dialog.createSpaceTitle"
   | "dialog.encryptedRoom"
+  | "dialog.invitedOnlyRoom"
+  | "dialog.invitedOnlyRoomInSpace"
   | "dialog.inviteCandidates"
   | "dialog.inviteHistory"
   | "dialog.inviteHistoryCurrent"
@@ -225,6 +227,7 @@ export type MessageId =
   | "dialog.roomName"
   | "dialog.spaceName"
   | "dialog.standardRoomInSpace"
+  | "dialog.privateRoomDescription"
   | "dialog.startDm"
   | "dialog.reportReasonLabel"
   | "dialog.reportReasonPlaceholder"
@@ -1567,6 +1570,8 @@ const en: Catalog = {
   "dialog.createRoomTitle": "Create room",
   "dialog.createSpaceTitle": "Create space",
   "dialog.encryptedRoom": "Encrypted room",
+  "dialog.invitedOnlyRoom": "Invited only",
+  "dialog.invitedOnlyRoomInSpace": "Invite-only room in {spaceName}: only explicitly invited people can join.",
   "dialog.inviteCandidates": "Invite candidates",
   "dialog.inviteHistory": "History visibility for invitees",
   "dialog.inviteHistoryCurrent": "Current room setting. Change it in Room Info before sending the invite.",
@@ -1608,7 +1613,8 @@ const en: Catalog = {
   "dialog.removeInviteTarget": "Remove invite target",
   "dialog.roomName": "Room name",
   "dialog.spaceName": "Space name",
-  "dialog.standardRoomInSpace": "Standard room in {spaceName}",
+  "dialog.standardRoomInSpace": "Standard room in {spaceName}: space members can join without approval.",
+  "dialog.privateRoomDescription": "Only explicitly invited people can join.",
   "dialog.startDm": "Start DM",
   "dialog.reportReasonLabel": "Reason",
   "dialog.reportReasonPlaceholder": "Why are you reporting this?",
@@ -2861,6 +2867,8 @@ const ja: Catalog = {
   "dialog.createRoomTitle": "ルームを作成",
   "dialog.createSpaceTitle": "スペースを作成",
   "dialog.encryptedRoom": "暗号化ルーム",
+  "dialog.invitedOnlyRoom": "招待された人のみ",
+  "dialog.invitedOnlyRoomInSpace": "{spaceName}内の招待専用ルーム：明示的に招待された人だけが参加できます",
   "dialog.inviteCandidates": "招待候補",
   "dialog.inviteHistory": "招待先に見える履歴",
   "dialog.inviteHistoryCurrent": "現在のルーム設定です。招待を送る前にRoom Infoから変更できます。",
@@ -2902,7 +2910,8 @@ const ja: Catalog = {
   "dialog.removeInviteTarget": "招待先を削除",
   "dialog.roomName": "ルーム名",
   "dialog.spaceName": "スペース名",
-  "dialog.standardRoomInSpace": "{spaceName}内の標準ルーム",
+  "dialog.standardRoomInSpace": "{spaceName}内の標準ルーム：スペースメンバーは承認なしで参加できます",
+  "dialog.privateRoomDescription": "明示的に招待された人だけが参加できます",
   "dialog.startDm": "DMを開始",
   "dialog.reportReasonLabel": "理由",
   "dialog.reportReasonPlaceholder": "報告理由を入力してください",

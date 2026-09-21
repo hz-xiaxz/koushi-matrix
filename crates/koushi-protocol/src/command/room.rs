@@ -18,6 +18,8 @@ pub struct CreateRoomOptions {
     #[serde(default)]
     pub encrypted: bool,
     #[serde(default)]
+    pub invited_only: bool,
+    #[serde(default)]
     pub visibility: CreateRoomVisibility,
     #[serde(default)]
     pub parent_space: Option<CreateRoomParentSpace>,
@@ -37,6 +39,7 @@ impl fmt::Debug for CreateRoomOptions {
                     .map(|_| "RoomAliasLocalpart(..)"),
             )
             .field("encrypted", &self.encrypted)
+            .field("invited_only", &self.invited_only)
             .field("visibility", &self.visibility)
             .field("parent_space", &self.parent_space)
             .finish()

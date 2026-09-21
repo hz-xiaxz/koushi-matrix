@@ -152,6 +152,7 @@ async fn run_authenticated(
             topic: None,
             alias_localpart: None,
             encrypted: false,
+            invited_only: false,
             visibility: MatrixCreateRoomVisibility::Private,
             parent_space: None,
         },

@@ -41,6 +41,27 @@ pub(crate) fn handle_room_list_updated(
     handle_room_list_updated_with_crawler(state, spaces, rooms, true, true)
 }
 
+/// Apply a successful local leave before the room-list service catches up.
+/// Provisional snapshots deliberately merge with the previous list, so they
+/// cannot be used to remove a room that has just been left.
+pub(crate) fn handle_room_left_locally(state: &mut AppState, room_id: String) -> Vec<AppEffect> {
+    if !is_session_ready(state) || !state.rooms.iter().any(|room| room.room_id == room_id) {
+        return Vec::new();
+    }
+    state
+        .room_list
+        .locally_left_room_ids
+        .insert(room_id.clone());
+    let mut rooms = state.rooms.clone();
+    rooms.retain(|room| room.room_id != room_id);
+    handle_room_list_updated_with_crawler(state, state.spaces.clone(), rooms, false, false)
+}
+
+pub(crate) fn handle_room_joined_locally(state: &mut AppState, room_id: String) -> Vec<AppEffect> {
+    state.room_list.locally_left_room_ids.remove(&room_id);
+    Vec::new()
+}
+
 fn handle_room_list_updated_with_crawler(
     state: &mut AppState,
     spaces: Vec<crate::state::SpaceSummary>,
@@ -58,6 +79,22 @@ fn handle_room_list_updated_with_crawler(
 
     let own_user_id = session_user_id(state).map(str::to_owned);
     let mut rooms = rooms;
+    if authoritative {
+        let observed_room_ids = rooms
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect::<BTreeSet<_>>();
+        state
+            .room_list
+            .locally_left_room_ids
+            .retain(|room_id| !observed_room_ids.contains(room_id.as_str()));
+    }
+    rooms.retain(|room| {
+        !state
+            .room_list
+            .locally_left_room_ids
+            .contains(&room.room_id)
+    });
     let mut spaces = spaces;
     preserve_known_avatar_thumbnails(state, &mut spaces, &mut rooms);
     suppress_stale_unread_after_local_read(state, &mut rooms);

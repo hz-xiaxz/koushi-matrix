@@ -13,6 +13,7 @@ export interface CreateRoomRequest {
   topic?: string | null;
   aliasLocalpart?: string | null;
   encrypted: boolean;
+  invitedOnly: boolean;
   visibility: CreateRoomVisibility;
   parentSpace?: CreateRoomParentSpace | null;
 }

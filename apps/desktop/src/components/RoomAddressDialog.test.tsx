@@ -9,7 +9,7 @@ test.each(["en", "ja"] as const)("renders Rust address preview and preserves dra
   setActiveLocaleProfile(locale, "none");
   const onChange = vi.fn();
   render(<CreateEntityDialog kind="room" isBusy={false} value="設計"
-    roomOptions={{ aliasLocalpart: "manual", topic: "", visibility: "public", encrypted: false }}
+    roomOptions={{ aliasLocalpart: "manual", topic: "", visibility: "public", encrypted: false, invitedOnly: false }}
     addressPreview={{ localpart: "manual", full_alias: "#manual:example.invalid", error: null }}
     addressFailure="aliasInUse"
     onCancel={vi.fn()} onValueChange={vi.fn()} onSubmit={vi.fn()} onRoomOptionsChange={onChange} />);

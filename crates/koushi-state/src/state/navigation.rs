@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fmt,
 };
 
@@ -422,6 +422,10 @@ pub struct RoomListProjection {
     pub active_filter: RoomListFilter,
     pub sort: RoomListSort,
     pub items: Vec<RoomListProjectionItem>,
+    /// Room IDs removed by a successful local leave, kept out of provisional
+    /// room-list snapshots until the server confirms the membership change.
+    #[serde(skip)]
+    pub locally_left_room_ids: BTreeSet<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -599,6 +603,7 @@ pub fn compute_room_list_projection(
         active_filter,
         sort,
         items,
+        locally_left_room_ids: BTreeSet::new(),
     }
 }
 

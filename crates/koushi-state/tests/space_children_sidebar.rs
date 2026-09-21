@@ -7,8 +7,10 @@
 //! an invitation.
 
 use koushi_state::{
-    AppState, InvitePreview, RoomSummary, RoomTags, SpaceChildMembership, SpaceChildSummary,
-    SpaceChildrenState, SpaceSummary, compose_sidebar_for_state,
+    AppAction, AppState, InvitePreview, RoomListSource, RoomSummary, RoomTags, SessionInfo,
+    SessionState,
+    SpaceChildMembership, SpaceChildSummary, SpaceChildrenState, SpaceSummary,
+    compose_sidebar_for_state, reduce,
 };
 
 const SPACE_ID: &str = "!space:example.invalid";
@@ -102,9 +104,12 @@ fn not_joined_children_get_their_own_lane_without_touching_the_joined_rooms() {
     let sidebar = compose_sidebar_for_state(&state);
 
     assert_eq!(names(&sidebar.sections.rooms), ["Joined Room"]);
-    // The undescribed child stays in the Space info panel; see
-    // `an_undescribed_child_stays_out_of_the_room_list`.
-    assert_eq!(names(&sidebar.sections.not_joined), ["Open Room"]);
+    // Encrypted/private children can be undescribed by `/hierarchy`, but they
+    // still belong in the Space's room list so they do not disappear.
+    assert_eq!(
+        names(&sidebar.sections.not_joined),
+        ["!private:example.invalid", "Open Room"]
+    );
     assert_eq!(
         sidebar.sections.rooms[0].membership,
         SpaceChildMembership::Joined
@@ -214,16 +219,57 @@ fn a_declined_invitation_stops_being_reported_as_invited() {
 
     let sidebar = compose_sidebar_for_state(&state);
 
-    assert_eq!(
-        sidebar.sections.not_joined[0].membership,
-        SpaceChildMembership::NotJoined
-    );
+    assert!(sidebar.sections.not_joined.is_empty());
 }
 
-/// A child the server declined to describe has only a room ID for a label and
-/// no action to offer, so it belongs to the Space info panel, not the room list.
 #[test]
-fn an_undescribed_child_stays_out_of_the_room_list() {
+fn a_successful_leave_removes_the_room_from_the_joined_projection_immediately() {
+    let mut state = state_with_children(vec![child(
+        "!joined:example.invalid",
+        "Joined Room",
+        SpaceChildMembership::Joined,
+    )]);
+    state.session = SessionState::Ready(SessionInfo {
+        homeserver: "https://example.invalid".to_owned(),
+        user_id: "@alice:example.invalid".to_owned(),
+        device_id: "DEVICE".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    });
+
+    let effects = reduce(
+        &mut state,
+        AppAction::RoomLeftLocally {
+            room_id: "!joined:example.invalid".to_owned(),
+        },
+    );
+
+    assert!(state.rooms.is_empty());
+    assert_eq!(
+        names(&compose_sidebar_for_state(&state).sections.not_joined),
+        ["Joined Room"]
+    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        koushi_state::AppEffect::EmitUiEvent(koushi_state::UiEvent::RoomListChanged)
+    )));
+
+    // A stale provisional snapshot from the live room-list service must not
+    // resurrect the room while the server processes the leave.
+    reduce(
+        &mut state,
+        AppAction::RoomListSnapshotProvisional {
+            generation: 0,
+            source: RoomListSource::Cache,
+            spaces: Vec::new(),
+            rooms: vec![joined_room("!joined:example.invalid", "Joined Room")],
+            invites: Vec::new(),
+        },
+    );
+    assert!(state.rooms.is_empty());
+}
+
+#[test]
+fn an_undescribed_child_stays_visible_in_the_room_list() {
     let state = state_with_children(vec![child(
         "!private:example.invalid",
         "!private:example.invalid",
@@ -232,7 +278,14 @@ fn an_undescribed_child_stays_out_of_the_room_list() {
 
     let sidebar = compose_sidebar_for_state(&state);
 
-    assert!(sidebar.sections.not_joined.is_empty());
+    assert_eq!(
+        names(&sidebar.sections.not_joined),
+        ["!private:example.invalid"]
+    );
+    assert_eq!(
+        sidebar.sections.not_joined[0].membership,
+        SpaceChildMembership::Unknown
+    );
 }
 
 /// Only rows that can actually be joined carry the affordance: everything else

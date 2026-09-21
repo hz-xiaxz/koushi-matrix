@@ -172,6 +172,7 @@ pub struct MatrixCreateRoomOptions {
     pub topic: Option<String>,
     pub alias_localpart: Option<String>,
     pub encrypted: bool,
+    pub invited_only: bool,
     pub visibility: MatrixCreateRoomVisibility,
     pub parent_space: Option<MatrixCreateRoomParentSpace>,
 }
@@ -780,6 +781,7 @@ pub async fn create_public_directory_room(
             topic: None,
             alias_localpart: Some(alias_localpart.to_owned()),
             encrypted: false,
+            invited_only: false,
             visibility: MatrixCreateRoomVisibility::Public,
             parent_space: None,
         },
@@ -801,6 +803,9 @@ pub(super) fn create_room_request(
         .map(ToOwned::to_owned);
 
     let is_public = matches!(options.visibility, MatrixCreateRoomVisibility::Public);
+    if is_public && options.invited_only {
+        return Err(MatrixRoomOperationError::InvalidRoomSetting);
+    }
     if is_public {
         let alias_localpart = options
             .alias_localpart
@@ -813,6 +818,13 @@ pub(super) fn create_room_request(
         request.visibility = matrix_sdk::ruma::api::client::room::Visibility::Public;
         request.preset =
             Some(matrix_sdk::ruma::api::client::room::create_room::v3::RoomPreset::PublicChat);
+    } else if options.invited_only || options.parent_space.is_none() {
+        // Make the invite-only behaviour explicit. Without a preset, the
+        // homeserver infers private_chat from visibility, but an explicit
+        // preset keeps the result consistent across homeservers and makes the
+        // access policy visible in the request itself.
+        request.preset =
+            Some(matrix_sdk::ruma::api::client::room::create_room::v3::RoomPreset::PrivateChat);
     }
 
     if options.encrypted && !is_public {
@@ -842,18 +854,20 @@ pub(super) fn create_room_request(
 
         if !is_public {
             request.room_version = Some(matrix_sdk::ruma::RoomVersionId::V9);
-            request.initial_state.push(
-                matrix_sdk::ruma::events::InitialStateEvent::with_empty_state_key(
-                    matrix_sdk::ruma::events::room::join_rules::RoomJoinRulesEventContent::restricted(
-                        vec![
-                            matrix_sdk::ruma::events::room::join_rules::AllowRule::room_membership(
-                                parent_space_id,
-                            ),
-                        ],
-                    ),
-                )
-                .to_raw_any(),
-            );
+            if !options.invited_only {
+                request.initial_state.push(
+                    matrix_sdk::ruma::events::InitialStateEvent::with_empty_state_key(
+                        matrix_sdk::ruma::events::room::join_rules::RoomJoinRulesEventContent::restricted(
+                            vec![
+                                matrix_sdk::ruma::events::room::join_rules::AllowRule::room_membership(
+                                    parent_space_id,
+                                ),
+                            ],
+                        ),
+                    )
+                    .to_raw_any(),
+                );
+            }
             request.initial_state.push(
                 matrix_sdk::ruma::events::InitialStateEvent::with_empty_state_key(
                     matrix_sdk::ruma::events::room::history_visibility::RoomHistoryVisibilityEventContent::new(
@@ -1199,12 +1213,8 @@ pub async fn accept_invited_room(
                 _ => "unknown",
             };
             koushi_diagnostics::record_and_stderr(
-                DiagnosticEvent::new(
-                    DiagnosticLevel::Warn,
-                    "sdk.room_operation",
-                    "join_failed",
-                )
-                .field(DiagnosticField::token("failure_kind", failure_kind)),
+                DiagnosticEvent::new(DiagnosticLevel::Warn, "sdk.room_operation", "join_failed")
+                    .field(DiagnosticField::token("failure_kind", failure_kind)),
             );
             return Err(operation_error);
         }

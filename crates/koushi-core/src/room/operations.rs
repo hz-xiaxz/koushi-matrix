@@ -124,6 +124,7 @@ fn matrix_create_room_options(options: CreateRoomOptions) -> MatrixCreateRoomOpt
         topic: options.topic,
         alias_localpart: options.alias_localpart,
         encrypted: options.encrypted,
+        invited_only: options.invited_only,
         visibility: match options.visibility {
             CreateRoomVisibility::Private => MatrixCreateRoomVisibility::Private,
             CreateRoomVisibility::Public => MatrixCreateRoomVisibility::Public,
@@ -685,6 +686,10 @@ impl RoomActor {
                     self.reject_residency_ack(request_id);
                     return;
                 }
+                self.reduce_reliable(vec![AppAction::RoomJoinedLocally {
+                    room_id: joined_room_id.clone(),
+                }])
+                .await;
                 koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(
                     DiagnosticLevel::Info,
                     "core.room_operation",
@@ -804,6 +809,10 @@ impl RoomActor {
                     self.reject_residency_ack(request_id);
                     return;
                 }
+                self.reduce_reliable(vec![AppAction::RoomJoinedLocally {
+                    room_id: joined_room_id.clone(),
+                }])
+                .await;
                 self.emit(CoreEvent::Room(RoomEvent::RoomJoined {
                     request_id,
                     room_id: joined_room_id,
@@ -841,6 +850,10 @@ impl RoomActor {
                 }
                 self.reduce_reliable(vec![AppAction::SpaceOrderPreferenceRemoved {
                     space_id: left_room_id.clone(),
+                }])
+                .await;
+                self.reduce_reliable(vec![AppAction::RoomLeftLocally {
+                    room_id: left_room_id.clone(),
                 }])
                 .await;
                 self.emit(CoreEvent::Room(RoomEvent::RoomLeft {

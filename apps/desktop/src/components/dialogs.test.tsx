@@ -553,6 +553,51 @@ describe("dialog IME submit handling", () => {
   });
 });
 
+describe("CreateEntityDialog room access", () => {
+  it("explains standard Space access and exposes invite-only access", () => {
+    const onRoomOptionsChange = vi.fn();
+    const roomOptions = {
+      aliasLocalpart: "",
+      encrypted: true,
+      invitedOnly: false,
+      topic: "",
+      visibility: "private" as const
+    };
+    const { rerender } = render(
+      <CreateEntityDialog
+        activeSpaceName="春学"
+        kind="room"
+        isBusy={false}
+        roomOptions={roomOptions}
+        value="秘密ルーム"
+        onCancel={vi.fn()}
+        onRoomOptionsChange={onRoomOptionsChange}
+        onSubmit={vi.fn()}
+        onValueChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(t("dialog.standardRoomInSpace", { spaceName: "春学" }))).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: t("dialog.invitedOnlyRoom") }));
+    expect(onRoomOptionsChange).toHaveBeenLastCalledWith(expect.objectContaining({ invitedOnly: true }));
+
+    rerender(
+      <CreateEntityDialog
+        activeSpaceName="春学"
+        kind="room"
+        isBusy={false}
+        roomOptions={{ ...roomOptions, invitedOnly: true }}
+        value="秘密ルーム"
+        onCancel={vi.fn()}
+        onRoomOptionsChange={onRoomOptionsChange}
+        onSubmit={vi.fn()}
+        onValueChange={vi.fn()}
+      />
+    );
+    expect(screen.getByText(t("dialog.invitedOnlyRoomInSpace", { spaceName: "春学" }))).toBeTruthy();
+  });
+});
+
 describe("InviteTargetsDialog history policy", () => {
   function workflow(): InviteWorkflowState {
     return {

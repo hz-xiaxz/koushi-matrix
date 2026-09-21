@@ -421,6 +421,7 @@ pub fn build_state_delta(
         || previous.rooms != next.rooms
         || previous.invites != next.invites
         || previous.room_notification_settings != next.room_notification_settings
+        || previous.space_children != next.space_children
     {
         let previous_sidebar = compose_sidebar_for_state(previous);
         let next_sidebar = compose_sidebar_for_state(next);

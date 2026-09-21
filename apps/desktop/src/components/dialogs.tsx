@@ -88,6 +88,7 @@ export function ResetLocalDataConfirmationDialog({
 export interface CreateRoomDialogOptions {
   aliasLocalpart: string;
   encrypted: boolean;
+  invitedOnly: boolean;
   topic: string;
   visibility: CreateRoomVisibility;
 }
@@ -125,6 +126,7 @@ export function CreateEntityDialog({
     ({
       aliasLocalpart: "",
       encrypted: true,
+      invitedOnly: false,
       topic: "",
       visibility: "private"
     } satisfies CreateRoomDialogOptions);
@@ -147,6 +149,7 @@ export function CreateEntityDialog({
     };
     if (next.visibility === "public") {
       next.encrypted = false;
+      next.invitedOnly = false;
     }
     onRoomOptionsChange?.(next);
   }
@@ -209,25 +212,46 @@ export function CreateEntityDialog({
                 <span>{t("dialog.publicRoom")}</span>
               </label>
             </div>
-            {activeSpaceName && effectiveRoomOptions.visibility === "private" ? (
+            {effectiveRoomOptions.visibility === "private" ? (
               <div className="create-room-space-note">
-                {t("dialog.standardRoomInSpace", { spaceName: activeSpaceName })}
+                {activeSpaceName
+                  ? effectiveRoomOptions.invitedOnly
+                    ? t("dialog.invitedOnlyRoomInSpace", { spaceName: activeSpaceName })
+                    : t("dialog.standardRoomInSpace", { spaceName: activeSpaceName })
+                  : t("dialog.privateRoomDescription")}
               </div>
             ) : null}
             {effectiveRoomOptions.visibility === "private" ? (
-              <label className="dialog-checkbox">
-                <input
-                  type="checkbox"
-                  checked={effectiveRoomOptions.encrypted}
-                  aria-label={t("dialog.encryptedRoom")}
-                  onChange={(event) =>
-                    updateRoomOptions({
-                      encrypted: event.currentTarget.checked
-                    })
-                  }
-                />
-                <span>{t("dialog.encryptedRoom")}</span>
-              </label>
+              <>
+                {activeSpaceName ? (
+                  <label className="dialog-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={effectiveRoomOptions.invitedOnly}
+                      aria-label={t("dialog.invitedOnlyRoom")}
+                      onChange={(event) =>
+                        updateRoomOptions({
+                          invitedOnly: event.currentTarget.checked
+                        })
+                      }
+                    />
+                    <span>{t("dialog.invitedOnlyRoom")}</span>
+                  </label>
+                ) : null}
+                <label className="dialog-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={effectiveRoomOptions.encrypted}
+                    aria-label={t("dialog.encryptedRoom")}
+                    onChange={(event) =>
+                      updateRoomOptions({
+                        encrypted: event.currentTarget.checked
+                      })
+                    }
+                  />
+                  <span>{t("dialog.encryptedRoom")}</span>
+                </label>
+              </>
             ) : null}
             <ImeTextField
               className="dialog-input"
