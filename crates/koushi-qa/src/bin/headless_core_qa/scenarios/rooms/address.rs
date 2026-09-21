@@ -17,6 +17,7 @@ pub(super) async fn verify(
         topic: None,
         alias_localpart: Some(preview.localpart),
         encrypted: false,
+        invited_only: false,
         visibility: CreateRoomVisibility::Public,
         parent_space: None,
     };

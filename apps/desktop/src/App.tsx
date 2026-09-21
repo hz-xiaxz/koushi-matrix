@@ -415,6 +415,7 @@ const ROOM_BOUND_RIGHT_PANEL_MODES = new Set<RightPanelMode>([
 const DEFAULT_CREATE_ROOM_OPTIONS: CreateRoomDialogOptions = {
   aliasLocalpart: "",
   encrypted: true,
+  invitedOnly: false,
   topic: "",
   visibility: "private"
 };
@@ -453,6 +454,7 @@ function createRoomRequestFromDraft(
     topic: options.topic.trim() || null,
     aliasLocalpart: visibility === "public" ? options.aliasLocalpart.trim() || null : null,
     encrypted: visibility === "private" ? options.encrypted : false,
+    invitedOnly: visibility === "private" ? options.invitedOnly : false,
     visibility,
     parentSpace:
       activeSpaceId && parentViaServer

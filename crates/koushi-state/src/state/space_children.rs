@@ -16,8 +16,9 @@ use super::{AvatarImage, errors::OperationFailureKind};
 
 /// The viewer's relationship to a Space child room.
 ///
-/// `Unknown` is the honest answer for a child the server did not describe:
-/// a room the account may not see is reported as such, never probed around.
+/// `Unknown` is the honest answer for a child the server did not describe and
+/// that is not present in the local room cache. Invited children that the sync
+/// client knows are projected with their local membership instead.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SpaceChildMembership {

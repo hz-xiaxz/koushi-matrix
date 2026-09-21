@@ -321,6 +321,7 @@ async fn unauthenticated_session_commands_are_rejected() {
                 topic: None,
                 alias_localpart: None,
                 encrypted: false,
+                invited_only: false,
                 visibility: CreateRoomVisibility::Private,
                 parent_space: None,
             },

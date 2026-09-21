@@ -81,6 +81,7 @@ pub(super) fn private_room_options(name: impl Into<String>, encrypted: bool) -> 
         topic: None,
         alias_localpart: None,
         encrypted,
+        invited_only: false,
         visibility: CreateRoomVisibility::Private,
         parent_space: None,
     }

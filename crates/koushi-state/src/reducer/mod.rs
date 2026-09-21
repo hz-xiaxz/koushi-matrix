@@ -59,6 +59,7 @@ pub(crate) fn visible_invites_for_ignored_users(
 
 pub(crate) fn recompute_room_list_projection(state: &mut AppState) {
     let readiness = state.room_list.readiness;
+    let locally_left_room_ids = state.room_list.locally_left_room_ids.clone();
     let visible_invites =
         visible_invites_for_ignored_users(&state.invites, &state.profile.ignored_user_ids);
     state.room_list = compute_room_list_projection(
@@ -71,6 +72,7 @@ pub(crate) fn recompute_room_list_projection(state: &mut AppState) {
         &visible_invites,
     );
     state.room_list.readiness = readiness;
+    state.room_list.locally_left_room_ids = locally_left_room_ids;
 }
 
 pub(crate) fn clear_stale_verification_flow(state: &mut AppState) -> bool {
@@ -723,6 +725,10 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         }
         AppAction::RoomListUpdated { spaces, rooms } => {
             room::handle_room_list_updated(state, spaces, rooms)
+        }
+        AppAction::RoomLeftLocally { room_id } => room::handle_room_left_locally(state, room_id),
+        AppAction::RoomJoinedLocally { room_id } => {
+            room::handle_room_joined_locally(state, room_id)
         }
         AppAction::RoomListBootstrapStarted { generation, source } => {
             room::handle_room_list_bootstrap_started(state, generation, source)

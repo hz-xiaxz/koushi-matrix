@@ -280,10 +280,13 @@ fn compose_sidebar_with_preferences(
         // `rooms` long before the next hierarchy fetch would say so, and it
         // must reappear here rather than vanish from the Space entirely.
         .filter(|child| !rooms_by_id.contains_key(child.room_id.as_str()))
-        // A child the server declined to describe has only a room ID for a
-        // label and no action the user could take, so it stays in the Space
-        // info panel rather than the room list (see #192's reverted lane).
-        .filter(|child| child.membership != SpaceChildMembership::Unknown)
+        // The hierarchy can contain stale children after every member has
+        // left. Keep actionable invitations/knocks and opaque private rooms,
+        // but do not expose a described room with no joined members.
+        .filter(|child| space_child_is_visible(child, &invited_room_ids))
+        // Keep advertised children visible even when the hierarchy endpoint
+        // could not describe them. Encrypted/private rooms can legitimately
+        // arrive as `Unknown`; hiding them makes a real Space child disappear.
         .collect();
     not_joined_children.sort_by(|left, right| {
         left.display_name
@@ -469,6 +472,26 @@ fn joined_membership() -> SpaceChildMembership {
     SpaceChildMembership::Joined
 }
 
+fn space_child_is_visible(child: &SpaceChildSummary, invited_room_ids: &HashSet<&str>) -> bool {
+    // The current invite list is authoritative even when the hierarchy only
+    // reports the room as a generic non-joined child.
+    if invited_room_ids.contains(child.room_id.as_str()) {
+        return true;
+    }
+    match child.membership {
+        SpaceChildMembership::Joined => true,
+        SpaceChildMembership::Unknown => child.joined_members > 0,
+        // The hierarchy can retain an old invited state after the invite was
+        // withdrawn or accepted. Only the account's current invite list makes
+        // that state actionable.
+        SpaceChildMembership::Invited => invited_room_ids.contains(child.room_id.as_str()),
+        SpaceChildMembership::Knocked => true,
+        SpaceChildMembership::NotJoined
+        | SpaceChildMembership::Left
+        | SpaceChildMembership::Banned => child.joined_members > 0,
+    }
+}
+
 fn room_list_item(
     room: &RoomSummary,
     room_notification_settings: &HashMap<String, RoomNotificationSettings>,
@@ -492,6 +515,58 @@ fn room_list_item(
         is_attention_highlighted: projection.is_attention_highlighted,
         has_unread_mention: projection.has_unread_mention,
         is_muted: projection.is_muted,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn child(membership: SpaceChildMembership, joined_members: u64) -> SpaceChildSummary {
+        SpaceChildSummary {
+            room_id: "!room:example.invalid".to_owned(),
+            display_name: "Room".to_owned(),
+            avatar: None,
+            membership,
+            can_join: false,
+            is_space: false,
+            joined_members,
+        }
+    }
+
+    #[test]
+    fn sidebar_hides_empty_described_children_but_keeps_actionable_or_opaque_rooms() {
+        let no_invites = HashSet::new();
+        assert!(!space_child_is_visible(
+            &child(SpaceChildMembership::NotJoined, 0),
+            &no_invites
+        ));
+        assert!(!space_child_is_visible(
+            &child(SpaceChildMembership::Left, 0),
+            &no_invites
+        ));
+        assert!(space_child_is_visible(
+            &child(SpaceChildMembership::NotJoined, 1),
+            &no_invites
+        ));
+        assert!(!space_child_is_visible(
+            &child(SpaceChildMembership::Invited, 0),
+            &no_invites
+        ));
+        let mut current_invites = HashSet::new();
+        current_invites.insert("!room:example.invalid");
+        assert!(space_child_is_visible(
+            &child(SpaceChildMembership::Invited, 0),
+            &current_invites
+        ));
+        assert!(!space_child_is_visible(
+            &child(SpaceChildMembership::Unknown, 0),
+            &no_invites
+        ));
+        assert!(space_child_is_visible(
+            &child(SpaceChildMembership::Unknown, 2),
+            &no_invites
+        ));
     }
 }
 

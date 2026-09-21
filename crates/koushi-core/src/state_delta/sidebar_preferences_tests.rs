@@ -1,7 +1,7 @@
 use super::*;
 use koushi_state::{
     AppAction, RoomListSort, RoomSummary, SettingsPatch, SettingsValues, SidebarSectionKind,
-    SidebarSectionPatch, SpaceSummary, reduce,
+    SidebarSectionPatch, SpaceChildMembership, SpaceChildSummary, SpaceSummary, reduce,
 };
 
 const SPACE: &str = "!space:example.invalid";
@@ -209,6 +209,29 @@ fn repeated_and_effectively_unchanged_preferences_do_not_publish_sidebar() {
             assert!(build_state_delta(2, &next, &repeated).is_none());
         }
     }
+}
+
+#[test]
+fn loading_space_children_publishes_the_not_joined_sidebar_lane() {
+    let previous = fixture(Some(SPACE));
+    let mut next = previous.clone();
+    next.space_children.selected_space_id = Some(SPACE.to_owned());
+    next.space_children.children = vec![SpaceChildSummary {
+        room_id: "!private:example.invalid".to_owned(),
+        display_name: "Private Room".to_owned(),
+        avatar: None,
+        membership: SpaceChildMembership::NotJoined,
+        can_join: false,
+        is_space: false,
+        joined_members: 1,
+    }];
+
+    let sidebar = build_state_delta(1, &previous, &next)
+        .unwrap()
+        .changed
+        .sidebar
+        .expect("space child loading must republish the sidebar");
+    assert_eq!(sidebar.sections.not_joined[0].display_name, "Private Room");
 }
 
 #[test]

@@ -23,8 +23,8 @@ use crate::state::{
     RoomModerationAction, RoomPreferencesState, RoomSettingChange, RoomSettingsSnapshot,
     RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability,
     ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope, SessionInfo,
-    SessionStatusRefreshTrigger, SettingsPatch, SettingsValues, SpaceMemberInviteOutcome,
-    SpaceChildSummary, SpaceMemberRoleUpdateOutcome, SpaceMembersProjection, SpaceSummary,
+    SessionStatusRefreshTrigger, SettingsPatch, SettingsValues, SpaceChildSummary,
+    SpaceMemberInviteOutcome, SpaceMemberRoleUpdateOutcome, SpaceMembersProjection, SpaceSummary,
     StagedUploadCompressionChoice, StagedUploadItem, StagedUploadOutputSelection,
     SyncLifecycleStatus, TimelineContinuityInspection, TimelineGapRepairFailureKind,
     TimelineMediaDownloadState, TimelineMediaGalleryItem, TimelineScrollAnchor,
@@ -650,6 +650,16 @@ pub enum AppAction {
     RoomListUpdated {
         spaces: Vec<SpaceSummary>,
         rooms: Vec<RoomSummary>,
+    },
+    /// Remove a room from the joined-room projection immediately after a
+    /// successful leave. The live room-list service may publish a provisional
+    /// snapshot that still contains the room for a short time.
+    RoomLeftLocally {
+        room_id: String,
+    },
+    /// Clear the local leave tombstone after a successful rejoin.
+    RoomJoinedLocally {
+        room_id: String,
     },
     RoomListBootstrapStarted {
         generation: u64,

@@ -36,6 +36,7 @@ async fn room_alias_collision_is_distinct_from_network_failure_and_redacts_serve
             topic: None,
             alias_localpart: Some("example-room".into()),
             encrypted: false,
+            invited_only: false,
             visibility: MatrixCreateRoomVisibility::Public,
             parent_space: None,
         },

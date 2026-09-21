@@ -30,6 +30,7 @@ fn create_room_request_projects_space_room_options() {
         topic: Some("Deployment notes".to_owned()),
         alias_localpart: None,
         encrypted: true,
+        invited_only: false,
         visibility: MatrixCreateRoomVisibility::Private,
         parent_space: Some(MatrixCreateRoomParentSpace {
             space_id: "!space:example.invalid".to_owned(),
@@ -91,6 +92,7 @@ fn create_room_request_projects_public_alias_without_encryption() {
         topic: None,
         alias_localpart: Some("synthetic-public".to_owned()),
         encrypted: true,
+        invited_only: false,
         visibility: MatrixCreateRoomVisibility::Public,
         parent_space: None,
     })
@@ -106,6 +108,49 @@ fn create_room_request_projects_public_alias_without_encryption() {
         event.get("type").and_then(serde_json::Value::as_str) == Some("m.room.encryption")
     }));
 }
+
+#[test]
+fn create_room_request_projects_invited_only_space_room() {
+    let request = create_room_request(MatrixCreateRoomOptions {
+        name: "Synthetic Invited Only".to_owned(),
+        topic: None,
+        alias_localpart: None,
+        encrypted: true,
+        invited_only: true,
+        visibility: MatrixCreateRoomVisibility::Private,
+        parent_space: Some(MatrixCreateRoomParentSpace {
+            space_id: "!space:example.invalid".to_owned(),
+            via_server: "example.invalid".to_owned(),
+        }),
+    })
+    .expect("request should build");
+
+    assert_eq!(
+        request.preset,
+        Some(matrix_sdk::ruma::api::client::room::create_room::v3::RoomPreset::PrivateChat)
+    );
+    let initial_state = initial_state_json(&request);
+    assert!(initial_state.iter().any(|event| {
+        event.get("type").and_then(serde_json::Value::as_str) == Some("m.room.encryption")
+    }));
+    assert!(!initial_state.iter().any(|event| {
+        event.get("type").and_then(serde_json::Value::as_str) == Some("m.room.join_rules")
+            && event
+                .get("content")
+                .and_then(|content| content.get("join_rule"))
+                .and_then(serde_json::Value::as_str)
+                == Some("restricted")
+    }));
+    assert!(initial_state.iter().any(|event| {
+        event.get("type").and_then(serde_json::Value::as_str) == Some("m.room.history_visibility")
+            && event
+                .get("content")
+                .and_then(|content| content.get("history_visibility"))
+                .and_then(serde_json::Value::as_str)
+                == Some("invited")
+    }));
+}
+
 fn initial_state_json(
     request: &matrix_sdk::ruma::api::client::room::create_room::v3::Request,
 ) -> Vec<serde_json::Value> {

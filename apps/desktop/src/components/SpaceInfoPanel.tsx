@@ -58,6 +58,10 @@ export function SpaceInfoPanel({
         .filter((room): room is RoomSummary => Boolean(room && !room.is_dm))
     : rooms.filter((room) => !room.is_dm);
   const unreadTotal = childRooms.reduce((sum, room) => sum + room.unread_count, 0);
+  const childRoomIds = new Set([
+    ...childRooms.map((room) => room.room_id),
+    ...spaceChildren.map((child) => child.room_id)
+  ]);
   // Joined children are already listed above from the room list, which owns
   // their labels and unread state; this is the remainder of the Space.
   const joinedRoomIds = new Set(childRooms.map((room) => room.room_id));
@@ -96,7 +100,7 @@ export function SpaceInfoPanel({
       </header>
 
       <div className="settings-summary-grid" aria-label={t("space.summary")}>
-        <SummaryTile label={t("workspace.rooms")} value={String(childRooms.length)} />
+        <SummaryTile label={t("workspace.rooms")} value={String(space ? childRoomIds.size : childRooms.length)} />
         <SummaryTile label={t("room.members")} value={loadedSpaceSettings ? String(memberCount) : "-"} />
         <SummaryTile label={t("room.unread")} value={String(unreadTotal)} />
       </div>
