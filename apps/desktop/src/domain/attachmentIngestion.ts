@@ -18,6 +18,16 @@ export function filesFromAttachmentTransfer(transfer: AttachmentTransfer): File[
   return attachmentTransferHasFiles(transfer) ? Array.from(transfer.files) : [];
 }
 
+/**
+ * WebKitGTK hides clipboard images from the paste event, so a paste that offers
+ * neither files nor plain text is the only case worth a native clipboard read.
+ */
+export function attachmentPasteNeedsNativeImageRead(
+  transfer: AttachmentTransfer & { getData(format: string): string }
+): boolean {
+  return !attachmentTransferHasFiles(transfer) && transfer.getData("text/plain") === "";
+}
+
 export async function ingestAttachmentFiles(
   files: Iterable<File>,
   ingest: (files: File[]) => void | Promise<void>

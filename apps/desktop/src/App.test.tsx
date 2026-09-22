@@ -258,9 +258,11 @@ describe("ContextualRightPanel", () => {
     expect(tauriImportStatements).toEqual([]);
     expect(productionTauriImportFiles()).toEqual([
       "backend/client.ts",
+      "backend/tauri/clipboardImagePort.ts",
       "backend/tauri/desktopAttentionPort.ts",
       "backend/tauri/desktopEventPort.ts",
       "backend/tauri/linkMediaPort.ts",
+      "backend/tauri/nativeFileDropPort.ts",
       "backend/tauri/windowDialogPort.ts",
       "backend/tauriTimelineTransport.ts"
     ]);

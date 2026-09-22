@@ -823,6 +823,7 @@ pub fn run() {
             };
             app.manage(core_state);
             app.manage(app_updates::DesktopUpdateManager::new());
+            app.manage(commands::dropped_files::DroppedFileLedger::default());
             app_updates::spawn_auto_update_loop(app.handle().clone(), update_settings_connection);
             install_oidc_deep_link_handler(app)?;
 
@@ -891,6 +892,16 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if window.label() == "main" {
+                // Only Linux enables native drag/drop (tauri.linux.conf.json).
+                if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) =
+                    event
+                {
+                    if let Some(ledger) =
+                        window.try_state::<commands::dropped_files::DroppedFileLedger>()
+                    {
+                        ledger.record_drop(paths);
+                    }
+                }
                 if let Some(focused) = observed_native_window_focus(event) {
                     if let Some(core_state) = window.try_state::<CoreRuntimeState>() {
                         if let Some(observation_generation) = next_native_window_focus_generation(
@@ -1116,6 +1127,9 @@ pub fn run() {
             commands::timeline::update_staged_upload_caption,
             commands::timeline::update_staged_upload_compression,
             commands::timeline::clear_upload_staging,
+            commands::clipboard_image::read_clipboard_image_png,
+            commands::dropped_files::claim_dropped_files,
+            commands::dropped_files::read_dropped_file,
             commands::timeline::cancel_scheduled_send,
             commands::timeline::reschedule_scheduled_send,
             commands::timeline::retry_send,
