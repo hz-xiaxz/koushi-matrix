@@ -447,7 +447,8 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::CurrentSessionStatusRefreshRequested {
             request_id,
             trigger,
-        } => session_status::handle_refresh_requested(state, request_id, trigger),
+            now_ms,
+        } => session_status::handle_refresh_requested(state, request_id, trigger, now_ms),
         AppAction::CurrentSessionStatusRefreshed {
             request_id,
             details,

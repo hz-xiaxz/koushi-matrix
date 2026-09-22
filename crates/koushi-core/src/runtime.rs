@@ -4989,6 +4989,7 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
         } => Some(AppAction::CurrentSessionStatusRefreshRequested {
             request_id: request_id.sequence,
             trigger: *trigger,
+            now_ms: crate::time::current_epoch_ms(),
         }),
         AccountCommand::LoadAccountManagementCapabilities { .. } => {
             Some(AppAction::AccountManagementCapabilitiesLoadRequested)

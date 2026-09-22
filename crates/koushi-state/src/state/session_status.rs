@@ -4,6 +4,33 @@ use serde::{Deserialize, Serialize};
 
 use super::{CurrentDeviceTrustState, SessionAuthenticationMethod};
 
+/// #982: a successful check stays authoritative for this long, so reopening the
+/// session-status panel reads state instead of re-running a full remote
+/// inspection (account devices, own identity, crypto device, backup probe).
+pub const SESSION_STATUS_FRESHNESS_MS: u64 = 6 * 60 * 60 * 1_000;
+
+/// Cooldown after the first failed check. Doubles per consecutive failure up to
+/// [`SESSION_STATUS_FAILURE_BACKOFF_CAP_MS`].
+pub const SESSION_STATUS_FAILURE_BACKOFF_BASE_MS: u64 = 60 * 1_000;
+
+/// Upper bound on the failure cooldown.
+pub const SESSION_STATUS_FAILURE_BACKOFF_CAP_MS: u64 = 30 * 60 * 1_000;
+
+/// How many consecutive failures an automatic reconnect-driven refresh will
+/// tolerate before it stops re-inspecting. A flapping connection must not
+/// produce an unbounded sequence of full inspections; manual refresh still
+/// bypasses this.
+pub const MAX_AUTOMATIC_SESSION_STATUS_RETRIES: u32 = 3;
+
+/// Cooldown before the next automatic check, given how many consecutive
+/// failures preceded it.
+pub fn session_status_failure_backoff_ms(consecutive_failures: u32) -> u64 {
+    let exponent = consecutive_failures.saturating_sub(1).min(16);
+    SESSION_STATUS_FAILURE_BACKOFF_BASE_MS
+        .saturating_mul(1u64 << exponent)
+        .min(SESSION_STATUS_FAILURE_BACKOFF_CAP_MS)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionStatusRefreshTrigger {
@@ -119,6 +146,10 @@ pub enum CurrentSessionStatusState {
         trigger: SessionStatusRefreshTrigger,
         #[serde(default)]
         last_known_details: Option<CurrentSessionStatusDetails>,
+        /// Failures preceding this attempt, carried so the backoff survives the
+        /// round trip through `Checking` (#982).
+        #[serde(default)]
+        consecutive_failures: u32,
     },
     Ready {
         request_id: u64,
@@ -130,5 +161,8 @@ pub enum CurrentSessionStatusState {
         checked_at_ms: u64,
         #[serde(default)]
         last_known_details: Option<CurrentSessionStatusDetails>,
+        /// Consecutive failed checks including this one; drives the backoff.
+        #[serde(default)]
+        consecutive_failures: u32,
     },
 }

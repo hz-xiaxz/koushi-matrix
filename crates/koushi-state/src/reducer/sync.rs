@@ -63,13 +63,21 @@ pub(crate) fn handle_sync_status_changed(
             } => Some(last_known_details.clone()),
             _ => None,
         };
-        if let Some(last_known_details) = last_known_details {
+        // #982: a flapping connection must not produce an unbounded sequence of
+        // full inspections. Stop retrying automatically once the checks have
+        // failed repeatedly; manual refresh still bypasses this.
+        let consecutive_failures =
+            super::session_status::consecutive_failures(&state.current_session_status);
+        let retries_exhausted =
+            consecutive_failures >= crate::state::MAX_AUTOMATIC_SESSION_STATUS_RETRIES;
+        if let Some(last_known_details) = last_known_details.filter(|_| !retries_exhausted) {
             let request_id =
                 recovery_session_status_request_id(&state.current_session_status, generation);
             state.current_session_status = CurrentSessionStatusState::Checking {
                 request_id,
                 trigger: SessionStatusRefreshTrigger::Recovery,
                 last_known_details,
+                consecutive_failures,
             };
             effects.push(AppEffect::RefreshCurrentSessionStatus {
                 request_id,

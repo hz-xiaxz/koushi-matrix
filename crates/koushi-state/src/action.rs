@@ -116,6 +116,9 @@ pub enum AppAction {
     CurrentSessionStatusRefreshRequested {
         request_id: u64,
         trigger: SessionStatusRefreshTrigger,
+        /// Core-supplied wall clock, so the freshness/backoff gate stays in the
+        /// portable reducer instead of reaching for a platform clock (#982).
+        now_ms: u64,
     },
     CurrentSessionStatusRefreshed {
         request_id: u64,

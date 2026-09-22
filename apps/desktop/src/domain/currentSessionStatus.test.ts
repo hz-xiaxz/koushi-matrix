@@ -21,7 +21,8 @@ function failed(kind: CurrentSessionStatusFailureKind) {
     request_id: 2,
     kind,
     checked_at_ms: 2,
-    last_known_details: details
+    last_known_details: details,
+    consecutive_failures: 1
   };
 }
 

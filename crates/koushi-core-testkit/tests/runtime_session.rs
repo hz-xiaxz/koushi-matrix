@@ -476,6 +476,7 @@ async fn authoritative_trust_loss_publishes_one_atomic_reset_delta_after_setup_q
         AppAction::CurrentSessionStatusRefreshRequested {
             request_id: 41,
             trigger: SessionStatusRefreshTrigger::Manual,
+            now_ms: 0,
         },
         AppAction::CurrentSessionStatusRefreshed {
             request_id: 41,

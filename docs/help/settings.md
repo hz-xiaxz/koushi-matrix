@@ -23,7 +23,7 @@ Japanese category names are included to help find them in a translated app.
 | Category | Settings and actions |
 | --- | --- |
 | Account (アカウント) | Language (Default (English), English, Japanese); profile display name and avatar; saved-account switching; account management page when provided by the server; change password and deactivate account when supported. |
-| Sessions (セッション) | Homeserver, user ID, device ID/name, verification, cross-signing, backup and local-store information; Sign out. This is current-session information, not a list of all remote devices. |
+| Sessions (セッション) | Homeserver, user ID, device ID/name, verification, cross-signing, backup and local-store information; Sign out. This is current-session information, not a list of all remote devices. The status shown is the last checked result; Koushi re-checks it automatically when the app or account starts and after a connection outage, and the refresh action checks again immediately. |
 | Appearance (外観) | Theme; display density; UI font and emoji style. |
 | Notifications (通知) | Desktop notifications, notification sounds and badge counts. Operating-system permissions also apply. |
 | Preferences (環境設定) | Code-block wrapping; URL previews in unencrypted/encrypted rooms; hiding removed messages; close to tray where configurable; automatic loading of older messages; placement of threaded conversations at their latest reply. |

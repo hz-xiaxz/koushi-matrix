@@ -407,7 +407,8 @@ describe("UserSettingsPanel", () => {
             key_backup: "ready",
             verification: "verified",
             checked_at_ms: 1_787_665_620_000
-          }
+          },
+          consecutive_failures: 1
         }}
         e2eeTrust={idleE2eeTrust}
         localEncryption={{ kind: "healthy" }}

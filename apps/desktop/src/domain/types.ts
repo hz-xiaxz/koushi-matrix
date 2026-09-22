@@ -710,6 +710,7 @@ export type CurrentSessionStatusState =
       request_id: number;
       trigger: SessionStatusRefreshTrigger;
       last_known_details: CurrentSessionStatusDetails | null;
+      consecutive_failures: number;
     }
   | { status: "ready"; request_id: number; details: CurrentSessionStatusDetails }
   | {
@@ -718,6 +719,7 @@ export type CurrentSessionStatusState =
       kind: CurrentSessionStatusFailureKind;
       checked_at_ms: number;
       last_known_details: CurrentSessionStatusDetails | null;
+      consecutive_failures: number;
     };
 
 export type SyncState =

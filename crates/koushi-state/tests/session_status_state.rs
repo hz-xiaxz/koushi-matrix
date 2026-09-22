@@ -43,6 +43,7 @@ fn refresh_enters_checking_and_emits_one_correlated_effect() {
         AppAction::CurrentSessionStatusRefreshRequested {
             request_id: 7,
             trigger: SessionStatusRefreshTrigger::Open,
+            now_ms: 0,
         },
     );
 
@@ -52,6 +53,7 @@ fn refresh_enters_checking_and_emits_one_correlated_effect() {
             request_id: 7,
             trigger: SessionStatusRefreshTrigger::Open,
             last_known_details: None,
+            consecutive_failures: 0,
         }
     );
     assert_eq!(
@@ -71,6 +73,7 @@ fn duplicate_refresh_is_rejected_while_checking() {
         AppAction::CurrentSessionStatusRefreshRequested {
             request_id: 7,
             trigger: SessionStatusRefreshTrigger::Open,
+            now_ms: 0,
         },
     );
 
@@ -79,6 +82,7 @@ fn duplicate_refresh_is_rejected_while_checking() {
         AppAction::CurrentSessionStatusRefreshRequested {
             request_id: 8,
             trigger: SessionStatusRefreshTrigger::Manual,
+            now_ms: 0,
         },
     );
 
@@ -96,6 +100,7 @@ fn correlated_completion_settles_ready_and_derives_verified_once_in_rust() {
         request_id: 7,
         trigger: SessionStatusRefreshTrigger::Manual,
         last_known_details: None,
+        consecutive_failures: 0,
     };
 
     reduce(
@@ -152,6 +157,7 @@ fn failed_refresh_preserves_prior_ready_facts() {
         AppAction::CurrentSessionStatusRefreshRequested {
             request_id: 7,
             trigger: SessionStatusRefreshTrigger::Manual,
+            now_ms: 0,
         },
     );
 
@@ -171,6 +177,7 @@ fn failed_refresh_preserves_prior_ready_facts() {
             kind: CurrentSessionStatusFailureKind::Sdk,
             checked_at_ms: 1_235,
             last_known_details: Some(details(true, OwnIdentityVerification::Verified)),
+            consecutive_failures: 1,
         }
     );
 }
@@ -182,6 +189,7 @@ fn stale_completion_cannot_replace_the_current_request() {
         request_id: 8,
         trigger: SessionStatusRefreshTrigger::Manual,
         last_known_details: None,
+        consecutive_failures: 0,
     };
 
     let effects = reduce(
@@ -206,6 +214,7 @@ fn trust_loss_clears_status_and_late_completions_stay_idle() {
         request_id: 41,
         trigger: SessionStatusRefreshTrigger::Manual,
         last_known_details: None,
+        consecutive_failures: 0,
     };
 
     reduce(
@@ -276,6 +285,7 @@ fn connectivity_recovery_refreshes_once_and_coalesces_a_later_manual_retry() {
         kind: CurrentSessionStatusFailureKind::Network,
         checked_at_ms: 2_000,
         last_known_details: Some(details(true, OwnIdentityVerification::Verified)),
+        consecutive_failures: 0,
     };
 
     let effects = reduce(
@@ -303,6 +313,7 @@ fn connectivity_recovery_refreshes_once_and_coalesces_a_later_manual_retry() {
             request_id: 41,
             trigger: SessionStatusRefreshTrigger::Recovery,
             last_known_details: Some(_),
+            consecutive_failures: 0,
         }
     ));
 
@@ -311,6 +322,7 @@ fn connectivity_recovery_refreshes_once_and_coalesces_a_later_manual_retry() {
         AppAction::CurrentSessionStatusRefreshRequested {
             request_id: 42,
             trigger: SessionStatusRefreshTrigger::Manual,
+            now_ms: 0,
         },
     );
     assert!(duplicate_effects.is_empty());
@@ -340,6 +352,7 @@ fn connectivity_recovery_replaces_checking_request_before_late_failure_arrives()
         request_id: 42,
         trigger: SessionStatusRefreshTrigger::Manual,
         last_known_details: Some(details(true, OwnIdentityVerification::Verified)),
+        consecutive_failures: 0,
     };
 
     reduce(
@@ -405,6 +418,7 @@ fn connectivity_recovery_reissues_after_cancelled_request_fails_first() {
         request_id: 40,
         trigger: SessionStatusRefreshTrigger::Manual,
         last_known_details: None,
+        consecutive_failures: 0,
     };
 
     reduce(
@@ -465,6 +479,7 @@ fn timeout_preserves_last_known_session_facts() {
         AppAction::CurrentSessionStatusRefreshRequested {
             request_id: 7,
             trigger: SessionStatusRefreshTrigger::Manual,
+            now_ms: 0,
         },
     );
     reduce(
@@ -483,6 +498,7 @@ fn timeout_preserves_last_known_session_facts() {
             kind: CurrentSessionStatusFailureKind::TimedOut,
             checked_at_ms: 2_001,
             last_known_details: Some(known),
+            consecutive_failures: 1,
         }
     );
 }
@@ -516,4 +532,308 @@ fn session_info_serializes_only_the_coarse_authentication_method() {
     assert!(serialized.contains(r#""authentication_method":"oauth""#));
     assert!(!serialized.contains("access_token"));
     assert!(!serialized.contains("refresh_token"));
+}
+
+const HOUR_MS: u64 = 60 * 60 * 1_000;
+const MINUTE_MS: u64 = 60 * 1_000;
+
+fn ready_at(checked_at_ms: u64) -> CurrentSessionStatusState {
+    let mut details = details(true, OwnIdentityVerification::Verified);
+    details.checked_at_ms = checked_at_ms;
+    CurrentSessionStatusState::Ready {
+        request_id: 1,
+        details,
+    }
+}
+
+fn request(
+    state: &mut AppState,
+    request_id: u64,
+    trigger: SessionStatusRefreshTrigger,
+    now_ms: u64,
+) -> Vec<AppEffect> {
+    reduce(
+        state,
+        AppAction::CurrentSessionStatusRefreshRequested {
+            request_id,
+            trigger,
+            now_ms,
+        },
+    )
+}
+
+/// #982: opening the session-status panel issued a full remote inspection every
+/// time — devices, own identity, crypto device, backup probe. Ordinary opens
+/// must serve the last known status instead.
+#[test]
+fn repeated_panel_opens_serve_the_last_known_status_until_it_goes_stale() {
+    let mut state = ready_state();
+    let fresh = ready_at(10 * HOUR_MS);
+    state.current_session_status = fresh.clone();
+
+    for (attempt, elapsed) in [MINUTE_MS, 30 * MINUTE_MS, 2 * HOUR_MS].iter().enumerate() {
+        let effects = request(
+            &mut state,
+            100 + attempt as u64,
+            SessionStatusRefreshTrigger::Open,
+            10 * HOUR_MS + elapsed,
+        );
+        assert!(
+            effects.is_empty(),
+            "panel open {elapsed}ms after a successful check must not re-inspect"
+        );
+        assert_eq!(
+            state.current_session_status, fresh,
+            "the last known status must stay readable"
+        );
+    }
+
+    // Once the cached status is stale, an open refreshes again.
+    let effects = request(
+        &mut state,
+        200,
+        SessionStatusRefreshTrigger::Open,
+        10 * HOUR_MS + 24 * HOUR_MS,
+    );
+    assert_eq!(
+        effects,
+        vec![AppEffect::RefreshCurrentSessionStatus {
+            request_id: 200,
+            trigger: SessionStatusRefreshTrigger::Open,
+        }]
+    );
+}
+
+#[test]
+fn manual_refresh_bypasses_the_freshness_gate() {
+    let mut state = ready_state();
+    state.current_session_status = ready_at(10 * HOUR_MS);
+
+    let effects = request(
+        &mut state,
+        300,
+        SessionStatusRefreshTrigger::Manual,
+        10 * HOUR_MS + 1,
+    );
+
+    assert_eq!(
+        effects,
+        vec![AppEffect::RefreshCurrentSessionStatus {
+            request_id: 300,
+            trigger: SessionStatusRefreshTrigger::Manual,
+        }],
+        "an explicit manual refresh is always an immediate check"
+    );
+}
+
+#[test]
+fn an_unchecked_session_always_refreshes() {
+    // App/session start and account switch both leave the status Idle.
+    let mut state = ready_state();
+    assert_eq!(
+        state.current_session_status,
+        CurrentSessionStatusState::Idle
+    );
+
+    let effects = request(&mut state, 400, SessionStatusRefreshTrigger::Open, HOUR_MS);
+
+    assert_eq!(
+        effects,
+        vec![AppEffect::RefreshCurrentSessionStatus {
+            request_id: 400,
+            trigger: SessionStatusRefreshTrigger::Open,
+        }]
+    );
+}
+
+#[test]
+fn repeated_failures_back_off_before_the_next_automatic_check() {
+    let mut state = ready_state();
+    let mut now = 10 * HOUR_MS;
+
+    // First failure: a short cooldown.
+    state.current_session_status = CurrentSessionStatusState::Failed {
+        request_id: 1,
+        kind: CurrentSessionStatusFailureKind::Network,
+        checked_at_ms: now,
+        last_known_details: None,
+        consecutive_failures: 1,
+    };
+    assert!(
+        request(&mut state, 500, SessionStatusRefreshTrigger::Open, now + 1).is_empty(),
+        "an open immediately after a failure must not retry"
+    );
+    now += 2 * MINUTE_MS;
+    assert!(
+        !request(&mut state, 501, SessionStatusRefreshTrigger::Open, now).is_empty(),
+        "the first cooldown must expire within a couple of minutes"
+    );
+
+    // Fourth consecutive failure: a longer cooldown than the first.
+    let failed_at = now;
+    state.current_session_status = CurrentSessionStatusState::Failed {
+        request_id: 2,
+        kind: CurrentSessionStatusFailureKind::Network,
+        checked_at_ms: failed_at,
+        last_known_details: None,
+        consecutive_failures: 4,
+    };
+    assert!(
+        request(
+            &mut state,
+            502,
+            SessionStatusRefreshTrigger::Open,
+            failed_at + 2 * MINUTE_MS,
+        )
+        .is_empty(),
+        "repeated failures must back off further than the first"
+    );
+    assert!(
+        !request(
+            &mut state,
+            503,
+            SessionStatusRefreshTrigger::Manual,
+            failed_at + 2 * MINUTE_MS,
+        )
+        .is_empty(),
+        "manual refresh still bypasses the backoff"
+    );
+}
+
+#[test]
+fn consecutive_failures_accumulate_and_reset_on_success() {
+    let mut state = ready_state();
+    for expected in 1..=3u32 {
+        state.current_session_status = CurrentSessionStatusState::Checking {
+            request_id: expected as u64,
+            trigger: SessionStatusRefreshTrigger::Manual,
+            last_known_details: None,
+            consecutive_failures: expected - 1,
+        };
+        reduce(
+            &mut state,
+            AppAction::CurrentSessionStatusRefreshFailed {
+                request_id: expected as u64,
+                kind: CurrentSessionStatusFailureKind::Network,
+                checked_at_ms: 1_000 * u64::from(expected),
+            },
+        );
+        let CurrentSessionStatusState::Failed {
+            consecutive_failures,
+            ..
+        } = state.current_session_status
+        else {
+            panic!("expected a failed status");
+        };
+        assert_eq!(consecutive_failures, expected);
+    }
+
+    state.current_session_status = CurrentSessionStatusState::Checking {
+        request_id: 9,
+        trigger: SessionStatusRefreshTrigger::Manual,
+        last_known_details: None,
+        consecutive_failures: 0,
+    };
+    reduce(
+        &mut state,
+        AppAction::CurrentSessionStatusRefreshed {
+            request_id: 9,
+            details: details(true, OwnIdentityVerification::Verified),
+        },
+    );
+    state.current_session_status = CurrentSessionStatusState::Checking {
+        request_id: 10,
+        trigger: SessionStatusRefreshTrigger::Manual,
+        last_known_details: None,
+        consecutive_failures: 0,
+    };
+    reduce(
+        &mut state,
+        AppAction::CurrentSessionStatusRefreshFailed {
+            request_id: 10,
+            kind: CurrentSessionStatusFailureKind::Network,
+            checked_at_ms: 9_000,
+        },
+    );
+    let CurrentSessionStatusState::Failed {
+        consecutive_failures,
+        ..
+    } = state.current_session_status
+    else {
+        panic!("expected a failed status");
+    };
+    assert_eq!(
+        consecutive_failures, 1,
+        "a successful check must reset the backoff"
+    );
+}
+
+/// #982: a flapping connection re-issued a full inspection on every reconnect.
+/// Automatic recovery retries must stop after a bounded number of consecutive
+/// failures; manual refresh still works.
+#[test]
+fn repeated_reconnects_stop_re_inspecting_after_bounded_consecutive_failures() {
+    let mut state = ready_state();
+    state.current_session_status = CurrentSessionStatusState::Failed {
+        request_id: 1,
+        kind: CurrentSessionStatusFailureKind::Network,
+        checked_at_ms: 0,
+        last_known_details: Some(details(true, OwnIdentityVerification::Verified)),
+        consecutive_failures: 0,
+    };
+    let mut automatic_inspections = 0;
+
+    for generation in 0..8u64 {
+        state.sync = SyncState::Reconnecting {
+            reason: "transport".to_owned(),
+        };
+        let effects = reduce(
+            &mut state,
+            AppAction::SyncStatusChanged {
+                generation,
+                status: SyncLifecycleStatus::Running,
+            },
+        );
+        let refreshed = effects.iter().any(|effect| {
+            matches!(
+                effect,
+                AppEffect::RefreshCurrentSessionStatus {
+                    trigger: SessionStatusRefreshTrigger::Recovery,
+                    ..
+                }
+            )
+        });
+        if !refreshed {
+            continue;
+        }
+        automatic_inspections += 1;
+        let CurrentSessionStatusState::Checking { request_id, .. } = state.current_session_status
+        else {
+            panic!("a recovery refresh must enter Checking");
+        };
+        reduce(
+            &mut state,
+            AppAction::CurrentSessionStatusRefreshFailed {
+                request_id,
+                kind: CurrentSessionStatusFailureKind::Network,
+                checked_at_ms: 1_000 * generation,
+            },
+        );
+    }
+
+    assert!(
+        automatic_inspections <= 3,
+        "8 reconnects caused {automatic_inspections} automatic inspections; repeated \
+         reconnect-driven refreshes must back off"
+    );
+    assert!(
+        automatic_inspections >= 1,
+        "the first reconnect after an outage must still re-check"
+    );
+
+    let manual = request(&mut state, 900, SessionStatusRefreshTrigger::Manual, 0);
+    assert!(
+        !manual.is_empty(),
+        "manual refresh must bypass the reconnect backoff"
+    );
 }
