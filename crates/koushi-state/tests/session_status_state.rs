@@ -837,3 +837,73 @@ fn repeated_reconnects_stop_re_inspecting_after_bounded_consecutive_failures() {
         "manual refresh must bypass the reconnect backoff"
     );
 }
+
+/// #982: with the freshness gate in place, a verification completion must still
+/// be observable without a restart — the cached "unverified" status cannot
+/// survive the transition to Verified for the whole freshness window.
+#[test]
+fn completing_verification_invalidates_a_cached_unverified_status() {
+    let mut state = ready_state();
+    let mut stale = details(false, OwnIdentityVerification::Unverified);
+    stale.verification = CurrentDeviceTrustState::Unverified;
+    stale.checked_at_ms = 10 * HOUR_MS;
+    state.current_session_status = CurrentSessionStatusState::Ready {
+        request_id: 1,
+        details: stale,
+    };
+
+    reduce(
+        &mut state,
+        AppAction::AuthoritativeDeviceTrustChanged {
+            generation: 1,
+            transition_id: 1,
+            trust: CurrentDeviceTrustState::Verified,
+        },
+    );
+
+    let effects = request(
+        &mut state,
+        600,
+        SessionStatusRefreshTrigger::Open,
+        10 * HOUR_MS + MINUTE_MS,
+    );
+    assert_eq!(
+        effects,
+        vec![AppEffect::RefreshCurrentSessionStatus {
+            request_id: 600,
+            trigger: SessionStatusRefreshTrigger::Open,
+        }],
+        "a verification completion must invalidate the cached status"
+    );
+}
+
+#[test]
+fn a_repeated_verified_trust_signal_does_not_invalidate_a_matching_cached_status() {
+    let mut state = ready_state();
+    let fresh = ready_at(10 * HOUR_MS);
+    state.current_session_status = fresh.clone();
+
+    reduce(
+        &mut state,
+        AppAction::AuthoritativeDeviceTrustChanged {
+            generation: 1,
+            transition_id: 1,
+            trust: CurrentDeviceTrustState::Verified,
+        },
+    );
+
+    assert_eq!(
+        state.current_session_status, fresh,
+        "a redundant Verified signal must not discard a matching fresh status"
+    );
+    assert!(
+        request(
+            &mut state,
+            601,
+            SessionStatusRefreshTrigger::Open,
+            10 * HOUR_MS + MINUTE_MS,
+        )
+        .is_empty(),
+        "and must not re-open the inspection path"
+    );
+}

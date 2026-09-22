@@ -92,35 +92,41 @@ async function publishNavigationFailure(page: Page): Promise<void> {
   await expect(page.getByRole("alert")).toContainText(t("navigation.failed"));
 }
 
-test("the failure banner never overlaps the right panel's close control", async ({ page }) => {
-  await page.setViewportSize({ width: 1400, height: 800 });
-  await gotoReadyShell(page);
-  await openRightPanel(page);
-  await publishNavigationFailure(page);
+// The reporter's capture was ~1086px wide, and the right panel switches from an
+// in-grid column to a fixed overlay below 1200px, so walk both sides of that.
+for (const width of [1400, 1190, 1086]) {
+  test(`the failure banner never overlaps the right panel's close control at ${width}px`, async ({
+    page
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await gotoReadyShell(page);
+    await openRightPanel(page);
+    await publishNavigationFailure(page);
 
-  const overlap = await page.evaluate(() => {
-    const banner = document.querySelector<HTMLElement>(".navigation-failure");
-    const header = document.querySelector<HTMLElement>(".thread-pane .thread-header");
-    const close = header?.querySelector<HTMLElement>("button");
-    if (!banner || !close) {
-      return null;
-    }
-    const a = banner.getBoundingClientRect();
-    const b = close.getBoundingClientRect();
-    const intersects =
-      a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-    // What actually receives a click aimed at the close button's centre.
-    const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
-    return { intersects, hitIsCloseButton: close.contains(hit) };
+    const overlap = await page.evaluate(() => {
+      const banner = document.querySelector<HTMLElement>(".navigation-failure");
+      const header = document.querySelector<HTMLElement>(".thread-pane .thread-header");
+      const close = header?.querySelector<HTMLElement>("button");
+      if (!banner || !close) {
+        return null;
+      }
+      const a = banner.getBoundingClientRect();
+      const b = close.getBoundingClientRect();
+      const intersects =
+        a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      // What actually receives a click aimed at the close button's centre.
+      const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      return { intersects, hitIsCloseButton: close.contains(hit) };
+    });
+
+    expect(overlap).not.toBeNull();
+    expect(overlap!.intersects, "the banner overlaps the right panel close button").toBe(false);
+    expect(
+      overlap!.hitIsCloseButton,
+      "a click aimed at the close button is absorbed by the banner"
+    ).toBe(true);
   });
-
-  expect(overlap).not.toBeNull();
-  expect(overlap!.intersects, "the banner overlaps the right panel close button").toBe(false);
-  expect(
-    overlap!.hitIsCloseButton,
-    "a click aimed at the close button is absorbed by the banner"
-  ).toBe(true);
-});
+}
 
 test("the right panel can still be closed while the failure banner is up", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 800 });

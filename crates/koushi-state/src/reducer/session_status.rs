@@ -137,6 +137,22 @@ pub(super) fn handle_refresh_failed(
     Vec::new()
 }
 
+/// #982: with the freshness gate in place, a cached status must not outlive the
+/// device trust it reports. Any observed trust that disagrees with the cached
+/// status invalidates it, so the next automatic refresh re-inspects instead of
+/// serving a pre-verification result for the whole freshness window. A repeated
+/// signal that agrees with the cache changes nothing.
+pub(super) fn invalidate_if_trust_disagrees(
+    state: &mut AppState,
+    trust: crate::state::CurrentDeviceTrustState,
+) {
+    if last_known_details(&state.current_session_status)
+        .is_none_or(|details| details.verification != trust)
+    {
+        reset(state);
+    }
+}
+
 pub(super) fn reset(state: &mut AppState) {
     state.current_session_status = CurrentSessionStatusState::Idle;
 }
