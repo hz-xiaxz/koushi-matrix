@@ -1025,7 +1025,7 @@ function sourceContractFailure(rule, message) {
 // runtime_room_list_sync::production_runtime_requires_committed_all_rooms_readiness | 6 | core.integration.room_list_readiness | 6
 // runtime_room_list_sync::production_core_has_no_legacy_or_mode_transition_vocabulary | 1 (7 predicates) | core.integration.no_legacy_mode_vocabulary | 7
 // runtime_timeline::production_timeline_has_no_classic_sync_or_legacy_checkpoint_path | 1 | core.integration.timeline_no_legacy_checkpoint | 4
-// send_queue_fast::fast_send_queue_lane_hard_bounds_generic_lifecycle_phases | 23 | core.qa.fast_send_queue_lifecycle | 23
+// send_queue_fast::fast_send_queue_lane_hard_bounds_generic_lifecycle_phases | 25 | core.qa.fast_send_queue_lifecycle | 25
 // send_queue_fast::send_queue_stage_uses_exact_causal_waiter_for_both_subscriptions | 1 | core.qa.send_queue_causal_waiter | 1
 // send_queue_fast::headless_send_queue_diagnostic_contract_counts_forwarded_and_completed_room_sends | 10 | core.qa.send_queue_diagnostic_counters | 10
 // send_queue_fast::headless_send_queue_diagnostic_contract_wraps_fifo_failure_with_proxy_deltas | 6 | core.qa.send_queue_proxy_deltas | 6
@@ -3554,7 +3554,7 @@ export function checkCoreQaFastSendQueueLifecycle() {
   const compact = lane.split(/\s+/u).join(" ").replaceAll("( ", "(");
   const failures = [];
   if (!/timeout\s*\(\s*FAST_SEND_QUEUE_TOTAL_TIMEOUT/u.test(source)) failures.push(sourceContractFailure(rule, "fast SendQueue lane lacks its whole-test timeout"));
-  for (const phase of ["initial trust configure", "login command", "LoggedIn event", "ready snapshot", "room-list snapshot", "initial stop sync", "initial subscribe command", "initial subscribe replay", "replacement sync start", "stop replacement sync", "first retry command", "cancel command", "first shutdown barrier", "restored trust configure", "restore command", "SessionRestored event", "restored ready snapshot", "restored stop sync", "restored subscribe command", "restored subscribe replay", "restored retry command", "final shutdown barrier"]) if (!compact.includes(`fast_send_queue_phase("fast_send_queue ${phase}",`)) failures.push(sourceContractFailure(rule, `fast SendQueue phase is not bounded: ${phase}`));
+  for (const phase of ["initial trust configure", "login command", "LoggedIn event", "ready snapshot", "room-list snapshot", "initial stop sync", "initial subscribe command", "initial subscribe replay", "post-proof resubscribe command", "post-proof resubscribe replay", "replacement sync start", "stop replacement sync", "first retry command", "cancel command", "first shutdown barrier", "restored trust configure", "restore command", "SessionRestored event", "restored ready snapshot", "restored stop sync", "restored subscribe command", "restored subscribe replay", "restored retry command", "final shutdown barrier"]) if (!compact.includes(`fast_send_queue_phase("fast_send_queue ${phase}",`)) failures.push(sourceContractFailure(rule, `fast SendQueue phase is not bounded: ${phase}`));
   return failures;
 }
 
