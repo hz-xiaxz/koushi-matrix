@@ -101,14 +101,16 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             session::handle_login_succeeded(state, attempt_id, info)
         }
         AppAction::CurrentDeviceTrustChanged(trust) => {
-            if matches!(state.session, SessionState::Ready(_))
-                && matches!(
+            if matches!(state.session, SessionState::Ready(_)) {
+                if matches!(
                     trust,
                     crate::state::CurrentDeviceTrustState::Unknown
                         | crate::state::CurrentDeviceTrustState::Unverified
-                )
-            {
-                session_status::reset(state);
+                ) {
+                    session_status::reset(state);
+                } else {
+                    session_status::invalidate_if_trust_disagrees(state, trust);
+                }
             }
             session::handle_current_device_trust_changed(state, trust)
         }
@@ -116,14 +118,16 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             session::handle_secure_backup_gate_changed(state, gate)
         }
         AppAction::AuthoritativeDeviceTrustChanged { trust, .. } => {
-            if matches!(state.session, SessionState::Ready(_))
-                && matches!(
+            if matches!(state.session, SessionState::Ready(_)) {
+                if matches!(
                     trust,
                     crate::state::CurrentDeviceTrustState::Unknown
                         | crate::state::CurrentDeviceTrustState::Unverified
-                )
-            {
-                session_status::reset(state);
+                ) {
+                    session_status::reset(state);
+                } else {
+                    session_status::invalidate_if_trust_disagrees(state, trust);
+                }
             }
             session::handle_authoritative_device_trust_changed(state, trust)
         }
@@ -447,7 +451,8 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::CurrentSessionStatusRefreshRequested {
             request_id,
             trigger,
-        } => session_status::handle_refresh_requested(state, request_id, trigger),
+            now_ms,
+        } => session_status::handle_refresh_requested(state, request_id, trigger, now_ms),
         AppAction::CurrentSessionStatusRefreshed {
             request_id,
             details,
@@ -1127,6 +1132,9 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             navigation::handle_event_navigation_failed(state, generation, kind)
         }
         AppAction::EventNavigationCleared => navigation::handle_event_navigation_cleared(state),
+        AppAction::EventNavigationFailureDismissed => {
+            navigation::handle_event_navigation_failure_dismissed(state)
+        }
         AppAction::TimelineScrollAnchorUpdated { room_id, anchor } => {
             navigation::handle_timeline_scroll_anchor_updated(state, room_id, anchor)
         }

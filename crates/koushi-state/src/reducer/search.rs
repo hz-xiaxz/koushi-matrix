@@ -363,6 +363,14 @@ fn search_result_space_label(
     scope: &SearchScope,
     room: &crate::state::RoomSummary,
 ) -> Option<String> {
+    // A DM is reachable through every Space its counterpart belongs to
+    // (`dm_space_ids`), so a containing-Space name would both be arbitrary and
+    // imply the DM is a room inside that Space. Identify the participant only.
+    // The Activity projection makes the same call in `activity_row_context_label`.
+    if room.is_dm {
+        return None;
+    }
+
     if let SearchScope::CurrentSpace { space_id } = scope
         && room_belongs_to_space(room, space_id)
         && let Some(label) = space_label_by_id(state, space_id)

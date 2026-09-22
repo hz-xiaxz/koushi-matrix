@@ -690,6 +690,9 @@ pub struct MatrixTimelineItem {
     pub sender: String,
     pub timestamp_ms: u64,
     pub body: String,
+    /// Thread root when this item is a thread reply, so unread-resolved
+    /// Activity rows route to the Thread panel (#965).
+    pub thread_root: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -710,6 +710,7 @@ export type CurrentSessionStatusState =
       request_id: number;
       trigger: SessionStatusRefreshTrigger;
       last_known_details: CurrentSessionStatusDetails | null;
+      consecutive_failures: number;
     }
   | { status: "ready"; request_id: number; details: CurrentSessionStatusDetails }
   | {
@@ -718,6 +719,7 @@ export type CurrentSessionStatusState =
       kind: CurrentSessionStatusFailureKind;
       checked_at_ms: number;
       last_known_details: CurrentSessionStatusDetails | null;
+      consecutive_failures: number;
     };
 
 export type SyncState =
@@ -1139,6 +1141,7 @@ export interface RoomLatestEventSummary {
   is_redacted: boolean;
   relation_type?: string | null;
   relation_event_id?: string | null;
+  thread_root_event_id?: string | null;
   sender_id: string | null;
   sender_label: string | null;
   sender_avatar: AvatarImage | null;

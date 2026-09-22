@@ -148,7 +148,7 @@ fn newest_items(
 }
 
 fn activity_row(item: &MatrixTimelineItem) -> ActivityRow {
-    ActivityRow::event(
+    let mut row = ActivityRow::event(
         item.room_id.clone(),
         item.event_id.clone(),
         Some(item.sender.clone()),
@@ -158,7 +158,9 @@ fn activity_row(item: &MatrixTimelineItem) -> ActivityRow {
         item.timestamp_ms,
         false,
         false,
-    )
+    );
+    row.thread_root_event_id = item.thread_root.clone();
+    row
 }
 
 #[cfg(test)]
@@ -172,6 +174,14 @@ mod tests {
             sender: "@private:example.invalid".to_owned(),
             timestamp_ms,
             body: "private body".to_owned(),
+            thread_root: None,
+        }
+    }
+
+    fn thread_reply(event_id: &str, timestamp_ms: u64, thread_root: &str) -> MatrixTimelineItem {
+        MatrixTimelineItem {
+            thread_root: Some(thread_root.to_owned()),
+            ..item(event_id, timestamp_ms)
         }
     }
 
@@ -205,6 +215,15 @@ mod tests {
         assert!(select_unread_items(&items, &request, false).is_none());
         let selected = select_unread_items(&items, &request, true).expect("start is authoritative");
         assert_eq!(selected[0].event_id, "$new");
+    }
+
+    #[test]
+    fn unread_resolved_thread_reply_row_carries_the_thread_root() {
+        // #965: rows built by the unread resolver must be routable to the
+        // Thread panel, not only rows built from a reconciled timeline.
+        let row = activity_row(&thread_reply("$reply", 30, "$thread-root"));
+        assert_eq!(row.thread_root_event_id.as_deref(), Some("$thread-root"));
+        assert_eq!(activity_row(&item("$plain", 30)).thread_root_event_id, None);
     }
 
     #[test]

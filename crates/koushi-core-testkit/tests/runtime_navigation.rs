@@ -215,3 +215,111 @@ fn room_in_space(room_id: &str, space_id: &str) -> RoomSummary {
         ..room_summary(room_id)
     }
 }
+
+/// #971: scrolling emitted one encrypted write + `sync_all()` + rename per
+/// scroll-anchor update — about ten durable writes per second while the wheel
+/// was moving. Anchor-only changes must coalesce into a single write; explicit
+/// preference mutations must still persist immediately.
+#[tokio::test]
+async fn scroll_anchor_updates_coalesce_into_one_navigation_persist() {
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let credential_dir = tempfile::tempdir().expect("credential dir");
+    let runtime = CoreRuntime::start_with_data_dir_and_file_credentials(
+        data_dir.path().to_path_buf(),
+        credential_dir.path().to_path_buf(),
+    );
+    let mut connection = runtime.attach();
+    runtime
+        .inject_actions(restore_ready_actions![
+            AppAction::RoomListUpdated {
+                spaces: vec![],
+                rooms: vec![room_summary("!room-a:example.test")],
+            },
+            AppAction::SelectRoom {
+                room_id: "!room-a:example.test".to_owned(),
+            },
+        ])
+        .await;
+    wait_for_state(&mut connection, |state| {
+        matches!(state.session, SessionState::Ready(_))
+            && state.navigation.active_room_id.as_deref() == Some("!room-a:example.test")
+    })
+    .await;
+
+    // Let the selection write settle so the baseline covers only the scroll.
+    executor::sleep(Duration::from_millis(1_200)).await;
+    let baseline = navigation_persist_count();
+    const SCROLL_UPDATES: usize = 20;
+    for step in 0..SCROLL_UPDATES {
+        connection
+            .command(CoreCommand::App(AppCommand::TimelineScrollAnchorUpdated {
+                request_id: connection.next_request_id(),
+                room_id: "!room-a:example.test".to_owned(),
+                anchor: koushi_state::TimelineScrollAnchor {
+                    event_id: "$anchor:example.test".to_owned(),
+                    edge: Default::default(),
+                    offset_px: step as i32 * 100,
+                    updated_at_ms: 1_800_000_000_000 + step as u64,
+                },
+            }))
+            .await
+            .expect("scroll anchor command");
+    }
+    wait_for_state(&mut connection, |state| {
+        state
+            .navigation
+            .room_scroll_anchors
+            .get("!room-a:example.test")
+            .is_some_and(|anchor| anchor.offset_px == (SCROLL_UPDATES as i32 - 1) * 100)
+    })
+    .await;
+
+    // Let the debounce elapse and settle.
+    executor::sleep(Duration::from_millis(1_200)).await;
+    let scroll_persists = navigation_persist_count() - baseline;
+    assert_eq!(
+        scroll_persists, 1,
+        "{SCROLL_UPDATES} scroll-anchor updates must coalesce into exactly one durable \
+         navigation write, not {scroll_persists}"
+    );
+
+    // An explicit preference mutation is not debounced.
+    let before_preference = navigation_persist_count();
+    connection
+        .command_with_admission(CoreCommand::App(AppCommand::UpdateNavigationPreference {
+            request_id: connection.next_request_id(),
+            update: NavigationPreferenceUpdate::SetHomeSelection {
+                selection: HomeSelection::Explore,
+            },
+        }))
+        .await
+        .expect("home selection preference");
+    // Immediate means well inside the debounce window, not merely eventually.
+    let mut waited = Duration::ZERO;
+    while navigation_persist_count() == before_preference && waited < Duration::from_millis(200) {
+        executor::sleep(Duration::from_millis(10)).await;
+        waited += Duration::from_millis(10);
+    }
+    assert_eq!(
+        navigation_persist_count() - before_preference,
+        1,
+        "an explicit preference mutation must persist immediately, not behind the \
+         {NAVIGATION_PERSIST_DEBOUNCE_MS}ms scroll debounce"
+    );
+
+    drop(connection);
+    runtime.shutdown().await;
+}
+
+const NAVIGATION_PERSIST_DEBOUNCE_MS: u64 = 500;
+
+fn navigation_persist_count() -> usize {
+    koushi_diagnostics::test_support::detail_snapshot()
+        .records
+        .iter()
+        .filter(|record| {
+            record.event.source == "core.space_order" && record.event.stage == "persisted"
+        })
+        .count()
+}

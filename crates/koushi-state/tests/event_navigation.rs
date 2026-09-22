@@ -262,3 +262,50 @@ fn return_to_live_and_session_exit_clear_event_navigation() {
         &EventNavigationState::Idle
     );
 }
+
+#[test]
+fn dismissing_a_navigation_failure_clears_it_without_cancelling_a_live_navigation() {
+    // #980: the failure banner must be dismissible, and a stale dismiss must
+    // not cancel a navigation that has since been restarted.
+    let mut state = ready_navigation_state();
+
+    reduce(
+        &mut state,
+        AppAction::EventNavigationStarted {
+            source: EventNavigationSource::Activity,
+        },
+    );
+    let generation = state.navigation.event_navigation.generation();
+    reduce(
+        &mut state,
+        AppAction::EventNavigationFailed {
+            generation,
+            kind: EventNavigationFailureKind::TargetMissing,
+        },
+    );
+    assert!(matches!(
+        &state.navigation.event_navigation,
+        EventNavigationState::Failed { .. }
+    ));
+
+    reduce(&mut state, AppAction::EventNavigationFailureDismissed);
+    assert_eq!(
+        &state.navigation.event_navigation,
+        &EventNavigationState::Idle
+    );
+
+    // A dismiss that arrives after a new navigation started is inert.
+    reduce(
+        &mut state,
+        AppAction::EventNavigationStarted {
+            source: EventNavigationSource::Pinned,
+        },
+    );
+    let opening = state.navigation.event_navigation.clone();
+    reduce(&mut state, AppAction::EventNavigationFailureDismissed);
+    assert_eq!(&state.navigation.event_navigation, &opening);
+
+    // Dismissing while idle is a no-op.
+    reduce(&mut state, AppAction::EventNavigationFailureDismissed);
+    assert_eq!(&state.navigation.event_navigation, &opening);
+}

@@ -24,6 +24,19 @@ pub(super) enum NavigationPersistenceStatus {
 
 pub(super) const EVENT_NAVIGATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
+/// #971: a scroll gesture updates the room scroll anchor about ten times a
+/// second, and every distinct anchor changes `NavigationState`. Persisting each
+/// one cost a full encrypt + `sync_all()` + rename. Anchor-driven writes are
+/// coalesced behind this window; explicit preference mutations bypass it.
+pub(super) const NAVIGATION_PERSIST_DEBOUNCE: std::time::Duration =
+    std::time::Duration::from_millis(500);
+
+pub(super) struct PendingNavigationPersist {
+    pub(super) key_id: koushi_protocol::SessionKeyId,
+    pub(super) navigation: NavigationState,
+    pub(super) deadline: std::time::Instant,
+}
+
 pub(super) fn spawn_event_navigation_deadline(
     tx: tokio::sync::mpsc::UnboundedSender<EventNavigationPrepared>,
     prepared: EventNavigationPrepared,
@@ -900,10 +913,63 @@ impl AppActor {
         self.handle_ui_event_effects(&effects).await;
     }
 
+    /// Queue a navigation write behind the debounce window. Any pending write for
+    /// the same account is superseded, because `navigation` always carries the
+    /// whole current `NavigationState`.
+    pub(super) async fn schedule_navigation_persist(
+        &mut self,
+        key_id: koushi_protocol::SessionKeyId,
+        navigation: NavigationState,
+    ) {
+        if self
+            .pending_navigation_persist
+            .as_ref()
+            .is_some_and(|pending| pending.key_id != key_id)
+        {
+            self.flush_pending_navigation().await;
+        }
+        self.pending_navigation_persist = Some(PendingNavigationPersist {
+            key_id,
+            navigation,
+            deadline: std::time::Instant::now() + NAVIGATION_PERSIST_DEBOUNCE,
+        });
+    }
+
+    pub(super) fn navigation_persist_delay(&self) -> Option<std::time::Duration> {
+        self.pending_navigation_persist.as_ref().map(|pending| {
+            pending
+                .deadline
+                .saturating_duration_since(std::time::Instant::now())
+        })
+    }
+
+    /// Write any queued navigation state now. Called from the debounce timer,
+    /// before an account switch reloads navigation, and at shutdown.
+    pub(super) async fn flush_pending_navigation(&mut self) -> bool {
+        let Some(pending) = self.pending_navigation_persist.take() else {
+            return true;
+        };
+        self.persist_navigation_now(pending.key_id, pending.navigation, "debounced")
+            .await
+    }
+
     pub(super) async fn persist_navigation(
         &mut self,
         key_id: koushi_protocol::SessionKeyId,
         navigation: NavigationState,
+    ) -> bool {
+        // An immediate write carries the whole current state, so it supersedes
+        // anything still queued behind the debounce.
+        self.pending_navigation_persist = None;
+        self.persist_navigation_now(key_id, navigation, "immediate")
+            .await
+    }
+
+    async fn persist_navigation_now(
+        &mut self,
+        key_id: koushi_protocol::SessionKeyId,
+        navigation: NavigationState,
+        trigger: &'static str,
     ) -> bool {
         let ledger_entries = navigation.space_order.len() as u64;
         let status_key_id = key_id.clone();
@@ -917,6 +983,7 @@ impl AppActor {
                 record(
                     DiagnosticEvent::new(DiagnosticLevel::Info, "core.space_order", "persisted")
                         .field(DiagnosticField::count("ledger_entries", ledger_entries))
+                        .field(DiagnosticField::token("trigger", trigger))
                         .field(DiagnosticField::token("result", "success")),
                 );
                 true
@@ -931,6 +998,7 @@ impl AppActor {
                         "persist_failed",
                     )
                     .field(DiagnosticField::count("ledger_entries", ledger_entries))
+                    .field(DiagnosticField::token("trigger", trigger))
                     .field(DiagnosticField::token("result", "failure")),
                 );
                 false

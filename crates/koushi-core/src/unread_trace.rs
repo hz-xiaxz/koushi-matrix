@@ -206,6 +206,7 @@ mod tests {
                 event_id: "$private-event:example.invalid".to_owned(),
                 relation_type: None,
                 relation_event_id: None,
+                thread_root_event_id: None,
                 sender_id: Some("@private-sender:example.invalid".to_owned()),
                 sender_label: Some("Private Sender".to_owned()),
                 sender_avatar: None,

@@ -1106,6 +1106,7 @@ pub fn run() {
             commands::navigation::reorder_spaces,
             commands::navigation::select_room,
             commands::navigation::open_activity_event,
+            commands::navigation::dismiss_event_navigation_failure,
             commands::navigation::open_pinned_event,
             commands::navigation::select_search_result,
             commands::navigation::close_focused_context,

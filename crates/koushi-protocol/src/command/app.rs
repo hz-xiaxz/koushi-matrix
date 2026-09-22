@@ -142,6 +142,10 @@ pub enum AppCommand {
     CloseFocusedContext {
         request_id: RequestId,
     },
+    /// Dismiss the navigation-failure banner (#980).
+    DismissEventNavigationFailure {
+        request_id: RequestId,
+    },
     CloseSearch {
         request_id: RequestId,
     },
@@ -458,6 +462,10 @@ impl fmt::Debug for AppCommand {
                 .finish(),
             Self::CloseFocusedContext { request_id } => formatter
                 .debug_struct("CloseFocusedContext")
+                .field("request_id", request_id)
+                .finish(),
+            Self::DismissEventNavigationFailure { request_id } => formatter
+                .debug_struct("DismissEventNavigationFailure")
                 .field("request_id", request_id)
                 .finish(),
             Self::CloseSearch { request_id } => formatter

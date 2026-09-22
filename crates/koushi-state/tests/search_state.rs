@@ -382,6 +382,78 @@ fn search_results_carry_rust_owned_space_context_label() {
 }
 
 #[test]
+fn dm_search_results_never_carry_a_space_context_label() {
+    let mut state = ready_state();
+    let mut dm = room_summary("dm-child");
+    dm.display_name = "Satoshi Terasaki".to_owned();
+    dm.display_label = "Satoshi Terasaki".to_owned();
+    dm.is_dm = true;
+    dm.dm_user_ids = vec!["@satoshi:example.invalid".to_owned()];
+    // A DM is reachable through every space its counterpart belongs to, and may
+    // additionally be an explicit space child. Neither makes it a room inside
+    // that space.
+    dm.dm_space_ids = vec!["space-active".to_owned()];
+    dm.parent_space_ids = vec!["space-fallback".to_owned()];
+    state.rooms = vec![dm];
+    state.spaces = vec![
+        SpaceSummary {
+            space_id: "space-fallback".to_owned(),
+            raw_name: None,
+            display_name: "Fallback Space".to_owned(),
+            avatar: None,
+            child_room_ids: vec!["dm-child".to_owned()],
+        },
+        SpaceSummary {
+            space_id: "space-active".to_owned(),
+            raw_name: None,
+            display_name: "CompPhysHack2026".to_owned(),
+            avatar: None,
+            child_room_ids: vec!["dm-child".to_owned()],
+        },
+    ];
+    state.navigation.active_space_id = Some("space-active".to_owned());
+
+    for search_scope in [
+        SearchScope::CurrentRoom {
+            room_id: "dm-child".to_owned(),
+        },
+        SearchScope::CurrentSpace {
+            space_id: "space-active".to_owned(),
+        },
+        SearchScope::AllRooms,
+    ] {
+        let mut dm_result = result("$event");
+        dm_result.room_id = "dm-child".to_owned();
+        reduce(
+            &mut state,
+            AppAction::SearchSubmitted {
+                request_id: 21,
+                query: "GPT".to_owned(),
+                scope: search_scope.clone(),
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::SearchSucceeded {
+                request_id: 21,
+                query: "GPT".to_owned(),
+                scope: search_scope.clone(),
+                results: vec![dm_result],
+            },
+        );
+
+        let SearchState::Results { results, .. } = &state.search else {
+            panic!("expected search results for {search_scope:?}");
+        };
+        assert_eq!(
+            results[0].context_label,
+            Some("Satoshi Terasaki".to_owned()),
+            "DM result must identify the participant without a Space name for {search_scope:?}"
+        );
+    }
+}
+
+#[test]
 fn search_actions_are_ignored_without_ready_session() {
     let mut state = AppState::default();
 

@@ -78,6 +78,7 @@ fn normalize_rooms_preserves_latest_redaction_fact() {
                 event_type: Some("m.room.message".to_owned()),
                 relation_type: None,
                 relation_event_id: None,
+                thread_root_event_id: None,
                 content_converted: true,
                 is_threaded: false,
                 is_reply: false,

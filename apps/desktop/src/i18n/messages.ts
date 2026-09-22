@@ -149,6 +149,7 @@ export type MessageId =
   | "upload.sendAttachments"
   | "window.title"
   | "navigation.failed"
+  | "navigation.failedDismiss"
   | "context.editMessage"
   | "context.addToFavourites"
   | "context.addToLowPriority"
@@ -1533,6 +1534,7 @@ const en: Catalog = {
   "upload.sendAttachments": "Send attachments",
   "window.title": "Koushi",
   "navigation.failed": "Navigation failed. Please try again.",
+  "navigation.failedDismiss": "Dismiss the navigation failure message",
   "context.editMessage": "Edit",
   "context.addToFavourites": "Add to Favourites",
   "context.addToLowPriority": "Move to Low priority",
@@ -2830,6 +2832,7 @@ const ja: Catalog = {
   "upload.sendAttachments": "添付を送信",
   "window.title": "Koushi（光子・格子）",
   "navigation.failed": "移動に失敗しました。もう一度お試しください。",
+  "navigation.failedDismiss": "移動失敗のメッセージを閉じる",
   "context.editMessage": "編集",
   "context.addToFavourites": "お気に入りに追加",
   "context.addToLowPriority": "低優先度に移動",

@@ -414,6 +414,7 @@ async fn activity_recent_includes_room_list_latest_event_for_unopened_read_dm() 
         event_id: "$latest-dm:example.test".to_owned(),
         relation_type: None,
         relation_event_id: None,
+        thread_root_event_id: None,
         sender_id: Some("@terasaki:example.test".to_owned()),
         sender_label: Some("Satoshi Terasaki".to_owned()),
         sender_avatar: None,
@@ -464,6 +465,68 @@ async fn activity_recent_includes_room_list_latest_event_for_unopened_read_dm() 
     );
     assert_eq!(row.context_label, "DM");
     assert!(!row.unread);
+}
+
+#[tokio::test]
+async fn activity_recent_row_from_room_summary_fallback_carries_the_thread_root() {
+    // #965: a room whose timeline has not been reconciled this session yields
+    // Activity rows from the room-summary fallback. Without a thread root the
+    // frontend routes a thread reply to a focused main timeline instead of the
+    // Thread panel.
+    let runtime = CoreRuntime::start();
+    let mut conn = runtime.attach();
+    let mut room = dm_room_summary("!threaded:example.test", "@terasaki:example.test");
+    room.unread_count = 0;
+    room.notification_count = 0;
+    room.highlight_count = 0;
+    room.latest_event = Some(RoomLatestEventSummary {
+        event_id: "$thread-reply:example.test".to_owned(),
+        relation_type: Some("m.thread".to_owned()),
+        relation_event_id: Some("$thread-root:example.test".to_owned()),
+        thread_root_event_id: Some("$thread-root:example.test".to_owned()),
+        sender_id: Some("@terasaki:example.test".to_owned()),
+        sender_label: Some("Satoshi Terasaki".to_owned()),
+        sender_avatar: None,
+        preview: Some("latest reply in the thread".to_owned()),
+        timestamp_ms: 120,
+        is_redacted: false,
+    });
+
+    runtime
+        .inject_actions(restore_ready_actions![AppAction::RoomListUpdated {
+            spaces: vec![],
+            rooms: vec![room],
+        },])
+        .await;
+    wait_for_state(&mut conn, |state| {
+        matches!(state.session, SessionState::Ready(_)) && state.rooms.len() == 1
+    })
+    .await;
+
+    let open_request_id = conn.next_request_id();
+    conn.command(CoreCommand::App(AppCommand::OpenActivity {
+        request_id: open_request_id,
+    }))
+    .await
+    .expect("open activity command");
+
+    let snapshot = wait_for_state(&mut conn, |state| {
+        matches!(state.activity, ActivityState::Open { .. })
+    })
+    .await;
+    let ActivityState::Open { recent, .. } = snapshot.activity else {
+        panic!("activity should be open");
+    };
+    let row = recent
+        .rows
+        .first()
+        .expect("latest room event should populate Recent");
+    assert_eq!(row.event_id.as_deref(), Some("$thread-reply:example.test"));
+    assert_eq!(
+        row.thread_root_event_id.as_deref(),
+        Some("$thread-root:example.test"),
+        "fallback rows must carry the thread root so the Thread panel opens"
+    );
 }
 
 #[tokio::test]

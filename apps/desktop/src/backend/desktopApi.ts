@@ -199,6 +199,7 @@ export interface DesktopApi {
   openPinnedEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
   selectSearchResult(roomId: string, eventId: string): Promise<CommandSettlement>;
   openTimelineAtTimestamp(roomId: string, timestampMs: number): Promise<CommandSettlement>;
+  dismissEventNavigationFailure(): Promise<CommandAdmission>;
   closeFocusedContext(): Promise<CommandSettlement>;
   closeSearch(): Promise<CommandSettlement>;
   beginComposerDraftRendererGeneration(): Promise<string>;

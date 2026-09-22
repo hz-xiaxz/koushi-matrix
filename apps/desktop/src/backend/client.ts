@@ -970,6 +970,10 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandSettlement>("open_pinned_event", { roomId, eventId });
   }
 
+  async dismissEventNavigationFailure(): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("dismiss_event_navigation_failure", {});
+  }
+
   async openTimelineAtTimestamp(
     roomId: string,
     timestampMs: number

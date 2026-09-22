@@ -1,3 +1,4 @@
+use crate::state::{SESSION_STATUS_FRESHNESS_MS, session_status_failure_backoff_ms};
 use crate::{
     AppEffect, AppState, CurrentSessionStatusDetails, CurrentSessionStatusFailureKind,
     CurrentSessionStatusState, SessionState, SessionStatusRefreshTrigger,
@@ -16,10 +17,48 @@ fn last_known_details(state: &CurrentSessionStatusState) -> Option<CurrentSessio
     }
 }
 
+pub(crate) fn consecutive_failures(state: &CurrentSessionStatusState) -> u32 {
+    match state {
+        CurrentSessionStatusState::Checking {
+            consecutive_failures,
+            ..
+        }
+        | CurrentSessionStatusState::Failed {
+            consecutive_failures,
+            ..
+        } => *consecutive_failures,
+        CurrentSessionStatusState::Idle | CurrentSessionStatusState::Ready { .. } => 0,
+    }
+}
+
+/// #982: a full inspection costs several remote round trips, so an automatic
+/// trigger only runs it when the last known status is stale or its failure
+/// cooldown has expired. `Manual` is the user asking for a check now and always
+/// bypasses this.
+fn automatic_refresh_is_due(status: &CurrentSessionStatusState, now_ms: u64) -> bool {
+    match status {
+        // No check yet: app/session start and account switch both land here.
+        CurrentSessionStatusState::Idle => true,
+        CurrentSessionStatusState::Checking { .. } => false,
+        CurrentSessionStatusState::Ready { details, .. } => {
+            now_ms.saturating_sub(details.checked_at_ms) >= SESSION_STATUS_FRESHNESS_MS
+        }
+        CurrentSessionStatusState::Failed {
+            checked_at_ms,
+            consecutive_failures,
+            ..
+        } => {
+            now_ms.saturating_sub(*checked_at_ms)
+                >= session_status_failure_backoff_ms(*consecutive_failures)
+        }
+    }
+}
+
 pub(super) fn handle_refresh_requested(
     state: &mut AppState,
     request_id: u64,
     trigger: SessionStatusRefreshTrigger,
+    now_ms: u64,
 ) -> Vec<AppEffect> {
     if !matches!(state.session, SessionState::Ready(_))
         || matches!(
@@ -29,11 +68,19 @@ pub(super) fn handle_refresh_requested(
     {
         return Vec::new();
     }
+    if !matches!(trigger, SessionStatusRefreshTrigger::Manual)
+        && !automatic_refresh_is_due(&state.current_session_status, now_ms)
+    {
+        // Serve the last known status unchanged.
+        return Vec::new();
+    }
     let last_known_details = last_known_details(&state.current_session_status);
+    let consecutive_failures = consecutive_failures(&state.current_session_status);
     state.current_session_status = CurrentSessionStatusState::Checking {
         request_id,
         trigger,
         last_known_details,
+        consecutive_failures,
     };
     vec![AppEffect::RefreshCurrentSessionStatus {
         request_id,
@@ -78,13 +125,32 @@ pub(super) fn handle_refresh_failed(
         return Vec::new();
     }
     let last_known_details = last_known_details(&state.current_session_status);
+    let consecutive_failures =
+        consecutive_failures(&state.current_session_status).saturating_add(1);
     state.current_session_status = CurrentSessionStatusState::Failed {
         request_id,
         kind,
         checked_at_ms,
         last_known_details,
+        consecutive_failures,
     };
     Vec::new()
+}
+
+/// #982: with the freshness gate in place, a cached status must not outlive the
+/// device trust it reports. Any observed trust that disagrees with the cached
+/// status invalidates it, so the next automatic refresh re-inspects instead of
+/// serving a pre-verification result for the whole freshness window. A repeated
+/// signal that agrees with the cache changes nothing.
+pub(super) fn invalidate_if_trust_disagrees(
+    state: &mut AppState,
+    trust: crate::state::CurrentDeviceTrustState,
+) {
+    if last_known_details(&state.current_session_status)
+        .is_none_or(|details| details.verification != trust)
+    {
+        reset(state);
+    }
 }
 
 pub(super) fn reset(state: &mut AppState) {

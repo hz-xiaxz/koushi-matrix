@@ -155,6 +155,7 @@ fn real_account_qa_report_counts_without_private_timeline_data() {
         sender: "@private:example.invalid".into(),
         timestamp_ms: 1_820_000_000_000,
         body: "Private visible message body".into(),
+        thread_root: None,
     }];
 
     let report = koushi_sdk::real_account_qa_report(&snapshot, true, &timeline_items);
@@ -201,6 +202,7 @@ fn restored_real_account_qa_report_records_restore_without_private_data() {
         sender: "@private:example.invalid".into(),
         timestamp_ms: 1_820_000_000_000,
         body: "Private visible message body".into(),
+        thread_root: None,
     }];
 
     let report = koushi_sdk::restored_real_account_qa_report(&snapshot, true, &timeline_items);
@@ -245,6 +247,7 @@ fn real_account_qa_report_records_search_without_private_candidate_ids() {
         sender: "@private:example.invalid".into(),
         timestamp_ms: 1_820_000_000_000,
         body: "Private visible message body".into(),
+        thread_root: None,
     }];
     let search_candidates = vec![MatrixSearchCandidate {
         room_id: "!private-search-room:example.invalid".into(),

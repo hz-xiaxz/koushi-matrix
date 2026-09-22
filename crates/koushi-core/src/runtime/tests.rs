@@ -1143,19 +1143,26 @@ fn current_session_status_account_command_projects_open_and_manual_refreshes() {
         koushi_state::SessionStatusRefreshTrigger::Open,
         koushi_state::SessionStatusRefreshTrigger::Manual,
     ] {
-        assert_eq!(
+        let projected =
             account_command_projected_action(&AccountCommand::RefreshCurrentSessionStatus {
                 request_id: RequestId {
                     connection_id: RuntimeConnectionId(2),
                     sequence: 17,
                 },
                 trigger,
-            }),
-            Some(AppAction::CurrentSessionStatusRefreshRequested {
-                request_id: 17,
-                trigger,
-            })
-        );
+            });
+        let Some(AppAction::CurrentSessionStatusRefreshRequested {
+            request_id,
+            trigger: projected_trigger,
+            now_ms,
+        }) = projected
+        else {
+            panic!("refresh command must project a refresh action: {projected:?}");
+        };
+        assert_eq!(request_id, 17);
+        assert_eq!(projected_trigger, trigger);
+        // Core supplies the wall clock the portable freshness gate reads (#982).
+        assert!(now_ms > 0);
     }
 }
 
@@ -1291,6 +1298,7 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         room_preferences_loaded_for: Some(session_key),
         state_generation: 0,
         pending_composer_draft_persist: None,
+        pending_navigation_persist: None,
         composer_draft_leases,
         composer_draft_lease_changes,
         composer_draft_rejected_tx,
@@ -1468,6 +1476,7 @@ async fn same_batch_select_room_settles_only_final_selection() {
         room_preferences_loaded_for: Some(session_key),
         state_generation: 0,
         pending_composer_draft_persist: None,
+        pending_navigation_persist: None,
         composer_draft_leases,
         composer_draft_lease_changes,
         composer_draft_rejected_tx,
@@ -2973,6 +2982,7 @@ fn app_actor_event_navigation_fixture(
         room_preferences_loaded_for: Some(session_key),
         state_generation: 0,
         pending_composer_draft_persist: None,
+        pending_navigation_persist: None,
         composer_draft_leases,
         composer_draft_lease_changes,
         composer_draft_rejected_tx,

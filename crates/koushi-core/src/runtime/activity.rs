@@ -796,6 +796,7 @@ impl ActivityProjection {
                 latest_event_highlight,
             );
             row.sender_avatar = latest_event.sender_avatar.clone();
+            row.thread_root_event_id = latest_event.thread_root_event_id.clone();
             row.context_label = context_label;
             if row.unread {
                 unread_event_room_ids.insert(row.room_id.clone());
