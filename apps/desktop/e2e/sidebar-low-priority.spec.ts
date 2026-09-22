@@ -1,13 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { StateUpdateEnvelope } from "../src/domain/coreEvents";
 import type { DesktopSnapshot, RoomListItem } from "../src/domain/types";
 import { t } from "../src/i18n/messages";
+import { pushDelta, pushSnapshot } from "./support/stateUpdates";
 
 // #955: the Low priority section, its scoped collapse preference, and the rule
 // that only a Rust snapshot moves a conversation between sections.
 interface Harness {
   currentSnapshot(): DesktopSnapshot;
-  pushStateUpdate(update: StateUpdateEnvelope): void;
   clearInvocations(): void;
   invocationsOf(command: string): unknown[];
   setCommandResponse(command: string, response: unknown): void;
@@ -43,28 +42,6 @@ function lowPriority(item: RoomListItem): RoomListItem {
 const PLAIN = row("!plain:example.invalid", "Plain Room", 5);
 const QUIET = row("!quiet:example.invalid", "Quiet Room", 8);
 const PERSON = row("!person:example.invalid", "Person", 3);
-
-async function push(page: Page, update: StateUpdateEnvelope): Promise<void> {
-  await page.evaluate((envelope) => {
-    (window as unknown as { __harness: Harness }).__harness.pushStateUpdate(envelope);
-  }, update);
-}
-
-/**
- * Push one sidebar delta at whatever generation the harness is currently on.
- * Command responses in between advance it, so the spec must not track it.
- */
-async function pushSidebar(page: Page, sidebar: DesktopSnapshot["sidebar"]): Promise<void> {
-  await page.evaluate((changedSidebar) => {
-    const harness = (window as unknown as { __harness: Harness }).__harness;
-    harness.pushStateUpdate({
-      protocol_version: 1,
-      kind: "delta",
-      generation: (harness.currentSnapshot().state_generation ?? 0) + 1,
-      changed: { sidebar: changedSidebar }
-    } as StateUpdateEnvelope);
-  }, sidebar);
-}
 
 async function openHarness(page: Page): Promise<DesktopSnapshot> {
   await page.goto("/appHarness.html");
@@ -104,22 +81,14 @@ function sidebarWith(
 
 test("a tag change moves a conversation only when the Rust snapshot says so", async ({ page }) => {
   const base = await openHarness(page);
-  const generation = (base.state_generation ?? 0) + 1;
-  await push(page, {
-    protocol_version: 1,
-    kind: "snapshot",
-    generation,
-    reason: "settlement",
-    snapshot: {
-      ...base,
-      state_generation: generation,
-      sidebar: sidebarWith(base, [PLAIN, QUIET], [PERSON], [], { space: 13, dm: 3 }),
-      state: {
-        ...base.state,
-        ui: {
-          ...base.state.ui,
-          navigation: { ...base.state.ui.navigation, active_space_id: null }
-        }
+  await pushSnapshot(page, {
+    ...base,
+    sidebar: sidebarWith(base, [PLAIN, QUIET], [PERSON], [], { space: 13, dm: 3 }),
+    state: {
+      ...base.state,
+      ui: {
+        ...base.state.ui,
+        navigation: { ...base.state.ui.navigation, active_space_id: null }
       }
     }
   });
@@ -150,10 +119,9 @@ test("a tag change moves a conversation only when the Rust snapshot says so", as
 
   // The Rust snapshot is what moves it, exactly once, and drops its unread
   // contribution from the Rooms heading while the row keeps its own count.
-  await pushSidebar(
-    page,
-    sidebarWith(base, [PLAIN], [PERSON], [lowPriority(QUIET)], { space: 5, dm: 3 })
-  );
+  await pushDelta(page, {
+    sidebar: sidebarWith(base, [PLAIN], [PERSON], [lowPriority(QUIET)], { space: 5, dm: 3 })
+  });
   const low = page.getByRole("region", { name: LABELS.lowPriority, exact: true });
   await expect(rooms.locator(".room-name")).toHaveText(["Plain Room"]);
   await expect(low.locator(".room-name")).toHaveText(["Quiet Room"]);
@@ -173,7 +141,9 @@ test("a tag change moves a conversation only when the Rust snapshot says so", as
   await filter.fill("");
 
   // Removing the tag restores the section and the heading total.
-  await pushSidebar(page, sidebarWith(base, [PLAIN, QUIET], [PERSON], [], { space: 13, dm: 3 }));
+  await pushDelta(page, {
+    sidebar: sidebarWith(base, [PLAIN, QUIET], [PERSON], [], { space: 13, dm: 3 })
+  });
   await expect(rooms.locator(".room-name")).toHaveText(["Plain Room", "Quiet Room"]);
   await expect(page.getByRole("region", { name: LABELS.lowPriority, exact: true })).toHaveCount(0);
   await expect(rooms.locator(".section-unread-count")).toHaveText("13");
@@ -183,22 +153,14 @@ test("Low priority collapse submits a typed scoped patch and renders the Rust re
   page
 }) => {
   const base = await openHarness(page);
-  const generation = (base.state_generation ?? 0) + 1;
-  await push(page, {
-    protocol_version: 1,
-    kind: "snapshot",
-    generation,
-    reason: "settlement",
-    snapshot: {
-      ...base,
-      state_generation: generation,
-      sidebar: sidebarWith(base, [PLAIN], [PERSON], [lowPriority(QUIET)], { space: 5, dm: 3 }),
-      state: {
-        ...base.state,
-        ui: {
-          ...base.state.ui,
-          navigation: { ...base.state.ui.navigation, active_space_id: null }
-        }
+  await pushSnapshot(page, {
+    ...base,
+    sidebar: sidebarWith(base, [PLAIN], [PERSON], [lowPriority(QUIET)], { space: 5, dm: 3 }),
+    state: {
+      ...base.state,
+      ui: {
+        ...base.state.ui,
+        navigation: { ...base.state.ui.navigation, active_space_id: null }
       }
     }
   });

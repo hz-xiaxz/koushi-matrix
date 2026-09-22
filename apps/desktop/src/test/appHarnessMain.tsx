@@ -33,7 +33,12 @@ import type {
   ViewDelivery
 } from "../domain/coreEvents";
 import { roomTimelineKey } from "../domain/coreEvents";
-import { applyDeltaToState } from "../domain/appStore";
+import {
+  applyDeltaToState,
+  getAppStoreDeltaStats,
+  useAppStore,
+  type AppStoreDeltaStats
+} from "../domain/appStore";
 import {
   SNAPSHOT_SCHEMA_VERSION,
   type ActivityTab,
@@ -116,6 +121,13 @@ interface AppHarnessControl {
   pushDesktopUpdate(state: DesktopUpdateState): Promise<void>;
   pushStateUpdate(envelope?: StateUpdateEnvelope): void;
   currentSnapshot(): DesktopSnapshot;
+  /**
+   * The generation the App's store has reached and its delta counters. A delta
+   * the store already subsumes is dropped silently (#759), so a spec asserts on
+   * these to prove the delta it pushed was applied rather than ignored (#984).
+   */
+  appStoreGeneration(): number | null;
+  appStoreDeltaStats(): AppStoreDeltaStats;
   e2eeTrustSnapshot(): DesktopSnapshot;
   replyModeSnapshot(): DesktopSnapshot;
 }
@@ -3808,6 +3820,8 @@ const harnessControl: AppHarnessControl = {
     void emit(STATE_UPDATE_EVENT_NAME, update);
   },
   currentSnapshot: () => currentSnapshot,
+  appStoreGeneration: () => useAppStore.getState().stateGeneration,
+  appStoreDeltaStats: getAppStoreDeltaStats,
   e2eeTrustSnapshot,
   replyModeSnapshot
 };
