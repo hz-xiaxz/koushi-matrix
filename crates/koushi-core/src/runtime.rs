@@ -29,7 +29,7 @@ use composer::{
 };
 use navigation::{
     EventNavigationPrepared, NavigationPersistenceStatus, NavigationReplacementRoomForCleanup,
-    PendingEventNavigation, PendingFocusedNavigation,
+    PendingEventNavigation, PendingFocusedNavigation, PendingNavigationPersist,
     cancel_replaced_room_timeline_link_previews_key, cancel_replaced_room_timeline_pagination_key,
     command_supersedes_event_navigation, effects_open_focused_timeline,
     navigation_replacement_room_for_cleanup, unsubscribe_replaced_timeline_key,
@@ -651,6 +651,7 @@ impl CoreRuntime {
             room_preferences_loaded_for: None,
             state_generation: 0,
             pending_composer_draft_persist: None,
+            pending_navigation_persist: None,
             composer_draft_leases: Arc::clone(&composer_draft_leases),
             composer_draft_lease_changes,
             composer_draft_rejected_tx,
@@ -965,6 +966,7 @@ struct AppActor {
     room_preferences_loaded_for: Option<koushi_protocol::SessionKeyId>,
     state_generation: u64,
     pending_composer_draft_persist: Option<PendingComposerDraftPersist>,
+    pending_navigation_persist: Option<PendingNavigationPersist>,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
     composer_draft_lease_changes: watch::Receiver<()>,
     composer_draft_rejected_tx: mpsc::UnboundedSender<RequestId>,
@@ -1134,6 +1136,7 @@ impl AppActor {
     async fn run(mut self) -> Result<(), CoreShutdownError> {
         loop {
             let composer_draft_persist_delay = self.composer_draft_persist_delay();
+            let navigation_persist_delay = self.navigation_persist_delay();
             let scheduled_send_delay = self.scheduled_send_delay();
             tokio::select! {
                 _ = async {
@@ -1143,6 +1146,14 @@ impl AppActor {
                     }
                 } => {
                     self.flush_pending_composer_drafts().await;
+                }
+                _ = async {
+                    match navigation_persist_delay {
+                        Some(delay) => executor::sleep(delay).await,
+                        None => future::pending::<()>().await,
+                    }
+                } => {
+                    self.flush_pending_navigation().await;
                 }
                 _ = async {
                     match scheduled_send_delay {
@@ -1702,6 +1713,9 @@ impl AppActor {
                     // save must not be overtaken by the new-account load.
                     let before_post_commit_loads = self.state.clone();
                     self.load_room_preferences_for_current_session().await;
+                    // A queued old-account navigation write must not be
+                    // overtaken by the new account's load (#971).
+                    self.flush_pending_navigation().await;
                     self.load_navigation_for_current_session().await;
                     self.load_composer_drafts_for_current_session().await;
                     self.load_scheduled_sends_for_current_session().await;
@@ -1719,6 +1733,7 @@ impl AppActor {
         // Finish owned work before publishing completion, not merely enqueueing
         // AccountActor shutdown. Its acknowledgment follows child/store cleanup.
         let draft_flush_ok = self.flush_pending_composer_drafts().await;
+        let navigation_flush_ok = self.flush_pending_navigation().await;
         for task in [
             &mut self.event_navigation_task,
             &mut self.event_navigation_deadline_task,
@@ -1737,7 +1752,7 @@ impl AppActor {
             return Err(CoreShutdownError::Incomplete);
         }
         match completion.await {
-            Ok(true) if draft_flush_ok => Ok(()),
+            Ok(true) if draft_flush_ok && navigation_flush_ok => Ok(()),
             Ok(_) | Err(_) => Err(CoreShutdownError::Incomplete),
         }
     }

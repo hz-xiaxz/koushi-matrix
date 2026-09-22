@@ -381,7 +381,15 @@ impl super::AppActor {
             let load_failed = self.navigation_persistence_status
                 == NavigationPersistenceStatus::LoadFailed(key_id.clone());
             if !load_failed || explicit_preference_mutation {
-                self.persist_navigation(key_id, navigation).await;
+                if explicit_preference_mutation {
+                    // Space reordering and preference edits stay immediate.
+                    self.persist_navigation(key_id, navigation).await;
+                } else {
+                    // Scroll anchors change ~10x/sec while the wheel moves, and
+                    // each distinct anchor is a whole-state change. Coalesce
+                    // them into one durable write (#971).
+                    self.schedule_navigation_persist(key_id, navigation).await;
+                }
             } else {
                 record(
                     DiagnosticEvent::new(
