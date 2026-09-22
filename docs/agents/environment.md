@@ -113,18 +113,33 @@ change is reviewed and merged.
 The repository Cargo config defaults Cargo-launched tests to `RUST_MIN_STACK=4194304` with `force=false`. This avoids debug-profile libtest stack cliffs while allowing developers and CI to override it; it does not affect packaged desktop processes launched outside Cargo.
 
 Full debug symbols are not needed for ordinary Rust tests, headless QA, or local
-iteration. Prefer line tables so backtraces retain file/line locations without
-retaining full DWARF data; reserve full symbols for LLDB/GDB or other debugger
-work. Distribution builds should strip debug information.
+iteration. The root manifest therefore pins the dev profile to line tables, so a
+backtrace still names the file and line without retaining full DWARF for every
+workspace crate:
 
-When a profile is being tuned, record the selected profile in the worklog. A
-large `target/` directory is disposable: after changing toolchains, profiles, or
-large feature matrices, remove the stale root target rather than preserving
+```toml
+[profile.dev]
+debug = "line-tables-only"
+```
+
+Dependencies stay at `debug = false` in `[profile.dev.package."*"]`, and
+`[profile.ci]` keeps `debug = 0` for hosted runs, so only local builds change.
+Every local entry point (`cargo build`, `cargo test`, `tauri dev`, and the QA
+binaries in `target/debug`) inherits it. Export `CARGO_PROFILE_DEV_DEBUG=1` for a
+full-symbol LLDB/GDB session; ordinary work never needs it. Distribution builds
+strip debug information.
+
+A large `target/` directory is disposable: after changing toolchains, profiles,
+or large feature matrices, remove the stale root target rather than preserving
 incompatible incremental artifacts:
 
 ```bash
-rm -rf -- target
+kache clean -n            # preview; pair with --stale 14d to keep recent trees
+kache clean -y            # remove the target/ directories under this tree
 ```
+
+`rm -rf -- target` is equivalent when kache is not in use; with kache the store
+can refill the removed directories without recompiling.
 
 Do not use that cleanup for source files, `Cargo.lock`, `node_modules`, QA
 artifacts, or uncommitted work. Rebuild the needed target after cleanup.

@@ -75,6 +75,8 @@ test("toolchain and dev dependency profile are pinned for stable incremental bui
 
   assert.match(toolchain, /channel = "1\.96\.0"/);
   assert.match(toolchain, /targets = \["wasm32-unknown-unknown"\]/);
+  assert.match(rootCargo, /^\[profile\.dev\]$/m);
+  assert.match(rootCargo, /^debug = "line-tables-only"$/m);
   assert.match(rootCargo, /^\[profile\.dev\.package\."\*"\]$/m);
   assert.match(rootCargo, /^debug = false$/m);
   assert.match(rootCargo, /^\[profile\.ci\]$/m);
