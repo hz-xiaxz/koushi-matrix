@@ -1127,6 +1127,9 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             navigation::handle_event_navigation_failed(state, generation, kind)
         }
         AppAction::EventNavigationCleared => navigation::handle_event_navigation_cleared(state),
+        AppAction::EventNavigationFailureDismissed => {
+            navigation::handle_event_navigation_failure_dismissed(state)
+        }
         AppAction::TimelineScrollAnchorUpdated { room_id, anchor } => {
             navigation::handle_timeline_scroll_anchor_updated(state, room_id, anchor)
         }

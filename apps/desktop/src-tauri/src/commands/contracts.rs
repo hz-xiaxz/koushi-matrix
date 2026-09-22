@@ -1264,6 +1264,13 @@ fn tauri_command_routes_build_expected_core_commands() {
             space_id: "!space:example.org".to_owned()
         }
     );
+    match build_dismiss_event_navigation_failure_command(fake_request_id(160)) {
+        CoreCommand::App(AppCommand::DismissEventNavigationFailure { request_id }) => {
+            assert_eq!(request_id, fake_request_id(160));
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
     match build_close_search_command(fake_request_id(16)) {
         CoreCommand::App(AppCommand::CloseSearch { request_id }) => {
             assert_eq!(request_id, fake_request_id(16));

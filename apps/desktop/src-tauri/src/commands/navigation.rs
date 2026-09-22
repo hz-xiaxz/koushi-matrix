@@ -125,6 +125,27 @@ pub async fn select_room(
     ))
 }
 
+pub(super) fn build_dismiss_event_navigation_failure_command(
+    request_id: koushi_protocol::RequestId,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::DismissEventNavigationFailure { request_id })
+}
+
+/// Dismiss the navigation-failure banner (#980). The banner reflects
+/// Rust-owned `ui.navigation.event_navigation`, so dismissal is a core command
+/// rather than renderer-local state.
+#[tauri::command]
+pub async fn dismiss_event_navigation_failure(
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id(state.inner()).await;
+    submit_core_command_with_admission(
+        state.inner(),
+        build_dismiss_event_navigation_failure_command(request_id),
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn open_activity_event(
     room_id: String,

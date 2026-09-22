@@ -201,6 +201,17 @@ pub(crate) fn handle_event_navigation_cleared(state: &mut AppState) -> Vec<AppEf
     Vec::new()
 }
 
+pub(crate) fn handle_event_navigation_failure_dismissed(state: &mut AppState) -> Vec<AppEffect> {
+    if !matches!(
+        state.navigation.event_navigation,
+        EventNavigationState::Failed { .. }
+    ) {
+        return Vec::new();
+    }
+    state.navigation.event_navigation = EventNavigationState::Idle;
+    Vec::new()
+}
+
 fn event_navigation_opening_source(
     state: &AppState,
     generation: u64,

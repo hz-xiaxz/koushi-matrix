@@ -1016,6 +1016,9 @@ pub enum AppAction {
         kind: EventNavigationFailureKind,
     },
     EventNavigationCleared,
+    /// User dismissed the navigation-failure banner. Only clears a `Failed`
+    /// state, so a dismiss that races a restarted navigation is inert (#980).
+    EventNavigationFailureDismissed,
     TimelineScrollAnchorUpdated {
         room_id: String,
         anchor: TimelineScrollAnchor,

@@ -221,10 +221,12 @@ import {
   setAppStoreSnapshot,
   useAppStore
 } from "./domain/appStore";
+import { X } from "lucide-react";
 import { getRecentJsErrors } from "./domain/jsErrorLog";
 import { getTimelineTransportStats } from "./domain/timelineTransportStats";
 
 import {
+  ICON_SIZE,
   composerModeProp,
   serverNameFromRoomId,
   syncStatePresentation,
@@ -6053,9 +6055,19 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           runtimeAlerts={runtimeAlerts}
         />
         {eventNavigation?.kind === "failed" ? (
-          <p className="navigation-failure" role="alert">
-            {t("navigation.failed")}
-          </p>
+          <div className="navigation-failure" role="alert">
+            <p className="navigation-failure-text">{t("navigation.failed")}</p>
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("navigation.failedDismiss")}
+              onClick={() => {
+                settleCommandInBackground(api.dismissEventNavigationFailure());
+              }}
+            >
+              <X size={ICON_SIZE.small} />
+            </button>
+          </div>
         ) : null}
       <div
         className={`app-grid ${rightPanelOpen ? "right-panel-open" : "thread-closed"}`}
