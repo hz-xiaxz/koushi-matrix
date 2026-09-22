@@ -157,6 +157,7 @@ function readySnapshot(
       raw_name: null,
       display_name: SPACE_NAME,
       avatar: null,
+      join_rule: null,
       child_room_ids: [ROOM_ID]
     },
     ...(overrides.extraSpaces ?? [])
@@ -723,6 +724,7 @@ function afterCreateSpaceSnapshot(): DesktopSnapshot {
     raw_name: null,
     display_name: "Created Space",
     avatar: null,
+    join_rule: null,
     child_room_ids: []
   });
   snapshot.state.ui.navigation.active_space_id = newSpaceId;
@@ -1075,6 +1077,7 @@ function setCurrentSnapshot(next: DesktopSnapshot): DesktopSnapshot {
   const rooms = next.state.domain.rooms.map(normalizeHarnessRoomSummary);
   const spaces = next.state.domain.spaces.map((space) => ({
     ...space,
+    join_rule: null,
     child_room_ids: space.child_room_ids ?? []
   }));
   const invites = next.state.domain.invites ?? [];
@@ -3018,6 +3021,7 @@ mock.setCommandResponse("load_room_settings", ({ roomId }: { roomId: string }) =
           history_visibility: "shared",
           permissions: {
             can_edit_settings: true,
+            can_change_join_rule: true,
             can_edit_roles: true,
             can_invite: true,
             can_kick: true,

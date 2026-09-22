@@ -7980,6 +7980,35 @@ kbd {
   font-weight: 800;
 }
 
+/* #935: Space access. The mode reads as the section's headline fact. */
+.space-access .space-access-mode {
+  font-weight: 800;
+}
+
+.space-access-actions,
+.space-access-confirm {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.space-access-confirm p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.space-access-status {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.space-access-status-failed {
+  color: var(--danger);
+}
+
 .room-member-scroll-container {
   max-block-size: min(60vh, 720px);
   overflow: auto;

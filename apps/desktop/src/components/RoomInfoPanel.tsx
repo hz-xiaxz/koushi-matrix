@@ -429,13 +429,11 @@ export function RoomInfoPanel({
                   disabled={!canEditSettings}
                   onChange={(event) => setJoinRuleDraft(event.currentTarget.value as RoomJoinRule)}
                 >
-                  {(["public", "invite", "knock", "restricted", "private"] as const).map(
-                    (rule) => (
-                      <option key={rule} value={rule}>
-                        {roomJoinRuleLabel(rule)}
-                      </option>
-                    )
-                  )}
+                  {joinRuleOptions(settings.join_rule).map((rule) => (
+                    <option key={rule} value={rule} disabled={!SETTABLE_JOIN_RULES.includes(rule)}>
+                      {roomJoinRuleLabel(rule)}
+                    </option>
+                  ))}
                 </select>
               </label>
               <button
@@ -710,9 +708,26 @@ function roomJoinRuleLabel(rule: RoomJoinRule): string {
       return t("room.joinRuleKnock");
     case "restricted":
       return t("room.joinRuleRestricted");
+    case "knockRestricted":
+      return t("room.joinRuleKnockRestricted");
     case "private":
       return t("room.joinRulePrivate");
+    case "unknown":
+      return t("room.joinRuleUnknown");
   }
+}
+
+/** The rules a join-rule change can carry; mirrors Rust `RoomJoinRule::is_settable`. */
+const SETTABLE_JOIN_RULES: readonly RoomJoinRule[] = ["public", "invite", "knock", "private"];
+
+/**
+ * The settable rules, plus the current one when it is not settable, so the
+ * select shows the room's real rule instead of silently landing on another.
+ */
+function joinRuleOptions(current: RoomJoinRule): readonly RoomJoinRule[] {
+  return SETTABLE_JOIN_RULES.includes(current)
+    ? SETTABLE_JOIN_RULES
+    : [...SETTABLE_JOIN_RULES, current];
 }
 
 function roomHistoryVisibilityLabel(visibility: RoomHistoryVisibility): string {

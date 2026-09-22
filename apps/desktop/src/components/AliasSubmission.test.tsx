@@ -18,8 +18,8 @@ const management: RoomManagementState = {
   selected_room_id: room.room_id, operation: { kind: "idle" }, settings: {
     room_id: room.room_id, name: "Room", topic: null, avatar_url: null,
     join_rule: "invite", history_visibility: "shared",
-    permissions: { can_edit_settings: false, can_edit_roles: false, can_invite: false,
-      can_kick: false, can_ban: false, can_unban: false },
+    permissions: { can_edit_settings: false, can_change_join_rule: false, can_edit_roles: false,
+      can_invite: false, can_kick: false, can_ban: false, can_unban: false },
     members: ["bob", "other"].map(name => ({ user_id: `@${name}:example.invalid`,
       display_name: "Reader", display_label: "Reader", original_display_label: "Reader",
       avatar_url: null, power_level: 0, role: "user", membership: "joined", role_options: [] }))

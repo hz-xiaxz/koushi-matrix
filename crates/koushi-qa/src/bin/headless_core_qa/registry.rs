@@ -575,7 +575,12 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
         ],
         QaStage::RoomSpace => &["room_space=ok"],
         QaStage::Directory => &["directory_query=ok", "directory_join=ok"],
-        QaStage::RoomManagement => &["room_settings=ok", "moderation=ok", "permission_guard=ok"],
+        QaStage::RoomManagement => &[
+            "room_settings=ok",
+            "moderation=ok",
+            "permission_guard=ok",
+            "space_access=ok",
+        ],
         QaStage::RoomPeopleProjection => &[
             "room_people_joined_scope=ok",
             "room_people_alias_search=ok",
@@ -702,6 +707,7 @@ fn implemented_final_tokens() -> Vec<&'static str> {
         "room_settings=ok",
         "moderation=ok",
         "permission_guard=ok",
+        "space_access=ok",
         "timeline=ok",
         "timeline_nav=ok",
         "hide_redacted=ok",

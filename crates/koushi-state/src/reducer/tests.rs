@@ -106,6 +106,7 @@ fn test_space(space_id: &str) -> crate::state::SpaceSummary {
         raw_name: None,
         display_name: space_id.to_owned(),
         avatar: None,
+        join_rule: None,
         child_room_ids: Vec::new(),
     }
 }

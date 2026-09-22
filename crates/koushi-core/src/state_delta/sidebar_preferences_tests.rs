@@ -31,6 +31,7 @@ fn fixture(active: Option<&str>) -> AppState {
             raw_name: None,
             display_name: "Synthetic Space".into(),
             avatar: None,
+            join_rule: None,
             child_room_ids: state
                 .rooms
                 .iter()

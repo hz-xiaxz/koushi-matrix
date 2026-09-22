@@ -74,6 +74,7 @@ fn scale_spaces() -> Vec<SpaceSummary> {
                 raw_name: None,
                 display_name: format!("Space {s}"),
                 avatar: None,
+                join_rule: None,
                 child_room_ids: children,
             }
         })

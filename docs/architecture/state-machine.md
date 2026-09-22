@@ -2916,8 +2916,12 @@ stateDiagram-v2
   Tauri handlers are transport adapters: they allocate a request id, submit the
   typed command, wait for the correlated `RoomEvent`, and do not call SDK
   wrappers directly.
-- Setting updates are accepted only with a `Ready` session and
-  `can_edit_settings=true` in the current snapshot. Moderation is accepted only
+- Setting updates are accepted only with a `Ready` session and the permission
+  fact `RoomPermissionFacts::allows_setting_change` names for the change:
+  `can_change_join_rule` (send `m.room.join_rules`) for a join-rule change,
+  `can_edit_settings` for every other setting. Core's pre-send guard and the
+  reducer's admission guard call that one helper, so they cannot disagree
+  (#935). Moderation is accepted only
   when the matching permission fact allows the action:
   `can_kick`, `can_ban`, or `can_unban`. Role edits are accepted only when
   `can_edit_roles=true`; success updates the target member's `power_level` and
@@ -2945,6 +2949,18 @@ stateDiagram-v2
   locally filter member rows after dispatching a moderation command. Unban does
   not synthesize a member row; a later settings/member refresh projects any
   active membership.
+- Join rules are projected as the server holds them: `knockRestricted` and
+  rules the client does not model (`unknown`) are distinct values, never folded
+  into `restricted` or `invite`. A missing `m.room.join_rules` event is
+  `invite`. Only `public`, `invite`, `knock`, and `private` can be sent back
+  (`RoomJoinRule::is_settable`); the others fail as an invalid setting.
+- `SpaceSummary.join_rule` carries each Space's join rule from every room-list
+  update. When it changes between two synced values for the Space whose
+  settings are open, the reducer copies it into
+  `room_management.settings.join_rule`, so a change made by another client
+  reaches Space Info without a reload. A level-wise copy would revert a
+  just-saved change while the room list still carries the old rule, so only a
+  synced transition counts; permissions are left for Core to re-read (#935).
 - SDK state-event mutation calls can return before the SDK room cache reflects
   the sent state event. The SDK adapter must project the submitted setting
   change or member power-level change into the success snapshot or otherwise
@@ -2957,9 +2973,12 @@ stateDiagram-v2
 - Logout, account switch, and session clearing reset `room_management` to its
   default idle state and drop selected-room settings.
 - Headless core QA covers this with the `room_management` scenario and
-  private-data-free tokens `room_settings=ok`, `permission_guard=ok`, and
-  `moderation=ok`. The lane uses a disposable management room so timeline and
-  room/space stages are not disrupted.
+  private-data-free tokens `room_settings=ok`, `permission_guard=ok`,
+  `moderation=ok`, and `space_access=ok`. The lane uses a disposable management
+  room so timeline and room/space stages are not disrupted. `space_access=ok`
+  proves a disposable Space's join rule switches invite ↔ public for its
+  creator, reaches a second member's open settings through sync, is refused for
+  that member, and leaves the child room's join rule unchanged.
 
 ## Space Members
 

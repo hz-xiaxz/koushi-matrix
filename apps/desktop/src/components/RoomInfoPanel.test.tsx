@@ -119,6 +119,7 @@ describe("RoomInfoPanel", () => {
             history_visibility: "shared",
             permissions: {
               can_edit_settings: true,
+              can_change_join_rule: true,
               can_edit_roles: true,
               can_invite: true,
               can_kick: true,
@@ -163,6 +164,7 @@ describe("RoomInfoPanel", () => {
             history_visibility: "shared",
             permissions: {
               can_edit_settings: true,
+              can_change_join_rule: true,
               can_edit_roles: true,
               can_invite: true,
               can_kick: true,
@@ -194,6 +196,46 @@ describe("RoomInfoPanel", () => {
     });
   });
 
+  test("shows a join rule it cannot set as itself rather than as another rule", () => {
+    render(
+      <RoomInfoPanel
+        room={baseRoom}
+        roomNotificationSettings={idleSettings}
+        spaces={[]}
+        roomManagement={{
+          selected_room_id: baseRoom.room_id,
+          settings: {
+            room_id: baseRoom.room_id,
+            name: "Alpha Room",
+            topic: null,
+            avatar_url: null,
+            join_rule: "knockRestricted",
+            history_visibility: "shared",
+            permissions: {
+              can_edit_settings: true,
+              can_change_join_rule: true,
+              can_edit_roles: true,
+              can_invite: true,
+              can_kick: true,
+              can_ban: true,
+              can_unban: true
+            },
+            members: []
+          },
+          operation: { kind: "idle" }
+        }}
+        onUpdateRoomSetting={vi.fn()}
+      />
+    );
+
+    const select = screen.getByRole("combobox", { name: "Join rule" }) as HTMLSelectElement;
+    expect(select.value).toBe("knockRestricted");
+    const current = Array.from(select.options).find((option) => option.value === "knockRestricted");
+    expect(current?.disabled).toBe(true);
+    // Restricted needs an allow list the command does not carry, so it is not offered.
+    expect(Array.from(select.options).some((option) => option.value === "restricted")).toBe(false);
+  });
+
   test("shows current access and history while disabling edits without permission", () => {
     render(
       <RoomInfoPanel
@@ -211,6 +253,7 @@ describe("RoomInfoPanel", () => {
             history_visibility: "joined",
             permissions: {
               can_edit_settings: false,
+              can_change_join_rule: false,
               can_edit_roles: false,
               can_invite: false,
               can_kick: false,
@@ -243,6 +286,7 @@ describe("RoomInfoPanel", () => {
         history_visibility: "shared" as const,
         permissions: {
           can_edit_settings: true,
+          can_change_join_rule: true,
           can_edit_roles: true,
           can_invite: true,
           can_kick: true,
@@ -285,6 +329,7 @@ describe("RoomInfoPanel", () => {
             raw_name: null,
             display_name: "Synthetic Workspace",
             avatar: null,
+            join_rule: null,
             child_room_ids: ["!room-alpha:example.invalid"]
           }
         ]}
@@ -320,6 +365,7 @@ describe("RoomInfoPanel", () => {
             history_visibility: "worldReadable",
             permissions: {
               can_edit_settings: true,
+              can_change_join_rule: true,
               can_edit_roles: true,
               can_invite: true,
               can_kick: true,
@@ -452,6 +498,7 @@ describe("RoomInfoPanel", () => {
             history_visibility: "shared",
             permissions: {
               can_edit_settings: true,
+              can_change_join_rule: true,
               can_edit_roles: true,
               can_invite: true,
               can_kick: true,

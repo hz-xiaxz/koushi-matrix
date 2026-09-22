@@ -116,6 +116,7 @@ const space: SpaceSummary = {
   raw_name: null,
   display_name: "Workspace",
   avatar: null,
+  join_rule: null,
   child_room_ids: [room.room_id]
 };
 
@@ -142,6 +143,7 @@ const roomManagement: RoomManagementState = {
     history_visibility: "shared",
     permissions: {
       can_edit_settings: true,
+      can_change_join_rule: true,
       can_edit_roles: true,
       can_invite: true,
       can_kick: true,
@@ -567,6 +569,7 @@ describe("ContextualRightPanel people composition", () => {
     };
     const identifierSpace: SpaceSummary = {
       ...space,
+      join_rule: null,
       child_room_ids: [identifierRoomId]
     };
     const identifierSnapshot = {

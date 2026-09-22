@@ -146,6 +146,7 @@ function spaceSummary(spaceId: string, label: string): SpaceSummary {
     raw_name: null,
     display_name: label,
     avatar: null,
+    join_rule: null,
     child_room_ids: []
   };
 }

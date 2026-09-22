@@ -622,6 +622,7 @@
           "name": "Fixture Room",
           "permissions": {
             "can_ban": true,
+            "can_change_join_rule": true,
             "can_edit_roles": true,
             "can_edit_settings": true,
             "can_invite": true,
@@ -948,6 +949,7 @@
             "!not-joined-room:example.invalid"
           ],
           "display_name": "Fixture Space",
+          "join_rule": "knockRestricted",
           "raw_name": "Fixture Space Canonical Name",
           "space_id": "!space:example.invalid"
         }

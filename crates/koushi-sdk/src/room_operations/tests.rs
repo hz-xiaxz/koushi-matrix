@@ -11,9 +11,70 @@ use super::{
 };
 
 use crate::room_projection::{
-    matrix_public_room_from_chunk, matrix_room_member_role, room_settings_snapshot_with_change,
-    room_settings_snapshot_with_member_power_level,
+    matrix_public_room_from_chunk, matrix_room_join_rule, matrix_room_member_role,
+    room_settings_snapshot_with_change, room_settings_snapshot_with_member_power_level,
+    sdk_join_rule_for_update,
 };
+
+#[test]
+fn join_rules_are_reported_as_the_server_holds_them() {
+    use matrix_sdk::ruma::events::room::join_rules::{
+        JoinRule, Restricted, RoomJoinRulesEventContent,
+    };
+
+    let cases = [
+        (JoinRule::Public, MatrixRoomJoinRule::Public),
+        (JoinRule::Invite, MatrixRoomJoinRule::Invite),
+        (JoinRule::Knock, MatrixRoomJoinRule::Knock),
+        (JoinRule::Private, MatrixRoomJoinRule::Private),
+        (
+            JoinRule::Restricted(Restricted::new(Vec::new())),
+            MatrixRoomJoinRule::Restricted,
+        ),
+        // #935: knock_restricted is its own rule, not restricted.
+        (
+            JoinRule::KnockRestricted(Restricted::new(Vec::new())),
+            MatrixRoomJoinRule::KnockRestricted,
+        ),
+    ];
+    for (rule, expected) in cases {
+        assert_eq!(matrix_room_join_rule(&rule), expected);
+    }
+
+    // A rule this client does not model is not passed off as invite-only.
+    let custom: RoomJoinRulesEventContent =
+        serde_json::from_value(serde_json::json!({ "join_rule": "org.example.custom" }))
+            .expect("custom join rule");
+    assert_eq!(
+        matrix_room_join_rule(&custom.join_rule),
+        MatrixRoomJoinRule::Unknown
+    );
+}
+
+#[test]
+fn only_join_rules_the_command_can_carry_are_sent() {
+    use matrix_sdk::ruma::events::room::join_rules::JoinRule;
+
+    assert_eq!(
+        sdk_join_rule_for_update(MatrixRoomJoinRule::Public).ok(),
+        Some(JoinRule::Public)
+    );
+    // "Private — invitation required" is the `invite` rule, never `private`.
+    assert_eq!(
+        sdk_join_rule_for_update(MatrixRoomJoinRule::Invite).ok(),
+        Some(JoinRule::Invite)
+    );
+    for rule in [
+        MatrixRoomJoinRule::Restricted,
+        MatrixRoomJoinRule::KnockRestricted,
+        MatrixRoomJoinRule::Unknown,
+    ] {
+        assert!(matches!(
+            sdk_join_rule_for_update(rule),
+            Err(MatrixRoomOperationError::InvalidRoomSetting)
+        ));
+    }
+}
 
 #[test]
 fn cancel_space_invite_validates_invite_membership_before_kicking() {
@@ -406,6 +467,7 @@ fn room_management_wrappers_use_settings_privacy_and_moderation_apis() {
         history_visibility: MatrixRoomHistoryVisibility::Shared,
         permissions: MatrixRoomPermissionFacts {
             can_edit_settings: true,
+            can_change_join_rule: true,
             can_edit_roles: true,
             can_invite: true,
             can_kick: true,
@@ -449,6 +511,7 @@ fn room_setting_update_projects_the_sent_change_into_the_success_snapshot() {
         history_visibility: MatrixRoomHistoryVisibility::Shared,
         permissions: MatrixRoomPermissionFacts {
             can_edit_settings: true,
+            can_change_join_rule: true,
             can_edit_roles: true,
             can_invite: true,
             can_kick: true,
@@ -511,6 +574,7 @@ fn room_member_power_level_projection_updates_role_in_success_snapshot() {
         history_visibility: MatrixRoomHistoryVisibility::Shared,
         permissions: MatrixRoomPermissionFacts {
             can_edit_settings: true,
+            can_change_join_rule: true,
             can_edit_roles: true,
             can_invite: true,
             can_kick: true,

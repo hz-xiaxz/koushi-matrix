@@ -226,7 +226,11 @@ pub enum MatrixRoomJoinRule {
     Invite,
     Knock,
     Restricted,
+    KnockRestricted,
     Private,
+    /// A join rule this client does not model. It is reported as-is rather
+    /// than folded into a known rule, and it is never sent back.
+    Unknown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -240,6 +244,9 @@ pub enum MatrixRoomHistoryVisibility {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct MatrixRoomPermissionFacts {
     pub can_edit_settings: bool,
+    /// Whether the account may send `m.room.join_rules` on its own, which is
+    /// all that changing who can join requires.
+    pub can_change_join_rule: bool,
     pub can_edit_roles: bool,
     pub can_invite: bool,
     pub can_kick: bool,

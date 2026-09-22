@@ -30,6 +30,7 @@ async fn space_invite_explicit_id_search_settles_after_publishing_candidate() {
                     raw_name: None,
                     display_name: "Invite test".into(),
                     avatar: None,
+                    join_rule: None,
                     child_room_ids: vec![],
                 }],
             },

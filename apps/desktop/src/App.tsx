@@ -6641,6 +6641,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           onUpdateRoomSetting={(roomId, change) => {
             runInBackground(updateRoomSetting(roomId, change));
           }}
+          onUpdateSpaceJoinRule={(spaceId, joinRule) => updateRoomSetting(spaceId, { joinRule })}
           onIgnoreUser={(userId) => {
             runInBackground(ignoreUser(userId));
           }}

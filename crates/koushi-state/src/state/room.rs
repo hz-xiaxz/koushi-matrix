@@ -16,6 +16,11 @@ pub struct SpaceSummary {
     pub display_name: String,
     #[serde(default)]
     pub avatar: Option<AvatarImage>,
+    /// The Space's join rule as last synced. `None` until a room-list update
+    /// has projected it (snapshots written before this field existed load as
+    /// `None`); readers show it as not yet known, never as a guessed rule.
+    #[serde(default)]
+    pub join_rule: Option<super::room_management::RoomJoinRule>,
     pub child_room_ids: Vec<String>,
 }
 

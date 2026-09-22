@@ -83,13 +83,15 @@ fn room_member_role_from_sdk(role: MatrixRoomMemberRole) -> RoomMemberRole {
     }
 }
 
-fn room_join_rule_from_sdk(join_rule: MatrixRoomJoinRule) -> RoomJoinRule {
+pub(super) fn room_join_rule_from_sdk(join_rule: MatrixRoomJoinRule) -> RoomJoinRule {
     match join_rule {
         MatrixRoomJoinRule::Public => RoomJoinRule::Public,
         MatrixRoomJoinRule::Invite => RoomJoinRule::Invite,
         MatrixRoomJoinRule::Knock => RoomJoinRule::Knock,
         MatrixRoomJoinRule::Restricted => RoomJoinRule::Restricted,
+        MatrixRoomJoinRule::KnockRestricted => RoomJoinRule::KnockRestricted,
         MatrixRoomJoinRule::Private => RoomJoinRule::Private,
+        MatrixRoomJoinRule::Unknown => RoomJoinRule::Unknown,
     }
 }
 
@@ -99,7 +101,9 @@ fn room_join_rule_to_sdk(join_rule: RoomJoinRule) -> MatrixRoomJoinRule {
         RoomJoinRule::Invite => MatrixRoomJoinRule::Invite,
         RoomJoinRule::Knock => MatrixRoomJoinRule::Knock,
         RoomJoinRule::Restricted => MatrixRoomJoinRule::Restricted,
+        RoomJoinRule::KnockRestricted => MatrixRoomJoinRule::KnockRestricted,
         RoomJoinRule::Private => MatrixRoomJoinRule::Private,
+        RoomJoinRule::Unknown => MatrixRoomJoinRule::Unknown,
     }
 }
 
@@ -128,6 +132,7 @@ fn room_history_visibility_to_sdk(
 fn room_permission_facts_from_sdk(permissions: MatrixRoomPermissionFacts) -> RoomPermissionFacts {
     RoomPermissionFacts {
         can_edit_settings: permissions.can_edit_settings,
+        can_change_join_rule: permissions.can_change_join_rule,
         can_edit_roles: permissions.can_edit_roles,
         can_invite: permissions.can_invite,
         can_kick: permissions.can_kick,
@@ -225,7 +230,7 @@ impl RoomActor {
             settings: settings.clone(),
         }])
         .await;
-        if !settings.permissions.can_edit_settings {
+        if !settings.permissions.allows_setting_change(&change) {
             self.reduce_reliable(vec![AppAction::RoomSettingUpdateRequested {
                 request_id: request_id.sequence,
                 room_id,
@@ -496,6 +501,7 @@ mod tests {
             history_visibility: MatrixRoomHistoryVisibility::Shared,
             permissions: MatrixRoomPermissionFacts {
                 can_edit_settings: true,
+                can_change_join_rule: true,
                 can_edit_roles: true,
                 can_invite: true,
                 can_kick: true,

@@ -1,5 +1,7 @@
 #[path = "rooms/address.rs"]
 mod address;
+#[path = "rooms/space_access.rs"]
+mod space_access;
 
 use super::event_wait::{
     QaEventDeadline, wait_for_dm_room_in_room_list, wait_for_initial_items,
@@ -913,6 +915,8 @@ pub(super) async fn run_room_management_stage(
     wait_for_room_member_moderated(conn_a, kick_id, "room_management member kick").await?;
     println!("moderation=ok");
 
+    space_access::verify(config, conn_a, conn_b).await?;
+
     Ok(())
 }
 
@@ -1064,11 +1068,27 @@ async fn wait_for_room_management_forbidden(
     request_id: RequestId,
     label: &str,
 ) -> Result<(), String> {
+    wait_for_room_management_forbidden_operation(
+        conn,
+        request_id,
+        RoomManagementOperationKind::Moderation,
+        label,
+    )
+    .await
+}
+
+async fn wait_for_room_management_forbidden_operation(
+    conn: &mut CoreConnection,
+    request_id: RequestId,
+    operation: RoomManagementOperationKind,
+    label: &str,
+) -> Result<(), String> {
     let deadline = tokio::time::Instant::now() + EVENT_TIMEOUT;
     let mut saw_forbidden_failure = false;
 
     loop {
-        if saw_forbidden_failure && room_management_forbidden_recorded(&conn.snapshot(), request_id)
+        if saw_forbidden_failure
+            && room_management_forbidden_recorded(&conn.snapshot(), request_id, operation)
         {
             return Ok(());
         }
@@ -1097,7 +1117,7 @@ async fn wait_for_room_management_forbidden(
                 ));
             }
             CoreEvent::StateDelta(_)
-                if room_management_forbidden_recorded(&conn.snapshot(), request_id) =>
+                if room_management_forbidden_recorded(&conn.snapshot(), request_id, operation) =>
             {
                 if saw_forbidden_failure {
                     return Ok(());
@@ -1108,7 +1128,11 @@ async fn wait_for_room_management_forbidden(
     }
 }
 
-fn room_management_forbidden_recorded(snapshot: &AppState, request_id: RequestId) -> bool {
+fn room_management_forbidden_recorded(
+    snapshot: &AppState,
+    request_id: RequestId,
+    expected: RoomManagementOperationKind,
+) -> bool {
     matches!(
         &snapshot.room_management.operation,
         RoomManagementOperationState::Failed {
@@ -1117,7 +1141,7 @@ fn room_management_forbidden_recorded(snapshot: &AppState, request_id: RequestId
             kind,
             ..
         } if *state_request_id == request_id.sequence
-            && *operation == RoomManagementOperationKind::Moderation
+            && *operation == expected
             && *kind == OperationFailureKind::Forbidden
     )
 }

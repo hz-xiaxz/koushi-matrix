@@ -330,6 +330,7 @@ fn space_scope_resolves_to_attachment_scope_with_child_room_ids() {
         raw_name: None,
         display_name: "Synthetic Space".to_owned(),
         avatar: None,
+        join_rule: None,
         child_room_ids: vec![
             "!room-a:example.invalid".to_owned(),
             "!room-b:example.invalid".to_owned(),
