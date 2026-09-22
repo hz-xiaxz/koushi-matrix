@@ -86,6 +86,7 @@ import {
   renderPlainTextBody,
   type OpenMatrixTargetHandler
 } from "./TimelineMessageBody";
+import { cachedDateTimeFormat, cachedListFormat } from "../../domain/intlFormatCache";
 
 export type TimelineThreadAttention = {
   rootEventId: string;
@@ -1398,7 +1399,7 @@ function formatReactionTooltip(
       : previewLabels;
   const names =
     labels.length > 0
-      ? new Intl.ListFormat(getActiveLocale(), { style: "long", type: "conjunction" }).format(labels)
+      ? cachedListFormat(getActiveLocale(), { style: "long", type: "conjunction" }).format(labels)
       : t("timeline.reactionSenderUnknown", { count: totalCount });
   return t("timeline.reactionTooltip", { names, key: reactionKey });
 }
@@ -1418,7 +1419,7 @@ function syntheticDateDividerTimestampMs(
 }
 
 function formatDateDividerLabel(timestampMs: number): string {
-  return new Intl.DateTimeFormat(getActiveLocale(), {
+  return cachedDateTimeFormat(getActiveLocale(), {
     weekday: "short",
     year: "numeric",
     month: "short",

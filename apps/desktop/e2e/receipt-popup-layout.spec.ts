@@ -5,7 +5,8 @@ for (const count of [1, 2]) {
   test(`reader popup fits ${count} timestamped rows without wrapping or scrolling`, async ({ page }) => {
     await gotoReadyShell(page);
     await page.evaluate((count) => {
-      const snapshot = window.__harness.currentSnapshot();
+      // A Rust snapshot is always a fresh object, never the live one edited in place.
+      const snapshot = structuredClone(window.__harness.currentSnapshot());
       const room = "!harness-room:example.invalid";
       snapshot.state.domain.live_signals.rooms[room] = {
         fully_read_event_id: null, typing_user_ids: [], typing_users: [],
