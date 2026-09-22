@@ -1012,7 +1012,7 @@ function mentionOptionAriaLabel(candidate: MentionCandidate): string {
   return meta ? `${label} ${meta}` : label;
 }
 
-function ThreadComposer({
+const ThreadComposer = memo(function ThreadComposer({
   canEdit,
   document,
   draftKey,
@@ -1063,7 +1063,7 @@ function ThreadComposer({
     <Composer
       surface="thread"
       canEdit={canEdit}
-      composerMode={{ kind: "plain" }}
+      composerMode={PLAIN_COMPOSER_MODE}
       hasStagedUploads={hasStagedUploads}
       stagedUploadsReady={stagedUploadsReady}
       isSending={isSending}
@@ -1081,7 +1081,7 @@ function ThreadComposer({
       placeholder={t("timeline.threadPlaceholder")}
       roomName={roomName}
       onAttachFiles={onAttachFiles}
-      onCancelReply={() => undefined}
+      onCancelReply={ignoreCancelReply}
       onDocumentChange={onDocumentChange}
       onMentionQueryChange={onMentionQueryChange}
       onScheduleSend={onScheduleSend}
@@ -1090,7 +1090,12 @@ function ThreadComposer({
       onDiagnosticLogEntry={onDiagnosticLogEntry}
     />
   );
-}
+});
+
+const PLAIN_COMPOSER_MODE = { kind: "plain" } as const;
+
+/** Thread replies have no reply target to cancel; one identity keeps Composer's memo. */
+function ignoreCancelReply(): void {}
 
 export { ThreadComposer };
 

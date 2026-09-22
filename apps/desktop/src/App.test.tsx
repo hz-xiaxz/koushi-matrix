@@ -1406,7 +1406,9 @@ describe("ContextualRightPanel", () => {
     const transportOffset = threadBranch.indexOf("threadTimelineKeyValue && threadRoomId && timelineTransport");
     const fallbackOffset = threadBranch.indexOf("browserThreadSnapshot ?");
 
-    expect(threadBranch).toContain("threadTimelineKey(");
+    // The key is memoized above the mode branches (#972) so it keeps one
+    // identity across renders; the thread branch still renders from it.
+    expect(source.slice(0, threadBranchStart)).toContain("threadTimelineKey(");
     expect(threadBranch).toContain("!timelineTransport");
     expect(threadBranch).toContain("snapshot.thread");
     expect(threadBranch).toContain("threadReplyToTimelineMessage(reply)");
