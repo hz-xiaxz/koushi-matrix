@@ -1,0 +1,21 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "Koushi",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 760,
+        "minHeight": 620,
+        "dragDropEnabled": true,
+        "zoomHotkeysEnabled": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 16
+        }
+      }
+    ]
+  }
+}

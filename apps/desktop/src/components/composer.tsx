@@ -58,8 +58,16 @@ import {
   type MentionCandidate,
   type ComposerModeProp
 } from "../app/uiShared";
-import { EntityAvatar } from "./Shell";
+import { readClipboardImageFile } from "../backend/clipboardImageRuntime";
 import {
+  claimNativeDroppedFiles,
+  subscribeNativeFileDrops,
+  type NativeFileDropEvent
+} from "../backend/nativeFileDropRuntime";
+import { EntityAvatar } from "./Shell";
+import { useStableEvent } from "./useStableEvent";
+import {
+  attachmentPasteNeedsNativeImageRead,
   attachmentTransferHasFiles,
   filesFromAttachmentTransfer,
   ingestAttachmentFiles
@@ -183,9 +191,12 @@ export const Composer = memo(function Composer({
   const documentEpochRef = useRef(0);
   const keyResolutionPendingRef = useRef(false);
   const mountedRef = useRef(true);
+  const sectionRef = useRef<HTMLElement>(null);
+  const draftKeyRef = useRef(draftKey);
   const autocompleteListboxId = useId();
   if (localDraftKey !== draftKey) {
     const end = documentLength(document);
+    draftKeyRef.current = draftKey;
     setLocalDraftKey(draftKey);
     setLocalDocument(document);
     setDocumentSelection({ start: end, end });
@@ -448,6 +459,16 @@ export const Composer = memo(function Composer({
     }
   }
 
+  async function attachNativeClipboardImage() {
+    const pasteDraftKey = draftKeyRef.current;
+    const image = await readClipboardImageFile();
+    // The native read is asynchronous; never stage into a conversation the
+    // paste was not aimed at.
+    if (image && mountedRef.current && draftKeyRef.current === pasteDraftKey) {
+      await attachDroppedOrPastedFiles([image]);
+    }
+  }
+
   function onAttachmentDragEnter(event: DragEvent<HTMLElement>) {
     if (!canEdit || !attachmentTransferHasFiles(event.dataTransfer)) {
       return;
@@ -478,6 +499,33 @@ export const Composer = memo(function Composer({
     setFileDragActive(false);
     void attachDroppedOrPastedFiles(filesFromAttachmentTransfer(event.dataTransfer));
   }
+
+  // Native drops carry no DOM target, so each composer hit-tests its own surface.
+  const onNativeFileDrop = useStableEvent((event: NativeFileDropEvent) => {
+    const rect = event.kind === "leave" ? null : sectionRef.current?.getBoundingClientRect();
+    const inside =
+      event.kind !== "leave" &&
+      canEdit &&
+      !!rect &&
+      event.x >= rect.left &&
+      event.x <= rect.right &&
+      event.y >= rect.top &&
+      event.y <= rect.bottom;
+    setFileDragActive(inside && event.kind === "over");
+    if (!inside || event.kind !== "drop") {
+      return;
+    }
+    const dropDraftKey = draftKeyRef.current;
+    void claimNativeDroppedFiles().then((files) => {
+      // Reading the files is asynchronous; never stage into a conversation
+      // the drop was not aimed at.
+      if (mountedRef.current && draftKeyRef.current === dropDraftKey) {
+        void attachDroppedOrPastedFiles(files);
+      }
+    });
+  });
+
+  useEffect(() => subscribeNativeFileDrops(onNativeFileDrop), [onNativeFileDrop]);
 
   function openScheduleForm() {
     setScheduleValue(defaultScheduleDateTimeValue());
@@ -743,6 +791,7 @@ export const Composer = memo(function Composer({
 
   return (
     <section
+      ref={sectionRef}
       className={`composer${editorOnly ? " is-editor-only" : ""}${fileDragActive ? " is-file-drag-over" : ""}`}
       aria-label={ariaLabel}
       data-file-drag-over={fileDragActive ? "true" : "false"}
@@ -867,6 +916,9 @@ export const Composer = memo(function Composer({
           if (files.length > 0) {
             event.preventDefault();
             void attachDroppedOrPastedFiles(files);
+          } else if (canEdit && attachmentPasteNeedsNativeImageRead(event.clipboardData)) {
+            event.preventDefault();
+            void attachNativeClipboardImage();
           }
         }}
       />
@@ -1012,7 +1064,7 @@ function mentionOptionAriaLabel(candidate: MentionCandidate): string {
   return meta ? `${label} ${meta}` : label;
 }
 
-function ThreadComposer({
+const ThreadComposer = memo(function ThreadComposer({
   canEdit,
   document,
   draftKey,
@@ -1063,7 +1115,7 @@ function ThreadComposer({
     <Composer
       surface="thread"
       canEdit={canEdit}
-      composerMode={{ kind: "plain" }}
+      composerMode={PLAIN_COMPOSER_MODE}
       hasStagedUploads={hasStagedUploads}
       stagedUploadsReady={stagedUploadsReady}
       isSending={isSending}
@@ -1081,7 +1133,7 @@ function ThreadComposer({
       placeholder={t("timeline.threadPlaceholder")}
       roomName={roomName}
       onAttachFiles={onAttachFiles}
-      onCancelReply={() => undefined}
+      onCancelReply={ignoreCancelReply}
       onDocumentChange={onDocumentChange}
       onMentionQueryChange={onMentionQueryChange}
       onScheduleSend={onScheduleSend}
@@ -1090,7 +1142,12 @@ function ThreadComposer({
       onDiagnosticLogEntry={onDiagnosticLogEntry}
     />
   );
-}
+});
+
+const PLAIN_COMPOSER_MODE = { kind: "plain" } as const;
+
+/** Thread replies have no reply target to cancel; one identity keeps Composer's memo. */
+function ignoreCancelReply(): void {}
 
 export { ThreadComposer };
 

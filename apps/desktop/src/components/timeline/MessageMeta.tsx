@@ -3,12 +3,13 @@ import type { ReactNode } from "react";
 
 import { getActiveLocale, t } from "../../i18n/messages";
 import type { PresenceKind } from "../../domain/types";
+import { cachedDateTimeFormat } from "../../domain/intlFormatCache";
 
 function formatMessageTimestamp(timestampMs: number | null): string | null {
   if (timestampMs === null) {
     return null;
   }
-  return new Intl.DateTimeFormat(getActiveLocale(), {
+  return cachedDateTimeFormat(getActiveLocale(), {
     timeStyle: "short"
   }).format(new Date(timestampMs));
 }

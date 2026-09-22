@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  attachmentPasteNeedsNativeImageRead,
   filesFromAttachmentTransfer,
   ingestAttachmentFiles,
   stageAttachmentFiles
@@ -39,12 +40,59 @@ describe("attachment ingestion", () => {
     ).toEqual([]);
   });
 
+  it("asks the native clipboard only when the paste exposes neither files nor text", () => {
+    const file = new File(["data"], "image.png", { type: "image/png" });
+    // WebKitGTK reports an image-only clipboard as a completely empty transfer.
+    expect(
+      attachmentPasteNeedsNativeImageRead({ files: [], items: [], types: [], getData: () => "" })
+    ).toBe(true);
+    // "Copy image" from a browser adds markup but still no plain text to paste.
+    expect(
+      attachmentPasteNeedsNativeImageRead({
+        files: [],
+        items: [{ kind: "string" }],
+        types: ["text/html"],
+        getData: () => ""
+      })
+    ).toBe(true);
+    expect(
+      attachmentPasteNeedsNativeImageRead({
+        files: [],
+        items: [{ kind: "string" }],
+        types: ["text/plain"],
+        getData: () => "hello"
+      })
+    ).toBe(false);
+    expect(
+      attachmentPasteNeedsNativeImageRead({
+        files: [file],
+        items: [{ kind: "file" }],
+        types: ["Files"],
+        getData: () => ""
+      })
+    ).toBe(false);
+  });
+
   it("keeps packaged desktop file drops on the browser File ingestion path", () => {
     const config = JSON.parse(
       readFileSync(new URL("../../src-tauri/tauri.conf.json", import.meta.url), "utf8")
     ) as { app: { windows: Array<{ dragDropEnabled?: boolean }> } };
 
     expect(config.app.windows[0]?.dragDropEnabled).toBe(false);
+  });
+
+  it("enables native drag/drop only on Linux, where WebKitGTK hides dragged files", () => {
+    const read = (name: string) =>
+      JSON.parse(readFileSync(new URL(`../../src-tauri/${name}`, import.meta.url), "utf8")) as {
+        app: { windows: Array<Record<string, unknown>> };
+      };
+    const base = read("tauri.conf.json").app.windows;
+    const linux = read("tauri.linux.conf.json").app.windows;
+
+    // The platform file replaces the whole windows array, so it must stay an
+    // exact copy of the base window apart from the one Linux difference.
+    expect(linux).toEqual([{ ...base[0], dragDropEnabled: true }]);
+    expect(base).toHaveLength(1);
   });
 
   it("captures target and bytes immediately before staging", async () => {

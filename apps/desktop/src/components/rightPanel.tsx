@@ -34,6 +34,7 @@ import {
   forwardDestinationsFromSnapshot,
   ICON_SIZE,
   ignoreComposerKeyAction,
+  pinnedEventIdsForRoom,
   pinnedEventsForRoom,
   shortcutLabelProfileFromLocaleProfile,
   threadReplyToTimelineMessage
@@ -72,6 +73,18 @@ import { useStableEvent } from "./useStableEvent";
 
 const noopSearchSpaceInviteTargets = async (): Promise<InviteTargetCandidate[]> => [];
 const noopResetSpaceInviteSearch = (): void => undefined;
+
+const NO_MEDIA_DOWNLOADS: NonNullable<
+  DesktopSnapshot["state"]["ui"]["timeline"]["media_downloads"]
+> = {};
+
+const DEFAULT_COMPOSER_SETTINGS: { math_mode: boolean; recent_emojis: string[] } = {
+  math_mode: true,
+  recent_emojis: []
+};
+
+/** A thread pane has no nested threads; one identity keeps TimelineView's memo. */
+function ignoreOpenThread(): void {}
 
 export function ContextualRightPanel({
   activeRoom,
@@ -392,11 +405,9 @@ export function ContextualRightPanel({
   threadComposerNotice?: string | null;
   threadComposerDocumentOverride?: ComposerDocument;
 }) {
-  const composerSettings = snapshot.state.domain.settings?.values.composer ?? {
-    math_mode: true,
-    recent_emojis: []
-  };
-  const mediaDownloads = snapshot.state.ui.timeline.media_downloads ?? {};
+  const composerSettings =
+    snapshot.state.domain.settings?.values.composer ?? DEFAULT_COMPOSER_SETTINGS;
+  const mediaDownloads = snapshot.state.ui.timeline.media_downloads ?? NO_MEDIA_DOWNLOADS;
   const loadThreadPreview = useStableEvent(onThreadLoadStagedUploadPreview);
   const onRecentEmojisChange = useStableEvent((recent_emojis: string[]) =>
     onUpdateSettings?.({ composer: { ...composerSettings, recent_emojis } })
@@ -408,6 +419,75 @@ export function ContextualRightPanel({
     threadTarget.kind === "opening" || threadTarget.kind === "open"
       ? threadTarget.root_event_id
       : null;
+  // Issue #972: App recreates every handler it passes on each render. The
+  // thread TimelineView and Composer are memoized, so they are handed stable
+  // references and only re-render when thread data changes.
+  const threadReplyStable = useStableEvent(onReply);
+  const threadOpenMatrixTargetStable = useStableEvent(
+    (...args: Parameters<NonNullable<typeof onOpenMatrixTarget>>) => onOpenMatrixTarget?.(...args)
+  );
+  const threadOpenSenderProfileStable = useStableEvent(
+    (...args: Parameters<NonNullable<typeof onOpenSenderProfile>>) =>
+      onOpenSenderProfile?.(...args)
+  );
+  const threadStartDirectMessageStable = useStableEvent(onStartDirectMessage);
+  const threadResolveComposerKeyActionStable = useStableEvent(onResolveComposerKeyAction);
+  const threadSetLocalUserAliasStable = useStableEvent(onSetLocalUserAlias);
+  const threadTimelineDiagnosticLogEntryStable = useStableEvent(
+    (...args: Parameters<NonNullable<typeof onTimelineDiagnosticLogEntry>>) =>
+      onTimelineDiagnosticLogEntry?.(...args)
+  );
+  const threadEditMentionQueryChangeStable = useStableEvent(onThreadMentionQueryChange);
+  const threadMathModeChangeStable = useStableEvent((enabled: boolean) =>
+    onUpdateSettings?.({ composer: { ...composerSettings, math_mode: enabled } })
+  );
+  const threadSendStagedUploadsStable = useStableEvent(() => {
+    if (threadPreviewRoomId && threadPreviewRootEventId) {
+      onThreadSendStagedAttachments(threadPreviewRoomId, threadPreviewRootEventId);
+    }
+  });
+  const threadDocumentChangeStable = useStableEvent((document: ComposerDocument) => {
+    if (threadPreviewRoomId && threadPreviewRootEventId) {
+      onThreadComposerDocumentChange(threadPreviewRoomId, threadPreviewRootEventId, document);
+    }
+  });
+  const threadAttachFilesStable = useStableEvent(
+    (files: Parameters<typeof onThreadAttachFiles>[2]) => {
+      if (threadPreviewRoomId && threadPreviewRootEventId) {
+        onThreadAttachFiles(threadPreviewRoomId, threadPreviewRootEventId, files);
+      }
+    }
+  );
+  const threadComposerMentionQueryChangeStable = useStableEvent((query: string | null) => {
+    if (threadPreviewRoomId) {
+      onThreadMentionQueryChange(threadPreviewRoomId, "thread", query);
+    }
+  });
+  const threadScheduleSendStable = useStableEvent(
+    (sendAtMs: number, document: ComposerDocument) => {
+      if (threadPreviewRoomId && threadPreviewRootEventId) {
+        return onThreadScheduleSend?.(
+          threadPreviewRoomId,
+          threadPreviewRootEventId,
+          sendAtMs,
+          document
+        );
+      }
+    }
+  );
+  const threadSendStable = useStableEvent((document: ComposerDocument) => {
+    if (threadPreviewRoomId && threadPreviewRootEventId) {
+      onThreadReplySend(threadPreviewRoomId, threadPreviewRootEventId, document);
+    }
+  });
+  const threadCurrentUserId = snapshot.state.domain.session.user_id ?? null;
+  const threadTimelineKeyValue = useMemo(
+    () =>
+      threadCurrentUserId && timelineTransport && threadPreviewRoomId && threadPreviewRootEventId
+        ? threadTimelineKey(threadCurrentUserId, threadPreviewRoomId, threadPreviewRootEventId)
+        : null,
+    [threadCurrentUserId, timelineTransport, threadPreviewRoomId, threadPreviewRootEventId]
+  );
   const threadPreviewLoader = useMemo(() => {
     return (stagedId: string, variantId: string) =>
       threadPreviewRoomId && threadPreviewRootEventId
@@ -875,10 +955,6 @@ export function ContextualRightPanel({
   const threadEditMentionCandidatesLoading =
     threadEditMentionCandidateTarget?.completeness === "loading" ||
     threadEditMentionCandidateTarget?.completeness === "partial";
-  const threadTimelineKeyValue =
-    currentUserId && timelineTransport && threadRoomId && rootEventId
-      ? threadTimelineKey(currentUserId, threadRoomId, rootEventId)
-      : null;
   const fixtureThreadSnapshot = snapshot.thread;
   const browserThreadSnapshot =
     !timelineTransport &&
@@ -887,9 +963,7 @@ export function ContextualRightPanel({
     fixtureThreadSnapshot.root_event_id === rootEventId
       ? fixtureThreadSnapshot
       : null;
-  const threadPinnedEventIds = pinnedEventsForRoom(snapshot, threadRoomId).map(
-    (event) => event.event_id
-  );
+  const threadPinnedEventIds = pinnedEventIdsForRoom(snapshot, threadRoomId);
 
   return (
     <aside className="thread-pane" aria-label={t("panel.context")}>
@@ -905,18 +979,18 @@ export function ContextualRightPanel({
             roomId={threadRoomId}
             timelineKey={threadTimelineKeyValue}
             transport={timelineTransport}
-            onReply={onReply}
-            onOpenMatrixTarget={onOpenMatrixTarget}
-            onOpenSenderProfile={onOpenSenderProfile}
-            onStartDirectMessage={onStartDirectMessage}
-            onOpenThread={() => undefined}
-            resolveComposerKeyAction={onResolveComposerKeyAction}
+            onReply={threadReplyStable}
+            onOpenMatrixTarget={onOpenMatrixTarget ? threadOpenMatrixTargetStable : undefined}
+            onOpenSenderProfile={onOpenSenderProfile ? threadOpenSenderProfileStable : undefined}
+            onStartDirectMessage={threadStartDirectMessageStable}
+            onOpenThread={ignoreOpenThread}
+            resolveComposerKeyAction={threadResolveComposerKeyActionStable}
             liveSignals={snapshot.state.domain.live_signals}
             profileUsers={snapshot.state.domain.profile.users}
             ownAvatar={snapshot.state.domain.profile.own.avatar}
             pinnedEventIds={threadPinnedEventIds}
             forwardDestinations={forwardDestinationsFromSnapshot(snapshot)}
-            onSetLocalUserAlias={onSetLocalUserAlias}
+            onSetLocalUserAlias={threadSetLocalUserAliasStable}
             automaticBackfillEligible={
               threadState.intent === "existingThread" ||
               (typeof threadState.intent === "object" && "pinnedReply" in threadState.intent)
@@ -935,8 +1009,10 @@ export function ContextualRightPanel({
             mediaDownloads={mediaDownloads}
             editMentionCandidates={threadEditMentionCandidates}
             editMentionCandidatesLoading={threadEditMentionCandidatesLoading}
-            onMentionQueryChange={onThreadMentionQueryChange}
-            onDiagnosticLogEntry={onTimelineDiagnosticLogEntry}
+            onMentionQueryChange={threadEditMentionQueryChangeStable}
+            onDiagnosticLogEntry={
+              onTimelineDiagnosticLogEntry ? threadTimelineDiagnosticLogEntryStable : undefined
+            }
           />
         ) : browserThreadSnapshot ? (
           <div className="message-fixture-list thread-fixture-list">
@@ -1012,11 +1088,7 @@ export function ContextualRightPanel({
       ) : null}
       <ThreadComposer
         stagedUploadsReady={uploadStagingItemsAreSendable(threadStagedUploads)}
-        onSendStagedUploads={() => {
-          if (threadRoomId && rootEventId) {
-            onThreadSendStagedAttachments(threadRoomId, rootEventId);
-          }
-        }}
+        onSendStagedUploads={threadSendStagedUploadsStable}
         notice={threadComposerNotice}
         document={threadDocument}
         draftKey={
@@ -1027,47 +1099,26 @@ export function ContextualRightPanel({
         hasStagedUploads={threadStagedUploads.length > 0}
         mathModeEnabled={composerSettings.math_mode}
         recentEmojis={composerSettings.recent_emojis}
-        onMathModeChange={(enabled) =>
-          onUpdateSettings?.({
-            composer: { ...composerSettings, math_mode: enabled }
-          })
-        }
+        onMathModeChange={threadMathModeChangeStable}
         onRecentEmojisChange={onRecentEmojisChange}
         mentionCandidates={threadMentionCandidates}
         mentionCandidatesLoading={threadMentionCandidatesLoading}
-        resolveComposerKeyAction={onResolveComposerKeyAction}
+        resolveComposerKeyAction={threadResolveComposerKeyActionStable}
         canEdit={
           !encryptedComposerBlocked &&
           threadState.kind === "open" &&
           Boolean(threadRoomId && rootEventId && threadComposer)
         }
-        onDocumentChange={(document) => {
-          if (threadRoomId && rootEventId) {
-            onThreadComposerDocumentChange(threadRoomId, rootEventId, document);
-          }
-        }}
-        onAttachFiles={(files) => {
-          if (threadRoomId && rootEventId) {
-            onThreadAttachFiles(threadRoomId, rootEventId, files);
-          }
-        }}
-        onMentionQueryChange={(query) => {
-          if (threadRoomId) {
-            onThreadMentionQueryChange(threadRoomId, "thread", query);
-          }
-        }}
+        onDocumentChange={threadDocumentChangeStable}
+        onAttachFiles={threadAttachFilesStable}
+        onMentionQueryChange={threadComposerMentionQueryChangeStable}
         onScheduleSend={
-          onThreadScheduleSend && threadRoomId && rootEventId
-            ? (sendAtMs, document) =>
-                onThreadScheduleSend(threadRoomId, rootEventId, sendAtMs, document)
-            : undefined
+          onThreadScheduleSend && threadRoomId && rootEventId ? threadScheduleSendStable : undefined
         }
-        onSend={(document) => {
-          if (threadRoomId && rootEventId) {
-            onThreadReplySend(threadRoomId, rootEventId, document);
-          }
-        }}
-        onDiagnosticLogEntry={onTimelineDiagnosticLogEntry}
+        onSend={threadSendStable}
+        onDiagnosticLogEntry={
+          onTimelineDiagnosticLogEntry ? threadTimelineDiagnosticLogEntryStable : undefined
+        }
       />
     </aside>
   );

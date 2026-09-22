@@ -11,6 +11,7 @@ import { timelineKeyIdentity, type ReceiptSourceRef, type ReaderRow } from "../.
 import { EntityAvatar } from "../Shell";
 import { api } from "../../backend/appRuntime";
 import type { LiveReadReceipt } from "../../domain/types";
+import { cachedDateTimeFormat } from "../../domain/intlFormatCache";
 
 /** Reader popup width; the panel narrows to the pane when it is smaller. */
 const RECEIPT_POPUP_INLINE_SIZE_PX = 420;
@@ -610,7 +611,7 @@ function formatReceiptTimestamp(timestampMs: number | null, locale: "en" | "ja")
   if (timestampMs === null) {
     return null;
   }
-  return new Intl.DateTimeFormat(locale, {
+  return cachedDateTimeFormat(locale, {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(timestampMs));

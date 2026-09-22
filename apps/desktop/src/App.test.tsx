@@ -258,9 +258,11 @@ describe("ContextualRightPanel", () => {
     expect(tauriImportStatements).toEqual([]);
     expect(productionTauriImportFiles()).toEqual([
       "backend/client.ts",
+      "backend/tauri/clipboardImagePort.ts",
       "backend/tauri/desktopAttentionPort.ts",
       "backend/tauri/desktopEventPort.ts",
       "backend/tauri/linkMediaPort.ts",
+      "backend/tauri/nativeFileDropPort.ts",
       "backend/tauri/windowDialogPort.ts",
       "backend/tauriTimelineTransport.ts"
     ]);
@@ -1406,7 +1408,9 @@ describe("ContextualRightPanel", () => {
     const transportOffset = threadBranch.indexOf("threadTimelineKeyValue && threadRoomId && timelineTransport");
     const fallbackOffset = threadBranch.indexOf("browserThreadSnapshot ?");
 
-    expect(threadBranch).toContain("threadTimelineKey(");
+    // The key is memoized above the mode branches (#972) so it keeps one
+    // identity across renders; the thread branch still renders from it.
+    expect(source.slice(0, threadBranchStart)).toContain("threadTimelineKey(");
     expect(threadBranch).toContain("!timelineTransport");
     expect(threadBranch).toContain("snapshot.thread");
     expect(threadBranch).toContain("threadReplyToTimelineMessage(reply)");

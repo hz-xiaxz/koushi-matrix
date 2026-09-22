@@ -3298,9 +3298,10 @@ dependencies = [
 
 [[package]]
 name = "koushi-desktop"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "dirs",
+ "gtk",
  "keyring",
  "koushi-core",
  "koushi-diagnostics",
