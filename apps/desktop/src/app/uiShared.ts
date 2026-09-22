@@ -375,20 +375,58 @@ export function scheduledSendCapabilityLabel(capability: import("../domain/types
   }
 }
 
+type PinnedEvents =
+  import("../domain/types").DesktopSnapshot["state"]["domain"]["room_interactions"][string]["pinned_events"];
+
+const NO_PINNED_EVENTS: PinnedEvents = [];
+const NO_PINNED_EVENT_IDS: string[] = [];
+const pinnedEventIdsByEvents = new WeakMap<PinnedEvents, string[]>();
+const forwardDestinationsByRooms = new WeakMap<
+  import("../domain/types").DesktopSnapshot["state"]["domain"]["rooms"],
+  import("../domain/projectionTypes").TimelineForwardDestination[]
+>();
+
 export function pinnedEventsForRoom(
   snapshot: import("../domain/types").DesktopSnapshot,
   roomId: string | null | undefined
-): import("../domain/types").DesktopSnapshot["state"]["domain"]["room_interactions"][string]["pinned_events"] {
-  return roomId ? snapshot.state.domain.room_interactions[roomId]?.pinned_events ?? [] : [];
+): PinnedEvents {
+  return roomId
+    ? snapshot.state.domain.room_interactions[roomId]?.pinned_events ?? NO_PINNED_EVENTS
+    : NO_PINNED_EVENTS;
 }
 
+/**
+ * Pinned event ids for a room. The result keeps its identity while the Rust
+ * projection it derives from does, so it is safe to pass to a memoized view.
+ */
+export function pinnedEventIdsForRoom(
+  snapshot: import("../domain/types").DesktopSnapshot,
+  roomId: string | null | undefined
+): string[] {
+  const events = pinnedEventsForRoom(snapshot, roomId);
+  if (events.length === 0) return NO_PINNED_EVENT_IDS;
+  let ids = pinnedEventIdsByEvents.get(events);
+  if (!ids) {
+    ids = events.map((event) => event.event_id);
+    pinnedEventIdsByEvents.set(events, ids);
+  }
+  return ids;
+}
+
+/** Identity-stable per `rooms` projection, for the same reason as above. */
 export function forwardDestinationsFromSnapshot(
   snapshot: import("../domain/types").DesktopSnapshot
 ): import("../domain/projectionTypes").TimelineForwardDestination[] {
-  return snapshot.state.domain.rooms.map((room) => ({
-    room_id: room.room_id,
-    display_name: room.display_label
-  }));
+  const rooms = snapshot.state.domain.rooms;
+  let destinations = forwardDestinationsByRooms.get(rooms);
+  if (!destinations) {
+    destinations = rooms.map((room) => ({
+      room_id: room.room_id,
+      display_name: room.display_label
+    }));
+    forwardDestinationsByRooms.set(rooms, destinations);
+  }
+  return destinations;
 }
 
 export function activeMentionQuery(value: string): { start: number; end: number; query: string } | null {

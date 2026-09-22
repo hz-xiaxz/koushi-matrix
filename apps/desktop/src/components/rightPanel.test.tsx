@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import type {
@@ -21,6 +22,48 @@ import { t } from "../i18n/messages";
 import { ContextualRightPanel, PanelHeader } from "./rightPanel";
 import { TimelineStoreContext } from "./timelineStoreContext";
 import { baseTransport, message } from "./timelineViewTestSupport";
+
+// Issue #972: count renders of the memoized thread consumers without changing
+// what they render.
+const renderCounts = vi.hoisted(() => ({ composer: 0, timelineView: 0, rows: 0 }));
+
+vi.mock("./timeline/TimelineItemRow", async () => {
+  const actual = await vi.importActual<typeof import("./timeline/TimelineItemRow")>(
+    "./timeline/TimelineItemRow"
+  );
+  const { createElement } = await import("react");
+  // Not memoized: it renders whenever TimelineView renders it, like the real row.
+  function TimelineItemRowProbe(props: Parameters<typeof actual.TimelineItemRow>[0]) {
+    renderCounts.rows += 1;
+    return createElement(actual.TimelineItemRow, props);
+  }
+  return { ...actual, TimelineItemRow: TimelineItemRowProbe };
+});
+
+vi.mock("./composer", async () => {
+  const actual = await vi.importActual<typeof import("./composer")>("./composer");
+  const { createElement, memo } = await import("react");
+  // ThreadComposer is memoized, so this probe renders exactly when it does.
+  const ThreadComposerProbe = memo(function ThreadComposerProbe(
+    props: Parameters<typeof actual.ThreadComposer>[0]
+  ) {
+    renderCounts.composer += 1;
+    return createElement(actual.ThreadComposer, props);
+  });
+  return { ...actual, ThreadComposer: ThreadComposerProbe };
+});
+
+vi.mock("./TimelineView", async () => {
+  const actual = await vi.importActual<typeof import("./TimelineView")>("./TimelineView");
+  const { createElement, memo } = await import("react");
+  const TimelineViewProbe = memo(function TimelineViewProbe(
+    props: Parameters<typeof actual.TimelineView>[0]
+  ) {
+    renderCounts.timelineView += 1;
+    return createElement(actual.TimelineView, props);
+  });
+  return { ...actual, TimelineView: TimelineViewProbe };
+});
 
 class MockIntersectionObserver {
   static callback: IntersectionObserverCallback | null = null;
@@ -674,5 +717,152 @@ describe("ContextualRightPanel thread sender profiles", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open profile for Other Person" }));
     expect(onOpenSenderProfile).toHaveBeenCalledWith(room.room_id, "@other:example.invalid");
+  });
+});
+
+describe("ContextualRightPanel thread render isolation", () => {
+  // App hands this panel freshly created closures on every render.
+  function handlersLikeApp(): Partial<RightPanelProps> {
+    return Object.fromEntries(
+      Object.entries(defaultProps)
+        .filter(([, value]) => typeof value === "function")
+        .map(([name, value]) => [
+          name,
+          (...args: unknown[]) => (value as (...inner: unknown[]) => unknown)(...args)
+        ])
+    ) as Partial<RightPanelProps>;
+  }
+
+  test("an App render that changes no thread data leaves the thread timeline and composer alone", () => {
+    const currentUserId = "@current:example.invalid";
+    const rootEventId = "$root:example.invalid";
+    const key = threadTimelineKey(currentUserId, room.room_id, rootEventId);
+    const base = threadSnapshot("");
+    const threadTimelineSnapshot = {
+      ...base,
+      state: {
+        ...base.state,
+        domain: {
+          ...base.state.domain,
+          live_signals: { presence: {}, rooms: {} },
+          profile: { ...base.state.domain.profile, own: { avatar: null } },
+          settings: {
+            ...base.state.domain.settings,
+            values: {
+              ...base.state.domain.settings.values,
+              appearance: { density: "default" }
+            }
+          }
+        }
+      }
+    } as unknown as DesktopSnapshot;
+    const storeContext = {
+      store: applyTimelineEvent(createTimelineStore(), {
+        InitialItems: {
+          request_id: null,
+          key,
+          generation: 1,
+          items: [message("$reply:example.invalid", "Thread reply")]
+        }
+      }),
+      setStore: vi.fn()
+    };
+    const timelineTransport = baseTransport({});
+    const panel = () => (
+      <TimelineStoreContext.Provider value={storeContext}>
+        <ContextualRightPanel
+          {...defaultProps}
+          {...handlersLikeApp()}
+          mode="thread"
+          snapshot={threadTimelineSnapshot}
+          timelineTransport={timelineTransport}
+          onOpenSenderProfile={() => undefined}
+          onStartDirectMessage={() => undefined}
+          onOpenMatrixTarget={() => undefined}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    const { rerender } = render(panel());
+    expect(screen.getByText("Thread reply")).toBeTruthy();
+    const mounted = { ...renderCounts };
+
+    rerender(panel());
+    rerender(panel());
+
+    expect(renderCounts.timelineView).toBe(mounted.timelineView);
+    expect(renderCounts.composer).toBe(mounted.composer);
+  });
+  // The cost that #972 measured is the rows: an unrelated App render used to
+  // re-render every row of the open thread. Row renders are the deterministic
+  // stand-in for that time; the commit duration is logged, not asserted,
+  // because wall-clock thresholds flake in CI.
+  test("an unrelated App render re-renders no thread rows", () => {
+    const currentUserId = "@current:example.invalid";
+    const rootEventId = "$root:example.invalid";
+    const key = threadTimelineKey(currentUserId, room.room_id, rootEventId);
+    const base = threadSnapshot("");
+    const threadTimelineSnapshot = {
+      ...base,
+      state: {
+        ...base.state,
+        domain: {
+          ...base.state.domain,
+          live_signals: { presence: {}, rooms: {} },
+          profile: { ...base.state.domain.profile, own: { avatar: null } },
+          settings: {
+            ...base.state.domain.settings,
+            values: {
+              ...base.state.domain.settings.values,
+              appearance: { density: "default" }
+            }
+          }
+        }
+      }
+    } as unknown as DesktopSnapshot;
+    const items = Array.from({ length: 13 }, (_, index) =>
+      message(`$reply-${index}:example.invalid`, `Thread reply ${index}`)
+    );
+    const storeContext = {
+      store: applyTimelineEvent(createTimelineStore(), {
+        InitialItems: { request_id: null, key, generation: 1, items }
+      }),
+      setStore: vi.fn()
+    };
+    const timelineTransport = baseTransport({});
+    const updateCommitsMs: number[] = [];
+    const panel = () => (
+      <Profiler
+        id="thread-pane"
+        onRender={(_id, phase, actualDuration) => {
+          if (phase === "update") updateCommitsMs.push(actualDuration);
+        }}
+      >
+        <TimelineStoreContext.Provider value={storeContext}>
+          <ContextualRightPanel
+            {...defaultProps}
+            {...handlersLikeApp()}
+            mode="thread"
+            snapshot={threadTimelineSnapshot}
+            timelineTransport={timelineTransport}
+          />
+        </TimelineStoreContext.Provider>
+      </Profiler>
+    );
+
+    const { rerender } = render(panel());
+    expect(renderCounts.rows).toBeGreaterThan(0);
+    const rowsAfterMount = renderCounts.rows;
+    updateCommitsMs.length = 0;
+
+    const appRenders = 10;
+    for (let index = 0; index < appRenders; index += 1) rerender(panel());
+
+    console.info(
+      `thread pane: ${renderCounts.rows - rowsAfterMount} row renders and ` +
+        `${updateCommitsMs.reduce((total, ms) => total + ms, 0).toFixed(1)} ms of React render time ` +
+        `over ${appRenders} unrelated App renders`
+    );
+    expect(renderCounts.rows).toBe(rowsAfterMount);
   });
 });
