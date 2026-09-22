@@ -109,6 +109,8 @@ pub struct MatrixRoomLatestEventSummary {
     pub event_type: Option<String>,
     pub relation_type: Option<String>,
     pub relation_event_id: Option<String>,
+    /// Thread root when the latest event is a thread reply (#965).
+    pub thread_root_event_id: Option<String>,
     pub content_converted: bool,
     pub is_threaded: bool,
     pub is_reply: bool,
@@ -2054,6 +2056,10 @@ pub(super) fn matrix_timeline_update_from_ui(
             sender: event.sender().to_string(),
             timestamp_ms: event.timestamp().0.into(),
             body: content.body().to_owned(),
+            thread_root: event
+                .content()
+                .thread_root()
+                .map(|thread_root| thread_root.to_string()),
         })),
         None => Some(MatrixTimelineUpdate::Remove {
             room_id: room_id.to_owned(),
@@ -2635,9 +2641,11 @@ async fn matrix_room_latest_remote_event_projection(
     let event_type = matrix_timeline_event_type(&identity_event);
     let (relation_type, relation_event_id) = matrix_timeline_event_relation(&identity_event);
     let content_converted = facts_content.is_some();
-    let is_threaded = facts_content
+    let thread_root_event_id = facts_content
         .as_ref()
-        .is_some_and(|content| content.thread_root().is_some());
+        .and_then(|content| content.thread_root())
+        .map(|thread_root| thread_root.to_string());
+    let is_threaded = thread_root_event_id.is_some();
     let is_reply = facts_content
         .as_ref()
         .is_some_and(|content| content.in_reply_to().is_some());
@@ -2686,6 +2694,7 @@ async fn matrix_room_latest_remote_event_projection(
         event_type,
         relation_type,
         relation_event_id,
+        thread_root_event_id,
         content_converted,
         is_threaded,
         is_reply,
@@ -2781,6 +2790,8 @@ fn matrix_local_latest_event_projection(
         event_type: Some(event_type.to_owned()),
         relation_type,
         relation_event_id: None,
+        // Local echoes carry no resolved thread root; matches `is_threaded: false`.
+        thread_root_event_id: None,
         content_converted: false,
         is_threaded: false,
         is_reply: false,

@@ -159,6 +159,7 @@ fn native_attention_recomputed_diagnostic_records_private_safe_fields_child() {
         event_id: private_event_id.to_owned(),
         relation_type: None,
         relation_event_id: None,
+        thread_root_event_id: None,
         sender_id: Some(private_user_id.to_owned()),
         sender_label: Some("Private sender".to_owned()),
         sender_avatar: None,

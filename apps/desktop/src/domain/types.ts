@@ -1139,6 +1139,7 @@ export interface RoomLatestEventSummary {
   is_redacted: boolean;
   relation_type?: string | null;
   relation_event_id?: string | null;
+  thread_root_event_id?: string | null;
   sender_id: string | null;
   sender_label: string | null;
   sender_avatar: AvatarImage | null;

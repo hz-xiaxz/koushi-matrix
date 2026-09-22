@@ -533,6 +533,7 @@ fn latest_event(event_id: &str, timestamp_ms: u64) -> RoomLatestEventSummary {
         event_id: event_id.to_owned(),
         relation_type: None,
         relation_event_id: None,
+        thread_root_event_id: None,
         sender_id: Some("@bob:example.invalid".to_owned()),
         sender_label: Some("Bob".to_owned()),
         sender_avatar: None,

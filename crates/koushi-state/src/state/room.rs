@@ -156,6 +156,11 @@ pub struct RoomLatestEventSummary {
     pub relation_type: Option<String>,
     #[serde(default)]
     pub relation_event_id: Option<String>,
+    /// Thread root of the latest event, when it is a thread reply. Carried so
+    /// Activity rows built from the room-summary fallback can route to the
+    /// Thread panel before the room timeline has been reconciled (#965).
+    #[serde(default)]
+    pub thread_root_event_id: Option<String>,
     #[serde(default)]
     pub sender_id: Option<String>,
     #[serde(default)]
@@ -184,6 +189,10 @@ impl fmt::Debug for RoomLatestEventSummary {
             .field(
                 "relation_event_id",
                 &self.relation_event_id.as_ref().map(|_| "EventId(..)"),
+            )
+            .field(
+                "thread_root_event_id",
+                &self.thread_root_event_id.as_ref().map(|_| "EventId(..)"),
             )
             .field("sender_id", &self.sender_id.as_ref().map(|_| "UserId(..)"))
             .field(
@@ -420,6 +429,7 @@ mod tests {
             event_id: "$private-event:example.invalid".to_owned(),
             relation_type: None,
             relation_event_id: None,
+            thread_root_event_id: None,
             sender_id: Some("@private-sender:example.invalid".to_owned()),
             sender_label: Some("Private Sender".to_owned()),
             sender_avatar: None,
