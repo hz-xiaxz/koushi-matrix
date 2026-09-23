@@ -125,6 +125,8 @@ import {
   desktopAttentionSummary,
   desktopAttentionWindowTitle
 } from "./domain/desktopAttention";
+import type { DesktopNotificationActivation } from "./domain/desktopNotification";
+import { desktopNotificationTargetPlan } from "./domain/desktopNotification";
 import {
   qaDomDiagnosticTokens,
   qaTimelineDiagnosticTokens,
@@ -1103,7 +1105,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     }
     setPrimaryView("timeline");
     setRightPanelMode(
-      eventNavigation.source === "activity"
+      eventNavigation.source === "activity" || eventNavigation.source === "notification"
         ? "closed"
         : eventNavigation.source === "search"
           ? "search"
@@ -1952,7 +1954,8 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     snapshot,
     attentionWindowTitle,
     safeAttentionSummary,
-    appendDiagnosticLog
+    appendDiagnosticLog,
+    onNotificationActivated: openNotificationTarget
   });
 
   useEffect(() => {
@@ -4572,6 +4575,35 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     }
 
     await settleCommand(api.openPinnedEvent(roomId, eventId));
+  }
+
+  // A desktop notification click reuses the pinned-event flow for thread
+  // replies and the notification navigation source for main-timeline events,
+  // so an unavailable target is explained instead of silently landing at the
+  // live edge. Rust decided the target and fenced the session before emitting
+  // the activation.
+  async function openNotificationTarget(target: DesktopNotificationActivation) {
+    setPrimaryView("timeline");
+    const plan = desktopNotificationTargetPlan(target);
+    if (plan.kind === "thread") {
+      if (
+        snapshot?.state.ui.navigation.active_room_id !== plan.roomId &&
+        !(await selectRoom(plan.roomId))
+      ) {
+        return;
+      }
+      await openThread(plan.roomId, plan.rootEventId, {
+        pinnedReply: { event_id: plan.eventId }
+      });
+      return;
+    }
+
+    if (plan.kind === "event") {
+      await settleCommand(api.openNotificationEvent(plan.roomId, plan.eventId));
+      return;
+    }
+
+    await selectRoom(plan.roomId);
   }
 
   async function closeThreadsListPanel() {

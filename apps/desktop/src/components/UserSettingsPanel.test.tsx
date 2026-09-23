@@ -19,6 +19,7 @@ describe("UserSettingsPanel", () => {
         desktop_notifications: true,
         sound: true,
         badges: true,
+        message_previews: true,
         send_read_receipts: true,
         send_typing_notifications: true
       },
@@ -231,6 +232,7 @@ describe("UserSettingsPanel", () => {
     expect(notificationsSection).toContain("Desktop notifications");
     expect(notificationsSection).toContain("Sound");
     expect(notificationsSection).toContain("Badges");
+    expect(notificationsSection).toContain("Show message content in notifications");
     expect(notificationsSection).not.toContain("Send read receipts");
     expect(notificationsSection).not.toContain("Send typing notifications");
     expect(messagingPrivacySection).toContain("Send read receipts");
@@ -1384,5 +1386,68 @@ describe("UserSettingsPanel", () => {
 
     expect(onSubmitAccountManagementUia).toHaveBeenCalledWith(9, "synthetic-secret");
     expect(password.value).toBe("");
+  });
+  test("toggles message previews through the Rust-owned notifications setting", () => {
+    const onUpdateSettings = vi.fn();
+    const { rerender } = render(
+      <UserSettingsPanel
+        currentSession={{
+          homeserver: "https://matrix.org",
+          user_id: "@demo-user:example.invalid",
+          device_id: "FAKEDEVICE"
+        }}
+        e2eeTrust={idleE2eeTrust}
+        localEncryption={{ kind: "healthy" }}
+        platform="linux"
+        accountManagement={idleAccountManagement}
+        accountManagementCapabilities={idleAccountManagementCapabilities}
+        savedSessions={[]}
+        profile={profile}
+        settings={settings}
+        {...handlers}
+        onUpdateSettings={onUpdateSettings}
+      />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Notifications" }));
+
+    const toggle = screen.getByRole("switch", {
+      name: "Show message content in notifications"
+    });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
+    expect(onUpdateSettings).toHaveBeenCalledWith({
+      notifications: { ...settings.values.notifications, message_previews: false }
+    });
+
+    rerender(
+      <UserSettingsPanel
+        currentSession={{
+          homeserver: "https://matrix.org",
+          user_id: "@demo-user:example.invalid",
+          device_id: "FAKEDEVICE"
+        }}
+        e2eeTrust={idleE2eeTrust}
+        localEncryption={{ kind: "healthy" }}
+        platform="linux"
+        accountManagement={idleAccountManagement}
+        accountManagementCapabilities={idleAccountManagementCapabilities}
+        savedSessions={[]}
+        profile={profile}
+        settings={{
+          ...settings,
+          values: {
+            ...settings.values,
+            notifications: { ...settings.values.notifications, message_previews: false }
+          }
+        }}
+        {...handlers}
+        onUpdateSettings={onUpdateSettings}
+      />
+    );
+    expect(
+      screen
+        .getByRole("switch", { name: "Show message content in notifications" })
+        .getAttribute("aria-checked")
+    ).toBe("false");
   });
 });

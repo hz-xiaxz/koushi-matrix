@@ -100,6 +100,7 @@ fn projected_native_attention_from_rooms(
             window_focused: state.native_attention_context.window_focused,
             observation,
             previous_candidate,
+            message_previews: state.settings.values.notifications.message_previews,
             capabilities: state.native_attention.summary.capabilities,
         },
     );

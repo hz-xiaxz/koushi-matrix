@@ -1985,6 +1985,7 @@ pub(super) async fn run_native_attention_stage(conn: &mut CoreConnection) -> Res
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities,
     });
 
@@ -2018,6 +2019,7 @@ pub(super) async fn run_native_attention_stage(conn: &mut CoreConnection) -> Res
         window_focused: true,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities,
     });
     if focused.summary.candidate.is_some()
@@ -2048,6 +2050,7 @@ pub(super) async fn run_native_attention_stage(conn: &mut CoreConnection) -> Res
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities,
     });
     if with_modes.summary.unread_count != 1
@@ -2073,6 +2076,7 @@ pub(super) async fn run_native_attention_stage(conn: &mut CoreConnection) -> Res
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: attention.summary.candidate.as_ref(),
+        message_previews: false,
         capabilities,
     });
     if clear.summary.badge_count != 0 || clear.summary.candidate.is_some() {

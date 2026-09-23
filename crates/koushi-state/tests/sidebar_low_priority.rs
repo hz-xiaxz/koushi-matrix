@@ -276,6 +276,7 @@ fn project(rooms: &[RoomSummary]) -> koushi_state::NativeAttentionProjection {
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities: NativeAttentionCapabilities::default(),
     })
 }
@@ -332,6 +333,7 @@ fn an_ignored_user_dm_keeps_its_raw_badge_contribution() {
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities: NativeAttentionCapabilities::default(),
     });
 

@@ -1338,6 +1338,7 @@ function makeSnapshot(): DesktopSnapshot {
               desktop_notifications: true,
               sound: true,
               badges: true,
+              message_previews: true,
               send_read_receipts: true,
               send_typing_notifications: true
             },

@@ -281,6 +281,7 @@ fn native_attention_command_debug_redacts_candidate_labels() {
             dispatch: NativeAttentionDispatchState::Suppressed {
                 reason: NativeAttentionSuppressionReason::WindowFocused,
             },
+            notification: None,
         },
     };
 

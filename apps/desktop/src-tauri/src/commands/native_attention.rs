@@ -1,6 +1,8 @@
 use super::*;
 use koushi_state::{NativeAttentionDispatchId, NativeAttentionSoundOutcome};
 
+pub(crate) mod notification;
+
 const NATIVE_BADGE_APPLY_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(target_os = "macos")]
 const MACOS_ALERT_SOUND_DEFAULTS_KEY: &str = "com.apple.sound.beep.sound";

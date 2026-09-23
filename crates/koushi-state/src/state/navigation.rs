@@ -11,6 +11,12 @@ pub enum EventNavigationSource {
     Activity,
     Search,
     Pinned,
+    /// A desktop OS notification click. The notification already names the
+    /// exact event, and a miss must explain itself instead of silently landing
+    /// at the live edge, so it uses the failing missing-target policy. The room
+    /// is selected before the event lookup, so the user still ends up in the
+    /// right room when the target is gone.
+    Notification,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

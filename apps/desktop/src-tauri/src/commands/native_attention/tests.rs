@@ -206,6 +206,7 @@ async fn command_helper_crosses_core_runtime_and_settles_the_matching_dispatch()
                     capabilities: NativeAttentionCapabilities::default(),
                 },
                 dispatch: NativeAttentionDispatchState::Idle,
+                notification: None,
             },
         }))
         .await
@@ -280,6 +281,7 @@ async fn concurrent_command_helpers_admit_only_one_native_backend_call() {
                     capabilities: NativeAttentionCapabilities::default(),
                 },
                 dispatch: NativeAttentionDispatchState::Idle,
+                notification: None,
             },
         }))
         .await

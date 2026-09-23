@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 // This hook is the React-owned platform-lifecycle seam for desktop attention.
 import { desktopAttentionPort } from "../backend/desktopAttentionRuntime";
@@ -13,6 +13,7 @@ import {
   clearDesktopAttentionNotifications,
   sendDesktopAttentionNotification
 } from "../domain/desktopNotification";
+import type { DesktopNotificationActivation } from "../domain/desktopNotification";
 import type { DesktopAttentionSummary } from "../domain/desktopAttention";
 import type { DesktopSnapshot } from "../domain/types";
 
@@ -21,6 +22,8 @@ type DesktopAttentionEffectsInput = {
   attentionWindowTitle: string;
   safeAttentionSummary: DesktopAttentionSummary;
   appendDiagnosticLog: (entry: TimelineDiagnosticLogEntry) => void;
+  /** Present a completed notification click through the existing flows. */
+  onNotificationActivated: (activation: DesktopNotificationActivation) => void;
 };
 
 const desktopCandidateSoundDispatcher = createDesktopCandidateSoundDispatcher();
@@ -29,8 +32,10 @@ export function useDesktopAttentionEffects({
   snapshot,
   attentionWindowTitle,
   safeAttentionSummary,
-  appendDiagnosticLog
+  appendDiagnosticLog,
+  onNotificationActivated
 }: DesktopAttentionEffectsInput): void {
+  const notificationActivationHandler = useRef(onNotificationActivated);
   const attentionCapabilities = useMemo(
     () => snapshot?.state.domain.native_attention.summary.capabilities,
     [
@@ -111,7 +116,7 @@ export function useDesktopAttentionEffects({
         message: token
       })
     );
-    void sendDesktopAttentionNotification(candidate, desktopAttentionPort.notifications, (token) =>
+    void sendDesktopAttentionNotification(desktopAttentionPort.notifications, (token) =>
       appendDiagnosticLog({ timestampMs: Date.now(), source: "native.attention", message: token })
     );
   }, [
@@ -121,6 +126,25 @@ export function useDesktopAttentionEffects({
     snapshot?.state.domain.native_attention.summary.candidate?.unread_count,
     snapshot?.state.domain.native_attention.summary.candidate?.highlight_count
   ]);
+
+  useEffect(() => {
+    notificationActivationHandler.current = onNotificationActivated;
+  }, [onNotificationActivated]);
+
+  useEffect(() => {
+    if (!desktopAttentionPort) {
+      return;
+    }
+
+    return desktopAttentionPort.notifications.onActivated((activation) => {
+      appendDiagnosticLog({
+        timestampMs: Date.now(),
+        source: "native.attention",
+        message: `attention_notification_activated thread=${activation.thread_root_event_id !== null}`
+      });
+      notificationActivationHandler.current(activation);
+    });
+  }, [appendDiagnosticLog]);
 
   useEffect(() => {
     if (!desktopAttentionPort || safeAttentionSummary.badgeCount !== 0) {

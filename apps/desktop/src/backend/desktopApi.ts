@@ -207,6 +207,7 @@ export interface DesktopApi {
   selectRoom(roomId: string): Promise<CommandSettlement>;
   openActivityEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
   openPinnedEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
+  openNotificationEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
   selectSearchResult(roomId: string, eventId: string): Promise<CommandSettlement>;
   openTimelineAtTimestamp(roomId: string, timestampMs: number): Promise<CommandSettlement>;
   dismissEventNavigationFailure(): Promise<CommandAdmission>;

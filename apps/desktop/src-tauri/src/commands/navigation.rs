@@ -180,6 +180,29 @@ pub async fn open_pinned_event(
     .await
 }
 
+/// Navigate to the message a desktop notification named.
+///
+/// Unlike activity and search, a notification already points at one exact
+/// event, so a missing target must explain itself instead of silently landing
+/// at the live edge. The room is selected before the event lookup, and the
+/// webview keeps the pointer there when the event is gone.
+#[tauri::command]
+pub async fn open_notification_event(
+    room_id: String,
+    event_id: String,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandSettlement, String> {
+    navigate_to_event(
+        room_id,
+        event_id,
+        koushi_state::EventNavigationSource::Notification,
+        app,
+        state,
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn select_search_result(
     room_id: String,
@@ -316,7 +339,8 @@ fn event_navigation_policy(
         | koushi_state::EventNavigationSource::Search => {
             koushi_core::EventNavigationMissingTargetPolicy::LiveFallback
         }
-        koushi_state::EventNavigationSource::Pinned => {
+        koushi_state::EventNavigationSource::Pinned
+        | koushi_state::EventNavigationSource::Notification => {
             koushi_core::EventNavigationMissingTargetPolicy::Fail
         }
     }

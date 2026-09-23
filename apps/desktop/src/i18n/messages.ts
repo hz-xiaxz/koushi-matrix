@@ -638,6 +638,8 @@ export type MessageId =
   | "settings.updateInstallFailed"
   | "settings.notificationBadges"
   | "settings.notificationDesktop"
+  | "settings.notificationMessagePreviews"
+  | "settings.notificationMessagePreviewsDescription"
   | "settings.notificationSound"
   | "settings.sendReadReceipts"
   | "settings.sendTypingNotifications"
@@ -2110,6 +2112,9 @@ const en: Catalog = {
   "timeline.linkPreviewLoading": "Loading preview…",
   "settings.notificationBadges": "Badges",
   "settings.notificationDesktop": "Desktop notifications",
+  "settings.notificationMessagePreviews": "Show message content in notifications",
+  "settings.notificationMessagePreviewsDescription":
+    "Message text will appear in banners and in your operating system's notification centre. This is a device-local setting.",
   "settings.notificationSound": "Sound",
   "settings.sendReadReceipts": "Send read receipts",
   "settings.sendTypingNotifications": "Send typing notifications",
@@ -3469,6 +3474,9 @@ const ja: Catalog = {
   "timeline.linkPreviewLoading": "プレビューを読み込み中…",
   "settings.notificationBadges": "バッジ",
   "settings.notificationDesktop": "デスクトップ通知",
+  "settings.notificationMessagePreviews": "通知にメッセージ本文を表示",
+  "settings.notificationMessagePreviewsDescription":
+    "バナーとOSの通知センターにメッセージ本文が表示されます。この設定はこの端末だけに保存されます。",
   "settings.notificationSound": "サウンド",
   "settings.sendReadReceipts": "既読を送信",
   "settings.sendTypingNotifications": "入力通知を送信",

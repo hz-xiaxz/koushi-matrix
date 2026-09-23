@@ -31,6 +31,10 @@ tauri-plugin-opener = "2"
 url = "2"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+# Desktop notification display plus click activation. `tauri-plugin-notification`
+# can show a banner on desktop but has no activation path, and this is the same
+# backend it uses underneath.
+notify-rust = "4.18"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
