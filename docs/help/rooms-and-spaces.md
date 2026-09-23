@@ -96,20 +96,20 @@ Matrix client are reflected after synchronization.
 
 ## Download room history
 
-Open the room, select **Room info**, and choose **Download history** under
-**Download history**. Koushi saves the messages as one JSON file in the format
-of Element's chat export, so scripts and tools that read Element exports can
-read it. It is not a backup: neither Koushi nor Element can import it back.
+Open the room, select **Room info**, and select **Download** in its **Download
+history** section. Koushi saves the messages as one JSON file in the format of
+Element's chat export, so scripts and tools that read Element exports can read
+it. It is not a backup: neither Koushi nor Element can import it back.
 
 1. Choose the range:
    - **All available history** saves every event your account can read.
    - **Period** saves the events from the start date through the end date,
      inclusive. The dialog shows the time zone it uses for the dates, which is
-     your computer's time zone.
+     your computer's time zone. Dates before 1970 cannot be chosen.
 2. Select **Save**, then choose where to save the file.
 3. The dialog shows how many events have been read and saved. Closing it does
-   not stop the download; **Room info** keeps showing the progress. Select
-   **Stop** to cancel.
+   not stop the download; **Room info** keeps showing the progress. To cancel,
+   select **Stop** in the dialog (select **Download** again to reopen it).
 
 What can be saved depends on your permission to read the room's history, on
 what the server still keeps, and on which messages this device can decrypt.

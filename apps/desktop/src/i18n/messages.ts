@@ -1345,7 +1345,8 @@ export type MessageId =
   | "roomHistoryExport.failedSdk"
   | "roomHistoryExport.notStarted"
   | "roomHistoryExport.busyOtherRoom"
-  | "roomHistoryExport.again";
+  | "roomHistoryExport.again"
+  | "roomHistoryExport.periodTooEarly";
 
 type MessageValues = Record<string, string | number>;
 type Catalog = Record<MessageId, string>;
@@ -2771,7 +2772,7 @@ const en: Catalog = {
   "settings.searchHistoryStopRoom": "Stop",
   "settings.searchHistoryRoomUnknown": "Room",
   "roomHistoryExport.section": "Download history",
-  "roomHistoryExport.open": "Download history",
+  "roomHistoryExport.open": "Download",
   "roomHistoryExport.hint": "Save this room's messages as a JSON file in Element's chat export format.",
   "roomHistoryExport.title": "Download history",
   "roomHistoryExport.range": "Range",
@@ -2805,6 +2806,7 @@ const en: Catalog = {
   "roomHistoryExport.notStarted": "The download could not start. Try again.",
   "roomHistoryExport.busyOtherRoom": "Another room's history is being downloaded.",
   "roomHistoryExport.again": "Download again",
+  "roomHistoryExport.periodTooEarly": "Choose dates from 1970 onward.",
 };
 
 const ja: Catalog = {
@@ -4127,7 +4129,7 @@ const ja: Catalog = {
   "settings.searchHistoryStopRoom": "停止",
   "settings.searchHistoryRoomUnknown": "ルーム",
   "roomHistoryExport.section": "履歴のダウンロード",
-  "roomHistoryExport.open": "履歴をダウンロード",
+  "roomHistoryExport.open": "ダウンロード",
   "roomHistoryExport.hint": "このルームのメッセージを、Elementのチャットエクスポート形式のJSONファイルに保存します。",
   "roomHistoryExport.title": "履歴をダウンロード",
   "roomHistoryExport.range": "範囲",
@@ -4161,6 +4163,7 @@ const ja: Catalog = {
   "roomHistoryExport.notStarted": "ダウンロードを開始できませんでした。もう一度お試しください。",
   "roomHistoryExport.busyOtherRoom": "別のルームの履歴をダウンロードしています。",
   "roomHistoryExport.again": "もう一度ダウンロード",
+  "roomHistoryExport.periodTooEarly": "1970年以降の日付を選んでください。",
 };
 
 const pseudo: Catalog = Object.fromEntries(

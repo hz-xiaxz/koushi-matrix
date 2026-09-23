@@ -71,7 +71,10 @@ async function invocationArgs(page: Page, command: string): Promise<Array<Record
 async function openExportDialog(page: Page) {
   await page.getByRole("button", { name: t("room.roomInfo") }).click();
   const panel = page.getByRole("complementary", { name: t("panel.context") });
-  await panel.getByRole("button", { name: t("roomHistoryExport.open"), exact: true }).click();
+  await panel
+    .getByRole("region", { name: t("roomHistoryExport.section") })
+    .getByRole("button", { name: t("roomHistoryExport.open"), exact: true })
+    .click();
   const dialog = page.getByRole("dialog", { name: t("roomHistoryExport.title") });
   await expect(dialog).toBeVisible();
   return { panel, dialog };

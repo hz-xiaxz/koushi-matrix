@@ -65,10 +65,9 @@ pub async fn export_room_history(
     }
     let range = resolve_range(range)?;
     let time_zone = platform_time_zone();
-    let file_name = export_file_name(
-        &file_name_stem,
-        Timestamp::now().to_zoned(time_zone.clone()).date(),
-    );
+    // One clock read, so the file name's date and `export_date` agree.
+    let now = Timestamp::now();
+    let file_name = export_file_name(&file_name_stem, now.to_zoned(time_zone.clone()).date());
     let Some(destination) = choose_destination(&app, &window, dialog_title, file_name).await?
     else {
         return Ok(FrontendRoomHistoryExportStart::Dismissed);
@@ -78,7 +77,7 @@ pub async fn export_room_history(
         request_id,
         room_id,
         range,
-        utc_offset_minutes(&time_zone, Timestamp::now()),
+        utc_offset_minutes(&time_zone, now),
     );
     let admission = submit_core_command_with_native_artifact_path(
         state.inner(),

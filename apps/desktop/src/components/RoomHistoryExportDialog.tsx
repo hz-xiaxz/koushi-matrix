@@ -29,6 +29,8 @@ export interface RoomHistoryExportControls {
 
 type RangeKind = RoomHistoryExportRangeInput["kind"];
 
+const EARLIEST_DATE = "1970-01-01";
+
 const FAILURE_MESSAGES: Record<RoomHistoryExportFailureKind, MessageId> = {
   invalidRange: "roomHistoryExport.failedInvalidRange",
   roomNotFound: "roomHistoryExport.failedRoomNotFound",
@@ -132,11 +134,14 @@ export function RoomHistoryExportDialog({
     exportState.request_id === submittedRequestId
       ? exportState
       : null;
-  // A rejected start leaves the Rust state unchanged, so the admitted snapshot
-  // holds neither this request in flight nor its settlement.
+  // A rejected start leaves the Rust state unchanged. Core admits a command
+  // only after handling it, so the admitted snapshot then holds neither this
+  // request in flight nor its settlement.
   const notStarted =
     startFailed || (submittedRequestId !== null && !starting && !exportingHere && settledHere === null);
-  const periodValid = startDate !== "" && endDate !== "" && startDate <= endDate;
+  // Instants before the Unix epoch cannot be exported; the adapter rejects them.
+  const periodTooEarly = (startDate !== "" && startDate < EARLIEST_DATE) || (endDate !== "" && endDate < EARLIEST_DATE);
+  const periodValid = startDate !== "" && endDate !== "" && startDate <= endDate && !periodTooEarly;
   const canSave =
     !starting &&
     !exportingElsewhere &&
@@ -174,7 +179,12 @@ export function RoomHistoryExportDialog({
   const status = roomHistoryExportStatus(exportState, roomId);
 
   return (
-    <ModalDialog title={t("roomHistoryExport.title")} className="room-history-export-modal" onClose={onClose}>
+    <ModalDialog
+      title={t("roomHistoryExport.title")}
+      className="room-history-export-modal"
+      dismissible={!starting}
+      onClose={onClose}
+    >
       <div className="room-history-export-content">
         {exportingHere && exportState.kind === "exporting" ? (
           <>
@@ -185,7 +195,10 @@ export function RoomHistoryExportDialog({
                 type="button"
                 className="dialog-button"
                 disabled={exportState.cancel_requested}
-                onClick={() => void controls.cancel(exportState.request_id)}
+                onClick={() => {
+                  // A failed submit leaves the Rust state, and so this view, unchanged.
+                  controls.cancel(exportState.request_id).catch(() => undefined);
+                }}
               >
                 {t("roomHistoryExport.stop")}
               </button>
@@ -280,7 +293,9 @@ export function RoomHistoryExportDialog({
                   {t("roomHistoryExport.timeZone", { timeZone })}
                 </p>
                 {!periodValid ? (
-                  <p className="profile-settings-hint error" role="alert">{t("roomHistoryExport.invalidPeriod")}</p>
+                  <p className="profile-settings-hint error" role="alert">
+                    {t(periodTooEarly ? "roomHistoryExport.periodTooEarly" : "roomHistoryExport.invalidPeriod")}
+                  </p>
                 ) : null}
               </div>
             ) : null}
@@ -299,7 +314,7 @@ export function RoomHistoryExportDialog({
               <p className="profile-settings-hint error" role="alert">{t("roomHistoryExport.notStarted")}</p>
             ) : null}
             <div className="dialog-actions">
-              <button type="button" className="dialog-button" onClick={onClose}>
+              <button type="button" className="dialog-button" disabled={starting} onClick={onClose}>
                 {t("action.cancel")}
               </button>
               <button type="submit" className="dialog-button is-primary" disabled={!canSave}>

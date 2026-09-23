@@ -106,6 +106,36 @@ test("an end date before the start date blocks Save", async () => {
   expect(ports.start).not.toHaveBeenCalled();
 });
 
+test("dates before 1970 are rejected in the dialog with their own hint", async () => {
+  const ports = controls();
+  renderDialog(idle, ports);
+  const period = screen.getByRole("radio", { name: "Period" });
+  await waitFor(() => expect((period as HTMLInputElement).disabled).toBe(false));
+  fireEvent.click(period);
+  fireEvent.change(screen.getByLabelText("Start date"), { target: { value: "1969-12-31" } });
+  expect(screen.getByRole("alert").textContent).toBe(t("roomHistoryExport.periodTooEarly"));
+  expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+test("a failed Stop submit is contained and leaves the Rust view", async () => {
+  const ports = controls();
+  ports.cancel.mockRejectedValueOnce(new Error("submit timed out"));
+  renderDialog(
+    {
+      kind: "exporting",
+      request_id: 41,
+      room_id: room.room_id,
+      range: { kind: "allAvailable" },
+      progress: progress(1, 1),
+      cancel_requested: false
+    },
+    ports
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+  await waitFor(() => expect(ports.cancel).toHaveBeenCalledTimes(1));
+  expect((screen.getByRole("button", { name: "Stop" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
 test("all available history is the default and needs no dates", async () => {
   const ports = controls();
   renderDialog(idle, ports);
@@ -271,7 +301,7 @@ test("Room info opens the dialog and summarizes the latest Rust outcome for its 
   expect(screen.getByTestId("room-info-history-export-summary").textContent).toBe(
     t("roomHistoryExport.completed", { exported: 4 }) + t("roomHistoryExport.undecryptable", { count: 1 })
   );
-  fireEvent.click(screen.getByRole("button", { name: "Download history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Download" }));
   expect(screen.getByRole("dialog", { name: "Download history" })).toBeTruthy();
   expect(roomHistoryExportSummary(completed, "!other:example.invalid")).toEqual([]);
   expect(roomHistoryExportSummary(idle, room.room_id)).toEqual([]);

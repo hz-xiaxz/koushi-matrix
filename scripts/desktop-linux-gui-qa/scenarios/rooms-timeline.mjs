@@ -1262,7 +1262,7 @@ export async function runLocalRoomHistoryExportScenario() {
     const roomInfoButton = await session.browser.$('button[aria-label="Room info"]');
     await roomInfoButton.waitForDisplayed({ timeout: timeoutMs });
     await roomInfoButton.click();
-    const openButton = await session.browser.$("//section[@aria-label='Download history']//button[normalize-space()='Download history']");
+    const openButton = await session.browser.$("//section[@aria-label='Download history']//button[normalize-space()='Download']");
     await openButton.waitForDisplayed({ timeout: timeoutMs });
     await openButton.click();
     await session.browser.$("//dialog[@aria-label='Download history']").waitForDisplayed({ timeout: timeoutMs });
@@ -1306,7 +1306,8 @@ export async function runLocalRoomHistoryExportScenario() {
     assertElementExportShape(pastExport, seeds, 0, "local GUI past period export");
     if (pastExport.messages.length !== 0) throw new Error("local GUI past period export is not empty");
 
-    // Today's period, in the zone the dialog named, holds every seed.
+    // Today's period, in the zone the dialog named, holds every seed. This
+    // assumes setup and this step fall on the same civil day in that zone.
     await clickHistoryExportDialogButton(session.browser, "Download again", timeoutMs);
     await setDatetimeLocalValue(session.browser, today, "Start date");
     await setDatetimeLocalValue(session.browser, today, "End date");

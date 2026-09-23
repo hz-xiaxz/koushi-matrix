@@ -114,3 +114,22 @@ row).
   parsed for Element's top-level keys and the seeded messages, and its count
   is compared with the dialog's. Tokens: `gui_local_history_export_all=ok`,
   `gui_local_history_export_period=ok`, `gui_local_room_history_export=ok`.
+
+## Review
+
+An independent read-only review of the integrated diff (2026-09-23) found no
+blocking issues. Fixed in this change:
+
+- A failed Stop submit was an unhandled rejection; it is now contained and
+  the Rust state still drives the view.
+- Dates before 1970 are rejected in the dialog with their own hint instead
+  of a generic "could not start".
+- The Room info button reads **Download** inside its **Download history**
+  section; the guide's Stop instructions name the dialog.
+- The in-app dialog cannot be dismissed while the native save dialog is
+  open, and one clock read feeds both the file name date and `export_date`.
+
+Accepted as documented: English plurals follow the existing catalog style
+("Saved 1 events"), Windows reserved stems such as `CON` are left to the
+native dialog, and the Linux lane's today-period step assumes setup and
+export fall on the same civil day.
