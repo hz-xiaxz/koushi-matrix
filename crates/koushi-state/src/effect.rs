@@ -211,6 +211,7 @@ pub enum UiEvent {
     SearchChanged,
     SearchCrawlerChanged,
     FilesViewChanged,
+    RoomHistoryExportChanged,
     LiveSignalsChanged,
     E2eeTrustChanged,
     E2eeKeyManagementChanged,

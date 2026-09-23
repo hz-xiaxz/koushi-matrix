@@ -442,7 +442,7 @@ export function defaultSnapshotResponse() {
       threads_list: { kind: "closed" },
       focused_context: { kind: "closed" },
       search: { kind: "closed" },
-      files_view: { kind: "closed" },
+      files_view: { kind: "closed" }, room_history_export: { kind: "idle" },
       errors: [],
       basic_operation: { kind: "idle" },
       live_signals: { rooms: {}, presence: {} },

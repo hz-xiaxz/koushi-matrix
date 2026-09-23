@@ -1807,6 +1807,23 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         }],
     };
 
+    // room_history_export — a period export in flight
+    state.room_history_export = koushi_state::RoomHistoryExportState::Exporting {
+        request_id: 12,
+        room_id: "!room:example.invalid".to_owned(),
+        range: koushi_state::RoomHistoryExportRange::Period {
+            start_ms: 1_700_000_000_000,
+            end_exclusive_ms: 1_700_086_400_000,
+            time_zone: "Asia/Tokyo".to_owned(),
+        },
+        progress: koushi_state::RoomHistoryExportProgress {
+            fetched_events: 250,
+            exported_events: 180,
+            undecryptable_events: 2,
+        },
+        cancel_requested: false,
+    };
+
     // files_view — Open with one attachment entry
     state.files_view = FilesViewState::Open {
         request_id: 10,

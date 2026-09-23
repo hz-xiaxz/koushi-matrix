@@ -102,6 +102,8 @@ mod participants;
 mod registry;
 #[path = "headless_core_qa/scenarios/avatars.rs"]
 mod scenario_avatars;
+#[path = "headless_core_qa/scenarios/history_export.rs"]
+mod scenario_history_export;
 #[path = "headless_core_qa/scenarios/identity.rs"]
 mod scenario_identity;
 #[path = "headless_core_qa/scenarios/read_state.rs"]

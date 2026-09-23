@@ -149,6 +149,12 @@ pub use state::{
     SlidingSyncCapabilityFailureKind, SlidingSyncCapabilityResult, SlidingSyncCapabilityState,
     SlidingSyncPositiveEvidence, SlidingSyncRevalidationState,
 };
+// Room-history export (#59) keeps its own block so the feature does not edit
+// the shared list above.
+pub use state::{
+    RoomHistoryExportFailureKind, RoomHistoryExportProgress, RoomHistoryExportRange,
+    RoomHistoryExportState,
+};
 pub use submission::{
     ComposerSubmissionTarget, ComposerSubmissionTerminalOutcome, ComposerTarget, SubmissionId,
 };

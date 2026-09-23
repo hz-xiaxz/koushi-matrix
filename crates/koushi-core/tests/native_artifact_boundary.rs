@@ -1,10 +1,11 @@
 use std::{path::PathBuf, sync::Arc};
 
 use koushi_core::{
-    AccountCommand, CoreCommand, CoreRuntime, NativeArtifactKind, NativeArtifactRegistry,
-    RoomKeyExportRequest,
+    AccountCommand, CoreCommand, CoreCommandPolicy, CoreRuntime, NativeArtifactKind,
+    NativeArtifactRegistry, RoomKeyExportRequest,
 };
-use koushi_state::AuthSecret;
+use koushi_protocol::command::RoomHistoryExportRequest;
+use koushi_state::{AuthSecret, RoomHistoryExportRange};
 
 #[tokio::test]
 async fn rejected_command_releases_its_exact_native_artifact_registration() {
@@ -74,6 +75,79 @@ async fn rejected_bootstrap_releases_its_recovery_key_destination() {
         .expect("local command admission");
 
     assert!(registry.is_empty());
+    drop(connection);
+    runtime.shutdown().await;
+}
+
+const ROOM: &str = "!history:example.invalid";
+
+fn export_command(request_id: koushi_protocol::ids::RequestId) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::ExportRoomHistory {
+        request_id,
+        request: RoomHistoryExportRequest {
+            room_id: ROOM.to_owned(),
+            range: RoomHistoryExportRange::Period {
+                start_ms: 1_700_000_000_000,
+                end_exclusive_ms: 1_700_086_400_000,
+                time_zone: "Asia/Tokyo".to_owned(),
+            },
+            export_date_utc_offset_minutes: 540,
+        },
+    })
+}
+
+#[test]
+fn export_commands_are_correlated_ready_gated_and_redacted() {
+    let request_id = koushi_protocol::ids::RequestId {
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(3),
+        sequence: 17,
+    };
+    let target_request_id = koushi_protocol::ids::RequestId {
+        connection_id: koushi_protocol::ids::RuntimeConnectionId(3),
+        sequence: 16,
+    };
+    let cancel = CoreCommand::Account(AccountCommand::CancelRoomHistoryExport {
+        request_id,
+        target_request_id,
+    });
+    for command in [export_command(request_id), cancel] {
+        assert_eq!(command.request_id(), request_id);
+        assert!(command.requires_ready_session());
+        let debug = format!("{command:?}");
+        assert!(!debug.contains(ROOM), "{debug}");
+        assert!(!debug.contains("Asia/Tokyo"), "{debug}");
+        assert!(!debug.contains("path"), "{debug}");
+    }
+}
+
+#[tokio::test]
+async fn a_rejected_export_releases_its_destination_registration() {
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let registry = Arc::new(NativeArtifactRegistry::new());
+    let runtime = CoreRuntime::start_with_data_dir_and_native_artifact_port(
+        data_dir.path().to_path_buf(),
+        registry.clone(),
+    );
+    let connection = runtime.attach();
+    let request_id = connection.next_request_id();
+    connection
+        .register_native_artifact(
+            request_id,
+            NativeArtifactKind::RoomHistoryExportDestination,
+            PathBuf::from("synthetic-history-export-path"),
+        )
+        .expect("register path");
+
+    connection
+        .command_with_admission(export_command(request_id))
+        .await
+        .expect("local command admission");
+
+    assert!(registry.is_empty());
+    assert_eq!(
+        connection.snapshot().room_history_export,
+        koushi_state::RoomHistoryExportState::Idle
+    );
     drop(connection);
     runtime.shutdown().await;
 }

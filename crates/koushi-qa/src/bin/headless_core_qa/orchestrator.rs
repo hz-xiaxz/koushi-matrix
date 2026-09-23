@@ -33,6 +33,7 @@ use super::scenario_rooms::{
     run_room_people_projection_stage, wait_for_pin_event_completed, wait_for_pinned_state,
     wait_for_room_list_containing, wait_for_unpin_event_completed,
 };
+use super::scenario_history_export::run_room_history_export_stage;
 use super::scenario_search::{
     poll_search_until_absent, poll_search_until_found, run_hide_redacted_stage,
     run_search_crawler_stage, wait_for_paginate_end_reached,
@@ -1194,6 +1195,10 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
     // on the same FIFO-ordered connection, so the actor is dropped first and
     // the following request-id-scoped wait provides the real synchronization.
     println!("timeline=ok");
+
+    if scenario.should_run_stage(QaStage::RoomHistoryExport) {
+        run_room_history_export_stage(&config, &mut conn_a, &account_key_a).await?;
+    }
 
     if scenario.should_run_stage(QaStage::SendQueue) {
         let recovery_secret = bootstrap_recovery_secret_a

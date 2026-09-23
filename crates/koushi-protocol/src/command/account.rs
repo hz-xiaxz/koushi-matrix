@@ -20,6 +20,33 @@ impl fmt::Debug for RoomKeyExportRequest {
     }
 }
 
+/// Export one room's history as an Element-compatible chat-export JSON file.
+///
+/// The destination path never travels in this command: the platform adapter
+/// registers it as a native artifact for the same request.
+/// `export_date_utc_offset_minutes` is the platform's current UTC offset, used
+/// only to render Element's `export_date` field in the user's local calendar.
+#[derive(Clone, Eq, PartialEq)]
+pub struct RoomHistoryExportRequest {
+    pub room_id: String,
+    pub range: koushi_state::RoomHistoryExportRange,
+    pub export_date_utc_offset_minutes: i32,
+}
+
+impl fmt::Debug for RoomHistoryExportRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RoomHistoryExportRequest")
+            .field("room_id", &"RoomId(..)")
+            .field("range", &self.range)
+            .field(
+                "export_date_utc_offset_minutes",
+                &self.export_date_utc_offset_minutes,
+            )
+            .finish()
+    }
+}
+
 #[derive(Clone, Eq, PartialEq)]
 pub struct RoomKeyImportRequest {
     pub passphrase: koushi_state::AuthSecret,
@@ -151,6 +178,16 @@ pub enum AccountCommand {
     ExportRoomKeys {
         request_id: RequestId,
         request: RoomKeyExportRequest,
+    },
+    ExportRoomHistory {
+        request_id: RequestId,
+        request: RoomHistoryExportRequest,
+    },
+    /// Cancel the export started by `target_request_id`. A partial file is
+    /// deleted; the export settles as cancelled.
+    CancelRoomHistoryExport {
+        request_id: RequestId,
+        target_request_id: RequestId,
     },
     ImportRoomKeys {
         request_id: RequestId,
@@ -419,6 +456,22 @@ impl fmt::Debug for AccountCommand {
                 .debug_struct("ExportRoomKeys")
                 .field("request_id", request_id)
                 .field("request", request)
+                .finish(),
+            Self::ExportRoomHistory {
+                request_id,
+                request,
+            } => formatter
+                .debug_struct("ExportRoomHistory")
+                .field("request_id", request_id)
+                .field("request", request)
+                .finish(),
+            Self::CancelRoomHistoryExport {
+                request_id,
+                target_request_id,
+            } => formatter
+                .debug_struct("CancelRoomHistoryExport")
+                .field("request_id", request_id)
+                .field("target_request_id", target_request_id)
                 .finish(),
             Self::ImportRoomKeys {
                 request_id,

@@ -1575,7 +1575,7 @@ function makeSnapshot(): DesktopSnapshot {
           staged_uploads: []
         },
         focused_context: { kind: "closed" },
-        files_view: { kind: "closed" },
+        files_view: { kind: "closed" }, room_history_export: { kind: "idle" },
         threads_list: { kind: "closed" },
         errors: [],
         basic_operation: { kind: "idle" }

@@ -472,6 +472,8 @@ async fn reset_local_data_clears_current_account_persistence_and_signs_out_local
         focused_projection_tx,
         account_work,
         activity_resolution_task: None,
+        room_history_export: None,
+        room_history_export_sink: Arc::new(crate::room_history_export::NativeRoomHistoryExportSink),
         data_dir: data_dir_path,
         link_preview_policy: LinkPreviewContext::default(),
         send_read_receipts: true,

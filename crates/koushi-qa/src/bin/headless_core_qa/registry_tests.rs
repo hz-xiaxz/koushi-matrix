@@ -83,6 +83,10 @@ fn parses_all_scenarios_from_env_value_including_directory() {
         QaScenario::SearchCrawler
     );
     assert_eq!(
+        QaScenario::from_env_value("room_history_export").unwrap(),
+        QaScenario::RoomHistoryExport
+    );
+    assert_eq!(
         QaScenario::from_env_value("scheduled_send").unwrap(),
         QaScenario::ScheduledSend
     );
@@ -261,6 +265,7 @@ fn all_core_qa_scenarios_suppress_matrix_identifiers() {
         QaScenario::Thread,
         QaScenario::EditRedactSearch,
         QaScenario::SearchCrawler,
+        QaScenario::RoomHistoryExport,
         QaScenario::ScheduledSend,
         QaScenario::SendQueue,
         QaScenario::RestoreCleanup,
@@ -480,6 +485,11 @@ fn implemented_final_tokens_include_thread() {
             "crawl_no_media_bytes=ok",
             "crawl_throttle=ok",
             "crawl_failure=ok",
+            "history_export_full=ok",
+            "history_export_period=ok",
+            "history_export_utd_counted=ok",
+            "history_export_cancel=ok",
+            "room_history_export=ok",
             "scheduled_capability=local_fallback",
             "scheduled_create=ok",
             "scheduled_reschedule=ok",
@@ -866,6 +876,11 @@ fn implemented_final_tokens_include_safety() {
             "crawl_no_media_bytes=ok",
             "crawl_throttle=ok",
             "crawl_failure=ok",
+            "history_export_full=ok",
+            "history_export_period=ok",
+            "history_export_utd_counted=ok",
+            "history_export_cancel=ok",
+            "room_history_export=ok",
             "scheduled_capability=local_fallback",
             "scheduled_create=ok",
             "scheduled_reschedule=ok",
@@ -890,4 +905,31 @@ fn implemented_final_tokens_include_safety() {
             "link_preview_hide=ok",
         ][..]
     );
+}
+
+#[test]
+fn room_history_export_is_registered_with_private_safe_tokens() {
+    assert_eq!(
+        stages_for_scenario(QaScenario::RoomHistoryExport),
+        [
+            QaStage::Safety,
+            QaStage::LoginSync,
+            QaStage::RoomSpace,
+            QaStage::Timeline,
+            QaStage::RoomHistoryExport,
+        ]
+    );
+    let tokens = final_tokens_for_scenario(QaScenario::RoomHistoryExport);
+    for token in [
+        "history_export_full=ok",
+        "history_export_period=ok",
+        "history_export_utd_counted=ok",
+        "history_export_cancel=ok",
+        "room_history_export=ok",
+        "restore_cleanup=ok",
+    ] {
+        assert!(tokens.contains(&token), "{token}");
+    }
+    assert!(QaScenario::All.should_run_stage(QaStage::RoomHistoryExport));
+    assert!(!QaScenario::RoomHistoryExport.should_run_stage(QaStage::EditRedactSearch));
 }

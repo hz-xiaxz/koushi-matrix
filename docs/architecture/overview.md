@@ -412,9 +412,10 @@ rewriting the runtime.
    executor (wasm) as well as multi-threaded tokio.
 3. **Platform capabilities live behind ports, owned by `StoreActor` and the
    adapters.** OS credential store (`keyring`), filesystem paths, SQLite
-   store config, media-save filesystem operations, and process/OS APIs appear
-   only behind traits with platform backends (today: OS keychain + SQLite and
-   the native media-save port; browser later: WebCrypto-derived keys +
+   store config, media-save filesystem operations, room-history export files,
+   and process/OS APIs appear only behind traits with platform backends
+   (today: OS keychain + SQLite, the native media-save port, and the native
+   `RoomHistoryExportSink`; browser later: WebCrypto-derived keys +
    IndexedDB). `koushi-store` may implement native credential/encrypted-file
    mechanics behind those ports, but `StoreActor` is the only actor allowed
    platform-conditional policy and remains the account/path/key/migration

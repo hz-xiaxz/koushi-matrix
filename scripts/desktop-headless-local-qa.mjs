@@ -68,6 +68,7 @@ const checks = [
   "scenario edit_redact_search",
   "scenario redact_edit_convergence",
   "scenario search_crawler",
+  "scenario room_history_export",
   "scenario scheduled_send",
   "scenario send_queue",
   "scenario restore_cleanup",
