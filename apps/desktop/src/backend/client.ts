@@ -45,6 +45,8 @@ import type {
   AttachmentSort,
   CreateRoomRequest,
   RoomAddressPreview,
+  RoomHistoryExportRangeInput,
+  RoomHistoryExportStart,
   FilesViewScope,
   SubmissionResponse,
   ThreadOpenIntent,
@@ -283,6 +285,28 @@ export class TauriDesktopApi implements DesktopApi {
 
   async importRoomKeys(sourcePath: string, passphrase: string): Promise<CommandAdmission> {
     return this.invokeCommand<CommandAdmission>("import_room_keys", { sourcePath, passphrase });
+  }
+
+  async roomHistoryExportTimeZone(): Promise<string> {
+    return this.invokeCommand<string>("room_history_export_time_zone");
+  }
+
+  async exportRoomHistory(
+    roomId: string,
+    range: RoomHistoryExportRangeInput,
+    dialogTitle: string,
+    fileNameStem: string
+  ): Promise<RoomHistoryExportStart> {
+    return this.invokeCommand<RoomHistoryExportStart>("export_room_history", {
+      roomId,
+      range,
+      dialogTitle,
+      fileNameStem
+    });
+  }
+
+  async cancelRoomHistoryExport(targetRequestId: number): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("cancel_room_history_export", { targetRequestId });
   }
 
   async bootstrapSecureBackup(

@@ -22,6 +22,8 @@ import type {
   ComposerTarget,
   CreateRoomRequest,
   RoomAddressPreview,
+  RoomHistoryExportRangeInput,
+  RoomHistoryExportStart,
   DesktopSnapshot,
   DesktopUpdateState,
   DirectoryQuery,
@@ -165,6 +167,14 @@ export interface DesktopApi {
   enableKeyBackup(): Promise<CommandAdmission>;
   exportRoomKeys(destinationPath: string, passphrase: string): Promise<CommandAdmission>;
   importRoomKeys(sourcePath: string, passphrase: string): Promise<CommandAdmission>;
+  roomHistoryExportTimeZone(): Promise<string>;
+  exportRoomHistory(
+    roomId: string,
+    range: RoomHistoryExportRangeInput,
+    dialogTitle: string,
+    fileNameStem: string
+  ): Promise<RoomHistoryExportStart>;
+  cancelRoomHistoryExport(targetRequestId: number): Promise<CommandAdmission>;
   bootstrapSecureBackup(
     passphrase: string | null,
     recoveryKeyDestinationPath: string | null,

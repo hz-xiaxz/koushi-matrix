@@ -53,10 +53,10 @@ supply a passphrase, and confirm **Export room keys** in the passphrase dialog.
 Import follows the same sequence with **Import room keys** and the passphrase
 that protected the original file. Keep both the file and its passphrase secure.
 
-A room-key file is not a readable copy of a conversation. This guide does not
-describe a released chat-history download feature; proposed chat export work
-is tracked in [issue 59](https://github.com/shinaoka/koushi-matrix/issues/59).
-Do not interpret that issue as an available menu item.
+A room-key file is not a readable copy of a conversation. To save a readable
+copy of a room's messages, use **Room info → Download history** instead; see
+[Download room history](rooms-and-spaces.md#download-room-history). That file
+holds encrypted messages as plain text and contains no keys.
 
 ## Understand trust labels
 

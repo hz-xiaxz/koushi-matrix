@@ -8978,3 +8978,42 @@ kbd {
 
 .confirmation-modal { width: 480px; }
 .confirmation-content { padding: 0 20px 20px; overflow-y: auto; }
+
+/* #59 room-history export dialog. */
+.room-history-export-modal { inline-size: 520px; }
+.room-history-export-content { display: grid; gap: 12px; min-block-size: 0; padding: 20px; overflow: auto; }
+.room-history-export-content p { margin: 0; }
+.room-history-export-form { display: grid; gap: 12px; }
+.room-history-export-period {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+.room-history-export-period > p { grid-column: 1 / -1; }
+.room-history-export-date {
+  display: grid;
+  gap: var(--scheduled-field-gap);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+.room-history-export-date input {
+  min-inline-size: 0;
+  min-block-size: var(--scheduled-input-block-size);
+  padding-inline: var(--scheduled-input-padding-inline);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  background: var(--surface);
+}
+.room-history-export-date input:focus { border-color: var(--brand); }
+.room-history-export-warning {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  color: var(--warning);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.room-history-export-warning svg { flex: 0 0 auto; margin-block-start: 2px; }

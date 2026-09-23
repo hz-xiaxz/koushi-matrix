@@ -71,6 +71,8 @@ export async function startLocalGuiScenario() {
     aliasLocalDisplayName: null,
     primaryUserId: null,
     seedRoomId: null,
+    historyExportDir: null,
+    historyExportSeedBodies: null,
     seedInviteRoomName: null,
     readerDisplayNames: [],
     readerSeedBody: null,
@@ -282,6 +284,18 @@ export async function startLocalGuiScenario() {
       );
     }
 
+    if (guiScenario === "local-room-history-export") {
+      session.historyExportSeedBodies = Array.from(
+        { length: 3 },
+        (_, index) => `QA history export seed ${index + 1}`
+      );
+      for (const [index, body] of session.historyExportSeedBodies.entries()) {
+        await sendRoomMessage(homeserver, accessToken, seedRoomId, body, `qa-history-export-${index}-${userSuffix}`);
+      }
+      session.historyExportDir = join(runDir, "history-export");
+      mkdirSync(session.historyExportDir, { recursive: true });
+    }
+
     if (guiScenario === "local-room-management") {
       const helperUsername = `qa_management_${userSuffix}`;
       const helperPassword = `koushi-desktop-helper-${userSuffix}`;
@@ -351,6 +365,11 @@ export async function startLocalGuiScenario() {
       session.qaLoginPipePath,
       session.qaControlPipePath
     );
+    if (session.historyExportDir) {
+      // Debug-build-only adapter override: WebDriver cannot drive the native
+      // save dialog, so the export is written to this ignored run directory.
+      baseEnv.KOUSHI_QA_HISTORY_EXPORT_DIR = session.historyExportDir;
+    }
     session.dbusSession = ensureDbusSession(logPath, baseEnv);
     session.buildEnv = {
       ...baseEnv,

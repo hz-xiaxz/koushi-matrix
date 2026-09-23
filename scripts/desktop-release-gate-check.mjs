@@ -32,6 +32,8 @@ assertSdkSubmoduleSynced({ repoRoot });
 const GATED_ENV_LITERALS = [
   '"KOUSHI_QA_LOGIN_PIPE"',
   '"KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR"',
+  // Redirects a user-chosen export destination without the native dialog.
+  '"KOUSHI_QA_HISTORY_EXPORT_DIR"',
 ];
 const GATE_ATTR = /#\[cfg\((any\()?(debug_assertions|test)/;
 

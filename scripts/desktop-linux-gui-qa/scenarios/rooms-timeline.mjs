@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { sendReadMarkers, sendRoomMessage } from "../../lib/local-homeserver-qa.mjs";
 import { parseQaTitle,safeTimestamp,timestamp } from "../evidence.mjs";
 import { cleanupLocalGuiScenario,recordLocalGuiEvidence,startLocalGuiScenario,waitForAuthScreen,waitForComposerSendSettled,waitForLocalLoginReady,waitForLocalSendSuccess,writeLocalLoginPipe } from "../local-session.mjs";
@@ -1168,6 +1170,160 @@ export async function runLocalCjkScenario() {
 
     await recordLocalGuiEvidence(session);
     console.log("gui_local_cjk=ok");
+  } finally {
+    await cleanupLocalGuiScenario(session);
+  }
+}
+
+const HISTORY_EXPORT_TOP_LEVEL_KEYS = ["room_name", "room_creator", "topic", "export_date", "exported_by", "messages"];
+
+function clearHistoryExportDir(directory) {
+  for (const name of readdirSync(directory)) rmSync(join(directory, name), { force: true });
+}
+
+// Reads the one committed export. A staged file is hidden (dot-prefixed) and
+// renamed over the destination only after the whole walk, so its presence
+// here would mean a partial export leaked.
+function readHistoryExport(directory, description) {
+  const names = readdirSync(directory);
+  const exports = names.filter((name) => name.endsWith(".json") && !name.startsWith("."));
+  if (exports.length !== 1 || names.length !== 1) {
+    throw new Error(`${description}: expected exactly one committed JSON file, found ${names.length} entries`);
+  }
+  return JSON.parse(readFileSync(join(directory, exports[0]), "utf8"));
+}
+
+function assertElementExportShape(exported, seedBodies, expectedSeedCount, description) {
+  const keys = Object.keys(exported);
+  if (JSON.stringify(keys) !== JSON.stringify(HISTORY_EXPORT_TOP_LEVEL_KEYS)) {
+    throw new Error(`${description}: top-level keys differ from Element's chat export (${keys.length} keys)`);
+  }
+  if (exported.room_name !== "QA Seed Room" || !Array.isArray(exported.messages)) {
+    throw new Error(`${description}: room_name or messages has the wrong shape`);
+  }
+  const seedEvents = exported.messages.filter(
+    (event) => event.type === "m.room.message" && seedBodies.includes(event.content?.body)
+  );
+  const wellFormed = exported.messages.every(
+    (event) => typeof event.event_id === "string" && typeof event.sender === "string" && Number.isInteger(event.origin_server_ts)
+  );
+  if (seedEvents.length !== expectedSeedCount || !wellFormed) {
+    throw new Error(
+      `${description}: expected ${expectedSeedCount} seed messages, found ${seedEvents.length}; well_formed=${wellFormed}`
+    );
+  }
+}
+
+async function waitForHistoryExportResult(browser, timeout, description) {
+  const selector = '[data-testid="room-history-export-state"][data-export-result]';
+  const startedAt = Date.now();
+  let last = null;
+  while (Date.now() - startedAt < timeout) {
+    last = await browser.execute((query) => {
+      const element = document.querySelector(query);
+      return element
+        ? { result: element.getAttribute("data-export-result"), text: (element.textContent ?? "").trim() }
+        : null;
+    }, selector);
+    if (last) return last;
+    await sleep(250);
+  }
+  throw new Error(`${description}: no export result within ${timeout}ms`);
+}
+
+async function clickHistoryExportDialogButton(browser, label, timeout) {
+  const button = await browser.$(
+    `//dialog[@aria-label='Download history']//button[normalize-space()='${label}']`
+  );
+  await button.waitForEnabled({ timeout });
+  await button.click();
+}
+
+async function exportedEventCount(browser) {
+  const text = await browser.execute(
+    () => document.querySelector('[data-testid="room-history-export-state"]')?.textContent ?? ""
+  );
+  const match = /Saved (\d+) events\./.exec(text);
+  return match ? Number(match[1]) : text.includes("The selected range has no messages") ? 0 : null;
+}
+
+export async function runLocalRoomHistoryExportScenario() {
+  const session = await startLocalGuiScenario();
+  try {
+    await waitForAuthScreen(session.browser, timeoutMs);
+    await writeLocalLoginPipe(session.qaLoginPipePath, session.credentials);
+    await waitForLocalLoginReady(session, timeoutMs);
+    const seeds = session.historyExportSeedBodies;
+    const directory = session.historyExportDir;
+    // A fresh Tuwunel user is also joined to the server's admin room.
+    await selectRoomByName(session.browser, "QA Seed Room", timeoutMs);
+    await waitForActiveRoomName(session.browser, "QA Seed Room", timeoutMs);
+
+    const roomInfoButton = await session.browser.$('button[aria-label="Room info"]');
+    await roomInfoButton.waitForDisplayed({ timeout: timeoutMs });
+    await roomInfoButton.click();
+    const openButton = await session.browser.$("//section[@aria-label='Download history']//button[normalize-space()='Download history']");
+    await openButton.waitForDisplayed({ timeout: timeoutMs });
+    await openButton.click();
+    await session.browser.$("//dialog[@aria-label='Download history']").waitForDisplayed({ timeout: timeoutMs });
+
+    // All available history, the default range.
+    clearHistoryExportDir(directory);
+    await clickHistoryExportDialogButton(session.browser, "Save", timeoutMs);
+    const all = await waitForHistoryExportResult(session.browser, timeoutMs, "local GUI full history export");
+    if (all.result !== "completed") throw new Error(`local GUI full history export settled as ${all.result}`);
+    const allExport = readHistoryExport(directory, "local GUI full history export");
+    assertElementExportShape(allExport, seeds, seeds.length, "local GUI full history export");
+    if ((await exportedEventCount(session.browser)) !== allExport.messages.length) {
+      throw new Error("local GUI full history export count differs from the saved file");
+    }
+    console.log(`gui_local_history_export_all=ok exported=${allExport.messages.length}`);
+
+    // A past period holds none of the seeded messages.
+    await clickHistoryExportDialogButton(session.browser, "Download again", timeoutMs);
+    const periodRadio = await session.browser.$("//dialog[@aria-label='Download history']//label[normalize-space()='Period']//input");
+    await periodRadio.waitForEnabled({ timeout: timeoutMs });
+    await periodRadio.click();
+    const zoneText = await session.browser.execute(
+      () => document.querySelector('[data-testid="room-history-export-time-zone"]')?.textContent ?? ""
+    );
+    if (!/^Dates use the \S+ time zone\. The end date is included\.$/.test(zoneText)) {
+      throw new Error("local GUI period export does not show its time zone");
+    }
+    const today = await session.browser.execute(
+      () => Array.from(document.querySelectorAll("input")).find((input) => input.getAttribute("aria-label") === "End date")?.value ?? ""
+    );
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new Error("local GUI period export has no default end date");
+    await setDatetimeLocalValue(session.browser, "2000-01-01", "Start date");
+    await setDatetimeLocalValue(session.browser, "2000-01-02", "End date");
+    clearHistoryExportDir(directory);
+    await clickHistoryExportDialogButton(session.browser, "Save", timeoutMs);
+    const past = await waitForHistoryExportResult(session.browser, timeoutMs, "local GUI past period export");
+    if (past.result !== "completed" || (await exportedEventCount(session.browser)) !== 0) {
+      throw new Error(`local GUI past period export settled as ${past.result}`);
+    }
+    const pastExport = readHistoryExport(directory, "local GUI past period export");
+    assertElementExportShape(pastExport, seeds, 0, "local GUI past period export");
+    if (pastExport.messages.length !== 0) throw new Error("local GUI past period export is not empty");
+
+    // Today's period, in the zone the dialog named, holds every seed.
+    await clickHistoryExportDialogButton(session.browser, "Download again", timeoutMs);
+    await setDatetimeLocalValue(session.browser, today, "Start date");
+    await setDatetimeLocalValue(session.browser, today, "End date");
+    clearHistoryExportDir(directory);
+    await clickHistoryExportDialogButton(session.browser, "Save", timeoutMs);
+    const current = await waitForHistoryExportResult(session.browser, timeoutMs, "local GUI current period export");
+    if (current.result !== "completed") throw new Error(`local GUI current period export settled as ${current.result}`);
+    const currentExport = readHistoryExport(directory, "local GUI current period export");
+    assertElementExportShape(currentExport, seeds, seeds.length, "local GUI current period export");
+    if (currentExport.messages.length > allExport.messages.length) {
+      throw new Error("local GUI current period export holds more than the full history");
+    }
+    console.log(`gui_local_history_export_period=ok exported=${currentExport.messages.length}`);
+
+    await clickHistoryExportDialogButton(session.browser, "Done", timeoutMs);
+    await recordLocalGuiEvidence(session);
+    console.log("gui_local_room_history_export=ok");
   } finally {
     await cleanupLocalGuiScenario(session);
   }

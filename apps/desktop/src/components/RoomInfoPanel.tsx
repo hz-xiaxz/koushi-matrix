@@ -4,6 +4,7 @@ import {
   Bell,
   ChevronRight,
   Copy,
+  Download,
   FileText,
   Globe2,
   History,
@@ -18,8 +19,14 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { t } from "../i18n/messages";
 import { ImeSafeForm, ImeTextArea, ImeTextField } from "./ImeTextControl";
+import {
+  RoomHistoryExportDialog,
+  roomHistoryExportSummary,
+  type RoomHistoryExportControls
+} from "./RoomHistoryExportDialog";
 import type {
   RoomHistoryVisibility,
+  RoomHistoryExportState,
   InviteHistoryPolicy,
   RoomJoinRule,
   RoomManagementState,
@@ -49,7 +56,9 @@ export function RoomInfoPanel({
   onForceRotateOutboundSession,
   inviteHistoryPolicy,
   onOpenRecovery,
-  onReturnToInvite
+  onReturnToInvite,
+  roomHistoryExport,
+  roomHistoryExportControls
 }: {
   room: RoomSummary | null;
   roomManagement?: RoomManagementState;
@@ -68,6 +77,8 @@ export function RoomInfoPanel({
   inviteHistoryPolicy?: InviteHistoryPolicy | null;
   onOpenRecovery?: () => void;
   onReturnToInvite?: () => void;
+  roomHistoryExport?: RoomHistoryExportState;
+  roomHistoryExportControls?: RoomHistoryExportControls;
 }) {
   const roomId = room?.room_id ?? "";
   const roomName = room?.display_label ?? "";
@@ -102,6 +113,7 @@ export function RoomInfoPanel({
   const [historyVisibilityDraft, setHistoryVisibilityDraft] =
     useState<RoomHistoryVisibility>(settings?.history_visibility ?? "shared");
   const [rotationConfirm, setRotationConfirm] = useState(false);
+  const [historyExportOpen, setHistoryExportOpen] = useState(false);
   const [rotationState, setRotationState] = useState<"idle" | "pending" | "completed" | "failed">(
     "idle"
   );
@@ -134,6 +146,7 @@ export function RoomInfoPanel({
     rotationEpochRef.current += 1;
     setRotationConfirm(false);
     setRotationState("idle");
+    setHistoryExportOpen(false);
   }, [roomId]);
 
   async function forceRotation() {
@@ -324,6 +337,36 @@ export function RoomInfoPanel({
               <p className="profile-settings-hint error">{t("room.rotationDiscardFailed")}</p>
             ) : null}
           </div>
+        </section>
+      ) : null}
+
+      {roomHistoryExport && roomHistoryExportControls ? (
+        <section className="settings-section" aria-label={t("roomHistoryExport.section")}>
+          <h3>{t("roomHistoryExport.section")}</h3>
+          <div className="room-key-actions">
+            <button
+              className="profile-settings-action"
+              type="button"
+              onClick={() => setHistoryExportOpen(true)}
+            >
+              <Download size={16} aria-hidden="true" />
+              <span>{t("roomHistoryExport.open")}</span>
+            </button>
+            <p className="profile-settings-hint">{t("roomHistoryExport.hint")}</p>
+            <div role="status" data-testid="room-info-history-export-summary">
+              {roomHistoryExportSummary(roomHistoryExport, roomId).map((line) => (
+                <p className="profile-settings-hint" key={line}>{line}</p>
+              ))}
+            </div>
+          </div>
+          {historyExportOpen ? (
+            <RoomHistoryExportDialog
+              room={room}
+              exportState={roomHistoryExport}
+              controls={roomHistoryExportControls}
+              onClose={() => setHistoryExportOpen(false)}
+            />
+          ) : null}
         </section>
       ) : null}
 

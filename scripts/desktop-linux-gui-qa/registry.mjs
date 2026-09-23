@@ -3,7 +3,7 @@ import { assertSdkSubmoduleSynced } from "../lib/sdk-submodule-status.mjs";
 import { guiScenario,repoRoot } from "./options.mjs";
 import { runLocalInvitesDmScenario,runLocalLoginScenario,runLocalLogoutReloginScenario,runSignedOutScenario } from "./scenarios/auth.mjs";
 import { runLocalImageCompressionScenario,runLocalMediaScenario,runLocalMessageTypesScenario } from "./scenarios/media.mjs";
-import { runLocalActivityScenario,runLocalAliasScenario,runLocalCjkScenario,runLocalComposerScenario,runLocalCreateRoomScenario,runLocalCreateSpaceScenario,runLocalExploreScenario,runLocalMessageActionsScenario,runLocalPinsScenario,runLocalReceiptReadersScenario,runLocalReplyScenario,runLocalRichFormattingScenario,runLocalRoomManagementScenario,runLocalRoomTagsScenario,runLocalScheduledSendScenario,runLocalSendScenario,runLocalSpacesNavScenario,runLocalTimelineNavigationScenario } from "./scenarios/rooms-timeline.mjs";
+import { runLocalActivityScenario,runLocalAliasScenario,runLocalCjkScenario,runLocalComposerScenario,runLocalCreateRoomScenario,runLocalCreateSpaceScenario,runLocalExploreScenario,runLocalMessageActionsScenario,runLocalPinsScenario,runLocalReceiptReadersScenario,runLocalReplyScenario,runLocalRichFormattingScenario,runLocalRoomHistoryExportScenario,runLocalRoomManagementScenario,runLocalRoomTagsScenario,runLocalScheduledSendScenario,runLocalSendScenario,runLocalSpacesNavScenario,runLocalTimelineNavigationScenario } from "./scenarios/rooms-timeline.mjs";
 import { runLocalE2eeKeyManagementScenario,runLocalSettingsScenario } from "./scenarios/settings-security.mjs";
 
 export const checks = [
@@ -20,6 +20,7 @@ export const checks = [
   "scenario local-image-compression",
   "scenario local-room-tags",
   "scenario local-room-management",
+  "scenario local-room-history-export",
   "scenario local-activity",
   "scenario local-explore",
   "scenario local-message-actions",
@@ -98,6 +99,10 @@ export async function run() {
   }
   if (guiScenario === "local-room-management") {
     await runLocalRoomManagementScenario();
+    return;
+  }
+  if (guiScenario === "local-room-history-export") {
+    await runLocalRoomHistoryExportScenario();
     return;
   }
   if (guiScenario === "local-activity") {

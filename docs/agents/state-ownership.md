@@ -979,7 +979,14 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   `RoomHistoryExportDestination` native artifact and resolves civil dates into
   the range's instants in a named time zone. React must not page, filter, or
   serialize history, and must not treat a cancelled or failed export as saved.
-  See [plan](../superpowers/plans/2026-09-23-issue59-room-history-export-phase-a.md).
+  In the desktop shell the Tauri adapter (`commands/history_export.rs`) names
+  the platform IANA zone through `room_history_export_time_zone`, opens the
+  native save dialog itself, and resolves the dialog's inclusive civil dates
+  in the zone the dialog displayed; the destination path never enters the
+  WebView. React owns only the dialog's unsent range, dates, and the request id
+  it started, and renders `ui.room_history_export`.
+  See the [Phase A](../superpowers/plans/2026-09-23-issue59-room-history-export-phase-a.md)
+  and [Phase B](../superpowers/plans/2026-09-23-issue59-room-history-export-phase-b.md) plans.
 - Selecting a file sends source bytes through `stage_upload_bytes` and shows the
   Rust-owned Upload attachments staging dialog. Send invokes
   `send_prepared_uploads`; there is no direct renderer upload command. Each staged caption is a nullable

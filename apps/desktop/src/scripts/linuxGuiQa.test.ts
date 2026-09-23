@@ -48,6 +48,10 @@ describe("desktop release scripts", () => {
     expect(source).toContain("timelineDateJumpDiagnostics");
     expect(source).toContain("setDatetimeLocalValue");
     expect(source).toContain("gui_local_cjk=ok");
+    expect(source).toContain("gui_local_history_export_all=ok");
+    expect(source).toContain("gui_local_history_export_period=ok");
+    expect(source).toContain("gui_local_room_history_export=ok");
+    expect(source).toContain("KOUSHI_QA_HISTORY_EXPORT_DIR");
   });
 
   test("linux GUI local logout/relogin uses the gated QA control pipe", () => {

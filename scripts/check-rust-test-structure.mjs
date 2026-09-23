@@ -442,6 +442,7 @@ function tauriCommandsSource() {
     "commands/diagnostics.rs",
     "commands/directory.rs",
     "commands/e2ee.rs",
+    "commands/history_export.rs",
     "commands/live_signals.rs",
     "commands/local_encryption.rs",
     "commands/mod.rs",
