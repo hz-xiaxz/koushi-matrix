@@ -114,6 +114,10 @@ fn parses_all_scenarios_from_env_value_including_directory() {
         QaScenario::from_env_value("read_state_convergence").unwrap(),
         QaScenario::ReadStateConvergence
     );
+    assert_eq!(
+        QaScenario::from_env_value("thread_late_joiner").unwrap(),
+        QaScenario::ThreadLateJoiner
+    );
 }
 
 #[test]
@@ -181,6 +185,29 @@ fn read_state_convergence_is_registered_with_private_safe_final_token() {
     );
     let report = scenario_report("local", scenario);
     assert!(report.contains("read_state_convergence=ok"));
+    assert!(!report.contains('@'));
+    assert!(!report.contains('!'));
+    assert!(!report.contains('$'));
+}
+
+#[test]
+fn thread_late_joiner_is_registered_with_private_safe_final_tokens() {
+    let scenario = QaScenario::ThreadLateJoiner;
+    assert_eq!(
+        stages_for_scenario(scenario),
+        [QaStage::Safety, QaStage::ThreadLateJoiner]
+    );
+    assert_eq!(
+        final_tokens_for_scenario(scenario),
+        [
+            "safety=ok",
+            "thread_late_joiner_root_not_visible=ok",
+            "thread_late_joiner_thread_panel=ok",
+            "thread_late_joiner=ok"
+        ]
+    );
+    let report = scenario_report("local", scenario);
+    assert!(report.contains("thread_late_joiner=ok"));
     assert!(!report.contains('@'));
     assert!(!report.contains('!'));
     assert!(!report.contains('$'));

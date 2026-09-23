@@ -74,6 +74,7 @@ const checks = [
   "scenario restore_cleanup",
   "scenario cache_restore",
   "scenario read_state_convergence",
+  "scenario thread_late_joiner",
   "verify installed Tuwunel binary",
   "verify local Synapse Docker runtime when --server=synapse",
   "start disposable local homeserver",
@@ -168,6 +169,9 @@ async function run() {
   }
   if (scenarios.includes("read_state_convergence") && !runCoreQa) {
     throw new Error("--scenario=read_state_convergence requires --core because it validates Core state");
+  }
+  if (scenarios.includes("thread_late_joiner") && !runCoreQa) {
+    throw new Error("--scenario=thread_late_joiner requires --core because it validates Core state");
   }
   if (fixtureRunOption !== undefined) {
     if (scenarios.length !== 1 || scenarios[0] !== "timeline_stress") {
@@ -607,7 +611,7 @@ function safeTimestamp() {
 
 function printUsage() {
   console.log(
-    "Usage: desktop-headless-local-qa.mjs --run [--server=tuwunel|synapse|both] [--scenario=all|session_status|device_cleanup|timeline_reconnect|timeline_stress|encryption_debug|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview|read_state_convergence[,scenario...]] [--core] [--cargo-profile=dev|ci|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
+    "Usage: desktop-headless-local-qa.mjs --run [--server=tuwunel|synapse|both] [--scenario=all|session_status|device_cleanup|timeline_reconnect|timeline_stress|encryption_debug|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview|read_state_convergence|thread_late_joiner[,scenario...]] [--core] [--cargo-profile=dev|ci|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
   );
   console.log("Starts a disposable local homeserver and runs non-GUI Matrix SDK QA.");
   console.log("  --server=both  Runs the positive Sliding Sync fixtures: Tuwunel and Synapse.");

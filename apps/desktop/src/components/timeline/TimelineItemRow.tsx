@@ -157,14 +157,35 @@ export type TimelineAliasTarget = {
 export function ThreadRootStatusPlaceholder({
   row,
   state,
+  roomId,
+  onOpenThread,
   showThreadSummary = true
 }: {
   row: TimelineDisplayRow;
   state: "pending" | "failed";
+  roomId: string;
+  onOpenThread: TimelineRowActionHandlers["onOpenThread"];
   showThreadSummary?: boolean;
 }) {
-  const summary = row.item.thread_summary;
-  const replyCount = summary?.reply_count ?? 0;
+  const replyCount = row.item.thread_summary?.reply_count ?? 0;
+  const rootEventId = row.content_event_id;
+  const displayKind = row.item.display_metadata?.kind;
+  // NotFound/Forbidden mean the server will not show this root to the
+  // account (e.g. sent before joining under joined-only history), which is
+  // permanent; other failures keep the generic unavailable text.
+  const rootNotVisible =
+    displayKind?.kind === "threadRootFailed" &&
+    (displayKind.failure_kind === "notFound" || displayKind.failure_kind === "forbidden");
+  const statusText =
+    state === "pending"
+      ? t("timeline.threadRootLoading")
+      : rootNotVisible
+        ? t("timeline.threadRootNotVisible")
+        : t("timeline.threadRootUnavailable");
+  const replyCountText = t(
+    replyCount === 1 ? "timeline.threadReplyCountOne" : "timeline.threadReplyCountMany",
+    { count: replyCount }
+  );
   return (
     <article
       className="message thread-root-projection-placeholder"
@@ -175,16 +196,28 @@ export function ThreadRootStatusPlaceholder({
       data-event-id={row.activity_event_id ?? undefined}
       data-thread-root-projection-state={state}
     >
-      <p className="timeline-thread-root-projection-status" role="status">
-        {state === "pending"
-          ? t("timeline.threadRootLoading")
-          : t("timeline.threadRootUnavailable")}
-      </p>
-      {showThreadSummary ? (
-        <span className="thread-reply-count">
-          {replyCount === 1 ? "1 reply" : `${replyCount} replies`}
-        </span>
-      ) : null}
+      <div className="message-main">
+        <p className="timeline-thread-root-projection-status" role="status">
+          {statusText}
+        </p>
+        {showThreadSummary && rootEventId ? (
+          <button
+            className="thread-summary-chip"
+            type="button"
+            aria-label={t("timeline.openThreadSummary", { summary: replyCountText })}
+            onClick={() =>
+              onOpenThread(
+                roomId,
+                rootEventId,
+                replyCount > 0 ? "existingThread" : "newThreadDraft"
+              )
+            }
+          >
+            <MessageCircle size={13} />
+            <span>{replyCountText}</span>
+          </button>
+        ) : null}
+      </div>
     </article>
   );
 }

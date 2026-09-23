@@ -381,6 +381,13 @@ impl ThreadRootProjectionService {
                 record.activity = activity.clone();
                 record.aggregate_failure = None;
                 record.pending_rollback = None;
+                if let ThreadRootProjectionAttempt::Failed(kind) = record.attempt
+                    && !root_withheld_by_server(kind)
+                {
+                    // A transient hydration failure is retried once per newer
+                    // accepted activity, never by a loop.
+                    record.attempt = ThreadRootProjectionAttempt::Pending;
+                }
                 if newer {
                     update_live_activity_floor(record, activity, &previous);
                 } else {
@@ -1648,10 +1655,36 @@ impl Drop for SubscriptionTasks {
 
 pub(crate) fn classify_thread_list_error(error: &ThreadListServiceError) -> OperationFailureKind {
     match error {
-        ThreadListServiceError::Sdk(matrix_sdk::Error::Http(_)) => OperationFailureKind::Network,
+        ThreadListServiceError::Sdk(error @ matrix_sdk::Error::Http(_)) => {
+            classify_thread_request_error(error)
+        }
         ThreadListServiceError::Sdk(_) | ThreadListServiceError::EventCache(_) => {
             OperationFailureKind::Sdk
         }
+    }
+}
+
+/// `NotFound`/`Forbidden` from root hydration mean the server withholds the
+/// root from this account; that outcome is terminal for the record.
+fn root_withheld_by_server(kind: OperationFailureKind) -> bool {
+    matches!(
+        kind,
+        OperationFailureKind::NotFound | OperationFailureKind::Forbidden
+    )
+}
+
+/// Classifies a failed thread request by its Matrix error code. A server that
+/// withholds an event the account may not see (for example a root sent before
+/// joining a room with joined-only history) answers `M_NOT_FOUND` or
+/// `M_FORBIDDEN`; that is a permanent visibility outcome, not a transport
+/// failure, so it keeps its own kind for the renderer to explain.
+pub(crate) fn classify_thread_request_error(error: &matrix_sdk::Error) -> OperationFailureKind {
+    use matrix_sdk::ruma::api::error::ErrorKind;
+
+    match error.client_api_error_kind() {
+        Some(ErrorKind::NotFound) => OperationFailureKind::NotFound,
+        Some(ErrorKind::Forbidden) => OperationFailureKind::Forbidden,
+        _ => OperationFailureKind::Network,
     }
 }
 

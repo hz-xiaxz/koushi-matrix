@@ -3716,6 +3716,13 @@ button:disabled {
   color: var(--text-muted);
 }
 
+.timeline-thread-root-projection-status {
+  margin: 0;
+  color: var(--text-muted);
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
 .message-emote-prefix {
   color: var(--text-muted);
   font-weight: 700;

@@ -1054,6 +1054,7 @@ export type MessageId =
   | "timeline.gapRepairFailed"
   | "timeline.threadRootLoading"
   | "timeline.threadRootUnavailable"
+  | "timeline.threadRootNotVisible"
   | "timeline.messagesTab"
   | "timeline.openingThread"
   | "timeline.presenceAway"
@@ -2526,6 +2527,8 @@ const en: Catalog = {
   "timeline.gapRepairFailed": "Some messages are still missing.",
   "timeline.threadRootLoading": "Loading thread message…",
   "timeline.threadRootUnavailable": "Thread message is unavailable.",
+  "timeline.threadRootNotVisible":
+    "The original thread message isn't visible to you. It may have been sent before you joined.",
   "timeline.messagesTab": "Messages",
   "timeline.openingThread": "Opening thread",
   "timeline.presenceAway": "Away",
@@ -3884,6 +3887,8 @@ const ja: Catalog = {
   "timeline.gapRepairFailed": "一部のメッセージを取得できませんでした。",
   "timeline.threadRootLoading": "スレッドのメッセージを読み込んでいます…",
   "timeline.threadRootUnavailable": "スレッドのメッセージを利用できません。",
+  "timeline.threadRootNotVisible":
+    "スレッドの元のメッセージは表示できません。参加する前に送信された可能性があります。",
   "timeline.messagesTab": "メッセージ",
   "timeline.openingThread": "スレッドを開いています",
   "timeline.presenceAway": "離席中",

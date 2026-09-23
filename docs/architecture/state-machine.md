@@ -1589,6 +1589,7 @@ stateDiagram-v2
     [*] --> Ready: canonical root snapshot
     Pending --> Ready: root hydration succeeds
     Pending --> Failed: root hydration fails
+    Failed --> Pending: newer accepted activity [transient failure] / rehydrate
     Ready --> Dormant: root/reply absent from bounded display window
     Failed --> Dormant: root/reply absent from bounded display window
     Dormant --> Ready: bounded display includes accepted root/activity again
@@ -1609,6 +1610,13 @@ stateDiagram-v2
   disappearance lookup retains the last accepted record; bounded-window absence
   changes visibility only. The service admits at most 120 roots per active Room
   owner and rejects over-cap admission without evicting accepted roots.
+- Root hydration failures are classified by Matrix error code. `NotFound` and
+  `Forbidden` mean the server withholds the root from this account (for
+  example a root sent before joining under joined-only history visibility);
+  they are terminal for the record and render an explicit not-visible
+  placeholder. Every other failure is transient: the record stays `Failed`
+  without a retry loop, and the next newer accepted activity for the root
+  returns it to `Pending` and rehydrates once.
 - A retained root body stays renderable during aggregate refresh and after an
   aggregate failure. Pending/failed display placeholders apply only when no
   root body has been accepted; operation status remains on the service record.

@@ -1603,3 +1603,63 @@ fn successful_receipt_uses_newest_provable_canonical_boundary() {
         "unknown out-of-window IDs cannot override a visible successful request"
     );
 }
+
+/// A late joiner cannot read a root sent before it joined a room whose history
+/// is visible to joined members only; the server rejects `/event` with 404
+/// (Synapse) or 403. That is a permanent visibility outcome, not a network
+/// failure, and must be classified so the UI can explain it.
+#[tokio::test]
+async fn thread_root_fetch_classifies_invisible_root_errors() {
+    use matrix_sdk::ruma::room_id;
+    use wiremock::ResponseTemplate;
+
+    let cases = [
+        (
+            ResponseTemplate::new(404)
+                .set_body_json(serde_json::json!({"errcode": "M_NOT_FOUND", "error": "x"})),
+            OperationFailureKind::NotFound,
+        ),
+        (
+            ResponseTemplate::new(403)
+                .set_body_json(serde_json::json!({"errcode": "M_FORBIDDEN", "error": "x"})),
+            OperationFailureKind::Forbidden,
+        ),
+        (
+            ResponseTemplate::new(400)
+                .set_body_json(serde_json::json!({"errcode": "M_UNKNOWN", "error": "x"})),
+            OperationFailureKind::Network,
+        ),
+    ];
+    for (response, expected) in cases {
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        let room_id = room_id!("!late-joiner:test");
+        let room = server.sync_joined_room(&client, room_id).await;
+        server
+            .mock_room_event()
+            .respond_with(response)
+            .mount()
+            .await;
+        let key = TimelineKey::room(
+            koushi_protocol::ids::AccountKey("@a:test".to_owned()),
+            room_id.as_str(),
+        );
+        let activity = ThreadRootProjectionActivity {
+            room_id: room_id.to_string(),
+            root_event_id: "$pre-join-root:test".to_owned(),
+            activity_event_id: "$reply:test".to_owned(),
+            activity_timestamp_ms: Some(100),
+            activity_sender: None,
+            activity_sender_label: None,
+            activity_body_preview: None,
+        };
+        let result = super::load_thread_root_projection_item_from_room(
+            &room,
+            &key,
+            client.user_id(),
+            &activity,
+        )
+        .await;
+        assert_eq!(result.err(), Some(expected));
+    }
+}
