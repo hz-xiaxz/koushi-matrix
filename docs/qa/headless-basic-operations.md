@@ -457,8 +457,8 @@ counts in `AppState.room_history_export` match the file.
 `history_export_period=ok` means a `[start, end)` export equals the full
 export restricted to that range. `history_export_utd_counted=ok` covers
 disposable user C, whose device is denied one room key: C's export contains
-that message as `m.bad.encrypted`, keeps the readable messages decrypted, and
-the Rust result counts the undecryptable event. `history_export_cancel=ok`
+that message as `m.bad.encrypted`, keeps the messages sent after C joined
+decrypted, and the Rust result counts every placeholder. `history_export_cancel=ok`
 means a cancelled export settles as cancelled and leaves neither the
 destination nor a staging file. Export files hold only synthetic QA messages
 in the per-run QA data directory and are deleted when the stage ends. No path,

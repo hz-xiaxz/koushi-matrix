@@ -279,8 +279,8 @@ async fn send_text(
 ///   of the full export whose timestamps fall in `[start, end)`.
 /// - `history_export_utd_counted=ok`: a member whose device was denied a room
 ///   key exports that message as Element's `m.bad.encrypted` placeholder, and
-///   the Rust-owned result counts it; the messages they can read stay
-///   decrypted.
+///   the Rust-owned result counts every placeholder; messages sent after they
+///   joined stay decrypted.
 /// - `history_export_cancel=ok`: a cancelled export settles as cancelled and
 ///   leaves neither the destination nor a staging file.
 pub(super) async fn run_room_history_export_stage(
@@ -495,16 +495,22 @@ pub(super) async fn run_room_history_export_stage(
                 .iter()
                 .find(|event| event["event_id"].as_str() == Some(event_id.as_str()))
         };
-        let readable = before_join
+        // Whether keys for messages sent before the join are shared depends on
+        // the SDK's history-sharing state, so those only need to be present.
+        let earlier_present = before_join.iter().all(|event_id| find(event_id).is_some());
+        let readable = after_join
             .iter()
-            .chain(&after_join)
             .all(|event_id| find(event_id).is_some_and(is_text_message));
         let withheld_undecryptable = find(&withheld).is_some_and(is_undecryptable);
-        if !readable || !withheld_undecryptable || late_progress.undecryptable_events == 0 {
+        if !earlier_present
+            || !readable
+            || !withheld_undecryptable
+            || late_progress.undecryptable_events == 0
+        {
             return Err(format!(
                 "history export late member: unexpected decryption outcome \
-                 (readable={readable} withheld_undecryptable={withheld_undecryptable} \
-                 undecryptable_total={})",
+                 (earlier_present={earlier_present} readable={readable} \
+                 withheld_undecryptable={withheld_undecryptable} undecryptable_total={})",
                 late_progress.undecryptable_events
             ));
         }
