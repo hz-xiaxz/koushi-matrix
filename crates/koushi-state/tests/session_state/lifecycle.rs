@@ -279,6 +279,7 @@ fn logout_clears_native_attention_state_and_notifies_ui() {
                 },
             },
             dispatch: Default::default(),
+            notification: None,
         },
         ..AppState::default()
     };

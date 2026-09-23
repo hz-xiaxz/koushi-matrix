@@ -8,7 +8,15 @@ use serde::{Deserialize, Serialize};
 use crate::locale_profile::DisplayPlatform;
 
 use super::errors::OperationFailureKind;
-use super::room::{RoomAttentionKind, RoomSummary, room_attention_summary};
+use super::room::{
+    RoomAttentionKind, RoomLatestEventSummary, RoomSummary, room_attention_summary,
+};
+
+/// Longest preview the desktop adapter may render in an OS notification body.
+///
+/// The preview is remote content; a bound keeps one notification from turning
+/// into an unbounded banner. Truncation happens on character boundaries.
+const NATIVE_NOTIFICATION_PREVIEW_MAX_CHARS: usize = 200;
 use super::settings::RoomNotificationMode;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -30,6 +38,15 @@ impl Default for NativeAttentionContext {
 pub struct NativeAttentionState {
     pub summary: NativeAttentionSummary,
     pub dispatch: NativeAttentionDispatchState,
+    /// Notification text and navigation target for the desktop adapter.
+    ///
+    /// Present only for a candidate that was selected and not suppressed. It is
+    /// deliberately outside [`NativeAttentionSummary`], and it is never
+    /// serialized: only the Rust desktop adapter reads it from live state
+    /// (overview.md, "Desktop Attention Surfaces"), so the attention surface
+    /// that reaches the webview stays free of message content and identifiers.
+    #[serde(skip)]
+    pub notification: Option<NativeNotificationPayload>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
@@ -88,6 +105,57 @@ impl fmt::Debug for NativeAttentionCandidate {
     }
 }
 
+/// Rust-owned text and target of one desktop notification.
+///
+/// Built in the same projection run as the selected candidate, so the
+/// notification body and the navigation target can never describe different
+/// events. `Debug` redacts every field: the title carries a room label and the
+/// body may carry message content.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NativeNotificationPayload {
+    pub title: String,
+    pub body: String,
+    pub target: NativeNotificationTarget,
+}
+
+impl fmt::Debug for NativeNotificationPayload {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NativeNotificationPayload")
+            .field("title", &"NotificationTitle(..)")
+            .field("body", &"NotificationBody(..)")
+            .field("target", &self.target)
+            .finish()
+    }
+}
+
+/// Navigation target of one desktop notification.
+///
+/// `room_id` is always present: when the room projection has not produced the
+/// triggering event, the adapter still has to open the right room instead of
+/// dropping the click. `thread_root_event_id` is set when the triggering event
+/// is a thread reply, so the click opens the thread before anchoring the reply.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NativeNotificationTarget {
+    pub room_id: String,
+    pub event_id: Option<String>,
+    pub thread_root_event_id: Option<String>,
+}
+
+impl fmt::Debug for NativeNotificationTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NativeNotificationTarget")
+            .field("room_id", &"RoomId(..)")
+            .field("event_id", &self.event_id.as_ref().map(|_| "EventId(..)"))
+            .field(
+                "thread_root_event_id",
+                &self.thread_root_event_id.as_ref().map(|_| "EventId(..)"),
+            )
+            .finish()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeAttentionObservationKind {
     Live,
@@ -107,6 +175,9 @@ pub struct NativeAttentionProjectionInput<'a> {
     pub window_focused: bool,
     pub observation: NativeAttentionObservationKind,
     pub previous_candidate: Option<&'a NativeAttentionCandidate>,
+    /// `SettingsValues.notifications.message_previews`. Device-local and OFF
+    /// by default; when OFF the notification body carries counts only.
+    pub message_previews: bool,
     pub capabilities: NativeAttentionCapabilities,
 }
 
@@ -122,6 +193,7 @@ pub struct NativeAttentionProjection {
 struct NativeAttentionCandidateEntry<'a> {
     room_id: &'a str,
     candidate: NativeAttentionCandidate,
+    latest_event: Option<&'a RoomLatestEventSummary>,
 }
 
 pub fn native_attention_state_from_rooms(
@@ -217,6 +289,7 @@ pub fn native_attention_projection_from_rooms(
                     unread_count: summary.unread_count,
                     highlight_count: summary.highlight_count,
                 },
+                latest_event: room.latest_event.as_ref(),
             });
         }
     }
@@ -256,6 +329,16 @@ pub fn native_attention_projection_from_rooms(
         }
     }
 
+    // A suppressed candidate must not produce OS notification text either, so
+    // the payload is derived after suppression, from the same entry that won
+    // the candidate selection.
+    let notification = match (candidate_entry, candidate.as_ref()) {
+        (Some(entry), Some(candidate)) => {
+            Some(native_notification_payload(entry, candidate, input.message_previews))
+        }
+        _ => None,
+    };
+
     let badge_count = match input.capabilities.badge {
         NativeAttentionCapability::Unavailable => 0,
         NativeAttentionCapability::Available | NativeAttentionCapability::Unknown => badge_count,
@@ -271,12 +354,118 @@ pub fn native_attention_projection_from_rooms(
                 capabilities: input.capabilities,
             },
             dispatch,
+            notification,
         },
         active_room_match,
         notification_count,
         badge_room_count,
         badge_excluded_room_count,
     }
+}
+
+/// Compose the OS notification the adapter may show for the selected candidate.
+///
+/// With previews OFF the body carries counts only and no message content ever
+/// leaves Rust. With previews ON the body is the triggering event's sanitized
+/// plain-text preview, which the room projection already reduced to
+/// `Unable to decrypt message`, `Message deleted`, or the event type for
+/// non-text and redacted events. A candidate without a usable preview falls
+/// back to the count body, so enabling previews never turns a notification into
+/// an empty banner.
+fn native_notification_payload(
+    entry: &NativeAttentionCandidateEntry<'_>,
+    candidate: &NativeAttentionCandidate,
+    message_previews: bool,
+) -> NativeNotificationPayload {
+    let latest_event = entry.latest_event;
+    let body = if message_previews {
+        latest_event
+            .and_then(native_notification_preview)
+            .unwrap_or_else(|| native_notification_count_body(candidate))
+    } else {
+        native_notification_count_body(candidate)
+    };
+
+    NativeNotificationPayload {
+        title: native_notification_title(&candidate.room_display_name, candidate.kind),
+        body,
+        target: NativeNotificationTarget {
+            room_id: entry.room_id.to_owned(),
+            event_id: latest_event.map(|event| event.event_id.clone()),
+            thread_root_event_id: latest_event
+                .and_then(|event| event.thread_root_event_id.clone()),
+        },
+    }
+}
+
+fn native_notification_title(room_display_name: &str, kind: RoomAttentionKind) -> String {
+    match kind {
+        RoomAttentionKind::Mention => format!("Mention in {room_display_name}"),
+        RoomAttentionKind::Dm => format!("Direct message in {room_display_name}"),
+        RoomAttentionKind::Message => format!("Message in {room_display_name}"),
+    }
+}
+
+fn native_notification_count_body(candidate: &NativeAttentionCandidate) -> String {
+    let mut parts = Vec::new();
+    if candidate.kind == RoomAttentionKind::Mention {
+        parts.push(format_notification_count(
+            candidate.highlight_count,
+            "mention",
+            "mentions",
+        ));
+    }
+    parts.push(format_notification_count(
+        candidate.unread_count,
+        "unread",
+        "unread",
+    ));
+    parts.retain(|part| !part.is_empty());
+    parts.join(", ")
+}
+
+fn format_notification_count(count: u64, singular: &str, plural: &str) -> String {
+    match count {
+        0 => String::new(),
+        1 => format!("1 {singular}"),
+        count => format!("{count} {plural}"),
+    }
+}
+
+/// Plain-text preview line for one room's latest event.
+///
+/// Returns `None` when the projection has no preview to show, which keeps
+/// undecrypted or content-free events on the count body instead of an empty
+/// notification.
+fn native_notification_preview(latest_event: &RoomLatestEventSummary) -> Option<String> {
+    let preview = latest_event.preview.as_deref()?;
+    let collapsed = preview.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return None;
+    }
+
+    let line = match latest_event
+        .sender_label
+        .as_deref()
+        .map(str::trim)
+        .filter(|sender| !sender.is_empty())
+    {
+        Some(sender) => format!("{sender}: {collapsed}"),
+        None => collapsed,
+    };
+    Some(truncate_notification_preview(line))
+}
+
+fn truncate_notification_preview(text: String) -> String {
+    if text.chars().count() <= NATIVE_NOTIFICATION_PREVIEW_MAX_CHARS {
+        return text;
+    }
+    let mut truncated: String = text
+        .chars()
+        .take(NATIVE_NOTIFICATION_PREVIEW_MAX_CHARS)
+        .collect();
+    truncated.push('…');
+    truncated
 }
 
 fn room_notification_unread_count(room: &RoomSummary) -> u64 {
@@ -497,6 +686,7 @@ mod tests {
             window_focused: false,
             observation,
             previous_candidate: None,
+            message_previews: false,
             capabilities: NativeAttentionCapabilities::default(),
         })
     }
@@ -559,6 +749,7 @@ mod tests {
             window_focused: false,
             observation: NativeAttentionObservationKind::Live,
             previous_candidate: None,
+            message_previews: false,
             capabilities: NativeAttentionCapabilities::default(),
         });
 

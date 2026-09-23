@@ -1103,7 +1103,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     }
     setPrimaryView("timeline");
     setRightPanelMode(
-      eventNavigation.source === "activity"
+      eventNavigation.source === "activity" || eventNavigation.source === "notification"
         ? "closed"
         : eventNavigation.source === "search"
           ? "search"

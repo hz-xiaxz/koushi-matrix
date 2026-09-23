@@ -349,6 +349,7 @@ fn local_alias_update_refreshes_open_dm_room_labels_and_notification_candidate()
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities: Default::default(),
     });
 

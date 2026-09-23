@@ -430,7 +430,9 @@ impl AppActor {
             EventNavigationSource::Activity | EventNavigationSource::Search => {
                 EventNavigationMissingTargetPolicy::LiveFallback
             }
-            EventNavigationSource::Pinned => EventNavigationMissingTargetPolicy::Fail,
+            EventNavigationSource::Pinned | EventNavigationSource::Notification => {
+                EventNavigationMissingTargetPolicy::Fail
+            }
         };
         if missing_policy != expected_policy {
             self.emit(CoreEvent::OperationFailed {

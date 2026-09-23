@@ -459,6 +459,12 @@ fn privacy_settings_persist_defaults() {
 }
 
 #[test]
+fn message_previews_default_to_off() {
+    assert!(!NotificationSettings::default().message_previews);
+    assert!(!SettingsValues::default().notifications.message_previews);
+}
+
+#[test]
 fn old_persisted_notification_json_defaults_privacy_to_true() {
     let json = r#"{
         "locale": {"language_tag": null, "text_direction": "auto"},
@@ -472,6 +478,9 @@ fn old_persisted_notification_json_defaults_privacy_to_true() {
     let values: SettingsValues = serde_json::from_str(json).unwrap();
     assert!(values.notifications.send_read_receipts);
     assert!(values.notifications.send_typing_notifications);
+    // Settings files written before message previews existed must keep the
+    // redacted OS notification body instead of failing the whole load.
+    assert!(!values.notifications.message_previews);
 }
 
 #[test]
@@ -483,6 +492,7 @@ fn settings_patch_can_change_privacy_toggles() {
             desktop_notifications: true,
             sound: true,
             badges: true,
+            message_previews: false,
             send_read_receipts: false,
             send_typing_notifications: false,
         }),
@@ -537,6 +547,7 @@ fn settings_loaded_event_populates_privacy_defaults() {
             desktop_notifications: false,
             sound: false,
             badges: false,
+            message_previews: true,
             send_read_receipts: false,
             send_typing_notifications: false,
         },
@@ -714,4 +725,62 @@ fn authoritative_policy_resolves_conflicting_rule_and_fresh_sync_releases_echo_f
         RoomNotificationMode::All
     );
     assert!(state.native_attention.summary.candidate.is_none());
+}
+
+/// The device-local preview setting must drive the Rust-owned notification
+/// body: OFF keeps counts only, ON shows the triggering event's content.
+#[test]
+fn message_previews_setting_drives_the_notification_body() {
+    let room_with_trigger = || {
+        let mut room = ready_state().rooms.remove(0);
+        room.unread_count = 2;
+        room.notification_count = 2;
+        room.latest_event = Some(koushi_state::RoomLatestEventSummary {
+            event_id: "$trigger:example.invalid".to_owned(),
+            relation_type: None,
+            relation_event_id: None,
+            thread_root_event_id: None,
+            sender_id: Some("@sender:example.invalid".to_owned()),
+            sender_label: Some("Alice".to_owned()),
+            sender_avatar: None,
+            preview: Some("private body".to_owned()),
+            timestamp_ms: 42,
+            is_redacted: false,
+        });
+        room
+    };
+
+    let mut off = ready_state();
+    reduce(
+        &mut off,
+        AppAction::RoomListUpdated {
+            spaces: Vec::new(),
+            rooms: vec![room_with_trigger()],
+        },
+    );
+    let off_payload = off
+        .native_attention
+        .notification
+        .expect("notification payload");
+    assert_eq!(off_payload.body, "2 unread");
+    assert!(!off_payload.body.contains("private body"));
+
+    let mut on = ready_state();
+    on.settings.values.notifications.message_previews = true;
+    reduce(
+        &mut on,
+        AppAction::RoomListUpdated {
+            spaces: Vec::new(),
+            rooms: vec![room_with_trigger()],
+        },
+    );
+    let on_payload = on
+        .native_attention
+        .notification
+        .expect("notification payload");
+    assert_eq!(on_payload.body, "Alice: private body");
+    assert_eq!(
+        on_payload.target.event_id.as_deref(),
+        Some("$trigger:example.invalid")
+    );
 }

@@ -176,8 +176,7 @@ fn frontend_snapshot_serializes_to_the_typescript_contract() {
             frontend_display_platform()
         ))
         .expect("capability profile serializes")
-    );
-    assert_eq!(
+    );    assert_eq!(
         value["state"]["domain"]["cjk_text_policy"]["japanese_catalog"]["catalog_locale"],
         json!("en")
     );
@@ -217,6 +216,7 @@ fn frontend_snapshot_serializes_to_the_typescript_contract() {
                 "desktop_notifications": true,
                 "sound": true,
                 "badges": true,
+                "message_previews": false,
                 "send_read_receipts": true,
                 "send_typing_notifications": true
         })
@@ -1724,6 +1724,17 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
             },
         },
         dispatch: NativeAttentionDispatchState::Idle,
+        // The dedicated desktop notification payload never crosses the webview
+        // DTO; see the assertions in the golden test below.
+        notification: Some(koushi_state::NativeNotificationPayload {
+            title: "Mention in Fixture Room".to_owned(),
+            body: "Alice: private fixture body".to_owned(),
+            target: koushi_state::NativeNotificationTarget {
+                room_id: "!room:example.invalid".to_owned(),
+                event_id: Some("$fixture:example.invalid".to_owned()),
+                thread_root_event_id: None,
+            },
+        }),
     };
 
     // directory — Results with one entry + Joining join state
@@ -1934,6 +1945,18 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
     assert_eq!(
         value, golden,
         "FrontendAppState wire shape changed — if intentional, regenerate with UPDATE_GOLDEN=1"
+    );
+    // The desktop notification payload (message preview + navigation target)
+    // is Rust-adapter-only and must never cross the webview DTO.
+    assert!(
+        !golden.to_string().contains("private fixture body"),
+        "notification preview text must not reach the webview"
+    );
+    assert!(
+        value["state"]["domain"]["native_attention"]
+            .get("notification")
+            .is_none(),
+        "the webview attention surface must not carry a notification payload"
     );
 }
 

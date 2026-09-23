@@ -172,6 +172,7 @@ fn native_attention_candidate_prioritizes_mentions_dm_then_messages_and_badges()
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities: available_capabilities(),
     });
 
@@ -206,6 +207,7 @@ fn native_attention_includes_plain_unread_counts_in_content_and_badge_totals() {
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities: available_capabilities(),
     });
 
@@ -242,6 +244,7 @@ fn native_attention_tracks_plain_unread_count_transitions() {
             window_focused: false,
             observation: NativeAttentionObservationKind::Live,
             previous_candidate: None,
+            message_previews: false,
             capabilities: available_capabilities(),
         });
 
@@ -277,6 +280,7 @@ fn native_attention_badge_deduplicates_rooms_and_excludes_manual_marks() {
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities: available_capabilities(),
     });
 
@@ -297,6 +301,7 @@ fn native_attention_candidate_uses_projected_room_display_label() {
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities: available_capabilities(),
     });
 
@@ -322,6 +327,7 @@ fn native_attention_candidate_serialization_omits_room_identity() {
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities: available_capabilities(),
     });
 
@@ -360,6 +366,7 @@ fn native_attention_suppresses_initial_backfill_self_and_focused_room() {
             window_focused: false,
             observation,
             previous_candidate: None,
+            message_previews: false,
             capabilities: available_capabilities(),
         });
 
@@ -379,6 +386,7 @@ fn native_attention_suppresses_initial_backfill_self_and_focused_room() {
         window_focused: true,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities: available_capabilities(),
     });
 
@@ -408,6 +416,7 @@ fn native_attention_projection_excludes_explicit_muting_and_low_priority_from_th
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities: available_capabilities(),
     });
 
@@ -434,6 +443,7 @@ fn native_attention_projection_excludes_effectively_muted_rooms_from_badge() {
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities: available_capabilities(),
     });
 
@@ -481,6 +491,7 @@ fn native_attention_badge_policy_preserves_non_muted_raw_unread() {
             window_focused: false,
             observation: NativeAttentionObservationKind::Live,
             previous_candidate: None,
+            message_previews: false,
             capabilities: available_capabilities(),
         });
 
@@ -506,6 +517,7 @@ fn native_attention_capability_unavailable_and_duplicate_candidates_are_suppress
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities: unavailable,
     });
 
@@ -533,6 +545,7 @@ fn native_attention_capability_unavailable_and_duplicate_candidates_are_suppress
         window_focused: false,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: Some(&previous),
+        message_previews: false,
         capabilities: available_capabilities(),
     });
 
@@ -557,6 +570,7 @@ fn native_attention_reducer_preserves_dispatch_state_not_only_summary() {
         window_focused: true,
         observation: NativeAttentionObservationKind::Live,
         previous_candidate: None,
+        message_previews: false,
         capabilities: available_capabilities(),
     });
 

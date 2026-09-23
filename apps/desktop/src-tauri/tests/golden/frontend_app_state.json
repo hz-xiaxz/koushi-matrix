@@ -835,6 +835,7 @@
           "notifications": {
             "badges": true,
             "desktop_notifications": true,
+            "message_previews": false,
             "send_read_receipts": true,
             "send_typing_notifications": true,
             "sound": true

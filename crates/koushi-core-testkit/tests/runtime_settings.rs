@@ -257,6 +257,7 @@ async fn disabled_badges_remain_rust_projected_to_zero_after_runtime_restart() {
                     },
                 },
                 dispatch: NativeAttentionDispatchState::Idle,
+                notification: None,
             },
         }))
         .await

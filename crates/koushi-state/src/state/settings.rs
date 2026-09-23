@@ -517,6 +517,14 @@ pub struct NotificationSettings {
     pub desktop_notifications: bool,
     pub sound: bool,
     pub badges: bool,
+    /// Show the triggering message's plain-text content in OS notifications.
+    ///
+    /// Device-local and default OFF. Settings files written before this field
+    /// existed must keep the redacted OS notification body, so the missing
+    /// field deserializes to `false` instead of failing the whole settings
+    /// load.
+    #[serde(default)]
+    pub message_previews: bool,
     #[serde(default = "default_true")]
     pub send_read_receipts: bool,
     #[serde(default = "default_true")]
@@ -529,6 +537,7 @@ impl Default for NotificationSettings {
             desktop_notifications: true,
             sound: true,
             badges: true,
+            message_previews: false,
             send_read_receipts: true,
             send_typing_notifications: true,
         }

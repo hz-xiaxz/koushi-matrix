@@ -316,7 +316,8 @@ fn event_navigation_policy(
         | koushi_state::EventNavigationSource::Search => {
             koushi_core::EventNavigationMissingTargetPolicy::LiveFallback
         }
-        koushi_state::EventNavigationSource::Pinned => {
+        koushi_state::EventNavigationSource::Pinned
+        | koushi_state::EventNavigationSource::Notification => {
             koushi_core::EventNavigationMissingTargetPolicy::Fail
         }
     }

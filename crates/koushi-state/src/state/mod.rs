@@ -196,8 +196,9 @@ pub use native_attention::{
     NativeAttentionContext, NativeAttentionDispatchId, NativeAttentionDispatchState,
     NativeAttentionObservationKind, NativeAttentionProjection, NativeAttentionProjectionInput,
     NativeAttentionSoundOutcome, NativeAttentionState, NativeAttentionSummary,
-    NativeAttentionSuppressionReason, native_attention_capabilities_for_platform,
-    native_attention_projection_from_rooms, native_attention_state_from_rooms,
+    NativeAttentionSuppressionReason, NativeNotificationPayload, NativeNotificationTarget,
+    native_attention_capabilities_for_platform, native_attention_projection_from_rooms,
+    native_attention_state_from_rooms,
 };
 
 // ── Re-exports: cjk ─────────────────────────────────────────────────────────
