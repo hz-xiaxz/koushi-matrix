@@ -1,9 +1,13 @@
-//! Matrix SDK adapter for the export driver: forward `/messages` pages and
-//! Element's header metadata.
+//! Matrix SDK adapter for the export driver: the `timestamp_to_event` seek,
+//! forward `/messages` pages, and Element's header metadata.
 
-use matrix_sdk::deserialized_responses::{TimelineEventKind, UnableToDecryptReason};
+use std::future::IntoFuture;
+
+use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind, UnableToDecryptReason};
 use matrix_sdk::room::MessagesOptions;
-use matrix_sdk::ruma::UInt;
+use matrix_sdk::ruma::api::Direction;
+use matrix_sdk::ruma::api::client::room::get_event_by_timestamp;
+use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, UInt};
 use serde_json::Value;
 
 use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
@@ -57,36 +61,99 @@ fn classify(kind: &TimelineEventKind) -> Option<ExportSourceEvent> {
     })
 }
 
+/// Run one request as background account work. Visible timeline work
+/// preempts the export; the request is retried once the account gate
+/// readmits background work.
+async fn background<F, R>(account_work: &AccountWorkScheduler, mut request: F) -> R::Output
+where
+    F: FnMut() -> R,
+    R: IntoFuture,
+{
+    loop {
+        let permit = account_work.acquire(AccountWorkKind::SearchCrawl).await;
+        tokio::select! {
+            biased;
+            _ = permit.cancelled() => continue,
+            result = request() => return result,
+        }
+    }
+}
+
+fn sdk_error(error: matrix_sdk::Error) -> HistoryPageError {
+    match error {
+        matrix_sdk::Error::Http(_) => HistoryPageError::Network,
+        _ => HistoryPageError::Sdk,
+    }
+}
+
+fn classify_all<'a>(events: impl Iterator<Item = &'a TimelineEvent>) -> Vec<ExportSourceEvent> {
+    events.filter_map(|event| classify(&event.kind)).collect()
+}
+
 impl HistoryPageSource for MatrixRoomHistorySource {
+    async fn seek(&mut self, at_ms: u64) -> Result<Option<HistoryPage>, HistoryPageError> {
+        let Ok(ts) = UInt::try_from(at_ms) else {
+            return Ok(None);
+        };
+        let request = get_event_by_timestamp::v1::Request::new(
+            self.room.room_id().to_owned(),
+            MilliSecondsSinceUnixEpoch(ts),
+            Direction::Forward,
+        );
+        let client = self.room.client();
+        // Any server answer (unsupported endpoint, no event, forbidden, or a
+        // server error) falls back to reading from the first visible event,
+        // as does a server whose advertised versions offer no path for the
+        // endpoint. Only a transport failure fails the export.
+        let found = match background(&self.account_work, || client.send(request.clone())).await {
+            Ok(found) => found,
+            Err(matrix_sdk::HttpError::IntoHttp(_)) => return Ok(None),
+            Err(error) if error.as_client_api_error().is_some() => return Ok(None),
+            Err(_) => return Err(HistoryPageError::Network),
+        };
+        let context = match background(&self.account_work, || {
+            self.room
+                .event_with_context(&found.event_id, true, UInt::from(0_u32), None)
+        })
+        .await
+        {
+            Ok(context) => context,
+            Err(matrix_sdk::Error::Http(error)) if error.as_client_api_error().is_some() => {
+                return Ok(None);
+            }
+            Err(error) => return Err(sdk_error(error)),
+        };
+        // The found event is emitted here and paging continues after it, so
+        // it is never skipped. Without a forward token the history cannot be
+        // continued safely.
+        let Some(end) = context.next_batch_token else {
+            return Ok(None);
+        };
+        Ok(Some(HistoryPage {
+            events: classify_all(
+                context
+                    .events_before
+                    .iter()
+                    .rev()
+                    .chain(context.event.iter())
+                    .chain(context.events_after.iter()),
+            ),
+            end: Some(end),
+        }))
+    }
+
     async fn next_page(&mut self, from: Option<String>) -> Result<HistoryPage, HistoryPageError> {
-        loop {
-            let permit = self
-                .account_work
-                .acquire(AccountWorkKind::SearchCrawl)
-                .await;
+        let messages = background(&self.account_work, || {
             let mut options = MessagesOptions::forward().from(from.as_deref());
             options.limit = UInt::from(PAGE_LIMIT);
-            let result = tokio::select! {
-                biased;
-                // Visible timeline work preempts the export; retry this page
-                // once the account gate readmits background work.
-                _ = permit.cancelled() => continue,
-                result = self.room.messages(options) => result,
-            };
-            drop(permit);
-            let messages = result.map_err(|error| match error {
-                matrix_sdk::Error::Http(_) => HistoryPageError::Network,
-                _ => HistoryPageError::Sdk,
-            })?;
-            return Ok(HistoryPage {
-                events: messages
-                    .chunk
-                    .iter()
-                    .filter_map(|event| classify(&event.kind))
-                    .collect(),
-                end: messages.end,
-            });
-        }
+            self.room.messages(options)
+        })
+        .await
+        .map_err(sdk_error)?;
+        Ok(HistoryPage {
+            events: classify_all(messages.chunk.iter()),
+            end: messages.end,
+        })
     }
 }
 

@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use super::driver::{
     AsyncProgress, ExportCounters, HistoryPage, HistoryPageError, HistoryPageSource,
-    MAX_CONSECUTIVE_EMPTY_PAGES, run_export,
+    MAX_CONSECUTIVE_EMPTY_PAGES, PERIOD_MARGIN_MS, run_export,
 };
 use super::element::{
     ExportDateLocale, ExportHeader, ExportSourceEvent, UndecryptableReason, effective_event,
@@ -108,22 +108,32 @@ impl RoomHistoryExportFile for MemoryFile {
     }
 }
 
-/// Pages served in order; records the `from` token of every request.
+/// Pages served in order; records the `from` token of every request and the
+/// timestamp of every seek.
 struct FakeSource {
+    seek: Option<Result<Option<HistoryPage>, HistoryPageError>>,
     pages: VecDeque<Result<HistoryPage, HistoryPageError>>,
     requested_from: Vec<Option<String>>,
+    seeks: Vec<u64>,
 }
 
 impl FakeSource {
     fn new(pages: Vec<Result<HistoryPage, HistoryPageError>>) -> Self {
         Self {
+            seek: None,
             pages: pages.into(),
             requested_from: Vec::new(),
+            seeks: Vec::new(),
         }
     }
 }
 
 impl HistoryPageSource for FakeSource {
+    async fn seek(&mut self, at_ms: u64) -> Result<Option<HistoryPage>, HistoryPageError> {
+        self.seeks.push(at_ms);
+        self.seek.take().unwrap_or(Ok(None))
+    }
+
     async fn next_page(&mut self, from: Option<String>) -> Result<HistoryPage, HistoryPageError> {
         self.requested_from.push(from);
         self.pages.pop_front().unwrap_or(Ok(HistoryPage {
@@ -152,6 +162,13 @@ fn page(
     })
 }
 
+fn seek_page(
+    events: Vec<ExportSourceEvent>,
+    end: Option<&str>,
+) -> Option<Result<Option<HistoryPage>, HistoryPageError>> {
+    Some(page(events, end).map(Some))
+}
+
 fn message(index: u64, timestamp: u64) -> ExportSourceEvent {
     ExportSourceEvent::Plain(json!({
         "type": "m.room.message",
@@ -170,6 +187,7 @@ struct Run {
     progress: Vec<RoomHistoryExportProgress>,
     counters: RoomHistoryExportProgress,
     requested_from: Vec<Option<String>>,
+    seeks: Vec<u64>,
 }
 
 fn run(
@@ -177,7 +195,17 @@ fn run(
     range: RoomHistoryExportRange,
     output: MemoryOutput,
 ) -> Run {
+    run_with_seek(None, pages, range, output)
+}
+
+fn run_with_seek(
+    seek: Option<Result<Option<HistoryPage>, HistoryPageError>>,
+    pages: Vec<Result<HistoryPage, HistoryPageError>>,
+    range: RoomHistoryExportRange,
+    output: MemoryOutput,
+) -> Run {
     let mut source = FakeSource::new(pages);
+    source.seek = seek;
     let counters = Arc::new(ExportCounters::default());
     let mut progress = RecordedProgress::default();
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -198,6 +226,15 @@ fn run(
         progress: progress.0,
         counters: counters.snapshot(),
         requested_from: source.requested_from,
+        seeks: source.seeks,
+    }
+}
+
+fn period(start_ms: u64, end_exclusive_ms: u64) -> RoomHistoryExportRange {
+    RoomHistoryExportRange::Period {
+        start_ms,
+        end_exclusive_ms,
+        time_zone: "UTC".to_owned(),
     }
 }
 
@@ -336,44 +373,167 @@ fn period_includes_the_start_instant_and_excludes_the_end_instant() {
 }
 
 #[test]
-fn period_walks_past_out_of_order_timestamps_instead_of_stopping_early() {
+fn period_walks_past_out_of_order_timestamps_within_the_margin() {
     // Topological order does not follow origin_server_ts: an in-range event
-    // can follow events that are already past the end of the period.
-    let range = RoomHistoryExportRange::Period {
-        start_ms: 100,
-        end_exclusive_ms: 200,
-        time_zone: "UTC".to_owned(),
-    };
+    // can follow events that are already past the end of the period but
+    // still within the margin.
+    let end = 200;
     let run = run(
         vec![
             page(vec![message(1, 150), message(2, 900)], Some("t1")),
-            page(vec![message(3, 950)], Some("t2")),
+            page(vec![message(3, end + PERIOD_MARGIN_MS - 1)], Some("t2")),
             page(vec![message(4, 120)], None),
         ],
-        range,
+        period(100, end),
         MemoryOutput::default(),
     );
+    assert_eq!(run.result, Ok(()));
     assert_eq!(
         exported_ids(&run),
         vec!["$m1:example.invalid", "$m4:example.invalid"]
     );
+    assert_eq!(run.requested_from.len(), 3);
+}
+
+#[test]
+fn period_stops_after_the_page_with_an_event_past_the_margin() {
+    let start = 10 * PERIOD_MARGIN_MS;
+    let end = start + 1_000;
+    let run = run(
+        vec![
+            page(vec![message(1, start)], Some("t1")),
+            // Events after the cutoff event on the same page are still judged.
+            page(
+                vec![message(2, end + PERIOD_MARGIN_MS), message(3, end - 1)],
+                Some("t2"),
+            ),
+            page(vec![message(4, start + 1)], None),
+        ],
+        period(start, end),
+        MemoryOutput::default(),
+    );
+    assert_eq!(run.result, Ok(()));
+    assert!(run.output.committed());
+    assert_eq!(
+        exported_ids(&run),
+        vec!["$m1:example.invalid", "$m3:example.invalid"]
+    );
+    assert_eq!(run.requested_from, vec![None, Some("t1".into())]);
+    assert_eq!(run.counters, progress(3, 2, 0));
+    assert_eq!(run.progress.len(), 2);
+}
+
+#[test]
+fn period_starts_from_the_seek_page_and_its_token() {
+    let start = 10 * PERIOD_MARGIN_MS;
+    let end = start + 1_000;
+    let run = run_with_seek(
+        seek_page(
+            vec![message(1, start - PERIOD_MARGIN_MS), message(2, start)],
+            Some("seek"),
+        ),
+        vec![page(vec![message(3, end - 1)], None)],
+        period(start, end),
+        MemoryOutput::default(),
+    );
+    assert_eq!(run.result, Ok(()));
+    assert_eq!(run.seeks, vec![start - PERIOD_MARGIN_MS]);
+    assert_eq!(run.requested_from, vec![Some("seek".into())]);
+    assert_eq!(
+        exported_ids(&run),
+        vec!["$m2:example.invalid", "$m3:example.invalid"]
+    );
+    assert_eq!(run.counters, progress(3, 2, 0));
+    assert_eq!(run.progress.len(), 2);
+}
+
+#[test]
+fn a_seek_page_without_a_token_ends_the_walk() {
+    let run = run_with_seek(
+        seek_page(vec![message(1, 150)], None),
+        Vec::new(),
+        period(100, 200),
+        MemoryOutput::default(),
+    );
+    assert_eq!(run.result, Ok(()));
+    assert!(run.requested_from.is_empty());
+    assert_eq!(exported_ids(&run), vec!["$m1:example.invalid"]);
+}
+
+#[test]
+fn an_unsupported_seek_falls_back_to_the_first_visible_event() {
+    let run = run_with_seek(
+        Some(Ok(None)),
+        vec![page(vec![message(1, 5), message(2, 150)], None)],
+        period(100, 200),
+        MemoryOutput::default(),
+    );
+    assert_eq!(run.result, Ok(()));
+    // A start earlier than the margin saturates at the epoch.
+    assert_eq!(run.seeks, vec![0]);
+    assert_eq!(run.requested_from, vec![None]);
+    assert_eq!(exported_ids(&run), vec!["$m2:example.invalid"]);
+}
+
+#[test]
+fn a_failed_seek_fails_the_export_without_committing() {
+    let run = run_with_seek(
+        Some(Err(HistoryPageError::Network)),
+        vec![page(vec![message(1, 150)], None)],
+        period(100, 200),
+        MemoryOutput::default(),
+    );
+    assert_eq!(run.result, Err(RoomHistoryExportFailureKind::Network));
+    assert!(!run.output.committed());
+    assert!(run.requested_from.is_empty());
+}
+
+#[test]
+fn a_full_export_neither_seeks_nor_stops_at_late_timestamps() {
+    let run = run(
+        vec![
+            page(vec![message(1, u64::MAX)], Some("t1")),
+            page(vec![message(2, 1)], None),
+        ],
+        RoomHistoryExportRange::AllAvailable,
+        MemoryOutput::default(),
+    );
+    assert_eq!(run.result, Ok(()));
+    assert!(run.seeks.is_empty());
+    assert_eq!(exported_ids(&run).len(), 2);
+}
+
+#[test]
+fn a_period_ending_near_the_maximum_timestamp_does_not_overflow_the_cutoff() {
+    let run = run(
+        vec![
+            page(vec![message(1, u64::MAX - 1)], Some("t1")),
+            page(vec![message(2, u64::MAX - 2)], None),
+        ],
+        period(u64::MAX - 10, u64::MAX),
+        MemoryOutput::default(),
+    );
+    assert_eq!(run.result, Ok(()));
+    assert_eq!(exported_ids(&run).len(), 2);
 }
 
 #[test]
 fn an_empty_period_still_writes_a_complete_file() {
-    let range = RoomHistoryExportRange::Period {
-        start_ms: 10_000,
-        end_exclusive_ms: 20_000,
-        time_zone: "UTC".to_owned(),
-    };
-    let run = run(
-        vec![page(vec![message(1, 5), message(2, 30_000)], None)],
-        range,
+    let start = 10 * PERIOD_MARGIN_MS;
+    let end = start + 1_000;
+    let run = run_with_seek(
+        seek_page(vec![message(1, start - 1)], Some("seek")),
+        vec![
+            page(vec![message(2, end + PERIOD_MARGIN_MS)], Some("t1")),
+            page(vec![message(3, start)], None),
+        ],
+        period(start, end),
         MemoryOutput::default(),
     );
     assert_eq!(run.result, Ok(()));
     assert!(run.output.committed());
     assert!(exported_ids(&run).is_empty());
+    assert_eq!(run.requested_from, vec![Some("seek".into())]);
     assert_eq!(run.counters, progress(2, 0, 0));
 }
 

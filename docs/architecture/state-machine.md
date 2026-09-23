@@ -2320,8 +2320,18 @@ stateDiagram-v2
   switch, and every other transition through `clear_session_views` (such as a
   verification-gate rejection) reset the slice to `Idle` and emit
   `RoomHistoryExportChanged` when it was not already idle.
-- A completed export has written every event the account could read from the
-  server into the destination. The destination is replaced atomically only
+- A completed full export has written every event the account could read
+  from the server into the destination. A period export reads only a window
+  around the period, bounded by a 24-hour margin (#988): it starts at the
+  event `timestamp_to_event` finds at `start_ms - margin` and stops after the
+  page holding an event at or after `end_exclusive_ms + margin`. When the
+  server cannot seek (unsupported endpoint, no such event, or any other
+  server error response) the export starts at the first visible event
+  instead. Event order is topological and `origin_server_ts` is
+  sender-controlled, so an in-range event displaced from its neighbours by
+  more than the margin is omitted. This is a deliberate tradeoff: short
+  periods of long rooms stay fast, and inclusion is still decided per event
+  by the range. The destination is replaced atomically only
   after the whole file is written. Cancellation, failure, and teardown discard
   the staged file, so a partial export never looks complete.
   `undecryptable_events` reports how many exported events the device could

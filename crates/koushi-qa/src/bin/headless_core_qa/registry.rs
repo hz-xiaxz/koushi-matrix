@@ -667,6 +667,7 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
         QaStage::RoomHistoryExport => &[
             "history_export_full=ok",
             "history_export_period=ok",
+            "history_export_period_fallback=ok",
             "history_export_utd_counted=ok",
             "history_export_cancel=ok",
             "room_history_export=ok",
@@ -765,6 +766,7 @@ fn implemented_final_tokens() -> Vec<&'static str> {
         "crawl_failure=ok",
         "history_export_full=ok",
         "history_export_period=ok",
+        "history_export_period_fallback=ok",
         "history_export_utd_counted=ok",
         "history_export_cancel=ok",
         "room_history_export=ok",

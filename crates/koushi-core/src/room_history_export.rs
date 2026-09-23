@@ -10,6 +10,8 @@ mod sdk_source;
 mod sink;
 
 #[cfg(test)]
+mod sdk_source_tests;
+#[cfg(test)]
 mod tests;
 
 pub(crate) use driver::{AsyncProgress, ExportCounters, run_export};

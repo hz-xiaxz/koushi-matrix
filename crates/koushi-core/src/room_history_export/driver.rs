@@ -1,11 +1,16 @@
 //! Paging and streaming loop for one room-history export.
 //!
-//! History is read oldest-first with `/messages?dir=f` starting at the first
-//! event visible to this account, so events are written in Element's order
-//! without buffering the room. Period exports still walk the whole visible
-//! history: event order is topological and `origin_server_ts` is
-//! sender-controlled, so stopping at the first event past the end of the
-//! period could drop later in-range events.
+//! History is read oldest-first with `/messages?dir=f`, so events are written
+//! in Element's order without buffering the room. A full export starts at the
+//! first event visible to this account and reads to the end.
+//!
+//! A period export bounds the walk with [`PERIOD_MARGIN_MS`]. It starts at
+//! the event `timestamp_to_event` finds at `start - margin` (or at the first
+//! visible event when the server cannot seek), and stops after the page that
+//! holds an event at or after `end + margin`. Event order is topological and
+//! `origin_server_ts` is sender-controlled, so the margin absorbs clock skew
+//! and reordering; an in-range event displaced by more than the margin is
+//! omitted. That tradeoff keeps short periods of long rooms fast.
 
 use std::collections::HashSet;
 use std::future::Future;
@@ -30,6 +35,9 @@ pub(crate) const PAGE_LIMIT: u32 = 250;
 /// committing a file that might silently omit later history.
 pub(crate) const MAX_CONSECUTIVE_EMPTY_PAGES: u32 = 200;
 
+/// How far outside a period the walk still reads: 24 hours.
+pub(crate) const PERIOD_MARGIN_MS: u64 = 24 * 60 * 60 * 1000;
+
 /// One `/messages` page in forward order.
 pub(crate) struct HistoryPage {
     pub(crate) events: Vec<ExportSourceEvent>,
@@ -46,6 +54,14 @@ pub(crate) enum HistoryPageError {
 /// A forward `/messages` reader. `from = None` starts at the first visible
 /// event.
 pub(crate) trait HistoryPageSource: Send {
+    /// The page at the first event at or after `at_ms`, with the token that
+    /// continues forward from it. `None` when the server cannot seek or finds
+    /// no such event; the walk then starts at the first visible event.
+    fn seek(
+        &mut self,
+        at_ms: u64,
+    ) -> impl Future<Output = Result<Option<HistoryPage>, HistoryPageError>> + Send;
+
     fn next_page(
         &mut self,
         from: Option<String>,
@@ -83,7 +99,7 @@ fn page_failure(error: HistoryPageError) -> RoomHistoryExportFailureKind {
 }
 
 /// Export the room into `file`, committing it only when the history is
-/// exhausted. `on_page` receives the counters after every page.
+/// exhausted or a period export has read past its margin. `on_page` receives the counters after every page.
 pub(crate) async fn run_export<S, P>(
     source: &mut S,
     file: Box<dyn RoomHistoryExportFile>,
@@ -101,12 +117,31 @@ where
     let (mut writer, head) = ElementJsonWriter::begin(header);
     file.write_all(&head).map_err(sink_failure)?;
 
+    let (mut seeked, cutoff_ms) = match range {
+        RoomHistoryExportRange::AllAvailable => (None, None),
+        RoomHistoryExportRange::Period {
+            start_ms,
+            end_exclusive_ms,
+            ..
+        } => (
+            source
+                .seek(start_ms.saturating_sub(PERIOD_MARGIN_MS))
+                .await
+                .map_err(page_failure)?,
+            Some(end_exclusive_ms.saturating_add(PERIOD_MARGIN_MS)),
+        ),
+    };
+
     let mut seen_event_ids = HashSet::<String>::new();
     let mut from: Option<String> = None;
     let mut empty_pages = 0_u32;
     loop {
-        let page = source.next_page(from.clone()).await.map_err(page_failure)?;
+        let page = match seeked.take() {
+            Some(page) => page,
+            None => source.next_page(from.clone()).await.map_err(page_failure)?,
+        };
         let page_was_empty = page.events.is_empty();
+        let mut past_cutoff = false;
         for source_event in page.events {
             let event = effective_event(source_event);
             let Some(event_id) = event.event_id() else {
@@ -116,10 +151,11 @@ where
                 continue;
             }
             counters.fetched.fetch_add(1, Ordering::AcqRel);
-            if !event
-                .origin_server_ts()
-                .is_some_and(|timestamp| range.contains(timestamp))
-            {
+            let timestamp = event.origin_server_ts();
+            if let (Some(timestamp), Some(cutoff_ms)) = (timestamp, cutoff_ms) {
+                past_cutoff |= timestamp >= cutoff_ms;
+            }
+            if !timestamp.is_some_and(|timestamp| range.contains(timestamp)) {
                 continue;
             }
             if !element_renders(&event, own_user_id) {
@@ -133,6 +169,9 @@ where
             }
         }
         on_page.page_completed(counters.snapshot()).await;
+        if past_cutoff {
+            break;
+        }
 
         empty_pages = if page_was_empty { empty_pages + 1 } else { 0 };
         match page.end {
