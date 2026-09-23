@@ -102,10 +102,12 @@ impl HistoryPageSource for MatrixRoomHistorySource {
         );
         let client = self.room.client();
         // Any server answer (unsupported endpoint, no event, forbidden, or a
-        // server error) falls back to reading from the first visible event;
-        // only a transport failure fails the export.
+        // server error) falls back to reading from the first visible event,
+        // as does a server whose advertised versions offer no path for the
+        // endpoint. Only a transport failure fails the export.
         let found = match background(&self.account_work, || client.send(request.clone())).await {
             Ok(found) => found,
+            Err(matrix_sdk::HttpError::IntoHttp(_)) => return Ok(None),
             Err(error) if error.as_client_api_error().is_some() => return Ok(None),
             Err(_) => return Err(HistoryPageError::Network),
         };
