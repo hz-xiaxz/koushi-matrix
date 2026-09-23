@@ -445,6 +445,7 @@ contract also requires these tokens when the scenario runs alone:
 ```text
 history_export_full=ok
 history_export_period=ok
+history_export_period_fallback=ok
 history_export_utd_counted=ok
 history_export_cancel=ok
 room_history_export=ok
@@ -455,7 +456,13 @@ room wrote Element's top-level object in Element's key order. Every sent
 message is decrypted, no edit, reaction, or redaction event appears, and the
 counts in `AppState.room_history_export` match the file.
 `history_export_period=ok` means a `[start, end)` export equals the full
-export restricted to that range. `history_export_utd_counted=ok` covers
+export restricted to that range. `history_export_period_fallback=ok` means a
+period after the room, where `timestamp_to_event` finds no event, falls back
+to reading the whole visible history and writes an empty file. A period
+before the room also writes an empty file; the informational
+`history_export_period_bounded=true` means the seek and the margin cutoff read
+fewer events than the full export (`false` means the server could not seek).
+`history_export_utd_counted=ok` covers
 disposable user C, whose device is denied one room key: C's export contains
 that message as `m.bad.encrypted`, keeps the messages sent after C joined
 decrypted, and the Rust result counts every placeholder. `history_export_cancel=ok`

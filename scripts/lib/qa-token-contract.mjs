@@ -26,6 +26,7 @@ export const HEADLESS_LOCAL_QA_SCENARIO_TOKENS = Object.freeze({
   room_history_export: Object.freeze([
     "history_export_full=ok",
     "history_export_period=ok",
+    "history_export_period_fallback=ok",
     "history_export_utd_counted=ok",
     "history_export_cancel=ok",
     "room_history_export=ok"

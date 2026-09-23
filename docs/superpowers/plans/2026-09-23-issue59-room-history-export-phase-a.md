@@ -64,10 +64,12 @@ Observed upstream behaviour that Koushi reproduces rather than "fixes":
   room. `room_history_export::element` contains the effective-event mapping,
   the ported renderer filter, the header, and the `JSON.stringify(…, null, 2)`
   layout. It does no I/O.
-- Period exports walk the whole visible history. Topological order does not
-  follow `origin_server_ts`, so stopping at the first event past either
-  boundary could drop in-range events. An early-termination optimization
-  would need its own correctness argument.
+- Period exports originally walked the whole visible history. #988 replaced
+  that with a window bounded by a 24-hour margin: a `timestamp_to_event` seek
+  to `start - margin` (falling back to the first visible event) and a stop
+  after `end + margin`. Events displaced by more than the margin are omitted;
+  the tradeoff is recorded in `docs/architecture/state-machine.md`, section
+  "Room History Export".
 - Output: `RoomHistoryExportSink` stages bytes in a hidden temporary file next
   to the destination (created with owner-only permissions). It fsyncs the
   file and renames it over the destination on commit. A staged file that is

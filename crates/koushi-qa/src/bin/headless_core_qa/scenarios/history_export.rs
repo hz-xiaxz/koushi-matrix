@@ -277,6 +277,11 @@ async fn send_text(
 ///   reaction, or redaction events, and counts that match the file.
 /// - `history_export_period=ok`: a period export contains exactly the events
 ///   of the full export whose timestamps fall in `[start, end)`.
+/// - `history_export_period_fallback=ok`: a period after the room, where
+///   `timestamp_to_event` finds no event, reads the whole visible history and
+///   writes an empty file. A period before the room also writes an empty
+///   file; `history_export_period_bounded` reports whether the seek and the
+///   margin cutoff read fewer events than the full export.
 /// - `history_export_utd_counted=ok`: a member whose device was denied a room
 ///   key exports that message as Element's `m.bad.encrypted` placeholder, and
 ///   the Rust-owned result counts every placeholder; messages sent after they
@@ -477,6 +482,66 @@ pub(super) async fn run_room_history_export_stage(
             );
         }
         println!("history_export_period=ok");
+
+        // A period long before the room: the seek lands on the room's first
+        // event, which is already past the period's margin, so the walk stops
+        // after one page. A server that cannot seek reads from the first
+        // visible event instead; either way the file is empty.
+        let before_path = directory.0.join("period-before.json");
+        let (before, before_progress) = export_to_value(
+            conn_a,
+            &room_id,
+            RoomHistoryExportRange::Period {
+                start_ms: 0,
+                end_exclusive_ms: 1_000,
+                time_zone: "UTC".to_owned(),
+            },
+            &before_path,
+            "history export period before room",
+        )
+        .await?;
+        check_export(
+            &before,
+            &before_progress,
+            "history export period before room",
+        )?;
+        if !messages(&before).is_empty() {
+            return Err("history export period before room: exported events".to_owned());
+        }
+        let bounded = before_progress.fetched_events < full_progress.fetched_events;
+        println!("history_export_period_bounded={bounded}");
+
+        // A period after the room: `timestamp_to_event` finds no event, so the
+        // export falls back to reading the whole visible history.
+        let last_ms = full_events
+            .iter()
+            .filter_map(|event| event["origin_server_ts"].as_u64())
+            .max()
+            .unwrap_or_default();
+        let after_start_ms = last_ms + 365 * 24 * 60 * 60 * 1000;
+        let after_path = directory.0.join("period-after.json");
+        let (after, after_progress) = export_to_value(
+            conn_a,
+            &room_id,
+            RoomHistoryExportRange::Period {
+                start_ms: after_start_ms,
+                end_exclusive_ms: after_start_ms + 24 * 60 * 60 * 1000,
+                time_zone: "UTC".to_owned(),
+            },
+            &after_path,
+            "history export period after room",
+        )
+        .await?;
+        check_export(&after, &after_progress, "history export period after room")?;
+        if !messages(&after).is_empty()
+            || after_progress.fetched_events < full_progress.fetched_events
+        {
+            return Err(
+                "history export period after room: the fallback did not read the history"
+                    .to_owned(),
+            );
+        }
+        println!("history_export_period_fallback=ok");
 
         // The later member cannot decrypt the withheld message.
         let late_path = directory.0.join("late-member.json");

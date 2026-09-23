@@ -487,6 +487,7 @@ fn implemented_final_tokens_include_thread() {
             "crawl_failure=ok",
             "history_export_full=ok",
             "history_export_period=ok",
+            "history_export_period_fallback=ok",
             "history_export_utd_counted=ok",
             "history_export_cancel=ok",
             "room_history_export=ok",
@@ -878,6 +879,7 @@ fn implemented_final_tokens_include_safety() {
             "crawl_failure=ok",
             "history_export_full=ok",
             "history_export_period=ok",
+            "history_export_period_fallback=ok",
             "history_export_utd_counted=ok",
             "history_export_cancel=ok",
             "room_history_export=ok",
@@ -923,6 +925,7 @@ fn room_history_export_is_registered_with_private_safe_tokens() {
     for token in [
         "history_export_full=ok",
         "history_export_period=ok",
+        "history_export_period_fallback=ok",
         "history_export_utd_counted=ok",
         "history_export_cancel=ok",
         "room_history_export=ok",
