@@ -105,7 +105,10 @@ it. It is not a backup: neither Koushi nor Element can import it back.
    - **All available history** saves every event your account can read.
    - **Period** saves the events from the start date through the end date,
      inclusive. The dialog shows the time zone it uses for the dates, which is
-     your computer's time zone. Dates before 1970 cannot be chosen.
+     your computer's time zone. Dates before 1970 cannot be chosen. To stay
+     fast in long rooms, a period download reads only the history around the
+     period, so a message whose timestamp is more than a day out of order with
+     the messages around it can be left out.
 2. Select **Save**, then choose where to save the file.
 3. The dialog shows how many events have been read and saved. Closing it does
    not stop the download; **Room info** keeps showing the progress. To cancel,
