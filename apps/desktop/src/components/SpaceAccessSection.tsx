@@ -1,4 +1,4 @@
-import { type Ref, useEffect, useRef, useState } from "react";
+import { type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { t, type MessageId } from "../i18n/messages";
 import type { RoomJoinRule, RoomManagementState, SpaceSummary } from "../domain/types";
@@ -37,6 +37,27 @@ export function SpaceAccessSection({
     rejected: boolean;
   } | null>(null);
   const epochRef = useRef(0);
+  // Focus follows the flow: into the confirmation when it opens, back to its
+  // trigger on cancel, and to the section heading once submitted, since each
+  // step unmounts the control that had focus.
+  const headingElementRef = useRef<HTMLHeadingElement>(null);
+  useImperativeHandle(headingRef, () => headingElementRef.current as HTMLHeadingElement);
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  const triggerRefs = useRef<Partial<Record<AccessChoice, HTMLButtonElement | null>>>({});
+  const [focusTarget, setFocusTarget] = useState<
+    { kind: "confirm" } | { kind: "trigger"; choice: AccessChoice } | { kind: "heading" } | null
+  >(null);
+  useEffect(() => {
+    if (!focusTarget) return;
+    const element =
+      focusTarget.kind === "confirm"
+        ? confirmButtonRef.current
+        : focusTarget.kind === "trigger"
+          ? triggerRefs.current[focusTarget.choice]
+          : headingElementRef.current;
+    element?.focus();
+    setFocusTarget(null);
+  }, [focusTarget]);
   useEffect(
     () => () => {
       epochRef.current += 1;
@@ -70,6 +91,7 @@ export function SpaceAccessSection({
   function submit(target: AccessChoice) {
     const epoch = ++epochRef.current;
     setConfirming(null);
+    setFocusTarget({ kind: "heading" });
     setSubmission({
       target,
       priorFailureRequestId: operation.kind === "failed" ? operation.request_id : null,
@@ -95,7 +117,7 @@ export function SpaceAccessSection({
 
   return (
     <section className="settings-section space-access" aria-labelledby="space-access-title">
-      <h3 id="space-access-title" ref={headingRef} tabIndex={-1}>
+      <h3 id="space-access-title" ref={headingElementRef} tabIndex={-1}>
         {t("space.access")}
       </h3>
       <p className="profile-settings-hint">{t("space.accessScope")}</p>
@@ -129,6 +151,7 @@ export function SpaceAccessSection({
               <div className="profile-settings-actions">
                 <button
                   className="profile-settings-action"
+                  ref={confirmButtonRef}
                   type="button"
                   disabled={pending}
                   onClick={() => submit(confirming)}
@@ -138,7 +161,10 @@ export function SpaceAccessSection({
                 <button
                   className="profile-settings-action"
                   type="button"
-                  onClick={() => setConfirming(null)}
+                  onClick={() => {
+                    setFocusTarget({ kind: "trigger", choice: confirming });
+                    setConfirming(null);
+                  }}
                 >
                   {t("action.cancel")}
                 </button>
@@ -150,9 +176,15 @@ export function SpaceAccessSection({
                 <button
                   className="profile-settings-action"
                   key={choice}
+                  ref={(element) => {
+                    triggerRefs.current[choice] = element;
+                  }}
                   type="button"
                   disabled={pending}
-                  onClick={() => setConfirming(choice)}
+                  onClick={() => {
+                    setConfirming(choice);
+                    setFocusTarget({ kind: "confirm" });
+                  }}
                 >
                   {t(choiceLabel(choice))}
                 </button>
@@ -162,18 +194,19 @@ export function SpaceAccessSection({
         </div>
       )}
 
-      {pending || failed || saved ? (
-        <p
-          className={failed ? "space-access-status space-access-status-failed" : "space-access-status"}
-          role="status"
-        >
-          {pending
-            ? t("space.accessSaving")
-            : failed
-              ? t(failure === "forbidden" ? "space.accessForbidden" : "space.accessFailed")
-              : t("space.accessSaved")}
-        </p>
-      ) : null}
+      {/* Always mounted, so a change of text is announced. */}
+      <p
+        className={failed ? "space-access-status space-access-status-failed" : "space-access-status"}
+        role="status"
+      >
+        {pending
+          ? t("space.accessSaving")
+          : failed
+            ? t(failure === "forbidden" ? "space.accessForbidden" : "space.accessFailed")
+            : saved
+              ? t("space.accessSaved")
+              : null}
+      </p>
     </section>
   );
 }

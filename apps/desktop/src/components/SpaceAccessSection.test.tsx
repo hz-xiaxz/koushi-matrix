@@ -152,15 +152,26 @@ describe("Space access (#935)", () => {
     fireEvent.click(within(access()).getByRole("button", { name: t("space.accessMakePublic") }));
     expect(onUpdateJoinRule).not.toHaveBeenCalled();
     expect(within(access()).getByText(t("space.accessConfirmPublic"))).toBeTruthy();
+    // Focus moves into the confirmation rather than falling to the page.
+    let dialog = within(access()).getByRole("group", { name: t("space.accessMakePublic") });
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole("button", { name: t("space.accessMakePublic") })
+    );
 
     fireEvent.click(within(access()).getByRole("button", { name: t("action.cancel") }));
     expect(within(access()).queryByText(t("space.accessConfirmPublic"))).toBeNull();
     expect(onUpdateJoinRule).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(
+      within(access()).getByRole("button", { name: t("space.accessMakePublic") })
+    );
 
     fireEvent.click(within(access()).getByRole("button", { name: t("space.accessMakePublic") }));
-    const dialog = within(access()).getByRole("group", { name: t("space.accessMakePublic") });
+    dialog = within(access()).getByRole("group", { name: t("space.accessMakePublic") });
     fireEvent.click(within(dialog).getByRole("button", { name: t("space.accessMakePublic") }));
     expect(onUpdateJoinRule).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(
+      within(access()).getByRole("heading", { name: t("space.access") })
+    );
     expect(onUpdateJoinRule).toHaveBeenCalledWith(SPACE_ID, "public");
   });
 

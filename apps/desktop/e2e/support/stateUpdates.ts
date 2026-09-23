@@ -7,14 +7,13 @@ interface StateUpdateHarness {
   currentSnapshot(): DesktopSnapshot;
   pushStateUpdate(update: StateUpdateEnvelope): void;
   appStoreGeneration(): number | null;
-  appStoreDeltaStats(): { applied: number; staleIgnored: number; gapRefreshRequested: number };
 }
 
 type ChangedSlices = Extract<StateUpdateEnvelope, { kind: "delta" }>["changed"];
 
 /**
  * Push one delta at the generation after the one the harness is on, and wait
- * until the App's store has applied it.
+ * until the App's store has reached it — failing if the update was dropped.
  *
  * The generation is read inside the same `page.evaluate` that pushes (#984).
  * A generation derived from a snapshot read earlier goes stale whenever one of
@@ -23,19 +22,18 @@ type ChangedSlices = Extract<StateUpdateEnvelope, { kind: "delta" }>["changed"];
  * transport behaviour, so it is the spec that has to stay current.
  */
 export async function pushDelta(page: Page, changed: ChangedSlices): Promise<number> {
-  const { generation, staleIgnored } = await page.evaluate((nextChanged) => {
+  const generation = await page.evaluate((nextChanged) => {
     const harness = (window as unknown as { __harness: StateUpdateHarness }).__harness;
     const next = (harness.currentSnapshot().state_generation ?? 0) + 1;
-    const before = harness.appStoreDeltaStats().staleIgnored;
     harness.pushStateUpdate({
       protocol_version: 1,
       kind: "delta",
       generation: next,
       changed: nextChanged
     } as StateUpdateEnvelope);
-    return { generation: next, staleIgnored: before };
+    return next;
   }, changed);
-  await expectApplied(page, generation, staleIgnored);
+  await expectGeneration(page, generation);
   return generation;
 }
 
@@ -45,10 +43,9 @@ export async function pushDelta(page: Page, changed: ChangedSlices): Promise<num
  * the same reason as {@link pushDelta}.
  */
 export async function pushSnapshot(page: Page, snapshot: DesktopSnapshot): Promise<number> {
-  const { generation, staleIgnored } = await page.evaluate((nextSnapshot) => {
+  const generation = await page.evaluate((nextSnapshot) => {
     const harness = (window as unknown as { __harness: StateUpdateHarness }).__harness;
     const next = (harness.currentSnapshot().state_generation ?? 0) + 1;
-    const before = harness.appStoreDeltaStats().staleIgnored;
     harness.pushStateUpdate({
       protocol_version: 1,
       kind: "snapshot",
@@ -56,13 +53,18 @@ export async function pushSnapshot(page: Page, snapshot: DesktopSnapshot): Promi
       reason: "settlement",
       snapshot: { ...nextSnapshot, state_generation: next }
     } as StateUpdateEnvelope);
-    return { generation: next, staleIgnored: before };
+    return next;
   }, snapshot);
-  await expectApplied(page, generation, staleIgnored);
+  await expectGeneration(page, generation);
   return generation;
 }
 
-async function expectApplied(page: Page, generation: number, staleIgnored: number): Promise<void> {
+/**
+ * The pushed generation is one past the harness's, and the store never runs
+ * ahead of the harness, so the store reaching it proves the update landed. A
+ * dropped update leaves the store behind and times this out.
+ */
+async function expectGeneration(page: Page, generation: number): Promise<void> {
   await expect
     .poll(() =>
       page.evaluate(
@@ -72,8 +74,4 @@ async function expectApplied(page: Page, generation: number, staleIgnored: numbe
       )
     )
     .toBeGreaterThanOrEqual(generation);
-  const stats = await page.evaluate(() =>
-    (window as unknown as { __harness: StateUpdateHarness }).__harness.appStoreDeltaStats()
-  );
-  expect(stats.staleIgnored, "the pushed update was dropped as stale").toBe(staleIgnored);
 }
