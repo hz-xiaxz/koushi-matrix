@@ -7,13 +7,12 @@
  */
 
 import { expect, test, type Page } from "@playwright/test";
-import type { StateUpdateEnvelope } from "../src/domain/coreEvents";
 import type { DesktopSnapshot, RoomListItem } from "../src/domain/types";
 import { t } from "../src/i18n/messages";
+import { pushDelta } from "./support/stateUpdates";
 
 interface Harness {
   currentSnapshot(): DesktopSnapshot;
-  pushStateUpdate(update: StateUpdateEnvelope): void;
   clearInvocations(): void;
   invocationsOf(command: string): unknown[];
   setCommandResponse(command: string, response: unknown): void;
@@ -70,34 +69,19 @@ async function openHarness(page: Page): Promise<DesktopSnapshot> {
 
 test("a Space lists the rooms it contains that the account has not joined", async ({ page }) => {
   const base = await openHarness(page);
-  const generation = (base.state_generation ?? 0) + 1;
-  await page.evaluate(
-    ({ envelope }) => {
-      (window as unknown as { __harness: Harness }).__harness.pushStateUpdate(
-        envelope as StateUpdateEnvelope
-      );
-    },
-    {
-      envelope: {
-        protocol_version: 1,
-        kind: "delta",
-        generation,
-        changed: {
-          sidebar: {
-            ...base.sidebar,
-            space_rooms: [JOINED],
-            sections: {
-              favourites: [],
-              rooms: [JOINED],
-              people: [],
-              low_priority: [LOW],
-              not_joined: [OPEN, INVITED]
-            }
-          }
-        }
+  await pushDelta(page, {
+    sidebar: {
+      ...base.sidebar,
+      space_rooms: [JOINED],
+      sections: {
+        favourites: [],
+        rooms: [JOINED],
+        people: [],
+        low_priority: [LOW],
+        not_joined: [OPEN, INVITED]
       }
     }
-  );
+  });
 
   const open = page.getByRole("button", { name: /Open Room/ });
   const invited = page.getByRole("button", { name: /Invited Room/ });

@@ -2,7 +2,7 @@ use crate::{
     effect::{AppEffect, UiEvent},
     state::{
         AppState, OperationFailureKind, RoomManagementOperationKind, RoomManagementOperationState,
-        RoomMemberRole, RoomModerationAction,
+        RoomMemberRole, RoomModerationAction, RoomSettingChange,
     },
 };
 
@@ -42,12 +42,13 @@ pub(crate) fn handle_room_setting_update_requested(
     state: &mut AppState,
     request_id: u64,
     room_id: String,
+    change: &RoomSettingChange,
 ) -> Vec<AppEffect> {
     if !is_session_ready(state) {
         return Vec::new();
     }
 
-    if !room_settings_permission_allows(state, &room_id) {
+    if !room_settings_permission_allows(state, &room_id, change) {
         state.room_management.operation = RoomManagementOperationState::Failed {
             request_id,
             room_id,
@@ -282,13 +283,17 @@ pub(crate) fn handle_room_member_role_update_failed(
 
 // --- Private helpers ---
 
-fn room_settings_permission_allows(state: &AppState, room_id: &str) -> bool {
+fn room_settings_permission_allows(
+    state: &AppState,
+    room_id: &str,
+    change: &RoomSettingChange,
+) -> bool {
     state
         .room_management
         .settings
         .as_ref()
         .filter(|settings| settings.room_id == room_id)
-        .is_some_and(|settings| settings.permissions.can_edit_settings)
+        .is_some_and(|settings| settings.permissions.allows_setting_change(change))
 }
 
 fn room_role_permission_allows(state: &AppState, room_id: &str) -> bool {

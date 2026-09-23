@@ -339,6 +339,7 @@ fn search_results_carry_rust_owned_space_context_label() {
             raw_name: None,
             display_name: "Fallback Space".to_owned(),
             avatar: None,
+            join_rule: None,
             child_room_ids: vec!["room-a".to_owned()],
         },
         SpaceSummary {
@@ -346,6 +347,7 @@ fn search_results_carry_rust_owned_space_context_label() {
             raw_name: None,
             display_name: "Active Space".to_owned(),
             avatar: None,
+            join_rule: None,
             child_room_ids: vec!["room-a".to_owned()],
         },
     ];
@@ -401,6 +403,7 @@ fn dm_search_results_never_carry_a_space_context_label() {
             raw_name: None,
             display_name: "Fallback Space".to_owned(),
             avatar: None,
+            join_rule: None,
             child_room_ids: vec!["dm-child".to_owned()],
         },
         SpaceSummary {
@@ -408,6 +411,7 @@ fn dm_search_results_never_carry_a_space_context_label() {
             raw_name: None,
             display_name: "CompPhysHack2026".to_owned(),
             avatar: None,
+            join_rule: None,
             child_room_ids: vec!["dm-child".to_owned()],
         },
     ];

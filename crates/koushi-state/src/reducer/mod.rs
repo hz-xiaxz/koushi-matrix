@@ -912,8 +912,10 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::RoomSettingUpdateRequested {
             request_id,
             room_id,
-            change: _,
-        } => room_management::handle_room_setting_update_requested(state, request_id, room_id),
+            change,
+        } => room_management::handle_room_setting_update_requested(
+            state, request_id, room_id, &change,
+        ),
         AppAction::RoomSettingUpdateSucceeded {
             request_id,
             room_id,

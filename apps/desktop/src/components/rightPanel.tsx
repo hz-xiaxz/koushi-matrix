@@ -15,6 +15,7 @@ import type {
   RoomModerationAction,
   InviteTargetCandidate,
   RoomNotificationMode,
+  RoomJoinRule,
   RoomSettingChange,
   SavedSessionInfo,
   SearchResult,
@@ -184,6 +185,7 @@ export function ContextualRightPanel({
   onRepairRoomTimeline = () => undefined,
   onForceRotateOutboundSession = () => undefined,
   onUpdateRoomSetting = () => undefined,
+  onUpdateSpaceJoinRule,
   onIgnoreUser = () => undefined,
   onUnignoreUser = () => undefined,
   onReportUser = () => undefined,
@@ -345,6 +347,8 @@ export function ContextualRightPanel({
   spaceLocalOverrides?: Record<string, SpaceLocalPresentation>;
   onTimelineDiagnosticLogEntry?: (entry: TimelineDiagnosticLogEntry) => void;
   onUpdateRoomSetting?: (roomId: string, change: RoomSettingChange) => void;
+  /** Issue #935: settles, or rejects when Rust refuses the change. */
+  onUpdateSpaceJoinRule?: (spaceId: string, joinRule: RoomJoinRule) => Promise<void>;
   onIgnoreUser?: (userId: string) => void;
   onUnignoreUser?: (userId: string) => void;
   onReportUser?: (userId: string) => void;
@@ -776,6 +780,7 @@ export function ContextualRightPanel({
               ? (override) => onSetSpaceLocalOverride(activeSpace.space_id, override)
               : undefined
           }
+          onUpdateJoinRule={activeSpace ? onUpdateSpaceJoinRule : undefined}
         />
       </aside>
     );

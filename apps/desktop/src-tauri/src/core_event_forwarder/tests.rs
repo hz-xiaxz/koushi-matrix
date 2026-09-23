@@ -1161,6 +1161,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
         history_visibility: RoomHistoryVisibility::Shared,
         permissions: RoomPermissionFacts {
             can_edit_settings: true,
+            can_change_join_rule: true,
             can_edit_roles: true,
             can_invite: true,
             can_kick: true,

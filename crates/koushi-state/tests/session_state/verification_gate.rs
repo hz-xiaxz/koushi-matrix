@@ -1235,6 +1235,7 @@ fn ready_session_ignores_recovery_availability_as_an_admission_signal() {
             raw_name: None,
             display_name: "Space A".to_owned(),
             avatar: None,
+            join_rule: None,
             child_room_ids: vec!["room-a".to_owned()],
         }],
         rooms: vec![RoomSummary {

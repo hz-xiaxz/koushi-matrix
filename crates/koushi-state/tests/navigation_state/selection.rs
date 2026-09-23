@@ -171,6 +171,7 @@ fn room_list_update_keeps_empty_selected_space_empty() {
                 raw_name: None,
                 display_name: "Empty Space".to_owned(),
                 avatar: None,
+                join_rule: None,
                 child_room_ids: Vec::new(),
             },
             SpaceSummary {
@@ -178,6 +179,7 @@ fn room_list_update_keeps_empty_selected_space_empty() {
                 raw_name: None,
                 display_name: "Space A".to_owned(),
                 avatar: None,
+                join_rule: None,
                 child_room_ids: vec!["room-a".to_owned()],
             },
         ],
@@ -261,6 +263,7 @@ fn selecting_space_restores_last_non_dm_room_for_that_space() {
         raw_name: None,
         display_name: "Space A".to_owned(),
         avatar: None,
+        join_rule: None,
         child_room_ids: vec!["room-a".to_owned(), "room-b".to_owned(), "dm-a".to_owned()],
     }];
     let mut state = AppState {

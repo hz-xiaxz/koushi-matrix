@@ -80,6 +80,7 @@ directory_join=ok
 room_settings=ok
 moderation=ok
 permission_guard=ok
+space_access=ok
 timeline=ok
 hide_redacted=ok
 activity_recent=ok
@@ -141,7 +142,8 @@ print room IDs, aliases, server names, query text, pagination tokens, or raw SDK
 errors as success output.
 
 `room_settings=ok`, `moderation=ok`, and `permission_guard=ok` are the Phase A
-room-management proof. The core lane creates a disposable management room,
+room-management proof; `space_access=ok` adds a Space's join-rule change and
+its member-side refusal and sync (#935). The core lane creates a disposable management room,
 loads Rust-owned settings/permission facts, updates a setting through
 `RoomCommand`, rejects an unauthorized moderation command before SDK mutation,
 and performs an authorized moderation action. The lane must not print room IDs,

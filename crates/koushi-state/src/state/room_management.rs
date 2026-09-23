@@ -226,7 +226,22 @@ pub enum RoomJoinRule {
     Invite,
     Knock,
     Restricted,
+    KnockRestricted,
     Private,
+    /// A rule this client does not model. Shown as-is and never sent back.
+    Unknown,
+}
+
+impl RoomJoinRule {
+    /// Whether a `RoomSettingChange::JoinRule` may carry this rule. The others
+    /// need content the command does not carry (a restricted allow list) or
+    /// could not be written back faithfully.
+    pub fn is_settable(self) -> bool {
+        matches!(
+            self,
+            Self::Public | Self::Invite | Self::Knock | Self::Private
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -241,12 +256,32 @@ pub enum RoomHistoryVisibility {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RoomPermissionFacts {
     pub can_edit_settings: bool,
+    /// Whether the account may send `m.room.join_rules`. Changing who can join
+    /// needs only this, so a member who may not rename the room can still
+    /// hold it (#935).
+    #[serde(default)]
+    pub can_change_join_rule: bool,
     pub can_edit_roles: bool,
     #[serde(default)]
     pub can_invite: bool,
     pub can_kick: bool,
     pub can_ban: bool,
     pub can_unban: bool,
+}
+
+impl RoomPermissionFacts {
+    /// The one permission check for a settings change, shared by the Core
+    /// guard before the state event is sent and the reducer guard that admits
+    /// the pending operation, so the two can never disagree.
+    pub fn allows_setting_change(&self, change: &RoomSettingChange) -> bool {
+        match change {
+            RoomSettingChange::JoinRule(_) => self.can_change_join_rule,
+            RoomSettingChange::Name(_)
+            | RoomSettingChange::Topic(_)
+            | RoomSettingChange::AvatarUrl(_)
+            | RoomSettingChange::HistoryVisibility(_) => self.can_edit_settings,
+        }
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]

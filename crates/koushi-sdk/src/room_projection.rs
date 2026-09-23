@@ -52,6 +52,9 @@ pub struct MatrixRoomListSpace {
     pub raw_name: Option<String>,
     pub display_name: String,
     pub avatar_mxc_uri: Option<String>,
+    /// The Space's current join rule, projected on every room-list update so
+    /// a change made by another client reaches Space Info (#935).
+    pub join_rule: MatrixRoomJoinRule,
     pub child_room_ids: Vec<String>,
     pub member_user_ids: Vec<String>,
 }
@@ -1594,6 +1597,11 @@ pub(super) async fn matrix_room_settings_snapshot(
         matrix_sdk::ruma::events::StateEventType::RoomHistoryVisibility,
     );
 
+    let can_change_join_rule = power_levels.user_can_send_state(
+        own_user_id,
+        matrix_sdk::ruma::events::StateEventType::RoomJoinRules,
+    );
+
     MatrixRoomSettingsSnapshot {
         room_id: room.room_id().to_string(),
         name: room.name(),
@@ -1610,14 +1618,11 @@ pub(super) async fn matrix_room_settings_snapshot(
             .await
             .ok()
             .map(|uri| uri.to_string()),
-        join_rule: room
-            .join_rule()
-            .as_ref()
-            .map(matrix_room_join_rule)
-            .unwrap_or(MatrixRoomJoinRule::Invite),
+        join_rule: matrix_room_join_rule_or_default(room),
         history_visibility: matrix_room_history_visibility(&room.history_visibility_or_default()),
         permissions: MatrixRoomPermissionFacts {
             can_edit_settings,
+            can_change_join_rule,
             can_edit_roles: power_levels.user_can_send_state(
                 own_user_id,
                 matrix_sdk::ruma::events::StateEventType::RoomPowerLevels,
@@ -1874,7 +1879,17 @@ pub(super) fn room_settings_snapshot_with_change(
     snapshot
 }
 
-fn matrix_room_join_rule(
+/// A room without an `m.room.join_rules` event is invite-only (Matrix spec,
+/// and Element's own default). The event is in the room list's
+/// `required_state`, so a synced room without it has none.
+pub(super) fn matrix_room_join_rule_or_default(room: &matrix_sdk::Room) -> MatrixRoomJoinRule {
+    room.join_rule()
+        .as_ref()
+        .map(matrix_room_join_rule)
+        .unwrap_or(MatrixRoomJoinRule::Invite)
+}
+
+pub(super) fn matrix_room_join_rule(
     join_rule: &matrix_sdk::ruma::events::room::join_rules::JoinRule,
 ) -> MatrixRoomJoinRule {
     use matrix_sdk::ruma::events::room::join_rules::JoinRule;
@@ -1882,9 +1897,10 @@ fn matrix_room_join_rule(
         JoinRule::Public => MatrixRoomJoinRule::Public,
         JoinRule::Invite => MatrixRoomJoinRule::Invite,
         JoinRule::Knock => MatrixRoomJoinRule::Knock,
-        JoinRule::Restricted(_) | JoinRule::KnockRestricted(_) => MatrixRoomJoinRule::Restricted,
+        JoinRule::Restricted(_) => MatrixRoomJoinRule::Restricted,
+        JoinRule::KnockRestricted(_) => MatrixRoomJoinRule::KnockRestricted,
         JoinRule::Private => MatrixRoomJoinRule::Private,
-        _ => MatrixRoomJoinRule::Invite,
+        _ => MatrixRoomJoinRule::Unknown,
     }
 }
 
@@ -1897,7 +1913,11 @@ pub(super) fn sdk_join_rule_for_update(
         MatrixRoomJoinRule::Invite => Ok(JoinRule::Invite),
         MatrixRoomJoinRule::Knock => Ok(JoinRule::Knock),
         MatrixRoomJoinRule::Private => Ok(JoinRule::Private),
-        MatrixRoomJoinRule::Restricted => Err(MatrixRoomOperationError::InvalidRoomSetting),
+        // These need content this command does not carry (an allow list) or
+        // name a rule this client cannot write back faithfully.
+        MatrixRoomJoinRule::Restricted
+        | MatrixRoomJoinRule::KnockRestricted
+        | MatrixRoomJoinRule::Unknown => Err(MatrixRoomOperationError::InvalidRoomSetting),
     }
 }
 
@@ -2184,6 +2204,7 @@ async fn matrix_room_list_snapshot_from_rooms(
                     .filter(|name| !name.is_empty()),
                 display_name,
                 avatar_mxc_uri: room.avatar_url().map(|uri| uri.to_string()),
+                join_rule: matrix_room_join_rule_or_default(&room),
                 child_room_ids,
                 member_user_ids: member_user_ids.unwrap_or_default(),
             });

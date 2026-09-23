@@ -202,6 +202,7 @@ fn space_summary(space_id: &str, child_room_ids: &[&str]) -> SpaceSummary {
         raw_name: None,
         display_name: "QA Space".to_owned(),
         avatar: None,
+        join_rule: None,
         child_room_ids: child_room_ids
             .iter()
             .map(|room_id| (*room_id).to_owned())

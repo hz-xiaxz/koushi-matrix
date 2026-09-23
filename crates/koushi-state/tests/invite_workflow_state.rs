@@ -112,6 +112,7 @@ fn ready_room_with_parent_space() -> AppState {
         raw_name: None,
         display_name: "Project Space".to_owned(),
         avatar: None,
+        join_rule: None,
         child_room_ids: vec![ROOM_A.to_owned()],
     });
     state
@@ -361,10 +362,10 @@ fn invite_target_query_prioritizes_people_known_from_joined_rooms_and_dms() {
         ALICE.to_owned(),
         user_profile(ALICE, "Amy Person", &["person"]),
     );
-    state.profile.users.insert(
-        BOB.to_owned(),
-        user_profile(BOB, "Zed Person", &["person"]),
-    );
+    state
+        .profile
+        .users
+        .insert(BOB.to_owned(), user_profile(BOB, "Zed Person", &["person"]));
     state
         .profile
         .room_users
@@ -1143,6 +1144,7 @@ fn invite_space_open_first_query_select_and_batch_flow_is_admitted() {
         raw_name: None,
         display_name: "Project Space".to_owned(),
         avatar: None,
+        join_rule: None,
         child_room_ids: Vec::new(),
     });
     reduce(
@@ -1167,6 +1169,7 @@ fn invite_space_open_first_query_select_and_batch_flow_is_admitted() {
         raw_name: None,
         display_name: "Project Space".to_owned(),
         avatar: None,
+        join_rule: None,
         child_room_ids: Vec::new(),
     });
     first_query.profile.users.insert(
@@ -1455,7 +1458,9 @@ fn invite_workflow_close_is_unconditional_cleanup() {
     let mut ready = state_with_pending();
     assert_eq!(
         reduce(&mut ready, AppAction::InviteWorkflowClosed),
-        vec![koushi_state::AppEffect::EmitUiEvent(koushi_state::UiEvent::InviteWorkflowChanged)]
+        vec![koushi_state::AppEffect::EmitUiEvent(
+            koushi_state::UiEvent::InviteWorkflowChanged
+        )]
     );
     assert_eq!(ready.invite_workflow, InviteWorkflowState::default());
 

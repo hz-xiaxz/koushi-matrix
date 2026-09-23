@@ -690,6 +690,7 @@ fn frontend_snapshot_serializes_profile_and_summary_avatars() {
         raw_name: None,
         display_name: "Space".to_owned(),
         avatar: Some(room_avatar.clone()),
+        join_rule: None,
         child_room_ids: vec![],
     });
     state.rooms.push(RoomSummary {
@@ -1252,6 +1253,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         raw_name: Some("Fixture Space Canonical Name".to_owned()),
         display_name: "Fixture Space".to_owned(),
         avatar: None,
+        join_rule: Some(RoomJoinRule::KnockRestricted),
         child_room_ids: vec![
             "!room:example.invalid".to_owned(),
             "!low-priority-room:example.invalid".to_owned(),
@@ -1476,6 +1478,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
             history_visibility: RoomHistoryVisibility::Shared,
             permissions: RoomPermissionFacts {
                 can_edit_settings: true,
+                can_change_join_rule: true,
                 can_edit_roles: true,
                 can_invite: true,
                 can_kick: true,

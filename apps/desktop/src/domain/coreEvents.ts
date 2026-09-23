@@ -868,12 +868,20 @@ export type UserTrustState =
   | { kind: "verified" }
   | { kind: "identityReset" };
 
-export type RoomJoinRule = "public" | "invite" | "knock" | "restricted" | "private";
+export type RoomJoinRule =
+  | "public"
+  | "invite"
+  | "knock"
+  | "restricted"
+  | "knockRestricted"
+  | "private"
+  | "unknown";
 
 export type RoomHistoryVisibility = "worldReadable" | "shared" | "invited" | "joined";
 
 export interface RoomPermissionFacts {
   can_edit_settings: boolean;
+  can_change_join_rule: boolean;
   can_edit_roles: boolean;
   can_invite: boolean;
   can_kick: boolean;

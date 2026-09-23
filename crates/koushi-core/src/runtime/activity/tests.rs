@@ -542,6 +542,7 @@ fn activity_projection_context_label_uses_space_and_room_names() {
         raw_name: None,
         display_name: "Science".to_owned(),
         avatar: None,
+        join_rule: None,
         child_room_ids: vec!["!room:example.invalid".to_owned()],
     }];
     state.rooms = vec![RoomSummary {

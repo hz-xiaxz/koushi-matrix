@@ -934,6 +934,8 @@ export interface SpaceSummary {
   raw_name: string | null;
   display_name: string;
   avatar: AvatarImage | null;
+  /** The join rule as last synced; null until a room-list update projects it (#935). */
+  join_rule: RoomJoinRule | null;
   child_room_ids: string[];
 }
 
@@ -1595,12 +1597,22 @@ export type UserTrustState =
   | { kind: "verified" }
   | { kind: "identityReset" };
 
-export type RoomJoinRule = "public" | "invite" | "knock" | "restricted" | "private";
+export type RoomJoinRule =
+  | "public"
+  | "invite"
+  | "knock"
+  | "restricted"
+  | "knockRestricted"
+  | "private"
+  /** A rule the Rust core does not model; shown as-is, never sent back. */
+  | "unknown";
 
 export type RoomHistoryVisibility = "worldReadable" | "shared" | "invited" | "joined";
 
 export interface RoomPermissionFacts {
   can_edit_settings: boolean;
+  /** May send `m.room.join_rules`, which is all changing who can join needs (#935). */
+  can_change_join_rule: boolean;
   can_edit_roles: boolean;
   can_invite: boolean;
   can_kick: boolean;

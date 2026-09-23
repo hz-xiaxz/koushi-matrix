@@ -33,7 +33,7 @@ import type {
   ViewDelivery
 } from "../domain/coreEvents";
 import { roomTimelineKey } from "../domain/coreEvents";
-import { applyDeltaToState } from "../domain/appStore";
+import { applyDeltaToState, useAppStore } from "../domain/appStore";
 import {
   SNAPSHOT_SCHEMA_VERSION,
   type ActivityTab,
@@ -116,6 +116,12 @@ interface AppHarnessControl {
   pushDesktopUpdate(state: DesktopUpdateState): Promise<void>;
   pushStateUpdate(envelope?: StateUpdateEnvelope): void;
   currentSnapshot(): DesktopSnapshot;
+  /**
+   * The generation the App's store has reached. A delta the store already
+   * subsumes is dropped silently (#759), so a spec waits on this to prove the
+   * update it pushed landed rather than being ignored (#984).
+   */
+  appStoreGeneration(): number | null;
   e2eeTrustSnapshot(): DesktopSnapshot;
   replyModeSnapshot(): DesktopSnapshot;
 }
@@ -145,6 +151,7 @@ function readySnapshot(
       raw_name: null,
       display_name: SPACE_NAME,
       avatar: null,
+      join_rule: null,
       child_room_ids: [ROOM_ID]
     },
     ...(overrides.extraSpaces ?? [])
@@ -711,6 +718,7 @@ function afterCreateSpaceSnapshot(): DesktopSnapshot {
     raw_name: null,
     display_name: "Created Space",
     avatar: null,
+    join_rule: null,
     child_room_ids: []
   });
   snapshot.state.ui.navigation.active_space_id = newSpaceId;
@@ -1063,6 +1071,7 @@ function setCurrentSnapshot(next: DesktopSnapshot): DesktopSnapshot {
   const rooms = next.state.domain.rooms.map(normalizeHarnessRoomSummary);
   const spaces = next.state.domain.spaces.map((space) => ({
     ...space,
+    join_rule: null,
     child_room_ids: space.child_room_ids ?? []
   }));
   const invites = next.state.domain.invites ?? [];
@@ -3006,6 +3015,7 @@ mock.setCommandResponse("load_room_settings", ({ roomId }: { roomId: string }) =
           history_visibility: "shared",
           permissions: {
             can_edit_settings: true,
+            can_change_join_rule: true,
             can_edit_roles: true,
             can_invite: true,
             can_kick: true,
@@ -3808,6 +3818,7 @@ const harnessControl: AppHarnessControl = {
     void emit(STATE_UPDATE_EVENT_NAME, update);
   },
   currentSnapshot: () => currentSnapshot,
+  appStoreGeneration: () => useAppStore.getState().stateGeneration,
   e2eeTrustSnapshot,
   replyModeSnapshot
 };

@@ -8,10 +8,11 @@ import {
   SlidersHorizontal,
   Users
 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { t } from "../i18n/messages";
 import type {
+  RoomJoinRule,
   RoomManagementState,
   RoomSummary,
   SpaceChildMembership,
@@ -19,6 +20,7 @@ import type {
   SpaceSummary
 } from "../domain/types";
 import { ImeTextField } from "./ImeTextControl";
+import { SpaceAccessSection } from "./SpaceAccessSection";
 
 export function SpaceInfoPanel({
   fallbackName,
@@ -33,7 +35,8 @@ export function SpaceInfoPanel({
   onJoinRoom,
   onOpenFiles,
   onOpenMembers,
-  onSetLocalPresentation
+  onSetLocalPresentation,
+  onUpdateJoinRule
 }: {
   fallbackName: string;
   localIcon?: string;
@@ -49,7 +52,10 @@ export function SpaceInfoPanel({
   onOpenFiles?: () => void;
   onOpenMembers?: () => void;
   onSetLocalPresentation?: (override: { name?: string; icon?: string } | null) => void;
+  /** Issue #935: change who can join the selected Space. */
+  onUpdateJoinRule?: (spaceId: string, joinRule: RoomJoinRule) => void | Promise<void>;
 }) {
+  const accessHeadingRef = useRef<HTMLHeadingElement>(null);
   const [localNameDraft, setLocalNameDraft] = useState(localName);
   const [localIconDraft, setLocalIconDraft] = useState(localIcon);
   const childRooms = space
@@ -79,6 +85,12 @@ export function SpaceInfoPanel({
     setLocalNameDraft(localName);
     setLocalIconDraft(localIcon);
   }, [localIcon, localName]);
+
+  function openAccessSettings() {
+    const heading = accessHeadingRef.current;
+    heading?.scrollIntoView?.({ block: "nearest" });
+    heading?.focus();
+  }
 
   function openMembers() {
     onOpenMembers?.();
@@ -126,6 +138,17 @@ export function SpaceInfoPanel({
             />
           </div>
         </section>
+      ) : null}
+
+      {space ? (
+        <SpaceAccessSection
+          // Keyed by Space so a confirmation or result never carries across.
+          key={space.space_id}
+          headingRef={accessHeadingRef}
+          roomManagement={roomManagement}
+          space={space}
+          onUpdateJoinRule={onUpdateJoinRule}
+        />
       ) : null}
 
       {space && onSetLocalPresentation ? (
@@ -240,7 +263,11 @@ export function SpaceInfoPanel({
         entries={[
           { icon: <Home size={16} />, label: t("space.home") },
           { icon: <SlidersHorizontal size={16} />, label: t("space.preferences") },
-          { icon: <Settings size={16} />, label: t("space.spaceSettings") },
+          {
+            icon: <Settings size={16} />,
+            label: t("space.spaceSettings"),
+            onClick: space ? openAccessSettings : undefined
+          },
           { icon: <Users size={16} />, label: t("room.members"), onClick: space ? openMembers : undefined },
           { icon: <MailPlus size={16} />, label: t("space.invite"), onClick: onInvitePeople },
           { icon: <Bell size={16} />, label: t("room.notifications") },

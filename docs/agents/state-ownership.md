@@ -850,6 +850,13 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   or repair permission, setting, or kick/ban/unban state locally. Tauri
   room-management commands wait for correlated `RoomEvent`s and must not call SDK
   wrappers directly.
+- Space Info access (#935) renders the Space's join rule from the loaded
+  `room_management.settings` when they are that Space's, else from the synced
+  `SpaceSummary.join_rule`; `null` renders as loading, never as a guessed rule.
+  Editing is offered only from `settings.permissions.can_change_join_rule`, and
+  "Private" dispatches the `invite` rule. Pending/failed state comes from the
+  Space-scoped `room_management.operation`; the renderer keeps only its own
+  confirmation step and which submission is its own, both reset per Space.
 - App's room/Space settings request epochs and load markers are renderer-only
   panel-demand fences, not settings authority. Rust/Core owns each correlated
   load terminal and the returned settings snapshot, while React must distinguish

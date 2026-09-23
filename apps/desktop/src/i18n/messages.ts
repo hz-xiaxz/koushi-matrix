@@ -411,6 +411,8 @@ export type MessageId =
   | "room.joinRulePrivate"
   | "room.joinRulePublic"
   | "room.joinRuleRestricted"
+  | "room.joinRuleKnockRestricted"
+  | "room.joinRuleUnknown"
   | "room.kick"
   | "room.kickMember"
   | "room.encryptionDebugging"
@@ -934,6 +936,28 @@ export type MessageId =
   | "space.roomMembership"
   | "space.spacePreferences"
   | "space.spaceSettings"
+  | "space.access"
+  | "space.accessScope"
+  | "space.accessCurrent"
+  | "space.accessLoading"
+  | "space.accessPublic"
+  | "space.accessInvite"
+  | "space.accessKnock"
+  | "space.accessRestricted"
+  | "space.accessKnockRestricted"
+  | "space.accessPrivate"
+  | "space.accessUnknown"
+  | "space.accessCheckingPermission"
+  | "space.accessNoPermission"
+  | "space.accessMakePublic"
+  | "space.accessMakePrivate"
+  | "space.accessConfirmPublic"
+  | "space.accessConfirmPrivate"
+  | "space.accessReplacesRule"
+  | "space.accessSaving"
+  | "space.accessSaved"
+  | "space.accessFailed"
+  | "space.accessForbidden"
   | "space.summary"
   | "sync.failed"
   | "sync.failedWithReason"
@@ -1804,6 +1828,8 @@ const en: Catalog = {
   "room.joinRulePrivate": "Private",
   "room.joinRulePublic": "Public",
   "room.joinRuleRestricted": "Restricted",
+  "room.joinRuleKnockRestricted": "Knock or restricted",
+  "room.joinRuleUnknown": "Unrecognised rule",
   "room.kick": "Kick",
   "room.kickMember": "Kick {name}",
   "room.management": "Room management",
@@ -2346,6 +2372,28 @@ const en: Catalog = {
   "space.roomMembership": "Room membership",
   "space.spacePreferences": "Space preferences",
   "space.spaceSettings": "Space settings",
+  "space.access": "Access",
+  "space.accessScope": "Access decides who can join this Space. It does not change the rooms inside it, their history or encryption, or whether the Space is listed in the server's room directory.",
+  "space.accessCurrent": "Current access",
+  "space.accessLoading": "Checking who can join…",
+  "space.accessPublic": "Public — anyone can join",
+  "space.accessInvite": "Private — invitation required",
+  "space.accessKnock": "Ask to join — a member must accept each request",
+  "space.accessRestricted": "Members of specific Spaces can join; everyone else needs an invitation",
+  "space.accessKnockRestricted": "Members of specific Spaces can join; everyone else can ask to join",
+  "space.accessPrivate": "Uses the reserved “private” join rule",
+  "space.accessUnknown": "Uses a join rule this app does not recognise",
+  "space.accessCheckingPermission": "Checking whether you can change who can join…",
+  "space.accessNoPermission": "You can see who can join, but your role in this Space does not let you change it.",
+  "space.accessMakePublic": "Make public",
+  "space.accessMakePrivate": "Make private",
+  "space.accessConfirmPublic": "Anyone with the Space's address or link will be able to join without an invitation. Its rooms keep their own access settings, and the Space is not added to the room directory.",
+  "space.accessConfirmPrivate": "New members will need an invitation. People already in the Space stay members, and its rooms keep their own access settings.",
+  "space.accessReplacesRule": "This replaces the current rule: {rule}.",
+  "space.accessSaving": "Saving who can join…",
+  "space.accessSaved": "Who can join has been updated.",
+  "space.accessFailed": "Couldn't change who can join. Try again.",
+  "space.accessForbidden": "You no longer have permission to change who can join.",
   "space.summary": "Space summary",
   "sync.failed": "Failed",
   "sync.failedWithReason": "Sync failed: {reason}",
@@ -3102,6 +3150,8 @@ const ja: Catalog = {
   "room.joinRulePrivate": "非公開",
   "room.joinRulePublic": "公開",
   "room.joinRuleRestricted": "制限付き",
+  "room.joinRuleKnockRestricted": "ノックまたは制限付き",
+  "room.joinRuleUnknown": "認識できないルール",
   "room.kick": "キック",
   "room.kickMember": "{name}をキック",
   "room.management": "ルーム管理",
@@ -3644,6 +3694,28 @@ const ja: Catalog = {
   "space.roomMembership": "ルーム参加状態",
   "space.spacePreferences": "スペース環境設定",
   "space.spaceSettings": "スペース設定",
+  "space.access": "アクセス",
+  "space.accessScope": "アクセスは、このスペースに誰が参加できるかを決めます。スペース内のルーム、その履歴や暗号化、サーバーのルームディレクトリへの掲載には影響しません。",
+  "space.accessCurrent": "現在のアクセス",
+  "space.accessLoading": "参加できる人を確認しています…",
+  "space.accessPublic": "公開 — 誰でも参加できます",
+  "space.accessInvite": "非公開 — 招待が必要です",
+  "space.accessKnock": "参加リクエスト制 — メンバーが各リクエストを承認します",
+  "space.accessRestricted": "特定のスペースのメンバーは参加でき、それ以外の人は招待が必要です",
+  "space.accessKnockRestricted": "特定のスペースのメンバーは参加でき、それ以外の人は参加をリクエストできます",
+  "space.accessPrivate": "予約済みの「private」参加ルールを使用しています",
+  "space.accessUnknown": "このアプリが認識しない参加ルールを使用しています",
+  "space.accessCheckingPermission": "参加できる人を変更できるか確認しています…",
+  "space.accessNoPermission": "参加できる人は確認できますが、このスペースでのあなたのロールでは変更できません。",
+  "space.accessMakePublic": "公開にする",
+  "space.accessMakePrivate": "非公開にする",
+  "space.accessConfirmPublic": "スペースのアドレスやリンクを知っている人は、招待なしで参加できるようになります。スペース内のルームはそれぞれのアクセス設定を保ち、スペースはルームディレクトリに追加されません。",
+  "space.accessConfirmPrivate": "新しいメンバーには招待が必要になります。すでに参加している人はメンバーのままで、スペース内のルームはそれぞれのアクセス設定を保ちます。",
+  "space.accessReplacesRule": "現在のルール（{rule}）は置き換えられます。",
+  "space.accessSaving": "参加できる人を保存しています…",
+  "space.accessSaved": "参加できる人を更新しました。",
+  "space.accessFailed": "参加できる人を変更できませんでした。もう一度お試しください。",
+  "space.accessForbidden": "参加できる人を変更する権限がなくなりました。",
   "space.summary": "スペース概要",
   "sync.failed": "失敗",
   "sync.failedWithReason": "同期失敗: {reason}",

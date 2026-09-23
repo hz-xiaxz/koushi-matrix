@@ -528,6 +528,7 @@
           "name": "Room Settings Sample",
           "permissions": {
             "can_ban": true,
+            "can_change_join_rule": true,
             "can_edit_roles": true,
             "can_edit_settings": true,
             "can_invite": true,
@@ -576,6 +577,7 @@
           "name": "Room Settings Sample",
           "permissions": {
             "can_ban": true,
+            "can_change_join_rule": true,
             "can_edit_roles": true,
             "can_edit_settings": true,
             "can_invite": true,

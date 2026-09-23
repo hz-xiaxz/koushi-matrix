@@ -667,6 +667,7 @@ fn space_changes_use_a_scoped_delta_when_order_is_stable() {
         raw_name: None,
         display_name: "Space".into(),
         avatar: None,
+        join_rule: None,
         child_room_ids: Vec::new(),
     });
     let mut next = previous.clone();

@@ -8,8 +8,7 @@
 
 use koushi_state::{
     AppAction, AppState, InvitePreview, RoomListSource, RoomSummary, RoomTags, SessionInfo,
-    SessionState,
-    SpaceChildMembership, SpaceChildSummary, SpaceChildrenState, SpaceSummary,
+    SessionState, SpaceChildMembership, SpaceChildSummary, SpaceChildrenState, SpaceSummary,
     compose_sidebar_for_state, reduce,
 };
 
@@ -62,6 +61,7 @@ fn state_with_children(children: Vec<SpaceChildSummary>) -> AppState {
         raw_name: Some("Space".to_owned()),
         display_name: "Space".to_owned(),
         avatar: None,
+        join_rule: None,
         child_room_ids: vec!["!joined:example.invalid".to_owned()],
     }];
     state.rooms = vec![joined_room("!joined:example.invalid", "Joined Room")];

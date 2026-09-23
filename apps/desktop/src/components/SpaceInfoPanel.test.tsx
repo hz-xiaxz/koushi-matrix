@@ -61,6 +61,7 @@ describe("SpaceInfoPanel", () => {
           raw_name: null,
           display_name: "Synthetic Workspace",
           avatar: null,
+          join_rule: null,
           child_room_ids: ["!room-alpha:example.invalid", "!room-beta:example.invalid"]
         }}
       />
@@ -141,6 +142,7 @@ describe("SpaceInfoPanel", () => {
           raw_name: null,
           display_name: "Synthetic Workspace",
           avatar: null,
+          join_rule: null,
           child_room_ids: []
         }}
         roomManagement={{
@@ -154,6 +156,7 @@ describe("SpaceInfoPanel", () => {
             history_visibility: "shared",
             permissions: {
               can_edit_settings: false,
+              can_change_join_rule: false,
               can_edit_roles: false,
               can_invite: false,
               can_kick: false,
@@ -194,6 +197,7 @@ describe("SpaceInfoPanel", () => {
           raw_name: null,
           display_name: "Synthetic Workspace",
           avatar: null,
+          join_rule: null,
           child_room_ids: []
         }}
         onOpenMembers={onOpenMembers}
@@ -217,6 +221,7 @@ describe("SpaceInfoPanel", () => {
           raw_name: null,
           display_name: "Synthetic Workspace",
           avatar: null,
+          join_rule: null,
           child_room_ids: []
         }}
         onSetLocalPresentation={onSetLocalPresentation}
@@ -256,6 +261,7 @@ describe("SpaceInfoPanel", () => {
           raw_name: "Research Group",
           display_name: "Research Group",
           avatar: null,
+          join_rule: null,
           child_room_ids: []
         }}
       />
@@ -279,6 +285,7 @@ describe("SpaceInfoPanel", () => {
           raw_name: null,
           display_name: "Alice and Bob",
           avatar: null,
+          join_rule: null,
           child_room_ids: []
         }}
       />
@@ -302,6 +309,7 @@ describe("SpaceInfoPanel", () => {
           raw_name: "Work",
           display_name: "Work",
           avatar: null,
+          join_rule: null,
           child_room_ids: []
         }}
         spaceChildren={[
@@ -368,6 +376,7 @@ describe("SpaceInfoPanel", () => {
           raw_name: "Work",
           display_name: "Work",
           avatar: null,
+          join_rule: null,
           child_room_ids: []
         }}
         spaceChildren={[
@@ -417,6 +426,7 @@ describe("SpaceInfoPanel", () => {
           raw_name: "Work",
           display_name: "Work",
           avatar: null,
+          join_rule: null,
           child_room_ids: ["!joined:example.invalid"]
         }}
         spaceChildren={[
