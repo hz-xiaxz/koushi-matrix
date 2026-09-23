@@ -1231,11 +1231,58 @@ profile relabeling refreshes that candidate label inside the reducer without
 serializing room identity in the native attention candidate.
 
 The Tauri adapter maps that transport-neutral surface to platform capabilities
-such as OS notifications, badge counts, and window-title updates. The redacted
-notification content policy is fail-closed: message bodies are excluded by
-default, and any future preview option requires an explicit settings design and
-new tests. Private-data-free QA title tokens may expose only aggregate values
-such as `unread=N`, `badge=N`, and `notify=<kind|none>`.
+such as OS notifications, badge counts, and window-title updates. Private-data-free
+QA title tokens may expose only aggregate values such as `unread=N`, `badge=N`,
+and `notify=<kind|none>`.
+
+OS notification text and navigation targets are a separate, dedicated contract
+rather than extra fields on the aggregate candidate. When the projection selects
+a candidate it also builds `NativeAttentionState.notification`, a
+`NativeNotificationPayload` carrying the banner title, the banner body, and the
+single `room`/`event`/`thread` target that caused the candidate. The payload is
+built in the same projection run as the candidate it describes, so a later
+event can never silently replace the target of an already composed banner. It is
+never serialized: `NativeAttentionState.notification` is `serde(skip)`, and only
+the Rust desktop adapter reads it from live `AppState`.
+
+The message-preview policy is device-local and ON by default, matching the
+other messengers users compare Koushi against.
+`SettingsValues.notifications.message_previews` is Rust-owned and persisted; a
+settings file without the field takes the current default rather than failing
+the load. Turning it OFF keeps counts only and lets no message content leave
+Rust. While it is ON the body
+is the triggering event's already-sanitized plain-text preview, bounded in
+length and with whitespace collapsed; an event without usable preview text
+(undecrypted, redacted, non-text, or missing history) falls back to the count
+body instead of an empty banner. The payload follows the same mute, session,
+initial-sync/backfill, self-event, focus, and dedup suppression as the candidate,
+and `NativeAttentionSummary` stays free of message bodies and identifiers.
+
+The desktop notification adapter is the only owner of the platform banner. It
+honors `SettingsValues.notifications.desktop_notifications` (app notifications
+OFF raises no banner) and uses `notify-rust` directly because
+`tauri-plugin-notification` has no desktop activation path: on macOS, Linux,
+and Windows it shows a banner but never reports
+a click. The adapter keeps a bounded pool of click waiters, so a burst of banners
+cannot grow threads without bound; a banner beyond the bound is still shown but
+its click cannot navigate. A completed click restores the main window, re-checks
+the account fence captured when the banner was shown, and publishes the target.
+A click that arrives after logout, an account switch, or a session change is
+dropped instead of navigating into the wrong session.
+
+The webview presents that target through the existing flows: a thread reply opens
+the thread panel with the reply pinned, a plain event navigates with
+`EventNavigationSource::Notification`, and a target without an event opens the
+room. Notification navigation uses the failing missing-target policy, so an
+unavailable target explains itself in the existing navigation failure surface
+while the room is already selected; deletion, leaving the room, and unloaded
+history therefore never leave the user in an unrelated room.
+
+Activation is local to the running application. A notification shown by a
+terminated app no longer has a waiter, so clicking it only relaunches Koushi;
+the app does not navigate. That limitation is the supported behavior and is
+stated here instead of being implied to work, and it remains an unverified
+platform behavior until the macOS smoke lane covers a terminated-app click.
 
 Server room notification preferences enter through the SDK room-list snapshot
 and a generation-fenced Rust reducer observation. Cached `m.push_rules` is the
@@ -1261,7 +1308,8 @@ there, and capabilities that depend on a runtime attempt are left `Unknown` for
 the adapter to overwrite before the snapshot reaches React. `tray` is such a
 capability — its value is whatever the adapter observed when it tried to create
 the tray icon, applied in the DTO projection alongside the process-wide display
-platform, so React never sees a claimed tray that does not exist. Sound and activation hooks are candidate-scoped transient effects, so
+platform, so React never sees a claimed tray that does not exist. Sound and dock/taskbar
+attention requests are candidate-scoped transient effects, so
 they run only for a Rust-owned notification candidate and not for every later
 snapshot that still contains unread state. Until a native Core-owned
 notification dispatcher replaces the webview/window sound port,

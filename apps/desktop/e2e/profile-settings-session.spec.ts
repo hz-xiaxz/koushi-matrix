@@ -754,6 +754,7 @@ test("notification settings dispatch Rust-owned update_settings patches", async 
           desktop_notifications: false,
           sound: true,
           badges: true,
+          message_previews: true,
           send_read_receipts: true,
           send_typing_notifications: true
         }
@@ -777,12 +778,39 @@ test("notification settings dispatch Rust-owned update_settings patches", async 
           desktop_notifications: false,
           sound: false,
           badges: true,
+          message_previews: true,
           send_read_receipts: true,
           send_typing_notifications: true
         }
       }
     });
   await expect(sound).toHaveAttribute("aria-checked", "false");
+
+  await page.evaluate(() => window.__harness.clearInvocations());
+  const previews = page.getByRole("switch", {
+    name: "Show message content in notifications"
+  });
+  await expect(previews).toHaveAttribute("aria-checked", "true");
+  await previews.click();
+
+  await expect.poll(() => invocationCount(page, "update_settings")).toBeGreaterThanOrEqual(1);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__harness.invocationsOf("update_settings")[0]?.args)
+    )
+    .toEqual({
+      patch: {
+        notifications: {
+          desktop_notifications: false,
+          sound: false,
+          badges: true,
+          message_previews: false,
+          send_read_receipts: true,
+          send_typing_notifications: true
+        }
+      }
+    });
+  await expect(previews).toHaveAttribute("aria-checked", "false");
 });
 
 test("timeline auto-load setting dispatches a Rust-owned update_settings patch", async ({
@@ -1288,6 +1316,7 @@ test("privacy toggles dispatch Rust-owned update_settings patches for read recei
           desktop_notifications: true,
           sound: true,
           badges: true,
+          message_previews: true,
           send_read_receipts: false,
           send_typing_notifications: true
         }
@@ -1311,6 +1340,7 @@ test("privacy toggles dispatch Rust-owned update_settings patches for read recei
           desktop_notifications: true,
           sound: true,
           badges: true,
+          message_previews: true,
           send_read_receipts: false,
           send_typing_notifications: false
         }

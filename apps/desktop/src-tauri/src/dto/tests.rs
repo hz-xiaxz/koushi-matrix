@@ -216,7 +216,7 @@ fn frontend_snapshot_serializes_to_the_typescript_contract() {
                 "desktop_notifications": true,
                 "sound": true,
                 "badges": true,
-                "message_previews": false,
+                "message_previews": true,
                 "send_read_receipts": true,
                 "send_typing_notifications": true
         })

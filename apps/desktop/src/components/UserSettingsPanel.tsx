@@ -414,6 +414,14 @@ export function UserSettingsPanel({
                 onSelect={onUpdateSettings}
                 icon={<Bell size={15} aria-hidden="true" />}
               />
+              <NotificationSettingToggle
+                label={t("settings.notificationMessagePreviews")}
+                description={t("settings.notificationMessagePreviewsDescription")}
+                settingKey="message_previews"
+                current={selectedNotifications}
+                onSelect={onUpdateSettings}
+                icon={<Bell size={15} aria-hidden="true" />}
+              />
             </div>
           </section>
         </div>
@@ -687,12 +695,14 @@ function currentSessionBackupLabel(
 
 function NotificationSettingToggle({
   label,
+  description,
   settingKey,
   current,
   onSelect,
   icon
 }: {
   label: string;
+  description?: string;
   settingKey: keyof NotificationSettings;
   current: NotificationSettings;
   onSelect: (patch: SettingsPatch) => void;
@@ -720,6 +730,9 @@ function NotificationSettingToggle({
           {icon}
           <span>{label}</span>
         </span>
+        {description ? (
+          <span className="settings-toggle-description">{description}</span>
+        ) : null}
       </span>
       <span className="settings-switch-track" aria-hidden="true">
         <span className="settings-switch-thumb" />

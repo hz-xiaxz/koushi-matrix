@@ -519,11 +519,11 @@ pub struct NotificationSettings {
     pub badges: bool,
     /// Show the triggering message's plain-text content in OS notifications.
     ///
-    /// Device-local and default OFF. Settings files written before this field
-    /// existed must keep the redacted OS notification body, so the missing
-    /// field deserializes to `false` instead of failing the whole settings
-    /// load.
-    #[serde(default)]
+    /// Device-local and ON by default, matching the other messengers users
+    /// compare Koushi against. Settings files written before this field existed
+    /// keep the default instead of failing the whole settings load, so an
+    /// upgrade does not silently change the banner policy.
+    #[serde(default = "default_true")]
     pub message_previews: bool,
     #[serde(default = "default_true")]
     pub send_read_receipts: bool,
@@ -537,7 +537,7 @@ impl Default for NotificationSettings {
             desktop_notifications: true,
             sound: true,
             badges: true,
-            message_previews: false,
+            message_previews: true,
             send_read_receipts: true,
             send_typing_notifications: true,
         }

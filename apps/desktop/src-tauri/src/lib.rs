@@ -1112,6 +1112,7 @@ pub fn run() {
             commands::navigation::open_activity_event,
             commands::navigation::dismiss_event_navigation_failure,
             commands::navigation::open_pinned_event,
+            commands::navigation::open_notification_event,
             commands::navigation::select_search_result,
             commands::navigation::close_focused_context,
             commands::navigation::open_timeline_at_timestamp,

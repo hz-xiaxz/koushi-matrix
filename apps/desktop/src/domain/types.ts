@@ -286,6 +286,7 @@ export interface NotificationSettings {
   desktop_notifications: boolean;
   sound: boolean;
   badges: boolean;
+  message_previews: boolean;
   send_read_receipts: boolean;
   send_typing_notifications: boolean;
 }

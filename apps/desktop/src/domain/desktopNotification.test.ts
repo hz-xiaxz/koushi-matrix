@@ -2,124 +2,111 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   clearDesktopAttentionNotifications,
-  desktopAttentionNotificationContent,
-  sendDesktopAttentionNotification
+  desktopNotificationTargetPlan,
+  sendDesktopAttentionNotification,
+  type DesktopNotificationActivation,
+  type DesktopNotificationTransport
 } from "./desktopNotification";
 
-describe("desktop notification content", () => {
+function transport(overrides: Partial<DesktopNotificationTransport> = {}) {
+  const show = vi.fn().mockResolvedValue(undefined);
+  const clear = vi.fn().mockResolvedValue(undefined);
+  const onActivated = vi.fn(() => () => undefined);
+  return { transport: { show, clear, onActivated, ...overrides }, show, clear };
+}
+
+describe("desktop notification dispatch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  test("builds a redacted payload from allowed attention fields only", () => {
-    const payload = desktopAttentionNotificationContent({
-      roomDisplayName: "Announcements",
-      kind: "mention",
-      unreadCount: 6,
-      highlightCount: 1
-    });
+  // The banner text, the preview gate, and the navigation target are
+  // Rust-owned; the webview only decides when to ask for a banner. The body and
+  // preview assertions live in the Rust attention tests.
+  test("asks the adapter to show the notification Rust owns", async () => {
+    const { transport: port, show } = transport();
 
-    expect(payload).toEqual({
-      title: "Mention in Announcements",
-      body: "1 mention, 6 unread"
-    });
-    expect(Object.keys(payload)).toEqual(["title", "body"]);
-    expect(JSON.stringify(payload)).not.toContain("room_id");
-    expect(JSON.stringify(payload)).not.toContain("event_id");
-    expect(JSON.stringify(payload)).not.toContain("transaction_id");
-    expect(JSON.stringify(payload)).not.toContain("sender");
-    expect(JSON.stringify(payload)).not.toContain("secret message text");
+    await sendDesktopAttentionNotification(port);
+
+    expect(show).toHaveBeenCalledOnce();
   });
 
-  test("omits zero-count parts from the body while preserving unread fallback", () => {
-    const payload = desktopAttentionNotificationContent({
-      roomDisplayName: "Direct chat",
-      kind: "dm",
-      unreadCount: 1,
-      highlightCount: 0
+  test("swallows notification failures with a fixed diagnostic token", async () => {
+    const { transport: port } = transport({
+      show: vi.fn().mockRejectedValue(new Error("private raw failure"))
     });
-
-    expect(payload.body).toBe("1 unread");
-    expect(payload.body).not.toContain("0 notifications");
-    expect(payload.body).not.toContain("0 unread");
-  });
-
-  test("sends the redacted payload through a mockable adapter", async () => {
-    const transport = {
-      notify: vi.fn().mockResolvedValue(undefined),
-      clear: vi.fn().mockResolvedValue(undefined)
-    };
-
-    await sendDesktopAttentionNotification(
-      {
-        roomDisplayName: "Direct chat",
-        kind: "dm",
-        unreadCount: 3,
-        highlightCount: 0
-      },
-      transport
-    );
-
-    expect(transport.notify).toHaveBeenCalledOnce();
-    expect(transport.notify).toHaveBeenCalledWith({
-      title: "Direct message in Direct chat",
-      body: "3 unread"
-    });
-  });
-
-  test("swallows notification transport failures", async () => {
-    const transport = {
-      notify: vi.fn().mockRejectedValue(new Error("notification failed")),
-      clear: vi.fn().mockResolvedValue(undefined)
-    };
-
     const diagnostic = vi.fn();
-    await expect(
-      sendDesktopAttentionNotification(
-        {
-          roomDisplayName: "General",
-          kind: "message",
-          unreadCount: 1,
-          highlightCount: 0
-        },
-        transport,
-        diagnostic
-      )
-    ).resolves.toBeUndefined();
-    expect(transport.notify).toHaveBeenCalledOnce();
+
+    await expect(sendDesktopAttentionNotification(port, diagnostic)).resolves.toBeUndefined();
+
     expect(diagnostic).toHaveBeenCalledWith("attention_notification_failed");
-  });
-
-  test("clears native notifications through a mockable adapter", async () => {
-    const transport = {
-      notify: vi.fn().mockResolvedValue(undefined),
-      clear: vi.fn().mockResolvedValue(undefined)
-    };
-
-    await clearDesktopAttentionNotifications(transport);
-
-    expect(transport.clear).toHaveBeenCalledOnce();
-  });
-
-  test("reports native notification clear failure with a fixed token", async () => {
-    const transport = {
-      notify: vi.fn().mockResolvedValue(undefined),
-      clear: vi.fn().mockRejectedValue(new Error("private raw failure"))
-    };
-    const diagnostic = vi.fn();
-    await expect(clearDesktopAttentionNotifications(transport, diagnostic)).resolves.toBeUndefined();
-    expect(diagnostic).toHaveBeenCalledWith("attention_notification_clear_failed");
     expect(diagnostic).not.toHaveBeenCalledWith(expect.stringContaining("private raw failure"));
   });
 
-  test("swallows native notification clearing failures", async () => {
-    const transport = {
-      notify: vi.fn().mockResolvedValue(undefined),
-      clear: vi.fn().mockRejectedValue(new Error("clear failed"))
-    };
+  test("clears native notifications through a mockable adapter", async () => {
+    const { transport: port, clear } = transport();
 
-    await expect(clearDesktopAttentionNotifications(transport)).resolves.toBeUndefined();
-    expect(transport.clear).toHaveBeenCalledOnce();
+    await clearDesktopAttentionNotifications(port);
+
+    expect(clear).toHaveBeenCalledOnce();
   });
 
+  test("reports native notification clear failure with a fixed token", async () => {
+    const { transport: port } = transport({
+      clear: vi.fn().mockRejectedValue(new Error("private raw failure"))
+    });
+    const diagnostic = vi.fn();
+
+    await expect(clearDesktopAttentionNotifications(port, diagnostic)).resolves.toBeUndefined();
+
+    expect(diagnostic).toHaveBeenCalledWith("attention_notification_clear_failed");
+    expect(diagnostic).not.toHaveBeenCalledWith(expect.stringContaining("private raw failure"));
+  });
+});
+
+describe("desktop notification activation plan", () => {
+  const target = (overrides: Partial<DesktopNotificationActivation>) => ({
+    room_id: "!room:example.invalid",
+    event_id: "$event:example.invalid",
+    thread_root_event_id: null,
+    ...overrides
+  });
+
+  test("opens the thread anchored at the triggering reply", () => {
+    expect(
+      desktopNotificationTargetPlan(
+        target({ thread_root_event_id: "$root:example.invalid" })
+      )
+    ).toEqual({
+      kind: "thread",
+      roomId: "!room:example.invalid",
+      rootEventId: "$root:example.invalid",
+      eventId: "$event:example.invalid"
+    });
+  });
+
+  test("navigates the main timeline for a room event", () => {
+    expect(desktopNotificationTargetPlan(target({}))).toEqual({
+      kind: "event",
+      roomId: "!room:example.invalid",
+      eventId: "$event:example.invalid"
+    });
+  });
+
+  test("still opens the room when the notification has no event", () => {
+    expect(desktopNotificationTargetPlan(target({ event_id: null }))).toEqual({
+      kind: "room",
+      roomId: "!room:example.invalid"
+    });
+  });
+
+  // A thread root without its reply cannot be pinned, so it degrades to the
+  // room instead of opening a thread the user did not click.
+  test("degrades a thread target without an event to the room", () => {
+    expect(
+      desktopNotificationTargetPlan(
+        target({ event_id: null, thread_root_event_id: "$root:example.invalid" })
+      )
+    ).toEqual({ kind: "room", roomId: "!room:example.invalid" });
+  });
 });

@@ -1,50 +1,66 @@
-import type {
-  DesktopAttentionDiagnosticSink,
-  DesktopAttentionNotificationCandidate
-} from "./desktopAttention";
+import type { DesktopAttentionDiagnosticSink } from "./desktopAttention";
 
-export interface DesktopNotificationContent {
-  title: string;
-  body: string;
+/**
+ * Navigation target of one completed desktop notification click.
+ *
+ * Rust owns the notification text and target; the webview only receives the
+ * identifiers it needs to present the target after a click.
+ */
+export interface DesktopNotificationActivation {
+  room_id: string;
+  event_id: string | null;
+  thread_root_event_id: string | null;
 }
 
 export interface DesktopNotificationTransport {
-  notify(content: DesktopNotificationContent): Promise<void>;
+  /**
+   * Ask the Rust adapter to show the notification it owns for the current
+   * attention candidate.
+   *
+   * The banner text, the message-preview gate, and the navigation target are
+   * Rust-owned: the webview never composes or reads them.
+   */
+  show(): Promise<void>;
   clear(): Promise<void>;
+  /** Subscribe to completed notification clicks. */
+  onActivated(handler: (activation: DesktopNotificationActivation) => void): () => void;
 }
 
-export function desktopAttentionNotificationContent(
-  candidate: DesktopAttentionNotificationCandidate
-): DesktopNotificationContent {
-  switch (candidate.kind) {
-    case "mention":
-      return {
-        title: `Mention in ${candidate.roomDisplayName}`,
-        body: joinAttentionCounts([
-          formatCount(candidate.highlightCount, "mention"),
-          formatCount(candidate.unreadCount, "unread", "unread")
-        ])
-      };
-    case "dm":
-      return {
-        title: `Direct message in ${candidate.roomDisplayName}`,
-        body: joinAttentionCounts([formatCount(candidate.unreadCount, "unread", "unread")])
-      };
-    case "message":
-      return {
-        title: `Message in ${candidate.roomDisplayName}`,
-        body: joinAttentionCounts([formatCount(candidate.unreadCount, "unread", "unread")])
-      };
+/**
+ * Presentation plan for one notification click.
+ *
+ * A thread reply opens the thread panel with the reply pinned; every other
+ * target navigates the main timeline. A target without an event still opens the
+ * room, so a stale notification never becomes a no-op.
+ */
+export type DesktopNotificationTargetPlan =
+  | { kind: "thread"; roomId: string; rootEventId: string; eventId: string }
+  | { kind: "event"; roomId: string; eventId: string }
+  | { kind: "room"; roomId: string };
+
+export function desktopNotificationTargetPlan(
+  activation: DesktopNotificationActivation
+): DesktopNotificationTargetPlan {
+  if (activation.thread_root_event_id !== null && activation.event_id !== null) {
+    return {
+      kind: "thread",
+      roomId: activation.room_id,
+      rootEventId: activation.thread_root_event_id,
+      eventId: activation.event_id
+    };
   }
+  if (activation.event_id !== null) {
+    return { kind: "event", roomId: activation.room_id, eventId: activation.event_id };
+  }
+  return { kind: "room", roomId: activation.room_id };
 }
 
 export async function sendDesktopAttentionNotification(
-  candidate: DesktopAttentionNotificationCandidate,
   transport: DesktopNotificationTransport,
   diagnostic?: DesktopAttentionDiagnosticSink
 ): Promise<void> {
   try {
-    await transport.notify(desktopAttentionNotificationContent(candidate));
+    await transport.show();
   } catch {
     diagnostic?.("attention_notification_failed");
   }
@@ -59,15 +75,4 @@ export async function clearDesktopAttentionNotifications(
   } catch {
     diagnostic?.("attention_notification_clear_failed");
   }
-}
-
-function joinAttentionCounts(parts: string[]): string {
-  return parts.filter((part) => part.length > 0).join(", ");
-}
-
-function formatCount(count: number, singularLabel: string, pluralLabel = `${singularLabel}s`): string {
-  if (count === 0) {
-    return "";
-  }
-  return `${count} ${count === 1 ? singularLabel : pluralLabel}`;
 }

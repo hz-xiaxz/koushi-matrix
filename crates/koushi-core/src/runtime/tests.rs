@@ -3154,7 +3154,8 @@ async fn run_app_actor_cross_room_missing_navigation(
                         ..
                     } if current_source == source
                 ),
-                koushi_state::EventNavigationSource::Pinned => matches!(
+                koushi_state::EventNavigationSource::Pinned
+                | koushi_state::EventNavigationSource::Notification => matches!(
                     snapshot.navigation.event_navigation,
                     koushi_state::EventNavigationState::Failed {
                         source: current_source,
@@ -3176,7 +3177,8 @@ async fn run_app_actor_cross_room_missing_navigation(
         | koushi_state::EventNavigationSource::Search => {
             IntentOutcome::BenignNoOp(IntentNoOpReason::TimelineTargetMissing)
         }
-        koushi_state::EventNavigationSource::Pinned => {
+        koushi_state::EventNavigationSource::Pinned
+        | koushi_state::EventNavigationSource::Notification => {
             IntentOutcome::FailedNoOp(IntentNoOpReason::TimelineTargetMissing)
         }
     };
@@ -3864,7 +3866,8 @@ async fn run_event_navigation_latest_source_case(
                         ..
                     } if current_source == second_source
                 ),
-                koushi_state::EventNavigationSource::Pinned => matches!(
+                koushi_state::EventNavigationSource::Pinned
+                | koushi_state::EventNavigationSource::Notification => matches!(
                     snapshot.navigation.event_navigation,
                     koushi_state::EventNavigationState::Failed {
                         source: current_source,
@@ -3889,7 +3892,8 @@ async fn run_event_navigation_latest_source_case(
         | koushi_state::EventNavigationSource::Search => {
             IntentOutcome::BenignNoOp(IntentNoOpReason::TimelineTargetMissing)
         }
-        koushi_state::EventNavigationSource::Pinned => {
+        koushi_state::EventNavigationSource::Pinned
+        | koushi_state::EventNavigationSource::Notification => {
             IntentOutcome::FailedNoOp(IntentNoOpReason::TimelineTargetMissing)
         }
     };

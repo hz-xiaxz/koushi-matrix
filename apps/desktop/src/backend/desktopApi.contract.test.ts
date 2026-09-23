@@ -63,7 +63,8 @@ describe("DesktopApi command contract", () => {
         "dismissEventNavigationFailure",
         "roomHistoryExportTimeZone",
         "exportRoomHistory",
-        "cancelRoomHistoryExport"
+        "cancelRoomHistoryExport",
+        "openNotificationEvent"
       )
       .sort();
     expect(new Set(current).size).toBe(current.length);
