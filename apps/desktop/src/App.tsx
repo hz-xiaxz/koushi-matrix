@@ -259,6 +259,7 @@ import {
   type RuntimeAlert
 } from "./components/Shell";
 import { ContextualRightPanel } from "./components/rightPanel";
+import type { RoomHistoryExportControls } from "./components/RoomHistoryExportDialog";
 import type {
   SpaceInviteAvailabilityReason,
   SpaceInviteCancellationAvailabilityReason
@@ -2598,6 +2599,20 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
   async function forceRotateOutboundSession(roomId: string) {
     await settleCommand(api.forceRotateOutboundSession(roomId));
   }
+
+  // #59: the platform half of the Rust-owned room-history export. Memoized so
+  // an open dialog loads the time zone once; the receipt reconciler is a ref.
+  const roomHistoryExportControls = useMemo<RoomHistoryExportControls>(() => ({
+    loadTimeZone: () => api.roomHistoryExportTimeZone(),
+    async start(roomId, range, dialogTitle, fileNameStem) {
+      const started = await api.exportRoomHistory(roomId, range, dialogTitle, fileNameStem);
+      if (started.kind === "submitted") await applyCommandReceipt(started.admission);
+      return started;
+    },
+    async cancel(requestId) {
+      await settleCommand(api.cancelRoomHistoryExport(requestId));
+    }
+  }), []);
 
   async function submitAccountManagementUia(flowId: number, password: string) {
     await settleCommand(api.submitAccountManagementUia(flowId, password));
@@ -6492,6 +6507,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
             runInBackground(repairRoomTimeline(roomId));
           }}
           onForceRotateOutboundSession={forceRotateOutboundSession}
+          roomHistoryExportControls={roomHistoryExportControls}
           onOpenSenderProfile={(roomId, userId) => {
             runInBackground(openRoomUserProfile(roomId, userId));
           }}

@@ -2328,6 +2328,17 @@ export type RoomHistoryExportState =
       failure_kind: RoomHistoryExportFailureKind;
     };
 
+/** The export range as the dialog shows it. The Tauri adapter resolves the
+ * inclusive civil dates into instants in the named IANA time zone. */
+export type RoomHistoryExportRangeInput =
+  | { kind: "allAvailable" }
+  | { kind: "period"; startDate: string; endDate: string; timeZone: string };
+
+/** `dismissed` means the native save dialog was closed without a destination. */
+export type RoomHistoryExportStart =
+  | { kind: "dismissed" }
+  | { kind: "submitted"; requestId: number; admission: CommandAdmission };
+
 export type FilesViewState =
   | { kind: "closed" }
   | {

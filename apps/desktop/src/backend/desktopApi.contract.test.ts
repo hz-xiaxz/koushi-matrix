@@ -60,7 +60,10 @@ describe("DesktopApi command contract", () => {
         "importLegacySettings",
         "updateNavigationPreference",
         "loadSpaceChildren",
-        "dismissEventNavigationFailure"
+        "dismissEventNavigationFailure",
+        "roomHistoryExportTimeZone",
+        "exportRoomHistory",
+        "cancelRoomHistoryExport"
       )
       .sort();
     expect(new Set(current).size).toBe(current.length);

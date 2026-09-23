@@ -93,3 +93,36 @@ notification settings can also affect whether a desktop notification appears.
 notification badge totals, even if it still has unread messages or mentions.
 Muting does not mark messages as read. Room notification changes made in another
 Matrix client are reflected after synchronization.
+
+## Download room history
+
+Open the room, select **Room info**, and select **Download** in its **Download
+history** section. Koushi saves the messages as one JSON file in the format of
+Element's chat export, so scripts and tools that read Element exports can read
+it. It is not a backup: neither Koushi nor Element can import it back.
+
+1. Choose the range:
+   - **All available history** saves every event your account can read.
+   - **Period** saves the events from the start date through the end date,
+     inclusive. The dialog shows the time zone it uses for the dates, which is
+     your computer's time zone. Dates before 1970 cannot be chosen. To stay
+     fast in long rooms, a period download reads only the history around the
+     period, so a message whose timestamp is more than a day out of order with
+     the messages around it can be left out.
+2. Select **Save**, then choose where to save the file.
+3. The dialog shows how many events have been read and saved. Closing it does
+   not stop the download; **Room info** keeps showing the progress. To cancel,
+   select **Stop** in the dialog (select **Download** again to reopen it).
+
+What can be saved depends on your permission to read the room's history, on
+what the server still keeps, and on which messages this device can decrypt.
+Attachments keep their names and references, but the files themselves are
+not downloaded.
+
+When the download finishes, Koushi reports how many events were saved. If some
+encrypted messages could not be decrypted, it also reports how many were saved
+without their content. If you stop the download or it fails, no file is saved;
+a file that was already at the chosen location is left unchanged.
+
+**Encrypted messages are saved as plain text.** Anyone who can open the file
+can read them, so keep it somewhere safe.

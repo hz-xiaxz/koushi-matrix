@@ -1310,7 +1310,43 @@ export type MessageId =
   | "settings.urlPreviewsEnabledForRoom"
   | "timeline.linkPreviewHide"
   | "timeline.linkPreviewFailed"
-  | "timeline.linkPreviewLoading";
+  | "timeline.linkPreviewLoading"
+  | "roomHistoryExport.section"
+  | "roomHistoryExport.open"
+  | "roomHistoryExport.hint"
+  | "roomHistoryExport.title"
+  | "roomHistoryExport.range"
+  | "roomHistoryExport.rangeAll"
+  | "roomHistoryExport.rangePeriod"
+  | "roomHistoryExport.startDate"
+  | "roomHistoryExport.endDate"
+  | "roomHistoryExport.timeZone"
+  | "roomHistoryExport.invalidPeriod"
+  | "roomHistoryExport.availability"
+  | "roomHistoryExport.plaintextWarning"
+  | "roomHistoryExport.attachments"
+  | "roomHistoryExport.save"
+  | "roomHistoryExport.saveDialogTitle"
+  | "roomHistoryExport.fileNameStem"
+  | "roomHistoryExport.exporting"
+  | "roomHistoryExport.cancelling"
+  | "roomHistoryExport.stop"
+  | "roomHistoryExport.continuesInBackground"
+  | "roomHistoryExport.completed"
+  | "roomHistoryExport.completedEmpty"
+  | "roomHistoryExport.undecryptable"
+  | "roomHistoryExport.cancelled"
+  | "roomHistoryExport.failed"
+  | "roomHistoryExport.failedInvalidRange"
+  | "roomHistoryExport.failedRoomNotFound"
+  | "roomHistoryExport.failedDestination"
+  | "roomHistoryExport.failedWrite"
+  | "roomHistoryExport.failedNetwork"
+  | "roomHistoryExport.failedSdk"
+  | "roomHistoryExport.notStarted"
+  | "roomHistoryExport.busyOtherRoom"
+  | "roomHistoryExport.again"
+  | "roomHistoryExport.periodTooEarly";
 
 type MessageValues = Record<string, string | number>;
 type Catalog = Record<MessageId, string>;
@@ -2734,7 +2770,43 @@ const en: Catalog = {
   "settings.searchHistoryRoomFailed": "Failed",
   "settings.searchHistoryStartRoom": "Start",
   "settings.searchHistoryStopRoom": "Stop",
-  "settings.searchHistoryRoomUnknown": "Room"
+  "settings.searchHistoryRoomUnknown": "Room",
+  "roomHistoryExport.section": "Download history",
+  "roomHistoryExport.open": "Download",
+  "roomHistoryExport.hint": "Save this room's messages as a JSON file in Element's chat export format.",
+  "roomHistoryExport.title": "Download history",
+  "roomHistoryExport.range": "Range",
+  "roomHistoryExport.rangeAll": "All available history",
+  "roomHistoryExport.rangePeriod": "Period",
+  "roomHistoryExport.startDate": "Start date",
+  "roomHistoryExport.endDate": "End date",
+  "roomHistoryExport.timeZone": "Dates use the {timeZone} time zone. The end date is included.",
+  "roomHistoryExport.invalidPeriod": "Choose an end date on or after the start date.",
+  "roomHistoryExport.availability": "What can be saved depends on your permission to read the history, what the server keeps, and what this device can decrypt.",
+  "roomHistoryExport.plaintextWarning": "Encrypted messages are saved as plain text. Anyone who can open the file can read them.",
+  "roomHistoryExport.attachments": "Attachments keep their names and references; the files themselves are not downloaded.",
+  "roomHistoryExport.save": "Save",
+  "roomHistoryExport.saveDialogTitle": "Save room history",
+  "roomHistoryExport.fileNameStem": "{roomName} - Chat Export",
+  "roomHistoryExport.exporting": "Downloading: {fetched} events read, {exported} saved",
+  "roomHistoryExport.cancelling": "Stopping…",
+  "roomHistoryExport.stop": "Stop",
+  "roomHistoryExport.continuesInBackground": "Closing this dialog does not stop the download.",
+  "roomHistoryExport.completed": "Saved {exported} events.",
+  "roomHistoryExport.completedEmpty": "Saved. The selected range has no messages.",
+  "roomHistoryExport.undecryptable": "{count} events could not be decrypted and were saved without their content.",
+  "roomHistoryExport.cancelled": "Stopped. No file was saved.",
+  "roomHistoryExport.failed": "The download failed. No file was saved.",
+  "roomHistoryExport.failedInvalidRange": "The period is not valid.",
+  "roomHistoryExport.failedRoomNotFound": "This room is no longer available.",
+  "roomHistoryExport.failedDestination": "The save location could not be used.",
+  "roomHistoryExport.failedWrite": "The file could not be written.",
+  "roomHistoryExport.failedNetwork": "The history could not be fetched from the server.",
+  "roomHistoryExport.failedSdk": "An unexpected error occurred.",
+  "roomHistoryExport.notStarted": "The download could not start. Try again.",
+  "roomHistoryExport.busyOtherRoom": "Another room's history is being downloaded.",
+  "roomHistoryExport.again": "Download again",
+  "roomHistoryExport.periodTooEarly": "Choose dates from 1970 onward.",
 };
 
 const ja: Catalog = {
@@ -4055,7 +4127,43 @@ const ja: Catalog = {
   "settings.searchHistoryRoomFailed": "失敗",
   "settings.searchHistoryStartRoom": "開始",
   "settings.searchHistoryStopRoom": "停止",
-  "settings.searchHistoryRoomUnknown": "ルーム"
+  "settings.searchHistoryRoomUnknown": "ルーム",
+  "roomHistoryExport.section": "履歴のダウンロード",
+  "roomHistoryExport.open": "ダウンロード",
+  "roomHistoryExport.hint": "このルームのメッセージを、Elementのチャットエクスポート形式のJSONファイルに保存します。",
+  "roomHistoryExport.title": "履歴をダウンロード",
+  "roomHistoryExport.range": "範囲",
+  "roomHistoryExport.rangeAll": "取得可能な全履歴",
+  "roomHistoryExport.rangePeriod": "期間指定",
+  "roomHistoryExport.startDate": "開始日",
+  "roomHistoryExport.endDate": "終了日",
+  "roomHistoryExport.timeZone": "日付は{timeZone}のタイムゾーンで扱い、終了日を含みます。",
+  "roomHistoryExport.invalidPeriod": "終了日には開始日以降の日付を選んでください。",
+  "roomHistoryExport.availability": "保存できる範囲は、履歴の閲覧権限、サーバー上の履歴、この端末の復号能力によって決まります。",
+  "roomHistoryExport.plaintextWarning": "暗号化されたメッセージも平文で保存されます。ファイルを開ける人は誰でも内容を読めます。",
+  "roomHistoryExport.attachments": "添付ファイルは名前と参照情報のみ保存され、ファイル本体はダウンロードされません。",
+  "roomHistoryExport.save": "保存",
+  "roomHistoryExport.saveDialogTitle": "ルーム履歴を保存",
+  "roomHistoryExport.fileNameStem": "{roomName} - チャット履歴",
+  "roomHistoryExport.exporting": "ダウンロード中：{fetched}件取得、{exported}件保存",
+  "roomHistoryExport.cancelling": "中止しています…",
+  "roomHistoryExport.stop": "中止",
+  "roomHistoryExport.continuesInBackground": "このダイアログを閉じてもダウンロードは続きます。",
+  "roomHistoryExport.completed": "{exported}件のイベントを保存しました。",
+  "roomHistoryExport.completedEmpty": "保存しました。選択した範囲にメッセージはありません。",
+  "roomHistoryExport.undecryptable": "{count}件のイベントは復号できず、内容なしで保存されました。",
+  "roomHistoryExport.cancelled": "中止しました。ファイルは保存されていません。",
+  "roomHistoryExport.failed": "ダウンロードに失敗しました。ファイルは保存されていません。",
+  "roomHistoryExport.failedInvalidRange": "期間が正しくありません。",
+  "roomHistoryExport.failedRoomNotFound": "このルームは利用できなくなりました。",
+  "roomHistoryExport.failedDestination": "保存先を使用できませんでした。",
+  "roomHistoryExport.failedWrite": "ファイルを書き込めませんでした。",
+  "roomHistoryExport.failedNetwork": "サーバーから履歴を取得できませんでした。",
+  "roomHistoryExport.failedSdk": "予期しないエラーが発生しました。",
+  "roomHistoryExport.notStarted": "ダウンロードを開始できませんでした。もう一度お試しください。",
+  "roomHistoryExport.busyOtherRoom": "別のルームの履歴をダウンロードしています。",
+  "roomHistoryExport.again": "もう一度ダウンロード",
+  "roomHistoryExport.periodTooEarly": "1970年以降の日付を選んでください。",
 };
 
 const pseudo: Catalog = Object.fromEntries(

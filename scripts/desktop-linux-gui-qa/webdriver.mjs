@@ -324,7 +324,11 @@ export async function setDatetimeLocalValue(browser, value, label = "Jump to dat
       inputExists: true,
       valuePresent: input.value.length > 0,
       valueLength: input.value.length,
-      valid: input.validity.valid
+      valid: input.validity.valid,
+      badInput: input.validity.badInput,
+      rangeUnderflow: input.validity.rangeUnderflow,
+      rangeOverflow: input.validity.rangeOverflow,
+      inputType: input.type
     };
   }, { nextValue: value, ariaLabel: label });
   if (!result.ok) {

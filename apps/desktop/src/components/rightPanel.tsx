@@ -57,6 +57,7 @@ import {
 import { FilesView } from "./FilesView";
 import { ModalDialog } from "./ModalDialog";
 import { RoomInfoPanel } from "./RoomInfoPanel";
+import type { RoomHistoryExportControls } from "./RoomHistoryExportDialog";
 import { SpaceInfoPanel } from "./SpaceInfoPanel";
 import { ThreadsListView } from "./ThreadsListView";
 import { UserSettingsPanel } from "./UserSettingsPanel";
@@ -184,6 +185,7 @@ export function ContextualRightPanel({
   onSetRoomUrlPreviewOverride = () => undefined,
   onRepairRoomTimeline = () => undefined,
   onForceRotateOutboundSession = () => undefined,
+  roomHistoryExportControls,
   onUpdateRoomSetting = () => undefined,
   onUpdateSpaceJoinRule,
   onIgnoreUser = () => undefined,
@@ -333,6 +335,7 @@ export function ContextualRightPanel({
   onSetRoomUrlPreviewOverride?: (roomId: string, enabled: boolean) => void;
   onRepairRoomTimeline?: (roomId: string) => void | Promise<void>;
   onForceRotateOutboundSession?: (roomId: string) => void | Promise<void>;
+  roomHistoryExportControls?: RoomHistoryExportControls;
   onLoadAccountManagementCapabilities?: () => void;
   onChangePassword?: (newPassword: string) => void;
   onDeactivateAccount?: (eraseData: boolean) => void;
@@ -641,6 +644,8 @@ export function ContextualRightPanel({
           }}
           onRepairRoomTimeline={onRepairRoomTimeline}
           onForceRotateOutboundSession={onForceRotateOutboundSession}
+          roomHistoryExport={snapshot.state.ui.room_history_export}
+          roomHistoryExportControls={roomHistoryExportControls}
           onOpenPeople={() => {
             void _onOpenPeople?.();
           }}

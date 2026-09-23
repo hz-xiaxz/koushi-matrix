@@ -1,8 +1,8 @@
 # Issue #59 Phase A: Element-compatible room-history export
 
 Status: Phase A implementation record. Phase B (GUI entry point, period
-dialog, Tauri save dialog, browser-headless and Linux GUI QA) is not part of
-this change.
+dialog, Tauri save dialog, browser-headless and Linux GUI QA) is recorded in
+[the Phase B plan](2026-09-23-issue59-room-history-export-phase-b.md).
 
 ## Upstream behaviour
 

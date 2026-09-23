@@ -95,6 +95,7 @@ pub(crate) mod diagnostics;
 pub(crate) mod directory;
 pub(crate) mod dropped_files;
 pub(crate) mod e2ee;
+pub(crate) mod history_export;
 pub(crate) mod live_signals;
 pub(crate) mod local_encryption;
 pub(crate) mod native_attention;
@@ -160,6 +161,28 @@ async fn submit_core_command_with_native_artifact(
     if path.trim().is_empty() {
         return Err("native artifact path is empty".to_owned());
     }
+    submit_core_command_with_native_artifact_path(
+        state,
+        request_id,
+        kind,
+        PathBuf::from(path),
+        command,
+    )
+    .await
+}
+
+/// Like [`submit_core_command_with_native_artifact`], for a path the adapter
+/// obtained itself (for example from a native save dialog).
+async fn submit_core_command_with_native_artifact_path(
+    state: &CoreRuntimeState,
+    request_id: RequestId,
+    kind: NativeArtifactKind,
+    path: PathBuf,
+    command: CoreCommand,
+) -> Result<FrontendCommandAdmission, String> {
+    if path.as_os_str().is_empty() {
+        return Err("native artifact path is empty".to_owned());
+    }
     if command.request_id() != request_id {
         return Err("native artifact request correlation mismatch".to_owned());
     }
@@ -167,11 +190,7 @@ async fn submit_core_command_with_native_artifact(
 
     match tokio::time::timeout(
         CORE_COMMAND_SUBMIT_TIMEOUT,
-        command_handle.command_with_native_artifact_and_admission(
-            command,
-            kind,
-            PathBuf::from(path),
-        ),
+        command_handle.command_with_native_artifact_and_admission(command, kind, path),
     )
     .await
     {
