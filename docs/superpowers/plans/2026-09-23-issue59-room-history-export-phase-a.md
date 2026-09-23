@@ -29,11 +29,14 @@ Intentional divergences from Element Web:
 
 Observed upstream behaviour that Koushi reproduces rather than "fixes":
 
-- Element maps freshly fetched `/messages` events. Edits are therefore not
-  applied to their originals, and `m.replace` events have no renderer. The
-  exception is an event that happens to be loaded in Element's in-memory
-  timeline, which can show edited content. That depends on UI state and is not
-  reproduced.
+- Element maps freshly fetched `/messages` events. An edit reaches its
+  original only when the server bundles the complete edit event
+  (matrix-js-sdk `eventMapperFor` → `makeReplaced`), and `m.replace` events
+  have no renderer. Koushi applies plaintext bundled edits the same way. An
+  encrypted bundled edit keeps the original content: Element decrypts that
+  replacement in the background, so its output depends on timing. An event
+  already loaded in Element's in-memory timeline can also show edits that
+  arrived by sync. That depends on UI state and is not reproduced.
 - An undecryptable event becomes `m.room.message` with `m.bad.encrypted`
   content. A redacted encrypted event stays the pruned `m.room.encrypted` wire
   event.
@@ -107,6 +110,29 @@ reviewed with the strongest available model before implementation.
   because blocking a device is device-global and later stages rely on B. Tokens: `history_export_full=ok`,
   `history_export_period=ok`, `history_export_utd_counted=ok`,
   `history_export_cancel=ok`, and `room_history_export=ok`.
+
+## Review
+
+An independent read-only review of the integrated diff (2026-09-23) asked
+for changes. Fixed in this change:
+
+- A cancel that aborted the task after commit, while it was sending its
+  settlement, was reported as cancelled. The task now records its terminal
+  action before sending it, and cancel or teardown settles with that
+  recorded outcome.
+- A panic in the export task now settles as failed.
+- Plaintext-returned `m.room.encrypted` events are now exported as
+  `m.bad.encrypted`.
+- Server-bundled edits are now applied like matrix-js-sdk's `makeReplaced`.
+- Non-state Jitsi widget events are now rendered.
+
+Accepted as documented:
+
+- The undecryptable-reason text is normalized to three messages.
+- The export file's buffered writes, fsync, and rename run on the async
+  worker. They are bounded per call and have no Phase A caller on a UI
+  thread. Moving the commit to a blocking pool is a follow-up for large
+  exports.
 
 ## Remaining for Phase B
 

@@ -11,10 +11,11 @@
 //!   `export_date`, `exported_by`, `messages`, serialized like
 //!   `JSON.stringify(object, null, 2)`.
 //!
-//! Element's exporter maps freshly fetched `/messages` events, so edits are
-//! not applied to their originals and `m.replace` events are dropped by the
-//! renderer filter. This module reproduces that behaviour rather than
-//! normalizing history into a Koushi-specific shape.
+//! Element's exporter maps freshly fetched `/messages` events: an edit is
+//! applied to its original only when the server bundles the complete edit
+//! event, and `m.replace` events themselves are dropped by the renderer
+//! filter. This module reproduces that behaviour rather than normalizing
+//! history into a Koushi-specific shape.
 //!
 //! Nothing here performs I/O or talks to the SDK: callers classify each event
 //! into an [`ExportSourceEvent`] and write through [`ElementJsonWriter`].
@@ -101,7 +102,69 @@ fn is_redacted(event: &Value) -> bool {
 
 /// `MatrixEvent.getEffectiveEvent()` for one fetched event.
 pub(crate) fn effective_event(source: ExportSourceEvent) -> EffectiveEvent {
+    let mut event = map_decryption(source);
+    apply_bundled_replacement(&mut event);
+    event
+}
+
+/// matrix-js-sdk's event mapper applies a complete edit bundled by the server
+/// (`unsigned["m.relations"]["m.replace"]` with `content`) through
+/// `makeReplaced`, after which `getContent()` is the edit's `m.new_content`,
+/// or `{}` without one. Redacted and state events are never replaced.
+///
+/// An encrypted bundled edit this device could not decrypt keeps the original
+/// content: Element decrypts the replacement in the background, so its result
+/// for that case depends on timing.
+fn apply_bundled_replacement(event: &mut EffectiveEvent) {
+    if event.undecryptable || is_redacted(&event.json) || event.json.get("state_key").is_some() {
+        return;
+    }
+    let Some(bundled) = event
+        .json
+        .get("unsigned")
+        .and_then(|unsigned| unsigned.get("m.relations"))
+        .and_then(|relations| relations.get("m.replace"))
+    else {
+        return;
+    };
+    let Some(bundled_content) = bundled.get("content").and_then(Value::as_object) else {
+        return;
+    };
+    if event_type(bundled) == Some(ENCRYPTED_TYPE) {
+        return;
+    }
+    let mut replaced = bundled_content
+        .get("m.new_content")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    // For an encrypted original, `getEffectiveEvent()` copies wire content keys
+    // outside the encryption schema, which the crypto crate already moved into
+    // the decrypted content (the wire `m.relates_to`).
+    if event.encrypted
+        && let Some(relation) = content(&event.json).get("m.relates_to")
+        && !replaced.contains_key("m.relates_to")
+    {
+        replaced.insert("m.relates_to".to_owned(), relation.clone());
+    }
+    if let Some(object) = event.json.as_object_mut() {
+        object.insert("content".to_owned(), Value::Object(replaced));
+    }
+}
+
+fn map_decryption(source: ExportSourceEvent) -> EffectiveEvent {
     match source {
+        // The SDK returns an `m.room.encrypted` event it could not attempt to
+        // decrypt (malformed content, or no crypto store) as plaintext;
+        // matrix-js-sdk turns the same failure into `m.bad.encrypted`.
+        ExportSourceEvent::Plain(json)
+            if event_type(&json) == Some(ENCRYPTED_TYPE) && !is_redacted(&json) =>
+        {
+            map_decryption(ExportSourceEvent::Undecryptable {
+                wire: json,
+                reason: UndecryptableReason::Other,
+            })
+        }
         ExportSourceEvent::Plain(json) => {
             let encrypted = event_type(&json) == Some(ENCRYPTED_TYPE);
             EffectiveEvent {
@@ -417,15 +480,15 @@ pub(crate) fn element_renders(event: &EffectiveEvent, own_user_id: &str) -> bool
             return false;
         }
     }
-    if is_state {
-        if event_type == "im.vector.modular.widgets" {
-            let widget_type = field_str(content(json), "type")
-                .filter(|kind| !kind.is_empty())
-                .or_else(|| field_str(prev_content(json), "type"));
-            if matches!(widget_type, Some("m.jitsi" | "jitsi")) {
-                return true;
-            }
+    if event_type == "im.vector.modular.widgets" {
+        let widget_type = field_str(content(json), "type")
+            .filter(|kind| !kind.is_empty())
+            .or_else(|| field_str(prev_content(json), "type"));
+        if matches!(widget_type, Some("m.jitsi" | "jitsi")) {
+            return true;
         }
+    }
+    if is_state {
         if is_beacon_info(event_type) && (truthy(field(content(json), "live")) || redacted) {
             return true;
         }

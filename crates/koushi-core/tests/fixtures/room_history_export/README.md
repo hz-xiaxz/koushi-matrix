@@ -33,8 +33,14 @@ revisions change.
   `m.relates_to`, are copied into the content.
 - A redacted `m.room.encrypted` event stays the pruned wire event.
   matrix-js-sdk does not decrypt redacted events.
-- Edits are not applied to their originals. Element's exporter maps freshly
-  fetched `/messages` events, and `m.replace` events have no renderer.
+- An edit is applied to its original only when the server bundles the
+  complete edit event under `unsigned["m.relations"]["m.replace"]`, as
+  matrix-js-sdk's event mapper does through `makeReplaced`; the content becomes
+  the edit's `m.new_content`. Otherwise the original keeps its content, and
+  `m.replace` events themselves have no renderer.
+- An `m.room.encrypted` event the SDK returns without attempting decryption
+  (for example malformed content) is exported as `m.bad.encrypted`, as
+  matrix-js-sdk does for any decryption failure.
 - Reactions, redaction events, `m.room.server_acl`, null rejoins,
   power-level events without a user change, create events without a
   predecessor, and verification requests for other users have no renderer and

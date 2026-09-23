@@ -7,6 +7,8 @@
 
 use std::sync::Arc;
 
+use futures_util::FutureExt;
+
 use koushi_protocol::command::RoomHistoryExportRequest;
 use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
 use koushi_protocol::ids::RequestId;
@@ -24,6 +26,10 @@ use crate::room_history_export::{
 pub(super) struct ActiveRoomHistoryExport {
     request_id: RequestId,
     counters: Arc<ExportCounters>,
+    /// The task's terminal action, recorded before it is sent. An abort that
+    /// lands while that send is pending must settle with this outcome: the
+    /// destination may already have been committed.
+    settlement: Arc<std::sync::Mutex<Option<AppAction>>>,
     task: executor::JoinHandle<()>,
 }
 
@@ -140,29 +146,38 @@ impl AccountActor {
         let account_work = self.account_work.clone();
         let own_user_id = session.info.user_id.clone();
         let task_counters = Arc::clone(&counters);
+        let settlement = Arc::new(std::sync::Mutex::new(None));
+        let task_settlement = Arc::clone(&settlement);
         let task = executor::spawn(async move {
-            let header = room_export_header(
-                &room,
-                crate::time::current_epoch_ms(),
-                export_date_utc_offset_minutes,
-                locale,
-            )
-            .await;
-            let mut source = MatrixRoomHistorySource::new(room, account_work);
-            let progress = ProgressToReducer {
-                request_id: request_id.sequence,
-                action_tx: action_tx.clone(),
+            let export = async {
+                let header = room_export_header(
+                    &room,
+                    crate::time::current_epoch_ms(),
+                    export_date_utc_offset_minutes,
+                    locale,
+                )
+                .await;
+                let mut source = MatrixRoomHistorySource::new(room, account_work);
+                let progress = ProgressToReducer {
+                    request_id: request_id.sequence,
+                    action_tx: action_tx.clone(),
+                };
+                run_export(
+                    &mut source,
+                    file,
+                    &header,
+                    &range,
+                    &own_user_id,
+                    &task_counters,
+                    progress,
+                )
+                .await
             };
-            let result = run_export(
-                &mut source,
-                file,
-                &header,
-                &range,
-                &own_user_id,
-                &task_counters,
-                progress,
-            )
-            .await;
+            // A panic inside the export must still settle the reducer.
+            let result = std::panic::AssertUnwindSafe(export)
+                .catch_unwind()
+                .await
+                .unwrap_or(Err(RoomHistoryExportFailureKind::Sdk));
             let progress = task_counters.snapshot();
             let action = match result {
                 Ok(()) => AppAction::RoomHistoryExportCompleted {
@@ -181,11 +196,15 @@ impl AccountActor {
                     }
                 }
             };
+            if let Ok(mut slot) = task_settlement.lock() {
+                *slot = Some(action.clone());
+            }
             let _ = action_tx.send(vec![action]).await;
         });
         self.room_history_export = Some(ActiveRoomHistoryExport {
             request_id,
             counters,
+            settlement,
             task,
         });
     }
@@ -220,14 +239,20 @@ impl AccountActor {
             return;
         };
         active.task.abort();
-        let aborted = active.task.await.is_err_and(|error| error.is_cancelled());
-        if aborted {
-            self.send_actions(vec![AppAction::RoomHistoryExportCancelled {
-                request_id: active.request_id.sequence,
-                progress: active.counters.snapshot(),
-            }])
-            .await;
+        if active.task.await.is_ok() {
+            // The task ran to completion and sent its own settlement.
+            return;
         }
+        let recorded = active
+            .settlement
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take());
+        let action = recorded.unwrap_or(AppAction::RoomHistoryExportCancelled {
+            request_id: active.request_id.sequence,
+            progress: active.counters.snapshot(),
+        });
+        self.send_actions(vec![action]).await;
     }
 }
 

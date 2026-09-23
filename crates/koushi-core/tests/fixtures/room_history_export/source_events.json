@@ -516,6 +516,66 @@
           }
         }
       }
+    },
+    {
+      "kind": "plain",
+      "event": {
+        "type": "m.room.message",
+        "sender": "@member-1:example.invalid",
+        "content": {
+          "msgtype": "m.text",
+          "body": "Synthetic original before bundled edit"
+        },
+        "room_id": "!history:example.invalid",
+        "event_id": "$e25:example.invalid",
+        "origin_server_ts": 1700001500000,
+        "unsigned": {
+          "age": 1000,
+          "m.relations": {
+            "m.replace": {
+              "type": "m.room.message",
+              "sender": "@member-1:example.invalid",
+              "room_id": "!history:example.invalid",
+              "event_id": "$e25edit:example.invalid",
+              "origin_server_ts": 1700001560000,
+              "content": {
+                "msgtype": "m.text",
+                "body": "* Synthetic bundled edit",
+                "m.new_content": {
+                  "msgtype": "m.text",
+                  "body": "Synthetic bundled edit"
+                },
+                "m.relates_to": {
+                  "rel_type": "m.replace",
+                  "event_id": "$e25:example.invalid"
+                }
+              },
+              "unsigned": {}
+            }
+          }
+        }
+      }
+    },
+    {
+      "kind": "plain",
+      "event": {
+        "type": "m.room.encrypted",
+        "sender": "@member-1:example.invalid",
+        "content": {
+          "ciphertext": "U3ludGhldGljQ2lwaGVydGV4dA",
+          "m.relates_to": {
+            "m.in_reply_to": {
+              "event_id": "$e08:example.invalid"
+            }
+          }
+        },
+        "room_id": "!history:example.invalid",
+        "event_id": "$e26:example.invalid",
+        "origin_server_ts": 1700001620000,
+        "unsigned": {
+          "age": 1000
+        }
+      }
     }
   ]
 }

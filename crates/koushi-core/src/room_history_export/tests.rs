@@ -11,7 +11,8 @@ use super::driver::{
     MAX_CONSECUTIVE_EMPTY_PAGES, run_export,
 };
 use super::element::{
-    ExportDateLocale, ExportHeader, ExportSourceEvent, UndecryptableReason, format_export_date,
+    ExportDateLocale, ExportHeader, ExportSourceEvent, UndecryptableReason, effective_event,
+    element_renders, format_export_date,
 };
 use super::sink::{
     NativeRoomHistoryExportSink, RoomHistoryExportFile, RoomHistoryExportSink,
@@ -257,10 +258,10 @@ fn fixture_matches_element_export_across_pages_with_duplicates_and_empty_pages()
     expected["export_date"] = json!("<normalized>");
     assert_eq!(actual, expected);
 
-    // 24 distinct events fetched, 15 rendered, one of them undecryptable.
-    assert_eq!(run.counters, progress(24, 15, 1));
+    // 26 distinct events fetched, 17 rendered, two of them undecryptable.
+    assert_eq!(run.counters, progress(26, 17, 2));
     assert_eq!(run.progress.len(), 4);
-    assert_eq!(run.progress.last().copied(), Some(progress(24, 15, 1)));
+    assert_eq!(run.progress.last().copied(), Some(progress(26, 17, 2)));
 }
 
 #[test]
@@ -520,4 +521,93 @@ fn native_sink_replaces_the_destination_only_on_commit() {
         sink.create(std::path::Path::new("relative.json")).err(),
         Some(RoomHistoryExportSinkError::InvalidDestination)
     );
+}
+
+fn with_bundled_edit(mut event: Value, edit: Value) -> Value {
+    event["unsigned"]["m.relations"] = json!({ "m.replace": edit });
+    event
+}
+
+fn bundled_edit(edit_type: &str, content: Value) -> Value {
+    json!({
+        "type": edit_type,
+        "sender": "@member-1:example.invalid",
+        "event_id": "$edit:example.invalid",
+        "origin_server_ts": 2,
+        "content": content
+    })
+}
+
+#[test]
+fn a_bundled_edit_of_an_encrypted_original_keeps_its_wire_relation() {
+    let original = json!({
+        "type": "m.room.message",
+        "sender": "@member-1:example.invalid",
+        "event_id": "$thread-reply:example.invalid",
+        "origin_server_ts": 1,
+        "content": {
+            "msgtype": "m.text",
+            "body": "Synthetic original",
+            "m.relates_to": { "rel_type": "m.thread", "event_id": "$root:example.invalid" }
+        },
+        "unsigned": {}
+    });
+    let edit = bundled_edit(
+        "m.room.message",
+        json!({ "m.new_content": { "msgtype": "m.text", "body": "Synthetic edited" } }),
+    );
+    let event = effective_event(ExportSourceEvent::Decrypted(with_bundled_edit(
+        original, edit,
+    )));
+    assert_eq!(
+        event.json["content"],
+        json!({
+            "msgtype": "m.text",
+            "body": "Synthetic edited",
+            "m.relates_to": { "rel_type": "m.thread", "event_id": "$root:example.invalid" }
+        })
+    );
+}
+
+#[test]
+fn bundled_edits_without_new_content_empty_the_content_and_encrypted_ones_are_kept() {
+    let ExportSourceEvent::Plain(original) = message(1, 1) else {
+        unreachable!()
+    };
+    let without_new_content = effective_event(ExportSourceEvent::Plain(with_bundled_edit(
+        original.clone(),
+        bundled_edit("m.room.message", json!({ "body": "* no new content" })),
+    )));
+    assert_eq!(without_new_content.json["content"], json!({}));
+
+    let encrypted_edit = effective_event(ExportSourceEvent::Plain(with_bundled_edit(
+        original.clone(),
+        bundled_edit("m.room.encrypted", json!({ "ciphertext": "c3ludGhldGlj" })),
+    )));
+    assert_eq!(encrypted_edit.json["content"], original["content"]);
+
+    let mut redacted = original.clone();
+    redacted["content"] = json!({});
+    redacted["unsigned"]["redacted_because"] = json!({ "type": "m.room.redaction" });
+    let redacted = effective_event(ExportSourceEvent::Plain(with_bundled_edit(
+        redacted,
+        bundled_edit(
+            "m.room.message",
+            json!({ "m.new_content": { "body": "x" } }),
+        ),
+    )));
+    assert_eq!(redacted.json["content"], json!({}));
+}
+
+#[test]
+fn a_non_state_jitsi_widget_event_renders_like_element() {
+    let event = effective_event(ExportSourceEvent::Plain(json!({
+        "type": "im.vector.modular.widgets",
+        "sender": "@member-1:example.invalid",
+        "event_id": "$widget:example.invalid",
+        "origin_server_ts": 1,
+        "content": { "type": "jitsi", "url": "https://example.invalid/widget" },
+        "unsigned": {}
+    })));
+    assert!(element_renders(&event, OWN_USER));
 }
