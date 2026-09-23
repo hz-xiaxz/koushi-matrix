@@ -23,6 +23,11 @@ export const HEADLESS_LOCAL_QA_SCENARIO_TOKENS = Object.freeze({
     "thread_summary_convergence=ok"
   ]),
   read_state_convergence: Object.freeze(["read_state_convergence=ok"]),
+  thread_late_joiner: Object.freeze([
+    "thread_late_joiner_root_not_visible=ok",
+    "thread_late_joiner_thread_panel=ok",
+    "thread_late_joiner=ok"
+  ]),
   room_history_export: Object.freeze([
     "history_export_full=ok",
     "history_export_period=ok",

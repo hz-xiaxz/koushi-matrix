@@ -22,6 +22,7 @@ use super::registry::{
     TimelineStressConfig, scenario_report, should_run_focused_send_queue_route,
     should_run_normal_secondary_participant,
 };
+use super::scenario_history_export::run_room_history_export_stage;
 use super::scenario_identity::{
     run_credential_health_stage, run_e2ee_login_store_scenario, run_e2ee_trust_stage,
     run_gate_negative_stage, run_gate_no_proof_stage, run_gate_restore_stage,
@@ -33,11 +34,11 @@ use super::scenario_rooms::{
     run_room_people_projection_stage, wait_for_pin_event_completed, wait_for_pinned_state,
     wait_for_room_list_containing, wait_for_unpin_event_completed,
 };
-use super::scenario_history_export::run_room_history_export_stage;
 use super::scenario_search::{
     poll_search_until_absent, poll_search_until_found, run_hide_redacted_stage,
     run_search_crawler_stage, wait_for_paginate_end_reached,
 };
+use super::scenario_thread_late_joiner::run_thread_late_joiner_scenario;
 use super::scenario_timeline::{
     assert_thread_reply_relation, run_activity_stage, run_cache_restore_scenario,
     run_composer_stage, run_focused_send_queue_scenario, run_link_preview_stage,
@@ -101,6 +102,11 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
     if scenario == QaScenario::ReadStateConvergence {
         println!("safety=ok");
         run_read_state_convergence_scenario(&config).await?;
+        return Ok(scenario_report(&config.server_kind, scenario));
+    }
+    if scenario == QaScenario::ThreadLateJoiner {
+        println!("safety=ok");
+        run_thread_late_joiner_scenario(&config).await?;
         return Ok(scenario_report(&config.server_kind, scenario));
     }
     if scenario == QaScenario::GateNoProof {

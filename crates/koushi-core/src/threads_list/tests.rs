@@ -228,6 +228,55 @@ fn thread_root_projection_service_emits_one_bounded_fetch_and_never_retries_term
 }
 
 #[test]
+fn newer_activity_rehydrates_a_transient_root_failure_but_not_a_withheld_root() {
+    for (failure_kind, expect_rehydrate) in [
+        (OperationFailureKind::Network, true),
+        (OperationFailureKind::Timeout, true),
+        (OperationFailureKind::NotFound, false),
+        (OperationFailureKind::Forbidden, false),
+    ] {
+        let mut service = ThreadRootProjectionService::default();
+        let activity = ThreadRootProjectionActivity {
+            room_id: "!room:example.invalid".to_owned(),
+            root_event_id: "$root:example.invalid".to_owned(),
+            activity_event_id: "$reply-1:example.invalid".to_owned(),
+            activity_timestamp_ms: Some(100),
+            activity_sender: None,
+            activity_sender_label: None,
+            activity_body_preview: None,
+        };
+        assert!(matches!(
+            service.observe(activity.clone()),
+            ThreadRootProjectionDecision::StartFetch(_)
+        ));
+        service.mark_failed(&activity, failure_kind);
+
+        let newer = ThreadRootProjectionActivity {
+            activity_event_id: "$reply-2:example.invalid".to_owned(),
+            activity_timestamp_ms: Some(200),
+            ..activity.clone()
+        };
+        assert!(matches!(
+            service.observe(newer.clone()),
+            ThreadRootProjectionDecision::ActivityUpdated(_)
+        ));
+        let refresh = service
+            .schedule_aggregate_refresh(
+                &newer,
+                AggregateRefreshCause::SelectedActivity,
+                true,
+                false,
+            )
+            .expect("newer activity schedules an aggregate refresh");
+        assert_eq!(
+            refresh.hydrate_root, expect_rehydrate,
+            "{failure_kind:?}: only a transient failure rehydrates on newer activity"
+        );
+        assert_eq!(service.has_pending_attempt(&newer), expect_rehydrate);
+    }
+}
+
+#[test]
 fn aggregate_refresh_is_pending_for_dto_but_not_hydration_dedupe() {
     let mut service = ThreadRootProjectionService::default();
     let activity = ThreadRootProjectionActivity {

@@ -19,7 +19,7 @@ use crate::threads_list::{
     AggregateRefresh, AggregateRefreshCause, ThreadRootProjectionActivity,
     ThreadRootProjectionDecision, ThreadRootProjectionRecord, ThreadRootProjectionRefreshResult,
     ThreadRootProjectionService, activity_is_newer, authoritative_thread_aggregate_from_sdk,
-    classify_thread_list_error,
+    classify_thread_list_error, classify_thread_request_error,
 };
 use koushi_protocol::event::{
     ReactionGroup, ReactionSender, ThreadSummaryDto, TimelineItem, TimelineItemId,
@@ -957,7 +957,7 @@ async fn load_thread_root_projection_item_from_room(
     let loaded = room
         .load_or_fetch_event(&root_event_id, None)
         .await
-        .map_err(|_| OperationFailureKind::Network)?;
+        .map_err(|error| classify_thread_request_error(&error))?;
     let raw: serde_json::Value =
         serde_json::from_str(loaded.raw().json().get()).map_err(|_| OperationFailureKind::Sdk)?;
     let sender_id = raw

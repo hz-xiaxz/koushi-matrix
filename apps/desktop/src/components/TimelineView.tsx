@@ -3525,6 +3525,8 @@ export const TimelineView = memo(function TimelineView({
                 <ThreadRootStatusPlaceholder
                   row={row}
                   state={row.kind === "threadRootPending" ? "pending" : "failed"}
+                  roomId={roomId}
+                  onOpenThread={onOpenThread}
                   showThreadSummary={presentationContext !== "thread"}
                 />
               ) : (

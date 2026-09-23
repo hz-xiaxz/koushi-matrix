@@ -162,6 +162,7 @@ pub(super) enum QaScenario {
     LinkPreview,
     CacheRestore,
     ReadStateConvergence,
+    ThreadLateJoiner,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -202,6 +203,7 @@ pub(super) enum QaStage {
     LinkPreview,
     CacheRestore,
     ReadStateConvergence,
+    ThreadLateJoiner,
 }
 
 /// Refuse to run against the OS keychain. Debug and qa-bin release builds both
@@ -280,9 +282,10 @@ impl QaScenario {
             "link_preview" => Ok(Self::LinkPreview),
             "cache_restore" => Ok(Self::CacheRestore),
             "read_state_convergence" => Ok(Self::ReadStateConvergence),
+            "thread_late_joiner" => Ok(Self::ThreadLateJoiner),
             "avatar_demand" => Ok(Self::AvatarDemand),
             other => Err(format!(
-                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, room_history_export, scheduled_send, restore_cleanup, link_preview, cache_restore, read_state_convergence, avatar_demand; got {other}"
+                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, room_history_export, scheduled_send, restore_cleanup, link_preview, cache_restore, read_state_convergence, thread_late_joiner, avatar_demand; got {other}"
             )),
         }
     }
@@ -295,6 +298,7 @@ impl QaScenario {
                     | QaStage::TimelineStress
                     | QaStage::DeviceCleanup
                     | QaStage::ReadStateConvergence
+                    | QaStage::ThreadLateJoiner
                     | QaStage::AvatarDemand
             ),
             Self::Safety => matches!(stage, QaStage::Safety),
@@ -492,6 +496,7 @@ impl QaScenario {
             Self::ReadStateConvergence => {
                 matches!(stage, QaStage::Safety | QaStage::ReadStateConvergence)
             }
+            Self::ThreadLateJoiner => matches!(stage, QaStage::Safety | QaStage::ThreadLateJoiner),
         }
     }
 
@@ -696,6 +701,11 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
         ],
         QaStage::CacheRestore => &["cache_restore=ok"],
         QaStage::ReadStateConvergence => &["read_state_convergence=ok"],
+        QaStage::ThreadLateJoiner => &[
+            "thread_late_joiner_root_not_visible=ok",
+            "thread_late_joiner_thread_panel=ok",
+            "thread_late_joiner=ok",
+        ],
         QaStage::AvatarDemand => &["avatar_window_requests=ok"],
     }
 }
@@ -961,6 +971,7 @@ pub(super) fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
         QaScenario::ReadStateConvergence => {
             vec![QaStage::Safety, QaStage::ReadStateConvergence]
         }
+        QaScenario::ThreadLateJoiner => vec![QaStage::Safety, QaStage::ThreadLateJoiner],
         QaScenario::All => vec![
             QaStage::Safety,
             QaStage::LoginSync,
@@ -1048,7 +1059,8 @@ pub(super) fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static st
         | QaScenario::GateNegative
         | QaScenario::GateNoProof
         | QaScenario::AvatarDemand
-        | QaScenario::ReadStateConvergence => stages_for_scenario(scenario)
+        | QaScenario::ReadStateConvergence
+        | QaScenario::ThreadLateJoiner => stages_for_scenario(scenario)
             .into_iter()
             .flat_map(|stage| tokens_for_stage(stage).iter().copied())
             .collect(),

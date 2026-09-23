@@ -2124,6 +2124,107 @@ describe("TimelineView", () => {
   });
 
 
+  it("explains a withheld thread root and opens its thread from the placeholder", async () => {
+    let emit: (payload: CoreEventPayload) => void = () => undefined;
+    const onOpenThread = vi.fn();
+    const transport = baseTransport({
+      listenCoreEvents(nextListener) {
+        emit = nextListener;
+        return () => undefined;
+      }
+    });
+    const placeholder = (
+      state: "pending" | "withheld" | "network",
+      rootEventId: string
+    ): TimelineItem => ({
+      ...message(`$reply-${rootEventId}`, ""),
+      id: { Synthetic: { synthetic_id: `thread-root-slot:${rootEventId}` } },
+      body: null,
+      thread_summary: {
+        reply_count: 1,
+        latest_event_id: `$reply-${rootEventId}`,
+        latest_sender: null,
+        latest_sender_label: null,
+        latest_body_preview: null,
+        latest_timestamp_ms: null
+      },
+      display_metadata: {
+        row_id: `thread-root:${rootEventId}`,
+        kind:
+          state === "pending"
+            ? { kind: "threadRootPending" }
+            : {
+                kind: "threadRootFailed",
+                failure_kind: state === "withheld" ? "notFound" : "network"
+              },
+        content_event_id: rootEventId,
+        activity_event_id: `$reply-${rootEventId}`,
+        display_timestamp_ms: null
+      }
+    });
+
+    setActiveLocaleProfile("ja", "none");
+    render(
+      <TimelineView
+        timelineKey={KEY}
+        roomId="!room:example.invalid"
+        transport={transport}
+        onReply={vi.fn()}
+        onOpenThread={onOpenThread}
+      />
+    );
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [
+              placeholder("pending", "$pending-root:example.invalid"),
+              placeholder("withheld", "$withheld-root:example.invalid"),
+              placeholder("network", "$network-root:example.invalid")
+            ]
+          }
+        }
+      });
+    });
+
+    const rowFor = (rootEventId: string) =>
+      document.querySelector<HTMLElement>(`article[data-content-event-id="${rootEventId}"]`)!;
+    await waitFor(() => expect(rowFor("$withheld-root:example.invalid")).not.toBeNull());
+    const statusText = (rootEventId: string) =>
+      within(rowFor(rootEventId)).getByRole("status").textContent;
+    expect(statusText("$pending-root:example.invalid")).toBe(
+      "スレッドのメッセージを読み込んでいます…"
+    );
+    expect(statusText("$withheld-root:example.invalid")).toBe(
+      "スレッドの元のメッセージは表示できません。参加する前に送信された可能性があります。"
+    );
+    expect(statusText("$network-root:example.invalid")).toBe(
+      "スレッドのメッセージを利用できません。"
+    );
+    for (const rootEventId of [
+      "$pending-root:example.invalid",
+      "$withheld-root:example.invalid",
+      "$network-root:example.invalid"
+    ]) {
+      // Status and chip share the message content column, so the avatar
+      // column stays empty instead of squeezing the text.
+      expect(rowFor(rootEventId).querySelector(":scope > .message-main [role=status]")).not.toBeNull();
+    }
+
+    const chip = within(rowFor("$withheld-root:example.invalid")).getByRole("button");
+    expect(chip.textContent).toBe("返信 1 件");
+    fireEvent.click(chip);
+    expect(onOpenThread).toHaveBeenCalledWith(
+      "!room:example.invalid",
+      "$withheld-root:example.invalid",
+      "existingThread"
+    );
+  });
+
   it("shows notification count on the matching root row without moving timeline rows", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const onOpenThread = vi.fn();
