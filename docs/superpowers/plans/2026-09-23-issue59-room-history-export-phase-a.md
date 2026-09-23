@@ -98,7 +98,7 @@ reviewed with the strongest available model before implementation.
   `export_date`, and native sink commit and discard. Fixtures are under
   `crates/koushi-core/tests/fixtures/room_history_export/`, and their README
   records the baseline and what comparisons normalize.
-- `cargo test -p koushi-core --test room_history_export_admission`: command
+- `cargo test -p koushi-core --test native_artifact_boundary`: command
   correlation, ready gating, Debug redaction, and release of a rejected
   export's destination registration.
 - `qa:headless-local -- --core --scenario=room_history_export` proves the
