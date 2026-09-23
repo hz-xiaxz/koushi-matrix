@@ -21,7 +21,11 @@ use super::event_wait::{
     wait_for_withheld_event_projection_from_source,
 };
 use super::fixtures::{accept_invite_for_qa, create_room_for_qa, invite_user_for_qa};
-use super::registry::E2EE_EVENT_TIMEOUT;
+use super::participants::{
+    QaOwnedRuntimeParticipant, QaParticipantLoginGate, cleanup_owned_e2ee_participant_best_effort,
+    login_synced_participant_for_qa, qa_data_dir,
+};
+use super::registry::{E2EE_EVENT_TIMEOUT, QaConfig};
 
 const EXPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 const HEADER_KEYS: [&str; 6] = [
@@ -280,246 +284,281 @@ async fn send_text(
 /// - `history_export_cancel=ok`: a cancelled export settles as cancelled and
 ///   leaves neither the destination nor a staging file.
 pub(super) async fn run_room_history_export_stage(
+    config: &QaConfig,
     conn_a: &mut CoreConnection,
     account_key_a: &AccountKey,
-    conn_b: &mut CoreConnection,
-    account_key_b: &AccountKey,
 ) -> Result<(), String> {
-    let directory = ExportDirectory(super::participants::qa_data_dir("history-export"));
-    std::fs::create_dir_all(&directory.0)
-        .map_err(|_| "history export: prepare export directory".to_owned())?;
-
-    let room_id =
-        create_room_for_qa(conn_a, "QA History Export", true, "history export room").await?;
-    wait_for_encrypted_room_projection_for_qa(conn_a, &room_id, "history export room").await?;
-    let key_a = TimelineKey::room(account_key_a.clone(), room_id.clone());
-    subscribe_timeline_for_qa(conn_a, &key_a, "history export timeline").await?;
-
-    let mut before_join = Vec::new();
-    for index in 1..=3 {
-        before_join.push(
-            send_text(
-                conn_a,
-                &key_a,
-                &format!("qa-history-export-before-{index}"),
-                &format!("Synthetic history export message {index}"),
-                "history export send before join",
-            )
-            .await?,
-        );
-    }
-    invite_user_for_qa(conn_a, &room_id, &account_key_b.0, "history export invite").await?;
-    wait_for_invite_in_snapshot(conn_b, &room_id, None, "history export invite").await?;
-    accept_invite_for_qa(conn_b, &room_id, "history export join").await?;
-    wait_for_encrypted_room_projection_for_qa(conn_b, &room_id, "history export join").await?;
-    let key_b = TimelineKey::room(account_key_b.clone(), room_id.clone());
-    let initial_b =
-        subscribe_timeline_for_qa(conn_b, &key_b, "history export late member timeline").await?;
-    let mut after_join = Vec::new();
-    for index in 4..=5 {
-        after_join.push(
-            send_text(
-                conn_a,
-                &key_a,
-                &format!("qa-history-export-after-{index}"),
-                &format!("Synthetic history export message {index}"),
-                "history export send after join",
-            )
-            .await?,
-        );
-    }
-    // The later member holds the keys for messages sent after they joined
-    // once the last one decrypts in their timeline.
-    wait_for_item_with_body(
-        conn_b,
-        &key_b,
-        "Synthetic history export message 5",
-        "history export late member decrypt",
+    // A disposable member whose device can be denied a room key without
+    // affecting the stages that later rely on B's devices.
+    let user_c = config
+        .user_c
+        .as_deref()
+        .ok_or("history export requires synthetic user C")?;
+    let suffix = user_c
+        .strip_prefix("qa_c_")
+        .ok_or("history export requires the local QA user naming contract")?;
+    let password_c = std::env::var("KOUSHI_LOCAL_QA_PASSWORD_C")
+        .unwrap_or_else(|_| format!("koushi-desktop-local-c-{suffix}"));
+    let outcome_c = login_synced_participant_for_qa(
+        &config.homeserver,
+        qa_data_dir("history-export-c"),
+        user_c,
+        &password_c,
+        "Koushi Core QA C",
+        "history export C",
+        "history export bootstrap C",
+        QaParticipantLoginGate::BootstrapNewIdentity,
     )
     .await?;
+    let account_key_c = outcome_c.account_key.clone();
+    let mut participant_c = QaOwnedRuntimeParticipant::from(outcome_c);
+    let result = async {
+        let conn_c = &mut participant_c.conn;
+        let directory = ExportDirectory(qa_data_dir("history-export"));
+        std::fs::create_dir_all(&directory.0)
+            .map_err(|_| "history export: prepare export directory".to_owned())?;
 
-    // A withholds the next room key from B's device, so B cannot decrypt it.
-    let device_b = match &conn_b.snapshot().session {
-        koushi_state::SessionState::Ready(info) => koushi_state::VerificationTarget {
-            user_id: info.user_id.clone(),
-            device_id: info.device_id.clone(),
-        },
-        _ => return Err("history export: late member is not Ready".to_owned()),
-    };
-    tokio::time::timeout(
-        E2EE_EVENT_TIMEOUT,
-        conn_a.qa_set_local_device_blacklisted(device_b, room_id.clone()),
-    )
-    .await
-    .map_err(|_| "history export: block device ack timeout".to_owned())?
-    .map_err(|_| "history export: block device failed".to_owned())?;
-    let withheld_body = "Synthetic history export withheld message";
-    let withheld = send_text(
-        conn_a,
-        &key_a,
-        "qa-history-export-withheld",
-        withheld_body,
-        "history export withheld send",
-    )
-    .await?;
-    wait_for_withheld_event_projection_from_source(
-        conn_b,
-        &key_b,
-        &withheld,
-        withheld_body,
-        &initial_b,
-        "history export withheld receive",
-        E2EE_EVENT_TIMEOUT,
-    )
-    .await?;
-    let sent = before_join.iter().chain(&after_join).collect::<Vec<_>>();
+        let room_id =
+            create_room_for_qa(conn_a, "QA History Export", true, "history export room").await?;
+        wait_for_encrypted_room_projection_for_qa(conn_a, &room_id, "history export room").await?;
+        let key_a = TimelineKey::room(account_key_a.clone(), room_id.clone());
+        subscribe_timeline_for_qa(conn_a, &key_a, "history export timeline").await?;
 
-    // Full export by the room creator.
-    let full_path = directory.0.join("full.json");
-    let (full, full_progress) = export_to_value(
-        conn_a,
-        &room_id,
-        RoomHistoryExportRange::AllAvailable,
-        &full_path,
-        "history export full",
-    )
-    .await?;
-    check_export(&full, &full_progress, "history export full")?;
-    let full_events = messages(&full);
-    let sent_events = sent
-        .iter()
-        .map(|event_id| {
-            full_events
-                .iter()
-                .find(|event| event["event_id"].as_str() == Some(event_id.as_str()))
-                .ok_or_else(|| "history export full: a sent message is missing".to_owned())
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    if !sent_events.iter().all(|event| is_text_message(event)) {
-        return Err("history export full: a sent message was not decrypted".to_owned());
-    }
-    if full_progress.undecryptable_events != 0 || full_progress.fetched_events < sent.len() as u64 {
-        return Err("history export full: unexpected counts for the room creator".to_owned());
-    }
-    println!("history_export_full=ok");
+        let mut before_join = Vec::new();
+        for index in 1..=3 {
+            before_join.push(
+                send_text(
+                    conn_a,
+                    &key_a,
+                    &format!("qa-history-export-before-{index}"),
+                    &format!("Synthetic history export message {index}"),
+                    "history export send before join",
+                )
+                .await?,
+            );
+        }
+        invite_user_for_qa(conn_a, &room_id, &account_key_c.0, "history export invite").await?;
+        wait_for_invite_in_snapshot(conn_c, &room_id, None, "history export invite").await?;
+        accept_invite_for_qa(conn_c, &room_id, "history export join").await?;
+        wait_for_encrypted_room_projection_for_qa(conn_c, &room_id, "history export join").await?;
+        let key_c = TimelineKey::room(account_key_c.clone(), room_id.clone());
+        let initial_c =
+            subscribe_timeline_for_qa(conn_c, &key_c, "history export late member timeline")
+                .await?;
+        let mut after_join = Vec::new();
+        for index in 4..=5 {
+            after_join.push(
+                send_text(
+                    conn_a,
+                    &key_a,
+                    &format!("qa-history-export-after-{index}"),
+                    &format!("Synthetic history export message {index}"),
+                    "history export send after join",
+                )
+                .await?,
+            );
+        }
+        // The later member holds the keys for messages sent after they joined
+        // once the last one decrypts in their timeline.
+        wait_for_item_with_body(
+            conn_c,
+            &key_c,
+            "Synthetic history export message 5",
+            "history export late member decrypt",
+        )
+        .await?;
 
-    // Period export: [message 2, message 4).
-    let start_ms = sent_events[1]["origin_server_ts"]
-        .as_u64()
-        .unwrap_or_default();
-    let end_exclusive_ms = sent_events[3]["origin_server_ts"]
-        .as_u64()
-        .unwrap_or_default();
-    if start_ms >= end_exclusive_ms {
-        return Err("history export period: sent messages share a timestamp".to_owned());
-    }
-    let expected_period = full_events
-        .iter()
-        .filter(|event| {
-            event["origin_server_ts"]
-                .as_u64()
-                .is_some_and(|ts| start_ms <= ts && ts < end_exclusive_ms)
-        })
-        .filter_map(|event| event["event_id"].as_str().map(str::to_owned))
-        .collect::<Vec<_>>();
-    let period_path = directory.0.join("period.json");
-    let (period, period_progress) = export_to_value(
-        conn_a,
-        &room_id,
-        RoomHistoryExportRange::Period {
-            start_ms,
-            end_exclusive_ms,
-            time_zone: "UTC".to_owned(),
-        },
-        &period_path,
-        "history export period",
-    )
-    .await?;
-    check_export(&period, &period_progress, "history export period")?;
-    if event_ids(&period) != expected_period
-        || !expected_period.contains(sent[1])
-        || expected_period.contains(sent[3])
-    {
-        return Err("history export period: events differ from the full export range".to_owned());
-    }
-    println!("history_export_period=ok");
+        // A withholds the next room key from B's device, so B cannot decrypt it.
+        let device_c = match &conn_c.snapshot().session {
+            koushi_state::SessionState::Ready(info) => koushi_state::VerificationTarget {
+                user_id: info.user_id.clone(),
+                device_id: info.device_id.clone(),
+            },
+            _ => return Err("history export: late member is not Ready".to_owned()),
+        };
+        tokio::time::timeout(
+            E2EE_EVENT_TIMEOUT,
+            conn_a.qa_set_local_device_blacklisted(device_c, room_id.clone()),
+        )
+        .await
+        .map_err(|_| "history export: block device ack timeout".to_owned())?
+        .map_err(|_| "history export: block device failed".to_owned())?;
+        let withheld_body = "Synthetic history export withheld message";
+        let withheld = send_text(
+            conn_a,
+            &key_a,
+            "qa-history-export-withheld",
+            withheld_body,
+            "history export withheld send",
+        )
+        .await?;
+        wait_for_withheld_event_projection_from_source(
+            conn_c,
+            &key_c,
+            &withheld,
+            withheld_body,
+            &initial_c,
+            "history export withheld receive",
+            E2EE_EVENT_TIMEOUT,
+        )
+        .await?;
+        let sent = before_join.iter().chain(&after_join).collect::<Vec<_>>();
 
-    // The later member cannot decrypt the withheld message.
-    let late_path = directory.0.join("late-member.json");
-    let (late, late_progress) = export_to_value(
-        conn_b,
-        &room_id,
-        RoomHistoryExportRange::AllAvailable,
-        &late_path,
-        "history export late member",
-    )
-    .await?;
-    check_export(&late, &late_progress, "history export late member")?;
-    let late_events = messages(&late);
-    let find = |event_id: &String| {
-        late_events
-            .iter()
-            .find(|event| event["event_id"].as_str() == Some(event_id.as_str()))
-    };
-    let readable = before_join
-        .iter()
-        .chain(&after_join)
-        .all(|event_id| find(event_id).is_some_and(is_text_message));
-    let withheld_undecryptable = find(&withheld).is_some_and(is_undecryptable);
-    if !readable || !withheld_undecryptable || late_progress.undecryptable_events == 0 {
-        return Err(format!(
-            "history export late member: unexpected decryption outcome \
-             (readable={readable} withheld_undecryptable={withheld_undecryptable} \
-             undecryptable_total={})",
-            late_progress.undecryptable_events
-        ));
-    }
-    println!("history_export_utd_counted=ok");
-
-    // Cancellation. A tiny room can finish before the cancel reaches the
-    // actor, so retry a bounded number of times.
-    let cancel_path = directory.0.join("cancelled.json");
-    let mut cancelled = false;
-    for attempt in 0..3 {
-        let _ = std::fs::remove_file(&cancel_path);
-        let export_id = start_export(
+        // Full export by the room creator.
+        let full_path = directory.0.join("full.json");
+        let (full, full_progress) = export_to_value(
             conn_a,
             &room_id,
             RoomHistoryExportRange::AllAvailable,
-            &cancel_path,
-            "history export cancel",
+            &full_path,
+            "history export full",
         )
         .await?;
-        let cancel_id = conn_a.next_request_id();
-        conn_a
-            .command(CoreCommand::Account(
-                AccountCommand::CancelRoomHistoryExport {
-                    request_id: cancel_id,
-                    target_request_id: export_id,
-                },
-            ))
-            .await
-            .map_err(|_| "history export cancel: submit cancel".to_owned())?;
-        match wait_for_terminal(conn_a, export_id, "history export cancel").await? {
-            ExportOutcome::Cancelled => {
-                cancelled = true;
-                break;
-            }
-            ExportOutcome::Completed(_) => {
-                println!("history_export_cancel_race_attempt={attempt}");
-            }
-            ExportOutcome::Failed(kind) => {
-                return Err(format!("history export cancel: export failed kind={kind}"));
+        check_export(&full, &full_progress, "history export full")?;
+        let full_events = messages(&full);
+        let sent_events = sent
+            .iter()
+            .map(|event_id| {
+                full_events
+                    .iter()
+                    .find(|event| event["event_id"].as_str() == Some(event_id.as_str()))
+                    .ok_or_else(|| "history export full: a sent message is missing".to_owned())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if !sent_events.iter().all(|event| is_text_message(event)) {
+            return Err("history export full: a sent message was not decrypted".to_owned());
+        }
+        if full_progress.undecryptable_events != 0
+            || full_progress.fetched_events < sent.len() as u64
+        {
+            return Err("history export full: unexpected counts for the room creator".to_owned());
+        }
+        println!("history_export_full=ok");
+
+        // Period export: [message 2, message 4).
+        let start_ms = sent_events[1]["origin_server_ts"]
+            .as_u64()
+            .unwrap_or_default();
+        let end_exclusive_ms = sent_events[3]["origin_server_ts"]
+            .as_u64()
+            .unwrap_or_default();
+        if start_ms >= end_exclusive_ms {
+            return Err("history export period: sent messages share a timestamp".to_owned());
+        }
+        let expected_period = full_events
+            .iter()
+            .filter(|event| {
+                event["origin_server_ts"]
+                    .as_u64()
+                    .is_some_and(|ts| start_ms <= ts && ts < end_exclusive_ms)
+            })
+            .filter_map(|event| event["event_id"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>();
+        let period_path = directory.0.join("period.json");
+        let (period, period_progress) = export_to_value(
+            conn_a,
+            &room_id,
+            RoomHistoryExportRange::Period {
+                start_ms,
+                end_exclusive_ms,
+                time_zone: "UTC".to_owned(),
+            },
+            &period_path,
+            "history export period",
+        )
+        .await?;
+        check_export(&period, &period_progress, "history export period")?;
+        if event_ids(&period) != expected_period
+            || !expected_period.contains(sent[1])
+            || expected_period.contains(sent[3])
+        {
+            return Err(
+                "history export period: events differ from the full export range".to_owned(),
+            );
+        }
+        println!("history_export_period=ok");
+
+        // The later member cannot decrypt the withheld message.
+        let late_path = directory.0.join("late-member.json");
+        let (late, late_progress) = export_to_value(
+            conn_c,
+            &room_id,
+            RoomHistoryExportRange::AllAvailable,
+            &late_path,
+            "history export late member",
+        )
+        .await?;
+        check_export(&late, &late_progress, "history export late member")?;
+        let late_events = messages(&late);
+        let find = |event_id: &String| {
+            late_events
+                .iter()
+                .find(|event| event["event_id"].as_str() == Some(event_id.as_str()))
+        };
+        let readable = before_join
+            .iter()
+            .chain(&after_join)
+            .all(|event_id| find(event_id).is_some_and(is_text_message));
+        let withheld_undecryptable = find(&withheld).is_some_and(is_undecryptable);
+        if !readable || !withheld_undecryptable || late_progress.undecryptable_events == 0 {
+            return Err(format!(
+                "history export late member: unexpected decryption outcome \
+                 (readable={readable} withheld_undecryptable={withheld_undecryptable} \
+                 undecryptable_total={})",
+                late_progress.undecryptable_events
+            ));
+        }
+        println!("history_export_utd_counted=ok");
+
+        // Cancellation. A tiny room can finish before the cancel reaches the
+        // actor, so retry a bounded number of times.
+        let cancel_path = directory.0.join("cancelled.json");
+        let mut cancelled = false;
+        for attempt in 0..3 {
+            let _ = std::fs::remove_file(&cancel_path);
+            let export_id = start_export(
+                conn_a,
+                &room_id,
+                RoomHistoryExportRange::AllAvailable,
+                &cancel_path,
+                "history export cancel",
+            )
+            .await?;
+            let cancel_id = conn_a.next_request_id();
+            conn_a
+                .command(CoreCommand::Account(
+                    AccountCommand::CancelRoomHistoryExport {
+                        request_id: cancel_id,
+                        target_request_id: export_id,
+                    },
+                ))
+                .await
+                .map_err(|_| "history export cancel: submit cancel".to_owned())?;
+            match wait_for_terminal(conn_a, export_id, "history export cancel").await? {
+                ExportOutcome::Cancelled => {
+                    cancelled = true;
+                    break;
+                }
+                ExportOutcome::Completed(_) => {
+                    println!("history_export_cancel_race_attempt={attempt}");
+                }
+                ExportOutcome::Failed(kind) => {
+                    return Err(format!("history export cancel: export failed kind={kind}"));
+                }
             }
         }
+        if !cancelled {
+            return Err("history export cancel: export completed before every cancel".to_owned());
+        }
+        if cancel_path.exists() || !no_partial_files(&directory.0) {
+            return Err("history export cancel: a cancelled export left a file".to_owned());
+        }
+        println!("history_export_cancel=ok");
+        println!("room_history_export=ok");
+        Ok(())
     }
-    if !cancelled {
-        return Err("history export cancel: export completed before every cancel".to_owned());
-    }
-    if cancel_path.exists() || !no_partial_files(&directory.0) {
-        return Err("history export cancel: a cancelled export left a file".to_owned());
-    }
-    println!("history_export_cancel=ok");
-    println!("room_history_export=ok");
-    Ok(())
+    .await;
+    let cleanup =
+        cleanup_owned_e2ee_participant_best_effort(participant_c, "history export C cleanup").await;
+    result.and(cleanup)
 }

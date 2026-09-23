@@ -437,6 +437,33 @@ Homeservers that advertise `org.matrix.msc4140` through `/versions` are routed
 through AccountActor-owned SDK/Ruma delayed-event requests instead; the local
 fallback timer is intentionally limited to Local handles.
 
+### Room-history export (#59)
+
+The `room_history_export` core scenario is part of `all`. The Node QA token
+contract also requires these tokens when the scenario runs alone:
+
+```text
+history_export_full=ok
+history_export_period=ok
+history_export_utd_counted=ok
+history_export_cancel=ok
+room_history_export=ok
+```
+
+`history_export_full=ok` means the Rust-owned export of a fresh encrypted
+room wrote Element's top-level object in Element's key order. Every sent
+message is decrypted, no edit, reaction, or redaction event appears, and the
+counts in `AppState.room_history_export` match the file.
+`history_export_period=ok` means a `[start, end)` export equals the full
+export restricted to that range. `history_export_utd_counted=ok` covers
+disposable user C, whose device is denied one room key: C's export contains
+that message as `m.bad.encrypted`, keeps the readable messages decrypted, and
+the Rust result counts the undecryptable event. `history_export_cancel=ok`
+means a cancelled export settles as cancelled and leaves neither the
+destination nor a staging file. Export files hold only synthetic QA messages
+in the per-run QA data directory and are deleted when the stage ends. No path,
+identifier, or body is printed.
+
 ## Headless browser IPC-contract lane
 
 Run the full headless browser tier:

@@ -1197,8 +1197,7 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
     println!("timeline=ok");
 
     if scenario.should_run_stage(QaStage::RoomHistoryExport) {
-        run_room_history_export_stage(&mut conn_a, &account_key_a, &mut conn_b, &account_key_b)
-            .await?;
+        run_room_history_export_stage(&config, &mut conn_a, &account_key_a).await?;
     }
 
     if scenario.should_run_stage(QaStage::SendQueue) {

@@ -54,8 +54,9 @@ Observed upstream behaviour that Koushi reproduces rather than "fixes":
   handle. Cancel and session teardown abort the task and await it.
   `room_history_export::driver` pages `Room::messages` forward from the first
   visible event, 250 events per page, under the account work scheduler's
-  background band. It ends on a missing or repeated `end` token, or after 32
-  consecutive empty pages. It deduplicates by event id and writes each
+  background band. It ends on a missing or repeated `end` token. More than
+  200 consecutive empty pages fails the export rather than committing a file
+  that might omit later history. It deduplicates by event id and writes each
   selected event as soon as it is read, so only the event-id set grows with the
   room. `room_history_export::element` contains the effective-event mapping,
   the ported renderer filter, the header, and the `JSON.stringify(…, null, 2)`
@@ -94,7 +95,7 @@ reviewed with the strongest available model before implementation.
 - `cargo test -p koushi-core --lib room_history_export`: Element fixture
   equality across pages with duplicates and an empty page, the exact
   `JSON.stringify` layout, an empty export, period boundaries, out-of-order
-  timestamps, token and empty-page termination, page and write failures,
+  timestamps, token termination, the empty-page bound, page and write failures,
   `export_date`, and native sink commit and discard. Fixtures are under
   `crates/koushi-core/tests/fixtures/room_history_export/`, and their README
   records the baseline and what comparisons normalize.
@@ -102,7 +103,8 @@ reviewed with the strongest available model before implementation.
   correlation, ready gating, Debug redaction, and release of a rejected
   export's destination registration.
 - `qa:headless-local -- --core --scenario=room_history_export` proves the
-  flow on a local homeserver. Tokens: `history_export_full=ok`,
+  flow on a local homeserver. The withheld-key probe uses disposable user C,
+  because blocking a device is device-global and later stages rely on B. Tokens: `history_export_full=ok`,
   `history_export_period=ok`, `history_export_utd_counted=ok`,
   `history_export_cancel=ok`, and `room_history_export=ok`.
 

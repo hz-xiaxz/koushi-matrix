@@ -392,7 +392,7 @@ fn a_repeated_token_ends_the_walk() {
 }
 
 #[test]
-fn a_bounded_run_of_empty_pages_ends_the_walk() {
+fn an_unbounded_run_of_empty_pages_fails_instead_of_committing() {
     let pages = (0..MAX_CONSECUTIVE_EMPTY_PAGES + 10)
         .map(|index| page(Vec::new(), Some(&format!("t{index}"))))
         .collect();
@@ -401,11 +401,27 @@ fn a_bounded_run_of_empty_pages_ends_the_walk() {
         RoomHistoryExportRange::AllAvailable,
         MemoryOutput::default(),
     );
-    assert_eq!(run.result, Ok(()));
+    assert_eq!(run.result, Err(RoomHistoryExportFailureKind::Sdk));
+    assert!(!run.output.committed());
     assert_eq!(
         run.requested_from.len(),
         MAX_CONSECUTIVE_EMPTY_PAGES as usize
     );
+}
+
+#[test]
+fn empty_pages_within_the_bound_do_not_end_the_walk() {
+    let mut pages: Vec<_> = (0..MAX_CONSECUTIVE_EMPTY_PAGES - 1)
+        .map(|index| page(Vec::new(), Some(&format!("t{index}"))))
+        .collect();
+    pages.push(page(vec![message(1, 1)], None));
+    let run = run(
+        pages,
+        RoomHistoryExportRange::AllAvailable,
+        MemoryOutput::default(),
+    );
+    assert_eq!(run.result, Ok(()));
+    assert_eq!(exported_ids(&run), vec!["$m1:example.invalid"]);
 }
 
 #[test]

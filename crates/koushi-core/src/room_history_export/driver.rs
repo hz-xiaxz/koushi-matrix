@@ -24,10 +24,11 @@ use super::sink::{RoomHistoryExportFile, RoomHistoryExportSinkError};
 /// Events requested per `/messages` page.
 pub(crate) const PAGE_LIMIT: u32 = 250;
 
-/// Consecutive empty pages that still carried a new token before the export
-/// treats the history as exhausted. Servers may return empty filtered pages
-/// inside history-visibility gaps; an unbounded run would never terminate.
-pub(crate) const MAX_CONSECUTIVE_EMPTY_PAGES: u32 = 32;
+/// Consecutive empty pages that may still carry a new token. Servers return
+/// empty filtered pages across events hidden by history visibility, so a run
+/// is tolerated, but an export that exceeds this bound fails rather than
+/// committing a file that might silently omit later history.
+pub(crate) const MAX_CONSECUTIVE_EMPTY_PAGES: u32 = 200;
 
 /// One `/messages` page in forward order.
 pub(crate) struct HistoryPage {
@@ -137,7 +138,7 @@ where
         match page.end {
             Some(end) if from.as_deref() != Some(end.as_str()) => {
                 if empty_pages >= MAX_CONSECUTIVE_EMPTY_PAGES {
-                    break;
+                    return Err(RoomHistoryExportFailureKind::Sdk);
                 }
                 from = Some(end);
             }
