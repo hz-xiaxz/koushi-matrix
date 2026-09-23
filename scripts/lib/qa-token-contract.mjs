@@ -22,7 +22,14 @@ export const HEADLESS_LOCAL_QA_SCENARIO_TOKENS = Object.freeze({
     "redact_edit_convergence=ok",
     "thread_summary_convergence=ok"
   ]),
-  read_state_convergence: Object.freeze(["read_state_convergence=ok"])
+  read_state_convergence: Object.freeze(["read_state_convergence=ok"]),
+  room_history_export: Object.freeze([
+    "history_export_full=ok",
+    "history_export_period=ok",
+    "history_export_utd_counted=ok",
+    "history_export_cancel=ok",
+    "room_history_export=ok"
+  ])
 });
 
 export function tokensFromOutput(output) {

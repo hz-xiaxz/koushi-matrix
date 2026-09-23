@@ -37,6 +37,7 @@ pub(crate) mod read_state;
 pub mod renderable_thumbnail;
 mod report;
 pub mod room;
+pub mod room_history_export;
 mod room_key_receive;
 #[cfg(any(test, feature = "test-hooks"))]
 pub mod room_subscription_residency_test_support;

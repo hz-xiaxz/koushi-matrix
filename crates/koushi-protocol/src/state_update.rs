@@ -112,6 +112,7 @@ pub struct StateDeltaChangedSlices {
     pub search_crawler_rooms_by_id: Option<BTreeMap<String, Option<SearchCrawlerRoomState>>>,
     pub search_crawler_last_active: Option<Option<SearchCrawlerLastActive>>,
     pub files_view: Option<FilesViewState>,
+    pub room_history_export: Option<koushi_state::RoomHistoryExportState>,
     pub basic_operation: Option<BasicOperationState>,
     pub live_signals: Option<LiveSignalsState>,
     /// Room-local live-signal replacements; `None` removes a room entry.

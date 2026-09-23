@@ -107,6 +107,7 @@ export interface AppUiState {
   thread: ThreadPaneState;
   focused_context: FocusedContextState;
   files_view: FilesViewState;
+  room_history_export: RoomHistoryExportState;
   threads_list: ThreadsListState;
   basic_operation: BasicOperationState;
   errors: AppError[];
@@ -2281,6 +2282,51 @@ export type FilesViewScope =
   | { kind: "room"; room_id: string }
   | { kind: "space"; space_id: string }
   | { kind: "account" };
+
+export type RoomHistoryExportRange =
+  | { kind: "allAvailable" }
+  | { kind: "period"; start_ms: number; end_exclusive_ms: number; time_zone: string };
+
+export interface RoomHistoryExportProgress {
+  fetched_events: number;
+  exported_events: number;
+  undecryptable_events: number;
+}
+
+export type RoomHistoryExportFailureKind =
+  | "invalidRange"
+  | "roomNotFound"
+  | "destinationUnavailable"
+  | "write"
+  | "network"
+  | "sdk";
+
+/** Rust-owned room-history export state (#59); React renders it only. */
+export type RoomHistoryExportState =
+  | { kind: "idle" }
+  | {
+      kind: "exporting";
+      request_id: number;
+      room_id: string;
+      range: RoomHistoryExportRange;
+      progress: RoomHistoryExportProgress;
+      cancel_requested: boolean;
+    }
+  | {
+      kind: "completed";
+      request_id: number;
+      room_id: string;
+      range: RoomHistoryExportRange;
+      progress: RoomHistoryExportProgress;
+    }
+  | { kind: "cancelled"; request_id: number; room_id: string; progress: RoomHistoryExportProgress }
+  | {
+      kind: "failed";
+      request_id: number;
+      room_id: string;
+      progress: RoomHistoryExportProgress;
+      failure_kind: RoomHistoryExportFailureKind;
+    };
 
 export type FilesViewState =
   | { kind: "closed" }

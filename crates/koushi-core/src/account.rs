@@ -10,6 +10,7 @@ pub(crate) enum RoomEventLookupResult {
 mod account_management;
 mod actor;
 mod avatar_demand;
+mod history_export;
 mod local_data_cleanup;
 mod profile;
 #[cfg(test)]

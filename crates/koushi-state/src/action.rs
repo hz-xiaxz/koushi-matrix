@@ -31,6 +31,9 @@ use crate::state::{
     TrustOperationFailureKind, UserProfile, VerificationCancelReason, VerificationGateFailureKind,
     VerificationGateState, VerificationMethod, VerificationTarget,
 };
+use crate::state::{
+    RoomHistoryExportFailureKind, RoomHistoryExportProgress, RoomHistoryExportRange,
+};
 use crate::state::{SlidingSyncAdmission, SlidingSyncCapabilityResult};
 
 #[derive(Clone, Eq, PartialEq)]
@@ -566,6 +569,31 @@ pub enum AppAction {
     RoomKeyExportFailed {
         request_id: u64,
         kind: TrustOperationFailureKind,
+    },
+    RoomHistoryExportRequested {
+        request_id: u64,
+        room_id: String,
+        range: RoomHistoryExportRange,
+    },
+    RoomHistoryExportProgressed {
+        request_id: u64,
+        progress: RoomHistoryExportProgress,
+    },
+    RoomHistoryExportCancelRequested {
+        request_id: u64,
+    },
+    RoomHistoryExportCompleted {
+        request_id: u64,
+        progress: RoomHistoryExportProgress,
+    },
+    RoomHistoryExportCancelled {
+        request_id: u64,
+        progress: RoomHistoryExportProgress,
+    },
+    RoomHistoryExportFailed {
+        request_id: u64,
+        kind: RoomHistoryExportFailureKind,
+        progress: RoomHistoryExportProgress,
     },
     RoomKeyImportRequested {
         request_id: u64,
@@ -1858,6 +1886,14 @@ impl fmt::Debug for AppAction {
             Self::FilesViewSelectionChanged { event_id } => formatter
                 .debug_struct("FilesViewSelectionChanged")
                 .field("event_id", &event_id.as_ref().map(|_| "EventId(..)"))
+                .finish(),
+            Self::RoomHistoryExportRequested {
+                request_id, range, ..
+            } => formatter
+                .debug_struct("RoomHistoryExportRequested")
+                .field("request_id", request_id)
+                .field("room_id", &"RoomId(..)")
+                .field("range", range)
                 .finish(),
             _ => formatter.write_str("AppAction(..)"),
         }

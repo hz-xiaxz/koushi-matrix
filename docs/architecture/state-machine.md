@@ -2260,6 +2260,76 @@ stateDiagram-v2
   snapshots must redact filenames and MXC URIs; the reducer `Debug` impl already
   hides them.
 
+## Room History Export
+
+`AppState.room_history_export` is the Rust-owned state machine for exporting
+one room's history as an Element-compatible chat-export JSON file (#59).
+React may render the state and dispatch typed export and cancel commands; it
+must not page history, select events, build JSON, or decide whether an export
+succeeded.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Exporting: RoomHistoryExportRequested [Ready, known room, valid range]
+    Completed --> Exporting: RoomHistoryExportRequested [Ready, known room, valid range]
+    Cancelled --> Exporting: RoomHistoryExportRequested [Ready, known room, valid range]
+    Failed --> Exporting: RoomHistoryExportRequested [Ready, known room, valid range]
+    Exporting --> Exporting: RoomHistoryExportProgressed [matching request_id, changed counts]
+    Exporting --> Exporting: RoomHistoryExportCancelRequested [matching request_id, not yet requested]
+    Exporting --> Completed: RoomHistoryExportCompleted [matching request_id]
+    Exporting --> Cancelled: RoomHistoryExportCancelled [matching request_id]
+    Exporting --> Failed: RoomHistoryExportFailed [matching request_id]
+    Exporting --> Idle: LogoutRequested/SessionLocked/SwitchAccountRequested/session gate
+    Completed --> Idle: LogoutRequested/SessionLocked/SwitchAccountRequested/session gate
+    Cancelled --> Idle: LogoutRequested/SessionLocked/SwitchAccountRequested/session gate
+    Failed --> Idle: LogoutRequested/SessionLocked/SwitchAccountRequested/session gate
+```
+
+- `RoomHistoryExportState` is `Idle`, `Exporting { request_id, room_id, range,
+  progress, cancel_requested }`, `Completed { request_id, room_id, range,
+  progress }`, `Cancelled { request_id, room_id, progress }`, or
+  `Failed { request_id, room_id, progress, failure_kind }`. `progress` holds
+  only the counts `fetched_events`, `exported_events`, and
+  `undecryptable_events`.
+- `RoomHistoryExportRange` is `AllAvailable` or `Period { start_ms,
+  end_exclusive_ms, time_zone }`. The platform adapter resolves the civil
+  start and end dates in the named IANA time zone: `start_ms` is 00:00 of the
+  start day and `end_exclusive_ms` is 00:00 of the day after the end day. Rust
+  rejects an empty period or a missing time zone, and includes an event exactly
+  when `start_ms <= origin_server_ts < end_exclusive_ms`.
+- Start guard: `RoomHistoryExportRequested` needs a Ready session, a room in
+  `AppState.rooms`, and a valid range, and no export may already be in flight.
+  A rejected request leaves the state unchanged. The runtime then settles the
+  command with `OperationFailed { RoomOperationFailed }` and releases the
+  destination registration. A terminal state is replaced by the next accepted
+  request.
+- `AccountCommand::ExportRoomHistory` projects `RoomHistoryExportRequested`.
+  `AccountCommand::CancelRoomHistoryExport { target_request_id }` projects
+  `RoomHistoryExportCancelRequested` for the target. Only the account actor
+  settles either. The actor aborts and awaits the export task, then reduces
+  `RoomHistoryExportCancelled` with the counts reached so far. If the task had
+  already finished, its own `Completed` or `Failed` settlement stands. A
+  cancel for a request that is not the actor's active export settles as
+  `OperationFailed { RoomOperationFailed(NotFound) }`.
+- Progress arrives once per fetched page. Stale request ids, duplicate
+  counts, and settlements when nothing is in flight are ignored. The first
+  settlement for the active request is terminal, and later settlements for it
+  are ignored.
+- Session teardown aborts and awaits the export task. Logout, lock, account
+  switch, and every other transition through `clear_session_views` (such as a
+  verification-gate rejection) reset the slice to `Idle` and emit
+  `RoomHistoryExportChanged` when it was not already idle.
+- A completed export has written every event the account could read from the
+  server into the destination. The destination is replaced atomically only
+  after the whole file is written. Cancellation, failure, and teardown discard
+  the staged file, so a partial export never looks complete.
+  `undecryptable_events` reports how many exported events the device could
+  not decrypt. The JSON itself carries no Koushi-specific fields.
+- The destination path is a native artifact registered by the platform adapter
+  for the exact request. It never enters commands, state, events, or logs.
+  Room ids and time-zone names are redacted from `Debug` output.
+
 ## Timeline Formatted Message Projection
 
 Received Matrix `formatted_body` is a Rust-owned security projection. The

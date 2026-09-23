@@ -117,6 +117,7 @@ qa-bin`; plain `cargo test` does not compile that binary.
 | `edit_redact_search` | edit, redact, search | — |
 | `redact_edit_convergence` | redaction/edit room-latest and Activity convergence plus live Rust-projected Room/thread-panel summary advance, edit, redaction rollback, and real-runtime restore parity | `redact_edit_convergence=ok`, `thread_summary_convergence=ok` |
 | `search_crawler` | crawler-fed search index | — |
+| `room_history_export` | Element-compatible JSON export of an encrypted room (#59): full history, a period `[start, end)`, a withheld key exported as `m.bad.encrypted` and counted, and cancellation that leaves no file | `history_export_full=ok`, `history_export_period=ok`, `history_export_utd_counted=ok`, `history_export_cancel=ok`, `room_history_export=ok` |
 | `scheduled_send` | schedule, reschedule, cancel, fire | `scheduled_capability=local_fallback`, `scheduled_create=ok`, `scheduled_reschedule=ok`, `scheduled_cancel=ok`, `scheduled_fire=ok` |
 | `send_queue` | retry/cancel across injected offline failure (`--features qa-bin`) | — |
 | `restore_cleanup` | session restore and logout cleanup | — |

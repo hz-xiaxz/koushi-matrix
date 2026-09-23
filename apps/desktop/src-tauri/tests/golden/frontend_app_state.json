@@ -1052,6 +1052,23 @@
           "!space:example.invalid"
         ]
       },
+      "room_history_export": {
+        "cancel_requested": false,
+        "kind": "exporting",
+        "progress": {
+          "exported_events": 180,
+          "fetched_events": 250,
+          "undecryptable_events": 2
+        },
+        "range": {
+          "end_exclusive_ms": 1700086400000,
+          "kind": "period",
+          "start_ms": 1700000000000,
+          "time_zone": "Asia/Tokyo"
+        },
+        "request_id": 12,
+        "room_id": "!room:example.invalid"
+      },
       "room_list": {
         "active_filter": {
           "kind": "rooms"

@@ -155,6 +155,7 @@ pub(super) enum QaScenario {
     EditRedactSearch,
     RedactEditConvergence,
     SearchCrawler,
+    RoomHistoryExport,
     ScheduledSend,
     SendQueue,
     RestoreCleanup,
@@ -194,6 +195,7 @@ pub(super) enum QaStage {
     EditRedactSearch,
     RedactEditConvergence,
     SearchCrawler,
+    RoomHistoryExport,
     ScheduledSend,
     SendQueue,
     RestoreCleanup,
@@ -271,6 +273,7 @@ impl QaScenario {
             "edit_redact_search" => Ok(Self::EditRedactSearch),
             "redact_edit_convergence" => Ok(Self::RedactEditConvergence),
             "search_crawler" => Ok(Self::SearchCrawler),
+            "room_history_export" => Ok(Self::RoomHistoryExport),
             "scheduled_send" => Ok(Self::ScheduledSend),
             "send_queue" => Ok(Self::SendQueue),
             "restore_cleanup" => Ok(Self::RestoreCleanup),
@@ -279,7 +282,7 @@ impl QaScenario {
             "read_state_convergence" => Ok(Self::ReadStateConvergence),
             "avatar_demand" => Ok(Self::AvatarDemand),
             other => Err(format!(
-                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, scheduled_send, restore_cleanup, link_preview, cache_restore, read_state_convergence, avatar_demand; got {other}"
+                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, room_history_export, scheduled_send, restore_cleanup, link_preview, cache_restore, read_state_convergence, avatar_demand; got {other}"
             )),
         }
     }
@@ -445,6 +448,14 @@ impl QaScenario {
                     | QaStage::Timeline
                     | QaStage::EditRedactSearch
                     | QaStage::SearchCrawler
+            ),
+            Self::RoomHistoryExport => matches!(
+                stage,
+                QaStage::Safety
+                    | QaStage::LoginSync
+                    | QaStage::RoomSpace
+                    | QaStage::Timeline
+                    | QaStage::RoomHistoryExport
             ),
             Self::ScheduledSend => matches!(
                 stage,
@@ -653,6 +664,13 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "crawl_throttle=ok",
             "crawl_failure=ok",
         ],
+        QaStage::RoomHistoryExport => &[
+            "history_export_full=ok",
+            "history_export_period=ok",
+            "history_export_utd_counted=ok",
+            "history_export_cancel=ok",
+            "room_history_export=ok",
+        ],
         QaStage::ScheduledSend => &[
             "scheduled_capability=local_fallback",
             "scheduled_create=ok",
@@ -745,6 +763,11 @@ fn implemented_final_tokens() -> Vec<&'static str> {
         "crawl_no_media_bytes=ok",
         "crawl_throttle=ok",
         "crawl_failure=ok",
+        "history_export_full=ok",
+        "history_export_period=ok",
+        "history_export_utd_counted=ok",
+        "history_export_cancel=ok",
+        "room_history_export=ok",
         "scheduled_capability=local_fallback",
         "scheduled_create=ok",
         "scheduled_reschedule=ok",
@@ -900,6 +923,13 @@ pub(super) fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
             QaStage::EditRedactSearch,
             QaStage::SearchCrawler,
         ],
+        QaScenario::RoomHistoryExport => vec![
+            QaStage::Safety,
+            QaStage::LoginSync,
+            QaStage::RoomSpace,
+            QaStage::Timeline,
+            QaStage::RoomHistoryExport,
+        ],
         QaScenario::ScheduledSend => vec![
             QaStage::Safety,
             QaStage::LoginSync,
@@ -949,6 +979,7 @@ pub(super) fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
             QaStage::Thread,
             QaStage::EditRedactSearch,
             QaStage::SearchCrawler,
+            QaStage::RoomHistoryExport,
             QaStage::ScheduledSend,
             QaStage::SendQueue,
             QaStage::E2eeTrust,
@@ -995,6 +1026,7 @@ pub(super) fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static st
         | QaScenario::EditRedactSearch
         | QaScenario::RedactEditConvergence
         | QaScenario::SearchCrawler
+        | QaScenario::RoomHistoryExport
         | QaScenario::ScheduledSend
         | QaScenario::SendQueue
         | QaScenario::RestoreCleanup

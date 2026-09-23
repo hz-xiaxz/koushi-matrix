@@ -398,6 +398,8 @@ pub struct FrontendUiStateChangedSlices {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub files_view: Option<FilesViewState>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub room_history_export: Option<koushi_state::RoomHistoryExportState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub threads_list: Option<ThreadsListState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub basic_operation: Option<BasicOperationState>,
@@ -413,6 +415,7 @@ impl FrontendUiStateChangedSlices {
             && self.thread.is_none()
             && self.focused_context.is_none()
             && self.files_view.is_none()
+            && self.room_history_export.is_none()
             && self.threads_list.is_none()
             && self.basic_operation.is_none()
             && self.errors.is_none()
@@ -505,6 +508,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         ui.thread = changed.thread.map(Into::into);
         ui.focused_context = changed.focused_context;
         ui.files_view = changed.files_view;
+        ui.room_history_export = changed.room_history_export;
         ui.threads_list = changed.threads_list;
         ui.basic_operation = changed.basic_operation;
         ui.errors = changed.errors;
@@ -593,6 +597,7 @@ pub struct FrontendUiState {
     pub thread: FrontendThreadPaneState,
     pub focused_context: FocusedContextState,
     pub files_view: FilesViewState,
+    pub room_history_export: koushi_state::RoomHistoryExportState,
     pub threads_list: ThreadsListState,
     pub basic_operation: BasicOperationState,
     pub errors: Vec<AppError>,
@@ -663,6 +668,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
             thread: state.thread.into(),
             focused_context: state.focused_context,
             files_view: state.files_view,
+            room_history_export: state.room_history_export,
             threads_list: state.threads_list,
             basic_operation: state.basic_operation,
             errors: state.errors,

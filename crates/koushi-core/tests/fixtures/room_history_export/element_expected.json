@@ -1,0 +1,286 @@
+{
+  "room_name": "Synthetic Room",
+  "room_creator": "Member 1",
+  "topic": "Synthetic topic",
+  "export_date": "<normalized>",
+  "exported_by": "Member 2",
+  "messages": [
+    {
+      "type": "m.room.member",
+      "sender": "@member-1:example.invalid",
+      "content": {
+        "membership": "join",
+        "displayname": "Member 1"
+      },
+      "room_id": "!history:example.invalid",
+      "event_id": "$e02:example.invalid",
+      "origin_server_ts": 1700000120000,
+      "state_key": "@member-1:example.invalid",
+      "unsigned": {
+        "age": 1000
+      }
+    },
+    {
+      "type": "m.room.name",
+      "sender": "@member-1:example.invalid",
+      "content": {
+        "name": "Synthetic Room"
+      },
+      "room_id": "!history:example.invalid",
+      "event_id": "$e04:example.invalid",
+      "origin_server_ts": 1700000240000,
+      "state_key": "",
+      "unsigned": {
+        "age": 1000
+      }
+    },
+    {
+      "type": "m.room.topic",
+      "sender": "@member-1:example.invalid",
+      "content": {
+        "topic": "Synthetic topic"
+      },
+      "room_id": "!history:example.invalid",
+      "event_id": "$e05:example.invalid",
+      "origin_server_ts": 1700000300000,
+      "state_key": "",
+      "unsigned": {
+        "age": 1000
+      }
+    },
+    {
+      "type": "m.room.encryption",
+      "sender": "@member-1:example.invalid",
+      "content": {
+        "algorithm": "m.megolm.v1.aes-sha2"
+      },
+      "room_id": "!history:example.invalid",
+      "event_id": "$e06:example.invalid",
+      "origin_server_ts": 1700000360000,
+      "state_key": "",
+      "unsigned": {
+        "age": 1000
+      }
+    },
+    {
+      "type": "m.room.member",
+      "sender": "@member-2:example.invalid",
+      "content": {
+        "membership": "join",
+        "displayname": "Member 2"
+      },
+      "room_id": "!history:example.invalid",
+      "event_id": "$e07:example.invalid",
+      "origin_server_ts": 1700000420000,
+      "state_key": "@member-2:example.invalid",
+      "unsigned": {
+        "age": 1000
+      }
+    },
+    {
+      "type": "m.room.message",
+      "sender": "@member-1:example.invalid",
+      "content": {
+        "msgtype": "m.text",
+        "body": "Synthetic plaintext message"
+      },
+      "room_id": "!history:example.invalid",
+      "event_id": "$e08:example.invalid",
+      "origin_server_ts": 1700000480000,
+      "unsigned": {
+        "age": 1000
+      }
+    },
+    {
+      "type": "m.room.message",
+      "sender": "@member-2:example.invalid",
+      "content": {
+        "msgtype": "m.text",
+        "body": "> <@member-1:example.invalid> Synthetic plaintext message\n\nSynthetic reply",
+        "m.relates_to": {
+          "m.in_reply_to": {
+            "event_id": "$e08:example.invalid"
+          }
+        }
+      },
+      "room_id": "!history:example.invalid",
+      "event_id": "$e09:example.invalid",
+      "origin_server_ts": 1700000540000,
+      "unsigned": {
+        "age": 1000
+      }
+    },
+    {
+      "type": "m.room.message",
+      "sender": "@member-2:example.invalid",
+      "content": {},
+      "room_id": "!history:example.invalid",
+      "event_id": "$e12:example.invalid",
+      "origin_server_ts": 1700000720000,
+      "unsigned": {
+        "redacted_because": {
+          "type": "m.room.redaction",
+          "sender": "@member-1:example.invalid",
+          "content": {},
+          "redacts": "$e12:example.invalid",
+          "event_id": "$redaction:example.invalid",
+          "origin_server_ts": 1700005940000,
+          "room_id": "!history:example.invalid",
+          "unsigned": {}
+        }
+      }
+    },
+    {
+      "type": "m.room.message",
+      "sender": "@member-2:example.invalid",
+      "content": {
+        "msgtype": "m.text",
+        "body": "Synthetic thread reply",
+        "m.relates_to": {
+          "rel_type": "m.thread",
+          "event_id": "$e08:example.invalid",
+          "is_falling_back": true,
+          "m.in_reply_to": {
+            "event_id": "$e08:example.invalid"
+          }
+        }
+      },
+      "room_id": "!history:example.invalid",
+      "event_id": "$e14:example.invalid",
+      "origin_server_ts": 1700000840000,
+      "unsigned": {
+        "age": 1000
+      }
+    },
+    {
+      "type": "m.room.message",
+      "sender": "@member-1:example.invalid",
+      "content": {
+        "msgtype": "m.file",
+        "body": "fixture_budget.xlsx",
+        "filename": "fixture_budget.xlsx",
+        "info": {
+          "mimetype": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "size": 12345
+        },
+        "file": {
+          "url": "mxc://example.invalid/synthetic-file",
+          "key": {
+            "kty": "oct",
+            "alg": "A256CTR",
+            "ext": true,
+            "key_ops": [
+              "encrypt",
+              "decrypt"
+            ],
+            "k": "c3ludGhldGljLWtleQ"
+          },
+          "iv": "c3ludGhldGljLWl2",
+          "hashes": {
+            "sha256": "c3ludGhldGljLWhhc2g"
+          },
+          "v": "v2"
+        }
+      },
+      "room_id": "!history:example.invalid",
+      "event_id": "$e15:example.invalid",
+      "origin_server_ts": 1700000900000,
+      "unsigned": {
+        "age": 1000
+      }
+    },
+    {
+      "type": "m.room.message",
+      "sender": "@member-1:example.invalid",
+      "content": {
+        "msgtype": "m.bad.encrypted",
+        "body": "** Unable to decrypt: DecryptionError: The sender's device has not sent us the keys for this message. **",
+        "m.relates_to": {
+          "rel_type": "m.thread",
+          "event_id": "$e08:example.invalid"
+        }
+      },
+      "room_id": "!history:example.invalid",
+      "event_id": "$e16:example.invalid",
+      "origin_server_ts": 1700000960000,
+      "unsigned": {
+        "age": 1000
+      }
+    },
+    {
+      "type": "m.room.encrypted",
+      "sender": "@member-2:example.invalid",
+      "content": {},
+      "room_id": "!history:example.invalid",
+      "event_id": "$e17:example.invalid",
+      "origin_server_ts": 1700001020000,
+      "unsigned": {
+        "redacted_because": {
+          "type": "m.room.redaction",
+          "sender": "@member-1:example.invalid",
+          "content": {},
+          "redacts": "$e17:example.invalid",
+          "event_id": "$redaction:example.invalid",
+          "origin_server_ts": 1700005940000,
+          "room_id": "!history:example.invalid",
+          "unsigned": {}
+        }
+      }
+    },
+    {
+      "type": "m.room.member",
+      "sender": "@member-1:example.invalid",
+      "content": {
+        "membership": "join",
+        "displayname": "Member One"
+      },
+      "room_id": "!history:example.invalid",
+      "event_id": "$e19:example.invalid",
+      "origin_server_ts": 1700001140000,
+      "state_key": "@member-1:example.invalid",
+      "unsigned": {
+        "prev_content": {
+          "membership": "join",
+          "displayname": "Member 1"
+        }
+      }
+    },
+    {
+      "type": "m.room.message",
+      "sender": "@member-2:example.invalid",
+      "content": {
+        "msgtype": "m.image",
+        "body": "fixture_image.png",
+        "url": "mxc://example.invalid/synthetic-image",
+        "info": {
+          "mimetype": "image/png",
+          "w": 16,
+          "h": 16,
+          "size": 100
+        }
+      },
+      "room_id": "!history:example.invalid",
+      "event_id": "$e23:example.invalid",
+      "origin_server_ts": 1700001380000,
+      "unsigned": {
+        "age": 1000
+      }
+    },
+    {
+      "type": "m.room.member",
+      "sender": "@member-1:example.invalid",
+      "content": {
+        "membership": "leave"
+      },
+      "room_id": "!history:example.invalid",
+      "event_id": "$e24:example.invalid",
+      "origin_server_ts": 1700001440000,
+      "state_key": "@member-3:example.invalid",
+      "unsigned": {
+        "prev_content": {
+          "membership": "invite"
+        }
+      }
+    }
+  ]
+}
