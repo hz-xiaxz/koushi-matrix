@@ -6,8 +6,12 @@
 //! trailing dots or spaces are removed, `..` never survives, and stems are
 //! capped so nested paths stay within platform limits.
 
-/// Longest stem kept from a room name or attachment file name, in characters.
+/// Longest stem kept from a room name or attachment file name: 120
+/// characters and at most 150 UTF-8 bytes, so a name plus its prefix, suffix,
+/// or extension stays under the common 255-byte file-name limit even for
+/// CJK text.
 pub(crate) const NAME_STEM_MAX_CHARS: usize = 120;
+const NAME_STEM_MAX_BYTES: usize = 150;
 
 const EXTENSION_MAX_CHARS: usize = 10;
 
@@ -92,7 +96,13 @@ fn clean_component(input: &str) -> String {
 }
 
 fn cap_stem(stem: &str) -> Option<String> {
-    let capped: String = stem.chars().take(NAME_STEM_MAX_CHARS).collect();
+    let mut capped = String::new();
+    for character in stem.chars().take(NAME_STEM_MAX_CHARS) {
+        if capped.len() + character.len_utf8() > NAME_STEM_MAX_BYTES {
+            break;
+        }
+        capped.push(character);
+    }
     let trimmed = capped.trim_end_matches(['.', ' ']);
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }

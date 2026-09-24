@@ -349,3 +349,14 @@ fn date_separators_follow_the_page_time_zone() {
         "{page}"
     );
 }
+
+#[test]
+fn a_quote_in_a_message_that_is_not_a_reply_is_kept() {
+    let page = render(&[
+        text("$1", "@alice:example.org", 0, "> quoted line\n\nmy answer"),
+        text("$2", "@alice:example.org", 1, "> only a quote"),
+    ]);
+    assert!(page.contains("&gt; quoted line"), "{page}");
+    assert!(page.contains("my answer"));
+    assert!(page.contains("&gt; only a quote"), "{page}");
+}

@@ -153,18 +153,18 @@ function roomPhaseText(room: HistoryExportRoom): string {
 function RoomList({ rooms }: { rooms: HistoryExportRoom[] }) {
   if (rooms.length === 0) return null;
   return (
-    <ul className="history-export-rooms" data-testid="history-export-rooms">
+    <ul className="export-progress-list" data-testid="history-export-rooms">
       {rooms.map((room) => (
         <li key={room.room_id} data-phase={room.phase}>
-          <span className="history-export-room-name">{room.display_name}</span>
-          <span className="history-export-room-phase">{roomPhaseText(room)}</span>
+          <span className="export-progress-name">{room.display_name}</span>
+          <span className="export-progress-phase">{roomPhaseText(room)}</span>
           {room.phase === "completed" && room.counts.attachments_failed > 0 ? (
-            <span className="history-export-room-note">
+            <span className="export-progress-note">
               {t("historyExport.attachmentsFailed", { count: room.counts.attachments_failed })}
             </span>
           ) : null}
           {room.phase === "completed" && room.counts.undecryptable_events > 0 ? (
-            <span className="history-export-room-note">
+            <span className="export-progress-note">
               {t("historyExport.undecryptable", { count: room.counts.undecryptable_events })}
             </span>
           ) : null}
@@ -194,6 +194,9 @@ export function HistoryExportDialog({
   const [submittedRequestId, setSubmittedRequestId] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
   const [startFailed, setStartFailed] = useState(false);
+  // Presentation only: the user chose to start a new download over an
+  // earlier export's result.
+  const [showForm, setShowForm] = useState(false);
 
   useEffect(() => {
     let current = true;
@@ -217,12 +220,15 @@ export function HistoryExportDialog({
   const forTarget = historyExportIsFor(exportState, target);
   const inFlightHere = forTarget && isInFlight(exportState) ? exportState : null;
   const busyElsewhere = isInFlight(exportState) && !forTarget;
+  // The latest settled export of this target: the one this dialog started,
+  // or, when the dialog is reopened, the one that finished while it was
+  // closed, until the user asks for a new download.
+  const settledForTarget =
+    forTarget && !isInFlight(exportState) && exportState.kind !== "idle" ? (exportState as Settled) : null;
   const settledHere =
-    submittedRequestId !== null &&
-    !isInFlight(exportState) &&
-    exportState.kind !== "idle" &&
-    exportState.request_id === submittedRequestId
-      ? (exportState as Settled)
+    settledForTarget &&
+    (submittedRequestId !== null ? settledForTarget.request_id === submittedRequestId : !showForm)
+      ? settledForTarget
       : null;
   // A rejected start leaves the Rust state unchanged. Core admits a command
   // only after handling it, so the admitted snapshot then holds neither this
@@ -240,6 +246,7 @@ export function HistoryExportDialog({
     !starting && !busyElsewhere && (rangeKind === "allAvailable" || (timeZone !== null && periodValid));
 
   async function submit(run: () => Promise<HistoryExportStart>) {
+    setShowForm(true);
     setStarting(true);
     setStartFailed(false);
     setSubmittedRequestId(null);
@@ -271,6 +278,7 @@ export function HistoryExportDialog({
   function startOver() {
     setSubmittedRequestId(null);
     setStartFailed(false);
+    setShowForm(true);
   }
 
   const title = t(target.kind === "space" ? "historyExport.spaceTitle" : "historyExport.title");

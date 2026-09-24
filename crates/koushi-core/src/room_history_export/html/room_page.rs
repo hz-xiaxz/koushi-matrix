@@ -124,9 +124,28 @@ fn anchor(event_id: &str) -> String {
     format!("e-{}", fnv1a_hex(event_id))
 }
 
-fn excerpt(content: &Value) -> String {
+/// Whether the content is a reply, whose plain body may start with a quoted
+/// fallback of the replied-to message.
+fn is_reply(content: &Value) -> bool {
+    content
+        .get("m.relates_to")
+        .and_then(|relates_to| relates_to.get("m.in_reply_to"))
+        .is_some()
+}
+
+/// The body without a reply's quoted fallback; other messages keep their
+/// quotes.
+fn plain_body(content: &Value) -> &str {
     let body = str_at(content, "body").unwrap_or_default();
-    let body = strip_reply_fallback(body);
+    if is_reply(content) {
+        strip_reply_fallback(body)
+    } else {
+        body
+    }
+}
+
+fn excerpt(content: &Value) -> String {
+    let body = plain_body(content);
     let line = body.lines().next().unwrap_or_default();
     let mut text: String = line.chars().take(EXCERPT_CHARS).collect();
     if line.chars().count() > EXCERPT_CHARS {
@@ -311,7 +330,12 @@ impl Page<'_> {
         self.reply(&content, thread_root.is_some());
         let edit = index.edits.get(event_id);
         let shown = edit.map_or(&content, |edit| edit.content);
-        self.body(shown, str_at(&content, "msgtype"), &sender_name);
+        self.body(
+            shown,
+            str_at(&content, "msgtype"),
+            &sender_name,
+            is_reply(&content),
+        );
         if let Some(record) = self.attachments.get(event_id).copied() {
             self.attachment(record);
         }
@@ -378,7 +402,7 @@ impl Page<'_> {
         }
     }
 
-    fn body(&mut self, content: &Value, msgtype: Option<&str>, sender_name: &str) {
+    fn body(&mut self, content: &Value, msgtype: Option<&str>, sender_name: &str, reply: bool) {
         if matches!(msgtype, Some("m.image" | "m.file" | "m.video" | "m.audio")) {
             return;
         }
@@ -390,7 +414,12 @@ impl Page<'_> {
         let html = match formatted {
             Some(html) => html,
             None => {
-                let body = strip_reply_fallback(str_at(content, "body").unwrap_or_default());
+                let raw = str_at(content, "body").unwrap_or_default();
+                let body = if reply {
+                    strip_reply_fallback(raw)
+                } else {
+                    raw
+                };
                 escape(body).replace('\n', "<br>")
             }
         };

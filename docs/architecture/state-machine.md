@@ -2383,10 +2383,12 @@ stateDiagram-v2
   remains, so starting an export on it later resumes it.
 - Folder and resume: the chosen directory is a native artifact registered by
   the platform adapter for the exact request. When it contains
-  `koushi-export.json` it is the export folder; otherwise Core creates
-  `<stem> - Export <local date>` inside it (reusing a folder of that name only
-  when it holds a manifest). A manifest of another scope, range, format, or
-  version fails the export as `ManifestMismatch` without touching the folder.
+  `koushi-export.json` it is the export folder; otherwise Core creates a new
+  `<stem> - Export <local date>` folder inside it, adding ` (2)`, ` (3)`, …
+  when the name is taken. Choosing a parent never resumes an existing export.
+  A manifest of another scope, range, format, or version, or one whose room
+  folder is not a single plain name, fails the export as `ManifestMismatch`
+  without touching the folder.
   On a matching manifest, completed rooms are kept, rooms that newly joined the
   Space are added, and every other target room is redone. Each room is built
   in `rooms/.<folder>.partial/` and renamed into place only when every stage
@@ -2396,8 +2398,12 @@ stateDiagram-v2
   subspaces as `Skipped { NotJoined }`. A subspace whose children cannot be
   read is left out; an unreadable root Space fails the export.
 - Failures: a room whose history cannot be fetched settles `Failed` and the
-  export continues. A write failure anywhere fails the export as `Write`, or
-  `NoSpace` when the disk is full; completed rooms remain. A failed attachment
+  export continues. A write the room's own names or files cannot make (the
+  filesystem rejects a name, a folder vanished) settles that room
+  `Failed { Write }` and the export continues. A full disk fails the export as
+  `NoSpace`, and a denied folder or any other write failure outside a room as
+  `Write`; completed rooms remain. Room folder and attachment names are capped
+  at 120 characters and 150 UTF-8 bytes. A failed attachment
   download (after three attempts for transient errors) is recorded in the
   room's `attachments.json` and page, and does not fail the room.
 - History windows are unchanged from #59/#988: a full export reads every event

@@ -312,3 +312,29 @@ test("Room info shows the section and its summary", () => {
   expect(screen.getByRole("region", { name: t("historyExport.section") })).toBeTruthy();
   expect(screen.getByTestId("history-export-summary").textContent).toBe(t("historyExport.completed"));
 });
+
+test("reopening the dialog after the export settled shows its result and Retry, then a new download", async () => {
+  const ports = controls(submitted(11), submitted(12));
+  renderDialog(spaceTarget, {
+    kind: "completed",
+    request_id: 7,
+    scope: spaceScope,
+    range: { kind: "allAvailable" },
+    rooms: [exportRoom("!a", "completed"), exportRoom("!b", "failed", { failure_kind: "network" })]
+  }, ports);
+  expect(screen.getByTestId("history-export-state").textContent).toBe(
+    t("historyExport.completedWithFailures", { count: 1 })
+  );
+  expect(screen.getByTestId("history-export-rooms").querySelectorAll("li")).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button", { name: t("historyExport.retryFailed") }));
+  await waitFor(() => expect(ports.retry).toHaveBeenCalledWith(7));
+  cleanup();
+  renderDialog(spaceTarget, { kind: "stopped", request_id: 7, scope: spaceScope, range: { kind: "allAvailable" }, rooms: [] }, ports);
+  fireEvent.click(screen.getByRole("button", { name: t("historyExport.again") }));
+  expect(screen.getByRole("button", { name: t("historyExport.save") })).toBeTruthy();
+});
+
+test("another target's settled export does not replace this dialog's form", () => {
+  renderDialog(roomTarget, { kind: "completed", request_id: 7, scope: spaceScope, range: { kind: "allAvailable" }, rooms: [] }, controls());
+  expect(screen.getByRole("button", { name: t("historyExport.save") })).toBeTruthy();
+});

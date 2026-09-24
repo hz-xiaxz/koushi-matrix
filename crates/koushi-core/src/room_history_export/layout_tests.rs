@@ -75,3 +75,31 @@ fn partial_and_export_folder_names() {
     );
     assert_eq!(thumbnail_file_name(7), "0007.jpg");
 }
+
+#[test]
+fn long_cjk_names_stay_within_the_file_name_byte_limit() {
+    let japanese = "設計".repeat(200);
+    let room = room_folder_name(&japanese, "!r:x");
+    assert!(room.len() <= 255, "room folder is {} bytes", room.len());
+    let attachment = attachment_file_name(9999, Some(&format!("{japanese}.pdf")), None);
+    assert!(
+        attachment.len() <= 255,
+        "attachment is {} bytes",
+        attachment.len()
+    );
+    assert!(attachment.ends_with(".pdf"));
+    assert!(export_folder_name(&japanese, "2025-09-25").len() <= 255);
+    // Still whole characters.
+    assert!(room.is_char_boundary(room.len()));
+}
+
+#[test]
+fn windows_reserved_stems_are_never_a_bare_name() {
+    for reserved in ["CON", "nul", "COM1", "LPT9", "AUX", "PRN"] {
+        assert_ne!(
+            room_folder_name(reserved, "!r:x").to_ascii_uppercase(),
+            reserved.to_ascii_uppercase()
+        );
+        assert!(attachment_file_name(1, Some(reserved), None).starts_with("0001_"));
+    }
+}

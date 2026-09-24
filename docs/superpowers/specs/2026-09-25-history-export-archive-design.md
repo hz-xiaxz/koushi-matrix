@@ -68,8 +68,8 @@ A single-room export produces the same layout with one room.
   found on resume. Sanitizing reuses `safe_media_save_filename`.
 - Attachment files are named `<chronological sequence>_<sanitized original
   name>`; thumbnails `<sequence>.jpg`. Room folder stems and attachment name
-  stems are capped (120 characters, the adapter's existing file-stem cap) so
-  nested paths stay within platform limits.
+  stems are capped (120 characters and 150 UTF-8 bytes) so names stay within
+  the 255-byte file-name limit, including for CJK text.
 - `messages.json` keeps Element's renderer filter, which drops reactions and
   edit events. `events.jsonl` is the lossless original: every distinct event
   the walk read inside the range, before that filter, one JSON object per
@@ -78,7 +78,8 @@ A single-room export produces the same layout with one room.
   (`NativeArtifactKind::HistoryExportDirectory`). It never appears in
   commands, state, or logs. If the chosen directory contains
   `koushi-export.json`, it is the export directory and the start is a resume;
-  otherwise it is the parent and a new export folder is created in it.
+  otherwise it is the parent and a new export folder is created in it (with a
+  ` (n)` suffix when the name is taken; a parent is never resumed).
 - `koushi-export.json` records a format version, the scope (room or Space id),
   the range, and each room's folder and status. It is rewritten atomically
   (temp file + rename) after every room transition that changes it.

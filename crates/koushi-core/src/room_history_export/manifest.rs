@@ -122,10 +122,29 @@ pub(crate) fn match_manifest(
             if manifest.format == FORMAT
                 && manifest.version == VERSION
                 && &manifest.scope == scope
-                && &manifest.range == range =>
+                && &manifest.range == range
+                && manifest
+                    .rooms
+                    .iter()
+                    .all(|room| is_plain_folder_name(&room.folder)) =>
         {
             ManifestMatch::Resume(manifest)
         }
         _ => ManifestMatch::Mismatch,
     }
+}
+
+/// Room folders come from the manifest on disk and are later deleted and
+/// renamed, so only a single ordinary, visible path component is accepted.
+fn is_plain_folder_name(folder: &str) -> bool {
+    !folder.is_empty()
+        && !folder.starts_with('.')
+        && !folder.contains(['/', '\\', ':'])
+        && matches!(
+            std::path::Path::new(folder)
+                .components()
+                .collect::<Vec<_>>()
+                .as_slice(),
+            [std::path::Component::Normal(_)]
+        )
 }

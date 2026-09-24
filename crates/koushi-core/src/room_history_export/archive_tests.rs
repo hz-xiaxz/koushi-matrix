@@ -663,7 +663,7 @@ async fn new_space_room_is_added_on_resume() {
 }
 
 #[tokio::test]
-async fn choosing_the_parent_again_on_the_same_day_resumes_the_same_folder() {
+async fn choosing_the_parent_again_starts_a_new_folder_instead_of_resuming() {
     let fs = filesystem();
     let mut source = FakeSource::default()
         .room("!a", vec![text("!a", 1)])
@@ -685,8 +685,51 @@ async fn choosing_the_parent_again_on_the_same_day_resumes_the_same_folder() {
         &request(space_scope(), CHOSEN),
     )
     .await;
-    assert_eq!(again.dir, Some(export_dir()));
-    assert!(source.opened().is_empty());
+    assert_eq!(again.result, Ok(ArchiveOutcome::Completed));
+    assert_eq!(
+        again.dir,
+        Some(Path::new(CHOSEN).join("Lab - Export 2025-09-25 (2)"))
+    );
+    assert_eq!(
+        source.opened(),
+        vec!["!a".to_owned()],
+        "a new export reads the room again"
+    );
+}
+
+#[tokio::test]
+async fn a_different_export_with_the_same_folder_name_does_not_collide() {
+    let fs = filesystem();
+    let mut source = FakeSource::default()
+        .room("!a", vec![text("!a", 1)])
+        .space("!space", vec![selected("!a", true)]);
+    run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
+    let mut period = request(space_scope(), CHOSEN);
+    period.range = HistoryExportRange::Period {
+        start_ms: 0,
+        end_exclusive_ms: 10,
+        time_zone: "UTC".to_owned(),
+    };
+    let other = run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &period,
+    )
+    .await;
+    assert_eq!(other.result, Ok(ArchiveOutcome::Completed));
+    assert_eq!(
+        other.dir,
+        Some(Path::new(CHOSEN).join("Lab - Export 2025-09-25 (2)"))
+    );
 }
 
 #[tokio::test]
@@ -839,4 +882,61 @@ fn relative_files(root: &Path) -> Vec<String> {
     files.retain(|file| !file.starts_with("assets/"));
     files.sort();
     files
+}
+
+#[tokio::test]
+async fn a_room_the_filesystem_rejects_fails_alone_and_the_export_continues() {
+    let fs = filesystem();
+    let mut source = FakeSource::default()
+        .room("!a", vec![text("!a", 1)])
+        .room("!b", vec![text("!b", 1)])
+        .space("!space", vec![selected("!a", true), selected("!b", true)]);
+    fs.fail_paths_containing(&room_folder_name("Room !a", "!a"), HistoryExportFsError::Io);
+    let mut reporter = Reporter::default();
+    let outcome = run(
+        &fs,
+        &mut source,
+        &mut reporter,
+        &StopFlag::default(),
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
+    assert_eq!(outcome.result, Ok(ArchiveOutcome::Completed));
+    let dir = outcome.dir.unwrap();
+    assert_eq!(
+        statuses(&fs, &dir),
+        vec![
+            ("!a".to_owned(), ManifestRoomStatus::Failed),
+            ("!b".to_owned(), ManifestRoomStatus::Completed)
+        ]
+    );
+    assert_eq!(
+        reporter.settled[0],
+        (
+            "!a".to_owned(),
+            HistoryExportRoomPhase::Failed,
+            Some(HistoryExportRoomFailureKind::Write)
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_permission_error_still_fails_the_whole_export() {
+    let fs = filesystem();
+    let mut source = FakeSource::default()
+        .room("!a", vec![text("!a", 1)])
+        .space("!space", vec![selected("!a", true)]);
+    fs.fail_paths_containing(
+        &room_folder_name("Room !a", "!a"),
+        HistoryExportFsError::PermissionDenied,
+    );
+    let outcome = run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
+    assert_eq!(outcome.result, Err(HistoryExportFailureKind::Write));
 }

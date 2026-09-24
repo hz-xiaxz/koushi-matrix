@@ -19,6 +19,8 @@ struct Inner {
     /// Number of file writes, used to inject a failure after N writes.
     writes: u64,
     fail_after_writes: Option<(u64, HistoryExportFsError)>,
+    /// Writes whose path contains this text fail with this error.
+    fail_paths_containing: Option<(String, HistoryExportFsError)>,
 }
 
 #[derive(Clone, Default)]
@@ -37,6 +39,11 @@ impl MemoryFilesystem {
         let mut inner = self.inner.lock().unwrap();
         let writes = inner.writes;
         inner.fail_after_writes = Some((writes + count, failure));
+    }
+
+    /// Make writes of paths containing `needle` fail with `failure`.
+    pub(crate) fn fail_paths_containing(&self, needle: &str, failure: HistoryExportFsError) {
+        self.inner.lock().unwrap().fail_paths_containing = Some((needle.to_owned(), failure));
     }
 
     /// Every file path below `root`, relative to it, sorted.
@@ -71,6 +78,11 @@ impl MemoryFilesystem {
 
     fn put_file(&self, path: &Path, bytes: Vec<u8>) -> Result<(), HistoryExportFsError> {
         let mut inner = self.inner.lock().unwrap();
+        if let Some((needle, failure)) = &inner.fail_paths_containing
+            && path.to_string_lossy().contains(needle.as_str())
+        {
+            return Err(*failure);
+        }
         Self::check_write(&mut inner)?;
         let parent_is_dir = path
             .parent()

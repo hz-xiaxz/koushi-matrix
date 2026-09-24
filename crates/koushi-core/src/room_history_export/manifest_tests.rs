@@ -126,3 +126,26 @@ fn upsert_updates_in_place_and_keeps_order() {
         "B (00000002)"
     );
 }
+
+#[test]
+fn a_manifest_whose_room_folder_is_not_a_plain_name_is_never_resumed() {
+    for hostile in [
+        "",
+        "..",
+        "../outside",
+        "/absolute",
+        ".hidden.partial",
+        "a/b",
+        "a\\b",
+        "C:evil",
+    ] {
+        let mut value: serde_json::Value = serde_json::from_slice(&manifest().to_bytes()).unwrap();
+        value["rooms"][0]["folder"] = hostile.into();
+        let bytes = serde_json::to_vec(&value).unwrap();
+        assert_eq!(
+            match_manifest(Some(&bytes), &scope(), &HistoryExportRange::AllAvailable),
+            ManifestMatch::Mismatch,
+            "folder {hostile:?} was accepted"
+        );
+    }
+}

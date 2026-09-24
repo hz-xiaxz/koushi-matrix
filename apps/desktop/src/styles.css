@@ -9025,8 +9025,8 @@ kbd {
 }
 .room-history-export-warning svg { flex: 0 0 auto; margin-block-start: 2px; }
 
-/* History export progress list. */
-.history-export-rooms {
+/* Archive export per-room progress list. */
+.export-progress-list {
   display: grid;
   gap: 6px;
   margin: 0;
@@ -9035,14 +9035,14 @@ kbd {
   max-block-size: 260px;
   overflow: auto;
 }
-.history-export-rooms li {
+.export-progress-list li {
   display: grid;
   gap: 2px;
   padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
 }
-.history-export-room-name { font-weight: 600; overflow-wrap: anywhere; }
-.history-export-room-phase,
-.history-export-room-note { font-size: 0.85em; color: var(--text-muted); }
-.history-export-rooms li[data-phase="failed"] .history-export-room-phase { color: var(--danger); }
+.export-progress-name { font-weight: 600; overflow-wrap: anywhere; }
+.export-progress-phase,
+.export-progress-note { font-size: 0.85em; color: var(--text-muted); }
+.export-progress-list li[data-phase="failed"] .export-progress-phase { color: var(--danger); }

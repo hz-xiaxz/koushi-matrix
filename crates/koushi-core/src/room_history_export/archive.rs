@@ -216,6 +216,15 @@ where
             Ok(counts) => commit_room(fs, &partial, &final_dir).map(|()| counts),
             Err(error) => Err(error),
         };
+        // A write this room's names or files cannot make (a name the
+        // filesystem rejects, a vanished folder) fails only this room; a full
+        // disk or a denied folder stops the export.
+        let result = match result {
+            Err(RoomError::Write(HistoryExportFsError::Io | HistoryExportFsError::NotFound)) => {
+                Err(RoomError::Failed(HistoryExportRoomFailureKind::Write))
+            }
+            other => other,
+        };
         match result {
             Ok(counts) => {
                 manifest.upsert_room(
@@ -290,8 +299,9 @@ where
 }
 
 /// The chosen directory is the export folder when it holds a manifest;
-/// otherwise a folder named from the stem and date is used inside it. An
-/// existing folder of that name without a manifest is never reused.
+/// otherwise a new folder named from the stem and date is created inside it,
+/// with ` (2)`, ` (3)`, … when that name is taken. Choosing a parent never
+/// resumes an existing export: only choosing the export folder itself does.
 fn resolve_export_dir(
     fs: &dyn HistoryExportFilesystem,
     request: &ArchiveRequest,
@@ -308,7 +318,7 @@ fn resolve_export_dir(
             format!("{base} ({attempt})")
         };
         let candidate = chosen.join(name);
-        if !fs.exists(&candidate) || fs.exists(&candidate.join(MANIFEST_FILE_NAME)) {
+        if !fs.exists(&candidate) {
             fs.create_dir_all(&candidate)?;
             return Ok(candidate);
         }
