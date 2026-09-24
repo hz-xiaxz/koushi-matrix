@@ -469,7 +469,9 @@ An in-process actor system in `koushi-core`:
   every demanded main/thread target for that room.
   Pinned-event body fetches run as actor-owned background work; room and Space
   selection can commit while a server fetch is pending. Session and per-room
-  refresh generations fence late results.
+  refresh generations fence late results. Space selection publishes its reducer
+  action before an actor-owned task enqueues member hydration, so a saturated
+  observer mailbox does not delay subsequent navigation.
   On the single Element X-compatible Simplified Sliding Sync engine it
   consumes the one `RoomListService` owned by the running `SyncService`;
   constructing additional ad-hoc `RoomListService` instances is prohibited —

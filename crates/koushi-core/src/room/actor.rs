@@ -411,6 +411,7 @@ pub struct RoomActor {
     #[cfg(any(test, feature = "test-hooks"))]
     pub(super) room_operation_test_reached_count: Arc<AtomicUsize>,
     pub(super) observation: Option<RoomListObservation>,
+    pub(super) space_hydration_enqueue_task: Option<executor::JoinHandle<()>>,
     room_list_generation: u64,
     room_list_source: Option<RoomListSource>,
     room_list_backend_generation: Option<u64>,
@@ -476,6 +477,7 @@ impl RoomActor {
             #[cfg(any(test, feature = "test-hooks"))]
             room_operation_test_reached_count: room_operation_test_reached_count.clone(),
             observation: None,
+            space_hydration_enqueue_task: None,
             room_list_generation: 0,
             room_list_source: None,
             room_list_backend_generation: None,
@@ -1056,13 +1058,19 @@ impl RoomActor {
                 let hydration_space_id = space_id.clone();
                 self.reduce_reliable(vec![AppAction::SelectSpace { space_id }])
                     .await;
+                if let Some(task) = self.space_hydration_enqueue_task.take() {
+                    task.abort();
+                    let _ = task.await;
+                }
                 if let Some(space_id) = hydration_space_id
                     && let Some(observation) = &self.observation
                 {
-                    let _ = observation
-                        .command_tx
-                        .send(RoomListObservationCommand::HydrateSpaceMembers { space_id })
-                        .await;
+                    let command_tx = observation.command_tx.clone();
+                    self.space_hydration_enqueue_task = Some(executor::spawn(async move {
+                        let _ = command_tx
+                            .send(RoomListObservationCommand::HydrateSpaceMembers { space_id })
+                            .await;
+                    }));
                 }
             }
             RoomCommand::ReorderSpaces {

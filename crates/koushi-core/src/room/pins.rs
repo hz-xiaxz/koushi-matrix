@@ -135,7 +135,7 @@ fn pinned_event_from_raw(event_id: String, raw_json: &str) -> PinnedEvent {
 
 impl RoomActor {
     pub(super) async fn handle_pin_event(
-        &self,
+        &mut self,
         request_id: RequestId,
         room_id: String,
         event_id: String,
@@ -166,8 +166,7 @@ impl RoomActor {
                     room_id: room_id.clone(),
                     event_id,
                 }));
-                self.project_pinned_events_after_success(request_id, room_id)
-                    .await;
+                self.start_pinned_refresh(room_id, Some(request_id));
             }
             Err(error) => {
                 let kind = classify_room_error(&error);
@@ -183,7 +182,7 @@ impl RoomActor {
     }
 
     pub(super) async fn handle_unpin_event(
-        &self,
+        &mut self,
         request_id: RequestId,
         room_id: String,
         event_id: String,
@@ -214,8 +213,7 @@ impl RoomActor {
                     room_id: room_id.clone(),
                     event_id,
                 }));
-                self.project_pinned_events_after_success(request_id, room_id)
-                    .await;
+                self.start_pinned_refresh(room_id, Some(request_id));
             }
             Err(error) => {
                 let kind = classify_room_error(&error);
@@ -292,21 +290,6 @@ impl RoomActor {
                 if let Some(request_id) = request_id {
                     self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
                 }
-            }
-        }
-    }
-
-    async fn project_pinned_events_after_success(&self, request_id: RequestId, room_id: String) {
-        let Some(session) = &self.session else {
-            return;
-        };
-        match load_pinned_events_for_room(session, &room_id).await {
-            Ok(pinned) => {
-                self.project_pinned_events(room_id, pinned, Some(request_id))
-                    .await
-            }
-            Err(kind) => {
-                self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
             }
         }
     }

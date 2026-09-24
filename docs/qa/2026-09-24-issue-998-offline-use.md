@@ -12,7 +12,9 @@ minutes. The timeline manager distinguishes SDK enqueue from remote terminal,
 releases the matching composer after enqueue, builds reply relations locally,
 and re-enables only recoverably failed room queues on bounded backoff. Room
 core owns pinned-event fetch workers and fences stale results. The Tauri
-selection command completes after the room selection is published.
+selection command completes after the room selection is published. Space
+member-hydration enqueue is actor-owned and no longer blocks a saturated
+observer mailbox.
 
 Verification on the pinned SDK revision:
 

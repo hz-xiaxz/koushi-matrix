@@ -1814,6 +1814,10 @@ impl RoomActor {
 
     /// Stop the observation loop (if running) and wait for it to exit.
     pub(super) async fn stop_observation(&mut self) {
+        if let Some(task) = self.space_hydration_enqueue_task.take() {
+            task.abort();
+            let _ = task.await;
+        }
         if let Some(mut observation) = self.observation.take() {
             let _ = observation.stop_tx.send(());
             if executor::timeout(
