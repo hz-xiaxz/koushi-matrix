@@ -17,16 +17,13 @@ use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use koushi_state::{
-    RoomHistoryExportFailureKind, RoomHistoryExportProgress, RoomHistoryExportRange,
-};
+use koushi_state::{HistoryExportRange, HistoryExportRoomCounts};
 
 use super::attachments::{AttachmentRef, StopFlag, attachment_ref};
 use super::element::{
     ElementJsonWriter, ExportHeader, ExportSourceEvent, effective_event, element_renders,
 };
 use super::fs::{HistoryExportFsError, StagedFile};
-use super::sink::RoomHistoryExportFile;
 
 /// Events requested per `/messages` page.
 pub(crate) const PAGE_LIMIT: u32 = 250;
@@ -80,11 +77,12 @@ pub(crate) struct ExportCounters {
 }
 
 impl ExportCounters {
-    pub(crate) fn snapshot(&self) -> RoomHistoryExportProgress {
-        RoomHistoryExportProgress {
+    pub(crate) fn snapshot(&self) -> HistoryExportRoomCounts {
+        HistoryExportRoomCounts {
             fetched_events: self.fetched.load(Ordering::Acquire),
             exported_events: self.exported.load(Ordering::Acquire),
             undecryptable_events: self.undecryptable.load(Ordering::Acquire),
+            ..HistoryExportRoomCounts::default()
         }
     }
 }
@@ -131,7 +129,7 @@ pub(crate) async fn run_fetch<S, P>(
     source: &mut S,
     outputs: FetchOutputs,
     header: &ExportHeader,
-    range: &RoomHistoryExportRange,
+    range: &HistoryExportRange,
     own_user_id: &str,
     counters: &Arc<ExportCounters>,
     stop: &StopFlag,
@@ -150,8 +148,8 @@ where
     let mut fetched = FetchResult::default();
 
     let (mut seeked, cutoff_ms) = match range {
-        RoomHistoryExportRange::AllAvailable => (None, None),
-        RoomHistoryExportRange::Period {
+        HistoryExportRange::AllAvailable => (None, None),
+        HistoryExportRange::Period {
             start_ms,
             end_exclusive_ms,
             ..
@@ -240,71 +238,10 @@ where
     Ok(fetched)
 }
 
-/// Adapter kept until the actor moves to the archive pipeline.
-struct SinkFile(Box<dyn RoomHistoryExportFile>);
-
-impl StagedFile for SinkFile {
-    fn write_all(&mut self, bytes: &[u8]) -> Result<(), HistoryExportFsError> {
-        self.0.write_all(bytes).map_err(|_| HistoryExportFsError::Io)
-    }
-
-    fn commit(self: Box<Self>) -> Result<(), HistoryExportFsError> {
-        self.0.commit().map_err(|_| HistoryExportFsError::Io)
-    }
-}
-
-struct DiscardFile;
-
-impl StagedFile for DiscardFile {
-    fn write_all(&mut self, _bytes: &[u8]) -> Result<(), HistoryExportFsError> {
-        Ok(())
-    }
-
-    fn commit(self: Box<Self>) -> Result<(), HistoryExportFsError> {
-        Ok(())
-    }
-}
-
-/// Single-file JSON export used by the current actor.
-pub(crate) async fn run_export<S, P>(
-    source: &mut S,
-    file: Box<dyn RoomHistoryExportFile>,
-    header: &ExportHeader,
-    range: &RoomHistoryExportRange,
-    own_user_id: &str,
-    counters: &Arc<ExportCounters>,
-    on_page: P,
-) -> Result<(), RoomHistoryExportFailureKind>
-where
-    S: HistoryPageSource,
-    P: AsyncProgress,
-{
-    run_fetch(
-        source,
-        FetchOutputs {
-            messages: Box::new(SinkFile(file)),
-            events: Box::new(DiscardFile),
-        },
-        header,
-        range,
-        own_user_id,
-        counters,
-        &StopFlag::default(),
-        on_page,
-    )
-    .await
-    .map(|_| ())
-    .map_err(|failure| match failure {
-        FetchFailure::Network => RoomHistoryExportFailureKind::Network,
-        FetchFailure::Sdk | FetchFailure::Stopped => RoomHistoryExportFailureKind::Sdk,
-        FetchFailure::Write(_) => RoomHistoryExportFailureKind::Write,
-    })
-}
-
-/// Progress callback for [`run_export`].
+/// Progress callback for [`run_fetch`].
 pub(crate) trait AsyncProgress: Send {
     fn page_completed(
         &mut self,
-        progress: RoomHistoryExportProgress,
+        progress: HistoryExportRoomCounts,
     ) -> impl Future<Output = ()> + Send;
 }

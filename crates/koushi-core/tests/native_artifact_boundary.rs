@@ -4,8 +4,8 @@ use koushi_core::{
     AccountCommand, CoreCommand, CoreCommandPolicy, CoreRuntime, NativeArtifactKind,
     NativeArtifactRegistry, RoomKeyExportRequest,
 };
-use koushi_protocol::command::RoomHistoryExportRequest;
-use koushi_state::{AuthSecret, RoomHistoryExportRange};
+use koushi_protocol::command::{HistoryExportLabels, HistoryExportRequest};
+use koushi_state::{AuthSecret, HistoryExportRange, HistoryExportScope};
 
 #[tokio::test]
 async fn rejected_command_releases_its_exact_native_artifact_registration() {
@@ -82,16 +82,21 @@ async fn rejected_bootstrap_releases_its_recovery_key_destination() {
 const ROOM: &str = "!history:example.invalid";
 
 fn export_command(request_id: koushi_protocol::ids::RequestId) -> CoreCommand {
-    CoreCommand::Account(AccountCommand::ExportRoomHistory {
+    CoreCommand::Account(AccountCommand::ExportHistory {
         request_id,
-        request: RoomHistoryExportRequest {
-            room_id: ROOM.to_owned(),
-            range: RoomHistoryExportRange::Period {
+        request: HistoryExportRequest {
+            scope: HistoryExportScope::Room {
+                room_id: ROOM.to_owned(),
+            },
+            range: HistoryExportRange::Period {
                 start_ms: 1_700_000_000_000,
                 end_exclusive_ms: 1_700_086_400_000,
                 time_zone: "Asia/Tokyo".to_owned(),
             },
+            display_time_zone: "Asia/Tokyo".to_owned(),
             export_date_utc_offset_minutes: 540,
+            folder_name_stem: "Private Folder Stem".to_owned(),
+            labels: HistoryExportLabels::default(),
         },
     })
 }
@@ -106,17 +111,22 @@ fn export_commands_are_correlated_ready_gated_and_redacted() {
         connection_id: koushi_protocol::ids::RuntimeConnectionId(3),
         sequence: 16,
     };
-    let cancel = CoreCommand::Account(AccountCommand::CancelRoomHistoryExport {
+    let stop = CoreCommand::Account(AccountCommand::StopHistoryExport {
         request_id,
         target_request_id,
     });
-    for command in [export_command(request_id), cancel] {
+    let retry = CoreCommand::Account(AccountCommand::RetryHistoryExport {
+        request_id,
+        target_request_id,
+    });
+    for command in [export_command(request_id), stop, retry] {
         assert_eq!(command.request_id(), request_id);
         assert!(command.requires_ready_session());
         let debug = format!("{command:?}");
         assert!(!debug.contains(ROOM), "{debug}");
         assert!(!debug.contains("Asia/Tokyo"), "{debug}");
         assert!(!debug.contains("path"), "{debug}");
+        assert!(!debug.contains("Private Folder Stem"), "{debug}");
     }
 }
 
@@ -133,7 +143,7 @@ async fn a_rejected_export_releases_its_destination_registration() {
     connection
         .register_native_artifact(
             request_id,
-            NativeArtifactKind::RoomHistoryExportDestination,
+            NativeArtifactKind::HistoryExportDirectory,
             PathBuf::from("synthetic-history-export-path"),
         )
         .expect("register path");
@@ -145,8 +155,8 @@ async fn a_rejected_export_releases_its_destination_registration() {
 
     assert!(registry.is_empty());
     assert_eq!(
-        connection.snapshot().room_history_export,
-        koushi_state::RoomHistoryExportState::Idle
+        connection.snapshot().history_export,
+        koushi_state::HistoryExportState::Idle
     );
     drop(connection);
     runtime.shutdown().await;

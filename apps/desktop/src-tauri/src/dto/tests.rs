@@ -1819,21 +1819,51 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         }],
     };
 
-    // room_history_export — a period export in flight
-    state.room_history_export = koushi_state::RoomHistoryExportState::Exporting {
+    // history_export — a Space export in flight with one room per phase kind
+    state.history_export = koushi_state::HistoryExportState::Running {
         request_id: 12,
-        room_id: "!room:example.invalid".to_owned(),
-        range: koushi_state::RoomHistoryExportRange::Period {
+        scope: koushi_state::HistoryExportScope::Space {
+            space_id: "!space:example.invalid".to_owned(),
+        },
+        range: koushi_state::HistoryExportRange::Period {
             start_ms: 1_700_000_000_000,
             end_exclusive_ms: 1_700_086_400_000,
             time_zone: "Asia/Tokyo".to_owned(),
         },
-        progress: koushi_state::RoomHistoryExportProgress {
-            fetched_events: 250,
-            exported_events: 180,
-            undecryptable_events: 2,
-        },
-        cancel_requested: false,
+        rooms: vec![
+            koushi_state::HistoryExportRoom {
+                room_id: "!room:example.invalid".to_owned(),
+                display_name: "Room".to_owned(),
+                phase: koushi_state::HistoryExportRoomPhase::Attachments,
+                counts: koushi_state::HistoryExportRoomCounts {
+                    fetched_events: 250,
+                    exported_events: 180,
+                    undecryptable_events: 2,
+                    attachments_total: 12,
+                    attachments_done: 5,
+                    attachments_failed: 1,
+                },
+                skip_reason: None,
+                failure_kind: None,
+            },
+            koushi_state::HistoryExportRoom {
+                room_id: "!unjoined:example.invalid".to_owned(),
+                display_name: "Unjoined".to_owned(),
+                phase: koushi_state::HistoryExportRoomPhase::Skipped,
+                counts: koushi_state::HistoryExportRoomCounts::default(),
+                skip_reason: Some(koushi_state::HistoryExportRoomSkipReason::NotJoined),
+                failure_kind: None,
+            },
+            koushi_state::HistoryExportRoom {
+                room_id: "!failed:example.invalid".to_owned(),
+                display_name: "Failed".to_owned(),
+                phase: koushi_state::HistoryExportRoomPhase::Failed,
+                counts: koushi_state::HistoryExportRoomCounts::default(),
+                skip_reason: None,
+                failure_kind: Some(koushi_state::HistoryExportRoomFailureKind::Network),
+            },
+        ],
+        stop_requested: false,
     };
 
     // files_view — Open with one attachment entry

@@ -27,7 +27,7 @@ mod native_attention;
 mod navigation;
 mod profile;
 mod room;
-mod room_history_export;
+mod history_export;
 mod room_management;
 mod search;
 mod session;
@@ -300,31 +300,52 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::RoomKeyExportFailed { request_id, kind } => {
             e2ee::handle_room_key_export_failed(state, request_id, kind)
         }
-        AppAction::RoomHistoryExportRequested {
+        AppAction::HistoryExportRequested {
+            request_id,
+            scope,
+            range,
+        } => history_export::handle_requested(state, request_id, scope, range),
+        AppAction::HistoryExportRetryRequested {
+            request_id,
+            target_request_id,
+        } => history_export::handle_retry_requested(state, request_id, target_request_id),
+        AppAction::HistoryExportPrepared { request_id, rooms } => {
+            history_export::handle_prepared(state, request_id, rooms)
+        }
+        AppAction::HistoryExportRoomProgressed {
             request_id,
             room_id,
-            range,
-        } => room_history_export::handle_requested(state, request_id, room_id, range),
-        AppAction::RoomHistoryExportProgressed {
+            phase,
+            counts,
+        } => history_export::handle_room_progressed(state, request_id, &room_id, phase, counts),
+        AppAction::HistoryExportRoomSettled {
             request_id,
-            progress,
-        } => room_history_export::handle_progressed(state, request_id, progress),
-        AppAction::RoomHistoryExportCancelRequested { request_id } => {
-            room_history_export::handle_cancel_requested(state, request_id)
+            room_id,
+            phase,
+            counts,
+            failure_kind,
+        } => history_export::handle_room_settled(
+            state,
+            request_id,
+            &room_id,
+            phase,
+            counts,
+            failure_kind,
+        ),
+        AppAction::HistoryExportStopRequested { request_id } => {
+            history_export::handle_stop_requested(state, request_id)
         }
-        AppAction::RoomHistoryExportCompleted {
+        AppAction::HistoryExportCompleted { request_id } => {
+            history_export::handle_settled(state, request_id, history_export::Settlement::Completed)
+        }
+        AppAction::HistoryExportStopped { request_id } => {
+            history_export::handle_settled(state, request_id, history_export::Settlement::Stopped)
+        }
+        AppAction::HistoryExportFailed { request_id, kind } => history_export::handle_settled(
+            state,
             request_id,
-            progress,
-        } => room_history_export::handle_completed(state, request_id, progress),
-        AppAction::RoomHistoryExportCancelled {
-            request_id,
-            progress,
-        } => room_history_export::handle_cancelled(state, request_id, progress),
-        AppAction::RoomHistoryExportFailed {
-            request_id,
-            kind,
-            progress,
-        } => room_history_export::handle_failed(state, request_id, kind, progress),
+            history_export::Settlement::Failed(kind),
+        ),
         AppAction::RoomKeyImportRequested { request_id } => {
             e2ee::handle_room_key_import_requested(state, request_id)
         }
@@ -1871,7 +1892,7 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     let had_local_encryption = state.local_encryption != LocalEncryptionState::Unknown;
     let had_native_attention = state.native_attention != Default::default();
     let had_files_view = state.files_view != FilesViewState::Closed;
-    let had_room_history_export = state.room_history_export != Default::default();
+    let had_history_export = state.history_export != Default::default();
     let had_threads_list = state.threads_list != ThreadsListState::Closed;
     let had_link_preview_settings = !state.link_preview_settings.room_overrides.is_empty();
     let had_room_preferences = !state.room_preferences.rooms.is_empty();
@@ -1903,7 +1924,7 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     state.search = SearchState::Closed;
     state.search_crawler = Default::default();
     state.files_view = FilesViewState::Closed;
-    state.room_history_export = Default::default();
+    state.history_export = Default::default();
     state.threads_list = ThreadsListState::Closed;
     state.e2ee_trust = E2eeTrustState::default();
     state.account_management_url = None;
@@ -1991,8 +2012,8 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     if had_files_view {
         effects.push(AppEffect::EmitUiEvent(UiEvent::FilesViewChanged));
     }
-    if had_room_history_export {
-        effects.push(AppEffect::EmitUiEvent(UiEvent::RoomHistoryExportChanged));
+    if had_history_export {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::HistoryExportChanged));
     }
     if had_threads_list {
         effects.push(AppEffect::EmitUiEvent(UiEvent::ThreadsListChanged));

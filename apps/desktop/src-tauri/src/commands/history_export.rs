@@ -1,27 +1,51 @@
-//! Room-history export (#59): the platform half of the Rust-owned export.
+//! History export: the platform half of the Rust-owned archive export.
 //!
-//! The adapter owns the native save dialog, the destination registration,
-//! and the civil-date resolution. React sends the civil dates it showed and
-//! the IANA time zone it named; this module turns them into the Core range.
-//! The destination path never reaches the WebView.
+//! The adapter owns the native folder dialog, the directory registration, and
+//! the civil-date resolution. React sends the civil dates it showed, the IANA
+//! time zone it named, and the catalog labels for the pages; this module turns
+//! them into the Core request. The directory path never reaches the WebView.
 
 use super::*;
 use jiff::{Timestamp, civil::Date, tz::TimeZone};
-use koushi_protocol::RoomHistoryExportRequest;
-use koushi_state::RoomHistoryExportRange;
+use koushi_protocol::{HistoryExportLabels, HistoryExportRequest};
+use koushi_state::{HistoryExportRange, HistoryExportScope};
 use tauri_plugin_dialog::DialogExt;
 
 #[cfg(any(debug_assertions, test))]
 const QA_HISTORY_EXPORT_DIR_ENV: &str = "KOUSHI_QA_HISTORY_EXPORT_DIR";
 
 const FALLBACK_TIME_ZONE: &str = "UTC";
-const FILE_NAME_STEM_MAX_CHARS: usize = 120;
+
+/// What React asked to export.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum HistoryExportScopeInput {
+    #[serde(rename_all = "camelCase")]
+    Room { room_id: String },
+    #[serde(rename_all = "camelCase")]
+    Space { space_id: String },
+}
+
+impl HistoryExportScopeInput {
+    fn into_scope(self) -> Result<HistoryExportScope, String> {
+        let scope = match self {
+            Self::Room { room_id } => HistoryExportScope::Room { room_id },
+            Self::Space { space_id } => HistoryExportScope::Space { space_id },
+        };
+        let (HistoryExportScope::Room { room_id: id } | HistoryExportScope::Space { space_id: id }) =
+            &scope;
+        if id.trim().is_empty() {
+            return Err("export target must not be blank".to_owned());
+        }
+        Ok(scope)
+    }
+}
 
 /// The range the dialog showed: civil dates are `YYYY-MM-DD`, the end date is
 /// inclusive, and `time_zone` is the IANA name displayed with them.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
-pub enum RoomHistoryExportRangeInput {
+pub enum HistoryExportRangeInput {
     AllAvailable,
     #[serde(rename_all = "camelCase")]
     Period {
@@ -33,8 +57,8 @@ pub enum RoomHistoryExportRangeInput {
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
-pub enum FrontendRoomHistoryExportStart {
-    /// The user closed the save dialog; nothing was submitted.
+pub enum FrontendHistoryExportStart {
+    /// The user closed the folder dialog; nothing was submitted.
     Dismissed,
     #[serde(rename_all = "camelCase")]
     Submitted {
@@ -46,56 +70,57 @@ pub enum FrontendRoomHistoryExportStart {
 /// The IANA name of the platform time zone, or `UTC` when the platform does
 /// not name one. The export dialog shows it and sends it back unchanged.
 #[tauri::command]
-pub async fn room_history_export_time_zone() -> Result<String, String> {
+pub async fn history_export_time_zone() -> Result<String, String> {
     Ok(platform_time_zone_name())
 }
 
 #[tauri::command]
-pub async fn export_room_history(
-    room_id: String,
-    range: RoomHistoryExportRangeInput,
+#[allow(clippy::too_many_arguments)]
+pub async fn export_history(
+    scope: HistoryExportScopeInput,
+    range: HistoryExportRangeInput,
+    labels: HistoryExportLabels,
     dialog_title: String,
-    file_name_stem: String,
+    folder_name_stem: String,
     app: AppHandle,
     window: tauri::WebviewWindow,
     state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendRoomHistoryExportStart, String> {
-    if room_id.trim().is_empty() {
-        return Err("room id must not be blank".to_owned());
-    }
+) -> Result<FrontendHistoryExportStart, String> {
+    let scope = scope.into_scope()?;
     let range = resolve_range(range)?;
     let time_zone = platform_time_zone();
-    // One clock read, so the file name's date and `export_date` agree.
-    let now = Timestamp::now();
-    let file_name = export_file_name(&file_name_stem, now.to_zoned(time_zone.clone()).date());
-    let Some(destination) = choose_destination(&app, &window, dialog_title, file_name).await?
-    else {
-        return Ok(FrontendRoomHistoryExportStart::Dismissed);
+    let Some(directory) = choose_directory(&app, &window, dialog_title).await? else {
+        return Ok(FrontendHistoryExportStart::Dismissed);
     };
     let request_id = next_request_id(state.inner()).await;
-    let command = build_export_room_history_command(
+    let command = build_export_history_command(
         request_id,
-        room_id,
-        range,
-        utc_offset_minutes(&time_zone, now),
+        HistoryExportRequest {
+            scope,
+            range,
+            display_time_zone: platform_time_zone_name(),
+            export_date_utc_offset_minutes: utc_offset_minutes(&time_zone, Timestamp::now()),
+            folder_name_stem,
+            labels,
+        },
     );
     let admission = submit_core_command_with_native_artifact_path(
         state.inner(),
         request_id,
-        NativeArtifactKind::RoomHistoryExportDestination,
-        destination,
+        NativeArtifactKind::HistoryExportDirectory,
+        directory,
         command,
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(FrontendRoomHistoryExportStart::Submitted {
+    Ok(FrontendHistoryExportStart::Submitted {
         request_id: request_id.sequence,
         admission,
     })
 }
 
 #[tauri::command]
-pub async fn cancel_room_history_export(
+pub async fn stop_history_export(
     target_request_id: u64,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
@@ -107,70 +132,96 @@ pub async fn cancel_room_history_export(
     };
     let admission = submit_core_command_with_admission(
         state.inner(),
-        build_cancel_room_history_export_command(request_id, target_request_id),
+        build_stop_history_export_command(request_id, target_request_id),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(admission)
 }
 
-pub(super) fn build_export_room_history_command(
-    request_id: koushi_protocol::RequestId,
-    room_id: String,
-    range: RoomHistoryExportRange,
-    export_date_utc_offset_minutes: i32,
-) -> CoreCommand {
-    CoreCommand::Account(AccountCommand::ExportRoomHistory {
-        request_id,
-        request: RoomHistoryExportRequest {
-            room_id,
-            range,
-            export_date_utc_offset_minutes,
-        },
+#[tauri::command]
+pub async fn retry_history_export(
+    target_request_id: u64,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendHistoryExportStart, String> {
+    let request_id = next_request_id(state.inner()).await;
+    let target_request_id = koushi_protocol::RequestId {
+        connection_id: request_id.connection_id,
+        sequence: target_request_id,
+    };
+    let admission = submit_core_command_with_admission(
+        state.inner(),
+        build_retry_history_export_command(request_id, target_request_id),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(FrontendHistoryExportStart::Submitted {
+        request_id: request_id.sequence,
+        admission,
     })
 }
 
-pub(super) fn build_cancel_room_history_export_command(
+pub(super) fn build_export_history_command(
+    request_id: koushi_protocol::RequestId,
+    request: HistoryExportRequest,
+) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::ExportHistory {
+        request_id,
+        request,
+    })
+}
+
+pub(super) fn build_stop_history_export_command(
     request_id: koushi_protocol::RequestId,
     target_request_id: koushi_protocol::RequestId,
 ) -> CoreCommand {
-    CoreCommand::Account(AccountCommand::CancelRoomHistoryExport {
+    CoreCommand::Account(AccountCommand::StopHistoryExport {
         request_id,
         target_request_id,
     })
 }
 
-async fn choose_destination(
+pub(super) fn build_retry_history_export_command(
+    request_id: koushi_protocol::RequestId,
+    target_request_id: koushi_protocol::RequestId,
+) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::RetryHistoryExport {
+        request_id,
+        target_request_id,
+    })
+}
+
+/// A folder: an earlier export folder to resume, or the parent to create a
+/// new export folder in (Core decides from its manifest).
+async fn choose_directory(
     app: &AppHandle,
     window: &tauri::WebviewWindow,
     dialog_title: String,
-    file_name: String,
 ) -> Result<Option<PathBuf>, String> {
     #[cfg(any(debug_assertions, test))]
     if let Some(directory) = qa_history_export_dir() {
-        // Unattended GUI QA cannot drive a native file dialog.
-        return Ok(Some(directory.join(file_name)));
+        // Unattended GUI QA cannot drive a native folder dialog.
+        return Ok(Some(directory));
     }
     let mut dialog = app
         .dialog()
         .file()
         .set_parent(window)
         .set_title(dialog_title)
-        .set_file_name(file_name)
-        .set_can_create_directories(true)
-        .add_filter("JSON", &["json"]);
+        .set_can_create_directories(true);
     if let Ok(downloads) = app.path().download_dir() {
         dialog = dialog.set_directory(downloads);
     }
     let (sender, receiver) = tokio::sync::oneshot::channel();
-    dialog.save_file(move |selected| {
+    dialog.pick_folder(move |selected| {
         let _ = sender.send(selected);
     });
     match receiver.await {
         Ok(Some(selected)) => selected
             .into_path()
             .map(Some)
-            .map_err(|_| "export destination is not a local file".to_owned()),
+            .map_err(|_| "export folder is not a local directory".to_owned()),
         Ok(None) | Err(_) => Ok(None),
     }
 }
@@ -199,12 +250,10 @@ fn platform_time_zone_name() -> String {
 /// Resolve the dialog's civil dates: the start is 00:00 of the start day and
 /// the exclusive end is 00:00 of the day after the end day, both in the named
 /// zone. Rust Core still validates the resulting range.
-pub(super) fn resolve_range(
-    input: RoomHistoryExportRangeInput,
-) -> Result<RoomHistoryExportRange, String> {
+pub(super) fn resolve_range(input: HistoryExportRangeInput) -> Result<HistoryExportRange, String> {
     match input {
-        RoomHistoryExportRangeInput::AllAvailable => Ok(RoomHistoryExportRange::AllAvailable),
-        RoomHistoryExportRangeInput::Period {
+        HistoryExportRangeInput::AllAvailable => Ok(HistoryExportRange::AllAvailable),
+        HistoryExportRangeInput::Period {
             start_date,
             end_date,
             time_zone,
@@ -215,7 +264,7 @@ pub(super) fn resolve_range(
             let end_exclusive = parse_civil_date(&end_date)?
                 .tomorrow()
                 .map_err(|_| "export end date is out of range".to_owned())?;
-            Ok(RoomHistoryExportRange::Period {
+            Ok(HistoryExportRange::Period {
                 start_ms: start_of_day_ms(start, &zone)?,
                 end_exclusive_ms: start_of_day_ms(end_exclusive, &zone)?,
                 time_zone: time_zone.trim().to_owned(),
@@ -246,33 +295,12 @@ pub(super) fn utc_offset_minutes(zone: &TimeZone, now: Timestamp) -> i32 {
     zone.to_offset(now).seconds() / 60
 }
 
-/// `<stem> - YYYY-MM-DD.json`, with characters that are not portable in file
-/// names replaced.
-pub(super) fn export_file_name(stem: &str, today: Date) -> String {
-    let sanitized: String = stem
-        .chars()
-        .map(|character| match character {
-            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-            character if character.is_control() => '_',
-            character => character,
-        })
-        .take(FILE_NAME_STEM_MAX_CHARS)
-        .collect();
-    let sanitized = sanitized.trim().trim_matches('.').trim();
-    let stem = if sanitized.is_empty() {
-        "chat-export"
-    } else {
-        sanitized
-    };
-    format!("{stem} - {today}.json")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn period(start: &str, end: &str, zone: &str) -> RoomHistoryExportRangeInput {
-        RoomHistoryExportRangeInput::Period {
+    fn period(start: &str, end: &str, zone: &str) -> HistoryExportRangeInput {
+        HistoryExportRangeInput::Period {
             start_date: start.to_owned(),
             end_date: end.to_owned(),
             time_zone: zone.to_owned(),
@@ -283,14 +311,14 @@ mod tests {
     fn period_resolves_to_midnights_in_the_named_zone_with_an_inclusive_end_day() {
         assert_eq!(
             resolve_range(period("2026-09-01", "2026-09-30", "Asia/Tokyo")),
-            Ok(RoomHistoryExportRange::Period {
+            Ok(HistoryExportRange::Period {
                 // 2026-08-31T15:00Z and 2026-09-30T15:00Z.
                 start_ms: 1_788_188_400_000,
                 end_exclusive_ms: 1_790_780_400_000,
                 time_zone: "Asia/Tokyo".to_owned(),
             })
         );
-        let Ok(RoomHistoryExportRange::Period {
+        let Ok(HistoryExportRange::Period {
             start_ms,
             end_exclusive_ms,
             ..
@@ -304,7 +332,7 @@ mod tests {
     #[test]
     fn period_days_follow_daylight_saving_transitions() {
         // New York springs forward on 2026-03-08: that civil day has 23 hours.
-        let Ok(RoomHistoryExportRange::Period {
+        let Ok(HistoryExportRange::Period {
             start_ms,
             end_exclusive_ms,
             ..
@@ -322,8 +350,8 @@ mod tests {
         assert!(resolve_range(period("2026-02-30", "2026-03-01", "UTC")).is_err());
         assert!(resolve_range(period("1969-12-31", "1970-01-01", "UTC")).is_err());
         assert_eq!(
-            resolve_range(RoomHistoryExportRangeInput::AllAvailable),
-            Ok(RoomHistoryExportRange::AllAvailable)
+            resolve_range(HistoryExportRangeInput::AllAvailable),
+            Ok(HistoryExportRange::AllAvailable)
         );
     }
 
@@ -335,7 +363,7 @@ mod tests {
 
     #[test]
     fn range_input_uses_the_frontend_wire_shape() {
-        let input: RoomHistoryExportRangeInput = serde_json::from_value(serde_json::json!({
+        let input: HistoryExportRangeInput = serde_json::from_value(serde_json::json!({
             "kind": "period",
             "startDate": "2026-09-01",
             "endDate": "2026-09-02",
@@ -343,9 +371,9 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(input, period("2026-09-01", "2026-09-02", "UTC"));
-        let all: RoomHistoryExportRangeInput =
+        let all: HistoryExportRangeInput =
             serde_json::from_value(serde_json::json!({ "kind": "allAvailable" })).unwrap();
-        assert_eq!(all, RoomHistoryExportRangeInput::AllAvailable);
+        assert_eq!(all, HistoryExportRangeInput::AllAvailable);
     }
 
     #[test]
@@ -361,59 +389,89 @@ mod tests {
         );
     }
 
-    #[test]
-    fn export_file_names_are_portable_and_dated() {
-        let today: Date = "2026-09-23".parse().unwrap();
-        assert_eq!(
-            export_file_name("Synthetic Room - Chat Export", today),
-            "Synthetic Room - Chat Export - 2026-09-23.json"
-        );
-        assert_eq!(
-            export_file_name("../a/b:c*d?\"e<f>g|h\n", today),
-            "_a_b_c_d__e_f_g_h_ - 2026-09-23.json"
-        );
-        assert_eq!(
-            export_file_name(" .. ", today),
-            "chat-export - 2026-09-23.json"
-        );
-        let long = "設".repeat(500);
-        assert_eq!(
-            export_file_name(&long, today).chars().count(),
-            FILE_NAME_STEM_MAX_CHARS + " - 2026-09-23.json".chars().count()
-        );
+    fn labels() -> HistoryExportLabels {
+        HistoryExportLabels {
+            edited: "(edited)".to_owned(),
+            ..HistoryExportLabels::default()
+        }
     }
 
     #[test]
-    fn export_and_cancel_build_correlated_account_commands_without_leaking_the_room() {
+    fn scope_and_labels_use_the_frontend_wire_shape() {
+        let space: HistoryExportScopeInput =
+            serde_json::from_value(serde_json::json!({ "kind": "space", "spaceId": "!s:x" }))
+                .unwrap();
+        assert_eq!(
+            space.into_scope(),
+            Ok(HistoryExportScope::Space {
+                space_id: "!s:x".to_owned()
+            })
+        );
+        let room: HistoryExportScopeInput =
+            serde_json::from_value(serde_json::json!({ "kind": "room", "roomId": "!r:x" }))
+                .unwrap();
+        assert!(room.into_scope().is_ok());
+        let blank: HistoryExportScopeInput =
+            serde_json::from_value(serde_json::json!({ "kind": "room", "roomId": " " })).unwrap();
+        assert!(blank.into_scope().is_err());
+        let labels: HistoryExportLabels = serde_json::from_value(serde_json::json!({
+            "edited": "(編集済み)", "inReplyTo": "{name} への返信", "timesInZone": "{timeZone}"
+        }))
+        .unwrap();
+        assert_eq!(labels.edited, "(編集済み)");
+        assert_eq!(labels.in_reply_to, "{name} への返信");
+        assert_eq!(labels.times_in_zone, "{timeZone}");
+    }
+
+    #[test]
+    fn export_stop_and_retry_build_correlated_commands_without_leaking_private_data() {
         let request_id = crate::commands::contracts::fake_request_id(51);
         let range = resolve_range(period("2026-09-01", "2026-09-02", "Asia/Tokyo")).unwrap();
-        let command = build_export_room_history_command(
+        let command = build_export_history_command(
             request_id,
-            "!private-history:example.invalid".to_owned(),
-            range.clone(),
-            540,
+            HistoryExportRequest {
+                scope: HistoryExportScope::Space {
+                    space_id: "!private-space:example.invalid".to_owned(),
+                },
+                range: range.clone(),
+                display_time_zone: "Asia/Tokyo".to_owned(),
+                export_date_utc_offset_minutes: 540,
+                folder_name_stem: "Private Lab".to_owned(),
+                labels: labels(),
+            },
         );
         assert_eq!(command.request_id(), request_id);
-        assert!(!format!("{command:?}").contains("private-history"));
-        assert!(!format!("{command:?}").contains("Asia/Tokyo"));
+        let debug = format!("{command:?}");
+        for private in ["private-space", "Asia/Tokyo", "Private Lab", "(edited)"] {
+            assert!(!debug.contains(private), "{private} leaked: {debug}");
+        }
         match command {
-            CoreCommand::Account(AccountCommand::ExportRoomHistory { request, .. }) => {
-                assert_eq!(request.room_id, "!private-history:example.invalid");
+            CoreCommand::Account(AccountCommand::ExportHistory { request, .. }) => {
                 assert_eq!(request.range, range);
                 assert_eq!(request.export_date_utc_offset_minutes, 540);
+                assert_eq!(request.labels.edited, "(edited)");
             }
             other => panic!("unexpected command: {other:?}"),
         }
         let target = crate::commands::contracts::fake_request_id(51);
-        match build_cancel_room_history_export_command(
-            crate::commands::contracts::fake_request_id(52),
-            target,
-        ) {
-            CoreCommand::Account(AccountCommand::CancelRoomHistoryExport {
+        match build_stop_history_export_command(crate::commands::contracts::fake_request_id(52), target)
+        {
+            CoreCommand::Account(AccountCommand::StopHistoryExport {
                 request_id,
                 target_request_id,
             }) => {
                 assert_eq!(request_id.sequence, 52);
+                assert_eq!(target_request_id, target);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+        match build_retry_history_export_command(crate::commands::contracts::fake_request_id(53), target)
+        {
+            CoreCommand::Account(AccountCommand::RetryHistoryExport {
+                request_id,
+                target_request_id,
+            }) => {
+                assert_eq!(request_id.sequence, 53);
                 assert_eq!(target_request_id, target);
             }
             other => panic!("unexpected command: {other:?}"),
@@ -423,7 +481,7 @@ mod tests {
     #[test]
     fn start_result_uses_the_frontend_wire_shape() {
         assert_eq!(
-            serde_json::to_value(FrontendRoomHistoryExportStart::Dismissed).unwrap(),
+            serde_json::to_value(FrontendHistoryExportStart::Dismissed).unwrap(),
             serde_json::json!({ "kind": "dismissed" })
         );
     }

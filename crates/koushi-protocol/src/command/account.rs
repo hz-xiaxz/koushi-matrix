@@ -78,29 +78,41 @@ pub struct HistoryExportLabels {
     pub state_other: String,
 }
 
-/// Export one room's history as an Element-compatible chat-export JSON file.
+/// Export a room, or every joined non-DM room of a Space, into an archive
+/// folder (HTML pages, the Element-compatible `messages.json`, the lossless
+/// `events.jsonl`, and attachments).
 ///
-/// The destination path never travels in this command: the platform adapter
-/// registers it as a native artifact for the same request.
-/// `export_date_utc_offset_minutes` is the platform's current UTC offset, used
-/// only to render Element's `export_date` field in the user's local calendar.
+/// The directory never travels in this command: the platform adapter
+/// registers it as a native artifact for the same request. When it holds a
+/// `koushi-export.json` it is resumed, otherwise a folder named from
+/// `folder_name_stem` is created inside it.
 #[derive(Clone, Eq, PartialEq)]
-pub struct RoomHistoryExportRequest {
-    pub room_id: String,
-    pub range: koushi_state::RoomHistoryExportRange,
+pub struct HistoryExportRequest {
+    pub scope: koushi_state::HistoryExportScope,
+    pub range: koushi_state::HistoryExportRange,
+    /// IANA zone the pages show dates and times in.
+    pub display_time_zone: String,
+    /// The platform's current UTC offset, for Element's `export_date` and the
+    /// new folder's date.
     pub export_date_utc_offset_minutes: i32,
+    /// Catalog-resolved folder name stem; Core sanitizes it.
+    pub folder_name_stem: String,
+    pub labels: HistoryExportLabels,
 }
 
-impl fmt::Debug for RoomHistoryExportRequest {
+impl fmt::Debug for HistoryExportRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("RoomHistoryExportRequest")
-            .field("room_id", &"RoomId(..)")
+            .debug_struct("HistoryExportRequest")
+            .field("scope", &self.scope)
             .field("range", &self.range)
+            .field("display_time_zone", &"TimeZone(..)")
             .field(
                 "export_date_utc_offset_minutes",
                 &self.export_date_utc_offset_minutes,
             )
+            .field("folder_name_stem", &"FolderName(..)")
+            .field("labels", &"HistoryExportLabels(..)")
             .finish()
     }
 }
@@ -237,13 +249,19 @@ pub enum AccountCommand {
         request_id: RequestId,
         request: RoomKeyExportRequest,
     },
-    ExportRoomHistory {
+    ExportHistory {
         request_id: RequestId,
-        request: RoomHistoryExportRequest,
+        request: HistoryExportRequest,
     },
-    /// Cancel the export started by `target_request_id`. A partial file is
-    /// deleted; the export settles as cancelled.
-    CancelRoomHistoryExport {
+    /// Ask the export started by `target_request_id` to stop after its
+    /// current step. Completed rooms are kept.
+    StopHistoryExport {
+        request_id: RequestId,
+        target_request_id: RequestId,
+    },
+    /// Resume the folder of the settled export `target_request_id`, redoing
+    /// every room that did not complete.
+    RetryHistoryExport {
         request_id: RequestId,
         target_request_id: RequestId,
     },
@@ -515,19 +533,27 @@ impl fmt::Debug for AccountCommand {
                 .field("request_id", request_id)
                 .field("request", request)
                 .finish(),
-            Self::ExportRoomHistory {
+            Self::ExportHistory {
                 request_id,
                 request,
             } => formatter
-                .debug_struct("ExportRoomHistory")
+                .debug_struct("ExportHistory")
                 .field("request_id", request_id)
                 .field("request", request)
                 .finish(),
-            Self::CancelRoomHistoryExport {
+            Self::StopHistoryExport {
                 request_id,
                 target_request_id,
             } => formatter
-                .debug_struct("CancelRoomHistoryExport")
+                .debug_struct("StopHistoryExport")
+                .field("request_id", request_id)
+                .field("target_request_id", target_request_id)
+                .finish(),
+            Self::RetryHistoryExport {
+                request_id,
+                target_request_id,
+            } => formatter
+                .debug_struct("RetryHistoryExport")
                 .field("request_id", request_id)
                 .field("target_request_id", target_request_id)
                 .finish(),

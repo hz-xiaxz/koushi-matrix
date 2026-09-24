@@ -10,6 +10,7 @@ koushi-protocol = { path = "../koushi-protocol" }
 koushi-sdk = { path = "../koushi-sdk" }
 koushi-key = { path = "../koushi-key" }
 koushi-media = { path = "../koushi-media" }
+jiff = "0.2"
 koushi-search = { path = "../koushi-search" }
 koushi-state = { path = "../koushi-state" }
 koushi-store = { path = "../koushi-store" }
@@ -40,7 +41,6 @@ koushi-store = { path = "../koushi-store", features = ["test-hooks"] }
 # Decodable PNG fixtures for upload-output preparation tests. Already a
 # workspace dependency: koushi-media encodes with it in production.
 image.workspace = true
-jiff = "0.2"
 matrix-sdk = { workspace = true, features = ["testing"] }
 matrix-sdk-test = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "rt", "sync", "time", "macros", "test-util"] }

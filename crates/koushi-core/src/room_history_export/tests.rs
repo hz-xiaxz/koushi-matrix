@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use koushi_state::{RoomHistoryExportProgress, RoomHistoryExportRange};
+use koushi_state::{HistoryExportRange, HistoryExportRoomCounts};
 use serde_json::{Value, json};
 
 use super::driver::{
@@ -140,10 +140,10 @@ impl HistoryPageSource for FakeSource {
 }
 
 #[derive(Default)]
-struct RecordedProgress(Vec<RoomHistoryExportProgress>);
+struct RecordedProgress(Vec<HistoryExportRoomCounts>);
 
 impl AsyncProgress for &mut RecordedProgress {
-    async fn page_completed(&mut self, progress: RoomHistoryExportProgress) {
+    async fn page_completed(&mut self, progress: HistoryExportRoomCounts) {
         self.0.push(progress);
     }
 }
@@ -182,15 +182,15 @@ struct Run {
     fetched: Option<FetchResult>,
     output: MemoryOutput,
     events: MemoryOutput,
-    progress: Vec<RoomHistoryExportProgress>,
-    counters: RoomHistoryExportProgress,
+    progress: Vec<HistoryExportRoomCounts>,
+    counters: HistoryExportRoomCounts,
     requested_from: Vec<Option<String>>,
     seeks: Vec<u64>,
 }
 
 fn run(
     pages: Vec<Result<HistoryPage, HistoryPageError>>,
-    range: RoomHistoryExportRange,
+    range: HistoryExportRange,
     output: MemoryOutput,
 ) -> Run {
     run_with_seek(None, pages, range, output)
@@ -199,7 +199,7 @@ fn run(
 fn run_with_seek(
     seek: Option<Result<Option<HistoryPage>, HistoryPageError>>,
     pages: Vec<Result<HistoryPage, HistoryPageError>>,
-    range: RoomHistoryExportRange,
+    range: HistoryExportRange,
     output: MemoryOutput,
 ) -> Run {
     let mut source = FakeSource::new(pages);
@@ -239,19 +239,20 @@ fn run_with_seek(
     }
 }
 
-fn period(start_ms: u64, end_exclusive_ms: u64) -> RoomHistoryExportRange {
-    RoomHistoryExportRange::Period {
+fn period(start_ms: u64, end_exclusive_ms: u64) -> HistoryExportRange {
+    HistoryExportRange::Period {
         start_ms,
         end_exclusive_ms,
         time_zone: "UTC".to_owned(),
     }
 }
 
-fn progress(fetched: u64, exported: u64, undecryptable: u64) -> RoomHistoryExportProgress {
-    RoomHistoryExportProgress {
+fn progress(fetched: u64, exported: u64, undecryptable: u64) -> HistoryExportRoomCounts {
+    HistoryExportRoomCounts {
         fetched_events: fetched,
         exported_events: exported,
         undecryptable_events: undecryptable,
+        ..HistoryExportRoomCounts::default()
     }
 }
 
@@ -281,7 +282,7 @@ fn fixture_matches_element_export_across_pages_with_duplicates_and_empty_pages()
             page(middle, Some("t3")),
             page(tail_with_duplicate, None),
         ],
-        RoomHistoryExportRange::AllAvailable,
+        HistoryExportRange::AllAvailable,
         MemoryOutput::default(),
     );
 
@@ -314,7 +315,7 @@ fn fixture_matches_element_export_across_pages_with_duplicates_and_empty_pages()
 fn output_uses_element_json_stringify_layout() {
     let run = run(
         vec![page(vec![message(1, 5)], None)],
-        RoomHistoryExportRange::AllAvailable,
+        HistoryExportRange::AllAvailable,
         MemoryOutput::default(),
     );
     let expected = "{\n  \"room_name\": \"Synthetic Room\",\n  \"room_creator\": \"Member 1\",\n  \"topic\": \"Synthetic topic\",\n  \"export_date\": \"9/23/2026\",\n  \"exported_by\": \"Member 2\",\n  \"messages\": [\n    {\n      \"content\": {\n        \"body\": \"Synthetic message 1\",\n        \"msgtype\": \"m.text\"\n      },\n      \"event_id\": \"$m1:example.invalid\",\n      \"origin_server_ts\": 5,\n      \"room_id\": \"!history:example.invalid\",\n      \"sender\": \"@member-1:example.invalid\",\n      \"type\": \"m.room.message\",\n      \"unsigned\": {}\n    }\n  ]\n}";
@@ -342,7 +343,7 @@ fn empty_export_writes_an_empty_messages_array_and_omits_an_unknown_creator() {
                 events: MemoryOutput::default().file(),
             },
             &header,
-            &RoomHistoryExportRange::AllAvailable,
+            &HistoryExportRange::AllAvailable,
             OWN_USER,
             &counters,
             &StopFlag::default(),
@@ -359,7 +360,7 @@ fn empty_export_writes_an_empty_messages_array_and_omits_an_unknown_creator() {
 fn period_includes_the_start_instant_and_excludes_the_end_instant() {
     let start = 1_700_000_000_000;
     let end = 1_700_086_400_000;
-    let range = RoomHistoryExportRange::Period {
+    let range = HistoryExportRange::Period {
         start_ms: start,
         end_exclusive_ms: end,
         time_zone: "Asia/Tokyo".to_owned(),
@@ -508,7 +509,7 @@ fn a_full_export_neither_seeks_nor_stops_at_late_timestamps() {
             page(vec![message(1, u64::MAX)], Some("t1")),
             page(vec![message(2, 1)], None),
         ],
-        RoomHistoryExportRange::AllAvailable,
+        HistoryExportRange::AllAvailable,
         MemoryOutput::default(),
     );
     assert_eq!(run.result, Ok(()));
@@ -557,7 +558,7 @@ fn a_repeated_token_ends_the_walk() {
             page(vec![message(1, 1)], Some("t1")),
             page(vec![message(2, 2)], Some("t1")),
         ],
-        RoomHistoryExportRange::AllAvailable,
+        HistoryExportRange::AllAvailable,
         MemoryOutput::default(),
     );
     assert_eq!(run.result, Ok(()));
@@ -572,7 +573,7 @@ fn an_unbounded_run_of_empty_pages_fails_instead_of_committing() {
         .collect();
     let run = run(
         pages,
-        RoomHistoryExportRange::AllAvailable,
+        HistoryExportRange::AllAvailable,
         MemoryOutput::default(),
     );
     assert_eq!(run.result, Err(FetchFailure::Sdk));
@@ -591,7 +592,7 @@ fn empty_pages_within_the_bound_do_not_end_the_walk() {
     pages.push(page(vec![message(1, 1)], None));
     let run = run(
         pages,
-        RoomHistoryExportRange::AllAvailable,
+        HistoryExportRange::AllAvailable,
         MemoryOutput::default(),
     );
     assert_eq!(run.result, Ok(()));
@@ -605,7 +606,7 @@ fn a_page_failure_fails_the_export_without_committing() {
             page(vec![message(1, 1), message(2, 2)], Some("t1")),
             Err(HistoryPageError::Network),
         ],
-        RoomHistoryExportRange::AllAvailable,
+        HistoryExportRange::AllAvailable,
         MemoryOutput::default(),
     );
     assert_eq!(run.result, Err(FetchFailure::Network));
@@ -614,7 +615,7 @@ fn a_page_failure_fails_the_export_without_committing() {
 
     let sdk = self::run(
         vec![Err(HistoryPageError::Sdk)],
-        RoomHistoryExportRange::AllAvailable,
+        HistoryExportRange::AllAvailable,
         MemoryOutput::default(),
     );
     assert_eq!(sdk.result, Err(FetchFailure::Sdk));
@@ -631,7 +632,7 @@ fn a_write_failure_fails_the_export_without_committing() {
             vec![message(1, 1), message(2, 2), message(3, 3)],
             None,
         )],
-        RoomHistoryExportRange::AllAvailable,
+        HistoryExportRange::AllAvailable,
         output,
     );
     assert_eq!(run.result, Err(FetchFailure::Write(HistoryExportFsError::Io)));
@@ -811,7 +812,7 @@ fn events_jsonl_keeps_every_in_range_event_while_messages_json_is_unchanged() {
 fn the_fixture_writes_one_jsonl_line_per_distinct_fetched_event() {
     let run = run(
         vec![page(fixture_events(), None)],
-        RoomHistoryExportRange::AllAvailable,
+        HistoryExportRange::AllAvailable,
         MemoryOutput::default(),
     );
     let mut actual: Value = serde_json::from_str(&run.output.text()).unwrap();
@@ -836,7 +837,7 @@ fn fetch_collects_rendered_attachments_and_senders_in_order() {
     };
     let run = run(
         vec![page(vec![file(1, "m.file"), message(9, 2), file(3, "m.image")], None)],
-        RoomHistoryExportRange::AllAvailable,
+        HistoryExportRange::AllAvailable,
         MemoryOutput::default(),
     );
     let fetched = run.fetched.unwrap();
@@ -855,7 +856,7 @@ fn fetch_stops_between_pages_without_committing() {
     let stop = StopFlag::default();
     struct StopAfterFirstPage(StopFlag);
     impl AsyncProgress for StopAfterFirstPage {
-        async fn page_completed(&mut self, _progress: RoomHistoryExportProgress) {
+        async fn page_completed(&mut self, _progress: HistoryExportRoomCounts) {
             self.0.set();
         }
     }
@@ -871,7 +872,7 @@ fn fetch_stops_between_pages_without_committing() {
                 events: events.file(),
             },
             &header(),
-            &RoomHistoryExportRange::AllAvailable,
+            &HistoryExportRange::AllAvailable,
             OWN_USER,
             &Arc::new(ExportCounters::default()),
             &stop,

@@ -18,10 +18,11 @@ use serde_json::Value;
 use super::fs::{HistoryExportFilesystem, HistoryExportFsError};
 use super::layout::{attachment_file_name, thumbnail_file_name};
 use super::records::{AttachmentIndex, AttachmentKind, AttachmentRecord, AttachmentStatus};
-use super::thumbnail::{THUMB_MAX_EDGE, thumbnail_jpeg};
 use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
 use crate::executor;
 
+/// Longest edge of a thumbnail, in pixels.
+const THUMB_MAX_EDGE: u32 = 480;
 /// Attempts per attachment for transient failures.
 pub(crate) const FETCH_ATTEMPTS: u32 = 3;
 /// Waits before the second and third attempts.
@@ -240,7 +241,7 @@ pub(crate) async fn download_attachments<F: AttachmentFetcher>(
                 );
                 fs.write_atomic(&room_dir.join(&file), &bytes)?;
                 if matches!(record.kind, AttachmentKind::Image | AttachmentKind::Sticker)
-                    && let Some(thumb_bytes) = thumbnail_jpeg(&bytes, THUMB_MAX_EDGE)
+                    && let Some(thumb_bytes) = koushi_media::thumbnail_jpeg(&bytes, THUMB_MAX_EDGE)
                 {
                     let thumb = format!("thumbs/{}", thumbnail_file_name(sequence));
                     fs.write_atomic(&room_dir.join(&thumb), &thumb_bytes)?;

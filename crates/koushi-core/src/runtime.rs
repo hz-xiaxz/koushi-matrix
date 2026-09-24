@@ -2184,13 +2184,14 @@ impl AppActor {
                         | AccountCommand::StartSessionBootstrap { .. }
                         | AccountCommand::ConfirmSessionBootstrapSaved { .. }
                         | AccountCommand::StartOwnUserSas { .. }
-                        | AccountCommand::ExportRoomHistory { .. }
+                        | AccountCommand::ExportHistory { .. }
+                        | AccountCommand::RetryHistoryExport { .. }
                 );
                 let should_route = !requires_projection_acceptance || projected_state_changed;
                 if !should_route {
                     let failure =
                         secure_backup_setup_projection_failure(&self.state, &account_command)
-                            .or_else(|| room_history_export_projection_failure(&account_command))
+                            .or_else(|| history_export_projection_failure(&account_command))
                             .unwrap_or(CoreFailure::SessionRequired);
                     self.emit(CoreEvent::OperationFailed {
                         request_id: command_request_id,
@@ -2209,10 +2210,10 @@ impl AppActor {
                 // it observes it via the action channel.
                 let native_artifact = native_artifact_for_account_command(&account_command);
                 let message = match account_command {
-                    AccountCommand::ExportRoomHistory {
+                    AccountCommand::ExportHistory {
                         request_id,
                         request,
-                    } => AccountMessage::ExportRoomHistory {
+                    } => AccountMessage::ExportHistory {
                         request_id,
                         request,
                         locale: koushi_state::resolve_catalog_locale(
@@ -4778,10 +4779,15 @@ fn is_ready_session_for_commands(session: &SessionState) -> bool {
     matches!(session, SessionState::Ready(_))
 }
 
-/// A rejected history export (range, unknown room, or one already in flight)
-/// leaves the reducer unchanged; the command settles as a room failure.
-fn room_history_export_projection_failure(command: &AccountCommand) -> Option<CoreFailure> {
-    matches!(command, AccountCommand::ExportRoomHistory { .. }).then_some(
+/// A rejected history export or retry (range, unknown room or Space, a stale
+/// retry target, or one already in flight) leaves the reducer unchanged; the
+/// command settles as a room failure.
+fn history_export_projection_failure(command: &AccountCommand) -> Option<CoreFailure> {
+    matches!(
+        command,
+        AccountCommand::ExportHistory { .. } | AccountCommand::RetryHistoryExport { .. }
+    )
+    .then_some(
         CoreFailure::RoomOperationFailed {
             kind: RoomFailureKind::Sdk,
         },
@@ -4945,18 +4951,25 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
                 request_id: request_id.sequence,
             })
         }
-        AccountCommand::ExportRoomHistory {
+        AccountCommand::ExportHistory {
             request_id,
             request,
-        } => Some(AppAction::RoomHistoryExportRequested {
+        } => Some(AppAction::HistoryExportRequested {
             request_id: request_id.sequence,
-            room_id: request.room_id.clone(),
+            scope: request.scope.clone(),
             range: request.range.clone(),
         }),
-        AccountCommand::CancelRoomHistoryExport {
+        AccountCommand::StopHistoryExport {
             target_request_id, ..
-        } => Some(AppAction::RoomHistoryExportCancelRequested {
+        } => Some(AppAction::HistoryExportStopRequested {
             request_id: target_request_id.sequence,
+        }),
+        AccountCommand::RetryHistoryExport {
+            request_id,
+            target_request_id,
+        } => Some(AppAction::HistoryExportRetryRequested {
+            request_id: request_id.sequence,
+            target_request_id: target_request_id.sequence,
         }),
         AccountCommand::ImportRoomKeys { request_id, .. } => {
             Some(AppAction::RoomKeyImportRequested {

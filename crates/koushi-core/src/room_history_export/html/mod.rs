@@ -17,6 +17,11 @@ mod room_page_tests;
 #[cfg(test)]
 mod test_support;
 
+#[cfg(test)]
+pub(crate) fn test_labels() -> koushi_protocol::HistoryExportLabels {
+    test_support::labels()
+}
+
 /// The math bootstrap written to `assets/koushi-math.js`.
 pub(crate) const MATH_BOOTSTRAP: &[u8] = include_bytes!("../../../assets/koushi-math.js");
 

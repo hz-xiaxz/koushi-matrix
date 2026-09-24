@@ -1,11 +1,8 @@
-//! Reduced previews for image attachments on exported pages.
+//! Reduced JPEG previews of raster images (history export thumbnails).
 
 use std::io::Cursor;
 
 use image::{DynamicImage, ImageDecoder, ImageReader, Limits, codecs::jpeg::JpegEncoder};
-
-/// Longest edge of a thumbnail, in pixels.
-pub(crate) const THUMB_MAX_EDGE: u32 = 480;
 
 const JPEG_QUALITY: u8 = 80;
 /// Decoding cap so a hostile image cannot exhaust memory.
@@ -14,7 +11,7 @@ const MAX_DECODE_ALLOC: u64 = 512 * 1024 * 1024;
 /// A JPEG no larger than `max_edge` on either side, upright per the image's
 /// EXIF orientation. `None` when the bytes are not a decodable raster image
 /// (unsupported formats such as GIF or SVG, or corrupt data).
-pub(crate) fn thumbnail_jpeg(bytes: &[u8], max_edge: u32) -> Option<Vec<u8>> {
+pub fn thumbnail_jpeg(bytes: &[u8], max_edge: u32) -> Option<Vec<u8>> {
     let mut reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .ok()?;

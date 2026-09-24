@@ -32,7 +32,8 @@ use crate::state::{
     VerificationGateState, VerificationMethod, VerificationTarget,
 };
 use crate::state::{
-    RoomHistoryExportFailureKind, RoomHistoryExportProgress, RoomHistoryExportRange,
+    HistoryExportFailureKind, HistoryExportRange, HistoryExportRoom, HistoryExportRoomCounts,
+    HistoryExportRoomFailureKind, HistoryExportRoomPhase, HistoryExportScope,
 };
 use crate::state::{SlidingSyncAdmission, SlidingSyncCapabilityResult};
 
@@ -570,30 +571,47 @@ pub enum AppAction {
         request_id: u64,
         kind: TrustOperationFailureKind,
     },
-    RoomHistoryExportRequested {
+    /// A history export was admitted by the runtime (see "History Export").
+    HistoryExportRequested {
+        request_id: u64,
+        scope: HistoryExportScope,
+        range: HistoryExportRange,
+    },
+    /// Resume a settled export's folder under a new request.
+    HistoryExportRetryRequested {
+        request_id: u64,
+        target_request_id: u64,
+    },
+    /// Core resolved the folder and listed the rooms.
+    HistoryExportPrepared {
+        request_id: u64,
+        rooms: Vec<HistoryExportRoom>,
+    },
+    HistoryExportRoomProgressed {
         request_id: u64,
         room_id: String,
-        range: RoomHistoryExportRange,
+        phase: HistoryExportRoomPhase,
+        counts: HistoryExportRoomCounts,
     },
-    RoomHistoryExportProgressed {
+    HistoryExportRoomSettled {
         request_id: u64,
-        progress: RoomHistoryExportProgress,
+        room_id: String,
+        phase: HistoryExportRoomPhase,
+        counts: HistoryExportRoomCounts,
+        failure_kind: Option<HistoryExportRoomFailureKind>,
     },
-    RoomHistoryExportCancelRequested {
+    HistoryExportStopRequested {
         request_id: u64,
     },
-    RoomHistoryExportCompleted {
+    HistoryExportCompleted {
         request_id: u64,
-        progress: RoomHistoryExportProgress,
     },
-    RoomHistoryExportCancelled {
+    HistoryExportStopped {
         request_id: u64,
-        progress: RoomHistoryExportProgress,
     },
-    RoomHistoryExportFailed {
+    HistoryExportFailed {
         request_id: u64,
-        kind: RoomHistoryExportFailureKind,
-        progress: RoomHistoryExportProgress,
+        kind: HistoryExportFailureKind,
     },
     RoomKeyImportRequested {
         request_id: u64,
@@ -1893,13 +1911,46 @@ impl fmt::Debug for AppAction {
                 .debug_struct("FilesViewSelectionChanged")
                 .field("event_id", &event_id.as_ref().map(|_| "EventId(..)"))
                 .finish(),
-            Self::RoomHistoryExportRequested {
-                request_id, range, ..
+            Self::HistoryExportRequested {
+                request_id,
+                scope,
+                range,
             } => formatter
-                .debug_struct("RoomHistoryExportRequested")
+                .debug_struct("HistoryExportRequested")
+                .field("request_id", request_id)
+                .field("scope", scope)
+                .field("range", range)
+                .finish(),
+            Self::HistoryExportPrepared { request_id, rooms } => formatter
+                .debug_struct("HistoryExportPrepared")
+                .field("request_id", request_id)
+                .field("rooms", rooms)
+                .finish(),
+            Self::HistoryExportRoomProgressed {
+                request_id,
+                phase,
+                counts,
+                ..
+            } => formatter
+                .debug_struct("HistoryExportRoomProgressed")
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
-                .field("range", range)
+                .field("phase", phase)
+                .field("counts", counts)
+                .finish(),
+            Self::HistoryExportRoomSettled {
+                request_id,
+                phase,
+                counts,
+                failure_kind,
+                ..
+            } => formatter
+                .debug_struct("HistoryExportRoomSettled")
+                .field("request_id", request_id)
+                .field("room_id", &"RoomId(..)")
+                .field("phase", phase)
+                .field("counts", counts)
+                .field("failure_kind", failure_kind)
                 .finish(),
             _ => formatter.write_str("AppAction(..)"),
         }

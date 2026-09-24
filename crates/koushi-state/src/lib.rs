@@ -157,10 +157,6 @@ pub use state::{
     HistoryExportRoomFailureKind, HistoryExportRoomPhase, HistoryExportRoomSkipReason,
     HistoryExportScope, HistoryExportState,
 };
-pub use state::{
-    RoomHistoryExportFailureKind, RoomHistoryExportProgress, RoomHistoryExportRange,
-    RoomHistoryExportState,
-};
 pub use submission::{
     ComposerSubmissionTarget, ComposerSubmissionTerminalOutcome, ComposerTarget, SubmissionId,
 };

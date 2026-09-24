@@ -9,7 +9,70 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-pub use super::room_history_export::RoomHistoryExportRange as HistoryExportRange;
+/// Which part of the history to export.
+///
+/// A period is resolved by the platform adapter from civil dates into UTC
+/// instants: `start_ms` is 00:00 of the start day and `end_exclusive_ms` is
+/// 00:00 of the day after the end day, both in `time_zone`. Rust owns the
+/// validation and the per-event inclusion test.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum HistoryExportRange {
+    /// Every event this account can read from the server.
+    AllAvailable,
+    /// Events with `start_ms <= origin_server_ts < end_exclusive_ms`.
+    Period {
+        start_ms: u64,
+        end_exclusive_ms: u64,
+        /// IANA time-zone name used to resolve the civil dates.
+        time_zone: String,
+    },
+}
+
+impl HistoryExportRange {
+    /// Whether the range can be exported: a period must be non-empty and name
+    /// the time zone its civil dates were resolved in.
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::AllAvailable => true,
+            Self::Period {
+                start_ms,
+                end_exclusive_ms,
+                time_zone,
+            } => start_ms < end_exclusive_ms && !time_zone.trim().is_empty(),
+        }
+    }
+
+    /// Whether an event timestamp falls inside the range.
+    pub fn contains(&self, origin_server_ts: u64) -> bool {
+        match self {
+            Self::AllAvailable => true,
+            Self::Period {
+                start_ms,
+                end_exclusive_ms,
+                ..
+            } => *start_ms <= origin_server_ts && origin_server_ts < *end_exclusive_ms,
+        }
+    }
+}
+
+impl fmt::Debug for HistoryExportRange {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AllAvailable => formatter.write_str("HistoryExportRange::AllAvailable"),
+            Self::Period {
+                start_ms,
+                end_exclusive_ms,
+                ..
+            } => formatter
+                .debug_struct("HistoryExportRange::Period")
+                .field("start_ms", start_ms)
+                .field("end_exclusive_ms", end_exclusive_ms)
+                .field("time_zone", &"TimeZone(..)")
+                .finish(),
+        }
+    }
+}
 
 /// What one export covers.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]

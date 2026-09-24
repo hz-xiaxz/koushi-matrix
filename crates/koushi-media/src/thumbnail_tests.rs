@@ -2,7 +2,9 @@ use std::io::Cursor;
 
 use image::{DynamicImage, ImageFormat, RgbImage};
 
-use super::thumbnail::{THUMB_MAX_EDGE, thumbnail_jpeg};
+use super::thumbnail::thumbnail_jpeg;
+
+const THUMB_MAX_EDGE: u32 = 480;
 
 fn encode(width: u32, height: u32, format: ImageFormat) -> Vec<u8> {
     let image = DynamicImage::ImageRgb8(RgbImage::from_pixel(width, height, image::Rgb([200, 30, 30])));

@@ -192,7 +192,7 @@ impl AccountActor {
         self.stop_recovery_trust_settlement_task().await;
         self.stop_provisional_runtime().await;
         self.cancel_current_session_status_refresh().await;
-        self.stop_room_history_export().await;
+        self.stop_history_export().await;
         self.stop_active_session_account_management_discovery()
             .await;
         self.cancel_secure_backup_inspection().await;

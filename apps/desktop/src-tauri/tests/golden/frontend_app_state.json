@@ -1023,6 +1023,68 @@
         "kind": "open",
         "room_id": "!room:example.invalid"
       },
+      "history_export": {
+        "kind": "running",
+        "range": {
+          "end_exclusive_ms": 1700086400000,
+          "kind": "period",
+          "start_ms": 1700000000000,
+          "time_zone": "Asia/Tokyo"
+        },
+        "request_id": 12,
+        "rooms": [
+          {
+            "counts": {
+              "attachments_done": 5,
+              "attachments_failed": 1,
+              "attachments_total": 12,
+              "exported_events": 180,
+              "fetched_events": 250,
+              "undecryptable_events": 2
+            },
+            "display_name": "Room",
+            "failure_kind": null,
+            "phase": "attachments",
+            "room_id": "!room:example.invalid",
+            "skip_reason": null
+          },
+          {
+            "counts": {
+              "attachments_done": 0,
+              "attachments_failed": 0,
+              "attachments_total": 0,
+              "exported_events": 0,
+              "fetched_events": 0,
+              "undecryptable_events": 0
+            },
+            "display_name": "Unjoined",
+            "failure_kind": null,
+            "phase": "skipped",
+            "room_id": "!unjoined:example.invalid",
+            "skip_reason": "notJoined"
+          },
+          {
+            "counts": {
+              "attachments_done": 0,
+              "attachments_failed": 0,
+              "attachments_total": 0,
+              "exported_events": 0,
+              "fetched_events": 0,
+              "undecryptable_events": 0
+            },
+            "display_name": "Failed",
+            "failure_kind": "network",
+            "phase": "failed",
+            "room_id": "!failed:example.invalid",
+            "skip_reason": null
+          }
+        ],
+        "scope": {
+          "kind": "space",
+          "space_id": "!space:example.invalid"
+        },
+        "stop_requested": false
+      },
       "navigation": {
         "active_room_id": "!room:example.invalid",
         "active_space_id": "!space:example.invalid",
@@ -1052,23 +1114,6 @@
         "space_order": [
           "!space:example.invalid"
         ]
-      },
-      "room_history_export": {
-        "cancel_requested": false,
-        "kind": "exporting",
-        "progress": {
-          "exported_events": 180,
-          "fetched_events": 250,
-          "undecryptable_events": 2
-        },
-        "range": {
-          "end_exclusive_ms": 1700086400000,
-          "kind": "period",
-          "start_ms": 1700000000000,
-          "time_zone": "Asia/Tokyo"
-        },
-        "request_id": 12,
-        "room_id": "!room:example.invalid"
       },
       "room_list": {
         "active_filter": {
