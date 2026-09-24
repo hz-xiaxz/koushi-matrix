@@ -7,7 +7,7 @@ build gates. AGENTS.md remains the operational how-to (permissions, install
 caveats, recovery steps); durable rules discovered there are promoted to
 REPOSITORY_RULES.md or this document.
 
-Last amended: 2026-09-10.
+Last amended: 2026-09-24.
 
 ## Design Simplicity
 
@@ -251,7 +251,7 @@ Rules:
    the changed setting.
    New or rotated outbound Megolm sessions are uploaded asynchronously by the
    SDK backup worker. Koushi observes backup state changes and performs one
-   single-owner periodic health inspection while the verified session is
+   single-owner periodic health inspection every 30 minutes while the verified session is
    active. Identifiers, backup versions, key material, message content,
    filesystem paths, and raw failures never cross its typed diagnostics.
    Outbound encrypted sends use the stock Element X sequence only: synchronize

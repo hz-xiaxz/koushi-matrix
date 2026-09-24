@@ -1,6 +1,4 @@
-use super::room::{
-    ROOM_OPERATION_EVENT_TIMEOUT, build_refresh_pinned_events_command, wait_for_room_operation,
-};
+use super::room::build_refresh_pinned_events_command;
 use super::timeline::{
     build_observe_timeline_viewport_command, build_open_timeline_at_timestamp_command,
     build_update_navigation_scroll_anchor_command,
@@ -94,12 +92,12 @@ pub async fn select_room(
 ) -> Result<FrontendCommandSettlement, String> {
     let selected_room_id = room_id.clone();
     let mut event_conn = state.runtime.attach();
-    event_conn
+    let generation = event_conn
         .select_room_and_wait(selected_room_id.clone(), SELECT_ROOM_EVENT_TIMEOUT)
         .await
         .map_err(invoke_error_from_select_room_error)?;
-    let baseline = event_conn.versioned_snapshot();
-    let account_key = account_key_from_app_state(&baseline.state);
+    // Pinned-event bodies may require network fetches. Their refresh is
+    // independent of the committed room selection and must not delay it.
     let refresh_request_id = event_conn.next_request_id();
     event_conn
         .command(build_refresh_pinned_events_command(
@@ -108,17 +106,6 @@ pub async fn select_room(
         ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
-    let generation = wait_for_room_operation(
-        &mut event_conn,
-        refresh_request_id,
-        baseline.generation,
-        account_key,
-        selected_room_id,
-        RoomOperationKind::PinnedEventsRefreshed,
-        ROOM_OPERATION_EVENT_TIMEOUT,
-        "pinned messages refresh",
-    )
-    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(FrontendCommandSettlement::from_published_generation(
         generation,

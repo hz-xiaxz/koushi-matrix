@@ -632,6 +632,7 @@ impl TimelineManagerActor {
                 session.client().send_queue().subscribe(),
                 Arc::clone(&send_completion),
                 terminal_ingress.clone(),
+                Some(session.client()),
             )) as GlobalSendCompletionObserverFuture);
         let actor = TimelineManagerActor {
             session: Some(Arc::clone(&session)),

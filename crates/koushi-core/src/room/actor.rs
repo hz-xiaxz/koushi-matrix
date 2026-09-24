@@ -13,7 +13,7 @@ use crate::timeline::TimelineSubscriptionResidencyHandle;
 use crate::timeline::{RoomMembershipTransition, VisibleRoomObservation};
 use koushi_protocol::command::RoomCommand;
 use koushi_protocol::event::CoreEvent;
-use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
 use koushi_protocol::ids::RequestId;
 #[cfg(test)]
 use koushi_protocol::ids::RuntimeConnectionId;
@@ -21,7 +21,7 @@ use koushi_sdk::{
     MatrixClientSession, MatrixJoinedMemberSnapshot, MatrixRoomOperationError,
     MatrixSpaceMembersProjection,
 };
-use koushi_state::{AppAction, MentionSurface, RoomListFailureKind, RoomListSource};
+use koushi_state::{AppAction, MentionSurface, PinnedEvent, RoomListFailureKind, RoomListSource};
 #[cfg(any(test, feature = "test-hooks"))]
 use std::sync::{Mutex, atomic::AtomicUsize};
 use std::{
@@ -139,6 +139,13 @@ pub enum RoomMessage {
     /// The actor reloads only the affected rooms so external pin/unpin actions
     /// become visible without polling every room.
     PinnedEventsChanged { room_ids: BTreeSet<String> },
+    PinnedRefreshCompleted {
+        generation: u64,
+        sequence: u64,
+        request_id: Option<RequestId>,
+        room_id: String,
+        result: Result<Vec<PinnedEvent>, RoomFailureKind>,
+    },
     #[cfg(any(test, feature = "test-hooks"))]
     TestVisibleRoomsObserved {
         core_generation: u64,
@@ -404,6 +411,7 @@ pub struct RoomActor {
     #[cfg(any(test, feature = "test-hooks"))]
     pub(super) room_operation_test_reached_count: Arc<AtomicUsize>,
     pub(super) observation: Option<RoomListObservation>,
+    pub(super) space_hydration_enqueue_task: Option<executor::JoinHandle<()>>,
     room_list_generation: u64,
     room_list_source: Option<RoomListSource>,
     room_list_backend_generation: Option<u64>,
@@ -426,6 +434,10 @@ pub struct RoomActor {
     pub(super) event_tx: broadcast::Sender<CoreEvent>,
     pub(super) sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
     pub(super) self_tx: mpsc::Sender<RoomMessage>,
+    pub(super) pinned_generation: u64,
+    pub(super) pinned_refresh_sequence: u64,
+    pub(super) pinned_latest_refresh: HashMap<String, u64>,
+    pub(super) pinned_refresh_tasks: Vec<executor::JoinHandle<()>>,
     command_rx: mpsc::Receiver<RoomMessage>,
 }
 
@@ -465,6 +477,7 @@ impl RoomActor {
             #[cfg(any(test, feature = "test-hooks"))]
             room_operation_test_reached_count: room_operation_test_reached_count.clone(),
             observation: None,
+            space_hydration_enqueue_task: None,
             room_list_generation: 0,
             room_list_source: None,
             room_list_backend_generation: None,
@@ -487,6 +500,10 @@ impl RoomActor {
             event_tx,
             sliding_sync_diagnostics,
             self_tx: tx.clone(),
+            pinned_generation: 0,
+            pinned_refresh_sequence: 0,
+            pinned_latest_refresh: HashMap::new(),
+            pinned_refresh_tasks: Vec::new(),
             command_rx,
         };
         let task = executor::spawn(actor.run());
@@ -507,6 +524,7 @@ impl RoomActor {
         while let Some(msg) = self.command_rx.recv().await {
             match msg {
                 RoomMessage::Shutdown => {
+                    self.stop_pinned_refreshes().await;
                     self.stop_observation().await;
                     break;
                 }
@@ -519,6 +537,7 @@ impl RoomActor {
                     let _ = processed.send(());
                 }
                 RoomMessage::SessionEstablished { session } => {
+                    self.stop_pinned_refreshes().await;
                     // Room operations become available; observation starts
                     // later on SyncStarted (backend then known).
                     self.reset_space_member_session();
@@ -534,6 +553,7 @@ impl RoomActor {
                     source,
                     backend_generation,
                 } => {
+                    self.stop_pinned_refreshes().await;
                     // Guard against two observation loops running: a previous
                     // loop (from an earlier SyncStarted) is stopped before the
                     // replacement is spawned.
@@ -663,6 +683,7 @@ impl RoomActor {
                     }
                 }
                 RoomMessage::SessionCleared { ack } => {
+                    self.stop_pinned_refreshes().await;
                     self.stop_observation().await;
                     self.reset_space_member_session();
                     self.session = None;
@@ -717,7 +738,22 @@ impl RoomActor {
                     .await;
                 }
                 RoomMessage::PinnedEventsChanged { room_ids } => {
-                    self.handle_pinned_events_changed(room_ids).await;
+                    self.handle_pinned_events_changed(room_ids);
+                }
+                RoomMessage::PinnedRefreshCompleted {
+                    generation,
+                    sequence,
+                    request_id,
+                    room_id,
+                    result,
+                } => {
+                    if generation == self.pinned_generation
+                        && self.pinned_latest_refresh.get(&room_id) == Some(&sequence)
+                    {
+                        self.pinned_latest_refresh.remove(&room_id);
+                        self.handle_pinned_refresh_completed(request_id, room_id, result)
+                            .await;
+                    }
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 RoomMessage::TestVisibleRoomsObserved {
@@ -906,7 +942,7 @@ impl RoomActor {
                 request_id,
                 room_id,
             } => {
-                self.handle_refresh_pinned_events(request_id, room_id).await;
+                self.handle_refresh_pinned_events(request_id, room_id);
             }
             RoomCommand::QueryDirectory { request_id, query } => {
                 self.handle_query_directory(request_id, query).await;
@@ -1022,13 +1058,19 @@ impl RoomActor {
                 let hydration_space_id = space_id.clone();
                 self.reduce_reliable(vec![AppAction::SelectSpace { space_id }])
                     .await;
+                if let Some(task) = self.space_hydration_enqueue_task.take() {
+                    task.abort();
+                    let _ = task.await;
+                }
                 if let Some(space_id) = hydration_space_id
                     && let Some(observation) = &self.observation
                 {
-                    let _ = observation
-                        .command_tx
-                        .send(RoomListObservationCommand::HydrateSpaceMembers { space_id })
-                        .await;
+                    let command_tx = observation.command_tx.clone();
+                    self.space_hydration_enqueue_task = Some(executor::spawn(async move {
+                        let _ = command_tx
+                            .send(RoomListObservationCommand::HydrateSpaceMembers { space_id })
+                            .await;
+                    }));
                 }
             }
             RoomCommand::ReorderSpaces {

@@ -1397,6 +1397,12 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             room_id,
             transaction_id,
         ),
+        AppAction::ComposerSubmissionQueued {
+            submission_id,
+            transaction_id,
+            target,
+            draft_revision,
+        } => submission::handle_queued(state, submission_id, transaction_id, target, draft_revision),
         AppAction::ComposerSubmissionSettled {
             submission_id,
             transaction_id,

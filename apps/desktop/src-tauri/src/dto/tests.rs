@@ -1605,6 +1605,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
             accepted_submission_ids: [koushi_state::SubmissionId::new("global-accepted")]
                 .into_iter()
                 .collect(),
+            queued_submission_ids: Default::default(),
             settled_submission_ids: [koushi_state::SubmissionId::new("global-settled")]
                 .into_iter()
                 .collect(),

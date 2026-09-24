@@ -83,6 +83,8 @@ pub enum TimelineContinuityState {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ComposerSubmissionRegistry {
     pub accepted_submission_ids: VecDeque<SubmissionId>,
+    #[serde(default)]
+    pub queued_submission_ids: VecDeque<SubmissionId>,
     pub settled_submission_ids: VecDeque<SubmissionId>,
     #[serde(skip)]
     pub active_submissions: VecDeque<ComposerSubmissionRecord>,
@@ -102,6 +104,10 @@ impl fmt::Debug for ComposerSubmissionRecord {
 }
 
 impl ComposerSubmissionRegistry {
+    pub(crate) fn remember_queued(&mut self, id: SubmissionId) {
+        remember_bounded_id(&mut self.queued_submission_ids, id);
+    }
+
     pub(crate) fn remember_accepted(
         &mut self,
         id: SubmissionId,
@@ -133,6 +139,7 @@ impl ComposerSubmissionRegistry {
 
     pub(crate) fn remember_settled(&mut self, id: SubmissionId) {
         self.accepted_submission_ids.retain(|active| active != &id);
+        self.queued_submission_ids.retain(|queued| queued != &id);
         self.active_submissions
             .retain(|active| active.submission_id != id);
         remember_bounded_id(&mut self.settled_submission_ids, id);

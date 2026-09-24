@@ -1196,6 +1196,7 @@
           "accepted_submission_ids": [
             "global-accepted"
           ],
+          "queued_submission_ids": [],
           "settled_submission_ids": [
             "global-settled"
           ]

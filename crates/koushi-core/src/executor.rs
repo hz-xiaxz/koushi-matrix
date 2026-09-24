@@ -31,6 +31,10 @@ pub async fn sleep(duration: Duration) {
     tokio::time::sleep(duration).await;
 }
 
+pub async fn sleep_until(deadline: Instant) {
+    tokio::time::sleep_until(deadline).await;
+}
+
 pub async fn timeout<F: Future>(
     duration: Duration,
     future: F,

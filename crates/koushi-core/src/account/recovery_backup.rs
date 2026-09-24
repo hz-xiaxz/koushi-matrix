@@ -44,7 +44,7 @@ const SECURE_BACKUP_RETRY_BASE: Duration = Duration::from_secs(5);
 
 const SECURE_BACKUP_RETRY_MAX: Duration = Duration::from_secs(5 * 60);
 
-const SECURE_BACKUP_MONITOR_INTERVAL: Duration = Duration::from_secs(60);
+const SECURE_BACKUP_MONITOR_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
 pub(super) fn secure_backup_retry_delay(attempt: u32, jitter_seed: u64) -> Duration {
     let exponent = attempt.min(6);
@@ -160,7 +160,23 @@ fn secure_backup_inspection_completion_action(
         return None;
     }
     let gate = match result {
-        Ok(inspection) => inspection.recommended_gate_state(),
+        Ok(inspection) => {
+            let gate = inspection.recommended_gate_state();
+            if was_admitted && matches!(gate, koushi_state::SecureBackupGateState::Checking) {
+                // A server observation without authority is not evidence that
+                // the previously verified backup has become unsafe.
+                koushi_state::SecureBackupGateState::DegradedRetrying {
+                    failure: koushi_state::SecureBackupGateFailureKind::Network,
+                }
+            } else if !was_admitted && matches!(gate, koushi_state::SecureBackupGateState::Checking)
+            {
+                koushi_state::SecureBackupGateState::BlockedFailed {
+                    failure: koushi_state::SecureBackupGateFailureKind::Network,
+                }
+            } else {
+                gate
+            }
+        }
         Err(
             failure @ (koushi_state::SecureBackupGateFailureKind::Network
             | koushi_state::SecureBackupGateFailureKind::RateLimited
@@ -169,6 +185,28 @@ fn secure_backup_inspection_completion_action(
         Err(failure) => koushi_state::SecureBackupGateState::BlockedFailed { failure },
     };
     Some(AppAction::SecureBackupGateChanged(gate))
+}
+
+fn backup_state_change_requires_gate_check(state: koushi_sdk::MatrixSecureBackupState) -> bool {
+    matches!(
+        state.backup,
+        koushi_sdk::MatrixSecureBackupLocalState::Disabled
+            | koushi_sdk::MatrixSecureBackupLocalState::Disabling
+    ) || matches!(
+        state.recovery,
+        koushi_sdk::MatrixSecureBackupRecoveryState::Disabled
+            | koushi_sdk::MatrixSecureBackupRecoveryState::Incomplete
+    )
+}
+
+fn backup_state_change_requires_inspection(
+    state: koushi_sdk::MatrixSecureBackupState,
+    already_admitted: bool,
+) -> bool {
+    backup_state_change_requires_gate_check(state)
+        || (!already_admitted
+            && state.backup == koushi_sdk::MatrixSecureBackupLocalState::Enabled
+            && state.recovery == koushi_sdk::MatrixSecureBackupRecoveryState::Enabled)
 }
 
 fn secure_backup_gate_token(gate: &koushi_state::SecureBackupGateState) -> &'static str {
@@ -1700,7 +1738,7 @@ impl AccountActor {
                 Some(attempt),
             )
         } else {
-            (SECURE_BACKUP_MONITOR_INTERVAL, "periodic_60s", None)
+            (SECURE_BACKUP_MONITOR_INTERVAL, "periodic_30m", None)
         };
         record(
             DiagnosticEvent::new(
@@ -1894,9 +1932,14 @@ impl AccountActor {
         }
         let generation = self.trust_generation;
         let mut observation = session.observe_secure_backup_state();
+        let mut previous = observation.current;
         let tx = self.self_tx.clone();
         self.secure_backup_observer = Some(executor::spawn(async move {
             while let Some(state) = observation.updates.next().await {
+                if state == previous {
+                    continue;
+                }
+                previous = state;
                 if tx
                     .send(AccountMessage::SecureBackupStateChanged { generation, state })
                     .await
@@ -1916,16 +1959,19 @@ impl AccountActor {
         if generation != self.trust_generation || !self.session_promoted {
             return;
         }
-        if state.backup != koushi_sdk::MatrixSecureBackupLocalState::Enabled
-            || state.recovery != koushi_sdk::MatrixSecureBackupRecoveryState::Enabled
-        {
+        if backup_state_change_requires_gate_check(state) {
             self.set_secure_backup_send_admitted(false);
+            self.send_actions(vec![AppAction::SecureBackupGateChanged(
+                koushi_state::SecureBackupGateState::Checking,
+            )])
+            .await;
         }
-        self.send_actions(vec![AppAction::SecureBackupGateChanged(
-            koushi_state::SecureBackupGateState::Checking,
-        )])
-        .await;
-        self.start_secure_backup_inspection();
+        // Healthy/unknown SDK state notifications can occur repeatedly during
+        // sync. They do not invalidate a proven gate or reset its 30-minute
+        // monitor. A blocked gate still inspects an enabling transition.
+        if backup_state_change_requires_inspection(state, self.secure_backup_ready) {
+            self.start_secure_backup_inspection();
+        }
     }
 
     pub(super) async fn stop_secure_backup_observer(&mut self) {

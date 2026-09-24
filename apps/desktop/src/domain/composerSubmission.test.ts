@@ -54,6 +54,19 @@ describe("composer submission controller", () => {
     expect(controller.active()).toBeNull();
   });
 
+  it("accepts another submission once Rust confirms durable enqueue", () => {
+    const ids = ["submission-1", "submission-2"];
+    const registry = createComposerSubmissionControllerRegistry(
+      () => createComposerSubmissionController(() => ids.shift()!)
+    );
+    const target = mainSubmissionTarget("room-a");
+    const first = registry.forTarget(target).begin()!;
+    registry.reconcile([first], [], []);
+    expect(registry.forTarget(target).begin()).toBeNull();
+    registry.reconcile([first], [], [first]);
+    expect(registry.forTarget(target).begin()).toBe("submission-2");
+  });
+
   it.each(["timeout", "disconnected"] as const)("classifies %s as an unknown outcome", (failure) => {
     expect(classifySubmissionFailure(failure)).toEqual({ kind: "unknown", reason: failure });
   });

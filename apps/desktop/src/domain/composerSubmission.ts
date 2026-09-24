@@ -125,7 +125,7 @@ export function threadSubmissionTarget(roomId: string, rootEventId: string): Com
 
 export interface ComposerSubmissionControllerRegistry {
   forTarget(target: ComposerSubmissionTargetKey): ComposerSubmissionController;
-  reconcile(acceptedSubmissionIds: readonly string[], settledSubmissionIds: readonly string[]): void;
+  reconcile(acceptedSubmissionIds: readonly string[], settledSubmissionIds: readonly string[], queuedSubmissionIds?: readonly string[]): void;
   reset(): void;
 }
 
@@ -141,9 +141,13 @@ export function createComposerSubmissionControllerRegistry(
       controllers.set(target, controller);
       return controller;
     },
-    reconcile(acceptedSubmissionIds, settledSubmissionIds) {
+    reconcile(acceptedSubmissionIds, settledSubmissionIds, queuedSubmissionIds = []) {
       for (const [target, controller] of controllers) {
         controller.observeRegistry(acceptedSubmissionIds, settledSubmissionIds);
+        const active = controller.active();
+        if (active !== null && queuedSubmissionIds.includes(active)) {
+          controller.releaseTerminal(active);
+        }
         if (controller.active() === null) controllers.delete(target);
       }
     },

@@ -404,6 +404,10 @@ stateDiagram-v2
   or incomplete storage closes encrypted admission immediately but does not
   clear composer drafts or stop sync. Upload progress and transient runtime
   degradation retain normal use; an inconclusive initial inspection does not.
+  A periodic server probe failure and an `Unknown` local backup observation
+  preserve an already operational gate and schedule retry. A positive local
+  disablement or incomplete recovery still closes admission immediately.
+  Repeated healthy SDK state notifications do not start another server probe.
   Account/session generation fencing occurs in `AccountActor` before reducer
   projection.
 - Nonessential secure-backup server inspection runs only while the accepted
@@ -423,7 +427,7 @@ stateDiagram-v2
   attempt across connectivity flaps until a successful backup inspection resets
   the epoch. A pre-authority inconclusive inspection is `BlockedFailed`, has no
   automatic monitor, and requires the explicit typed retry. Successful
-  authoritative inspection resumes periodic monitoring.
+  authoritative inspection resumes periodic monitoring every 30 minutes.
 - Secure-backup setup admission is Rust-owned and uses the closed
   `SecureBackupSetupIntent`. `InitialSetup` is admitted only by `SetupRequired`
   or recovery-key delivery retry; `Reenable { confirmed: true }` is admitted
@@ -2062,6 +2066,9 @@ stateDiagram-v2
   Because cleanup may already have cleared profiles, this bounded transient
   projection can use the safe raw-sender fallback and remain orphaned until the
   next authoritative pinned refresh; it never recreates room/list/tag state.
+  Selection commits without waiting for pinned bodies. The actor owns the
+  asynchronous refresh, discards results from older sessions or superseded
+  requests, and cancels outstanding refreshes on session replacement/shutdown.
 - `PinEventRequested` and `UnpinEventRequested` are accepted only for a Ready
   session, a known room, a non-empty event id, and an `Idle` or recoverable
   `Failed` pin operation. Requests while another pin/unpin is pending are
@@ -2863,9 +2870,9 @@ stateDiagram-v2
 
 | Command / update | Accepted states | Rejected states | Notes |
 | --- | --- | --- | --- |
-| accepted text/reply | below the bounded pending cap and current actor publication acknowledged | cap full, actor replaced without successful reroute, publication unavailable | Publishes one client-transaction `sending` row before composer acceptance clears the draft. |
+| accepted text/reply | below the bounded pending cap and current actor publication acknowledged | cap full, actor replaced without successful reroute, publication unavailable | Publishes one client-transaction `sending` row, retaining the persisted draft until SDK enqueue succeeds. Replies construct their relation from known event IDs, and plain thread sends use the known root as fallback, without a network fetch before enqueue. `ComposerSubmissionQueued` then clears the submitted draft revision and releases only that composer while the submission registry retains its remote terminal. A failed pre-enqueue attempt leaves the draft intact. |
 | `NewLocalEvent` | any | none | Exact SDK binding merges the canonical local echo into the pending row and stores the SDK `SendHandle`; it never inserts a duplicate. Restored local echoes from `RoomSendQueue::subscribe()` initialize the same actor table before commands. |
-| `SendError` | `sending` | none | Records `not_sent { reason }` using only the SDK recoverable flag. Release diagnostics may record a closed app-owned failure class plus that recoverable flag, but raw SDK errors stay out of DTOs, logs, QA tokens, and React state. The matching composer pending state is failed once; later retry success can still emit `SendCompleted`. |
+| `SendError` | `sending` | none | Records `not_sent { reason }` using only the SDK recoverable flag. Release diagnostics may record a closed app-owned failure class plus that recoverable flag, but raw SDK errors stay out of DTOs, logs, QA tokens, and React state. The matching composer pending state is failed once if enqueue never succeeded. A recoverable SDK failure after enqueue schedules room-queue re-enablement with bounded backoff and server Retry-After; later success can still emit `SendCompleted`. |
 | `RetrySend { room_id, transaction_id }` | `not_sent` with a stored `SendHandle` | `sending`, `sent`, `cancelled`, unknown transaction | Re-enables the SDK room queue with `room.send_queue().set_enabled(true)`, then calls `SendHandle::unwedge()`. FIFO order remains the SDK send queue's responsibility; React never reorders or manually marks successors sent. |
 | `CancelSend { room_id, transaction_id }` | `sending`, `not_sent` with a stored `SendHandle` | `sent`, `cancelled`, unknown transaction | Calls `SendHandle::abort()`. A successful cancel records `cancelled`, drops the handle, re-enables the SDK room queue so successors are not stranded, and clears matching composer pending state without creating a send-failure error. |
 | `SentEvent` | any | none | The manager-owned observer records `sent`, maps the composite SDK correlation to the original request, reliably enqueues the matching reducer action, then emits `SendCompleted`. Without a local echo, the same row changes atomically to the event ID and remains visible until canonical remote convergence or exact-event hydration. Settled correlations are bounded tombstones so duplicate SDK terminals cannot complete twice. |

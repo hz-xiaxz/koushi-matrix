@@ -1674,6 +1674,7 @@ export type TimelineContinuityState =
 
 export interface ComposerSubmissionRegistry {
   accepted_submission_ids: string[];
+  queued_submission_ids?: string[];
   settled_submission_ids: string[];
 }
 
