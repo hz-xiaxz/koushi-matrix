@@ -437,7 +437,7 @@ Homeservers that advertise `org.matrix.msc4140` through `/versions` are routed
 through AccountActor-owned SDK/Ruma delayed-event requests instead; the local
 fallback timer is intentionally limited to Local handles.
 
-### Room-history export (#59)
+### History export
 
 The `room_history_export` core scenario is part of `all`. The Node QA token
 contract also requires these tokens when the scenario runs alone:
@@ -448,13 +448,17 @@ history_export_period=ok
 history_export_period_fallback=ok
 history_export_utd_counted=ok
 history_export_cancel=ok
+history_export_space=ok
+history_export_attachments=ok
+history_export_resume=ok
 room_history_export=ok
 ```
 
 `history_export_full=ok` means the Rust-owned export of a fresh encrypted
 room wrote Element's top-level object in Element's key order. Every sent
 message is decrypted, no edit, reaction, or redaction event appears, and the
-counts in `AppState.room_history_export` match the file.
+counts in `AppState.history_export` match the room's `messages.json` in the
+export folder.
 `history_export_period=ok` means a `[start, end)` export equals the full
 export restricted to that range. `history_export_period_fallback=ok` means a
 period after the room, where `timestamp_to_event` finds no event, falls back
@@ -466,8 +470,14 @@ fewer events than the full export (`false` means the server could not seek).
 disposable user C, whose device is denied one room key: C's export contains
 that message as `m.bad.encrypted`, keeps the messages sent after C joined
 decrypted, and the Rust result counts every placeholder. `history_export_cancel=ok`
-means a cancelled export settles as cancelled and leaves neither the
-destination nor a staging file. Export files hold only synthetic QA messages
+means a stopped export settles as stopped and leaves no partial room folder.
+`history_export_space=ok` means a Space export lists its joined rooms,
+completes them, writes a table of contents naming them, and leaves out a
+direct message added as a child. `history_export_attachments=ok` means an image
+uploaded to the encrypted room is saved byte-for-byte decrypted with a JPEG
+thumbnail. `history_export_resume=ok` means exporting the same folder after a
+room joined the Space exports only that room and leaves the earlier rooms'
+files untouched. Export folders hold only synthetic QA messages
 in the per-run QA data directory and are deleted when the stage ends. No path,
 identifier, or body is printed.
 

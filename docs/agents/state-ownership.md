@@ -970,23 +970,29 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   coverage uses deterministic port fakes plus a real temporary symlink escape;
   Windows junction/canonicalization and short-name assumptions remain covered
   by the hosted Windows gate rather than Core path normalization.
-- Room-history export (#59) is Rust-owned end to end. `AppState.room_history_export`
-  (Tauri `ui.room_history_export`) carries only the request id, room id, range,
-  counts, and failure kind. Core pages the server history, decides period
-  inclusion, maps decryption outcomes, selects events with the ported Element
-  renderer filter, and writes the JSON through `RoomHistoryExportSink`. The
-  platform adapter registers the destination as the
-  `RoomHistoryExportDestination` native artifact and resolves civil dates into
-  the range's instants in a named time zone. React must not page, filter, or
-  serialize history, and must not treat a cancelled or failed export as saved.
-  In the desktop shell the Tauri adapter (`commands/history_export.rs`) names
-  the platform IANA zone through `room_history_export_time_zone`, opens the
-  native save dialog itself, and resolves the dialog's inclusive civil dates
-  in the zone the dialog displayed; the destination path never enters the
-  WebView. React owns only the dialog's unsent range, dates, and the request id
-  it started, and renders `ui.room_history_export`.
-  See the [Phase A](../superpowers/plans/2026-09-23-issue59-room-history-export-phase-a.md)
-  and [Phase B](../superpowers/plans/2026-09-23-issue59-room-history-export-phase-b.md) plans.
+- History export is Rust-owned end to end. `AppState.history_export` (Tauri
+  `ui.history_export`) carries the request id, the room or Space scope, the
+  range, and per-room phase, counts, skip reason, failure kind, and display
+  name (the one non-count field, because unjoined rooms are not in
+  `AppState.rooms`). Core selects the rooms (joined subspaces, DMs excluded),
+  resolves and resumes the folder from its `koushi-export.json`, pages the
+  server history, applies the ported Element renderer filter to
+  `messages.json`, writes the lossless `events.jsonl`, downloads and decrypts
+  attachments, builds thumbnails (through `koushi-media`), and renders the
+  HTML pages, all through the `HistoryExportFilesystem` port. The platform
+  adapter registers the chosen folder as the `HistoryExportDirectory` native
+  artifact and resolves civil dates into the range's instants in a named time
+  zone. React must not select rooms, page, filter, serialize, or download,
+  must not decide resume, and must not treat a stopped or failed export as
+  finished. In the desktop shell the Tauri adapter
+  (`commands/history_export.rs`) names the platform IANA zone through
+  `history_export_time_zone`, opens the native folder dialog itself, and
+  submits `ExportHistory`, `StopHistoryExport`, and `RetryHistoryExport`; the
+  folder path never enters the WebView. React owns only the dialog's unsent
+  range, dates, and the request id it started; it resolves the catalog page
+  labels (`domain/historyExportLabels.ts`) and renders `ui.history_export`.
+  See the [spec](../superpowers/specs/2026-09-25-history-export-archive-design.md)
+  and [plan](../superpowers/plans/2026-09-25-history-export-archive.md).
 - Selecting a file sends source bytes through `stage_upload_bytes` and shows the
   Rust-owned Upload attachments staging dialog. Send invokes
   `send_prepared_uploads`; there is no direct renderer upload command. Each staged caption is a nullable

@@ -55,8 +55,9 @@ that protected the original file. Keep both the file and its passphrase secure.
 
 A room-key file is not a readable copy of a conversation. To save a readable
 copy of a room's messages, use **Room info → Download history** instead; see
-[Download room history](rooms-and-spaces.md#download-room-history). That file
-holds encrypted messages as plain text and contains no keys.
+[Download room history](rooms-and-spaces.md#download-room-history). That
+folder holds encrypted messages and attachments unencrypted and contains no
+room keys.
 
 ## Understand trust labels
 

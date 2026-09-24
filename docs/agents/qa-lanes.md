@@ -117,7 +117,7 @@ qa-bin`; plain `cargo test` does not compile that binary.
 | `edit_redact_search` | edit, redact, search | — |
 | `redact_edit_convergence` | redaction/edit room-latest and Activity convergence plus live Rust-projected Room/thread-panel summary advance, edit, redaction rollback, and real-runtime restore parity | `redact_edit_convergence=ok`, `thread_summary_convergence=ok` |
 | `search_crawler` | crawler-fed search index | — |
-| `room_history_export` | Element-compatible JSON export of an encrypted room (#59): full history, a period `[start, end)`, the bounded period seek and its fallback (#988), a withheld key exported as `m.bad.encrypted` and counted, and cancellation that leaves no file | `history_export_full=ok`, `history_export_period=ok`, `history_export_period_fallback=ok`, `history_export_utd_counted=ok`, `history_export_cancel=ok`, `room_history_export=ok` |
+| `room_history_export` | Archive export of an encrypted room and a Space: full history, a period `[start, end)`, the bounded period seek and its fallback (#988), a withheld key exported as `m.bad.encrypted` and counted, Stop leaving no partial room, a Space export that leaves out a DM, a decrypted image with a thumbnail, and a resume that adds only a newly joined room | `history_export_full=ok`, `history_export_period=ok`, `history_export_period_fallback=ok`, `history_export_utd_counted=ok`, `history_export_cancel=ok`, `history_export_space=ok`, `history_export_attachments=ok`, `history_export_resume=ok`, `room_history_export=ok` |
 | `scheduled_send` | schedule, reschedule, cancel, fire | `scheduled_capability=local_fallback`, `scheduled_create=ok`, `scheduled_reschedule=ok`, `scheduled_cancel=ok`, `scheduled_fire=ok` |
 | `send_queue` | retry/cancel across injected offline failure (`--features qa-bin`) | — |
 | `restore_cleanup` | session restore and logout cleanup | — |
@@ -183,7 +183,7 @@ scenario run. See [environment.md](environment.md#reusing-a-debug-build) for the
 | `local-image-compression` | sets Compress images to Always, attaches a synthetic wide PNG, waits for the compressed `.jpg` filename, `image/jpeg`, and selected dimensions | `gui_local_image_compress=ok` |
 | `local-room-tags` | real room row context menu, waits for the row to move between Rooms and Favourites | `gui_local_room_tag_set=ok`, `gui_local_room_tag_removed=ok` |
 | `local-room-management` | topic edit (waits for `AppState.room_management.settings.topic`), role change through the Rust-owned power-level command, kick, waiting for the room-scoped `settings.members` snapshot to remove the row | `gui_local_room_topic=ok`, `gui_local_room_role=ok`, `gui_local_room_kick=ok` |
-| `local-room-history-export` | Room info → Download history (#59): all available history, a past period, and today's period in the displayed time zone; parses each committed JSON for Element's top-level keys, the seeded messages, and the dialog's saved count | `gui_local_history_export_all=ok`, `gui_local_history_export_period=ok`, `gui_local_room_history_export=ok` |
+| `local-room-history-export` | Room info → Download history: all available history, a past period, and today's period in the displayed time zone; reads each export folder's room `messages.json` for Element's top-level keys, the seeded messages, and the dialog's per-room count | `gui_local_history_export_all=ok`, `gui_local_history_export_period=ok`, `gui_local_room_history_export=ok` |
 | `local-activity` | Activity rail entry and tab switching | `gui_local_activity_open=ok`, `gui_local_activity_unread_tab=ok`, `gui_local_activity_recent_tab=ok` |
 | `local-explore` | real Explore search and Join over a synthetic public-room fixture | `gui_local_explore_query=ok`, `gui_local_explore_join=ok` |
 | `local-message-actions` | hover-gated action menu, source/forward, redaction, `Hide deleted messages` toggle to `TimelineItem.is_hidden` | — |
@@ -226,10 +226,11 @@ Lane scope notes:
 - `local-room-tags` must wait until the row is observed in the expected section.
   Do not mutate React state, monkeypatch Tauri IPC, or treat menu click
   completion as evidence.
-- `local-room-history-export` cannot drive the native save dialog. Its run sets
-  the debug-build-only `KOUSHI_QA_HISTORY_EXPORT_DIR`, and the Tauri adapter
-  then writes the export into that ignored run directory instead of opening the
-  dialog. Release builds compile the override out
+- `local-room-history-export` cannot drive the native folder dialog. Its run
+  sets the debug-build-only `KOUSHI_QA_HISTORY_EXPORT_DIR`, and the Tauri
+  adapter then uses that ignored run directory as the chosen folder instead of
+  opening the dialog; the scenario empties it before each export so no earlier
+  export is resumed. Release builds compile the override out
   (`scripts/desktop-release-gate-check.mjs`). The lane prints only counts and
   booleans; the files hold synthetic local-homeserver data.
 - `local-e2ee-key-management` may legitimately finish in recovery state: after
