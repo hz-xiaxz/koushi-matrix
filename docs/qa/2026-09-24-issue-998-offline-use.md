@@ -16,6 +16,8 @@ core owns pinned-event fetch workers and fences stale results. The Tauri
 selection command completes after the room selection is published. Space
 member-hydration enqueue is actor-owned and no longer blocks a saturated
 observer mailbox.
+The Rust source-contract checker enforces the 30-minute cadence and
+completion-before-actor-owned-pin-refresh order.
 
 Verification on the pinned SDK revision:
 
@@ -33,6 +35,7 @@ Verification on the pinned SDK revision:
   `pinned_state`, and `unpin_event` passed.
 - Disposable Tuwunel Core `thread` QA: thread receive, pagination, projection
   lifecycle, and summary passed.
+- Rust test-structure checker tests and guard passed with the updated contracts.
 
 Connection-drop injection and GUI navigation timing remain follow-up coverage
 before claiming every condition in #998's full acceptance matrix.

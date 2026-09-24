@@ -1019,7 +1019,7 @@ function sourceContractFailure(rule, message) {
 // koushi_core::room::operations::tests::room_tag_success_path_does_not_refresh_from_stale_sdk_snapshot | 2 | core.room.tag_no_stale_refresh | 2
 // koushi_core::room::operations::tests::create_room_links_parent_space_child_with_created_room_id_before_completion_event | 2 | core.room.create_links_before_completion | 2
 // koushi_core::room::operations::tests::missing_space_child_repairs_are_actor_owned_and_retryable | 3 | core.room.missing_space_child_repair | 3
-// koushi_core::room::pins::tests::pin_success_settles_pending_before_pinned_projection_reload | 4 | core.room.pin_settlement_order | 4
+// koushi_core::room::pins::tests::pin_success_settles_pending_before_actor_owned_pinned_refresh | 4 | core.room.pin_settlement_order | 4
 // koushi_core::room::pins::tests::pin_and_unpin_commands_require_actor_known_room_guard_before_sdk_call | 2 | core.room.pin_command_guard | 2
 // koushi_core::room::space_members::tests::space_member_load_failure_does_not_construct_an_empty_projection | 2 | core.room.space_member_failure_projection | 2
 // koushi_core::room::space_members::tests::background_space_member_lookup_failure_preserves_state_and_only_records_diagnostic | 3 | core.room.space_member_background_failure | 3
@@ -1793,11 +1793,11 @@ export function checkCoreRoomPinSettlementOrder() {
   const rule = "core.room.pin_settlement_order";
   const pin = coreItemBody("room/pins.rs", "async fn handle_pin_event");
   const unpin = coreItemBody("room/pins.rs", "async fn handle_unpin_event");
-  const projection = coreItemBody("room/pins.rs", "async fn project_pinned_events_after_success");
+  const projection = coreItemBody("room/pins.rs", "async fn handle_pinned_refresh_completed");
   const failures = [];
   for (const [body, completion] of [[pin, "self.reduce_reliable(vec![AppAction::PinEventCompleted"], [unpin, "self.reduce_reliable(vec![AppAction::UnpinEventCompleted"]]) {
     const settled = body?.indexOf(completion) ?? -1;
-    const reload = body?.indexOf("project_pinned_events_after_success") ?? -1;
+    const reload = body?.indexOf("self.start_pinned_refresh(room_id, Some(request_id))") ?? -1;
     if (settled < 0 || reload < 0 || settled >= reload) failures.push(sourceContractFailure(rule, "pin completion is not reduced before pinned projection reload"));
   }
   for (const marker of ["AppAction::PinEventCompleted", "AppAction::UnpinEventCompleted"]) if (projection?.includes(marker)) failures.push(sourceContractFailure(rule, `pinned projection emits ${marker}`));
@@ -2835,7 +2835,7 @@ export function checkCoreAccountSecureBackupMonitorOwner() {
   const retire = accountItemBody("recovery_backup.rs", "fn retire_secure_backup_monitor");
   const inspection = accountItemBody("recovery_backup.rs", "fn start_secure_backup_inspection");
   const failures = [];
-  for (const [source, marker] of [[recovery, "const SECURE_BACKUP_MONITOR_INTERVAL: Duration = Duration::from_secs(60);"], [actor, "secure_backup_monitor_task: Option<crate::executor::JoinHandle<()>>"], [retire, "secure_backup_monitor_task.take()"], [scheduler, "SECURE_BACKUP_MONITOR_INTERVAL"], [scheduler, "monitor_serial"], [inspection, "retire_secure_backup_monitor()"]]) if (!source?.includes(marker)) failures.push(sourceContractFailure(rule, `secure-backup monitor is missing ${marker}`));
+  for (const [source, marker] of [[recovery, "const SECURE_BACKUP_MONITOR_INTERVAL: Duration = Duration::from_secs(30 * 60);"], [actor, "secure_backup_monitor_task: Option<crate::executor::JoinHandle<()>>"], [retire, "secure_backup_monitor_task.take()"], [scheduler, "SECURE_BACKUP_MONITOR_INTERVAL"], [scheduler, "monitor_serial"], [inspection, "retire_secure_backup_monitor()"]]) if (!source?.includes(marker)) failures.push(sourceContractFailure(rule, `secure-backup monitor is missing ${marker}`));
   return failures;
 }
 
