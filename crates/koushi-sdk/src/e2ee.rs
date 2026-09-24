@@ -2627,10 +2627,9 @@ impl MatrixClientSession {
                 MatrixSecureBackupServerState::Present,
                 MatrixSecureBackupTrustState::Unknown,
             ),
-            Err(_) => (
-                MatrixSecureBackupServerState::Unknown,
-                MatrixSecureBackupTrustState::Unknown,
-            ),
+            Err(error) => {
+                return Err(E2eeTrustError::Classified(e2ee_trust_failure_kind(&error)));
+            }
         };
         let local_sdk_state = backups.state();
         let local = map_secure_backup_local_state(local_sdk_state);

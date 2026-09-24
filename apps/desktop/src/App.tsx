@@ -56,7 +56,8 @@ export function reconcileComposerSubmissionSnapshot(
 ): void {
   registry.reconcile(
     timeline.submission_registry.accepted_submission_ids,
-    timeline.submission_registry.settled_submission_ids
+    timeline.submission_registry.settled_submission_ids,
+    timeline.submission_registry.queued_submission_ids ?? []
   );
 }
 

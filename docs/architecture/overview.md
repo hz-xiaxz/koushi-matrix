@@ -467,6 +467,9 @@ An in-process actor system in `koushi-core`:
   fail-closed partial projection, incomplete lazy-loaded membership triggers
   one SDK refresh, and base-room membership updates invalidate and recompute
   every demanded main/thread target for that room.
+  Pinned-event body fetches run as actor-owned background work; room and Space
+  selection can commit while a server fetch is pending. Session and per-room
+  refresh generations fence late results.
   On the single Element X-compatible Simplified Sliding Sync engine it
   consumes the one `RoomListService` owned by the running `SyncService`;
   constructing additional ad-hoc `RoomListService` instances is prohibited —
@@ -1031,7 +1034,11 @@ relay that model, not fight it.
    media enqueue future, observes client-global queue terminals, and preserves
    request/submission correlation across timeline unsubscribe and actor
    replacement. Per-timeline actors own only the presentation subscription and
-   guarded queue handles:
+   guarded queue handles. A matching SDK enqueue releases the composer for the
+   next message while remote delivery remains tracked; recoverable room-queue
+   errors schedule bounded automatic re-enablement. Replies use their known
+   event IDs to build the relation without fetching the original before enqueue.
+   The presentation handles expose:
    `TimelineItem.send_state`, transaction-id keyed retry/cancel guards, and
    `RetrySend` / `CancelSend` command routing through SDK `SendHandle`s. After
    recoverable send errors, retry/cancel also re-enable the SDK room queue so

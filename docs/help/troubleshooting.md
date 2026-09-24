@@ -38,6 +38,13 @@ See [Search](search.md). Rebuilding the index does not recover missing keys.
 
 ## Message will not send
 
+If you have already completed session verification and secure backup setup,
+you can continue composing during a temporary connection failure. A message
+accepted into the local send queue can remain pending while the server is
+unreachable; you can compose the next message without waiting for delivery.
+Koushi retries a room queue after a recoverable send failure. Keep the app open
+until the connection returns, or reopen it to resume the stored queue.
+
 Check the connection status at the top of the window and any verification or
 secure backup requirement. Read the status on the affected message. For a failed
 send, use its retry action when offered instead of submitting a duplicate

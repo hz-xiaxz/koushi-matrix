@@ -16,8 +16,11 @@ use koushi_state::{AppAction, ComposerDocument, ComposerFormattingOptions, Media
 
 use crate::send_diagnostics::{SendFailureDiagnostic, classify_send_failure};
 use matrix_sdk::attachment::AttachmentConfig;
-use matrix_sdk::room::reply::Reply;
-use matrix_sdk::ruma::events::room::message::AddMentions;
+use matrix_sdk::ruma::OwnedRoomId;
+use matrix_sdk::ruma::events::relation::{Reply, Thread};
+use matrix_sdk::ruma::events::room::message::{
+    Relation, RoomMessageEventContent, RoomMessageEventContentWithoutRelation,
+};
 use matrix_sdk::send_queue::{RoomSendQueueUpdate, SendQueueUpdate};
 use matrix_sdk_ui::timeline::Timeline;
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -46,9 +49,8 @@ use super::display_projection::{DisplayProjectionContext, DisplayProjectionState
 use super::item_projection::{
     apply_ignored_sender_suppression, apply_link_previews_to_item, attachment_info_for_upload,
     attachment_reply_for_key, is_attention_eligible_event, remember_local_echo,
-    reply_enforce_thread_for_key, sdk_item_to_timeline_item_with_send_states, send_failure_reason,
-    thumbnail_for_upload, timeline_media_source_from_sdk, timeline_room_id, validate_cancel_send,
-    validate_retry_send,
+    sdk_item_to_timeline_item_with_send_states, send_failure_reason, thumbnail_for_upload,
+    timeline_media_source_from_sdk, timeline_room_id, validate_cancel_send, validate_retry_send,
 };
 use super::manager::TimelineManagerActor;
 use super::navigation::{
@@ -586,17 +588,7 @@ async fn enqueue_document_reply_send(
         document,
         formatting_options,
     )?;
-    let reply = Reply {
-        event_id: reply_event_id,
-        enforce_thread: reply_enforce_thread_for_key(&context.key),
-        add_mentions: AddMentions::Yes,
-    };
-    let content = context
-        .timeline
-        .room()
-        .make_reply_event(content, reply)
-        .await
-        .map_err(|_| TimelineFailureKind::Sdk)?;
+    let content = make_offline_reply_content(content, reply_event_id, &context.key)?;
     context
         .timeline
         .send(content.into())
@@ -607,6 +599,23 @@ async fn enqueue_document_reply_send(
             media_queued: None,
         })
         .map_err(|error| classify_timeline_send_error(&error))
+}
+
+fn make_offline_reply_content(
+    content: RoomMessageEventContentWithoutRelation,
+    reply_event_id: matrix_sdk::ruma::OwnedEventId,
+    key: &TimelineKey,
+) -> Result<RoomMessageEventContent, TimelineFailureKind> {
+    let mut content: RoomMessageEventContent = content.into();
+    content.relates_to = Some(match &key.kind {
+        TimelineKind::Thread { root_event_id, .. } => {
+            let root = matrix_sdk::ruma::EventId::parse(root_event_id)
+                .map_err(|_| TimelineFailureKind::Sdk)?;
+            Relation::Thread(Thread::reply(root, reply_event_id))
+        }
+        _ => Relation::Reply(Reply::with_event_id(reply_event_id)),
+    });
+    Ok(content)
 }
 
 async fn enqueue_media_send(
@@ -896,10 +905,12 @@ impl TimelineManagerActor {
         mut registration: SendCompletionRegistration,
         admission: Option<oneshot::Receiver<()>>,
         payload: TimelineSendEnqueuePayload,
+        queued_action: Option<AppAction>,
     ) -> oneshot::Receiver<()> {
         let (preflight_started_tx, preflight_started_rx) = oneshot::channel();
         let account_work = self.account_work.clone();
         let event_tx = self.event_tx.clone();
+        let action_tx = self.action_tx.clone();
         self.send_enqueue_workers.tasks.push(Box::pin(async move {
             let worker = async move {
                 let mut changed_key = None;
@@ -945,6 +956,12 @@ impl TimelineManagerActor {
                                     transaction_id: media.transaction_id,
                                 },
                             ));
+                        }
+                        if let Some(action) = queued_action
+                            && action_tx.send(vec![action]).await.is_err()
+                        {
+                            registration.fail_known(TimelineFailureKind::QueueOverflow);
+                            return changed_key;
                         }
                         changed_key = registration.bind_with_handle(sdk_transaction_id, handle);
                     }
@@ -1296,7 +1313,7 @@ impl TimelineManagerActor {
             );
             return;
         }
-        let preflight_started = self.spawn_send_enqueue(context, registration, None, payload);
+        let preflight_started = self.spawn_send_enqueue(context, registration, None, payload, None);
         // Directly-owned futures are not independently scheduled Tokio tasks. Drive this
         // admitted worker through its permit to the start of payload-specific preflight before
         // returning to the command loop. This does not serialize later SDK queue insertion.
@@ -1333,7 +1350,7 @@ impl TimelineManagerActor {
             false,
         );
         registration.activate();
-        let preflight_started = self.spawn_send_enqueue(context, registration, None, payload);
+        let preflight_started = self.spawn_send_enqueue(context, registration, None, payload, None);
         self.drive_send_enqueue_until_preflight_started(preflight_started)
             .await;
     }
@@ -1448,8 +1465,19 @@ impl TimelineManagerActor {
             .expect("new send registration must own its id");
         // The stable manager owns the permit-blocked worker before it exposes
         // acceptance. Unsubscribe may now remove only presentation state.
-        let preflight_started =
-            self.spawn_send_enqueue(context, registration, Some(permit_rx), payload);
+        let queued_action =
+            submission_target(key).map(|target| AppAction::ComposerSubmissionQueued {
+                submission_id: submission_id.clone(),
+                transaction_id: transaction_id.clone(),
+                target,
+            });
+        let preflight_started = self.spawn_send_enqueue(
+            context,
+            registration,
+            Some(permit_rx),
+            payload,
+            queued_action,
+        );
         if !self
             .send_completion
             .lock()
@@ -2159,27 +2187,79 @@ pub(super) async fn run_global_send_completion_observer(
     mut update_rx: broadcast::Receiver<SendQueueUpdate>,
     coordinator: SharedSendCompletionCoordinator,
     terminal_ingress: TimelineSendTerminalIngress,
+    retry_client: Option<matrix_sdk::Client>,
 ) {
+    let mut retry_at: HashMap<OwnedRoomId, executor::Instant> = HashMap::new();
+    let mut retry_attempts: HashMap<OwnedRoomId, u32> = HashMap::new();
     loop {
-        match update_rx.recv().await {
+        let next_retry = retry_at.values().copied().min();
+        let received = tokio::select! {
+            received = update_rx.recv() => Some(received),
+            _ = async {
+                if let Some(deadline) = next_retry {
+                    executor::sleep_until(deadline).await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => None,
+        };
+        let Some(received) = received else {
+            let now = executor::Instant::now();
+            let due: Vec<_> = retry_at
+                .iter()
+                .filter(|(_, deadline)| **deadline <= now)
+                .map(|(room_id, _)| room_id.clone())
+                .collect();
+            for room_id in due {
+                retry_at.remove(&room_id);
+                if let Some(room) = retry_client
+                    .as_ref()
+                    .and_then(|client| client.get_room(&room_id))
+                {
+                    // SDK keeps recoverable requests in its durable queue but
+                    // disables this room after exhausting its own HTTP retries.
+                    room.send_queue().set_enabled(true);
+                }
+            }
+            continue;
+        };
+        match received {
             Ok(SendQueueUpdate { room_id, update }) => {
                 let observation = match update {
                     RoomSendQueueUpdate::SentEvent {
                         transaction_id,
                         event_id,
-                    } => Some(SendCompletionObservation::Sent {
-                        sdk_transaction_id: transaction_id.to_string(),
-                        event_id: event_id.to_string(),
-                    }),
+                    } => {
+                        retry_at.remove(&room_id);
+                        retry_attempts.remove(&room_id);
+                        Some(SendCompletionObservation::Sent {
+                            sdk_transaction_id: transaction_id.to_string(),
+                            event_id: event_id.to_string(),
+                        })
+                    }
                     RoomSendQueueUpdate::SendError {
                         transaction_id,
                         error,
                         is_recoverable,
-                    } => Some(SendCompletionObservation::SendError {
-                        sdk_transaction_id: transaction_id.to_string(),
-                        diagnostic: classify_send_failure(error.as_ref(), is_recoverable),
-                    }),
+                    } => {
+                        if is_recoverable && retry_client.is_some() {
+                            let attempt = retry_attempts.entry(room_id.clone()).or_default();
+                            let delay =
+                                send_retry_delay(*attempt, send_retry_after(error.as_ref()));
+                            *attempt = attempt.saturating_add(1);
+                            retry_at.insert(room_id.clone(), executor::Instant::now() + delay);
+                        } else {
+                            retry_at.remove(&room_id);
+                            retry_attempts.remove(&room_id);
+                        }
+                        Some(SendCompletionObservation::SendError {
+                            sdk_transaction_id: transaction_id.to_string(),
+                            diagnostic: classify_send_failure(error.as_ref(), is_recoverable),
+                        })
+                    }
                     RoomSendQueueUpdate::CancelledLocalEvent { transaction_id } => {
+                        retry_at.remove(&room_id);
+                        retry_attempts.remove(&room_id);
                         Some(SendCompletionObservation::Cancelled {
                             sdk_transaction_id: transaction_id.to_string(),
                         })
@@ -2211,6 +2291,30 @@ pub(super) async fn run_global_send_completion_observer(
             }
             Err(broadcast::error::RecvError::Closed) => break,
         }
+    }
+}
+
+fn send_retry_delay(attempt: u32, server_delay: Option<Duration>) -> Duration {
+    let backoff = Duration::from_secs(10_u64.saturating_mul(1_u64 << attempt.min(5)).min(300));
+    backoff.max(server_delay.unwrap_or_default())
+}
+
+fn send_retry_after(error: &matrix_sdk::Error) -> Option<Duration> {
+    use matrix_sdk::ruma::api::error::{ErrorKind, RetryAfter};
+
+    let matrix_sdk::Error::Http(http_error) = error else {
+        return None;
+    };
+    let ErrorKind::LimitExceeded(limit) = http_error.client_api_error_kind()? else {
+        return None;
+    };
+    match limit.retry_after.as_ref()? {
+        RetryAfter::Delay(duration) => Some(*duration),
+        RetryAfter::DateTime(deadline) => Some(
+            deadline
+                .duration_since(std::time::SystemTime::now())
+                .unwrap_or_default(),
+        ),
     }
 }
 

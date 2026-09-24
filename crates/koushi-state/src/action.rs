@@ -1232,6 +1232,11 @@ pub enum AppAction {
         room_id: String,
         transaction_id: String,
     },
+    ComposerSubmissionQueued {
+        submission_id: SubmissionId,
+        transaction_id: String,
+        target: ComposerSubmissionTarget,
+    },
     ComposerSubmissionSettled {
         submission_id: SubmissionId,
         transaction_id: String,

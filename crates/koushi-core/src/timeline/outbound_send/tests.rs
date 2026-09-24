@@ -48,7 +48,7 @@ use super::super::navigation::{TimelineActorGenerationGate, send_generation_fenc
 use super::super::read_state::ReadWorkerSupervisor;
 use super::super::test_support::{
     fake_rid, gap_demand_test_actor_handle, live_tail_test_manager, room_key,
-    test_timeline_actor_handle,
+    test_timeline_actor_handle, thread_key,
 };
 use super::super::thread_projection::ThreadRootProjectionFetchRegistry;
 use super::{
@@ -63,9 +63,101 @@ use super::{
     TimelineSendTerminalAdmission, TimelineSendTerminalHandoff, TimelineSendTerminalIngress,
     apply_send_completion_observation_and_handoff,
     apply_send_completion_observation_loss_and_handoff, await_submission_admission,
-    classify_timeline_send_error, media_upload_progress_identity, pending_send_item,
-    run_global_send_completion_observer,
+    classify_timeline_send_error, make_offline_reply_content, media_upload_progress_identity,
+    pending_send_item, run_global_send_completion_observer, send_retry_delay,
 };
+
+#[test]
+fn offline_reply_keeps_its_relation_without_fetching_the_original_event() {
+    use matrix_sdk::ruma::events::room::message::{
+        Relation, RoomMessageEventContentWithoutRelation,
+    };
+    let original = matrix_sdk::ruma::event_id!("$reply-to:test").to_owned();
+    let content = || RoomMessageEventContentWithoutRelation::text_plain("queued reply");
+    let room = make_offline_reply_content(content(), original.clone(), &room_key()).unwrap();
+    assert!(matches!(room.relates_to, Some(Relation::Reply(_))));
+    let thread = make_offline_reply_content(content(), original, &thread_key()).unwrap();
+    assert!(matches!(thread.relates_to, Some(Relation::Thread(_))));
+}
+
+#[test]
+fn recoverable_send_retry_is_bounded_but_honors_server_delay() {
+    assert_eq!(send_retry_delay(0, None), Duration::from_secs(10));
+    assert_eq!(send_retry_delay(9, None), Duration::from_secs(300));
+    assert_eq!(
+        send_retry_delay(2, Some(Duration::from_secs(900))),
+        Duration::from_secs(900),
+    );
+}
+
+#[tokio::test]
+async fn recoverable_sdk_send_error_reenables_the_affected_room_queue() {
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let room_id = matrix_sdk::ruma::room_id!("!retry:example.test");
+    let room = server.sync_joined_room(&client, room_id).await;
+    room.send_queue().set_enabled(false);
+    tokio::time::pause();
+
+    let (tx, rx) = broadcast::channel(8);
+    let (ingress, _terminal_rx) = TimelineSendTerminalIngress::channel();
+    let task = tokio::spawn(run_global_send_completion_observer(
+        rx,
+        SharedSendCompletionCoordinator::default(),
+        ingress,
+        Some(client),
+    ));
+    tx.send(SendQueueUpdate {
+        room_id: room_id.to_owned(),
+        update: RoomSendQueueUpdate::SendError {
+            transaction_id: matrix_sdk::ruma::OwnedTransactionId::from("retry-1"),
+            error: Arc::new(matrix_sdk::Error::Timeout),
+            is_recoverable: true,
+        },
+    })
+    .expect("queue update");
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+    assert!(!room.send_queue().is_enabled());
+    tokio::time::advance(Duration::from_secs(11)).await;
+    for _ in 0..32 {
+        if room.send_queue().is_enabled() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(room.send_queue().is_enabled());
+    room.send_queue().set_enabled(false);
+    tx.send(SendQueueUpdate {
+        room_id: room_id.to_owned(),
+        update: RoomSendQueueUpdate::SendError {
+            transaction_id: matrix_sdk::ruma::OwnedTransactionId::from("retry-2"),
+            error: Arc::new(matrix_sdk::Error::Timeout),
+            is_recoverable: true,
+        },
+    })
+    .expect("second recoverable update");
+    tx.send(SendQueueUpdate {
+        room_id: room_id.to_owned(),
+        update: RoomSendQueueUpdate::SendError {
+            transaction_id: matrix_sdk::ruma::OwnedTransactionId::from("permanent-1"),
+            error: Arc::new(matrix_sdk::Error::Timeout),
+            is_recoverable: false,
+        },
+    })
+    .expect("permanent update");
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+    tokio::time::advance(Duration::from_secs(600)).await;
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+    assert!(!room.send_queue().is_enabled());
+    drop(tx);
+    task.await.expect("observer shutdown");
+}
 
 fn test_session_key() -> koushi_protocol::SessionKeyId {
     koushi_protocol::SessionKeyId {
@@ -628,6 +720,11 @@ async fn duplicate_submission_routes_one_manager_enqueue_worker() {
     );
     manager.join_send_enqueue_workers().await;
 
+    assert!(matches!(
+        action_rx.try_recv(),
+        Ok(actions) if matches!(actions.as_slice(), [AppAction::ComposerSubmissionQueued { submission_id: queued, .. }] if queued == &submission_id)
+    ));
+
     while event_rx.try_recv().is_ok() {}
     let mut cap_registrations = Vec::new();
     for index in 1..MAX_PENDING_SEND_PROJECTIONS {
@@ -975,6 +1072,7 @@ async fn shutdown_grace_polls_exact_terminal_observer_before_worker_quiescence()
             updates_rx,
             Arc::clone(&manager.send_completion),
             manager.terminal_ingress.clone(),
+            None,
         )));
     let (release_tx, release_rx) = oneshot::channel();
     manager.spawn_send_enqueue_future(registration, async move {
@@ -2615,8 +2713,13 @@ async fn global_send_observer_lag_fails_bound_and_unbound_in_registration_order(
             .expect("queue lag update");
     }
     drop(updates_tx);
-    run_global_send_completion_observer(updates_rx, Arc::clone(&coordinator), ingress.clone())
-        .await;
+    run_global_send_completion_observer(
+        updates_rx,
+        Arc::clone(&coordinator),
+        ingress.clone(),
+        None,
+    )
+    .await;
 
     let first_failure = terminal_rx.try_recv().expect("first lag failure");
     let second_failure = terminal_rx.try_recv().expect("second lag failure");

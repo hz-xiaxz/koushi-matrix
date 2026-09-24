@@ -5,6 +5,7 @@ use tokio::sync::oneshot;
 
 use super::{
     SecureBackupInspectionAdmission, apply_secure_backup_connectivity_edge,
+    backup_state_change_requires_gate_check, backup_state_change_requires_inspection,
     classify_e2ee_trust_auth_failure, classify_e2ee_trust_error, classify_recovery_error,
     project_bootstrap_cross_signing_result, project_enable_key_backup_result,
     project_reset_identity_auth_required, project_reset_identity_completed,
@@ -164,6 +165,52 @@ fn secure_backup_completion_rejects_stale_or_unpromoted_sessions() {
             }
         ))
     ));
+}
+
+#[test]
+fn inconclusive_backup_probe_does_not_revoke_existing_send_admission() {
+    let mut inspection = ready_secure_backup_inspection();
+    inspection.server = koushi_sdk::MatrixSecureBackupServerState::Unknown;
+    inspection.trust = koushi_sdk::MatrixSecureBackupTrustState::Unknown;
+
+    assert!(matches!(
+        secure_backup_inspection_completion_action(5, true, true, 5, Ok(inspection.clone())),
+        Some(AppAction::SecureBackupGateChanged(
+            koushi_state::SecureBackupGateState::DegradedRetrying {
+                failure: koushi_state::SecureBackupGateFailureKind::Network
+            }
+        ))
+    ));
+    assert!(matches!(
+        secure_backup_inspection_completion_action(5, true, false, 5, Ok(inspection)),
+        Some(AppAction::SecureBackupGateChanged(
+            koushi_state::SecureBackupGateState::BlockedFailed { .. }
+        ))
+    ));
+}
+
+#[test]
+fn healthy_backup_state_notification_does_not_close_the_composer() {
+    let enabled = koushi_sdk::MatrixSecureBackupState {
+        backup: koushi_sdk::MatrixSecureBackupLocalState::Enabled,
+        recovery: koushi_sdk::MatrixSecureBackupRecoveryState::Enabled,
+    };
+    assert!(!backup_state_change_requires_gate_check(enabled));
+    assert!(!backup_state_change_requires_inspection(enabled, true));
+    assert!(backup_state_change_requires_inspection(enabled, false));
+    let disabled = koushi_sdk::MatrixSecureBackupState {
+        backup: koushi_sdk::MatrixSecureBackupLocalState::Disabled,
+        ..enabled
+    };
+    assert!(backup_state_change_requires_gate_check(disabled));
+    assert!(backup_state_change_requires_inspection(disabled, true));
+    let unknown = koushi_sdk::MatrixSecureBackupState {
+        backup: koushi_sdk::MatrixSecureBackupLocalState::Unknown,
+        ..enabled
+    };
+    assert!(!backup_state_change_requires_gate_check(unknown));
+    assert!(!backup_state_change_requires_inspection(unknown, true));
+    assert!(!backup_state_change_requires_inspection(unknown, false));
 }
 
 #[test]

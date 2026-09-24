@@ -1,6 +1,8 @@
 use super::actor::RoomActor;
+use super::actor::RoomMessage;
 use super::list_observer::state_contains_pinned_events;
 use super::operations::{classify_room_error, operation_failure_kind};
+use crate::executor;
 use koushi_protocol::event::{CoreEvent, RoomEvent};
 use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
 use koushi_protocol::ids::RequestId;
@@ -228,38 +230,67 @@ impl RoomActor {
         }
     }
 
-    pub(super) async fn handle_refresh_pinned_events(
-        &self,
-        request_id: RequestId,
-        room_id: String,
-    ) {
-        let Some(session) = &self.session else {
+    pub(super) fn handle_refresh_pinned_events(&mut self, request_id: RequestId, room_id: String) {
+        if self.session.is_none() {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
-        };
-        match load_pinned_events_for_room(session, &room_id).await {
-            Ok(pinned) => {
-                self.project_pinned_events(room_id, pinned, Some(request_id))
-                    .await
-            }
-            Err(kind) => {
-                self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
-            }
+        }
+        self.start_pinned_refresh(room_id, Some(request_id));
+    }
+
+    pub(super) fn handle_pinned_events_changed(&mut self, room_ids: BTreeSet<String>) {
+        for room_id in room_ids {
+            self.start_pinned_refresh(room_id, None);
         }
     }
 
-    pub(super) async fn handle_pinned_events_changed(&self, room_ids: BTreeSet<String>) {
-        let Some(session) = &self.session else {
+    fn start_pinned_refresh(&mut self, room_id: String, request_id: Option<RequestId>) {
+        let Some(session) = self.session.clone() else {
             return;
         };
-        for room_id in room_ids {
-            match load_pinned_events_for_room(session, &room_id).await {
-                Ok(pinned) => self.project_pinned_events(room_id, pinned, None).await,
-                Err(_kind) => {
-                    // A background sync refresh has no request to fail. Keep
-                    // the previous projection and wait for the next state
-                    // update; only classified failure state may cross the
-                    // Core boundary.
+        self.pinned_refresh_tasks.retain(|task| !task.is_finished());
+        let generation = self.pinned_generation;
+        self.pinned_refresh_sequence = self.pinned_refresh_sequence.wrapping_add(1).max(1);
+        let sequence = self.pinned_refresh_sequence;
+        self.pinned_latest_refresh.insert(room_id.clone(), sequence);
+        let tx = self.self_tx.clone();
+        self.pinned_refresh_tasks.push(executor::spawn(async move {
+            let result = load_pinned_events_for_room(&session, &room_id).await;
+            let _ = tx
+                .send(RoomMessage::PinnedRefreshCompleted {
+                    generation,
+                    sequence,
+                    request_id,
+                    room_id,
+                    result,
+                })
+                .await;
+        }));
+    }
+
+    pub(super) async fn stop_pinned_refreshes(&mut self) {
+        self.pinned_generation = self.pinned_generation.wrapping_add(1);
+        self.pinned_latest_refresh.clear();
+        for task in self.pinned_refresh_tasks.drain(..) {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
+    pub(super) async fn handle_pinned_refresh_completed(
+        &self,
+        request_id: Option<RequestId>,
+        room_id: String,
+        result: Result<Vec<PinnedEvent>, RoomFailureKind>,
+    ) {
+        match result {
+            Ok(pinned) => {
+                self.project_pinned_events(room_id, pinned, request_id)
+                    .await
+            }
+            Err(kind) => {
+                if let Some(request_id) = request_id {
+                    self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
                 }
             }
         }

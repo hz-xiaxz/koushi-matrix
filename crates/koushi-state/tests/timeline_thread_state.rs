@@ -563,6 +563,66 @@ fn duplicate_submission_id_is_accepted_once_and_stale_completion_is_ignored() {
 }
 
 #[test]
+fn durable_enqueue_releases_the_composer_without_losing_the_first_terminal() {
+    let mut state = selected_room_state("room-a");
+    let first = SubmissionId::new("first");
+    let second = SubmissionId::new("second");
+    let target = ComposerSubmissionTarget::Main {
+        room_id: "room-a".to_owned(),
+    };
+    reduce(
+        &mut state,
+        AppAction::ComposerSubmissionAccepted {
+            submission_id: first.clone(),
+            room_id: "room-a".to_owned(),
+            transaction_id: "txn-first".to_owned(),
+            body: "first".to_owned(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::ComposerSubmissionQueued {
+            submission_id: first.clone(),
+            transaction_id: "txn-first".to_owned(),
+            target: target.clone(),
+        },
+    );
+    assert_eq!(state.timeline.composer.pending_submission_id, None);
+    assert!(state.timeline.submission_registry.accepted_submission_ids.contains(&first));
+
+    reduce(
+        &mut state,
+        AppAction::ComposerSubmissionAccepted {
+            submission_id: second.clone(),
+            room_id: "room-a".to_owned(),
+            transaction_id: "txn-second".to_owned(),
+            body: "second".to_owned(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::ComposerSubmissionSettled {
+            submission_id: first.clone(),
+            transaction_id: "txn-first".to_owned(),
+            target: target.clone(),
+            outcome: ComposerSubmissionTerminalOutcome::Succeeded,
+        },
+    );
+    assert_eq!(state.timeline.composer.pending_submission_id, Some(second.clone()));
+    assert!(!state.timeline.submission_registry.accepted_submission_ids.contains(&first));
+    reduce(
+        &mut state,
+        AppAction::ComposerSubmissionSettled {
+            submission_id: second,
+            transaction_id: "txn-second".to_owned(),
+            target,
+            outcome: ComposerSubmissionTerminalOutcome::Succeeded,
+        },
+    );
+    assert_eq!(state.timeline.composer.pending_submission_id, None);
+}
+
+#[test]
 fn terminal_submission_requires_matching_id_and_transaction() {
     let mut state = selected_room_state("room-a");
     let active = SubmissionId::new("active-submission");
