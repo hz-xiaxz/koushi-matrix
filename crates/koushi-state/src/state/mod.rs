@@ -23,6 +23,7 @@ mod native_attention;
 mod navigation;
 mod profile;
 mod room;
+mod history_export;
 mod room_history_export;
 mod room_interactions;
 mod room_management;
@@ -240,6 +241,13 @@ pub use search::{
 pub use files_view::{
     AttachmentFilter, AttachmentKind, AttachmentResult, AttachmentScope, AttachmentSort,
     FilesViewScope, FilesViewState,
+};
+
+// ── Re-exports: history_export ──────────────────────────────────────────────
+pub use history_export::{
+    HistoryExportFailureKind, HistoryExportRange, HistoryExportRoom, HistoryExportRoomCounts,
+    HistoryExportRoomFailureKind, HistoryExportRoomPhase, HistoryExportRoomSkipReason,
+    HistoryExportScope, HistoryExportState,
 };
 
 // ── Re-exports: room_history_export ─────────────────────────────────────────

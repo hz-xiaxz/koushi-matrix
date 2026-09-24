@@ -150,8 +150,13 @@ pub use state::{
     SlidingSyncCapabilityFailureKind, SlidingSyncCapabilityResult, SlidingSyncCapabilityState,
     SlidingSyncPositiveEvidence, SlidingSyncRevalidationState,
 };
-// Room-history export (#59) keeps its own block so the feature does not edit
-// the shared list above.
+// History export keeps its own block so the feature does not edit the shared
+// list above.
+pub use state::{
+    HistoryExportFailureKind, HistoryExportRange, HistoryExportRoom, HistoryExportRoomCounts,
+    HistoryExportRoomFailureKind, HistoryExportRoomPhase, HistoryExportRoomSkipReason,
+    HistoryExportScope, HistoryExportState,
+};
 pub use state::{
     RoomHistoryExportFailureKind, RoomHistoryExportProgress, RoomHistoryExportRange,
     RoomHistoryExportState,
