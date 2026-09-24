@@ -426,3 +426,53 @@ fn composer_recognized_unavailable_commands_are_structured_slash_intents() {
         }
     );
 }
+
+fn formatted(body: &str) -> Option<String> {
+    build_formatted_message_draft(body, MentionIntent::default()).formatted_body
+}
+
+#[test]
+fn composer_markdown_links_become_anchors_for_safe_schemes_only() {
+    assert_eq!(
+        formatted("see [the docs](https://example.com/a?b=1&c=2) now").as_deref(),
+        Some("see <a href=\"https://example.com/a?b=1&amp;c=2\">the docs</a> now")
+    );
+    assert_eq!(
+        formatted("[mail](mailto:someone@example.com)").as_deref(),
+        Some("<a href=\"mailto:someone@example.com\">mail</a>")
+    );
+    assert_eq!(
+        formatted("[<b>](http://example.com/\"x)").as_deref(),
+        Some("<a href=\"http://example.com/&quot;x\">&lt;b&gt;</a>")
+    );
+    // Unsafe or unknown schemes stay literal text.
+    assert_eq!(formatted("[x](javascript:alert(1))"), None);
+    assert_eq!(formatted("[x](data:text/html,hi)"), None);
+    assert_eq!(formatted("[x](relative/path)"), None);
+    // Not a link.
+    assert_eq!(formatted("[x] (https://example.com)"), None);
+    assert_eq!(formatted("[x](https://exa mple.com)"), None);
+}
+
+#[test]
+fn composer_markdown_underscore_emphasis_respects_word_boundaries() {
+    assert_eq!(formatted("an _em_ word").as_deref(), Some("an <em>em</em> word"));
+    assert_eq!(formatted("snake_case_name"), None);
+    assert_eq!(formatted("file_name.txt and _x_").as_deref(), Some("file_name.txt and <em>x</em>"));
+    assert_eq!(formatted("_ not emphasis _"), None);
+}
+
+#[test]
+fn composer_toolbar_link_and_italic_output_is_formatted() {
+    // The Link then Italic toolbar buttons on an empty composer.
+    assert_eq!(
+        formatted("_[link](https://)_").as_deref(),
+        Some("<em><a href=\"https://\">link</a></em>")
+    );
+    assert_eq!(
+        formatted("[link](https://example.com) **bold** _em_ *star* `code`").as_deref(),
+        Some(
+            "<a href=\"https://example.com\">link</a> <strong>bold</strong> <em>em</em> <em>star</em> <code>code</code>"
+        )
+    );
+}
