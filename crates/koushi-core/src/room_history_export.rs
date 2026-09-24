@@ -6,6 +6,7 @@
 
 mod driver;
 mod element;
+mod katex_assets;
 mod sdk_source;
 mod sink;
 

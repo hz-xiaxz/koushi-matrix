@@ -47,3 +47,12 @@ Local path: `apps/desktop/node_modules/twemoji-colr-font` during build; Vite bun
 License: package metadata `OFL-1.1`; package CSS header `MIT`; Twemoji visual design/artwork under Creative Commons Attribution 4.0 International (`CC-BY-4.0`)
 Copyright: Twemoji font package by Tilman Vatteroth; Twemoji artwork by the Twemoji project
 Notes: Used as the bundled-preferred emoji font when the Rust-owned typography profile selects `emoji = twemojiColr`; platform/system emoji fonts remain fallback. npm marks this package deprecated, so upgrades or replacement must revisit the font source and attribution.
+
+Project: KaTeX
+Repository: https://github.com/KaTeX/KaTeX
+Upstream commit: npm package `katex@0.18.1` (the version pinned in `crates/koushi-core/assets/katex/VERSION`)
+Source path: `dist/katex.min.js`, `dist/katex.min.css`, `dist/fonts/*.woff2`
+Local path: `crates/koushi-core/assets/katex`
+License: MIT
+Copyright: Copyright (c) 2013-2020 Khan Academy and other contributors
+Notes: Embedded in the desktop binary and copied into every exported history folder (`assets/katex/`) so exported pages render math offline. The CSS keeps only the woff2 font sources. `apps/desktop/src/i18n/katexVendor.test.ts` keeps the vendored version equal to the npm dependency. The license text is `crates/koushi-core/assets/katex/LICENSE`.
