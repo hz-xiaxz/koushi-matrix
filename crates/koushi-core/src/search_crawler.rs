@@ -132,6 +132,7 @@ async fn run_history_crawl_page(
     };
 
     let (batch_size, delay_ms) = crawl_batch_and_delay(checkpoint.settings.speed);
+    let first_page = checkpoint.processed == 0;
     // Search history must use the SDK-owned room event cache. Calling
     // `Room::messages` here would populate only the search index and leave
     // linked chunks untouched, forcing the normal timeline to fetch the same
@@ -150,16 +151,25 @@ async fn run_history_crawl_page(
             result = async {
                 let (event_cache, _drop_handles) = room.event_cache().await
                     .map_err(|_| ())?;
-                event_cache
+                // #996: events that sync already put in the cache (at least the
+                // newest one) are never returned by backward pagination, so the
+                // first page of a crawl indexes them too.
+                let cached = if first_page {
+                    event_cache.events().await.map_err(|_| ())?
+                } else {
+                    Vec::new()
+                };
+                let page = event_cache
                     .pagination()
                     .run_backwards_once(batch_size as u16)
                     .await
-                    .map_err(|_| ())
+                    .map_err(|_| ())?;
+                Ok::<_, ()>((cached, page))
             } => result,
         };
         startup_trace::trace_phase(StartupPhase::CrawlerPage, page_started);
         match page_result {
-            Ok(messages) => messages,
+            Ok(page) => page,
             Err(_) => {
                 trace_crawler_page(
                     DiagnosticLevel::Warn,
@@ -176,11 +186,22 @@ async fn run_history_crawl_page(
         }
     };
 
+    let (cached, messages) = messages;
     let chunk_len = messages.events.len() as u64;
-    checkpoint.processed += chunk_len;
+    let mut seen_event_ids = HashSet::new();
+    let events = cached
+        .iter()
+        .chain(messages.events.iter())
+        .filter(|event| {
+            event
+                .event_id()
+                .is_none_or(|event_id| seen_event_ids.insert(event_id.to_string()))
+        })
+        .collect::<Vec<_>>();
+    checkpoint.processed += events.len() as u64;
 
     let mut index_messages = Vec::new();
-    for timeline_event in &messages.events {
+    for timeline_event in events {
         if timeline_event.kind.is_utd() {
             continue;
         }

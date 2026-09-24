@@ -117,11 +117,23 @@ async fn crawler_page_is_visible_to_the_normal_room_event_cache() {
     let HistoryCrawlPageResult::Success { messages, .. } = result else {
         panic!("crawler page should complete through SDK pagination");
     };
+    // #996: the newest event arrived by sync and was already cached before the
+    // crawl; backward pagination never returns it, so the first page must
+    // index the cached events too.
+    let indexed_ids = messages
+        .iter()
+        .filter_map(|message| match message {
+            SearchIndexMessage::Upsert { event_id, .. } => Some(event_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        messages.len(),
-        2,
-        "crawler should index both historical events"
+        indexed_ids.len(),
+        3,
+        "crawler should index the cached latest event and both historical events: {indexed_ids:?}"
     );
+    assert!(indexed_ids.contains(&"$crawler-latest"));
+    assert!(indexed_ids.contains(&"$crawler-older-1"));
 
     let room = client.get_room(room_id).expect("joined room");
     let (cache, _drop_handles) = room.event_cache().await.expect("room event cache");

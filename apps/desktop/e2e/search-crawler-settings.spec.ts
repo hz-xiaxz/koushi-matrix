@@ -376,7 +376,7 @@ test("room in 'idle' state shows Start button and no Stop button", async ({ page
   ).not.toBeVisible();
 });
 
-test("room in 'completed' state shows neither Start nor Stop button", async ({ page }) => {
+test("room in 'completed' state offers Index again, which dispatches start_room_crawl (#996)", async ({ page }) => {
   await gotoReadyShell(page);
 
   await page.evaluate((roomId) => {
@@ -422,6 +422,22 @@ test("room in 'completed' state shows neither Start nor Stop button", async ({ p
   await expect(
     statusSection.getByRole("button", { name: t("settings.searchHistoryStopRoom") })
   ).not.toBeVisible();
+  // A completed room can still miss messages that arrived while the app was
+  // closed; the row offers a per-room re-index instead of only the global
+  // rebuild.
+  await statusSection.getByRole("button", { name: t("settings.searchHistoryReindexRoom") }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __harness: { invocationsOf(command: string): Array<{ args: Record<string, unknown> }> };
+            }
+          ).__harness.invocationsOf("start_room_crawl").map((call) => call.args.roomId)
+      )
+    )
+    .toEqual([HARNESS_ROOM_ID]);
 });
 
 test("room in 'failed' state shows coarse kind label without raw SDK errors", async ({ page }) => {

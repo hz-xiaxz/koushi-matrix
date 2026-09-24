@@ -4384,9 +4384,17 @@ stateDiagram-v2
     Completed --> Idle : content-setting toggle\n(include_media_captions or\ninclude_filenames changed)
     Completed --> Idle : HistoryCrawlStopped\n(room pruned)
     Failed --> Queued : HistoryCrawlStarted\n(retry)
+    Completed --> Queued : HistoryCrawlStarted\n(explicit StartHistoryCrawl: index again, #996)
 ```
 
 ### Guards and lifecycle
+
+- **First page (#996)**: a crawl's first page also indexes the events the
+  room's event cache already holds before paging backwards (at least the
+  newest event, which sync delivered and backward pagination never returns).
+  Events are deduplicated by id; the index upserts, so repeats are harmless.
+  A completed room can be crawled again with an explicit `StartHistoryCrawl`
+  (the room row's **Index again** action).
 
 - **Auto-start (idempotent)**: `RoomListUpdated` emits
   `AppEffect::NotifySearchCrawlerRoomsAvailable` with all current joined rooms

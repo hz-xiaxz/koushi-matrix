@@ -520,6 +520,28 @@ fn push_inline_markdown_subset(
             changed = true;
             continue;
         }
+        // #991: `[text](url)`, the composer toolbar's Link output. Only
+        // http(s) and mailto targets become links; anything else stays text.
+        if let Some((text, url, consumed)) = markdown_link(rest) {
+            html.push_str("<a href=\"");
+            push_escaped_html(html, url);
+            html.push_str("\">");
+            push_inline_markdown_subset(html, text, options);
+            html.push_str("</a>");
+            index += consumed;
+            changed = true;
+            continue;
+        }
+        // #991: `_text_`, the toolbar's Italic output. Underscores inside a
+        // word (`snake_case`) are not emphasis.
+        if let Some((inner, consumed)) = underscore_emphasis(&body[..index], rest) {
+            html.push_str("<em>");
+            push_inline_markdown_subset(html, inner, options);
+            html.push_str("</em>");
+            index += consumed;
+            changed = true;
+            continue;
+        }
         if let Some(after) = rest.strip_prefix("**")
             && let Some(end) = after.find("**")
         {
@@ -573,6 +595,62 @@ fn push_inline_markdown_subset(
     }
 
     changed
+}
+
+/// `[text](url)` at the start of `rest`: the link text, the URL, and the bytes
+/// consumed. The text holds no `]` or line break; the URL holds no whitespace
+/// or `)` and must use an http, https, or mailto scheme.
+fn markdown_link(rest: &str) -> Option<(&str, &str, usize)> {
+    let after_open = rest.strip_prefix('[')?;
+    let text_end = after_open.find(']')?;
+    let text = &after_open[..text_end];
+    if text.is_empty() || text.contains(['[', '\n']) {
+        return None;
+    }
+    let after_text = after_open[text_end + 1..].strip_prefix('(')?;
+    let url_end = after_text.find(')')?;
+    let url = &after_text[..url_end];
+    if url.is_empty() || url.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let lower = url.to_ascii_lowercase();
+    if !["https://", "http://", "mailto:"]
+        .iter()
+        .any(|scheme| lower.starts_with(scheme))
+    {
+        return None;
+    }
+    Some((text, url, 1 + text_end + 1 + 1 + url_end + 1))
+}
+
+/// `_text_` at the start of `rest`, not inside a word: the emphasized text and
+/// the bytes consumed. The text is non-empty and neither starts nor ends with
+/// whitespace.
+fn underscore_emphasis<'a>(before: &str, rest: &'a str) -> Option<(&'a str, usize)> {
+    let after = rest.strip_prefix('_')?;
+    if before
+        .chars()
+        .next_back()
+        .is_some_and(char::is_alphanumeric)
+    {
+        return None;
+    }
+    let mut search_from = 0;
+    while let Some(offset) = after[search_from..].find('_') {
+        let end = search_from + offset;
+        let inner = &after[..end];
+        let next = after[end + 1..].chars().next();
+        if !inner.is_empty()
+            && !inner.starts_with(char::is_whitespace)
+            && !inner.ends_with(char::is_whitespace)
+            && !inner.contains('\n')
+            && !next.is_some_and(char::is_alphanumeric)
+        {
+            return Some((inner, 1 + end + 1));
+        }
+        search_from = end + 1;
+    }
+    None
 }
 
 fn find_unescaped_math_close(value: &str) -> Option<usize> {
