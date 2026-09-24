@@ -20,7 +20,9 @@ observer mailbox.
 Verification on the pinned SDK revision:
 
 - `cargo test -p koushi-sdk --lib`: 152 passed.
-- `cargo test -p koushi-core --lib`: 1150 passed, 9 ignored.
+- `cargo test -p koushi-core --lib`: 1151 passed, 9 ignored.
+- A delayed pinned-event HTTP response did not hold a Space selection; the
+  actor cancelled the outstanding fetch on shutdown.
 - Focused backup tests after observer deduplication: 26 passed.
 - `cargo test -p koushi-state`: passed.
 - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib`: 185 passed.
@@ -32,6 +34,5 @@ Verification on the pinned SDK revision:
 - Disposable Tuwunel Core `thread` QA: thread receive, pagination, projection
   lifecycle, and summary passed.
 
-Network-drop and pinned-fetch latency injection
-remain valuable follow-up coverage before claiming every condition in #998's
-full acceptance matrix.
+Connection-drop injection and GUI navigation timing remain follow-up coverage
+before claiming every condition in #998's full acceptance matrix.

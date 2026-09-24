@@ -71,6 +71,98 @@ async fn select_space_projects_action() {
 }
 
 #[tokio::test]
+async fn pinned_event_network_delay_does_not_block_space_selection() {
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use wiremock::{
+        Mock, ResponseTemplate,
+        matchers::{method, path_regex},
+    };
+
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let room_id = matrix_sdk::ruma::room_id!("!pinned:example.test");
+    server.sync_joined_room(&client, room_id).await;
+    Mock::given(method("GET"))
+        .and(path_regex(
+            r"^/_matrix/client/v3/rooms/.*/state/m.room.pinned_events/?$",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "pinned": ["$held:example.test"] })),
+        )
+        .expect(1)
+        .mount(&*server)
+        .await;
+    server
+        .mock_room_event()
+        .room(room_id)
+        .ok_with_template(ResponseTemplate::new(200).set_delay(Duration::from_secs(60)))
+        .mock_once()
+        .mount()
+        .await;
+
+    let session = Arc::new(MatrixClientSession::from_client_for_testing(
+        client,
+        SessionInfo {
+            homeserver: server.uri(),
+            user_id: "@alice:example.test".to_owned(),
+            device_id: "ALICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        },
+    ));
+    let (action_tx, mut action_rx) = mpsc::channel(16);
+    let (event_tx, _event_rx) = broadcast::channel(16);
+    let handle = RoomActor::spawn(
+        action_tx,
+        event_tx,
+        crate::SlidingSyncDiagnostics::default(),
+    );
+    tokio::time::pause();
+    assert!(
+        handle
+            .send(RoomMessage::SessionEstablished { session })
+            .await
+    );
+    assert!(
+        handle
+            .send(RoomMessage::Command(RoomCommand::RefreshPinnedEvents {
+                request_id: make_request_id(81),
+                room_id: room_id.to_string(),
+            }))
+            .await
+    );
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        action_rx.try_recv().is_err(),
+        "pinned event fetch should still be pending"
+    );
+
+    assert!(
+        handle
+            .send(RoomMessage::Command(RoomCommand::SelectSpace {
+                request_id: make_request_id(82),
+                space_id: Some("!space:example.test".to_owned()),
+            }))
+            .await
+    );
+    let actions = tokio::time::timeout(Duration::from_secs(1), action_rx.recv())
+        .await
+        .expect("space selection must not wait for pin fetch")
+        .expect("selection action");
+    assert!(matches!(
+        actions.as_slice(),
+        [AppAction::SelectSpace { .. }]
+    ));
+    assert!(handle.send(RoomMessage::Shutdown).await);
+    tokio::time::timeout(Duration::from_secs(1), handle.join())
+        .await
+        .expect("shutdown");
+    server.verify_and_reset().await;
+}
+
+#[tokio::test]
 async fn reorder_spaces_projects_action() {
     let (action_tx, mut action_rx) = mpsc::channel(16);
     let (event_tx, _event_rx) = broadcast::channel(16);
