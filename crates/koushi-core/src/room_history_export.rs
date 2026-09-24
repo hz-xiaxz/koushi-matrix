@@ -6,12 +6,14 @@
 
 mod driver;
 pub(crate) mod fs;
+pub(crate) mod html;
 #[cfg(test)]
 pub(crate) mod fs_fake;
 mod element;
 mod katex_assets;
 pub(crate) mod layout;
 pub(crate) mod manifest;
+pub(crate) mod records;
 mod sdk_source;
 mod sink;
 

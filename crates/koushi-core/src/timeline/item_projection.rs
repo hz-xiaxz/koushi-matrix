@@ -25,7 +25,7 @@ use matrix_sdk::ruma::events::room::message::{
 };
 use matrix_sdk::ruma::events::room::{MediaSource, ThumbnailInfo};
 use matrix_sdk::ruma::events::{StateEventContentChange, room::name::RoomNameEventContent};
-use matrix_sdk::ruma::html::{Html, SanitizerConfig};
+use matrix_sdk::ruma::html::Html;
 use matrix_sdk::send_queue::{LocalEcho, LocalEchoContent, SendHandle};
 use matrix_sdk_ui::timeline::{
     AnyOtherStateEventContentChange, EmbeddedEvent, EncryptedMessage,
@@ -3160,13 +3160,7 @@ fn project_formatted_body(formatted_body: &FormattedBody) -> Option<FormattedBod
         return None;
     }
 
-    let html = Html::parse(&formatted_body.body);
-    html.sanitize_with(
-        &SanitizerConfig::compat()
-            .remove_reply_fallback()
-            .remove_elements(["script", "style"]),
-    );
-    let sanitized_body = html.to_string();
+    let sanitized_body = super::html_sanitize::sanitize_matrix_html(&formatted_body.body, &[]);
 
     if sanitized_body.trim().is_empty() {
         return None;

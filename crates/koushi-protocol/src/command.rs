@@ -241,7 +241,7 @@ mod test_support;
 mod timeline;
 
 pub use account::{
-    AccountCommand, RoomHistoryExportRequest, RoomKeyExportRequest, RoomKeyImportRequest,
+    AccountCommand, HistoryExportLabels, RoomHistoryExportRequest, RoomKeyExportRequest, RoomKeyImportRequest,
     SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
 };
 pub use app::{AppCommand, EventNavigationMissingTargetPolicy};

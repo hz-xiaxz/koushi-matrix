@@ -40,6 +40,7 @@ koushi-store = { path = "../koushi-store", features = ["test-hooks"] }
 # Decodable PNG fixtures for upload-output preparation tests. Already a
 # workspace dependency: koushi-media encodes with it in production.
 image.workspace = true
+jiff = "0.2"
 matrix-sdk = { workspace = true, features = ["testing"] }
 matrix-sdk-test = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "rt", "sync", "time", "macros", "test-util"] }

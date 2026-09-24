@@ -32,6 +32,9 @@ pub(crate) enum ManifestRoomStatus {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ManifestRoom {
     pub(crate) room_id: String,
+    /// Room name when the room was last listed, for the table of contents.
+    #[serde(default)]
+    pub(crate) display_name: String,
     /// Folder name below `rooms/`, fixed when the room was first listed.
     pub(crate) folder: String,
     pub(crate) status: ManifestRoomStatus,
@@ -78,17 +81,20 @@ impl ExportManifest {
     pub(crate) fn upsert_room(
         &mut self,
         room_id: &str,
+        display_name: &str,
         folder: &str,
         status: ManifestRoomStatus,
         counts: HistoryExportRoomCounts,
     ) {
         match self.rooms.iter_mut().find(|room| room.room_id == room_id) {
             Some(room) => {
+                room.display_name = display_name.to_owned();
                 room.status = status;
                 room.counts = counts;
             }
             None => self.rooms.push(ManifestRoom {
                 room_id: room_id.to_owned(),
+                display_name: display_name.to_owned(),
                 folder: folder.to_owned(),
                 status,
                 counts,

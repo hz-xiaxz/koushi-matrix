@@ -20,6 +20,64 @@ impl fmt::Debug for RoomKeyExportRequest {
     }
 }
 
+/// Catalog-resolved text for the pages of a history export.
+///
+/// React resolves these from the message catalog in the app locale; Core only
+/// interpolates the named placeholders listed on each field and HTML-escapes
+/// the result. Templates carry no private data.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct HistoryExportLabels {
+    /// BCP 47 language of the strings, for `<html lang>`.
+    pub lang: String,
+    pub edited: String,
+    /// `{name}`
+    pub in_reply_to: String,
+    pub reply_unavailable: String,
+    pub thread_reply: String,
+    pub thread_root_link: String,
+    pub redacted: String,
+    pub undecryptable: String,
+    pub not_retrieved: String,
+    pub reactions: String,
+    /// `{timeZone}`
+    pub times_in_zone: String,
+    /// `{date}`
+    pub exported_at: String,
+    pub range_all: String,
+    /// `{start}`, `{end}`
+    pub range_period: String,
+    pub rooms_heading: String,
+    pub status_completed: String,
+    pub status_skipped: String,
+    pub status_failed: String,
+    pub status_pending: String,
+    /// `{count}`
+    pub events_count: String,
+    /// `{count}`
+    pub attachments_count: String,
+    /// `{count}`
+    pub failed_attachments_count: String,
+    /// `{name}`
+    pub state_joined: String,
+    /// `{name}`
+    pub state_left: String,
+    /// `{name}`, `{target}`
+    pub state_invited: String,
+    /// `{name}`, `{target}`
+    pub state_removed: String,
+    /// `{name}`, `{target}`
+    pub state_banned: String,
+    /// `{name}`, `{value}`
+    pub state_renamed: String,
+    /// `{name}`, `{value}`
+    pub state_topic: String,
+    /// `{name}`
+    pub state_avatar: String,
+    /// `{name}`, `{type}`
+    pub state_other: String,
+}
+
 /// Export one room's history as an Element-compatible chat-export JSON file.
 ///
 /// The destination path never travels in this command: the platform adapter

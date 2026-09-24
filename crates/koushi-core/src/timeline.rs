@@ -52,6 +52,7 @@ pub(crate) mod composer;
 mod diagnostics;
 mod display_projection;
 mod gap_repair;
+pub(crate) mod html_sanitize;
 mod item_projection;
 mod manager;
 mod media;
