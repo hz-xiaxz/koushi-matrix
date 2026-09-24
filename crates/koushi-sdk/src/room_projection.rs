@@ -3093,3 +3093,22 @@ pub(crate) async fn matrix_space_child_room_ids(room: &matrix_sdk::Room) -> Vec<
 mod notification_mode_tests;
 #[cfg(test)]
 mod tests;
+
+/// Whether a room is a direct message: the account's `m.direct` data when it
+/// is authoritative, otherwise the room's own direct targets. Mirrors the
+/// joined room-list projection in `matrix_room_list_snapshot_from_rooms`.
+pub async fn matrix_room_is_dm(
+    room: &matrix_sdk::Room,
+    direct_targets_by_room: Option<&MatrixDirectTargetsByRoom>,
+) -> bool {
+    match direct_targets_by_room {
+        Some(direct_targets_by_room) => direct_targets_by_room.contains_key(room.room_id().as_str()),
+        None => {
+            if !room.direct_targets().is_empty() {
+                true
+            } else {
+                room.is_direct().await.unwrap_or_else(|_| room.is_dm())
+            }
+        }
+    }
+}

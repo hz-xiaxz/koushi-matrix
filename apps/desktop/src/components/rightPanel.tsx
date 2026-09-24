@@ -57,7 +57,7 @@ import {
 import { FilesView } from "./FilesView";
 import { ModalDialog } from "./ModalDialog";
 import { RoomInfoPanel } from "./RoomInfoPanel";
-import type { RoomHistoryExportControls } from "./RoomHistoryExportDialog";
+import type { HistoryExportControls } from "./HistoryExportDialog";
 import { SpaceInfoPanel } from "./SpaceInfoPanel";
 import { ThreadsListView } from "./ThreadsListView";
 import { UserSettingsPanel } from "./UserSettingsPanel";
@@ -185,7 +185,7 @@ export function ContextualRightPanel({
   onSetRoomUrlPreviewOverride = () => undefined,
   onRepairRoomTimeline = () => undefined,
   onForceRotateOutboundSession = () => undefined,
-  roomHistoryExportControls,
+  historyExportControls,
   onUpdateRoomSetting = () => undefined,
   onUpdateSpaceJoinRule,
   onIgnoreUser = () => undefined,
@@ -335,7 +335,7 @@ export function ContextualRightPanel({
   onSetRoomUrlPreviewOverride?: (roomId: string, enabled: boolean) => void;
   onRepairRoomTimeline?: (roomId: string) => void | Promise<void>;
   onForceRotateOutboundSession?: (roomId: string) => void | Promise<void>;
-  roomHistoryExportControls?: RoomHistoryExportControls;
+  historyExportControls?: HistoryExportControls;
   onLoadAccountManagementCapabilities?: () => void;
   onChangePassword?: (newPassword: string) => void;
   onDeactivateAccount?: (eraseData: boolean) => void;
@@ -644,8 +644,8 @@ export function ContextualRightPanel({
           }}
           onRepairRoomTimeline={onRepairRoomTimeline}
           onForceRotateOutboundSession={onForceRotateOutboundSession}
-          roomHistoryExport={snapshot.state.ui.room_history_export}
-          roomHistoryExportControls={roomHistoryExportControls}
+          historyExport={snapshot.state.ui.history_export}
+          historyExportControls={historyExportControls}
           onOpenPeople={() => {
             void _onOpenPeople?.();
           }}
@@ -757,6 +757,8 @@ export function ContextualRightPanel({
           roomManagement={snapshot.state.domain.room_management}
           rooms={snapshot.state.domain.rooms}
           space={activeSpace}
+          historyExport={snapshot.state.ui.history_export}
+          historyExportControls={historyExportControls}
           spaceChildren={
             activeSpace &&
             snapshot.state.domain.space_children.selected_space_id === activeSpace.space_id

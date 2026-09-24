@@ -12,7 +12,7 @@ pub enum NativeArtifactKind {
     RoomKeyExportDestination,
     RoomKeyImportSource,
     RecoveryKeyDestination,
-    RoomHistoryExportDestination,
+    HistoryExportDirectory,
 }
 
 impl fmt::Display for NativeArtifactKind {
@@ -21,7 +21,7 @@ impl fmt::Display for NativeArtifactKind {
             Self::RoomKeyExportDestination => "room_key_export_destination",
             Self::RoomKeyImportSource => "room_key_import_source",
             Self::RecoveryKeyDestination => "recovery_key_destination",
-            Self::RoomHistoryExportDestination => "room_history_export_destination",
+            Self::HistoryExportDirectory => "history_export_directory",
         })
     }
 }

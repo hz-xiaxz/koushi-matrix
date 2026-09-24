@@ -314,7 +314,7 @@ pub fn build_state_delta(
         changed.search_crawler_rooms_by_id = (!changes.is_empty()).then_some(changes);
     }
     changed_slice!(files_view);
-    changed_slice!(room_history_export);
+    changed_slice!(history_export);
     changed_slice!(basic_operation);
     if previous.live_signals.presence != next.live_signals.presence {
         let user_ids = previous
@@ -579,7 +579,7 @@ fn audit_app_state_delta_slices(state: &AppState) {
         search: _,
         search_crawler: _,
         files_view: _,
-        room_history_export: _,
+        history_export: _,
         basic_operation: _,
         live_signals: _,
         e2ee_trust: _,

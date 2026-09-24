@@ -262,7 +262,8 @@ import {
   type RuntimeAlert
 } from "./components/Shell";
 import { ContextualRightPanel } from "./components/rightPanel";
-import type { RoomHistoryExportControls } from "./components/RoomHistoryExportDialog";
+import type { HistoryExportControls } from "./components/HistoryExportDialog";
+import { historyExportLabels } from "./domain/historyExportLabels";
 import type {
   SpaceInviteAvailabilityReason,
   SpaceInviteCancellationAvailabilityReason
@@ -2604,17 +2605,22 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     await settleCommand(api.forceRotateOutboundSession(roomId));
   }
 
-  // #59: the platform half of the Rust-owned room-history export. Memoized so
-  // an open dialog loads the time zone once; the receipt reconciler is a ref.
-  const roomHistoryExportControls = useMemo<RoomHistoryExportControls>(() => ({
-    loadTimeZone: () => api.roomHistoryExportTimeZone(),
-    async start(roomId, range, dialogTitle, fileNameStem) {
-      const started = await api.exportRoomHistory(roomId, range, dialogTitle, fileNameStem);
+  // The platform half of the Rust-owned history export. Memoized so an open
+  // dialog loads the time zone once; the receipt reconciler is a ref.
+  const historyExportControls = useMemo<HistoryExportControls>(() => ({
+    loadTimeZone: () => api.historyExportTimeZone(),
+    async start(scope, range, dialogTitle, folderNameStem) {
+      const started = await api.exportHistory(scope, range, historyExportLabels(), dialogTitle, folderNameStem);
       if (started.kind === "submitted") await applyCommandReceipt(started.admission);
       return started;
     },
-    async cancel(requestId) {
-      await settleCommand(api.cancelRoomHistoryExport(requestId));
+    async stop(requestId) {
+      await settleCommand(api.stopHistoryExport(requestId));
+    },
+    async retry(requestId) {
+      const started = await api.retryHistoryExport(requestId);
+      if (started.kind === "submitted") await applyCommandReceipt(started.admission);
+      return started;
     }
   }), []);
 
@@ -6540,7 +6546,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
             runInBackground(repairRoomTimeline(roomId));
           }}
           onForceRotateOutboundSession={forceRotateOutboundSession}
-          roomHistoryExportControls={roomHistoryExportControls}
+          historyExportControls={historyExportControls}
           onOpenSenderProfile={(roomId, userId) => {
             runInBackground(openRoomUserProfile(roomId, userId));
           }}

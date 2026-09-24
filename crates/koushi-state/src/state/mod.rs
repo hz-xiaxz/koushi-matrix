@@ -23,7 +23,7 @@ mod native_attention;
 mod navigation;
 mod profile;
 mod room;
-mod room_history_export;
+mod history_export;
 mod room_interactions;
 mod room_management;
 mod search;
@@ -242,11 +242,13 @@ pub use files_view::{
     FilesViewScope, FilesViewState,
 };
 
-// ── Re-exports: room_history_export ─────────────────────────────────────────
-pub use room_history_export::{
-    RoomHistoryExportFailureKind, RoomHistoryExportProgress, RoomHistoryExportRange,
-    RoomHistoryExportState,
+// ── Re-exports: history_export ──────────────────────────────────────────────
+pub use history_export::{
+    HistoryExportFailureKind, HistoryExportRange, HistoryExportRoom, HistoryExportRoomCounts,
+    HistoryExportRoomFailureKind, HistoryExportRoomPhase, HistoryExportRoomSkipReason,
+    HistoryExportScope, HistoryExportState,
 };
+
 
 // ── Re-exports: basic_operation ─────────────────────────────────────────────
 pub use basic_operation::{BasicOperationRequest, BasicOperationState};
@@ -350,7 +352,7 @@ pub struct AppState {
     pub search_crawler: SearchCrawlerState,
     pub files_view: FilesViewState,
     #[serde(default)]
-    pub room_history_export: RoomHistoryExportState,
+    pub history_export: HistoryExportState,
     pub basic_operation: BasicOperationState,
     pub live_signals: LiveSignalsState,
     pub e2ee_trust: E2eeTrustState,
@@ -412,7 +414,7 @@ impl Default for AppState {
             search: SearchState::Closed,
             search_crawler: SearchCrawlerState::default(),
             files_view: FilesViewState::Closed,
-            room_history_export: RoomHistoryExportState::Idle,
+            history_export: HistoryExportState::Idle,
             basic_operation: BasicOperationState::Idle,
             live_signals: LiveSignalsState::default(),
             e2ee_trust: E2eeTrustState::default(),

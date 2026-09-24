@@ -1,6 +1,10 @@
 mod image_kind;
+mod thumbnail;
+#[cfg(test)]
+mod thumbnail_tests;
 
 pub use image_kind::{ImageKind, image_kind};
+pub use thumbnail::thumbnail_jpeg;
 
 use std::io::Cursor;
 

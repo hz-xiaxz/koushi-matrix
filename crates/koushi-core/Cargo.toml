@@ -10,6 +10,7 @@ koushi-protocol = { path = "../koushi-protocol" }
 koushi-sdk = { path = "../koushi-sdk" }
 koushi-key = { path = "../koushi-key" }
 koushi-media = { path = "../koushi-media" }
+jiff = "0.2"
 koushi-search = { path = "../koushi-search" }
 koushi-state = { path = "../koushi-state" }
 koushi-store = { path = "../koushi-store" }

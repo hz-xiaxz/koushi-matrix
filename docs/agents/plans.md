@@ -78,6 +78,7 @@ Phase A is Rust/headless work and comes before Phase B GUI wiring.
 | Area | Phase A | Phase B |
 | --- | --- | --- |
 | Media / file timeline | [2026-06-15-media-phase-a.md](../superpowers/plans/2026-06-15-media-phase-a.md) | — |
+| History export archive: room and Space folders with HTML, attachments, resume | [2026-09-25-history-export-archive.md](../superpowers/plans/2026-09-25-history-export-archive.md) | [spec](../superpowers/specs/2026-09-25-history-export-archive-design.md) |
 | Room-history export, Element-compatible JSON (#59) | [2026-09-23-issue59-room-history-export-phase-a.md](../superpowers/plans/2026-09-23-issue59-room-history-export-phase-a.md) | [2026-09-23-issue59-room-history-export-phase-b.md](../superpowers/plans/2026-09-23-issue59-room-history-export-phase-b.md) |
 | Media preparation/cache retention (#547) | [2026-08-18-issue547-memory-bounds.md](../superpowers/plans/2026-08-18-issue547-memory-bounds.md) | [2026-08-18-issue547-memory-bounds.md](../superpowers/plans/2026-08-18-issue547-memory-bounds.md) |
 | Muted-room native Dock attention (#543) | [2026-08-18-issue543-muted-dock-badge.md](../superpowers/plans/2026-08-18-issue543-muted-dock-badge.md) | [2026-08-18-issue543-muted-dock-badge.md](../superpowers/plans/2026-08-18-issue543-muted-dock-badge.md) |

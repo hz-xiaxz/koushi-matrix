@@ -91,8 +91,9 @@ impl CoreCommand {
                 | AccountCommand::SubmitAccountManagementUia { request_id, .. }
                 | AccountCommand::SoftLogoutReauth { request_id, .. }
                 | AccountCommand::ExportRoomKeys { request_id, .. }
-                | AccountCommand::ExportRoomHistory { request_id, .. }
-                | AccountCommand::CancelRoomHistoryExport { request_id, .. }
+                | AccountCommand::ExportHistory { request_id, .. }
+                | AccountCommand::StopHistoryExport { request_id, .. }
+                | AccountCommand::RetryHistoryExport { request_id, .. }
                 | AccountCommand::ImportRoomKeys { request_id, .. }
                 | AccountCommand::BootstrapSecureBackup { request_id, .. }
                 | AccountCommand::RecoverSecureBackup { request_id, .. }
@@ -241,7 +242,7 @@ mod test_support;
 mod timeline;
 
 pub use account::{
-    AccountCommand, RoomHistoryExportRequest, RoomKeyExportRequest, RoomKeyImportRequest,
+    AccountCommand, HistoryExportLabels, HistoryExportRequest, RoomKeyExportRequest, RoomKeyImportRequest,
     SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
 };
 pub use app::{AppCommand, EventNavigationMissingTargetPolicy};

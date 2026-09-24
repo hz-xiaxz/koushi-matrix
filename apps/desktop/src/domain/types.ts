@@ -107,7 +107,7 @@ export interface AppUiState {
   thread: ThreadPaneState;
   focused_context: FocusedContextState;
   files_view: FilesViewState;
-  room_history_export: RoomHistoryExportState;
+  history_export: HistoryExportState;
   threads_list: ThreadsListState;
   basic_operation: BasicOperationState;
   errors: AppError[];
@@ -2285,59 +2285,133 @@ export type FilesViewScope =
   | { kind: "space"; space_id: string }
   | { kind: "account" };
 
-export type RoomHistoryExportRange =
+export type HistoryExportRange =
   | { kind: "allAvailable" }
   | { kind: "period"; start_ms: number; end_exclusive_ms: number; time_zone: string };
 
-export interface RoomHistoryExportProgress {
+export type HistoryExportScope = { kind: "room"; room_id: string } | { kind: "space"; space_id: string };
+
+export interface HistoryExportRoomCounts {
   fetched_events: number;
   exported_events: number;
   undecryptable_events: number;
+  attachments_total: number;
+  attachments_done: number;
+  attachments_failed: number;
 }
 
-export type RoomHistoryExportFailureKind =
+export type HistoryExportRoomPhase =
+  | "pending"
+  | "fetching"
+  | "attachments"
+  | "rendering"
+  | "completed"
+  | "skipped"
+  | "failed";
+
+export type HistoryExportRoomFailureKind = "network" | "sdk" | "write";
+
+export interface HistoryExportRoom {
+  room_id: string;
+  display_name: string;
+  phase: HistoryExportRoomPhase;
+  counts: HistoryExportRoomCounts;
+  skip_reason: "notJoined" | null;
+  failure_kind: HistoryExportRoomFailureKind | null;
+}
+
+export type HistoryExportFailureKind =
   | "invalidRange"
   | "roomNotFound"
+  | "spaceNotFound"
   | "destinationUnavailable"
+  | "manifestMismatch"
   | "write"
+  | "noSpace"
   | "network"
   | "sdk";
 
-/** Rust-owned room-history export state (#59); React renders it only. */
-export type RoomHistoryExportState =
+/** Rust-owned history export state; React renders it only. */
+export type HistoryExportState =
   | { kind: "idle" }
   | {
-      kind: "exporting";
+      kind: "preparing";
       request_id: number;
-      room_id: string;
-      range: RoomHistoryExportRange;
-      progress: RoomHistoryExportProgress;
-      cancel_requested: boolean;
+      scope: HistoryExportScope;
+      range: HistoryExportRange;
+      stop_requested: boolean;
     }
   | {
-      kind: "completed";
+      kind: "running";
       request_id: number;
-      room_id: string;
-      range: RoomHistoryExportRange;
-      progress: RoomHistoryExportProgress;
+      scope: HistoryExportScope;
+      range: HistoryExportRange;
+      rooms: HistoryExportRoom[];
+      stop_requested: boolean;
     }
-  | { kind: "cancelled"; request_id: number; room_id: string; progress: RoomHistoryExportProgress }
+  | {
+      kind: "completed" | "stopped";
+      request_id: number;
+      scope: HistoryExportScope;
+      range: HistoryExportRange;
+      rooms: HistoryExportRoom[];
+    }
   | {
       kind: "failed";
       request_id: number;
-      room_id: string;
-      progress: RoomHistoryExportProgress;
-      failure_kind: RoomHistoryExportFailureKind;
+      scope: HistoryExportScope;
+      range: HistoryExportRange;
+      rooms: HistoryExportRoom[];
+      failure_kind: HistoryExportFailureKind;
     };
+
+/** What the dialog asks the adapter to export. */
+export type HistoryExportScopeInput = { kind: "room"; roomId: string } | { kind: "space"; spaceId: string };
 
 /** The export range as the dialog shows it. The Tauri adapter resolves the
  * inclusive civil dates into instants in the named IANA time zone. */
-export type RoomHistoryExportRangeInput =
+export type HistoryExportRangeInput =
   | { kind: "allAvailable" }
   | { kind: "period"; startDate: string; endDate: string; timeZone: string };
 
-/** `dismissed` means the native save dialog was closed without a destination. */
-export type RoomHistoryExportStart =
+/** Catalog-resolved page text Rust writes into exported pages
+ * (`koushi_protocol::HistoryExportLabels`). */
+export interface HistoryExportLabels {
+  lang: string;
+  edited: string;
+  inReplyTo: string;
+  replyUnavailable: string;
+  threadReply: string;
+  threadRootLink: string;
+  redacted: string;
+  undecryptable: string;
+  notRetrieved: string;
+  reactions: string;
+  timesInZone: string;
+  exportedAt: string;
+  rangeAll: string;
+  rangePeriod: string;
+  roomsHeading: string;
+  statusCompleted: string;
+  statusSkipped: string;
+  statusFailed: string;
+  statusPending: string;
+  eventsCount: string;
+  attachmentsCount: string;
+  failedAttachmentsCount: string;
+  stateJoined: string;
+  stateLeft: string;
+  stateInvited: string;
+  stateRemoved: string;
+  stateBanned: string;
+  stateRenamed: string;
+  stateTopic: string;
+  stateAvatar: string;
+  stateOther: string;
+}
+
+/** `dismissed` means the native folder dialog was closed without a choice. */
+export type HistoryExportStart =
   | { kind: "dismissed" }
   | { kind: "submitted"; requestId: number; admission: CommandAdmission };
 

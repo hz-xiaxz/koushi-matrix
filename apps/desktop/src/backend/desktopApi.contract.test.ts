@@ -61,9 +61,10 @@ describe("DesktopApi command contract", () => {
         "updateNavigationPreference",
         "loadSpaceChildren",
         "dismissEventNavigationFailure",
-        "roomHistoryExportTimeZone",
-        "exportRoomHistory",
-        "cancelRoomHistoryExport",
+        "historyExportTimeZone",
+        "exportHistory",
+        "stopHistoryExport",
+        "retryHistoryExport",
         "openNotificationEvent"
       )
       .sort();

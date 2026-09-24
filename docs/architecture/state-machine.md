@@ -2275,85 +2275,146 @@ stateDiagram-v2
   snapshots must redact filenames and MXC URIs; the reducer `Debug` impl already
   hides them.
 
-## Room History Export
+## History Export
 
-`AppState.room_history_export` is the Rust-owned state machine for exporting
-one room's history as an Element-compatible chat-export JSON file (#59).
-React may render the state and dispatch typed export and cancel commands; it
-must not page history, select events, build JSON, or decide whether an export
-succeeded.
+`AppState.history_export` is the Rust-owned state machine for exporting a
+room, or every joined non-DM room of a Space, into an archive folder: HTML
+pages, Element's chat-export `messages.json`, the lossless `events.jsonl`,
+and the rooms' attachments (spec:
+`docs/superpowers/specs/2026-09-25-history-export-archive-design.md`).
+React may render the state and dispatch typed export, stop, and retry
+commands; it must not page history, select rooms, download attachments,
+build files, decide resume, or decide whether an export succeeded.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> Exporting: RoomHistoryExportRequested [Ready, known room, valid range]
-    Completed --> Exporting: RoomHistoryExportRequested [Ready, known room, valid range]
-    Cancelled --> Exporting: RoomHistoryExportRequested [Ready, known room, valid range]
-    Failed --> Exporting: RoomHistoryExportRequested [Ready, known room, valid range]
-    Exporting --> Exporting: RoomHistoryExportProgressed [matching request_id, changed counts]
-    Exporting --> Exporting: RoomHistoryExportCancelRequested [matching request_id, not yet requested]
-    Exporting --> Completed: RoomHistoryExportCompleted [matching request_id]
-    Exporting --> Cancelled: RoomHistoryExportCancelled [matching request_id]
-    Exporting --> Failed: RoomHistoryExportFailed [matching request_id]
-    Exporting --> Idle: LogoutRequested/SessionLocked/SwitchAccountRequested/session gate
+    Idle --> Preparing: HistoryExportRequested [Ready, known room or Space, valid range]
+    Completed --> Preparing: HistoryExportRequested [same guard]
+    Stopped --> Preparing: HistoryExportRequested [same guard]
+    Failed --> Preparing: HistoryExportRequested [same guard]
+    Completed --> Preparing: HistoryExportRetryRequested [Ready, matching target]
+    Stopped --> Preparing: HistoryExportRetryRequested [Ready, matching target]
+    Failed --> Preparing: HistoryExportRetryRequested [Ready, matching target]
+    Preparing --> Preparing: HistoryExportStopRequested [matching request_id, not yet requested]
+    Preparing --> Running: HistoryExportPrepared [matching request_id]
+    Preparing --> Stopped: HistoryExportStopped [matching request_id]
+    Preparing --> Failed: HistoryExportFailed [matching request_id]
+    Running --> Running: HistoryExportRoomProgressed [matching request_id, known unsettled room, phase not backward, changed]
+    Running --> Running: HistoryExportRoomSettled [matching request_id, known unsettled room, Completed or Failed]
+    Running --> Running: HistoryExportStopRequested [matching request_id, not yet requested]
+    Running --> Completed: HistoryExportCompleted [matching request_id]
+    Running --> Stopped: HistoryExportStopped [matching request_id]
+    Running --> Failed: HistoryExportFailed [matching request_id]
+    Preparing --> Idle: LogoutRequested/SessionLocked/SwitchAccountRequested/session gate
+    Running --> Idle: LogoutRequested/SessionLocked/SwitchAccountRequested/session gate
     Completed --> Idle: LogoutRequested/SessionLocked/SwitchAccountRequested/session gate
-    Cancelled --> Idle: LogoutRequested/SessionLocked/SwitchAccountRequested/session gate
+    Stopped --> Idle: LogoutRequested/SessionLocked/SwitchAccountRequested/session gate
     Failed --> Idle: LogoutRequested/SessionLocked/SwitchAccountRequested/session gate
 ```
 
-- `RoomHistoryExportState` is `Idle`, `Exporting { request_id, room_id, range,
-  progress, cancel_requested }`, `Completed { request_id, room_id, range,
-  progress }`, `Cancelled { request_id, room_id, progress }`, or
-  `Failed { request_id, room_id, progress, failure_kind }`. `progress` holds
-  only the counts `fetched_events`, `exported_events`, and
-  `undecryptable_events`.
-- `RoomHistoryExportRange` is `AllAvailable` or `Period { start_ms,
+Each room of a `Running` export has its own phase, which only moves forward:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending
+    [*] --> Skipped: not joined (listed by Core, never exported)
+    [*] --> Completed: completed by an earlier run of this folder
+    Pending --> Fetching
+    Fetching --> Attachments
+    Attachments --> Rendering
+    Rendering --> Completed: HistoryExportRoomSettled
+    Fetching --> Failed: HistoryExportRoomSettled
+    Attachments --> Failed: HistoryExportRoomSettled
+    Rendering --> Failed: HistoryExportRoomSettled
+```
+
+- `HistoryExportState` is `Idle`, `Preparing { request_id, scope, range,
+  stop_requested }`, `Running { request_id, scope, range, rooms,
+  stop_requested }`, `Completed`/`Stopped { request_id, scope, range, rooms }`,
+  or `Failed { request_id, scope, range, rooms, failure_kind }`.
+  `HistoryExportScope` is `Room { room_id }` or `Space { space_id }`.
+- Each `HistoryExportRoom` carries `room_id`, `display_name`, `phase`,
+  private-data-free `counts` (fetched, exported, and undecryptable events;
+  attachment total, done, and failed), and a skip reason or failure kind.
+  `display_name` is a deliberate exception to "ids and counts only": rooms the
+  account has not joined are absent from `AppState.rooms`, and the progress
+  list must name them. It is redacted from `Debug` output like the ids.
+- `HistoryExportRange` is `AllAvailable` or `Period { start_ms,
   end_exclusive_ms, time_zone }`. The platform adapter resolves the civil
   start and end dates in the named IANA time zone: `start_ms` is 00:00 of the
   start day and `end_exclusive_ms` is 00:00 of the day after the end day. Rust
   rejects an empty period or a missing time zone, and includes an event exactly
   when `start_ms <= origin_server_ts < end_exclusive_ms`.
-- Start guard: `RoomHistoryExportRequested` needs a Ready session, a room in
-  `AppState.rooms`, and a valid range, and no export may already be in flight.
-  A rejected request leaves the state unchanged. The runtime then settles the
-  command with `OperationFailed { RoomOperationFailed }` and releases the
-  destination registration. A terminal state is replaced by the next accepted
-  request.
-- `AccountCommand::ExportRoomHistory` projects `RoomHistoryExportRequested`.
-  `AccountCommand::CancelRoomHistoryExport { target_request_id }` projects
-  `RoomHistoryExportCancelRequested` for the target. Only the account actor
-  settles either. The actor aborts and awaits the export task, then reduces
-  `RoomHistoryExportCancelled` with the counts reached so far. If the task had
-  already finished, its own `Completed` or `Failed` settlement stands. A
-  cancel for a request that is not the actor's active export settles as
+- Start guard: `HistoryExportRequested` needs a Ready session, the room in
+  `AppState.rooms` or the Space in `AppState.spaces`, a valid range, and no
+  export in `Preparing` or `Running`. A rejected request leaves the state
+  unchanged; the runtime settles the command with
+  `OperationFailed { RoomOperationFailed }` and releases the directory
+  registration. A settled export is replaced by the next accepted request.
+- Retry guard: `HistoryExportRetryRequested { target_request_id }` needs a
+  Ready session and a settled state whose `request_id` is the target. It keeps
+  the scope and range. The account actor resumes the folder the target
+  resolved; if it never resolved one, the retry fails as
+  `DestinationUnavailable`.
+- Commands: `AccountCommand::ExportHistory` projects `HistoryExportRequested`;
+  `StopHistoryExport { target_request_id }` projects
+  `HistoryExportStopRequested`; `RetryHistoryExport { target_request_id }`
+  projects `HistoryExportRetryRequested`. `ExportHistory` and
+  `RetryHistoryExport` reach the account actor only when their projection was
+  accepted. Only the account actor produces `Prepared`, room progress, room
+  settlements, and the terminal action.
+- Stop is cooperative. The task checks the stop request between history pages
+  and attachments and races it against an in-flight download; it then removes
+  the interrupted room's `.partial` folder, rewrites the manifest and the
+  table of contents, and settles `HistoryExportStopped`. A stop for a request
+  that is not the actor's active export settles as
   `OperationFailed { RoomOperationFailed(NotFound) }`.
-- Progress arrives once per fetched page. Stale request ids, duplicate
-  counts, and settlements when nothing is in flight are ignored. The first
-  settlement for the active request is terminal, and later settlements for it
-  are ignored.
-- Session teardown aborts and awaits the export task. Logout, lock, account
-  switch, and every other transition through `clear_session_views` (such as a
-  verification-gate rejection) reset the slice to `Idle` and emit
-  `RoomHistoryExportChanged` when it was not already idle.
-- A completed full export has written every event the account could read
-  from the server into the destination. A period export reads only a window
-  around the period, bounded by a 24-hour margin (#988): it starts at the
-  event `timestamp_to_event` finds at `start_ms - margin` and stops after the
-  page holding an event at or after `end_exclusive_ms + margin`. When the
-  server cannot seek (unsupported endpoint, no such event, or any other
-  server error response) the export starts at the first visible event
-  instead. Event order is topological and `origin_server_ts` is
-  sender-controlled, so an in-range event displaced from its neighbours by
-  more than the margin is omitted. This is a deliberate tradeoff: short
-  periods of long rooms stay fast, and inclusion is still decided per event
-  by the range. The destination is replaced atomically only
-  after the whole file is written. Cancellation, failure, and teardown discard
-  the staged file, so a partial export never looks complete.
-  `undecryptable_events` reports how many exported events the device could
-  not decrypt. The JSON itself carries no Koushi-specific fields.
-- The destination path is a native artifact registered by the platform adapter
-  for the exact request. It never enters commands, state, events, or logs.
-  Room ids and time-zone names are redacted from `Debug` output.
+- Room progress is best effort (a full action channel drops it) and throttled
+  during attachments to one update per 250 ms or per 10 files, with the last
+  file always reported. `Prepared`, room settlements, and the terminal action
+  are always delivered. Stale request ids, unknown rooms, backward phases,
+  duplicate counts, and progress that would settle a room are ignored. A room
+  settles once; the first terminal action for the active request is final.
+- Session teardown aborts and awaits the export task and forgets the retry
+  target. Logout, lock, account switch, and every other transition through
+  `clear_session_views` reset the slice to `Idle` and emit
+  `HistoryExportChanged` when it was not already idle. The folder's manifest
+  remains, so starting an export on it later resumes it.
+- Folder and resume: the chosen directory is a native artifact registered by
+  the platform adapter for the exact request. When it contains
+  `koushi-export.json` it is the export folder; otherwise Core creates a new
+  `<stem> - Export <local date>` folder inside it, adding ` (2)`, ` (3)`, …
+  when the name is taken. Choosing a parent never resumes an existing export.
+  A manifest of another scope, range, format, or version, or one whose room
+  folder is not a single plain name, fails the export as `ManifestMismatch`
+  without touching the folder.
+  On a matching manifest, completed rooms are kept, rooms that newly joined the
+  Space are added, and every other target room is redone. Each room is built
+  in `rooms/.<folder>.partial/` and renamed into place only when every stage
+  succeeded; leftover `.partial` folders are removed at the start of a run.
+- Room selection: a Space export walks joined subspaces breadth-first with a
+  visited set, exports joined non-DM rooms, and lists unjoined rooms and
+  subspaces as `Skipped { NotJoined }`. A subspace whose children cannot be
+  read is left out; an unreadable root Space fails the export.
+- Failures: a room whose history cannot be fetched settles `Failed` and the
+  export continues. A write the room's own names or files cannot make (the
+  filesystem rejects a name, a folder vanished) settles that room
+  `Failed { Write }` and the export continues. A full disk fails the export as
+  `NoSpace`, and a denied folder or any other write failure outside a room as
+  `Write`; completed rooms remain. Room folder and attachment names are capped
+  at 120 characters and 150 UTF-8 bytes. A failed attachment
+  download (after three attempts for transient errors) is recorded in the
+  room's `attachments.json` and page, and does not fail the room.
+- History windows are unchanged from #59/#988: a full export reads every event
+  the account can read; a period export reads a window bounded by a 24-hour
+  margin around the period, seeking with `timestamp_to_event` when the server
+  supports it. An in-range event displaced from its neighbours by more than
+  the margin is omitted. `messages.json` keeps Element's renderer filter and
+  carries no Koushi-specific fields; `events.jsonl` holds every distinct
+  in-range event before that filter.
+- Paths, file names, message content, labels, and the folder stem never enter
+  commands' `Debug` output, state, events, or logs.
 
 ## Timeline Formatted Message Projection
 

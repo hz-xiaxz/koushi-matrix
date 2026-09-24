@@ -1,6 +1,7 @@
 //! Matrix SDK adapter for the export driver: the `timestamp_to_event` seek,
 //! forward `/messages` pages, and Element's header metadata.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::IntoFuture;
 
 use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind, UnableToDecryptReason};
@@ -12,9 +13,14 @@ use serde_json::Value;
 
 use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
 
+use super::archive::ArchiveSource;
 use super::driver::{HistoryPage, HistoryPageError, HistoryPageSource, PAGE_LIMIT};
 use super::element::{
     ExportDateLocale, ExportHeader, ExportSourceEvent, UndecryptableReason, format_export_date,
+};
+use super::manifest::ManifestScope;
+use super::space_selection::{
+    SdkSpaceChildSource, SelectedRoom, SelectionError, select_space_rooms,
 };
 
 pub(crate) struct MatrixRoomHistorySource {
@@ -196,5 +202,124 @@ pub(crate) async fn room_export_header(
         topic: room.topic().unwrap_or_default(),
         export_date: format_export_date(now_ms, utc_offset_minutes, ExportDateLocale::from(locale)),
         exported_by: member_label(room, room.own_user_id()).await,
+    }
+}
+
+async fn room_display_name(room: &matrix_sdk::Room) -> String {
+    match room.display_name().await {
+        Ok(name) => name.to_string(),
+        Err(_) => room
+            .cached_display_name()
+            .map(|name| name.to_string())
+            .or_else(|| room.name())
+            .unwrap_or_else(|| room.room_id().to_string()),
+    }
+}
+
+/// [`ArchiveSource`] over the signed-in Matrix session.
+pub(crate) struct SdkArchiveSource {
+    session: std::sync::Arc<koushi_sdk::MatrixClientSession>,
+    account_work: AccountWorkScheduler,
+    own_user_id: String,
+    now_ms: u64,
+    utc_offset_minutes: i32,
+    locale: koushi_state::CatalogLocale,
+}
+
+impl SdkArchiveSource {
+    pub(crate) fn new(
+        session: std::sync::Arc<koushi_sdk::MatrixClientSession>,
+        account_work: AccountWorkScheduler,
+        now_ms: u64,
+        utc_offset_minutes: i32,
+        locale: koushi_state::CatalogLocale,
+    ) -> Self {
+        let own_user_id = session.info.user_id.clone();
+        Self {
+            session,
+            account_work,
+            own_user_id,
+            now_ms,
+            utc_offset_minutes,
+            locale,
+        }
+    }
+
+    fn room(&self, room_id: &str) -> Option<matrix_sdk::Room> {
+        let room_id = room_id.parse::<matrix_sdk::ruma::OwnedRoomId>().ok()?;
+        self.session.client().get_room(&room_id)
+    }
+}
+
+impl ArchiveSource for SdkArchiveSource {
+    type Pages = MatrixRoomHistorySource;
+
+    fn own_user_id(&self) -> &str {
+        &self.own_user_id
+    }
+
+    async fn scope_title(&mut self, scope: &ManifestScope) -> Option<String> {
+        let (ManifestScope::Room { id } | ManifestScope::Space { id }) = scope;
+        let room = self.room(id)?;
+        let is_space = room.is_space();
+        let matches = matches!(scope, ManifestScope::Space { .. }) == is_space;
+        if !matches {
+            return None;
+        }
+        Some(room_display_name(&room).await)
+    }
+
+    async fn select_rooms(
+        &mut self,
+        scope: &ManifestScope,
+    ) -> Result<Vec<SelectedRoom>, SelectionError> {
+        match scope {
+            ManifestScope::Room { id } => {
+                let room = self.room(id).ok_or(SelectionError)?;
+                Ok(vec![SelectedRoom {
+                    room_id: id.clone(),
+                    display_name: room_display_name(&room).await,
+                    target: true,
+                }])
+            }
+            ManifestScope::Space { id } => {
+                let mut children = SdkSpaceChildSource::new(self.session.clone());
+                select_space_rooms(&mut children, id).await
+            }
+        }
+    }
+
+    async fn open_room(
+        &mut self,
+        room_id: &str,
+    ) -> Option<(ExportHeader, MatrixRoomHistorySource)> {
+        let room = self.room(room_id)?;
+        if room.state() != matrix_sdk::RoomState::Joined {
+            return None;
+        }
+        let header =
+            room_export_header(&room, self.now_ms, self.utc_offset_minutes, self.locale).await;
+        Some((
+            header,
+            MatrixRoomHistorySource::new(room, self.account_work.clone()),
+        ))
+    }
+
+    async fn sender_names(
+        &mut self,
+        room_id: &str,
+        senders: &BTreeSet<String>,
+    ) -> BTreeMap<String, String> {
+        let Some(room) = self.room(room_id) else {
+            return BTreeMap::new();
+        };
+        let mut names = BTreeMap::new();
+        for sender in senders {
+            let Ok(user_id) = sender.parse::<matrix_sdk::ruma::OwnedUserId>() else {
+                continue;
+            };
+            names.insert(sender.clone(), member_label(&room, &user_id).await);
+        }
+        names
     }
 }

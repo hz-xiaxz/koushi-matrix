@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { sendReadMarkers, sendRoomMessage } from "../../lib/local-homeserver-qa.mjs";
 import { parseQaTitle,safeTimestamp,timestamp } from "../evidence.mjs";
@@ -1178,19 +1178,28 @@ export async function runLocalCjkScenario() {
 const HISTORY_EXPORT_TOP_LEVEL_KEYS = ["room_name", "room_creator", "topic", "export_date", "exported_by", "messages"];
 
 function clearHistoryExportDir(directory) {
-  for (const name of readdirSync(directory)) rmSync(join(directory, name), { force: true });
+  for (const name of readdirSync(directory)) rmSync(join(directory, name), { recursive: true, force: true });
 }
 
-// Reads the one committed export. A staged file is hidden (dot-prefixed) and
-// renamed over the destination only after the whole walk, so its presence
-// here would mean a partial export leaked.
+// Reads the one room of the one export folder created in the chosen
+// directory. A room is built in a hidden `.partial` folder and renamed into
+// place only when complete, so a leftover one would mean a partial export.
 function readHistoryExport(directory, description) {
-  const names = readdirSync(directory);
-  const exports = names.filter((name) => name.endsWith(".json") && !name.startsWith("."));
-  if (exports.length !== 1 || names.length !== 1) {
-    throw new Error(`${description}: expected exactly one committed JSON file, found ${names.length} entries`);
+  const folders = readdirSync(directory).filter((name) => existsSync(join(directory, name, "koushi-export.json")));
+  if (folders.length !== 1 || readdirSync(directory).length !== 1) {
+    throw new Error(`${description}: expected exactly one export folder`);
   }
-  return JSON.parse(readFileSync(join(directory, exports[0]), "utf8"));
+  const exportDir = join(directory, folders[0]);
+  if (!existsSync(join(exportDir, "index.html"))) throw new Error(`${description}: no table of contents`);
+  const rooms = readdirSync(join(exportDir, "rooms"));
+  if (rooms.length !== 1 || rooms[0].startsWith(".")) {
+    throw new Error(`${description}: expected exactly one committed room folder, found ${rooms.length} entries`);
+  }
+  const roomDir = join(exportDir, "rooms", rooms[0]);
+  for (const file of ["events.jsonl", "room.json", "attachments.json", "index.html"]) {
+    if (!existsSync(join(roomDir, file))) throw new Error(`${description}: room folder lacks ${file}`);
+  }
+  return JSON.parse(readFileSync(join(roomDir, "messages.json"), "utf8"));
 }
 
 function assertElementExportShape(exported, seedBodies, expectedSeedCount, description) {
@@ -1215,7 +1224,7 @@ function assertElementExportShape(exported, seedBodies, expectedSeedCount, descr
 }
 
 async function waitForHistoryExportResult(browser, timeout, description) {
-  const selector = '[data-testid="room-history-export-state"][data-export-result]';
+  const selector = '[data-testid="history-export-state"][data-export-result]';
   const startedAt = Date.now();
   let last = null;
   while (Date.now() - startedAt < timeout) {
@@ -1241,10 +1250,10 @@ async function clickHistoryExportDialogButton(browser, label, timeout) {
 
 async function exportedEventCount(browser) {
   const text = await browser.execute(
-    () => document.querySelector('[data-testid="room-history-export-state"]')?.textContent ?? ""
+    () => document.querySelector('[data-testid="history-export-rooms"]')?.textContent ?? ""
   );
-  const match = /Saved (\d+) events\./.exec(text);
-  return match ? Number(match[1]) : text.includes("The selected range has no messages") ? 0 : null;
+  const match = /Done: (\d+) events/.exec(text);
+  return match ? Number(match[1]) : null;
 }
 
 export async function runLocalRoomHistoryExportScenario() {
@@ -1269,7 +1278,7 @@ export async function runLocalRoomHistoryExportScenario() {
 
     // All available history, the default range.
     clearHistoryExportDir(directory);
-    await clickHistoryExportDialogButton(session.browser, "Save", timeoutMs);
+    await clickHistoryExportDialogButton(session.browser, "Choose folder and download", timeoutMs);
     const all = await waitForHistoryExportResult(session.browser, timeoutMs, "local GUI full history export");
     if (all.result !== "completed") throw new Error(`local GUI full history export settled as ${all.result}`);
     const allExport = readHistoryExport(directory, "local GUI full history export");
@@ -1280,12 +1289,12 @@ export async function runLocalRoomHistoryExportScenario() {
     console.log(`gui_local_history_export_all=ok exported=${allExport.messages.length}`);
 
     // A past period holds none of the seeded messages.
-    await clickHistoryExportDialogButton(session.browser, "Download again", timeoutMs);
+    await clickHistoryExportDialogButton(session.browser, "Start a new download", timeoutMs);
     const periodRadio = await session.browser.$("//dialog[@aria-label='Download history']//label[normalize-space()='Period']//input");
     await periodRadio.waitForEnabled({ timeout: timeoutMs });
     await periodRadio.click();
     const zoneText = await session.browser.execute(
-      () => document.querySelector('[data-testid="room-history-export-time-zone"]')?.textContent ?? ""
+      () => document.querySelector('[data-testid="history-export-time-zone"]')?.textContent ?? ""
     );
     if (!/^Dates use the \S+ time zone\. The end date is included\.$/.test(zoneText)) {
       throw new Error("local GUI period export does not show its time zone");
@@ -1297,7 +1306,7 @@ export async function runLocalRoomHistoryExportScenario() {
     await setDatetimeLocalValue(session.browser, "2000-01-01", "Start date");
     await setDatetimeLocalValue(session.browser, "2000-01-02", "End date");
     clearHistoryExportDir(directory);
-    await clickHistoryExportDialogButton(session.browser, "Save", timeoutMs);
+    await clickHistoryExportDialogButton(session.browser, "Choose folder and download", timeoutMs);
     const past = await waitForHistoryExportResult(session.browser, timeoutMs, "local GUI past period export");
     if (past.result !== "completed" || (await exportedEventCount(session.browser)) !== 0) {
       throw new Error(`local GUI past period export settled as ${past.result}`);
@@ -1308,11 +1317,11 @@ export async function runLocalRoomHistoryExportScenario() {
 
     // Today's period, in the zone the dialog named, holds every seed. This
     // assumes setup and this step fall on the same civil day in that zone.
-    await clickHistoryExportDialogButton(session.browser, "Download again", timeoutMs);
+    await clickHistoryExportDialogButton(session.browser, "Start a new download", timeoutMs);
     await setDatetimeLocalValue(session.browser, today, "Start date");
     await setDatetimeLocalValue(session.browser, today, "End date");
     clearHistoryExportDir(directory);
-    await clickHistoryExportDialogButton(session.browser, "Save", timeoutMs);
+    await clickHistoryExportDialogButton(session.browser, "Choose folder and download", timeoutMs);
     const current = await waitForHistoryExportResult(session.browser, timeoutMs, "local GUI current period export");
     if (current.result !== "completed") throw new Error(`local GUI current period export settled as ${current.result}`);
     const currentExport = readHistoryExport(directory, "local GUI current period export");

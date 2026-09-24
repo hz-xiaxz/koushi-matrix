@@ -129,11 +129,11 @@ pub(crate) enum AccountMessage {
         >,
     },
     Command(AccountCommand),
-    /// `AccountCommand::ExportRoomHistory` with the Rust-resolved catalog
-    /// locale Element's `export_date` is formatted in.
-    ExportRoomHistory {
+    /// `AccountCommand::ExportHistory` with the Rust-resolved catalog locale
+    /// Element's `export_date` is formatted in.
+    ExportHistory {
         request_id: RequestId,
-        request: koushi_protocol::command::RoomHistoryExportRequest,
+        request: koushi_protocol::command::HistoryExportRequest,
         locale: koushi_state::CatalogLocale,
     },
     #[cfg(any(test, feature = "test-hooks"))]
@@ -999,8 +999,9 @@ pub struct AccountActor {
     pub(super) activity_resolution_task: Option<crate::executor::JoinHandle<()>>,
     /// The room-history export task, retained until cancel, teardown, or
     /// replacement by the next export.
-    pub(super) room_history_export: Option<super::history_export::ActiveRoomHistoryExport>,
-    pub(super) room_history_export_sink: Arc<dyn crate::room_history_export::RoomHistoryExportSink>,
+    pub(super) history_export: Option<super::history_export::ActiveHistoryExport>,
+    pub(super) last_history_export: Option<super::history_export::LastHistoryExport>,
+    pub(super) history_export_fs: Arc<dyn crate::room_history_export::HistoryExportFilesystem>,
     /// Application data directory for cached preview images.
     pub(super) data_dir: std::path::PathBuf,
     /// Latest link-preview policy snapshot from AppState, kept current so a
@@ -1281,8 +1282,9 @@ impl AccountActor {
             focused_projection_tx,
             account_work,
             activity_resolution_task: None,
-            room_history_export: None,
-            room_history_export_sink: super::history_export::default_room_history_export_sink(),
+            history_export: None,
+            last_history_export: None,
+            history_export_fs: super::history_export::default_history_export_fs(),
             data_dir,
             link_preview_policy: initial_link_preview_policy,
             send_read_receipts: initial_send_read_receipts,
@@ -1629,12 +1631,12 @@ impl AccountActor {
                             .await;
                     }));
                 }
-                AccountMessage::ExportRoomHistory {
+                AccountMessage::ExportHistory {
                     request_id,
                     request,
                     locale,
                 } => {
-                    self.handle_export_room_history(request_id, request, locale)
+                    self.handle_export_history(request_id, request, locale)
                         .await;
                 }
                 AccountMessage::CancelActivityResolution => {
@@ -2619,15 +2621,14 @@ impl AccountActor {
             } => {
                 self.handle_export_room_keys(request_id, request).await;
             }
-            AccountCommand::ExportRoomHistory { request_id, .. } => {
-                // AppActor routes this command as `AccountMessage::ExportRoomHistory`
+            AccountCommand::ExportHistory { request_id, .. } => {
+                // AppActor routes this command as `AccountMessage::ExportHistory`
                 // with its resolved locale; a bare command cannot be exported.
                 self.native_artifacts
-                    .unregister(request_id, NativeArtifactKind::RoomHistoryExportDestination);
-                self.send_actions(vec![AppAction::RoomHistoryExportFailed {
+                    .unregister(request_id, NativeArtifactKind::HistoryExportDirectory);
+                self.send_actions(vec![AppAction::HistoryExportFailed {
                     request_id: request_id.sequence,
-                    kind: koushi_state::RoomHistoryExportFailureKind::Sdk,
-                    progress: Default::default(),
+                    kind: koushi_state::HistoryExportFailureKind::Sdk,
                 }])
                 .await;
                 self.emit_failure(
@@ -2637,11 +2638,18 @@ impl AccountActor {
                     },
                 );
             }
-            AccountCommand::CancelRoomHistoryExport {
+            AccountCommand::StopHistoryExport {
                 request_id,
                 target_request_id,
             } => {
-                self.handle_cancel_room_history_export(request_id, target_request_id)
+                self.handle_stop_history_export(request_id, target_request_id)
+                    .await;
+            }
+            AccountCommand::RetryHistoryExport {
+                request_id,
+                target_request_id,
+            } => {
+                self.handle_retry_history_export(request_id, target_request_id)
                     .await;
             }
             AccountCommand::ImportRoomKeys {

@@ -1,0 +1,28 @@
+{
+  "format": "koushi-history-export",
+  "version": 1,
+  "scope": {
+    "kind": "room",
+    "id": "!math"
+  },
+  "range": {
+    "kind": "allAvailable"
+  },
+  "title": "Room !math",
+  "rooms": [
+    {
+      "room_id": "!math",
+      "display_name": "Room !math",
+      "folder": "Room !math (9a23b6fa)",
+      "status": "completed",
+      "counts": {
+        "fetched_events": 2,
+        "exported_events": 2,
+        "undecryptable_events": 0,
+        "attachments_total": 1,
+        "attachments_done": 1,
+        "attachments_failed": 0
+      }
+    }
+  ]
+}

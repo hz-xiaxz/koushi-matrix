@@ -1,6 +1,7 @@
-//! Room-history export (#59) through `CoreCommand` against a local homeserver.
+//! History export (room and Space archive folders) through `CoreCommand`
+//! against a local homeserver.
 //!
-//! Output is token-only. The exported files hold synthetic QA messages in a
+//! Output is token-only. The exported folders hold synthetic QA messages in a
 //! per-run temporary directory and are deleted when the stage ends; no path,
 //! identifier, or body is printed.
 
@@ -8,26 +9,33 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use koushi_core::runtime::CoreConnection;
-use koushi_protocol::command::{AccountCommand, CoreCommand, RoomHistoryExportRequest};
+use koushi_protocol::command::{
+    AccountCommand, CoreCommand, HistoryExportLabels, HistoryExportRequest,
+};
 use koushi_protocol::ids::{AccountKey, RequestId, TimelineKey};
 use koushi_state::{
-    AppState, RoomHistoryExportProgress, RoomHistoryExportRange, RoomHistoryExportState,
+    AppState, HistoryExportRange, HistoryExportRoom, HistoryExportRoomCounts,
+    HistoryExportRoomPhase, HistoryExportScope, HistoryExportState,
 };
 use serde_json::Value;
 
 use super::event_wait::{
     subscribe_timeline_for_qa, wait_for_encrypted_room_projection_for_qa,
-    wait_for_invite_in_snapshot, wait_for_item_with_body, wait_for_send_flow_completion,
+    wait_for_invite_in_snapshot, wait_for_item_with_body, wait_for_media_send_flow_completion,
+    wait_for_send_flow_completion, wait_for_space_child_projection, wait_for_space_in_space_list,
     wait_for_withheld_event_projection_from_source,
 };
-use super::fixtures::{accept_invite_for_qa, create_room_for_qa, invite_user_for_qa};
+use super::fixtures::{
+    accept_invite_for_qa, create_room_for_qa, create_space_for_qa, invite_user_for_qa,
+    set_space_child_for_qa, start_direct_message_for_qa,
+};
 use super::participants::{
     QaOwnedRuntimeParticipant, QaParticipantLoginGate, cleanup_owned_e2ee_participant_best_effort,
     login_synced_participant_for_qa, qa_data_dir,
 };
 use super::registry::{E2EE_EVENT_TIMEOUT, QaConfig};
 
-const EXPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+const EXPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 const HEADER_KEYS: [&str; 6] = [
     "room_name",
     "room_creator",
@@ -36,25 +44,33 @@ const HEADER_KEYS: [&str; 6] = [
     "exported_by",
     "messages",
 ];
+/// A 1×1 PNG, uploaded as an image attachment.
+const PNG_1X1: &[u8] = &[
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+    0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+    0x42, 0x60, 0x82,
+];
 
 /// A terminal export outcome read from the authoritative snapshot.
 enum ExportOutcome {
-    Completed(RoomHistoryExportProgress),
-    Cancelled,
+    Completed(Vec<HistoryExportRoom>),
+    Stopped,
     Failed(String),
 }
 
 fn terminal_outcome(state: &AppState, request_id: RequestId) -> Option<ExportOutcome> {
-    match &state.room_history_export {
-        RoomHistoryExportState::Completed {
+    match &state.history_export {
+        HistoryExportState::Completed {
             request_id: id,
-            progress,
+            rooms,
             ..
-        } if *id == request_id.sequence => Some(ExportOutcome::Completed(*progress)),
-        RoomHistoryExportState::Cancelled { request_id: id, .. } if *id == request_id.sequence => {
-            Some(ExportOutcome::Cancelled)
+        } if *id == request_id.sequence => Some(ExportOutcome::Completed(rooms.clone())),
+        HistoryExportState::Stopped { request_id: id, .. } if *id == request_id.sequence => {
+            Some(ExportOutcome::Stopped)
         }
-        RoomHistoryExportState::Failed {
+        HistoryExportState::Failed {
             request_id: id,
             failure_kind,
             ..
@@ -71,9 +87,14 @@ async fn wait_for_terminal(
     if let Some(outcome) = terminal_outcome(&conn.snapshot(), request_id) {
         return Ok(outcome);
     }
-    tokio::time::timeout(EXPORT_TIMEOUT, async {
+    let mut failure: Option<String> = None;
+    let result = tokio::time::timeout(EXPORT_TIMEOUT, async {
         loop {
             match conn.recv_event().await {
+                Ok(koushi_protocol::event::CoreEvent::OperationFailed {
+                    request_id: failed,
+                    failure: kind,
+                }) if failed == request_id => failure = Some(format!("{kind:?}")),
                 Ok(_) => {}
                 // A lagged stream still leaves the snapshot authoritative.
                 Err(_) => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
@@ -83,30 +104,74 @@ async fn wait_for_terminal(
             }
         }
     })
-    .await
-    .map_err(|_| format!("{label}: timed out waiting for a terminal export state"))?
+    .await;
+    result.map_err(|_| {
+        format!(
+            "{label}: timed out waiting for a terminal export state ({}; operation_failed={})",
+            export_state_summary(&conn.snapshot().history_export, request_id),
+            failure.as_deref().unwrap_or("none")
+        )
+    })?
+}
+
+/// Private-data-free summary of the export state for a timeout diagnosis.
+fn export_state_summary(state: &HistoryExportState, request_id: RequestId) -> String {
+    let (kind, rooms) = match state {
+        HistoryExportState::Idle => ("idle", None),
+        HistoryExportState::Preparing { .. } => ("preparing", None),
+        HistoryExportState::Running { rooms, .. } => ("running", Some(rooms)),
+        HistoryExportState::Completed { rooms, .. } => ("completed", Some(rooms)),
+        HistoryExportState::Stopped { rooms, .. } => ("stopped", Some(rooms)),
+        HistoryExportState::Failed { rooms, .. } => ("failed", Some(rooms)),
+    };
+    let ours = state.request_id() == Some(request_id.sequence);
+    let rooms = rooms
+        .map(|rooms| {
+            rooms
+                .iter()
+                .map(|room| {
+                    format!(
+                        "{:?}:f{}:a{}/{}",
+                        room.phase,
+                        room.counts.fetched_events,
+                        room.counts.attachments_done,
+                        room.counts.attachments_total
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    format!("state={kind} ours={ours} rooms=[{rooms}]")
 }
 
 async fn start_export(
     conn: &mut CoreConnection,
-    room_id: &str,
-    range: RoomHistoryExportRange,
-    destination: &Path,
+    scope: HistoryExportScope,
+    range: HistoryExportRange,
+    chosen_dir: &Path,
     label: &str,
 ) -> Result<RequestId, String> {
     let request_id = conn.next_request_id();
     conn.register_native_artifact(
         request_id,
-        koushi_core::NativeArtifactKind::RoomHistoryExportDestination,
-        destination.to_path_buf(),
+        koushi_core::NativeArtifactKind::HistoryExportDirectory,
+        chosen_dir.to_path_buf(),
     )
-    .map_err(|_| format!("{label}: register export destination"))?;
-    conn.command(CoreCommand::Account(AccountCommand::ExportRoomHistory {
+    .map_err(|_| format!("{label}: register export directory"))?;
+    conn.command(CoreCommand::Account(AccountCommand::ExportHistory {
         request_id,
-        request: RoomHistoryExportRequest {
-            room_id: room_id.to_owned(),
+        request: HistoryExportRequest {
+            scope,
             range,
+            display_time_zone: "UTC".to_owned(),
             export_date_utc_offset_minutes: 0,
+            folder_name_stem: "QA Export".to_owned(),
+            labels: HistoryExportLabels {
+                lang: "en".to_owned(),
+                edited: "(edited)".to_owned(),
+                ..HistoryExportLabels::default()
+            },
         },
     }))
     .await
@@ -114,22 +179,63 @@ async fn start_export(
     Ok(request_id)
 }
 
-async fn export_to_value(
+async fn export_completed(
     conn: &mut CoreConnection,
-    room_id: &str,
-    range: RoomHistoryExportRange,
-    destination: &Path,
+    scope: HistoryExportScope,
+    range: HistoryExportRange,
+    chosen_dir: &Path,
     label: &str,
-) -> Result<(Value, RoomHistoryExportProgress), String> {
-    let request_id = start_export(conn, room_id, range, destination, label).await?;
-    let progress = match wait_for_terminal(conn, request_id, label).await? {
-        ExportOutcome::Completed(progress) => progress,
-        ExportOutcome::Cancelled => return Err(format!("{label}: export was cancelled")),
-        ExportOutcome::Failed(kind) => return Err(format!("{label}: export failed kind={kind}")),
-    };
-    let bytes = std::fs::read(destination).map_err(|_| format!("{label}: read export file"))?;
+) -> Result<Vec<HistoryExportRoom>, String> {
+    let request_id = start_export(conn, scope, range, chosen_dir, label).await?;
+    match wait_for_terminal(conn, request_id, label).await? {
+        ExportOutcome::Completed(rooms) => Ok(rooms),
+        ExportOutcome::Stopped => Err(format!("{label}: export stopped")),
+        ExportOutcome::Failed(kind) => Err(format!("{label}: export failed kind={kind}")),
+    }
+}
+
+/// The export folder Core created inside `chosen_dir`, or `chosen_dir` itself
+/// when it already held a manifest.
+fn export_dir(chosen_dir: &Path) -> Result<PathBuf, String> {
+    if chosen_dir.join("koushi-export.json").is_file() {
+        return Ok(chosen_dir.to_path_buf());
+    }
+    let mut folders = std::fs::read_dir(chosen_dir)
+        .map_err(|_| "history export: read chosen directory".to_owned())?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.join("koushi-export.json").is_file())
+        .collect::<Vec<_>>();
+    match (folders.pop(), folders.is_empty()) {
+        (Some(folder), true) => Ok(folder),
+        _ => Err("history export: expected exactly one export folder".to_owned()),
+    }
+}
+
+fn room_folders(export_dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut folders = std::fs::read_dir(export_dir.join("rooms"))
+        .map_err(|_| "history export: read rooms folder".to_owned())?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    folders.sort();
+    Ok(folders)
+}
+
+fn no_partial_folders(export_dir: &Path) -> bool {
+    std::fs::read_dir(export_dir.join("rooms")).is_ok_and(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().ends_with(".partial"))
+    })
+}
+
+fn read_messages(room_folder: &Path, label: &str) -> Result<Value, String> {
+    let bytes = std::fs::read(room_folder.join("messages.json"))
+        .map_err(|_| format!("{label}: read messages.json"))?;
     let value = serde_json::from_slice::<Value>(&bytes)
-        .map_err(|_| format!("{label}: export file is not JSON"))?;
+        .map_err(|_| format!("{label}: messages.json is not JSON"))?;
     // Element's top-level key order, as `JSON.stringify` writes it.
     let text = String::from_utf8(bytes).map_err(|_| format!("{label}: export is not UTF-8"))?;
     let positions = HEADER_KEYS
@@ -140,7 +246,54 @@ async fn export_to_value(
     if !positions.windows(2).all(|pair| pair[0] < pair[1]) {
         return Err(format!("{label}: Element top-level key order differs"));
     }
-    Ok((value, progress))
+    for file in [
+        "events.jsonl",
+        "room.json",
+        "attachments.json",
+        "index.html",
+    ] {
+        if !room_folder.join(file).is_file() {
+            return Err(format!("{label}: room folder lacks {file}"));
+        }
+    }
+    Ok(value)
+}
+
+/// Export one room into a fresh directory and return its `messages.json` and
+/// the Rust-reported counts.
+async fn export_room_to_value(
+    conn: &mut CoreConnection,
+    room_id: &str,
+    range: HistoryExportRange,
+    chosen_dir: &Path,
+    label: &str,
+) -> Result<(Value, HistoryExportRoomCounts), String> {
+    std::fs::create_dir_all(chosen_dir).map_err(|_| format!("{label}: prepare directory"))?;
+    let rooms = export_completed(
+        conn,
+        HistoryExportScope::Room {
+            room_id: room_id.to_owned(),
+        },
+        range,
+        chosen_dir,
+        label,
+    )
+    .await?;
+    let [room] = rooms.as_slice() else {
+        return Err(format!(
+            "{label}: a room export listed {} rooms",
+            rooms.len()
+        ));
+    };
+    if room.phase != HistoryExportRoomPhase::Completed {
+        return Err(format!("{label}: room phase {:?}", room.phase));
+    }
+    let dir = export_dir(chosen_dir)?;
+    let folders = room_folders(&dir)?;
+    let [folder] = folders.as_slice() else {
+        return Err(format!("{label}: expected one room folder"));
+    };
+    Ok((read_messages(folder, label)?, room.counts))
 }
 
 fn messages(value: &Value) -> &[Value] {
@@ -168,7 +321,7 @@ fn is_text_message(event: &Value) -> bool {
 /// Structural checks shared by every completed export.
 fn check_export(
     value: &Value,
-    progress: &RoomHistoryExportProgress,
+    progress: &HistoryExportRoomCounts,
     label: &str,
 ) -> Result<(), String> {
     for key in [
@@ -228,17 +381,6 @@ fn check_export(
     Ok(())
 }
 
-fn no_partial_files(directory: &Path) -> bool {
-    std::fs::read_dir(directory).is_ok_and(|entries| {
-        entries.filter_map(Result::ok).all(|entry| {
-            !entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(".koushi-export-")
-        })
-    })
-}
-
 struct ExportDirectory(PathBuf);
 
 impl Drop for ExportDirectory {
@@ -286,8 +428,14 @@ async fn send_text(
 ///   key exports that message as Element's `m.bad.encrypted` placeholder, and
 ///   the Rust-owned result counts every placeholder; messages sent after they
 ///   joined stay decrypted.
-/// - `history_export_cancel=ok`: a cancelled export settles as cancelled and
-///   leaves neither the destination nor a staging file.
+/// - `history_export_cancel=ok`: a stopped export settles as stopped and
+///   leaves no partial room folder.
+/// - `history_export_attachments=ok`: an image uploaded to the encrypted room
+///   is downloaded, decrypted byte-for-byte, and given a JPEG thumbnail.
+/// - `history_export_space=ok`: a Space export covers its joined rooms, lists
+///   them in the table of contents, and leaves out a direct message.
+/// - `history_export_resume=ok`: exporting the same folder again after a room
+///   joined the Space exports only that room and keeps the earlier rooms.
 pub(super) async fn run_room_history_export_stage(
     config: &QaConfig,
     conn_a: &mut CoreConnection,
@@ -410,11 +558,11 @@ pub(super) async fn run_room_history_export_stage(
         let sent = before_join.iter().chain(&after_join).collect::<Vec<_>>();
 
         // Full export by the room creator.
-        let full_path = directory.0.join("full.json");
-        let (full, full_progress) = export_to_value(
+        let full_path = directory.0.join("full");
+        let (full, full_progress) = export_room_to_value(
             conn_a,
             &room_id,
-            RoomHistoryExportRange::AllAvailable,
+            HistoryExportRange::AllAvailable,
             &full_path,
             "history export full",
         )
@@ -459,11 +607,11 @@ pub(super) async fn run_room_history_export_stage(
             })
             .filter_map(|event| event["event_id"].as_str().map(str::to_owned))
             .collect::<Vec<_>>();
-        let period_path = directory.0.join("period.json");
-        let (period, period_progress) = export_to_value(
+        let period_path = directory.0.join("period");
+        let (period, period_progress) = export_room_to_value(
             conn_a,
             &room_id,
-            RoomHistoryExportRange::Period {
+            HistoryExportRange::Period {
                 start_ms,
                 end_exclusive_ms,
                 time_zone: "UTC".to_owned(),
@@ -487,11 +635,11 @@ pub(super) async fn run_room_history_export_stage(
         // event, which is already past the period's margin, so the walk stops
         // after one page. A server that cannot seek reads from the first
         // visible event instead; either way the file is empty.
-        let before_path = directory.0.join("period-before.json");
-        let (before, before_progress) = export_to_value(
+        let before_path = directory.0.join("period-before");
+        let (before, before_progress) = export_room_to_value(
             conn_a,
             &room_id,
-            RoomHistoryExportRange::Period {
+            HistoryExportRange::Period {
                 start_ms: 0,
                 end_exclusive_ms: 1_000,
                 time_zone: "UTC".to_owned(),
@@ -519,11 +667,11 @@ pub(super) async fn run_room_history_export_stage(
             .max()
             .unwrap_or_default();
         let after_start_ms = last_ms + 365 * 24 * 60 * 60 * 1000;
-        let after_path = directory.0.join("period-after.json");
-        let (after, after_progress) = export_to_value(
+        let after_path = directory.0.join("period-after");
+        let (after, after_progress) = export_room_to_value(
             conn_a,
             &room_id,
-            RoomHistoryExportRange::Period {
+            HistoryExportRange::Period {
                 start_ms: after_start_ms,
                 end_exclusive_ms: after_start_ms + 24 * 60 * 60 * 1000,
                 time_zone: "UTC".to_owned(),
@@ -544,11 +692,11 @@ pub(super) async fn run_room_history_export_stage(
         println!("history_export_period_fallback=ok");
 
         // The later member cannot decrypt the withheld message.
-        let late_path = directory.0.join("late-member.json");
-        let (late, late_progress) = export_to_value(
+        let late_path = directory.0.join("late-member");
+        let (late, late_progress) = export_room_to_value(
             conn_c,
             &room_id,
-            RoomHistoryExportRange::AllAvailable,
+            HistoryExportRange::AllAvailable,
             &late_path,
             "history export late member",
         )
@@ -581,50 +729,65 @@ pub(super) async fn run_room_history_export_stage(
         }
         println!("history_export_utd_counted=ok");
 
-        // Cancellation. A tiny room can finish before the cancel reaches the
-        // actor, so retry a bounded number of times.
-        let cancel_path = directory.0.join("cancelled.json");
-        let mut cancelled = false;
+        // Stop. A tiny room can finish before the stop reaches the task, so
+        // retry a bounded number of times.
+        let mut stopped = false;
         for attempt in 0..3 {
-            let _ = std::fs::remove_file(&cancel_path);
+            let chosen = directory.0.join(format!("stopped-{attempt}"));
+            std::fs::create_dir_all(&chosen)
+                .map_err(|_| "history export stop: prepare directory".to_owned())?;
             let export_id = start_export(
                 conn_a,
-                &room_id,
-                RoomHistoryExportRange::AllAvailable,
-                &cancel_path,
-                "history export cancel",
+                HistoryExportScope::Room {
+                    room_id: room_id.clone(),
+                },
+                HistoryExportRange::AllAvailable,
+                &chosen,
+                "history export stop",
             )
             .await?;
-            let cancel_id = conn_a.next_request_id();
+            let stop_id = conn_a.next_request_id();
             conn_a
-                .command(CoreCommand::Account(
-                    AccountCommand::CancelRoomHistoryExport {
-                        request_id: cancel_id,
-                        target_request_id: export_id,
-                    },
-                ))
+                .command(CoreCommand::Account(AccountCommand::StopHistoryExport {
+                    request_id: stop_id,
+                    target_request_id: export_id,
+                }))
                 .await
-                .map_err(|_| "history export cancel: submit cancel".to_owned())?;
-            match wait_for_terminal(conn_a, export_id, "history export cancel").await? {
-                ExportOutcome::Cancelled => {
-                    cancelled = true;
+                .map_err(|_| "history export stop: submit stop".to_owned())?;
+            match wait_for_terminal(conn_a, export_id, "history export stop").await? {
+                ExportOutcome::Stopped => {
+                    let dir = export_dir(&chosen)?;
+                    if !no_partial_folders(&dir) {
+                        return Err(
+                            "history export stop: a stopped export left a partial room".to_owned()
+                        );
+                    }
+                    stopped = true;
                     break;
                 }
                 ExportOutcome::Completed(_) => {
                     println!("history_export_cancel_race_attempt={attempt}");
                 }
                 ExportOutcome::Failed(kind) => {
-                    return Err(format!("history export cancel: export failed kind={kind}"));
+                    return Err(format!("history export stop: export failed kind={kind}"));
                 }
             }
         }
-        if !cancelled {
-            return Err("history export cancel: export completed before every cancel".to_owned());
-        }
-        if cancel_path.exists() || !no_partial_files(&directory.0) {
-            return Err("history export cancel: a cancelled export left a file".to_owned());
+        if !stopped {
+            return Err("history export stop: export completed before every stop".to_owned());
         }
         println!("history_export_cancel=ok");
+
+        run_space_export(
+            config,
+            conn_a,
+            account_key_a,
+            &account_key_c.0,
+            &room_id,
+            &key_a,
+            &directory.0,
+        )
+        .await?;
         println!("room_history_export=ok");
         Ok(())
     }
@@ -632,4 +795,250 @@ pub(super) async fn run_room_history_export_stage(
     let cleanup =
         cleanup_owned_e2ee_participant_best_effort(participant_c, "history export C cleanup").await;
     result.and(cleanup)
+}
+
+fn modified(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+}
+
+/// Space export, attachments, and resume.
+#[allow(clippy::too_many_arguments)]
+async fn run_space_export(
+    config: &QaConfig,
+    conn_a: &mut CoreConnection,
+    account_key_a: &AccountKey,
+    user_c: &str,
+    encrypted_room_id: &str,
+    key_a: &TimelineKey,
+    directory: &Path,
+) -> Result<(), String> {
+    // An image in the encrypted room: the export must decrypt it.
+    let expected_account = match conn_a.snapshot().session {
+        koushi_state::SessionState::Ready(info) => {
+            koushi_core::store::session_key_id_from_info(&info)
+        }
+        _ => return Err("history export space: requires a ready session".to_owned()),
+    };
+    let media_txn = "qa-history-export-image".to_owned();
+    let send_media_id = conn_a.next_request_id();
+    conn_a
+        .command(CoreCommand::Timeline(
+            koushi_protocol::command::TimelineCommand::UploadAndSendMedia {
+                request_id: send_media_id,
+                expected_account,
+                key: key_a.clone(),
+                transaction_id: media_txn.clone(),
+                request: koushi_protocol::command::UploadMediaRequest {
+                    filename: "qa-history-export.png".to_owned(),
+                    mime_type: "image/png".to_owned(),
+                    bytes: PNG_1X1.to_vec(),
+                    kind: koushi_protocol::command::UploadMediaKind::Image {
+                        width: Some(1),
+                        height: Some(1),
+                    },
+                    compression: None,
+                    thumbnail: None,
+                    caption: None,
+                },
+            },
+        ))
+        .await
+        .map_err(|_| "history export space: submit image".to_owned())?;
+    wait_for_media_send_flow_completion(
+        conn_a,
+        send_media_id,
+        key_a,
+        &media_txn,
+        "history export image",
+    )
+    .await?;
+
+    let space_id =
+        create_space_for_qa(conn_a, "QA History Export Space", "history export space").await?;
+    set_space_child_for_qa(
+        conn_a,
+        &space_id,
+        encrypted_room_id,
+        &config.server_name,
+        "history export space child",
+    )
+    .await?;
+    let plain_room = create_room_for_qa(
+        conn_a,
+        "QA History Export Plain",
+        false,
+        "history export plain room",
+    )
+    .await?;
+    set_space_child_for_qa(
+        conn_a,
+        &space_id,
+        &plain_room,
+        &config.server_name,
+        "history export plain child",
+    )
+    .await?;
+    let dm_room = start_direct_message_for_qa(conn_a, user_c, "history export dm").await?;
+    set_space_child_for_qa(
+        conn_a,
+        &space_id,
+        &dm_room,
+        &config.server_name,
+        "history export dm child",
+    )
+    .await?;
+    let _ = account_key_a;
+    // The reducer admits a Space export only for a Space in `AppState.spaces`.
+    wait_for_space_in_space_list(conn_a, &space_id, "history export space projection").await?;
+    wait_for_space_child_projection(
+        conn_a,
+        &space_id,
+        &[
+            encrypted_room_id.to_owned(),
+            plain_room.clone(),
+            dm_room.clone(),
+        ],
+        "history export space children",
+    )
+    .await?;
+
+    let chosen = directory.join("space");
+    std::fs::create_dir_all(&chosen)
+        .map_err(|_| "history export space: prepare directory".to_owned())?;
+    let rooms = export_completed(
+        conn_a,
+        HistoryExportScope::Space {
+            space_id: space_id.clone(),
+        },
+        HistoryExportRange::AllAvailable,
+        &chosen,
+        "history export space",
+    )
+    .await?;
+    let listed = rooms
+        .iter()
+        .map(|room| room.room_id.as_str())
+        .collect::<BTreeSet<_>>();
+    if !listed.contains(encrypted_room_id) || !listed.contains(plain_room.as_str()) {
+        return Err("history export space: a joined room was not listed".to_owned());
+    }
+    if listed.contains(dm_room.as_str()) {
+        return Err("history export space: the direct message was exported".to_owned());
+    }
+    if rooms.iter().any(|room| {
+        room.phase != HistoryExportRoomPhase::Completed
+            && room.phase != HistoryExportRoomPhase::Skipped
+    }) {
+        return Err("history export space: a room did not complete".to_owned());
+    }
+    let dir = export_dir(&chosen)?;
+    let folders = room_folders(&dir)?;
+    if folders.len() != 2 || !no_partial_folders(&dir) {
+        return Err(format!(
+            "history export space: expected two room folders, found {}",
+            folders.len()
+        ));
+    }
+    let index = std::fs::read_to_string(dir.join("index.html"))
+        .map_err(|_| "history export space: read table of contents".to_owned())?;
+    if !index.contains("QA History Export Plain") {
+        return Err("history export space: the table of contents lacks a room".to_owned());
+    }
+    println!("history_export_space=ok");
+
+    // The encrypted room's image, decrypted, with a thumbnail.
+    let mut image_checked = false;
+    for folder in &folders {
+        let attachments: Value = serde_json::from_slice(
+            &std::fs::read(folder.join("attachments.json"))
+                .map_err(|_| "history export attachments: read attachments.json".to_owned())?,
+        )
+        .map_err(|_| "history export attachments: attachments.json is not JSON".to_owned())?;
+        let Some(record) = attachments["attachments"].as_array().and_then(|records| {
+            records
+                .iter()
+                .find(|record| record["name"] == "qa-history-export.png")
+        }) else {
+            continue;
+        };
+        let file = record["file"]
+            .as_str()
+            .ok_or("history export attachments: image not retrieved")?;
+        let thumb = record["thumb"]
+            .as_str()
+            .ok_or("history export attachments: no thumbnail")?;
+        let bytes = std::fs::read(folder.join(file))
+            .map_err(|_| "history export attachments: read image".to_owned())?;
+        let thumb_bytes = std::fs::read(folder.join(thumb))
+            .map_err(|_| "history export attachments: read thumbnail".to_owned())?;
+        if bytes != PNG_1X1 || !thumb_bytes.starts_with(&[0xFF, 0xD8]) {
+            return Err("history export attachments: image or thumbnail differs".to_owned());
+        }
+        image_checked = true;
+    }
+    if !image_checked {
+        return Err("history export attachments: the image was not exported".to_owned());
+    }
+    println!("history_export_attachments=ok");
+
+    // Resume: a room joins the Space; exporting the same folder adds only it.
+    let before = folders
+        .iter()
+        .map(|folder| modified(&folder.join("messages.json")))
+        .collect::<Vec<_>>();
+    let added_room = create_room_for_qa(
+        conn_a,
+        "QA History Export Added",
+        false,
+        "history export added room",
+    )
+    .await?;
+    set_space_child_for_qa(
+        conn_a,
+        &space_id,
+        &added_room,
+        &config.server_name,
+        "history export added child",
+    )
+    .await?;
+    wait_for_space_child_projection(
+        conn_a,
+        &space_id,
+        &[
+            encrypted_room_id.to_owned(),
+            plain_room.clone(),
+            dm_room.clone(),
+            added_room.clone(),
+        ],
+        "history export added child projection",
+    )
+    .await?;
+    let rooms = export_completed(
+        conn_a,
+        HistoryExportScope::Space { space_id },
+        HistoryExportRange::AllAvailable,
+        &dir,
+        "history export resume",
+    )
+    .await?;
+    if !rooms
+        .iter()
+        .any(|room| room.room_id == added_room && room.phase == HistoryExportRoomPhase::Completed)
+    {
+        return Err("history export resume: the added room was not exported".to_owned());
+    }
+    let after = folders
+        .iter()
+        .map(|folder| modified(&folder.join("messages.json")))
+        .collect::<Vec<_>>();
+    if before != after || room_folders(&dir)?.len() != 3 {
+        return Err(
+            "history export resume: earlier rooms were rewritten or the new room is missing"
+                .to_owned(),
+        );
+    }
+    println!("history_export_resume=ok");
+    Ok(())
 }

@@ -12,6 +12,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { t } from "../i18n/messages";
 import type {
+  HistoryExportState,
   RoomJoinRule,
   RoomManagementState,
   RoomSummary,
@@ -20,10 +21,13 @@ import type {
   SpaceSummary
 } from "../domain/types";
 import { ImeTextField } from "./ImeTextControl";
+import { HistoryExportSection, type HistoryExportControls } from "./HistoryExportDialog";
 import { SpaceAccessSection } from "./SpaceAccessSection";
 
 export function SpaceInfoPanel({
   fallbackName,
+  historyExport,
+  historyExportControls,
   localIcon = "",
   localName = "",
   rooms,
@@ -39,6 +43,8 @@ export function SpaceInfoPanel({
   onUpdateJoinRule
 }: {
   fallbackName: string;
+  historyExport?: HistoryExportState;
+  historyExportControls?: HistoryExportControls;
   localIcon?: string;
   localName?: string;
   rooms: RoomSummary[];
@@ -148,6 +154,15 @@ export function SpaceInfoPanel({
           roomManagement={roomManagement}
           space={space}
           onUpdateJoinRule={onUpdateJoinRule}
+        />
+      ) : null}
+
+      {space && historyExport && historyExportControls ? (
+        <HistoryExportSection
+          key={space.space_id}
+          target={{ kind: "space", spaceId: space.space_id, name: space.display_name || fallbackName }}
+          exportState={historyExport}
+          controls={historyExportControls}
         />
       ) : null}
 

@@ -1314,42 +1314,93 @@ export type MessageId =
   | "timeline.linkPreviewHide"
   | "timeline.linkPreviewFailed"
   | "timeline.linkPreviewLoading"
-  | "roomHistoryExport.section"
-  | "roomHistoryExport.open"
-  | "roomHistoryExport.hint"
-  | "roomHistoryExport.title"
-  | "roomHistoryExport.range"
-  | "roomHistoryExport.rangeAll"
-  | "roomHistoryExport.rangePeriod"
-  | "roomHistoryExport.startDate"
-  | "roomHistoryExport.endDate"
-  | "roomHistoryExport.timeZone"
-  | "roomHistoryExport.invalidPeriod"
-  | "roomHistoryExport.availability"
-  | "roomHistoryExport.plaintextWarning"
-  | "roomHistoryExport.attachments"
-  | "roomHistoryExport.save"
-  | "roomHistoryExport.saveDialogTitle"
-  | "roomHistoryExport.fileNameStem"
-  | "roomHistoryExport.exporting"
-  | "roomHistoryExport.cancelling"
-  | "roomHistoryExport.stop"
-  | "roomHistoryExport.continuesInBackground"
-  | "roomHistoryExport.completed"
-  | "roomHistoryExport.completedEmpty"
-  | "roomHistoryExport.undecryptable"
-  | "roomHistoryExport.cancelled"
-  | "roomHistoryExport.failed"
-  | "roomHistoryExport.failedInvalidRange"
-  | "roomHistoryExport.failedRoomNotFound"
-  | "roomHistoryExport.failedDestination"
-  | "roomHistoryExport.failedWrite"
-  | "roomHistoryExport.failedNetwork"
-  | "roomHistoryExport.failedSdk"
-  | "roomHistoryExport.notStarted"
-  | "roomHistoryExport.busyOtherRoom"
-  | "roomHistoryExport.again"
-  | "roomHistoryExport.periodTooEarly";
+  | "historyExport.section"
+  | "historyExport.spaceSection"
+  | "historyExport.open"
+  | "historyExport.hint"
+  | "historyExport.spaceHint"
+  | "historyExport.title"
+  | "historyExport.spaceTitle"
+  | "historyExport.range"
+  | "historyExport.rangeAll"
+  | "historyExport.rangePeriod"
+  | "historyExport.startDate"
+  | "historyExport.endDate"
+  | "historyExport.timeZone"
+  | "historyExport.invalidPeriod"
+  | "historyExport.availability"
+  | "historyExport.plaintextWarning"
+  | "historyExport.attachments"
+  | "historyExport.resumeHint"
+  | "historyExport.save"
+  | "historyExport.folderDialogTitle"
+  | "historyExport.preparing"
+  | "historyExport.roomsProgress"
+  | "historyExport.phasePending"
+  | "historyExport.phaseFetching"
+  | "historyExport.phaseAttachments"
+  | "historyExport.phaseRendering"
+  | "historyExport.phaseCompleted"
+  | "historyExport.phaseSkipped"
+  | "historyExport.phaseFailed"
+  | "historyExport.roomFailedNetwork"
+  | "historyExport.roomFailedSdk"
+  | "historyExport.roomFailedWrite"
+  | "historyExport.attachmentsFailed"
+  | "historyExport.undecryptable"
+  | "historyExport.stopping"
+  | "historyExport.stop"
+  | "historyExport.continuesInBackground"
+  | "historyExport.completed"
+  | "historyExport.completedWithFailures"
+  | "historyExport.stopped"
+  | "historyExport.failed"
+  | "historyExport.failedInvalidRange"
+  | "historyExport.failedRoomNotFound"
+  | "historyExport.failedSpaceNotFound"
+  | "historyExport.failedDestination"
+  | "historyExport.failedManifestMismatch"
+  | "historyExport.failedWrite"
+  | "historyExport.failedNoSpace"
+  | "historyExport.failedNetwork"
+  | "historyExport.failedSdk"
+  | "historyExport.notStarted"
+  | "historyExport.busy"
+  | "historyExport.retryFailed"
+  | "historyExport.resume"
+  | "historyExport.again"
+  | "historyExport.periodTooEarly"
+  | "historyExport.summaryRunning"
+  | "historyExport.page.edited"
+  | "historyExport.page.inReplyTo"
+  | "historyExport.page.replyUnavailable"
+  | "historyExport.page.threadReply"
+  | "historyExport.page.threadRootLink"
+  | "historyExport.page.redacted"
+  | "historyExport.page.undecryptable"
+  | "historyExport.page.notRetrieved"
+  | "historyExport.page.reactions"
+  | "historyExport.page.timesInZone"
+  | "historyExport.page.exportedAt"
+  | "historyExport.page.rangeAll"
+  | "historyExport.page.rangePeriod"
+  | "historyExport.page.roomsHeading"
+  | "historyExport.page.statusCompleted"
+  | "historyExport.page.statusSkipped"
+  | "historyExport.page.statusFailed"
+  | "historyExport.page.statusPending"
+  | "historyExport.page.eventsCount"
+  | "historyExport.page.attachmentsCount"
+  | "historyExport.page.failedAttachmentsCount"
+  | "historyExport.page.stateJoined"
+  | "historyExport.page.stateLeft"
+  | "historyExport.page.stateInvited"
+  | "historyExport.page.stateRemoved"
+  | "historyExport.page.stateBanned"
+  | "historyExport.page.stateRenamed"
+  | "historyExport.page.stateTopic"
+  | "historyExport.page.stateAvatar"
+  | "historyExport.page.stateOther"
 
 type MessageValues = Record<string, string | number>;
 type Catalog = Record<MessageId, string>;
@@ -2779,42 +2830,93 @@ const en: Catalog = {
   "settings.searchHistoryStartRoom": "Start",
   "settings.searchHistoryStopRoom": "Stop",
   "settings.searchHistoryRoomUnknown": "Room",
-  "roomHistoryExport.section": "Download history",
-  "roomHistoryExport.open": "Download",
-  "roomHistoryExport.hint": "Save this room's messages as a JSON file in Element's chat export format.",
-  "roomHistoryExport.title": "Download history",
-  "roomHistoryExport.range": "Range",
-  "roomHistoryExport.rangeAll": "All available history",
-  "roomHistoryExport.rangePeriod": "Period",
-  "roomHistoryExport.startDate": "Start date",
-  "roomHistoryExport.endDate": "End date",
-  "roomHistoryExport.timeZone": "Dates use the {timeZone} time zone. The end date is included.",
-  "roomHistoryExport.invalidPeriod": "Choose an end date on or after the start date.",
-  "roomHistoryExport.availability": "What can be saved depends on your permission to read the history, what the server keeps, and what this device can decrypt.",
-  "roomHistoryExport.plaintextWarning": "Encrypted messages are saved as plain text. Anyone who can open the file can read them.",
-  "roomHistoryExport.attachments": "Attachments keep their names and references; the files themselves are not downloaded.",
-  "roomHistoryExport.save": "Save",
-  "roomHistoryExport.saveDialogTitle": "Save room history",
-  "roomHistoryExport.fileNameStem": "{roomName} - Chat Export",
-  "roomHistoryExport.exporting": "Downloading: {fetched} events read, {exported} saved",
-  "roomHistoryExport.cancelling": "Stopping…",
-  "roomHistoryExport.stop": "Stop",
-  "roomHistoryExport.continuesInBackground": "Closing this dialog does not stop the download.",
-  "roomHistoryExport.completed": "Saved {exported} events.",
-  "roomHistoryExport.completedEmpty": "Saved. The selected range has no messages.",
-  "roomHistoryExport.undecryptable": "{count} events could not be decrypted and were saved without their content.",
-  "roomHistoryExport.cancelled": "Stopped. No file was saved.",
-  "roomHistoryExport.failed": "The download failed. No file was saved.",
-  "roomHistoryExport.failedInvalidRange": "The period is not valid.",
-  "roomHistoryExport.failedRoomNotFound": "This room is no longer available.",
-  "roomHistoryExport.failedDestination": "The save location could not be used.",
-  "roomHistoryExport.failedWrite": "The file could not be written.",
-  "roomHistoryExport.failedNetwork": "The history could not be fetched from the server.",
-  "roomHistoryExport.failedSdk": "An unexpected error occurred.",
-  "roomHistoryExport.notStarted": "The download could not start. Try again.",
-  "roomHistoryExport.busyOtherRoom": "Another room's history is being downloaded.",
-  "roomHistoryExport.again": "Download again",
-  "roomHistoryExport.periodTooEarly": "Choose dates from 1970 onward.",
+  "historyExport.section": "Download history",
+  "historyExport.spaceSection": "Download Space history",
+  "historyExport.open": "Download",
+  "historyExport.hint": "Save this room's messages and attachments into a folder, with a page you can read in a browser.",
+  "historyExport.spaceHint": "Save every room of this Space you have joined, except direct messages, into one folder.",
+  "historyExport.title": "Download history",
+  "historyExport.spaceTitle": "Download Space history",
+  "historyExport.range": "Range",
+  "historyExport.rangeAll": "All available history",
+  "historyExport.rangePeriod": "Period",
+  "historyExport.startDate": "Start date",
+  "historyExport.endDate": "End date",
+  "historyExport.timeZone": "Dates use the {timeZone} time zone. The end date is included.",
+  "historyExport.invalidPeriod": "Choose an end date on or after the start date.",
+  "historyExport.availability": "What can be saved depends on your permission to read the history, what the server keeps, and what this device can decrypt.",
+  "historyExport.plaintextWarning": "Encrypted messages and attachments are saved unencrypted. Anyone who can open the folder can read them.",
+  "historyExport.attachments": "Every attachment is downloaded, one file at a time. A large room can take a long time and use a lot of disk space.",
+  "historyExport.resumeHint": "To continue an earlier download, choose its folder.",
+  "historyExport.save": "Choose folder and download",
+  "historyExport.folderDialogTitle": "Choose where to save the history",
+  "historyExport.preparing": "Preparing…",
+  "historyExport.roomsProgress": "{done} of {total} rooms done",
+  "historyExport.phasePending": "Waiting",
+  "historyExport.phaseFetching": "Reading messages: {fetched}",
+  "historyExport.phaseAttachments": "Downloading attachments: {done} of {total}",
+  "historyExport.phaseRendering": "Writing the page",
+  "historyExport.phaseCompleted": "Done: {exported} events, {attachments} attachments",
+  "historyExport.phaseSkipped": "Skipped: not joined",
+  "historyExport.phaseFailed": "Failed",
+  "historyExport.roomFailedNetwork": "The history could not be fetched from the server.",
+  "historyExport.roomFailedSdk": "An unexpected error occurred.",
+  "historyExport.roomFailedWrite": "The folder could not be written.",
+  "historyExport.attachmentsFailed": "{count} attachments could not be downloaded.",
+  "historyExport.undecryptable": "{count} events could not be decrypted and were saved without their content.",
+  "historyExport.stopping": "Stopping…",
+  "historyExport.stop": "Stop",
+  "historyExport.continuesInBackground": "Closing this dialog does not stop the download.",
+  "historyExport.completed": "Download finished.",
+  "historyExport.completedWithFailures": "Download finished. {count} rooms failed.",
+  "historyExport.stopped": "Stopped. Finished rooms are kept; choose the same folder to continue.",
+  "historyExport.failed": "The download stopped because of an error. Finished rooms are kept.",
+  "historyExport.failedInvalidRange": "The period is not valid.",
+  "historyExport.failedRoomNotFound": "This room is no longer available.",
+  "historyExport.failedSpaceNotFound": "This Space is no longer available.",
+  "historyExport.failedDestination": "The folder could not be used.",
+  "historyExport.failedManifestMismatch": "This folder holds a different download. Choose another folder.",
+  "historyExport.failedWrite": "The folder could not be written.",
+  "historyExport.failedNoSpace": "The disk is full. Free some space, then retry.",
+  "historyExport.failedNetwork": "The history could not be fetched from the server.",
+  "historyExport.failedSdk": "An unexpected error occurred.",
+  "historyExport.notStarted": "The download could not start. Try again.",
+  "historyExport.busy": "Another download is in progress.",
+  "historyExport.retryFailed": "Retry failed rooms",
+  "historyExport.resume": "Continue",
+  "historyExport.again": "Start a new download",
+  "historyExport.periodTooEarly": "Choose dates from 1970 onward.",
+  "historyExport.summaryRunning": "Downloading: {done} of {total} rooms done",
+  "historyExport.page.edited": "(edited)",
+  "historyExport.page.inReplyTo": "In reply to {name}",
+  "historyExport.page.replyUnavailable": "In reply to a message outside this download",
+  "historyExport.page.threadReply": "Thread reply",
+  "historyExport.page.threadRootLink": "Thread start",
+  "historyExport.page.redacted": "Message deleted",
+  "historyExport.page.undecryptable": "Unable to decrypt this message",
+  "historyExport.page.notRetrieved": "not downloaded",
+  "historyExport.page.reactions": "Reactions",
+  "historyExport.page.timesInZone": "Times are in {timeZone}.",
+  "historyExport.page.exportedAt": "Downloaded {date}",
+  "historyExport.page.rangeAll": "All available history",
+  "historyExport.page.rangePeriod": "{start} to {end}",
+  "historyExport.page.roomsHeading": "Rooms",
+  "historyExport.page.statusCompleted": "Done",
+  "historyExport.page.statusSkipped": "Skipped (not joined)",
+  "historyExport.page.statusFailed": "Failed",
+  "historyExport.page.statusPending": "Not downloaded yet",
+  "historyExport.page.eventsCount": "{count} events",
+  "historyExport.page.attachmentsCount": "{count} attachments",
+  "historyExport.page.failedAttachmentsCount": "{count} not downloaded",
+  "historyExport.page.stateJoined": "{name} joined",
+  "historyExport.page.stateLeft": "{name} left",
+  "historyExport.page.stateInvited": "{name} invited {target}",
+  "historyExport.page.stateRemoved": "{name} removed {target}",
+  "historyExport.page.stateBanned": "{name} banned {target}",
+  "historyExport.page.stateRenamed": "{name} changed the room name to {value}",
+  "historyExport.page.stateTopic": "{name} changed the topic to {value}",
+  "historyExport.page.stateAvatar": "{name} changed the room picture",
+  "historyExport.page.stateOther": "{name} changed {type}",
 };
 
 const ja: Catalog = {
@@ -4141,42 +4243,93 @@ const ja: Catalog = {
   "settings.searchHistoryStartRoom": "開始",
   "settings.searchHistoryStopRoom": "停止",
   "settings.searchHistoryRoomUnknown": "ルーム",
-  "roomHistoryExport.section": "履歴のダウンロード",
-  "roomHistoryExport.open": "ダウンロード",
-  "roomHistoryExport.hint": "このルームのメッセージを、Elementのチャットエクスポート形式のJSONファイルに保存します。",
-  "roomHistoryExport.title": "履歴をダウンロード",
-  "roomHistoryExport.range": "範囲",
-  "roomHistoryExport.rangeAll": "取得可能な全履歴",
-  "roomHistoryExport.rangePeriod": "期間指定",
-  "roomHistoryExport.startDate": "開始日",
-  "roomHistoryExport.endDate": "終了日",
-  "roomHistoryExport.timeZone": "日付は{timeZone}のタイムゾーンで扱い、終了日を含みます。",
-  "roomHistoryExport.invalidPeriod": "終了日には開始日以降の日付を選んでください。",
-  "roomHistoryExport.availability": "保存できる範囲は、履歴の閲覧権限、サーバー上の履歴、この端末の復号能力によって決まります。",
-  "roomHistoryExport.plaintextWarning": "暗号化されたメッセージも平文で保存されます。ファイルを開ける人は誰でも内容を読めます。",
-  "roomHistoryExport.attachments": "添付ファイルは名前と参照情報のみ保存され、ファイル本体はダウンロードされません。",
-  "roomHistoryExport.save": "保存",
-  "roomHistoryExport.saveDialogTitle": "ルーム履歴を保存",
-  "roomHistoryExport.fileNameStem": "{roomName} - チャット履歴",
-  "roomHistoryExport.exporting": "ダウンロード中：{fetched}件取得、{exported}件保存",
-  "roomHistoryExport.cancelling": "中止しています…",
-  "roomHistoryExport.stop": "中止",
-  "roomHistoryExport.continuesInBackground": "このダイアログを閉じてもダウンロードは続きます。",
-  "roomHistoryExport.completed": "{exported}件のイベントを保存しました。",
-  "roomHistoryExport.completedEmpty": "保存しました。選択した範囲にメッセージはありません。",
-  "roomHistoryExport.undecryptable": "{count}件のイベントは復号できず、内容なしで保存されました。",
-  "roomHistoryExport.cancelled": "中止しました。ファイルは保存されていません。",
-  "roomHistoryExport.failed": "ダウンロードに失敗しました。ファイルは保存されていません。",
-  "roomHistoryExport.failedInvalidRange": "期間が正しくありません。",
-  "roomHistoryExport.failedRoomNotFound": "このルームは利用できなくなりました。",
-  "roomHistoryExport.failedDestination": "保存先を使用できませんでした。",
-  "roomHistoryExport.failedWrite": "ファイルを書き込めませんでした。",
-  "roomHistoryExport.failedNetwork": "サーバーから履歴を取得できませんでした。",
-  "roomHistoryExport.failedSdk": "予期しないエラーが発生しました。",
-  "roomHistoryExport.notStarted": "ダウンロードを開始できませんでした。もう一度お試しください。",
-  "roomHistoryExport.busyOtherRoom": "別のルームの履歴をダウンロードしています。",
-  "roomHistoryExport.again": "もう一度ダウンロード",
-  "roomHistoryExport.periodTooEarly": "1970年以降の日付を選んでください。",
+  "historyExport.section": "履歴のダウンロード",
+  "historyExport.spaceSection": "スペースの履歴のダウンロード",
+  "historyExport.open": "ダウンロード",
+  "historyExport.hint": "このルームのメッセージと添付ファイルを、ブラウザで読めるページと一緒にフォルダに保存します。",
+  "historyExport.spaceHint": "参加しているこのスペースのルーム（DMを除く）を、まとめて1つのフォルダに保存します。",
+  "historyExport.title": "履歴をダウンロード",
+  "historyExport.spaceTitle": "スペースの履歴をダウンロード",
+  "historyExport.range": "範囲",
+  "historyExport.rangeAll": "取得可能な全履歴",
+  "historyExport.rangePeriod": "期間指定",
+  "historyExport.startDate": "開始日",
+  "historyExport.endDate": "終了日",
+  "historyExport.timeZone": "日付は{timeZone}のタイムゾーンで扱い、終了日を含みます。",
+  "historyExport.invalidPeriod": "終了日には開始日以降の日付を選んでください。",
+  "historyExport.availability": "保存できる範囲は、履歴の閲覧権限、サーバー上の履歴、この端末の復号能力によって決まります。",
+  "historyExport.plaintextWarning": "暗号化されたメッセージと添付ファイルも暗号化せずに保存されます。フォルダを開ける人は誰でも内容を読めます。",
+  "historyExport.attachments": "添付ファイルはすべてダウンロードします。大きなルームでは時間がかかり、ディスク容量も多く使います。",
+  "historyExport.resumeHint": "以前のダウンロードを続けるには、そのフォルダを選んでください。",
+  "historyExport.save": "フォルダを選んでダウンロード",
+  "historyExport.folderDialogTitle": "履歴の保存先を選択",
+  "historyExport.preparing": "準備しています…",
+  "historyExport.roomsProgress": "{total}ルーム中{done}ルーム完了",
+  "historyExport.phasePending": "待機中",
+  "historyExport.phaseFetching": "メッセージを取得中：{fetched}件",
+  "historyExport.phaseAttachments": "添付ファイルをダウンロード中：{total}件中{done}件",
+  "historyExport.phaseRendering": "ページを作成中",
+  "historyExport.phaseCompleted": "完了：イベント{exported}件、添付ファイル{attachments}件",
+  "historyExport.phaseSkipped": "スキップ：未参加",
+  "historyExport.phaseFailed": "失敗",
+  "historyExport.roomFailedNetwork": "サーバーから履歴を取得できませんでした。",
+  "historyExport.roomFailedSdk": "予期しないエラーが発生しました。",
+  "historyExport.roomFailedWrite": "フォルダに書き込めませんでした。",
+  "historyExport.attachmentsFailed": "{count}件の添付ファイルをダウンロードできませんでした。",
+  "historyExport.undecryptable": "{count}件のイベントは復号できず、内容なしで保存されました。",
+  "historyExport.stopping": "中止しています…",
+  "historyExport.stop": "中止",
+  "historyExport.continuesInBackground": "このダイアログを閉じてもダウンロードは続きます。",
+  "historyExport.completed": "ダウンロードが完了しました。",
+  "historyExport.completedWithFailures": "ダウンロードが完了しました。{count}ルームは失敗しました。",
+  "historyExport.stopped": "中止しました。完了したルームは残っています。同じフォルダを選ぶと続きから再開できます。",
+  "historyExport.failed": "エラーのため中断しました。完了したルームは残っています。",
+  "historyExport.failedInvalidRange": "期間が正しくありません。",
+  "historyExport.failedRoomNotFound": "このルームは利用できなくなりました。",
+  "historyExport.failedSpaceNotFound": "このスペースは利用できなくなりました。",
+  "historyExport.failedDestination": "フォルダを使用できませんでした。",
+  "historyExport.failedManifestMismatch": "このフォルダには別のダウンロードが入っています。別のフォルダを選んでください。",
+  "historyExport.failedWrite": "フォルダに書き込めませんでした。",
+  "historyExport.failedNoSpace": "ディスクがいっぱいです。空きを作ってから再試行してください。",
+  "historyExport.failedNetwork": "サーバーから履歴を取得できませんでした。",
+  "historyExport.failedSdk": "予期しないエラーが発生しました。",
+  "historyExport.notStarted": "ダウンロードを開始できませんでした。もう一度お試しください。",
+  "historyExport.busy": "別のダウンロードが進行中です。",
+  "historyExport.retryFailed": "失敗したものを再試行",
+  "historyExport.resume": "続きから再開",
+  "historyExport.again": "新しくダウンロード",
+  "historyExport.periodTooEarly": "1970年以降の日付を選んでください。",
+  "historyExport.summaryRunning": "ダウンロード中：{total}ルーム中{done}ルーム完了",
+  "historyExport.page.edited": "（編集済み）",
+  "historyExport.page.inReplyTo": "{name}への返信",
+  "historyExport.page.replyUnavailable": "このダウンロードに含まれないメッセージへの返信",
+  "historyExport.page.threadReply": "スレッドの返信",
+  "historyExport.page.threadRootLink": "スレッドの最初",
+  "historyExport.page.redacted": "削除されたメッセージ",
+  "historyExport.page.undecryptable": "復号できなかったメッセージ",
+  "historyExport.page.notRetrieved": "未取得",
+  "historyExport.page.reactions": "リアクション",
+  "historyExport.page.timesInZone": "時刻は{timeZone}で表示しています。",
+  "historyExport.page.exportedAt": "ダウンロード日時：{date}",
+  "historyExport.page.rangeAll": "取得可能な全履歴",
+  "historyExport.page.rangePeriod": "{start}〜{end}",
+  "historyExport.page.roomsHeading": "ルーム",
+  "historyExport.page.statusCompleted": "完了",
+  "historyExport.page.statusSkipped": "スキップ（未参加）",
+  "historyExport.page.statusFailed": "失敗",
+  "historyExport.page.statusPending": "未ダウンロード",
+  "historyExport.page.eventsCount": "イベント{count}件",
+  "historyExport.page.attachmentsCount": "添付ファイル{count}件",
+  "historyExport.page.failedAttachmentsCount": "{count}件未取得",
+  "historyExport.page.stateJoined": "{name}が参加しました",
+  "historyExport.page.stateLeft": "{name}が退出しました",
+  "historyExport.page.stateInvited": "{name}が{target}を招待しました",
+  "historyExport.page.stateRemoved": "{name}が{target}を退出させました",
+  "historyExport.page.stateBanned": "{name}が{target}の参加を禁止しました",
+  "historyExport.page.stateRenamed": "{name}がルーム名を「{value}」に変更しました",
+  "historyExport.page.stateTopic": "{name}がトピックを「{value}」に変更しました",
+  "historyExport.page.stateAvatar": "{name}がルームの画像を変更しました",
+  "historyExport.page.stateOther": "{name}が{type}を変更しました",
 };
 
 const pseudo: Catalog = Object.fromEntries(
