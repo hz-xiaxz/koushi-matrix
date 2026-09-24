@@ -4,6 +4,7 @@
 //! selection, and JSON generation. The destination is a platform-registered
 //! native artifact and bytes reach it only through [`RoomHistoryExportSink`].
 
+pub(crate) mod attachments;
 mod driver;
 pub(crate) mod fs;
 pub(crate) mod html;
@@ -14,9 +15,12 @@ mod katex_assets;
 pub(crate) mod layout;
 pub(crate) mod manifest;
 pub(crate) mod records;
+pub(crate) mod thumbnail;
 mod sdk_source;
 mod sink;
 
+#[cfg(test)]
+mod attachments_tests;
 #[cfg(test)]
 mod fs_tests;
 #[cfg(test)]
@@ -25,6 +29,8 @@ mod layout_tests;
 mod manifest_tests;
 #[cfg(test)]
 mod sdk_source_tests;
+#[cfg(test)]
+mod thumbnail_tests;
 #[cfg(test)]
 mod tests;
 
