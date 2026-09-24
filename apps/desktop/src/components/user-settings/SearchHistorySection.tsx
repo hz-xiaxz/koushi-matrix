@@ -381,7 +381,18 @@ function CrawlerRoomRow({
         >
           {t("settings.searchHistoryStopRoom")}
         </button>
-      ) : showActions && !isRunning && roomState.kind !== "completed" && onStart ? (
+      ) : showActions && roomState.kind === "completed" && onStart ? (
+        // #996: a completed room can still miss messages that arrived while
+        // the app was closed, so it can be indexed again on its own.
+        <button
+          className="profile-settings-action"
+          type="button"
+          aria-label={t("settings.searchHistoryReindexRoom")}
+          onClick={() => onStart(roomId)}
+        >
+          {t("settings.searchHistoryReindexRoom")}
+        </button>
+      ) : showActions && !isRunning && onStart ? (
         <button
           className="profile-settings-action"
           type="button"

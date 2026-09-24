@@ -1300,6 +1300,7 @@ export type MessageId =
   | "settings.searchHistoryRoomCompleted"
   | "settings.searchHistoryRoomFailed"
   | "settings.searchHistoryStartRoom"
+  | "settings.searchHistoryReindexRoom"
   | "settings.searchHistoryStopRoom"
   | "settings.searchHistoryRoomUnknown"
   | "settings.urlPreviews"
@@ -2828,6 +2829,7 @@ const en: Catalog = {
   "settings.searchHistoryRoomCompleted": "Complete ({indexed} indexed)",
   "settings.searchHistoryRoomFailed": "Failed",
   "settings.searchHistoryStartRoom": "Start",
+  "settings.searchHistoryReindexRoom": "Index again",
   "settings.searchHistoryStopRoom": "Stop",
   "settings.searchHistoryRoomUnknown": "Room",
   "historyExport.section": "Download history",
@@ -4241,6 +4243,7 @@ const ja: Catalog = {
   "settings.searchHistoryRoomCompleted": "完了（{indexed}件インデックス済み）",
   "settings.searchHistoryRoomFailed": "失敗",
   "settings.searchHistoryStartRoom": "開始",
+  "settings.searchHistoryReindexRoom": "再インデックス",
   "settings.searchHistoryStopRoom": "停止",
   "settings.searchHistoryRoomUnknown": "ルーム",
   "historyExport.section": "履歴のダウンロード",

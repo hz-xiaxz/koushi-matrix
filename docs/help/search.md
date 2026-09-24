@@ -33,6 +33,8 @@ Check the scope, use a distinctive phrase from the message, and inspect
 3. Check the activity summary and **Room index status**.
 4. Use **Resume crawler** if paused. Choose **Standard**, **Fast**, or **Slow**
    for the crawl speed; room rows offer **Start** and **Stop** when available.
+   A room marked complete offers **Index again**: use it if search misses
+   messages that arrived in that room while Koushi was closed.
 
 **Processed** counts timeline events scanned; **indexed** counts searchable
 messages. They need not be equal. **Index media captions** and **Index file
