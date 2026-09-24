@@ -1036,10 +1036,12 @@ relay that model, not fight it.
    media enqueue future, observes client-global queue terminals, and preserves
    request/submission correlation across timeline unsubscribe and actor
    replacement. Per-timeline actors own only the presentation subscription and
-   guarded queue handles. A matching SDK enqueue releases the composer for the
-   next message while remote delivery remains tracked; recoverable room-queue
+   guarded queue handles. The persisted draft stays until SDK enqueue succeeds;
+   that enqueue clears the submitted revision and releases the composer for the
+   next message while remote delivery remains tracked. Recoverable room-queue
    errors schedule bounded automatic re-enablement. Replies use their known
-   event IDs to build the relation without fetching the original before enqueue.
+   event IDs to build the relation without fetching the original before enqueue;
+   plain thread messages use their known root as the fallback relation.
    The presentation handles expose:
    `TimelineItem.send_state`, transaction-id keyed retry/cancel guards, and
    `RetrySend` / `CancelSend` command routing through SDK `SendHandle`s. After

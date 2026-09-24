@@ -42,13 +42,16 @@ pub(crate) fn handle_thread_submission_accepted(
             root_event_id: root_event_id.clone(),
         },
     );
-    let Ok(accepted_revision) =
+    if ComposerDraftRevision::checked_successor(
         state
             .composer_drafts
-            .advance_thread_revision(&room_id, &root_event_id, draft_revision)
-    else {
+            .thread_revision(&room_id, &root_event_id),
+        draft_revision,
+    )
+    .is_err()
+    {
         return Vec::new();
-    };
+    }
     let accepted_composer = state
         .composer_drafts
         .composer_for_thread(&room_id, &root_event_id);
@@ -78,7 +81,7 @@ pub(crate) fn handle_thread_submission_accepted(
     });
     composer.draft = accepted_composer.draft;
     composer.document = accepted_composer.document;
-    composer.draft_revision = accepted_revision;
+    composer.draft_revision = accepted_composer.draft_revision;
     composer.last_accepted_clear_revision = accepted_composer.last_accepted_clear_revision;
     *intent = ThreadOpenIntent::ExistingThread;
     vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]

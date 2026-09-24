@@ -16,13 +16,14 @@ use koushi_state::{AppAction, ComposerDocument, ComposerFormattingOptions, Media
 
 use crate::send_diagnostics::{SendFailureDiagnostic, classify_send_failure};
 use matrix_sdk::attachment::AttachmentConfig;
-use matrix_sdk::ruma::OwnedRoomId;
+use matrix_sdk::ruma::events::Mentions;
 use matrix_sdk::ruma::events::relation::{Reply, Thread};
 use matrix_sdk::ruma::events::room::message::{
     Relation, RoomMessageEventContent, RoomMessageEventContentWithoutRelation,
 };
+use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, OwnedUserId, UserId};
 use matrix_sdk::send_queue::{RoomSendQueueUpdate, SendQueueUpdate};
-use matrix_sdk_ui::timeline::Timeline;
+use matrix_sdk_ui::timeline::{Timeline, TimelineItemKind};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::account_work::{AccountWorkKind, InteractiveWorkGuard};
@@ -560,10 +561,11 @@ async fn enqueue_document_send(
     document: ComposerDocument,
     formatting_options: ComposerFormattingOptions,
 ) -> Result<SendEnqueueSuccess, TimelineFailureKind> {
-    let content = build_room_message_content_from_composer_document_with_options(
+    let mut content = build_room_message_content_from_composer_document_with_options(
         document,
         formatting_options,
     )?;
+    make_offline_thread_content(&mut content, &context.key)?;
     context
         .timeline
         .send(content.into())
@@ -574,6 +576,21 @@ async fn enqueue_document_send(
             media_queued: None,
         })
         .map_err(|error| classify_timeline_send_error(&error))
+}
+
+fn make_offline_thread_content(
+    content: &mut RoomMessageEventContent,
+    key: &TimelineKey,
+) -> Result<(), TimelineFailureKind> {
+    if let TimelineKind::Thread { root_event_id, .. } = &key.kind {
+        let root = matrix_sdk::ruma::EventId::parse(root_event_id)
+            .map_err(|_| TimelineFailureKind::Sdk)?;
+        // A known root is a valid reply fallback even when the latest thread
+        // item is not cached. Supplying the relation prevents SDK timeline.send
+        // from fetching an event before it can enqueue the message.
+        content.relates_to = Some(Relation::Thread(Thread::plain(root.clone(), root)));
+    }
+    Ok(())
 }
 
 async fn enqueue_document_reply_send(
@@ -588,7 +605,20 @@ async fn enqueue_document_reply_send(
         document,
         formatting_options,
     )?;
-    let content = make_offline_reply_content(content, reply_event_id, &context.key)?;
+    let source = context.timeline.items().await.iter().find_map(|item| {
+        let TimelineItemKind::Event(event) = item.kind() else {
+            return None;
+        };
+        (event.event_id() == Some(reply_event_id.as_ref()))
+            .then(|| (event.sender().to_owned(), event.content().thread_root()))
+    });
+    let content = make_offline_reply_content(
+        content,
+        reply_event_id,
+        &context.key,
+        source,
+        context.session.client().user_id(),
+    )?;
     context
         .timeline
         .send(content.into())
@@ -603,17 +633,31 @@ async fn enqueue_document_reply_send(
 
 fn make_offline_reply_content(
     content: RoomMessageEventContentWithoutRelation,
-    reply_event_id: matrix_sdk::ruma::OwnedEventId,
+    reply_event_id: OwnedEventId,
     key: &TimelineKey,
+    source: Option<(OwnedUserId, Option<OwnedEventId>)>,
+    own_user_id: Option<&UserId>,
 ) -> Result<RoomMessageEventContent, TimelineFailureKind> {
     let mut content: RoomMessageEventContent = content.into();
+    if let Some((sender, _)) = &source
+        && Some(sender.as_ref()) != own_user_id
+    {
+        content
+            .mentions
+            .get_or_insert_with(Mentions::new)
+            .user_ids
+            .insert(sender.clone());
+    }
     content.relates_to = Some(match &key.kind {
         TimelineKind::Thread { root_event_id, .. } => {
             let root = matrix_sdk::ruma::EventId::parse(root_event_id)
                 .map_err(|_| TimelineFailureKind::Sdk)?;
             Relation::Thread(Thread::reply(root, reply_event_id))
         }
-        _ => Relation::Reply(Reply::with_event_id(reply_event_id)),
+        _ => match source.and_then(|(_, root)| root) {
+            Some(root) => Relation::Thread(Thread::reply(root, reply_event_id)),
+            None => Relation::Reply(Reply::with_event_id(reply_event_id)),
+        },
     });
     Ok(content)
 }
@@ -1470,6 +1514,7 @@ impl TimelineManagerActor {
                 submission_id: submission_id.clone(),
                 transaction_id: transaction_id.clone(),
                 target,
+                draft_revision,
             });
         let preflight_started = self.spawn_send_enqueue(
             context,

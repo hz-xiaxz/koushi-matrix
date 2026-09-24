@@ -9,7 +9,8 @@ The SDK adapter now preserves classified secure-backup inspection errors.
 Account core retains an established send gate after inconclusive probes,
 deduplicates backup state notifications, and inspects routinely every 30
 minutes. The timeline manager distinguishes SDK enqueue from remote terminal,
-releases the matching composer after enqueue, builds reply relations locally,
+clears the persisted draft and releases the matching composer only after
+enqueue, builds reply and thread relations locally,
 and re-enables only recoverably failed room queues on bounded backoff. Room
 core owns pinned-event fetch workers and fences stale results. The Tauri
 selection command completes after the room selection is published. Space
@@ -19,7 +20,7 @@ observer mailbox.
 Verification on the pinned SDK revision:
 
 - `cargo test -p koushi-sdk --lib`: 152 passed.
-- `cargo test -p koushi-core --lib`: 1148 passed, 9 ignored.
+- `cargo test -p koushi-core --lib`: 1150 passed, 9 ignored.
 - Focused backup tests after observer deduplication: 26 passed.
 - `cargo test -p koushi-state`: passed.
 - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib`: 185 passed.
@@ -28,6 +29,8 @@ Verification on the pinned SDK revision:
   `cancel_send`, and `unsent_restart` passed.
 - Disposable Tuwunel Core `reply` QA: `reply`, `reply_quote`, `pin_event`,
   `pinned_state`, and `unpin_event` passed.
+- Disposable Tuwunel Core `thread` QA: thread receive, pagination, projection
+  lifecycle, and summary passed.
 
 Network-drop and pinned-fetch latency injection
 remain valuable follow-up coverage before claiming every condition in #998's

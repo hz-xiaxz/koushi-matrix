@@ -1,6 +1,7 @@
 use crate::{
-    AppEffect, AppState, ComposerMode, ComposerSubmissionTarget, ComposerSubmissionTerminalOutcome,
-    PendingComposerSendKind, SubmissionId, ThreadPaneState, UiEvent, state::AppError,
+    AppEffect, AppState, ComposerDraftRevision, ComposerMode, ComposerSubmissionTarget,
+    ComposerSubmissionTerminalOutcome, PendingComposerSendKind, SubmissionId, ThreadPaneState,
+    UiEvent, state::AppError,
 };
 
 use super::is_session_ready;
@@ -12,12 +13,12 @@ pub(crate) fn handle_queued(
     submission_id: SubmissionId,
     transaction_id: String,
     target: ComposerSubmissionTarget,
+    draft_revision: ComposerDraftRevision,
 ) -> Vec<AppEffect> {
     if !state
         .timeline
         .submission_registry
         .active_matches(&submission_id, &transaction_id, &target)
-        || !is_session_ready(state)
     {
         return Vec::new();
     }
@@ -26,19 +27,35 @@ pub(crate) fn handle_queued(
         .submission_registry
         .remember_queued(submission_id.clone());
     match target {
-        ComposerSubmissionTarget::Main { room_id }
-            if state.timeline.room_id.as_deref() == Some(room_id.as_str())
-                && state.timeline.composer.pending_submission_id.as_ref()
-                    == Some(&submission_id)
-                && state.timeline.composer.pending_transaction_id.as_deref()
-                    == Some(transaction_id.as_str()) =>
-        {
+        ComposerSubmissionTarget::Main { room_id } => {
+            let was_cleared = state.composer_drafts.room_revision(&room_id) <= draft_revision;
+            if state
+                .composer_drafts
+                .advance_room_revision(&room_id, draft_revision)
+                .is_err()
+            {
+                return Vec::new();
+            }
+            if state.timeline.room_id.as_deref() != Some(room_id.as_str())
+                || state.timeline.composer.pending_submission_id.as_ref() != Some(&submission_id)
+                || state.timeline.composer.pending_transaction_id.as_deref()
+                    != Some(transaction_id.as_str())
+            {
+                return Vec::new();
+            }
+            let accepted_composer = state.composer_drafts.composer_for_room(&room_id);
             let pending_kind = state.timeline.composer.pending_send_kind.take();
             state.timeline.composer.pending_submission_id = None;
             state.timeline.composer.pending_transaction_id = None;
+            state.timeline.composer.draft = accepted_composer.draft;
+            state.timeline.composer.document = accepted_composer.document;
+            state.timeline.composer.draft_revision = accepted_composer.draft_revision;
+            state.timeline.composer.last_accepted_clear_revision =
+                accepted_composer.last_accepted_clear_revision;
             if let Some(PendingComposerSendKind::Reply {
                 in_reply_to_event_id,
             }) = pending_kind
+                && was_cleared
                 && state.timeline.composer.mode
                     == (ComposerMode::Reply {
                         in_reply_to_event_id,
@@ -52,6 +69,16 @@ pub(crate) fn handle_queued(
             room_id,
             root_event_id,
         } => {
+            if state
+                .composer_drafts
+                .advance_thread_revision(&room_id, &root_event_id, draft_revision)
+                .is_err()
+            {
+                return Vec::new();
+            }
+            let accepted_composer = state
+                .composer_drafts
+                .composer_for_thread(&room_id, &root_event_id);
             let ThreadPaneState::Open {
                 room_id: open_room_id,
                 root_event_id: open_root_event_id,
@@ -71,9 +98,12 @@ pub(crate) fn handle_queued(
             composer.pending_submission_id = None;
             composer.pending_transaction_id = None;
             composer.pending_send_kind = None;
+            composer.draft = accepted_composer.draft;
+            composer.document = accepted_composer.document;
+            composer.draft_revision = accepted_composer.draft_revision;
+            composer.last_accepted_clear_revision = accepted_composer.last_accepted_clear_revision;
             vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]
         }
-        _ => Vec::new(),
     }
 }
 

@@ -63,8 +63,9 @@ use super::{
     TimelineSendTerminalAdmission, TimelineSendTerminalHandoff, TimelineSendTerminalIngress,
     apply_send_completion_observation_and_handoff,
     apply_send_completion_observation_loss_and_handoff, await_submission_admission,
-    classify_timeline_send_error, make_offline_reply_content, media_upload_progress_identity,
-    pending_send_item, run_global_send_completion_observer, send_retry_delay,
+    classify_timeline_send_error, make_offline_reply_content, make_offline_thread_content,
+    media_upload_progress_identity, pending_send_item, run_global_send_completion_observer,
+    send_retry_delay,
 };
 
 #[test]
@@ -74,10 +75,62 @@ fn offline_reply_keeps_its_relation_without_fetching_the_original_event() {
     };
     let original = matrix_sdk::ruma::event_id!("$reply-to:test").to_owned();
     let content = || RoomMessageEventContentWithoutRelation::text_plain("queued reply");
-    let room = make_offline_reply_content(content(), original.clone(), &room_key()).unwrap();
+    let room =
+        make_offline_reply_content(content(), original.clone(), &room_key(), None, None).unwrap();
     assert!(matches!(room.relates_to, Some(Relation::Reply(_))));
-    let thread = make_offline_reply_content(content(), original, &thread_key()).unwrap();
+    let thread =
+        make_offline_reply_content(content(), original, &thread_key(), None, None).unwrap();
     assert!(matches!(thread.relates_to, Some(Relation::Thread(_))));
+}
+
+#[test]
+fn cached_reply_metadata_preserves_thread_and_sender_mention() {
+    use matrix_sdk::ruma::events::room::message::{
+        Relation, RoomMessageEventContentWithoutRelation,
+    };
+    let original = matrix_sdk::ruma::event_id!("$reply-to:test").to_owned();
+    let sender = matrix_sdk::ruma::user_id!("@bob:test").to_owned();
+    let root = matrix_sdk::ruma::event_id!("$root:test").to_owned();
+    let content = RoomMessageEventContentWithoutRelation::text_plain("queued reply");
+    let room = make_offline_reply_content(
+        content,
+        original,
+        &room_key(),
+        Some((sender.clone(), Some(root))),
+        None,
+    )
+    .unwrap();
+    assert!(matches!(room.relates_to, Some(Relation::Thread(_))));
+    assert!(
+        room.mentions
+            .is_some_and(|mentions| mentions.user_ids.contains(&sender))
+    );
+    let self_reply = make_offline_reply_content(
+        RoomMessageEventContentWithoutRelation::text_plain("self reply"),
+        matrix_sdk::ruma::event_id!("$reply-to:test").to_owned(),
+        &room_key(),
+        Some((sender.clone(), None)),
+        Some(sender.as_ref()),
+    )
+    .unwrap();
+    assert!(
+        !self_reply
+            .mentions
+            .is_some_and(|mentions| mentions.user_ids.contains(&sender))
+    );
+}
+
+#[test]
+fn plain_thread_message_has_local_relation_before_sdk_enqueue() {
+    use matrix_sdk::ruma::events::room::message::{Relation, RoomMessageEventContent};
+    let mut content = RoomMessageEventContent::text_plain("queued thread message");
+    make_offline_thread_content(&mut content, &thread_key()).unwrap();
+    assert!(
+        matches!(content.relates_to, Some(Relation::Thread(ref thread))
+        if thread.event_id.as_str() == "$root:test"
+            && thread.is_falling_back
+            && thread.in_reply_to.as_ref().is_some_and(|reply| reply.event_id.as_str() == "$root:test"))
+    );
 }
 
 #[test]

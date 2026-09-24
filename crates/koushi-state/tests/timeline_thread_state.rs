@@ -585,10 +585,17 @@ fn durable_enqueue_releases_the_composer_without_losing_the_first_terminal() {
             submission_id: first.clone(),
             transaction_id: "txn-first".to_owned(),
             target: target.clone(),
+            draft_revision: 0.into(),
         },
     );
     assert_eq!(state.timeline.composer.pending_submission_id, None);
-    assert!(state.timeline.submission_registry.accepted_submission_ids.contains(&first));
+    assert!(
+        state
+            .timeline
+            .submission_registry
+            .accepted_submission_ids
+            .contains(&first)
+    );
 
     reduce(
         &mut state,
@@ -608,8 +615,17 @@ fn durable_enqueue_releases_the_composer_without_losing_the_first_terminal() {
             outcome: ComposerSubmissionTerminalOutcome::Succeeded,
         },
     );
-    assert_eq!(state.timeline.composer.pending_submission_id, Some(second.clone()));
-    assert!(!state.timeline.submission_registry.accepted_submission_ids.contains(&first));
+    assert_eq!(
+        state.timeline.composer.pending_submission_id,
+        Some(second.clone())
+    );
+    assert!(
+        !state
+            .timeline
+            .submission_registry
+            .accepted_submission_ids
+            .contains(&first)
+    );
     reduce(
         &mut state,
         AppAction::ComposerSubmissionSettled {
@@ -797,8 +813,9 @@ fn global_submission_registry_tracks_offscreen_acceptance_and_settlement() {
 }
 
 #[test]
-fn active_main_acceptance_projects_the_accepted_clear_revision() {
+fn active_main_enqueue_clears_only_after_durable_acceptance() {
     let mut state = selected_room_state("room-a");
+    let submission_id = SubmissionId::new("room-a-visible-accepted");
     reduce(
         &mut state,
         AppAction::ComposerDraftChangedAtRevision {
@@ -811,7 +828,7 @@ fn active_main_acceptance_projects_the_accepted_clear_revision() {
     reduce(
         &mut state,
         AppAction::ComposerSubmissionAcceptedAtRevision {
-            submission_id: SubmissionId::new("room-a-visible-accepted"),
+            submission_id: submission_id.clone(),
             room_id: "room-a".to_owned(),
             transaction_id: "txn-a-visible".to_owned(),
             body: "sent from room a".to_owned(),
@@ -819,6 +836,19 @@ fn active_main_acceptance_projects_the_accepted_clear_revision() {
         },
     );
 
+    assert_eq!(state.timeline.composer.draft, "sent from room a");
+    assert_eq!(state.composer_drafts.room_revision("room-a"), 1.into());
+    reduce(
+        &mut state,
+        AppAction::ComposerSubmissionQueued {
+            submission_id,
+            transaction_id: "txn-a-visible".to_owned(),
+            target: ComposerSubmissionTarget::Main {
+                room_id: "room-a".to_owned(),
+            },
+            draft_revision: 1.into(),
+        },
+    );
     assert_eq!(state.timeline.composer.draft, "");
     assert_eq!(state.timeline.composer.draft_revision, 2.into());
     assert_eq!(
@@ -828,8 +858,49 @@ fn active_main_acceptance_projects_the_accepted_clear_revision() {
 }
 
 #[test]
-fn offscreen_main_acceptance_advances_the_captured_room_draft_fence() {
+fn failed_pre_enqueue_submission_keeps_the_persisted_draft() {
+    let mut state = selected_room_state("room-a");
+    let submission_id = SubmissionId::new("not-queued");
+    reduce(
+        &mut state,
+        AppAction::ComposerDraftChangedAtRevision {
+            room_id: "room-a".to_owned(),
+            document: "keep this draft".into(),
+            revision: 1.into(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::ComposerSubmissionAcceptedAtRevision {
+            submission_id: submission_id.clone(),
+            room_id: "room-a".to_owned(),
+            transaction_id: "txn-not-queued".to_owned(),
+            body: "keep this draft".to_owned(),
+            draft_revision: 1.into(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::ComposerSubmissionSettled {
+            submission_id,
+            transaction_id: "txn-not-queued".to_owned(),
+            target: ComposerSubmissionTarget::Main {
+                room_id: "room-a".to_owned(),
+            },
+            outcome: ComposerSubmissionTerminalOutcome::Failed {
+                message: "enqueue failed".to_owned(),
+            },
+        },
+    );
+    assert_eq!(state.timeline.composer.draft, "keep this draft");
+    assert_eq!(state.composer_drafts.room_revision("room-a"), 1.into());
+    assert!(state.composer_drafts.rooms.contains_key("room-a"));
+}
+
+#[test]
+fn offscreen_main_enqueue_advances_the_captured_room_draft_fence() {
     let mut state = selected_room_state("room-b");
+    let submission_id = SubmissionId::new("room-a-accepted");
     reduce(
         &mut state,
         AppAction::ComposerDraftChangedAtRevision {
@@ -842,7 +913,7 @@ fn offscreen_main_acceptance_advances_the_captured_room_draft_fence() {
     reduce(
         &mut state,
         AppAction::ComposerSubmissionAcceptedAtRevision {
-            submission_id: SubmissionId::new("room-a-accepted"),
+            submission_id: submission_id.clone(),
             room_id: "room-a".to_owned(),
             transaction_id: "txn-a".to_owned(),
             body: "sent from room a".to_owned(),
@@ -850,6 +921,18 @@ fn offscreen_main_acceptance_advances_the_captured_room_draft_fence() {
         },
     );
 
+    assert_eq!(state.composer_drafts.room_revision("room-a"), 1.into());
+    reduce(
+        &mut state,
+        AppAction::ComposerSubmissionQueued {
+            submission_id,
+            transaction_id: "txn-a".to_owned(),
+            target: ComposerSubmissionTarget::Main {
+                room_id: "room-a".to_owned(),
+            },
+            draft_revision: 1.into(),
+        },
+    );
     assert_eq!(state.timeline.room_id.as_deref(), Some("room-b"));
     assert!(state.timeline.composer.draft.is_empty());
     assert_eq!(state.composer_drafts.room_revision("room-a"), 2.into());
@@ -857,8 +940,9 @@ fn offscreen_main_acceptance_advances_the_captured_room_draft_fence() {
 }
 
 #[test]
-fn active_thread_acceptance_projects_the_accepted_clear_revision() {
+fn active_thread_enqueue_clears_only_after_durable_acceptance() {
     let mut state = open_thread_state("room-a", "$root-a");
+    let submission_id = SubmissionId::new("root-a-visible-accepted");
     reduce(
         &mut state,
         AppAction::ThreadComposerDraftChangedAtRevision {
@@ -872,7 +956,7 @@ fn active_thread_acceptance_projects_the_accepted_clear_revision() {
     reduce(
         &mut state,
         AppAction::ThreadSubmissionAcceptedAtRevision {
-            submission_id: SubmissionId::new("root-a-visible-accepted"),
+            submission_id: submission_id.clone(),
             room_id: "room-a".to_owned(),
             root_event_id: "$root-a".to_owned(),
             transaction_id: "txn-root-a-visible".to_owned(),
@@ -881,6 +965,19 @@ fn active_thread_acceptance_projects_the_accepted_clear_revision() {
         },
     );
 
+    assert_eq!(open_thread_composer(&state).draft, "sent reply");
+    reduce(
+        &mut state,
+        AppAction::ComposerSubmissionQueued {
+            submission_id,
+            transaction_id: "txn-root-a-visible".to_owned(),
+            target: ComposerSubmissionTarget::Thread {
+                room_id: "room-a".to_owned(),
+                root_event_id: "$root-a".to_owned(),
+            },
+            draft_revision: 1.into(),
+        },
+    );
     let composer = open_thread_composer(&state);
     assert_eq!(composer.draft, "");
     assert_eq!(composer.draft_revision, 2.into());
@@ -888,7 +985,7 @@ fn active_thread_acceptance_projects_the_accepted_clear_revision() {
 }
 
 #[test]
-fn offscreen_thread_acceptance_advances_fence_and_global_registry() {
+fn offscreen_thread_enqueue_advances_fence_and_global_registry() {
     let mut state = open_thread_state("room-a", "$root-b");
     reduce(
         &mut state,
@@ -913,6 +1010,22 @@ fn offscreen_thread_acceptance_advances_fence_and_global_registry() {
         },
     );
 
+    assert_eq!(
+        state.composer_drafts.thread_revision("room-a", "$root-a"),
+        1.into()
+    );
+    reduce(
+        &mut state,
+        AppAction::ComposerSubmissionQueued {
+            submission_id: submission_id.clone(),
+            transaction_id: "txn-root-a".to_owned(),
+            target: ComposerSubmissionTarget::Thread {
+                room_id: "room-a".to_owned(),
+                root_event_id: "$root-a".to_owned(),
+            },
+            draft_revision: 1.into(),
+        },
+    );
     assert_eq!(
         state.composer_drafts.thread_revision("room-a", "$root-a"),
         2.into()

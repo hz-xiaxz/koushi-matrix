@@ -762,12 +762,14 @@ pub(crate) fn handle_composer_submission_accepted(
             room_id: room_id.clone(),
         },
     );
-    let Ok(accepted_revision) = state
-        .composer_drafts
-        .advance_room_revision(&room_id, draft_revision)
-    else {
+    if ComposerDraftRevision::checked_successor(
+        state.composer_drafts.room_revision(&room_id),
+        draft_revision,
+    )
+    .is_err()
+    {
         return Vec::new();
-    };
+    }
     if state.timeline.room_id.as_deref() != Some(room_id.as_str())
         || state.timeline.composer.pending_submission_id.is_some()
         || state.timeline.composer.pending_transaction_id.is_some()
@@ -796,7 +798,7 @@ pub(crate) fn handle_composer_submission_accepted(
     let accepted_composer = state.composer_drafts.composer_for_room(&room_id);
     state.timeline.composer.draft = accepted_composer.draft;
     state.timeline.composer.document = accepted_composer.document;
-    state.timeline.composer.draft_revision = accepted_revision;
+    state.timeline.composer.draft_revision = accepted_composer.draft_revision;
     state.timeline.composer.last_accepted_clear_revision =
         accepted_composer.last_accepted_clear_revision;
     vec![

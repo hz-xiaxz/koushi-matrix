@@ -1236,6 +1236,7 @@ pub enum AppAction {
         submission_id: SubmissionId,
         transaction_id: String,
         target: ComposerSubmissionTarget,
+        draft_revision: ComposerDraftRevision,
     },
     ComposerSubmissionSettled {
         submission_id: SubmissionId,
