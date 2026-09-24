@@ -88,19 +88,12 @@ async fn pinned_event_network_delay_does_not_block_space_selection() {
         ))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!({ "pinned": ["$held:example.test"] })),
+                .set_body_json(serde_json::json!({ "pinned": [] }))
+                .set_delay(Duration::from_secs(60)),
         )
         .expect(1)
         .mount(&*server)
         .await;
-    server
-        .mock_room_event()
-        .room(room_id)
-        .ok_with_template(ResponseTemplate::new(200).set_delay(Duration::from_secs(60)))
-        .mock_once()
-        .mount()
-        .await;
-
     let session = Arc::new(MatrixClientSession::from_client_for_testing(
         client,
         SessionInfo {
@@ -131,9 +124,19 @@ async fn pinned_event_network_delay_does_not_block_space_selection() {
             }))
             .await
     );
-    for _ in 0..64 {
+    let mut pin_request_started = false;
+    for _ in 0..256 {
+        pin_request_started = server.received_requests().await.is_some_and(|requests| {
+            requests.iter().any(|request| {
+                request.url.path().contains("/state/m.room.pinned_events/")
+            })
+        });
+        if pin_request_started {
+            break;
+        }
         tokio::task::yield_now().await;
     }
+    assert!(pin_request_started, "pinned event request should start");
     assert!(
         action_rx.try_recv().is_err(),
         "pinned event fetch should still be pending"
