@@ -547,3 +547,55 @@ Actor (`account/history_export.rs`): `ActiveHistoryExport { request_id, stop: St
   - `npm run qa:headless-local -- --server=both` (merge gate), plus the Linux GUI lane from Task 10.
 - [ ] **Step 3:** Preflight checklist `~/.agents/skills/preflight-review/SKILL.md`; fix findings. Whole-branch review (`/code-review high`); fix confirmed findings.
 - [ ] **Step 4:** Push, open the PR (body: summary, spec/plan links, gates with EXIT codes, closes nothing — reference #59), then `babysit-pr` until merged.
+
+---
+
+## Amendments after plan review (binding; they override the tasks above)
+
+- **Task 1b (before Task 2): additive state types.** Add
+  `crates/koushi-state/src/state/history_export.rs` with the Task 7 types
+  (`HistoryExportScope`, `HistoryExportRoomCounts`, `HistoryExportRoomPhase`,
+  `HistoryExportRoomSkipReason`, `HistoryExportRoomFailureKind`,
+  `HistoryExportRoom`, `HistoryExportFailureKind`, `HistoryExportState`) and
+  `pub use RoomHistoryExportRange as HistoryExportRange`, re-exported in their
+  own block (pattern at `koushi-state/src/lib.rs:153`), not yet in `AppState`.
+  Unit tests: serde shapes and Debug redaction. Task 7 then wires them in and
+  removes the old types (rename `RoomHistoryExportRange` for real there).
+- **StopFlag** (Task 4): `tokio::sync::watch`-backed (no `tokio-util` in Core):
+  `set()`, `is_set()`, `async fn cancelled()`. Attachment fetch is
+  `select! { _ = stop.cancelled() => Err(Stopped), r = fetch => r }`. No
+  `MEDIA_DOWNLOAD_TIMEOUT` on attachments; use `ATTACHMENT_FETCH_TIMEOUT =
+  30 min`. Acquire the background permit before each fetch but do not restart
+  the fetch when the permit is cancelled. The SDK returns the whole file as
+  `Vec<u8>` (`get_media_file` also buffers; verified in
+  `vendor/matrix-rust-sdk/crates/matrix-sdk/src/media.rs:356-364`); document
+  "one attachment is held in memory at a time" in the help page and the PR.
+- **Task 3:** `sanitize_matrix_html` keeps the existing chain
+  (`SanitizerConfig::compat().remove_reply_fallback().remove_elements(["script",
+  "style"])`); the exporter additionally removes `img` elements (inline `mxc:`
+  images cannot load offline). Plain `body` reply fallback (`> ` lines up to the
+  first blank line, when the event has `m.in_reply_to`) is stripped. Edits are
+  applied only when the `m.replace` sender equals the original sender.
+  `m.room.member` lines take `displayname` from the event content (fallback
+  `room.json`, then user id). CSP drops `data:` from `img-src`. Non-image file
+  links carry the `download` attribute.
+- **Task 6:** `SpaceRoomList` requests `max_depth = 1`
+  (`matrix-sdk-ui/src/spaces/room_list.rs:282`), so recursion with a visited
+  set is required, as planned.
+- **Task 7:** throttle `HistoryExportRoomProgressed` during attachments to at
+  most one action per 250 ms or per 10 files (always send the final one);
+  clear `last_export` on session teardown; add `RetryHistoryExport` to the
+  `requires_projection_acceptance` list in `runtime.rs`;
+  `HistoryExportRoom.display_name` is a deliberate exception to "counts only"
+  (unjoined rooms are absent from `state.rooms`) and state-machine.md says so.
+- **Task 9:** the committed fixture holds only `koushi-export.json`,
+  `index.html` and `rooms/<folder>/*`. Playwright `beforeAll` assembles a temp
+  dir from the fixture plus `crates/koushi-core/assets/katex` and the
+  `koushi-math.js` source. The Rust byte-compare test excludes `assets/`.
+  Update `scripts/check-command-snapshot-contract.mjs` expectations if the
+  renamed Tauri commands are snapshotted.
+- **Task 10:** replace the timing-dependent "stop mid-run" step with a
+  deterministic resume proof: after the first Space export, create and join a
+  new room in the Space, start again on the same directory → only the new room
+  is exported and existing room folders' mtimes are unchanged. Use a fresh temp
+  directory per QA run. Stop-mid-room coverage stays in the Rust fake-FS test.
