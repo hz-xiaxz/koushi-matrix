@@ -45,8 +45,10 @@ import type {
   AttachmentSort,
   CreateRoomRequest,
   RoomAddressPreview,
-  RoomHistoryExportRangeInput,
-  RoomHistoryExportStart,
+  HistoryExportLabels,
+  HistoryExportRangeInput,
+  HistoryExportScopeInput,
+  HistoryExportStart,
   FilesViewScope,
   SubmissionResponse,
   ThreadOpenIntent,
@@ -287,26 +289,32 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandAdmission>("import_room_keys", { sourcePath, passphrase });
   }
 
-  async roomHistoryExportTimeZone(): Promise<string> {
-    return this.invokeCommand<string>("room_history_export_time_zone");
+  async historyExportTimeZone(): Promise<string> {
+    return this.invokeCommand<string>("history_export_time_zone");
   }
 
-  async exportRoomHistory(
-    roomId: string,
-    range: RoomHistoryExportRangeInput,
+  async exportHistory(
+    scope: HistoryExportScopeInput,
+    range: HistoryExportRangeInput,
+    labels: HistoryExportLabels,
     dialogTitle: string,
-    fileNameStem: string
-  ): Promise<RoomHistoryExportStart> {
-    return this.invokeCommand<RoomHistoryExportStart>("export_room_history", {
-      roomId,
+    folderNameStem: string
+  ): Promise<HistoryExportStart> {
+    return this.invokeCommand<HistoryExportStart>("export_history", {
+      scope,
       range,
+      labels,
       dialogTitle,
-      fileNameStem
+      folderNameStem
     });
   }
 
-  async cancelRoomHistoryExport(targetRequestId: number): Promise<CommandAdmission> {
-    return this.invokeCommand<CommandAdmission>("cancel_room_history_export", { targetRequestId });
+  async stopHistoryExport(targetRequestId: number): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("stop_history_export", { targetRequestId });
+  }
+
+  async retryHistoryExport(targetRequestId: number): Promise<HistoryExportStart> {
+    return this.invokeCommand<HistoryExportStart>("retry_history_export", { targetRequestId });
   }
 
   async bootstrapSecureBackup(

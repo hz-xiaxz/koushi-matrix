@@ -1,0 +1,33 @@
+{
+  "room_name": "Room !math",
+  "topic": "",
+  "export_date": "9/25/2025",
+  "exported_by": "Alice",
+  "messages": [
+    {
+      "content": {
+        "body": "Energy $E=mc^2$ and the integral",
+        "format": "org.matrix.custom.html",
+        "formatted_body": "Energy <span data-mx-maths=\"E=mc^2\"><code>E=mc^2</code></span> and <div data-mx-maths=\"\\int_0^1 x\\,dx = \\frac{1}{2}\"><code>\\int_0^1 x\\,dx</code></div>",
+        "msgtype": "m.text"
+      },
+      "event_id": "$math-1",
+      "origin_server_ts": 1758758400000,
+      "room_id": "!math",
+      "sender": "@alice:x",
+      "type": "m.room.message"
+    },
+    {
+      "content": {
+        "body": "plot.png",
+        "msgtype": "m.image",
+        "url": "mxc://h/plot"
+      },
+      "event_id": "$math-2",
+      "origin_server_ts": 1758758460000,
+      "room_id": "!math",
+      "sender": "@alice:x",
+      "type": "m.room.message"
+    }
+  ]
+}

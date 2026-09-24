@@ -478,3 +478,77 @@ async fn unknown_room_or_space_fails_before_writing() {
     assert_eq!(space.result, Err(HistoryExportFailureKind::SpaceNotFound));
     assert!(fs.files_below(Path::new(CHOSEN)).is_empty());
 }
+
+/// The page Playwright opens over `file://` (e2e/history-export-page.spec.ts).
+/// CI's browser job has no Rust toolchain, so the rendered folder is
+/// committed; this test fails when the renderer and the fixture drift.
+/// Regenerate with `KOUSHI_UPDATE_HISTORY_EXPORT_FIXTURE=1`.
+#[tokio::test]
+async fn browser_fixture_matches_renderer() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/desktop/e2e/fixtures/history-export-page");
+    let output = tempfile::tempdir().unwrap();
+    let fs = super::fs::NativeHistoryExportFilesystem;
+    let math = ExportSourceEvent::Plain(json!({
+        "type": "m.room.message", "sender": "@alice:x", "room_id": "!math",
+        "event_id": "$math-1", "origin_server_ts": 1_758_758_400_000_u64,
+        "content": {
+            "msgtype": "m.text",
+            "body": "Energy $E=mc^2$ and the integral",
+            "format": "org.matrix.custom.html",
+            "formatted_body": "Energy <span data-mx-maths=\"E=mc^2\"><code>E=mc^2</code></span> and <div data-mx-maths=\"\\int_0^1 x\\,dx = \\frac{1}{2}\"><code>\\int_0^1 x\\,dx</code></div>"
+        }
+    }));
+    let picture = ExportSourceEvent::Plain(json!({
+        "type": "m.room.message", "sender": "@alice:x", "room_id": "!math",
+        "event_id": "$math-2", "origin_server_ts": 1_758_758_460_000_u64,
+        "content": { "msgtype": "m.image", "body": "plot.png", "url": "mxc://h/plot" }
+    }));
+    let mut source = FakeSource::default().room("!math", vec![math, picture]);
+    let mut request = request(ManifestScope::Room { id: "!math".to_owned() }, output.path().to_str().unwrap());
+    request.folder_name_stem = "Fixture".to_owned();
+    request.time_zone = "Asia/Tokyo".to_owned();
+    let mut dir = None;
+    let result = run_archive(&fs, &mut source, &PngFetcher, &mut Reporter::default(), &StopFlag::default(), &request, &mut dir).await;
+    assert_eq!(result, Ok(ArchiveOutcome::Completed));
+    let dir = dir.unwrap();
+
+    let rendered = relative_files(&dir);
+    if std::env::var_os("KOUSHI_UPDATE_HISTORY_EXPORT_FIXTURE").is_some() {
+        let _ = std::fs::remove_dir_all(&fixture);
+        for file in &rendered {
+            let target = fixture.join(file);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::copy(dir.join(file), target).unwrap();
+        }
+    }
+    assert_eq!(rendered, relative_files(&fixture), "fixture file list drifted; regenerate it");
+    for file in &rendered {
+        assert_eq!(
+            std::fs::read(dir.join(file)).unwrap(),
+            std::fs::read(fixture.join(file)).unwrap(),
+            "{file} drifted; regenerate the fixture"
+        );
+    }
+}
+
+/// Files below `root` except the vendored `assets/`, sorted, `/`-separated.
+fn relative_files(root: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else {
+                out.push(path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(root, root, &mut files);
+    files.retain(|file| !file.starts_with("assets/"));
+    files.sort();
+    files
+}

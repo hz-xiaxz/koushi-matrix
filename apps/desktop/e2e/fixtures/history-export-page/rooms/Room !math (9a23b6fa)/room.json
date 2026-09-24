@@ -1,0 +1,10 @@
+{
+  "room_id": "!math",
+  "name": "Room !math",
+  "topic": "",
+  "senders": {
+    "@alice:x": "Alice"
+  },
+  "exported_at_ms": 1758758400000,
+  "time_zone": "Asia/Tokyo"
+}

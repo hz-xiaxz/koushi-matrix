@@ -67,7 +67,7 @@ import {
   compareComposerDraftRevisions,
   nextComposerDraftRevision
 } from "../domain/composerDraftRevision";
-import type { ComposerDraftRevision } from "../domain/types";
+import type { ComposerDraftRevision, HistoryExportScope } from "../domain/types";
 import type { ComposerDraftLeaseSnapshot } from "../domain/composerDraftLifecycle";
 import "../styles.css";
 
@@ -315,7 +315,7 @@ function readySnapshot(
           },
           timeline: { room_id: ROOM_ID, is_subscribed: true, is_paginating_backwards: false, composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", document: { version: 2, inlines: [] }, mode: composerMode }, submission_registry: { accepted_submission_ids: [], settled_submission_ids: [] }, scheduled_send_capability: "unknown", scheduled_sends: [], staged_uploads: [], media_gallery: [], media_downloads: {}, continuity: { kind: "unknown" } },
           thread: { kind: "closed" }, threads_list: { kind: "closed" }, focused_context: { kind: "closed" },
-          files_view: { kind: "closed" }, room_history_export: { kind: "idle" }, errors: [], basic_operation: basicOperation
+          files_view: { kind: "closed" }, history_export: { kind: "idle" }, errors: [], basic_operation: basicOperation
         }
       },
       sidebar,
@@ -2069,40 +2069,61 @@ mock.setCommandResponse("enable_key_backup", () =>
     }
   })
 );
-// #59 room-history export: fixed Rust-shaped transitions only. Specs push the
+// History export: fixed Rust-shaped transitions only. Specs push the room
 // progress and settlement snapshots they need.
 const HARNESS_HISTORY_EXPORT_REQUEST_ID = 9_300;
-mock.setCommandResponse("room_history_export_time_zone", () => "Asia/Tokyo");
-mock.setCommandResponse("export_room_history", (args: Record<string, any>) => ({
-  requestId: HARNESS_HISTORY_EXPORT_REQUEST_ID,
-  snapshot: setCurrentSnapshot({
-    ...currentSnapshot,
-    state: {
-      ...currentSnapshot.state,
-      ui: {
-        ...currentSnapshot.state.ui,
-        room_history_export: {
-          kind: "exporting",
-          request_id: HARNESS_HISTORY_EXPORT_REQUEST_ID,
-          room_id: String(args.roomId),
-          range: { kind: "allAvailable" },
-          progress: { fetched_events: 0, exported_events: 0, undecryptable_events: 0 },
-          cancel_requested: false
-        }
-      }
-    }
-  })
-}));
-mock.setCommandResponse("cancel_room_history_export", () => {
-  const current = currentSnapshot.state.ui.room_history_export;
+let harnessHistoryExportRequestId = HARNESS_HISTORY_EXPORT_REQUEST_ID;
+function harnessHistoryExportPreparing(requestId: number, scope: HistoryExportScope) {
   return setCurrentSnapshot({
     ...currentSnapshot,
     state: {
       ...currentSnapshot.state,
       ui: {
         ...currentSnapshot.state.ui,
-        room_history_export:
-          current.kind === "exporting" ? { ...current, cancel_requested: true } : current
+        history_export: {
+          kind: "preparing",
+          request_id: requestId,
+          scope,
+          range: { kind: "allAvailable" },
+          stop_requested: false
+        }
+      }
+    }
+  });
+}
+mock.setCommandResponse("history_export_time_zone", () => "Asia/Tokyo");
+mock.setCommandResponse("export_history", (args: Record<string, any>) => {
+  harnessHistoryExportRequestId = HARNESS_HISTORY_EXPORT_REQUEST_ID;
+  const scope: HistoryExportScope =
+    args.scope?.kind === "space"
+      ? { kind: "space", space_id: String(args.scope.spaceId) }
+      : { kind: "room", room_id: String(args.scope?.roomId) };
+  return {
+    requestId: harnessHistoryExportRequestId,
+    snapshot: harnessHistoryExportPreparing(harnessHistoryExportRequestId, scope)
+  };
+});
+mock.setCommandResponse("retry_history_export", () => {
+  const current = currentSnapshot.state.ui.history_export;
+  harnessHistoryExportRequestId += 1;
+  return {
+    requestId: harnessHistoryExportRequestId,
+    snapshot:
+      current.kind === "idle"
+        ? currentSnapshot
+        : harnessHistoryExportPreparing(harnessHistoryExportRequestId, current.scope)
+  };
+});
+mock.setCommandResponse("stop_history_export", () => {
+  const current = currentSnapshot.state.ui.history_export;
+  return setCurrentSnapshot({
+    ...currentSnapshot,
+    state: {
+      ...currentSnapshot.state,
+      ui: {
+        ...currentSnapshot.state.ui,
+        history_export:
+          current.kind === "preparing" || current.kind === "running" ? { ...current, stop_requested: true } : current
       }
     }
   });
