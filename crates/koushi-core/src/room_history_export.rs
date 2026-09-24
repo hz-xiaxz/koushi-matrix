@@ -5,11 +5,22 @@
 //! native artifact and bytes reach it only through [`RoomHistoryExportSink`].
 
 mod driver;
+pub(crate) mod fs;
+#[cfg(test)]
+pub(crate) mod fs_fake;
 mod element;
 mod katex_assets;
+pub(crate) mod layout;
+pub(crate) mod manifest;
 mod sdk_source;
 mod sink;
 
+#[cfg(test)]
+mod fs_tests;
+#[cfg(test)]
+mod layout_tests;
+#[cfg(test)]
+mod manifest_tests;
 #[cfg(test)]
 mod sdk_source_tests;
 #[cfg(test)]
