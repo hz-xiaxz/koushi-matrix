@@ -628,7 +628,11 @@ fn markdown_link(rest: &str) -> Option<(&str, &str, usize)> {
 /// whitespace.
 fn underscore_emphasis<'a>(before: &str, rest: &'a str) -> Option<(&'a str, usize)> {
     let after = rest.strip_prefix('_')?;
-    if before.chars().next_back().is_some_and(char::is_alphanumeric) {
+    if before
+        .chars()
+        .next_back()
+        .is_some_and(char::is_alphanumeric)
+    {
         return None;
     }
     let mut search_from = 0;

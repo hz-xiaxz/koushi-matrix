@@ -456,9 +456,15 @@ fn composer_markdown_links_become_anchors_for_safe_schemes_only() {
 
 #[test]
 fn composer_markdown_underscore_emphasis_respects_word_boundaries() {
-    assert_eq!(formatted("an _em_ word").as_deref(), Some("an <em>em</em> word"));
+    assert_eq!(
+        formatted("an _em_ word").as_deref(),
+        Some("an <em>em</em> word")
+    );
     assert_eq!(formatted("snake_case_name"), None);
-    assert_eq!(formatted("file_name.txt and _x_").as_deref(), Some("file_name.txt and <em>x</em>"));
+    assert_eq!(
+        formatted("file_name.txt and _x_").as_deref(),
+        Some("file_name.txt and <em>x</em>")
+    );
     assert_eq!(formatted("_ not emphasis _"), None);
 }
 
