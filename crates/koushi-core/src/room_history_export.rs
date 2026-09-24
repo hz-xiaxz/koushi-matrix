@@ -15,6 +15,7 @@ mod katex_assets;
 pub(crate) mod layout;
 pub(crate) mod manifest;
 pub(crate) mod records;
+pub(crate) mod space_selection;
 pub(crate) mod thumbnail;
 mod sdk_source;
 mod sink;
@@ -29,6 +30,8 @@ mod layout_tests;
 mod manifest_tests;
 #[cfg(test)]
 mod sdk_source_tests;
+#[cfg(test)]
+mod space_selection_tests;
 #[cfg(test)]
 mod thumbnail_tests;
 #[cfg(test)]
