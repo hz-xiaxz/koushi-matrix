@@ -28,17 +28,24 @@ fn contract(fs: &dyn HistoryExportFilesystem, root: &Path) {
     fs.write_atomic(&manifest, b"two").unwrap();
     assert_eq!(fs.read(&manifest).unwrap(), b"two");
 
-    fs.rename(&dir.join("rooms/a"), &dir.join("rooms/b")).unwrap();
+    fs.rename(&dir.join("rooms/a"), &dir.join("rooms/b"))
+        .unwrap();
     assert!(!fs.exists(&dir.join("rooms/a")));
     assert_eq!(fs.read(&dir.join("rooms/b/messages.json")).unwrap(), b"{}");
 
     let mut names = fs.list_dir(&dir).unwrap();
     names.sort();
-    assert_eq!(names, vec!["koushi-export.json".to_owned(), "rooms".to_owned()]);
+    assert_eq!(
+        names,
+        vec!["koushi-export.json".to_owned(), "rooms".to_owned()]
+    );
 
     fs.remove_dir_all(&dir.join("rooms")).unwrap();
     assert!(!fs.exists(&dir.join("rooms/b/messages.json")));
-    assert_eq!(fs.read(&dir.join("missing")), Err(HistoryExportFsError::NotFound));
+    assert_eq!(
+        fs.read(&dir.join("missing")),
+        Err(HistoryExportFsError::NotFound)
+    );
 }
 
 #[test]

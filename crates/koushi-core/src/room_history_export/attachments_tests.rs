@@ -34,7 +34,10 @@ struct FakeFetcher {
 
 impl FakeFetcher {
     fn answer(self, url: &str, answers: Vec<Result<Vec<u8>, FetchError>>) -> Self {
-        self.answers.lock().unwrap().insert(url.to_owned(), answers.into());
+        self.answers
+            .lock()
+            .unwrap()
+            .insert(url.to_owned(), answers.into());
         self
     }
 }
@@ -57,7 +60,11 @@ fn message(id: &str, content: serde_json::Value) -> serde_json::Value {
 }
 
 fn image_ref(id: &str, name: &str, url: &str) -> AttachmentRef {
-    attachment_ref(&message(id, json!({ "msgtype": "m.image", "body": name, "url": url }))).unwrap()
+    attachment_ref(&message(
+        id,
+        json!({ "msgtype": "m.image", "body": name, "url": url }),
+    ))
+    .unwrap()
 }
 
 fn room_dir(fs: &MemoryFilesystem) -> &'static Path {
@@ -68,10 +75,14 @@ fn room_dir(fs: &MemoryFilesystem) -> &'static Path {
 
 #[test]
 fn attachment_ref_reads_plain_and_encrypted_sources() {
-    let plain = attachment_ref(&message("$1", json!({
-        "msgtype": "m.file", "body": "caption", "filename": "paper.pdf", "url": "mxc://h/plain",
-        "info": { "size": 2048, "mimetype": "application/pdf" }
-    }))).unwrap();
+    let plain = attachment_ref(&message(
+        "$1",
+        json!({
+            "msgtype": "m.file", "body": "caption", "filename": "paper.pdf", "url": "mxc://h/plain",
+            "info": { "size": 2048, "mimetype": "application/pdf" }
+        }),
+    ))
+    .unwrap();
     assert_eq!(plain.kind, AttachmentKind::File);
     assert_eq!(plain.name, "paper.pdf");
     assert_eq!(plain.size, Some(2048));
@@ -90,8 +101,11 @@ fn attachment_ref_reads_plain_and_encrypted_sources() {
     assert_eq!(encrypted.kind, AttachmentKind::Image);
     assert!(matches!(encrypted.source, MediaSource::Encrypted(_)));
 
-    let sticker = attachment_ref(&json!({ "type": "m.sticker", "event_id": "$3", "sender": "@a:x",
-        "content": { "body": "wave", "url": "mxc://h/s", "info": {} } })).unwrap();
+    let sticker = attachment_ref(
+        &json!({ "type": "m.sticker", "event_id": "$3", "sender": "@a:x",
+        "content": { "body": "wave", "url": "mxc://h/s", "info": {} } }),
+    )
+    .unwrap();
     assert_eq!(sticker.kind, AttachmentKind::Sticker);
 }
 
@@ -99,29 +113,62 @@ fn attachment_ref_reads_plain_and_encrypted_sources() {
 fn attachment_ref_ignores_text_redacted_and_sourceless_events() {
     assert!(attachment_ref(&message("$1", json!({ "msgtype": "m.text", "body": "hi" }))).is_none());
     assert!(attachment_ref(&message("$2", json!({}))).is_none());
-    assert!(attachment_ref(&message("$3", json!({ "msgtype": "m.image", "body": "x.png" }))).is_none());
+    assert!(
+        attachment_ref(&message(
+            "$3",
+            json!({ "msgtype": "m.image", "body": "x.png" })
+        ))
+        .is_none()
+    );
 }
 
 #[tokio::test(start_paused = true)]
 async fn download_writes_sequenced_files_and_thumbs() {
     let fs = MemoryFilesystem::default();
     let dir = room_dir(&fs);
-    let pdf = attachment_ref(&message("$3", json!({ "msgtype": "m.file", "body": "c.pdf", "url": "mxc://h/c" }))).unwrap();
+    let pdf = attachment_ref(&message(
+        "$3",
+        json!({ "msgtype": "m.file", "body": "c.pdf", "url": "mxc://h/c" }),
+    ))
+    .unwrap();
     let fetcher = FakeFetcher::default()
         .answer("mxc://h/a", vec![Ok(png())])
         .answer("mxc://h/b", vec![Ok(png())])
         .answer("mxc://h/c", vec![Ok(b"%PDF".to_vec())]);
-    let refs = vec![image_ref("$1", "a.png", "mxc://h/a"), image_ref("$2", "b.png", "mxc://h/b"), pdf];
+    let refs = vec![
+        image_ref("$1", "a.png", "mxc://h/a"),
+        image_ref("$2", "b.png", "mxc://h/b"),
+        pdf,
+    ];
     let mut progress = Vec::new();
-    let index = download_attachments(&fetcher, &fs, dir, refs, &StopFlag::default(), |done, total, failed| progress.push((done, total, failed)))
-        .await
-        .unwrap();
+    let index = download_attachments(
+        &fetcher,
+        &fs,
+        dir,
+        refs,
+        &StopFlag::default(),
+        |done, total, failed| progress.push((done, total, failed)),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         fs.files_below(dir),
-        vec!["files/0001_a.png", "files/0002_b.png", "files/0003_c.pdf", "thumbs/0001.jpg", "thumbs/0002.jpg"]
+        vec![
+            "files/0001_a.png",
+            "files/0002_b.png",
+            "files/0003_c.pdf",
+            "thumbs/0001.jpg",
+            "thumbs/0002.jpg"
+        ]
     );
-    assert_eq!(index.attachments[0].file.as_deref(), Some("files/0001_a.png"));
-    assert_eq!(index.attachments[0].thumb.as_deref(), Some("thumbs/0001.jpg"));
+    assert_eq!(
+        index.attachments[0].file.as_deref(),
+        Some("files/0001_a.png")
+    );
+    assert_eq!(
+        index.attachments[0].thumb.as_deref(),
+        Some("thumbs/0001.jpg")
+    );
     assert_eq!(index.attachments[2].thumb, None);
     assert_eq!(progress.last(), Some(&(3, 3, 0)));
 }
@@ -132,11 +179,22 @@ async fn download_retries_transient_then_records_failure() {
     let dir = room_dir(&fs);
     let fetcher = FakeFetcher::default().answer(
         "mxc://h/a",
-        vec![Err(FetchError::Transient), Err(FetchError::Transient), Err(FetchError::Transient)],
+        vec![
+            Err(FetchError::Transient),
+            Err(FetchError::Transient),
+            Err(FetchError::Transient),
+        ],
     );
-    let index = download_attachments(&fetcher, &fs, dir, vec![image_ref("$1", "a.png", "mxc://h/a")], &StopFlag::default(), |_, _, _| {})
-        .await
-        .unwrap();
+    let index = download_attachments(
+        &fetcher,
+        &fs,
+        dir,
+        vec![image_ref("$1", "a.png", "mxc://h/a")],
+        &StopFlag::default(),
+        |_, _, _| {},
+    )
+    .await
+    .unwrap();
     assert_eq!(fetcher.calls.lock().unwrap().len(), FETCH_ATTEMPTS as usize);
     assert_eq!(index.attachments[0].status, AttachmentStatus::Failed);
     assert!(fs.files_below(dir).is_empty());
@@ -146,10 +204,18 @@ async fn download_retries_transient_then_records_failure() {
 async fn transient_failure_then_success_is_retrieved() {
     let fs = MemoryFilesystem::default();
     let dir = room_dir(&fs);
-    let fetcher = FakeFetcher::default().answer("mxc://h/a", vec![Err(FetchError::Transient), Ok(png())]);
-    let index = download_attachments(&fetcher, &fs, dir, vec![image_ref("$1", "a.png", "mxc://h/a")], &StopFlag::default(), |_, _, _| {})
-        .await
-        .unwrap();
+    let fetcher =
+        FakeFetcher::default().answer("mxc://h/a", vec![Err(FetchError::Transient), Ok(png())]);
+    let index = download_attachments(
+        &fetcher,
+        &fs,
+        dir,
+        vec![image_ref("$1", "a.png", "mxc://h/a")],
+        &StopFlag::default(),
+        |_, _, _| {},
+    )
+    .await
+    .unwrap();
     assert_eq!(index.attachments[0].status, AttachmentStatus::Retrieved);
 }
 
@@ -159,9 +225,16 @@ async fn permanent_failure_is_not_retried() {
     let dir = room_dir(&fs);
     let fetcher = FakeFetcher::default().answer("mxc://h/a", vec![Err(FetchError::Permanent)]);
     let mut last = None;
-    download_attachments(&fetcher, &fs, dir, vec![image_ref("$1", "a.png", "mxc://h/a")], &StopFlag::default(), |d, t, f| last = Some((d, t, f)))
-        .await
-        .unwrap();
+    download_attachments(
+        &fetcher,
+        &fs,
+        dir,
+        vec![image_ref("$1", "a.png", "mxc://h/a")],
+        &StopFlag::default(),
+        |d, t, f| last = Some((d, t, f)),
+    )
+    .await
+    .unwrap();
     assert_eq!(fetcher.calls.lock().unwrap().len(), 1);
     assert_eq!(last, Some((1, 1, 1)));
 }
@@ -171,9 +244,16 @@ async fn corrupt_image_keeps_file_without_thumb() {
     let fs = MemoryFilesystem::default();
     let dir = room_dir(&fs);
     let fetcher = FakeFetcher::default().answer("mxc://h/a", vec![Ok(b"garbage".to_vec())]);
-    let index = download_attachments(&fetcher, &fs, dir, vec![image_ref("$1", "a.png", "mxc://h/a")], &StopFlag::default(), |_, _, _| {})
-        .await
-        .unwrap();
+    let index = download_attachments(
+        &fetcher,
+        &fs,
+        dir,
+        vec![image_ref("$1", "a.png", "mxc://h/a")],
+        &StopFlag::default(),
+        |_, _, _| {},
+    )
+    .await
+    .unwrap();
     assert_eq!(fs.files_below(dir), vec!["files/0001_a.png"]);
     assert_eq!(index.attachments[0].thumb, None);
     assert_eq!(index.attachments[0].status, AttachmentStatus::Retrieved);
@@ -189,10 +269,19 @@ async fn stop_flag_interrupts_between_files() {
     let stop = StopFlag::default();
     let stopper = stop.clone();
     let result = download_attachments(
-        &fetcher, &fs, dir,
-        vec![image_ref("$1", "a.png", "mxc://h/a"), image_ref("$2", "b.png", "mxc://h/b")],
+        &fetcher,
+        &fs,
+        dir,
+        vec![
+            image_ref("$1", "a.png", "mxc://h/a"),
+            image_ref("$2", "b.png", "mxc://h/b"),
+        ],
         &stop,
-        move |done, _, _| if done == 1 { stopper.set() },
+        move |done, _, _| {
+            if done == 1 {
+                stopper.set()
+            }
+        },
     )
     .await;
     assert_eq!(result.unwrap_err(), ArchiveStepError::Stopped);
@@ -205,8 +294,19 @@ async fn a_full_disk_fails_the_step() {
     let dir = room_dir(&fs);
     fs.fail_after_writes(0, super::fs::HistoryExportFsError::NoSpace);
     let fetcher = FakeFetcher::default().answer("mxc://h/a", vec![Ok(png())]);
-    let result = download_attachments(&fetcher, &fs, dir, vec![image_ref("$1", "a.png", "mxc://h/a")], &StopFlag::default(), |_, _, _| {}).await;
-    assert_eq!(result.unwrap_err(), ArchiveStepError::Write(super::fs::HistoryExportFsError::NoSpace));
+    let result = download_attachments(
+        &fetcher,
+        &fs,
+        dir,
+        vec![image_ref("$1", "a.png", "mxc://h/a")],
+        &StopFlag::default(),
+        |_, _, _| {},
+    )
+    .await;
+    assert_eq!(
+        result.unwrap_err(),
+        ArchiveStepError::Write(super::fs::HistoryExportFsError::NoSpace)
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -225,6 +325,14 @@ async fn stop_cancels_an_in_flight_fetch() {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         stopper.set();
     });
-    let result = download_attachments(&Hanging, &fs, dir, vec![image_ref("$1", "a.png", "mxc://h/a")], &stop, |_, _, _| {}).await;
+    let result = download_attachments(
+        &Hanging,
+        &fs,
+        dir,
+        vec![image_ref("$1", "a.png", "mxc://h/a")],
+        &stop,
+        |_, _, _| {},
+    )
+    .await;
     assert_eq!(result.unwrap_err(), ArchiveStepError::Stopped);
 }

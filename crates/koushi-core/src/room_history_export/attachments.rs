@@ -110,7 +110,9 @@ pub(crate) fn attachment_ref(event: &Value) -> Option<AttachmentRef> {
             .or_else(|| str_at(content, "body"))
             .unwrap_or_default()
             .to_owned(),
-        size: info.and_then(|info| info.get("size")).and_then(Value::as_u64),
+        size: info
+            .and_then(|info| info.get("size"))
+            .and_then(Value::as_u64),
         mimetype: info
             .and_then(|info| str_at(info, "mimetype"))
             .map(str::to_owned),
@@ -152,7 +154,10 @@ impl AttachmentFetcher for SdkAttachmentFetcher {
     async fn fetch(&self, source: &MediaSource) -> Result<Vec<u8>, FetchError> {
         // Wait for background admission, but do not restart a long download
         // when visible work later preempts the permit.
-        let _permit = self.account_work.acquire(AccountWorkKind::SearchCrawl).await;
+        let _permit = self
+            .account_work
+            .acquire(AccountWorkKind::SearchCrawl)
+            .await;
         let request = MediaRequestParameters {
             source: source.clone(),
             format: MediaFormat::File,

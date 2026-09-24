@@ -75,7 +75,10 @@ fn staging_file(path: &Path) -> Result<tempfile::NamedTempFile, HistoryExportFsE
         .tempfile_in(parent)?)
 }
 
-fn persist(staged: tempfile::NamedTempFile, destination: &Path) -> Result<(), HistoryExportFsError> {
+fn persist(
+    staged: tempfile::NamedTempFile,
+    destination: &Path,
+) -> Result<(), HistoryExportFsError> {
     staged.as_file().sync_all()?;
     staged
         .persist(destination)

@@ -15,12 +15,12 @@ use crate::account_work::{AccountWorkKind, AccountWorkScheduler};
 
 use super::archive::ArchiveSource;
 use super::driver::{HistoryPage, HistoryPageError, HistoryPageSource, PAGE_LIMIT};
+use super::element::{
+    ExportDateLocale, ExportHeader, ExportSourceEvent, UndecryptableReason, format_export_date,
+};
 use super::manifest::ManifestScope;
 use super::space_selection::{
     SdkSpaceChildSource, SelectedRoom, SelectionError, select_space_rooms,
-};
-use super::element::{
-    ExportDateLocale, ExportHeader, ExportSourceEvent, UndecryptableReason, format_export_date,
 };
 
 pub(crate) struct MatrixRoomHistorySource {
@@ -289,7 +289,10 @@ impl ArchiveSource for SdkArchiveSource {
         }
     }
 
-    async fn open_room(&mut self, room_id: &str) -> Option<(ExportHeader, MatrixRoomHistorySource)> {
+    async fn open_room(
+        &mut self,
+        room_id: &str,
+    ) -> Option<(ExportHeader, MatrixRoomHistorySource)> {
         let room = self.room(room_id)?;
         if room.state() != matrix_sdk::RoomState::Joined {
             return None;

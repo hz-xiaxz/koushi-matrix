@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use koushi_state::{HistoryExportRange, HistoryExportRoomCounts};
 use serde_json::{Value, json};
 
+use super::attachments::StopFlag;
 use super::driver::{
     AsyncProgress, ExportCounters, FetchFailure, FetchOutputs, FetchResult, HistoryPage,
     HistoryPageError, HistoryPageSource, MAX_CONSECUTIVE_EMPTY_PAGES, PERIOD_MARGIN_MS, run_fetch,
@@ -12,7 +13,6 @@ use super::element::{
     ExportDateLocale, ExportHeader, ExportSourceEvent, UndecryptableReason, effective_event,
     element_renders, format_export_date,
 };
-use super::attachments::StopFlag;
 use super::fs::{HistoryExportFsError, StagedFile};
 
 const SOURCE: &str = include_str!("../../tests/fixtures/room_history_export/source_events.json");
@@ -635,7 +635,10 @@ fn a_write_failure_fails_the_export_without_committing() {
         HistoryExportRange::AllAvailable,
         output,
     );
-    assert_eq!(run.result, Err(FetchFailure::Write(HistoryExportFsError::Io)));
+    assert_eq!(
+        run.result,
+        Err(FetchFailure::Write(HistoryExportFsError::Io))
+    );
     assert!(!run.output.committed());
 }
 
@@ -792,7 +795,12 @@ fn jsonl_ids(output: &MemoryOutput) -> Vec<String> {
 fn events_jsonl_keeps_every_in_range_event_while_messages_json_is_unchanged() {
     let run = run(
         vec![page(
-            vec![message(1, 10), reaction(1, 1, 11), message(1, 10), message(2, 99)],
+            vec![
+                message(1, 10),
+                reaction(1, 1, 11),
+                message(1, 10),
+                message(2, 99),
+            ],
             None,
         )],
         period(0, 50),
@@ -820,7 +828,10 @@ fn the_fixture_writes_one_jsonl_line_per_distinct_fetched_event() {
     actual["export_date"] = json!("<normalized>");
     expected["export_date"] = json!("<normalized>");
     assert_eq!(actual, expected, "messages.json stays Element-compatible");
-    assert_eq!(run.events.text().lines().count() as u64, run.counters.fetched_events);
+    assert_eq!(
+        run.events.text().lines().count() as u64,
+        run.counters.fetched_events
+    );
 }
 
 #[test]
@@ -836,12 +847,19 @@ fn fetch_collects_rendered_attachments_and_senders_in_order() {
         }))
     };
     let run = run(
-        vec![page(vec![file(1, "m.file"), message(9, 2), file(3, "m.image")], None)],
+        vec![page(
+            vec![file(1, "m.file"), message(9, 2), file(3, "m.image")],
+            None,
+        )],
         HistoryExportRange::AllAvailable,
         MemoryOutput::default(),
     );
     let fetched = run.fetched.unwrap();
-    let ids: Vec<_> = fetched.attachments.iter().map(|a| a.event_id.as_str()).collect();
+    let ids: Vec<_> = fetched
+        .attachments
+        .iter()
+        .map(|a| a.event_id.as_str())
+        .collect();
     assert_eq!(ids, vec!["$f1:example.invalid", "$f3:example.invalid"]);
     assert!(fetched.senders.contains("@member-1:example.invalid"));
     assert!(fetched.senders.contains("@member-3:example.invalid"));

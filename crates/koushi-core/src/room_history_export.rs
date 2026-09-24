@@ -10,17 +10,17 @@
 pub(crate) mod archive;
 pub(crate) mod attachments;
 mod driver;
+mod element;
 pub(crate) mod fs;
-pub(crate) mod html;
 #[cfg(test)]
 pub(crate) mod fs_fake;
-mod element;
+pub(crate) mod html;
 mod katex_assets;
 pub(crate) mod layout;
 pub(crate) mod manifest;
 pub(crate) mod records;
-pub(crate) mod space_selection;
 mod sdk_source;
+pub(crate) mod space_selection;
 
 #[cfg(test)]
 mod archive_tests;

@@ -220,10 +220,7 @@ impl AccountActor {
                 range: task_request.range.clone(),
                 chosen_dir,
                 folder_name_stem: task_request.folder_name_stem.clone(),
-                folder_date: local_civil_date(
-                    now_ms,
-                    task_request.export_date_utc_offset_minutes,
-                ),
+                folder_date: local_civil_date(now_ms, task_request.export_date_utc_offset_minutes),
                 time_zone: task_request.display_time_zone.clone(),
                 now_ms,
                 labels: task_request.labels.clone(),

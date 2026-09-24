@@ -43,7 +43,10 @@ fn relates_to(event: &Value) -> Option<&Value> {
 
 fn relation(event: &Value) -> Option<(&str, &str)> {
     let relates_to = relates_to(event)?;
-    Some((str_at(relates_to, "rel_type")?, str_at(relates_to, "event_id")?))
+    Some((
+        str_at(relates_to, "rel_type")?,
+        str_at(relates_to, "event_id")?,
+    ))
 }
 
 fn is_state(event: &Value) -> bool {
@@ -196,7 +199,13 @@ pub(crate) fn render_room_page(
 
 impl Page<'_> {
     fn header(&mut self) {
-        head(&mut self.out, &self.labels.lang, &self.meta.name, "../../assets/", true);
+        head(
+            &mut self.out,
+            &self.labels.lang,
+            &self.meta.name,
+            "../../assets/",
+            true,
+        );
         let (date, time, _) = civil(self.meta.exported_at_ms, &self.zone);
         self.out.push_str("<body>\n<header>\n<h1>");
         self.out.push_str(&escape(&self.meta.name));
@@ -327,10 +336,8 @@ impl Page<'_> {
     }
 
     fn placeholder(&mut self, text: &str) {
-        self.out.push_str(&format!(
-            "<p class=\"placeholder\">{}</p>\n",
-            escape(text)
-        ));
+        self.out
+            .push_str(&format!("<p class=\"placeholder\">{}</p>\n", escape(text)));
     }
 
     fn reply(&mut self, content: &Value, in_thread: bool) {
@@ -356,10 +363,7 @@ impl Page<'_> {
                 let name = str_at(original, "sender")
                     .map(|sender| self.meta.sender_name(sender).to_owned())
                     .unwrap_or_default();
-                let quoted = original
-                    .get("content")
-                    .map(excerpt)
-                    .unwrap_or_default();
+                let quoted = original.get("content").map(excerpt).unwrap_or_default();
                 self.out.push_str(&format!(
                     "<blockquote class=\"reply\"><a href=\"#{}\">{}</a> {}</blockquote>\n",
                     anchor(target),
@@ -375,10 +379,7 @@ impl Page<'_> {
     }
 
     fn body(&mut self, content: &Value, msgtype: Option<&str>, sender_name: &str) {
-        if matches!(
-            msgtype,
-            Some("m.image" | "m.file" | "m.video" | "m.audio")
-        ) {
+        if matches!(msgtype, Some("m.image" | "m.file" | "m.video" | "m.audio")) {
             return;
         }
         let formatted = (str_at(content, "format") == Some("org.matrix.custom.html"))
@@ -407,17 +408,17 @@ impl Page<'_> {
         match (&record.status, &record.file) {
             (AttachmentStatus::Retrieved, Some(file)) => {
                 let href = href_path(file);
-                let is_image = matches!(record.kind, AttachmentKind::Image | AttachmentKind::Sticker);
+                let is_image =
+                    matches!(record.kind, AttachmentKind::Image | AttachmentKind::Sticker);
                 match (&record.thumb, is_image) {
                     (Some(thumb), true) => self.out.push_str(&format!(
                         "<a href=\"{href}\"><img src=\"{}\" alt=\"{}\" loading=\"lazy\"></a>",
                         href_path(thumb),
                         escape(&record.name)
                     )),
-                    (_, true) => self.out.push_str(&format!(
-                        "<a href=\"{href}\">{}</a>",
-                        escape(&record.name)
-                    )),
+                    (_, true) => self
+                        .out
+                        .push_str(&format!("<a href=\"{href}\">{}</a>", escape(&record.name))),
                     (_, false) => self.out.push_str(&format!(
                         "<a href=\"{href}\" download>{}</a>",
                         escape(&record.name)
@@ -481,11 +482,17 @@ impl Page<'_> {
             }
             "m.room.name" => label(
                 &labels.state_renamed,
-                &[("name", name), ("value", str_at(&content, "name").unwrap_or_default())],
+                &[
+                    ("name", name),
+                    ("value", str_at(&content, "name").unwrap_or_default()),
+                ],
             ),
             "m.room.topic" => label(
                 &labels.state_topic,
-                &[("name", name), ("value", str_at(&content, "topic").unwrap_or_default())],
+                &[
+                    ("name", name),
+                    ("value", str_at(&content, "topic").unwrap_or_default()),
+                ],
             ),
             "m.room.avatar" => label(&labels.state_avatar, &[("name", name)]),
             other => label(&labels.state_other, &[("name", name), ("type", other)]),

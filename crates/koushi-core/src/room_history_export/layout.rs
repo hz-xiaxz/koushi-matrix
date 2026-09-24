@@ -99,7 +99,9 @@ fn cap_stem(stem: &str) -> Option<String> {
 
 fn is_extension(candidate: &str) -> bool {
     (1..=EXTENSION_MAX_CHARS).contains(&candidate.chars().count())
-        && candidate.chars().all(|character| character.is_ascii_alphanumeric())
+        && candidate
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
 }
 
 fn extension_for_mime(mimetype: &str) -> Option<&'static str> {

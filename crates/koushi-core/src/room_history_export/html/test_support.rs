@@ -74,7 +74,12 @@ pub(super) fn message(id: &str, sender: &str, minutes: u64, content: Value) -> V
 }
 
 pub(super) fn text(id: &str, sender: &str, minutes: u64, body: &str) -> Value {
-    message(id, sender, minutes, json!({ "msgtype": "m.text", "body": body }))
+    message(
+        id,
+        sender,
+        minutes,
+        json!({ "msgtype": "m.text", "body": body }),
+    )
 }
 
 pub(super) fn html(id: &str, minutes: u64, body: &str, formatted: &str) -> Value {

@@ -54,7 +54,10 @@ impl HistoryPageSource for FakePages {
     }
 
     async fn next_page(&mut self, _from: Option<String>) -> Result<HistoryPage, HistoryPageError> {
-        self.0.pop_front().unwrap_or(Ok(HistoryPage { events: Vec::new(), end: None }))
+        self.0.pop_front().unwrap_or(Ok(HistoryPage {
+            events: Vec::new(),
+            end: None,
+        }))
     }
 }
 
@@ -97,7 +100,10 @@ impl ArchiveSource for FakeSource {
         self.titles.get(id).cloned()
     }
 
-    async fn select_rooms(&mut self, scope: &ManifestScope) -> Result<Vec<SelectedRoom>, SelectionError> {
+    async fn select_rooms(
+        &mut self,
+        scope: &ManifestScope,
+    ) -> Result<Vec<SelectedRoom>, SelectionError> {
         match scope {
             ManifestScope::Room { id } => Ok(vec![SelectedRoom {
                 room_id: id.clone(),
@@ -126,8 +132,15 @@ impl ArchiveSource for FakeSource {
         Some((header, FakePages(VecDeque::from([page]))))
     }
 
-    async fn sender_names(&mut self, _room_id: &str, senders: &BTreeSet<String>) -> BTreeMap<String, String> {
-        senders.iter().map(|sender| (sender.clone(), "Alice".to_owned())).collect()
+    async fn sender_names(
+        &mut self,
+        _room_id: &str,
+        senders: &BTreeSet<String>,
+    ) -> BTreeMap<String, String> {
+        senders
+            .iter()
+            .map(|sender| (sender.clone(), "Alice".to_owned()))
+            .collect()
     }
 }
 
@@ -143,7 +156,11 @@ impl AttachmentFetcher for PngFetcher {
 struct Reporter {
     prepared: Vec<HistoryExportRoom>,
     phases: Vec<(String, HistoryExportRoomPhase)>,
-    settled: Vec<(String, HistoryExportRoomPhase, Option<HistoryExportRoomFailureKind>)>,
+    settled: Vec<(
+        String,
+        HistoryExportRoomPhase,
+        Option<HistoryExportRoomFailureKind>,
+    )>,
     /// Set the stop flag when this room reaches this phase.
     stop_at: Option<(String, HistoryExportRoomPhase, StopFlag)>,
     /// Make every later write fail once this room settles.
@@ -155,7 +172,12 @@ impl ArchiveReporter for Reporter {
         self.prepared = rooms;
     }
 
-    fn progressed(&mut self, room_id: &str, phase: HistoryExportRoomPhase, _counts: HistoryExportRoomCounts) {
+    fn progressed(
+        &mut self,
+        room_id: &str,
+        phase: HistoryExportRoomPhase,
+        _counts: HistoryExportRoomCounts,
+    ) {
         self.phases.push((room_id.to_owned(), phase));
         if let Some((room, at, stop)) = &self.stop_at
             && room == room_id
@@ -195,11 +217,17 @@ fn request(scope: ManifestScope, chosen: &str) -> ArchiveRequest {
 }
 
 fn space_scope() -> ManifestScope {
-    ManifestScope::Space { id: "!space".to_owned() }
+    ManifestScope::Space {
+        id: "!space".to_owned(),
+    }
 }
 
 fn selected(id: &str, target: bool) -> SelectedRoom {
-    SelectedRoom { room_id: id.to_owned(), display_name: format!("Room {id}"), target }
+    SelectedRoom {
+        room_id: id.to_owned(),
+        display_name: format!("Room {id}"),
+        target,
+    }
 }
 
 fn filesystem() -> MemoryFilesystem {
@@ -230,7 +258,11 @@ fn manifest(fs: &MemoryFilesystem, dir: &Path) -> ExportManifest {
 }
 
 fn statuses(fs: &MemoryFilesystem, dir: &Path) -> Vec<(String, ManifestRoomStatus)> {
-    manifest(fs, dir).rooms.into_iter().map(|room| (room.room_id, room.status)).collect()
+    manifest(fs, dir)
+        .rooms
+        .into_iter()
+        .map(|room| (room.room_id, room.status))
+        .collect()
 }
 
 fn export_dir() -> PathBuf {
@@ -242,7 +274,19 @@ async fn room_export_writes_full_layout() {
     let fs = filesystem();
     let mut source = FakeSource::default().room("!a", vec![text("!a", 1), image("!a", 2)]);
     let mut reporter = Reporter::default();
-    let outcome = run(&fs, &mut source, &mut reporter, &StopFlag::default(), &request(ManifestScope::Room { id: "!a".to_owned() }, CHOSEN)).await;
+    let outcome = run(
+        &fs,
+        &mut source,
+        &mut reporter,
+        &StopFlag::default(),
+        &request(
+            ManifestScope::Room {
+                id: "!a".to_owned(),
+            },
+            CHOSEN,
+        ),
+    )
+    .await;
     assert_eq!(outcome.result, Ok(ArchiveOutcome::Completed));
     let dir = outcome.dir.unwrap();
     assert_eq!(dir, export_dir());
@@ -262,11 +306,21 @@ async fn room_export_writes_full_layout() {
         format!("rooms/{folder}/files/0001_cat2.png"),
         format!("rooms/{folder}/thumbs/0001.jpg"),
     ] {
-        assert!(files.contains(&expected), "missing {expected} in {files:#?}");
+        assert!(
+            files.contains(&expected),
+            "missing {expected} in {files:#?}"
+        );
     }
     assert!(!files.iter().any(|file| file.contains(".partial")));
-    assert_eq!(statuses(&fs, &dir), vec![("!a".to_owned(), ManifestRoomStatus::Completed)]);
-    let page = String::from_utf8(fs.read(&dir.join(format!("rooms/{folder}/index.html"))).unwrap()).unwrap();
+    assert_eq!(
+        statuses(&fs, &dir),
+        vec![("!a".to_owned(), ManifestRoomStatus::Completed)]
+    );
+    let page = String::from_utf8(
+        fs.read(&dir.join(format!("rooms/{folder}/index.html")))
+            .unwrap(),
+    )
+    .unwrap();
     assert!(page.contains("message 1"));
     assert!(page.contains("thumbs/0001.jpg"));
     assert_eq!(reporter.prepared.len(), 1);
@@ -275,9 +329,19 @@ async fn room_export_writes_full_layout() {
     assert!(phases.contains(&HistoryExportRoomPhase::Fetching));
     assert!(phases.contains(&HistoryExportRoomPhase::Attachments));
     assert!(phases.contains(&HistoryExportRoomPhase::Rendering));
-    assert_eq!(reporter.settled, vec![("!a".to_owned(), HistoryExportRoomPhase::Completed, None)]);
+    assert_eq!(
+        reporter.settled,
+        vec![("!a".to_owned(), HistoryExportRoomPhase::Completed, None)]
+    );
     let counts = manifest(&fs, &dir).rooms[0].counts;
-    assert_eq!((counts.exported_events, counts.attachments_total, counts.attachments_done), (2, 1, 1));
+    assert_eq!(
+        (
+            counts.exported_events,
+            counts.attachments_total,
+            counts.attachments_done
+        ),
+        (2, 1, 1)
+    );
 }
 
 #[tokio::test]
@@ -287,19 +351,33 @@ async fn space_export_skips_unjoined_and_lists_them_in_index() {
         .room("!a", vec![text("!a", 1)])
         .space("!space", vec![selected("!a", true), selected("!c", false)]);
     let mut reporter = Reporter::default();
-    let outcome = run(&fs, &mut source, &mut reporter, &StopFlag::default(), &request(space_scope(), CHOSEN)).await;
+    let outcome = run(
+        &fs,
+        &mut source,
+        &mut reporter,
+        &StopFlag::default(),
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
     assert_eq!(outcome.result, Ok(ArchiveOutcome::Completed));
     let dir = outcome.dir.unwrap();
     assert_eq!(
         statuses(&fs, &dir),
-        vec![("!a".to_owned(), ManifestRoomStatus::Completed), ("!c".to_owned(), ManifestRoomStatus::Skipped)]
+        vec![
+            ("!a".to_owned(), ManifestRoomStatus::Completed),
+            ("!c".to_owned(), ManifestRoomStatus::Skipped)
+        ]
     );
     assert_eq!(source.opened(), vec!["!a".to_owned()]);
     assert_eq!(reporter.prepared[1].phase, HistoryExportRoomPhase::Skipped);
     let index = String::from_utf8(fs.read(&dir.join("index.html")).unwrap()).unwrap();
     assert!(index.contains("Room !c"));
     assert!(index.contains("Skipped (not joined)"));
-    assert!(!fs.files_below(&dir).iter().any(|file| file.contains("Room !c")));
+    assert!(
+        !fs.files_below(&dir)
+            .iter()
+            .any(|file| file.contains("Room !c"))
+    );
 }
 
 #[tokio::test]
@@ -311,28 +389,64 @@ async fn stop_then_resume_redoes_only_the_interrupted_room() {
         .space("!space", vec![selected("!a", true), selected("!b", true)]);
     let stop = StopFlag::default();
     let mut reporter = Reporter {
-        stop_at: Some(("!b".to_owned(), HistoryExportRoomPhase::Attachments, stop.clone())),
+        stop_at: Some((
+            "!b".to_owned(),
+            HistoryExportRoomPhase::Attachments,
+            stop.clone(),
+        )),
         ..Reporter::default()
     };
-    let first = run(&fs, &mut source, &mut reporter, &stop, &request(space_scope(), CHOSEN)).await;
+    let first = run(
+        &fs,
+        &mut source,
+        &mut reporter,
+        &stop,
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
     assert_eq!(first.result, Ok(ArchiveOutcome::Stopped));
     let dir = first.dir.unwrap();
-    assert!(!fs.files_below(&dir).iter().any(|file| file.contains(".partial")), "{:#?}", fs.files_below(&dir));
+    assert!(
+        !fs.files_below(&dir)
+            .iter()
+            .any(|file| file.contains(".partial")),
+        "{:#?}",
+        fs.files_below(&dir)
+    );
     assert_eq!(
         statuses(&fs, &dir),
-        vec![("!a".to_owned(), ManifestRoomStatus::Completed), ("!b".to_owned(), ManifestRoomStatus::Pending)]
+        vec![
+            ("!a".to_owned(), ManifestRoomStatus::Completed),
+            ("!b".to_owned(), ManifestRoomStatus::Pending)
+        ]
     );
     assert!(fs.exists(&dir.join("index.html")));
 
     let mut reporter = Reporter::default();
-    let resumed = run(&fs, &mut source, &mut reporter, &StopFlag::default(), &request(space_scope(), dir.to_str().unwrap())).await;
+    let resumed = run(
+        &fs,
+        &mut source,
+        &mut reporter,
+        &StopFlag::default(),
+        &request(space_scope(), dir.to_str().unwrap()),
+    )
+    .await;
     assert_eq!(resumed.result, Ok(ArchiveOutcome::Completed));
     assert_eq!(resumed.dir.as_deref(), Some(dir.as_path()));
-    assert_eq!(source.opened(), vec!["!a".to_owned(), "!b".to_owned(), "!b".to_owned()]);
-    assert_eq!(reporter.prepared[0].phase, HistoryExportRoomPhase::Completed);
+    assert_eq!(
+        source.opened(),
+        vec!["!a".to_owned(), "!b".to_owned(), "!b".to_owned()]
+    );
+    assert_eq!(
+        reporter.prepared[0].phase,
+        HistoryExportRoomPhase::Completed
+    );
     assert_eq!(
         statuses(&fs, &dir),
-        vec![("!a".to_owned(), ManifestRoomStatus::Completed), ("!b".to_owned(), ManifestRoomStatus::Completed)]
+        vec![
+            ("!a".to_owned(), ManifestRoomStatus::Completed),
+            ("!b".to_owned(), ManifestRoomStatus::Completed)
+        ]
     );
 }
 
@@ -345,18 +459,36 @@ async fn room_fetch_failure_continues_with_next_room() {
         .space("!space", vec![selected("!a", true), selected("!b", true)]);
     source.failing.lock().unwrap().insert("!a".to_owned());
     let mut reporter = Reporter::default();
-    let outcome = run(&fs, &mut source, &mut reporter, &StopFlag::default(), &request(space_scope(), CHOSEN)).await;
+    let outcome = run(
+        &fs,
+        &mut source,
+        &mut reporter,
+        &StopFlag::default(),
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
     assert_eq!(outcome.result, Ok(ArchiveOutcome::Completed));
     let dir = outcome.dir.unwrap();
     assert_eq!(
         statuses(&fs, &dir),
-        vec![("!a".to_owned(), ManifestRoomStatus::Failed), ("!b".to_owned(), ManifestRoomStatus::Completed)]
+        vec![
+            ("!a".to_owned(), ManifestRoomStatus::Failed),
+            ("!b".to_owned(), ManifestRoomStatus::Completed)
+        ]
     );
     assert_eq!(
         reporter.settled[0],
-        ("!a".to_owned(), HistoryExportRoomPhase::Failed, Some(HistoryExportRoomFailureKind::Network))
+        (
+            "!a".to_owned(),
+            HistoryExportRoomPhase::Failed,
+            Some(HistoryExportRoomFailureKind::Network)
+        )
     );
-    assert!(!fs.files_below(&dir).iter().any(|file| file.contains(".partial")));
+    assert!(
+        !fs.files_below(&dir)
+            .iter()
+            .any(|file| file.contains(".partial"))
+    );
 }
 
 #[tokio::test]
@@ -367,16 +499,33 @@ async fn retry_after_failure_redoes_failed_rooms_only() {
         .room("!b", vec![text("!b", 1)])
         .space("!space", vec![selected("!a", true), selected("!b", true)]);
     source.failing.lock().unwrap().insert("!a".to_owned());
-    let first = run(&fs, &mut source, &mut Reporter::default(), &StopFlag::default(), &request(space_scope(), CHOSEN)).await;
+    let first = run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
     let dir = first.dir.unwrap();
     source.failing.lock().unwrap().clear();
     source.opened.lock().unwrap().clear();
-    let retry = run(&fs, &mut source, &mut Reporter::default(), &StopFlag::default(), &request(space_scope(), dir.to_str().unwrap())).await;
+    let retry = run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request(space_scope(), dir.to_str().unwrap()),
+    )
+    .await;
     assert_eq!(retry.result, Ok(ArchiveOutcome::Completed));
     assert_eq!(source.opened(), vec!["!a".to_owned()]);
     assert_eq!(
         statuses(&fs, &dir),
-        vec![("!a".to_owned(), ManifestRoomStatus::Completed), ("!b".to_owned(), ManifestRoomStatus::Completed)]
+        vec![
+            ("!a".to_owned(), ManifestRoomStatus::Completed),
+            ("!b".to_owned(), ManifestRoomStatus::Completed)
+        ]
     );
 }
 
@@ -391,24 +540,62 @@ async fn no_space_fails_whole_export_and_keeps_completed_rooms() {
         fill_disk_after: Some(("!a".to_owned(), fs.clone())),
         ..Reporter::default()
     };
-    let outcome = run(&fs, &mut source, &mut reporter, &StopFlag::default(), &request(space_scope(), CHOSEN)).await;
+    let outcome = run(
+        &fs,
+        &mut source,
+        &mut reporter,
+        &StopFlag::default(),
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
     assert_eq!(outcome.result, Err(HistoryExportFailureKind::NoSpace));
     let dir = outcome.dir.unwrap();
     let folder = room_folder_name("Room !a", "!a");
     assert!(fs.exists(&dir.join(format!("rooms/{folder}/index.html"))));
-    assert!(!fs.files_below(&dir).iter().any(|file| file.contains(".partial")));
-    assert_eq!(statuses(&fs, &dir)[0], ("!a".to_owned(), ManifestRoomStatus::Completed));
+    assert!(
+        !fs.files_below(&dir)
+            .iter()
+            .any(|file| file.contains(".partial"))
+    );
+    assert_eq!(
+        statuses(&fs, &dir)[0],
+        ("!a".to_owned(), ManifestRoomStatus::Completed)
+    );
 }
 
 #[tokio::test]
 async fn manifest_mismatch_refuses_resume() {
     let fs = filesystem();
-    let other = ExportManifest::new(ManifestScope::Space { id: "!other".to_owned() }, HistoryExportRange::AllAvailable, "Other".to_owned());
-    fs.write_atomic(&Path::new(CHOSEN).join("koushi-export.json"), &other.to_bytes()).unwrap();
+    let other = ExportManifest::new(
+        ManifestScope::Space {
+            id: "!other".to_owned(),
+        },
+        HistoryExportRange::AllAvailable,
+        "Other".to_owned(),
+    );
+    fs.write_atomic(
+        &Path::new(CHOSEN).join("koushi-export.json"),
+        &other.to_bytes(),
+    )
+    .unwrap();
     let mut source = FakeSource::default().space("!space", vec![]);
-    let outcome = run(&fs, &mut source, &mut Reporter::default(), &StopFlag::default(), &request(space_scope(), CHOSEN)).await;
-    assert_eq!(outcome.result, Err(HistoryExportFailureKind::ManifestMismatch));
-    assert_eq!(manifest(&fs, Path::new(CHOSEN)).title, "Other", "the other export is untouched");
+    let outcome = run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
+    assert_eq!(
+        outcome.result,
+        Err(HistoryExportFailureKind::ManifestMismatch)
+    );
+    assert_eq!(
+        manifest(&fs, Path::new(CHOSEN)).title,
+        "Other",
+        "the other export is untouched"
+    );
 }
 
 #[tokio::test]
@@ -417,11 +604,30 @@ async fn stale_partial_folders_are_removed_on_start() {
     let mut source = FakeSource::default()
         .room("!a", vec![text("!a", 1)])
         .space("!space", vec![selected("!a", true)]);
-    let first = run(&fs, &mut source, &mut Reporter::default(), &StopFlag::default(), &request(space_scope(), CHOSEN)).await;
+    let first = run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
     let dir = first.dir.unwrap();
-    fs.create_dir_all(&dir.join("rooms/.crashed (00000000).partial")).unwrap();
-    fs.write_atomic(&dir.join("rooms/.crashed (00000000).partial/messages.json"), b"{").unwrap();
-    run(&fs, &mut source, &mut Reporter::default(), &StopFlag::default(), &request(space_scope(), dir.to_str().unwrap())).await;
+    fs.create_dir_all(&dir.join("rooms/.crashed (00000000).partial"))
+        .unwrap();
+    fs.write_atomic(
+        &dir.join("rooms/.crashed (00000000).partial/messages.json"),
+        b"{",
+    )
+    .unwrap();
+    run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request(space_scope(), dir.to_str().unwrap()),
+    )
+    .await;
     assert!(!fs.exists(&dir.join("rooms/.crashed (00000000).partial")));
 }
 
@@ -432,11 +638,25 @@ async fn new_space_room_is_added_on_resume() {
         .room("!a", vec![text("!a", 1)])
         .room("!b", vec![text("!b", 1)])
         .space("!space", vec![selected("!a", true)]);
-    let first = run(&fs, &mut source, &mut Reporter::default(), &StopFlag::default(), &request(space_scope(), CHOSEN)).await;
+    let first = run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
     let dir = first.dir.unwrap();
     *source.selection.lock().unwrap() = vec![selected("!a", true), selected("!b", true)];
     source.opened.lock().unwrap().clear();
-    let second = run(&fs, &mut source, &mut Reporter::default(), &StopFlag::default(), &request(space_scope(), dir.to_str().unwrap())).await;
+    let second = run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request(space_scope(), dir.to_str().unwrap()),
+    )
+    .await;
     assert_eq!(second.result, Ok(ArchiveOutcome::Completed));
     assert_eq!(source.opened(), vec!["!b".to_owned()]);
     assert_eq!(statuses(&fs, &dir).len(), 2);
@@ -448,9 +668,23 @@ async fn choosing_the_parent_again_on_the_same_day_resumes_the_same_folder() {
     let mut source = FakeSource::default()
         .room("!a", vec![text("!a", 1)])
         .space("!space", vec![selected("!a", true)]);
-    run(&fs, &mut source, &mut Reporter::default(), &StopFlag::default(), &request(space_scope(), CHOSEN)).await;
+    run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
     source.opened.lock().unwrap().clear();
-    let again = run(&fs, &mut source, &mut Reporter::default(), &StopFlag::default(), &request(space_scope(), CHOSEN)).await;
+    let again = run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
     assert_eq!(again.dir, Some(export_dir()));
     assert!(source.opened().is_empty());
 }
@@ -459,12 +693,23 @@ async fn choosing_the_parent_again_on_the_same_day_resumes_the_same_folder() {
 async fn an_unrelated_folder_with_the_same_name_is_not_reused() {
     let fs = filesystem();
     fs.create_dir_all(&export_dir()).unwrap();
-    fs.write_atomic(&export_dir().join("notes.txt"), b"mine").unwrap();
+    fs.write_atomic(&export_dir().join("notes.txt"), b"mine")
+        .unwrap();
     let mut source = FakeSource::default()
         .room("!a", vec![text("!a", 1)])
         .space("!space", vec![selected("!a", true)]);
-    let outcome = run(&fs, &mut source, &mut Reporter::default(), &StopFlag::default(), &request(space_scope(), CHOSEN)).await;
-    assert_eq!(outcome.dir, Some(Path::new(CHOSEN).join("Lab - Export 2025-09-25 (2)")));
+    let outcome = run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
+    assert_eq!(
+        outcome.dir,
+        Some(Path::new(CHOSEN).join("Lab - Export 2025-09-25 (2)"))
+    );
     assert_eq!(fs.read(&export_dir().join("notes.txt")).unwrap(), b"mine");
 }
 
@@ -472,9 +717,28 @@ async fn an_unrelated_folder_with_the_same_name_is_not_reused() {
 async fn unknown_room_or_space_fails_before_writing() {
     let fs = filesystem();
     let mut source = FakeSource::default();
-    let room = run(&fs, &mut source, &mut Reporter::default(), &StopFlag::default(), &request(ManifestScope::Room { id: "!gone".to_owned() }, CHOSEN)).await;
+    let room = run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request(
+            ManifestScope::Room {
+                id: "!gone".to_owned(),
+            },
+            CHOSEN,
+        ),
+    )
+    .await;
     assert_eq!(room.result, Err(HistoryExportFailureKind::RoomNotFound));
-    let space = run(&fs, &mut source, &mut Reporter::default(), &StopFlag::default(), &request(space_scope(), CHOSEN)).await;
+    let space = run(
+        &fs,
+        &mut source,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request(space_scope(), CHOSEN),
+    )
+    .await;
     assert_eq!(space.result, Err(HistoryExportFailureKind::SpaceNotFound));
     assert!(fs.files_below(Path::new(CHOSEN)).is_empty());
 }
@@ -485,7 +749,8 @@ async fn unknown_room_or_space_fails_before_writing() {
 /// Regenerate with `KOUSHI_UPDATE_HISTORY_EXPORT_FIXTURE=1`.
 #[tokio::test]
 async fn browser_fixture_matches_renderer() {
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/desktop/e2e/fixtures/history-export-page");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../apps/desktop/e2e/fixtures/history-export-page");
     let output = tempfile::tempdir().unwrap();
     let fs = super::fs::NativeHistoryExportFilesystem;
     let math = ExportSourceEvent::Plain(json!({
@@ -504,11 +769,25 @@ async fn browser_fixture_matches_renderer() {
         "content": { "msgtype": "m.image", "body": "plot.png", "url": "mxc://h/plot" }
     }));
     let mut source = FakeSource::default().room("!math", vec![math, picture]);
-    let mut request = request(ManifestScope::Room { id: "!math".to_owned() }, output.path().to_str().unwrap());
+    let mut request = request(
+        ManifestScope::Room {
+            id: "!math".to_owned(),
+        },
+        output.path().to_str().unwrap(),
+    );
     request.folder_name_stem = "Fixture".to_owned();
     request.time_zone = "Asia/Tokyo".to_owned();
     let mut dir = None;
-    let result = run_archive(&fs, &mut source, &PngFetcher, &mut Reporter::default(), &StopFlag::default(), &request, &mut dir).await;
+    let result = run_archive(
+        &fs,
+        &mut source,
+        &PngFetcher,
+        &mut Reporter::default(),
+        &StopFlag::default(),
+        &request,
+        &mut dir,
+    )
+    .await;
     assert_eq!(result, Ok(ArchiveOutcome::Completed));
     let dir = dir.unwrap();
 
@@ -521,7 +800,11 @@ async fn browser_fixture_matches_renderer() {
             std::fs::copy(dir.join(file), target).unwrap();
         }
     }
-    assert_eq!(rendered, relative_files(&fixture), "fixture file list drifted; regenerate it");
+    assert_eq!(
+        rendered,
+        relative_files(&fixture),
+        "fixture file list drifted; regenerate it"
+    );
     for file in &rendered {
         assert_eq!(
             std::fs::read(dir.join(file)).unwrap(),
@@ -542,7 +825,12 @@ fn relative_files(root: &Path) -> Vec<String> {
             if path.is_dir() {
                 walk(root, &path, out);
             } else {
-                out.push(path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"));
+                out.push(
+                    path.strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
             }
         }
     }

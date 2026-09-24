@@ -101,8 +101,15 @@ fn request(state: &mut AppState, request_id: u64, scope: HistoryExportScope) -> 
     )
 }
 
-fn prepared(state: &mut AppState, request_id: u64, rooms: Vec<HistoryExportRoom>) -> Vec<AppEffect> {
-    reduce(state, AppAction::HistoryExportPrepared { request_id, rooms })
+fn prepared(
+    state: &mut AppState,
+    request_id: u64,
+    rooms: Vec<HistoryExportRoom>,
+) -> Vec<AppEffect> {
+    reduce(
+        state,
+        AppAction::HistoryExportPrepared { request_id, rooms },
+    )
 }
 
 fn progressed(
@@ -199,7 +206,11 @@ fn second_request_is_rejected_while_one_is_in_flight() {
     let mut state = ready_state();
     request(&mut state, 1, room_scope());
     assert!(request(&mut state, 2, space_scope()).is_empty());
-    prepared(&mut state, 1, vec![export_room(ROOM, HistoryExportRoomPhase::Pending)]);
+    prepared(
+        &mut state,
+        1,
+        vec![export_room(ROOM, HistoryExportRoomPhase::Pending)],
+    );
     assert!(request(&mut state, 3, space_scope()).is_empty());
     assert_eq!(state.history_export.active_request_id(), Some(1));
 }
@@ -210,15 +221,26 @@ fn prepared_moves_to_running_with_rooms_and_ignores_stale_requests() {
     request(&mut state, 1, space_scope());
     assert!(prepared(&mut state, 9, Vec::new()).is_empty());
     assert_eq!(
-        prepared(&mut state, 1, vec![export_room("!a:x", HistoryExportRoomPhase::Pending)]),
+        prepared(
+            &mut state,
+            1,
+            vec![export_room("!a:x", HistoryExportRoomPhase::Pending)]
+        ),
         changed()
     );
     assert!(matches!(
         state.history_export,
-        HistoryExportState::Running { request_id: 1, stop_requested: false, .. }
+        HistoryExportState::Running {
+            request_id: 1,
+            stop_requested: false,
+            ..
+        }
     ));
     assert_eq!(rooms(&state).len(), 1);
-    assert!(prepared(&mut state, 1, Vec::new()).is_empty(), "prepared twice");
+    assert!(
+        prepared(&mut state, 1, Vec::new()).is_empty(),
+        "prepared twice"
+    );
 }
 
 #[test]
@@ -232,7 +254,13 @@ fn room_progress_ignores_unknown_rooms_stale_requests_backward_phases_and_duplic
     assert!(progressed(&mut state, 1, "!a:x", HistoryExportRoomPhase::Fetching, 10).is_empty());
     assert!(progressed(&mut state, 2, "!a:x", HistoryExportRoomPhase::Fetching, 20).is_empty());
     assert!(progressed(&mut state, 1, "!zz:x", HistoryExportRoomPhase::Fetching, 1).is_empty());
-    progressed(&mut state, 1, "!a:x", HistoryExportRoomPhase::Attachments, 30);
+    progressed(
+        &mut state,
+        1,
+        "!a:x",
+        HistoryExportRoomPhase::Attachments,
+        30,
+    );
     assert!(progressed(&mut state, 1, "!a:x", HistoryExportRoomPhase::Fetching, 40).is_empty());
     assert!(
         progressed(&mut state, 1, "!a:x", HistoryExportRoomPhase::Completed, 40).is_empty(),
@@ -261,7 +289,10 @@ fn rooms_settle_once_and_skipped_rooms_cannot_change() {
             },
         )
     };
-    assert_eq!(settle(&mut state, "!a:x", HistoryExportRoomPhase::Completed, None), changed());
+    assert_eq!(
+        settle(&mut state, "!a:x", HistoryExportRoomPhase::Completed, None),
+        changed()
+    );
     assert!(settle(&mut state, "!a:x", HistoryExportRoomPhase::Failed, None).is_empty());
     assert_eq!(
         settle(
@@ -274,13 +305,22 @@ fn rooms_settle_once_and_skipped_rooms_cannot_change() {
     );
     assert!(settle(&mut state, "!c:x", HistoryExportRoomPhase::Completed, None).is_empty());
     assert!(
-        settle(&mut state, "!c:x", HistoryExportRoomPhase::Attachments, None).is_empty(),
+        settle(
+            &mut state,
+            "!c:x",
+            HistoryExportRoomPhase::Attachments,
+            None
+        )
+        .is_empty(),
         "only settled phases settle"
     );
     let rooms = rooms(&state);
     assert_eq!(rooms[0].phase, HistoryExportRoomPhase::Completed);
     assert_eq!(rooms[0].counts.exported_events, 5);
-    assert_eq!(rooms[1].failure_kind, Some(HistoryExportRoomFailureKind::Network));
+    assert_eq!(
+        rooms[1].failure_kind,
+        Some(HistoryExportRoomFailureKind::Network)
+    );
     assert_eq!(rooms[2].phase, HistoryExportRoomPhase::Skipped);
 }
 
@@ -288,37 +328,89 @@ fn rooms_settle_once_and_skipped_rooms_cannot_change() {
 fn stop_is_accepted_once_while_preparing_or_running() {
     let mut state = ready_state();
     request(&mut state, 1, space_scope());
-    assert!(reduce(&mut state, AppAction::HistoryExportStopRequested { request_id: 2 }).is_empty());
+    assert!(
+        reduce(
+            &mut state,
+            AppAction::HistoryExportStopRequested { request_id: 2 }
+        )
+        .is_empty()
+    );
     assert_eq!(
-        reduce(&mut state, AppAction::HistoryExportStopRequested { request_id: 1 }),
+        reduce(
+            &mut state,
+            AppAction::HistoryExportStopRequested { request_id: 1 }
+        ),
         changed()
     );
-    assert!(reduce(&mut state, AppAction::HistoryExportStopRequested { request_id: 1 }).is_empty());
-    prepared(&mut state, 1, vec![export_room("!a:x", HistoryExportRoomPhase::Pending)]);
+    assert!(
+        reduce(
+            &mut state,
+            AppAction::HistoryExportStopRequested { request_id: 1 }
+        )
+        .is_empty()
+    );
+    prepared(
+        &mut state,
+        1,
+        vec![export_room("!a:x", HistoryExportRoomPhase::Pending)],
+    );
     assert!(matches!(
         state.history_export,
-        HistoryExportState::Running { stop_requested: true, .. }
+        HistoryExportState::Running {
+            stop_requested: true,
+            ..
+        }
     ));
     assert_eq!(
-        reduce(&mut state, AppAction::HistoryExportStopped { request_id: 1 }),
+        reduce(
+            &mut state,
+            AppAction::HistoryExportStopped { request_id: 1 }
+        ),
         changed()
     );
-    assert!(matches!(state.history_export, HistoryExportState::Stopped { request_id: 1, .. }));
-    assert!(reduce(&mut state, AppAction::HistoryExportStopRequested { request_id: 1 }).is_empty());
+    assert!(matches!(
+        state.history_export,
+        HistoryExportState::Stopped { request_id: 1, .. }
+    ));
+    assert!(
+        reduce(
+            &mut state,
+            AppAction::HistoryExportStopRequested { request_id: 1 }
+        )
+        .is_empty()
+    );
 }
 
 #[test]
 fn terminal_settlements_keep_rooms_and_ignore_stale_or_duplicate_ones() {
     let mut state = ready_state();
     running_space(&mut state);
-    assert!(reduce(&mut state, AppAction::HistoryExportCompleted { request_id: 7 }).is_empty());
+    assert!(
+        reduce(
+            &mut state,
+            AppAction::HistoryExportCompleted { request_id: 7 }
+        )
+        .is_empty()
+    );
     assert_eq!(
-        reduce(&mut state, AppAction::HistoryExportCompleted { request_id: 1 }),
+        reduce(
+            &mut state,
+            AppAction::HistoryExportCompleted { request_id: 1 }
+        ),
         changed()
     );
-    assert!(matches!(state.history_export, HistoryExportState::Completed { request_id: 1, .. }));
+    assert!(matches!(
+        state.history_export,
+        HistoryExportState::Completed { request_id: 1, .. }
+    ));
     assert_eq!(rooms(&state).len(), 3);
-    assert!(reduce(&mut state, AppAction::HistoryExportCompleted { request_id: 1 }).is_empty());
+    assert!(
+        reduce(
+            &mut state,
+            AppAction::HistoryExportCompleted { request_id: 1 }
+        )
+        .is_empty()
+    );
     assert!(
         reduce(
             &mut state,
@@ -371,7 +463,10 @@ fn retry_requires_the_matching_terminal_request_and_keeps_scope_and_range() {
         )
     };
     assert!(retry(&mut state, 2, 1).is_empty(), "not while running");
-    reduce(&mut state, AppAction::HistoryExportStopped { request_id: 1 });
+    reduce(
+        &mut state,
+        AppAction::HistoryExportStopped { request_id: 1 },
+    );
     assert!(retry(&mut state, 2, 5).is_empty(), "wrong target");
     assert_eq!(retry(&mut state, 2, 1), changed());
     assert_eq!(
@@ -390,7 +485,10 @@ fn retry_requires_the_matching_terminal_request_and_keeps_scope_and_range() {
 fn a_new_request_replaces_a_terminal_state() {
     let mut state = ready_state();
     running_space(&mut state);
-    reduce(&mut state, AppAction::HistoryExportCompleted { request_id: 1 });
+    reduce(
+        &mut state,
+        AppAction::HistoryExportCompleted { request_id: 1 },
+    );
     assert_eq!(request(&mut state, 2, room_scope()), changed());
     assert_eq!(state.history_export.active_request_id(), Some(2));
 }

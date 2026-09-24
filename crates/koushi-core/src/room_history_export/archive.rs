@@ -26,9 +26,9 @@ use super::driver::{
 };
 use super::element::ExportHeader;
 use super::fs::{HistoryExportFilesystem, HistoryExportFsError};
+use super::html::MATH_BOOTSTRAP;
 use super::html::index_page::render_index_page;
 use super::html::room_page::render_room_page;
-use super::html::MATH_BOOTSTRAP;
 use super::katex_assets::katex_assets;
 use super::layout::{export_folder_name, partial_folder_name, room_folder_name};
 use super::manifest::{
@@ -49,7 +49,8 @@ pub(crate) trait ArchiveSource: Send {
 
     fn own_user_id(&self) -> &str;
     /// The room or Space name; `None` when this session does not know it.
-    fn scope_title(&mut self, scope: &ManifestScope) -> impl Future<Output = Option<String>> + Send;
+    fn scope_title(&mut self, scope: &ManifestScope)
+    -> impl Future<Output = Option<String>> + Send;
     fn select_rooms(
         &mut self,
         scope: &ManifestScope,
@@ -146,7 +147,9 @@ where
     *resolved_dir = Some(dir.clone());
     let existing = fs.read(&dir.join(MANIFEST_FILE_NAME)).ok();
     let mut manifest = match match_manifest(existing.as_deref(), &request.scope, &request.range) {
-        ManifestMatch::Fresh => ExportManifest::new(request.scope.clone(), request.range.clone(), title),
+        ManifestMatch::Fresh => {
+            ExportManifest::new(request.scope.clone(), request.range.clone(), title)
+        }
         ManifestMatch::Resume(manifest) => manifest,
         ManifestMatch::Mismatch => return Err(HistoryExportFailureKind::ManifestMismatch),
     };
@@ -164,8 +167,14 @@ where
             Some(previous) if previous.status == ManifestRoomStatus::Completed => {
                 (ManifestRoomStatus::Completed, previous.counts)
             }
-            _ if !room.target => (ManifestRoomStatus::Skipped, HistoryExportRoomCounts::default()),
-            _ => (ManifestRoomStatus::Pending, HistoryExportRoomCounts::default()),
+            _ if !room.target => (
+                ManifestRoomStatus::Skipped,
+                HistoryExportRoomCounts::default(),
+            ),
+            _ => (
+                ManifestRoomStatus::Pending,
+                HistoryExportRoomCounts::default(),
+            ),
         };
         manifest.upsert_room(&room.room_id, &room.display_name, &folder, status, counts);
     }
@@ -191,12 +200,18 @@ where
             outcome = Ok(ArchiveOutcome::Stopped);
             break;
         }
-        let Some(folder) = manifest.room(&room.room_id).map(|entry| entry.folder.clone()) else {
+        let Some(folder) = manifest
+            .room(&room.room_id)
+            .map(|entry| entry.folder.clone())
+        else {
             continue;
         };
         let partial = rooms_dir.join(partial_folder_name(&folder));
         let final_dir = rooms_dir.join(&folder);
-        let result = export_room(fs, source, fetcher, reporter, stop, request, &room, &partial).await;
+        let result = export_room(
+            fs, source, fetcher, reporter, stop, request, &room, &partial,
+        )
+        .await;
         let result = match result {
             Ok(counts) => commit_room(fs, &partial, &final_dir).map(|()| counts),
             Err(error) => Err(error),
@@ -215,7 +230,12 @@ where
                     break;
                 }
                 reporter
-                    .settled(&room.room_id, HistoryExportRoomPhase::Completed, counts, None)
+                    .settled(
+                        &room.room_id,
+                        HistoryExportRoomPhase::Completed,
+                        counts,
+                        None,
+                    )
                     .await;
             }
             Err(RoomError::Failed(kind)) => {
@@ -255,7 +275,12 @@ where
 
     // Best effort on failure: the disk may be full.
     let manifest_written = write_manifest(fs, &dir, &manifest);
-    let index = render_index_page(&manifest, &request.labels, request.now_ms, &request.time_zone);
+    let index = render_index_page(
+        &manifest,
+        &request.labels,
+        request.now_ms,
+        &request.time_zone,
+    );
     let index_written = fs.write_atomic(&dir.join("index.html"), &index);
     if outcome.is_ok() {
         manifest_written.map_err(export_failure)?;

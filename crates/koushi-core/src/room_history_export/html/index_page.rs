@@ -23,7 +23,10 @@ pub(crate) fn render_index_page(
     out.push_str("<body>\n<header>\n<h1>");
     out.push_str(&escape(&manifest.title));
     out.push_str("</h1>\n<p class=\"meta\">");
-    out.push_str(&label(&labels.exported_at, &[("date", &format!("{date} {time}"))]));
+    out.push_str(&label(
+        &labels.exported_at,
+        &[("date", &format!("{date} {time}"))],
+    ));
     out.push_str(" · ");
     out.push_str(&range_text(&manifest.range, labels));
     out.push_str("</p>\n</header>\n<main>\n<h2>");

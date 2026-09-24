@@ -78,9 +78,13 @@ impl fmt::Debug for HistoryExportRange {
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum HistoryExportScope {
-    Room { room_id: String },
+    Room {
+        room_id: String,
+    },
     /// Every joined non-DM room reachable through joined subspaces.
-    Space { space_id: String },
+    Space {
+        space_id: String,
+    },
 }
 
 impl fmt::Debug for HistoryExportScope {

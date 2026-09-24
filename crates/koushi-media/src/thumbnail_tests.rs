@@ -7,7 +7,11 @@ use super::thumbnail::thumbnail_jpeg;
 const THUMB_MAX_EDGE: u32 = 480;
 
 fn encode(width: u32, height: u32, format: ImageFormat) -> Vec<u8> {
-    let image = DynamicImage::ImageRgb8(RgbImage::from_pixel(width, height, image::Rgb([200, 30, 30])));
+    let image = DynamicImage::ImageRgb8(RgbImage::from_pixel(
+        width,
+        height,
+        image::Rgb([200, 30, 30]),
+    ));
     let mut bytes = Cursor::new(Vec::new());
     image.write_to(&mut bytes, format).unwrap();
     bytes.into_inner()
@@ -25,7 +29,20 @@ fn jpeg_with_orientation(width: u32, height: u32, orientation: u8) -> Vec<u8> {
     app1.extend_from_slice(b"Exif\0\0");
     app1.extend_from_slice(&[b'I', b'I', 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00]);
     app1.extend_from_slice(&[0x01, 0x00]);
-    app1.extend_from_slice(&[0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, orientation, 0x00, 0x00, 0x00]);
+    app1.extend_from_slice(&[
+        0x12,
+        0x01,
+        0x03,
+        0x00,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        orientation,
+        0x00,
+        0x00,
+        0x00,
+    ]);
     app1.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
     let mut bytes = plain[..2].to_vec();
     bytes.extend(app1);
@@ -55,7 +72,13 @@ fn thumbnail_applies_exif_orientation() {
 #[test]
 fn corrupt_or_unsupported_data_has_no_thumbnail() {
     assert!(thumbnail_jpeg(b"not an image", THUMB_MAX_EDGE).is_none());
-    assert!(thumbnail_jpeg(b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>", THUMB_MAX_EDGE).is_none());
+    assert!(
+        thumbnail_jpeg(
+            b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+            THUMB_MAX_EDGE
+        )
+        .is_none()
+    );
     let mut truncated = encode(64, 64, ImageFormat::Png);
     truncated.truncate(40);
     assert!(thumbnail_jpeg(&truncated, THUMB_MAX_EDGE).is_none());
