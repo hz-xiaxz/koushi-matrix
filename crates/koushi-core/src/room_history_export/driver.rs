@@ -12,7 +12,7 @@
 //! and reordering; an in-range event displaced by more than the margin is
 //! omitted. That tradeoff keeps short periods of long rooms fast.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -21,10 +21,12 @@ use koushi_state::{
     RoomHistoryExportFailureKind, RoomHistoryExportProgress, RoomHistoryExportRange,
 };
 
+use super::attachments::{AttachmentRef, StopFlag, attachment_ref};
 use super::element::{
     ElementJsonWriter, ExportHeader, ExportSourceEvent, effective_event, element_renders,
 };
-use super::sink::{RoomHistoryExportFile, RoomHistoryExportSinkError};
+use super::fs::{HistoryExportFsError, StagedFile};
+use super::sink::RoomHistoryExportFile;
 
 /// Events requested per `/messages` page.
 pub(crate) const PAGE_LIMIT: u32 = 250;
@@ -87,35 +89,65 @@ impl ExportCounters {
     }
 }
 
-fn sink_failure(_: RoomHistoryExportSinkError) -> RoomHistoryExportFailureKind {
-    RoomHistoryExportFailureKind::Write
+/// Why the fetch stage of one room did not finish.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FetchFailure {
+    Network,
+    Sdk,
+    Write(HistoryExportFsError),
+    Stopped,
 }
 
-fn page_failure(error: HistoryPageError) -> RoomHistoryExportFailureKind {
+fn page_failure(error: HistoryPageError) -> FetchFailure {
     match error {
-        HistoryPageError::Network => RoomHistoryExportFailureKind::Network,
-        HistoryPageError::Sdk => RoomHistoryExportFailureKind::Sdk,
+        HistoryPageError::Network => FetchFailure::Network,
+        HistoryPageError::Sdk => FetchFailure::Sdk,
     }
 }
 
-/// Export the room into `file`, committing it only when the history is
-/// exhausted or a period export has read past its margin. `on_page` receives the counters after every page.
-pub(crate) async fn run_export<S, P>(
+/// The two originals the fetch stage writes.
+pub(crate) struct FetchOutputs {
+    /// `messages.json`, Element's chat-export JSON.
+    pub(crate) messages: Box<dyn StagedFile>,
+    /// `events.jsonl`, every distinct in-range event, one per line.
+    pub(crate) events: Box<dyn StagedFile>,
+}
+
+/// What the later stages need from the fetched history.
+#[derive(Debug, Default)]
+pub(crate) struct FetchResult {
+    /// Senders of in-range events, for `room.json` display names.
+    pub(crate) senders: BTreeSet<String>,
+    /// Attachments of rendered in-range events, in history order.
+    pub(crate) attachments: Vec<AttachmentRef>,
+}
+
+/// Read the room's history into `outputs`, committing both only when the
+/// history is exhausted or a period export has read past its margin.
+/// `on_page` receives the counters after every page; `stop` is checked
+/// between pages.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_fetch<S, P>(
     source: &mut S,
-    file: Box<dyn RoomHistoryExportFile>,
+    outputs: FetchOutputs,
     header: &ExportHeader,
     range: &RoomHistoryExportRange,
     own_user_id: &str,
     counters: &Arc<ExportCounters>,
+    stop: &StopFlag,
     mut on_page: P,
-) -> Result<(), RoomHistoryExportFailureKind>
+) -> Result<FetchResult, FetchFailure>
 where
     S: HistoryPageSource,
     P: AsyncProgress,
 {
-    let mut file = file;
+    let FetchOutputs {
+        mut messages,
+        mut events,
+    } = outputs;
     let (mut writer, head) = ElementJsonWriter::begin(header);
-    file.write_all(&head).map_err(sink_failure)?;
+    messages.write_all(&head).map_err(FetchFailure::Write)?;
+    let mut fetched = FetchResult::default();
 
     let (mut seeked, cutoff_ms) = match range {
         RoomHistoryExportRange::AllAvailable => (None, None),
@@ -136,6 +168,9 @@ where
     let mut from: Option<String> = None;
     let mut empty_pages = 0_u32;
     loop {
+        if stop.is_set() {
+            return Err(FetchFailure::Stopped);
+        }
         let page = match seeked.take() {
             Some(page) => page,
             None => source.next_page(from.clone()).await.map_err(page_failure)?,
@@ -158,11 +193,23 @@ where
             if !timestamp.is_some_and(|timestamp| range.contains(timestamp)) {
                 continue;
             }
+            let mut line = serde_json::to_vec(&event.json).unwrap_or_default();
+            line.push(b'\n');
+            events.write_all(&line).map_err(FetchFailure::Write)?;
+            if let Some(sender) = event.json.get("sender").and_then(serde_json::Value::as_str) {
+                if !fetched.senders.contains(sender) {
+                    fetched.senders.insert(sender.to_owned());
+                }
+            }
             if !element_renders(&event, own_user_id) {
                 continue;
             }
-            file.write_all(&writer.event(&event.json))
-                .map_err(sink_failure)?;
+            if let Some(attachment) = attachment_ref(&event.json) {
+                fetched.attachments.push(attachment);
+            }
+            messages
+                .write_all(&writer.event(&event.json))
+                .map_err(FetchFailure::Write)?;
             counters.exported.fetch_add(1, Ordering::AcqRel);
             if event.undecryptable {
                 counters.undecryptable.fetch_add(1, Ordering::AcqRel);
@@ -177,7 +224,7 @@ where
         match page.end {
             Some(end) if from.as_deref() != Some(end.as_str()) => {
                 if empty_pages >= MAX_CONSECUTIVE_EMPTY_PAGES {
-                    return Err(RoomHistoryExportFailureKind::Sdk);
+                    return Err(FetchFailure::Sdk);
                 }
                 from = Some(end);
             }
@@ -185,8 +232,73 @@ where
         }
     }
 
-    file.write_all(&writer.finish()).map_err(sink_failure)?;
-    file.commit().map_err(sink_failure)
+    messages
+        .write_all(&writer.finish())
+        .map_err(FetchFailure::Write)?;
+    messages.commit().map_err(FetchFailure::Write)?;
+    events.commit().map_err(FetchFailure::Write)?;
+    Ok(fetched)
+}
+
+/// Adapter kept until the actor moves to the archive pipeline.
+struct SinkFile(Box<dyn RoomHistoryExportFile>);
+
+impl StagedFile for SinkFile {
+    fn write_all(&mut self, bytes: &[u8]) -> Result<(), HistoryExportFsError> {
+        self.0.write_all(bytes).map_err(|_| HistoryExportFsError::Io)
+    }
+
+    fn commit(self: Box<Self>) -> Result<(), HistoryExportFsError> {
+        self.0.commit().map_err(|_| HistoryExportFsError::Io)
+    }
+}
+
+struct DiscardFile;
+
+impl StagedFile for DiscardFile {
+    fn write_all(&mut self, _bytes: &[u8]) -> Result<(), HistoryExportFsError> {
+        Ok(())
+    }
+
+    fn commit(self: Box<Self>) -> Result<(), HistoryExportFsError> {
+        Ok(())
+    }
+}
+
+/// Single-file JSON export used by the current actor.
+pub(crate) async fn run_export<S, P>(
+    source: &mut S,
+    file: Box<dyn RoomHistoryExportFile>,
+    header: &ExportHeader,
+    range: &RoomHistoryExportRange,
+    own_user_id: &str,
+    counters: &Arc<ExportCounters>,
+    on_page: P,
+) -> Result<(), RoomHistoryExportFailureKind>
+where
+    S: HistoryPageSource,
+    P: AsyncProgress,
+{
+    run_fetch(
+        source,
+        FetchOutputs {
+            messages: Box::new(SinkFile(file)),
+            events: Box::new(DiscardFile),
+        },
+        header,
+        range,
+        own_user_id,
+        counters,
+        &StopFlag::default(),
+        on_page,
+    )
+    .await
+    .map(|_| ())
+    .map_err(|failure| match failure {
+        FetchFailure::Network => RoomHistoryExportFailureKind::Network,
+        FetchFailure::Sdk | FetchFailure::Stopped => RoomHistoryExportFailureKind::Sdk,
+        FetchFailure::Write(_) => RoomHistoryExportFailureKind::Write,
+    })
 }
 
 /// Progress callback for [`run_export`].
