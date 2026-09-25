@@ -174,17 +174,25 @@ test("live edge: editing the last message without typing stays visible", async (
 
 test("the reveal does not fight the reader's own scrolling afterwards", async ({ page }) => {
   const items = Array.from({ length: 24 }, (_, index) => item(index));
-  items[18] = item(18, LONG);
+  items[18] = item(18, SHORT);
   await seed(page, items);
   const id = "$e18:example.invalid";
-  await scrollUntil(page, id, (g) => g.rowTop >= g.viewportBottom - 110);
+  await scrollUntil(page, id, (g) => g.rowBottom >= g.viewportBottom - 6);
   await startEditing(page, id);
   await expectActionsVisible(page, id);
-  await page.mouse.wheel(0, -200);
+  await page.mouse.wheel(0, -60);
   await page.waitForTimeout(300);
   const scrolledUp = await geometry(page, id);
+  // Growing the form past the viewport bottom after the reader scrolled must
+  // not pull the view back down.
+  for (let line = 0; line < 6; line += 1) {
+    await page.keyboard.press("Shift+Enter");
+    await page.keyboard.type(`more ${line}`);
+  }
   await page.waitForTimeout(500);
   const later = await geometry(page, id);
+  expect(later.actionsBottom).not.toBeNull();
+  expect(later.actionsBottom!).toBeGreaterThan(later.viewportBottom);
   expect(Math.abs(later.scrollTop - scrolledUp.scrollTop)).toBeLessThanOrEqual(1);
 });
 
@@ -215,4 +223,46 @@ test("typing at the end of a long edit keeps the caret inside the editor", async
       })
     )
     .toBe(true);
+});
+
+test("growth above the viewport is compensated before any reveal, keeping the reader's rows in place", async ({ page }) => {
+  const items = Array.from({ length: 24 }, (_, index) => item(index));
+  items[18] = item(18, SHORT);
+  await seed(page, items);
+  const id = "$e18:example.invalid";
+  await scrollUntil(page, id, (g) => g.rowBottom >= g.viewportBottom - 6);
+  await startEditing(page, id);
+  await expectActionsVisible(page, id);
+  await page.waitForTimeout(300);
+  // The first visible row, and the mounted row just above it.
+  const probe = await page.evaluate(() => {
+    const view = document.querySelector<HTMLElement>("[data-testid=timeline-view]")!;
+    const top = view.getBoundingClientRect().top;
+    const rows = Array.from(view.querySelectorAll<HTMLElement>("[data-event-id^='$e']"));
+    const firstVisible = rows.find((row) => row.getBoundingClientRect().bottom > top + 1)!;
+    const index = Number(firstVisible.dataset.eventId!.slice(2).split(":")[0]);
+    return { index, eventId: firstVisible.dataset.eventId!, top: firstVisible.getBoundingClientRect().top };
+  });
+  expect(probe.index).toBeGreaterThan(0);
+  const grown = item(probe.index - 1, LONG);
+  await page.evaluate(
+    async ({ key, index, grown }) => {
+      const harness = (window as unknown as { __harness: { pushCoreEvent(event: unknown): Promise<void> } }).__harness;
+      await harness.pushCoreEvent({
+        kind: "Timeline",
+        event: { ItemsUpdated: { key, generation: 2, batch_id: 3, diffs: [{ Set: { index, item: grown } }] } }
+      });
+    },
+    { key: KEY, index: probe.index - 1, grown }
+  );
+  await expect
+    .poll(() => page.locator(`[data-event-id="$e${probe.index - 1}:example.invalid"]`).innerText())
+    .toContain("long line 39");
+  await page.waitForTimeout(500);
+  const after = await page.evaluate(
+    (eventId) => document.querySelector<HTMLElement>(`[data-event-id="${CSS.escape(eventId)}"]`)!.getBoundingClientRect().top,
+    probe.eventId
+  );
+  expect(Math.abs(after - probe.top)).toBeLessThanOrEqual(2);
+  await expectActionsVisible(page, id);
 });

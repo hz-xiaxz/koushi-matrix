@@ -2302,12 +2302,24 @@ export const TimelineView = memo(function TimelineView({
       if (timelineKeyHashRef.current !== timelineKeyHash || timelineGenerationRef.current !== generation ||
           jumpViewportControlRef.current || roomScrollAnchorRestorePendingRef.current) return;
       const container = containerRef.current;
-      if (container && revealEditForm(container)) return;
       const owner = viewportTransactionRef.current;
       if (container && userScrollInputPendingRef.current) owner.accountForInput(container.scrollTop);
       const anchor = owner.active()?.anchor ?? stableAnchor();
+      const delta = container && anchor ? measureAnchorDelta(container, anchor) : 0;
+      // Reveal an open edit form only once the reader's position is settled:
+      // no stabilization transaction and no pending anchor drift to correct.
+      if (
+        container &&
+        !owner.active() &&
+        delta !== null &&
+        Math.abs(delta) <= VIEWPORT_ANCHOR_TOLERANCE_PX &&
+        revealEditForm(container)
+      ) {
+        // The grown row still has to reach the virtual height model.
+        setViewportTransactionRevision((revision) => revision + 1);
+        return;
+      }
       if (!container || !anchor) return;
-      const delta = measureAnchorDelta(container, anchor);
       if (!owner.active() && delta !== null && Math.abs(delta) > VIEWPORT_ANCHOR_TOLERANCE_PX) {
         owner.begin({ key: timelineKeyHash, generation, anchor, scrollTop: container.scrollTop, phase: "waiting-measurement" });
       }

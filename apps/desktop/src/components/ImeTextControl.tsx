@@ -882,7 +882,7 @@ function restoreDocumentSelection(control: HTMLDivElement, selection: DocumentSe
 function keepCaretInsideEditor(control: HTMLDivElement, range: Range) {
   if (control.ownerDocument.activeElement !== control) return;
   if (control.scrollHeight <= control.clientHeight) return;
-  if (typeof range.getBoundingClientRect !== "function") return;
+  if (typeof range.getBoundingClientRect !== "function" || typeof range.getClientRects !== "function") return;
   const caret = range.getClientRects()[0] ?? range.getBoundingClientRect();
   const box = control.getBoundingClientRect();
   if (!caret || (caret.top === 0 && caret.bottom === 0)) return;
