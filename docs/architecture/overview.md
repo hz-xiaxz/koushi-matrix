@@ -1548,6 +1548,11 @@ UI responsibilities:
   may be classified as such only against the exact current transaction/write
   generation; an unscoped last-scroll signature is prohibited. Later independent resize observations use
   the same owner and a current anchor, never resurrect a completed capture.
+  Revealing an opened inline edit form (#1001) is an explicit jump: while the
+  form is open and the reader has not scrolled, a resize observation that finds
+  its actions below the viewport scrolls them into view through the owner's
+  `editReveal` placement write and recaptures the stable anchor. Keys typed
+  inside an editor in the timeline never count as timeline scroll input.
   Lifecycle diagnostics expose closed phase/cancellation/rebase reasons and
   renderer-local counters only, never timeline key hashes or Matrix identities.
 - Decide backward pagination through one state evaluator. Automatic demand is

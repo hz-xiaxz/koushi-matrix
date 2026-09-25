@@ -5,6 +5,7 @@ const WRITE_REASONS = [
   "jumpToEvent",
   "jumpToBottom",
   "roomRestore",
+  "editReveal",
   "backfillCompensation",
   "projectionCompensation",
   "measurementFlush"
