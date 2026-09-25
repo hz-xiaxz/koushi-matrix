@@ -2662,10 +2662,18 @@ async fn matrix_room_latest_remote_event_projection(
     let event_type = matrix_timeline_event_type(&identity_event);
     let (relation_type, relation_event_id) = matrix_timeline_event_relation(&identity_event);
     let content_converted = facts_content.is_some();
+    // #997: `TimelineItemContent::from_event` never fills in the thread root,
+    // so it is taken from the event's own `m.thread` relation. A cold room's
+    // Activity row relies on it to open the Thread panel.
     let thread_root_event_id = facts_content
         .as_ref()
         .and_then(|content| content.thread_root())
-        .map(|thread_root| thread_root.to_string());
+        .map(|thread_root| thread_root.to_string())
+        .or_else(|| {
+            (relation_type.as_deref() == Some("m.thread"))
+                .then(|| relation_event_id.clone())
+                .flatten()
+        });
     let is_threaded = thread_root_event_id.is_some();
     let is_reply = facts_content
         .as_ref()

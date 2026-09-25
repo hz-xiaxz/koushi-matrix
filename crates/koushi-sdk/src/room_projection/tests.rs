@@ -195,6 +195,74 @@ async fn remote_replacement_latest_keeps_original_identity_and_order() {
     assert_eq!(activity.map(|activity| activity.timestamp_ms), Some(42));
 }
 
+/// #997: a cold room's Activity row is built from this latest-event summary.
+/// Its thread root decides whether the row opens the Thread panel, so it must
+/// come from the event's own `m.thread` relation (the SDK's raw
+/// `TimelineItemContent::from_event` never fills it in).
+#[tokio::test]
+async fn thread_reply_latest_event_carries_its_thread_root() {
+    use matrix_sdk::ruma::{event_id, room_id, user_id};
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+    let room_id = room_id!("!threads:example.invalid");
+    let sender = user_id!("@sender:example.invalid");
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    client
+        .event_cache()
+        .subscribe()
+        .expect("event cache subscription");
+
+    let root = EventFactory::new()
+        .room(room_id)
+        .sender(sender)
+        .server_ts(42)
+        .text_msg("root")
+        .event_id(event_id!("$root:example.invalid"))
+        .into_raw_sync();
+    let reply = EventFactory::new()
+        .room(room_id)
+        .sender(sender)
+        .server_ts(99)
+        .text_msg("reply in thread")
+        .in_thread(
+            event_id!("$root:example.invalid"),
+            event_id!("$root:example.invalid"),
+        )
+        .event_id(event_id!("$reply:example.invalid"))
+        .into_raw_sync();
+
+    let room = server
+        .sync_room(&client, JoinedRoomBuilder::new(room_id))
+        .await;
+    let mut latest_events = client
+        .latest_events()
+        .await
+        .listen_and_subscribe_to_room(room_id)
+        .await
+        .expect("latest event subscription")
+        .expect("latest event stream");
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(room_id).add_timeline_bulk(vec![root, reply]),
+        )
+        .await;
+    tokio::time::timeout(std::time::Duration::from_secs(1), latest_events.next())
+        .await
+        .expect("latest event update must be event-driven");
+
+    let (latest, _) = matrix_room_latest_event_projection(&room).await;
+    let latest = latest.expect("latest thread reply projection");
+    assert_eq!(latest.event_id, "$reply:example.invalid");
+    assert_eq!(latest.relation_type.as_deref(), Some("m.thread"));
+    assert_eq!(
+        latest.thread_root_event_id.as_deref(),
+        Some("$root:example.invalid")
+    );
+}
+
 #[test]
 fn conversation_activity_keeps_the_newest_cache_or_local_candidate() {
     let cached = super::MatrixConversationActivity {
