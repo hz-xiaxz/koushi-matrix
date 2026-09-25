@@ -874,6 +874,23 @@ function restoreDocumentSelection(control: HTMLDivElement, selection: DocumentSe
   const domSelection = control.ownerDocument.getSelection();
   domSelection?.removeAllRanges();
   domSelection?.addRange(range);
+  keepCaretInsideEditor(control, range);
+}
+
+/** Rebuilding the editor DOM drops the browser's own caret scrolling (#1001).
+ * Scroll only the editor, never an ancestor, so the caret stays visible. */
+function keepCaretInsideEditor(control: HTMLDivElement, range: Range) {
+  if (control.ownerDocument.activeElement !== control) return;
+  if (control.scrollHeight <= control.clientHeight) return;
+  if (typeof range.getBoundingClientRect !== "function") return;
+  const caret = range.getClientRects()[0] ?? range.getBoundingClientRect();
+  const box = control.getBoundingClientRect();
+  if (!caret || (caret.top === 0 && caret.bottom === 0)) return;
+  if (caret.bottom > box.bottom) {
+    control.scrollTop += caret.bottom - box.bottom;
+  } else if (caret.top < box.top) {
+    control.scrollTop -= box.top - caret.top;
+  }
 }
 
 function domPointFromDocumentOffset(control: HTMLDivElement, rawOffset: number) {

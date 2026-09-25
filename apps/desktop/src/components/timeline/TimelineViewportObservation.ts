@@ -84,6 +84,11 @@ export function timelineKeyShouldReleaseViewportIntent(event: KeyboardEvent<HTML
   if (event.altKey || event.ctrlKey || event.metaKey) {
     return false;
   }
+  // #1001: keys typed into an editor inside the timeline (inline edit) move
+  // its caret, not the timeline, so they must not drop the live edge.
+  if (keyTargetEditsText(event.target)) {
+    return false;
+  }
   switch (event.key) {
     case "ArrowDown":
     case "ArrowUp":
@@ -96,6 +101,16 @@ export function timelineKeyShouldReleaseViewportIntent(event: KeyboardEvent<HTML
     default:
       return false;
   }
+}
+
+function keyTargetEditsText(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.isContentEditable ||
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target.closest("[contenteditable='true'], [contenteditable='']") !== null
+  );
 }
 
 /** Distance (px) from the top edge that triggers automatic backfill. */

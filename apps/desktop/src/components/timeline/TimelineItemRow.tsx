@@ -242,6 +242,7 @@ export function TimelineItemRow({
   onSendReaction,
   onRedactReaction,
   onEdit,
+  onEditFormOpenChange,
   onRedact,
   isPinned = false,
   isContinuation = false,
@@ -310,6 +311,9 @@ export function TimelineItemRow({
   onSendReaction: TimelineRowActionHandlers["onSendReaction"];
   onRedactReaction: TimelineRowActionHandlers["onRedactReaction"];
   onEdit: TimelineRowActionHandlers["onEdit"];
+  /** #1001: tells the timeline's viewport owner the inline edit form opened
+   * or closed, so it can keep the form's actions in view. */
+  onEditFormOpenChange?: (eventId: string, open: boolean) => void;
   onRedact: TimelineRowActionHandlers["onRedact"];
   isPinned?: boolean;
   isContinuation?: boolean;
@@ -496,13 +500,15 @@ export function TimelineItemRow({
     setForwardMenuOpen(false);
     setEditDocument(item.actions?.editable_document ?? documentFromText(item.body ?? ""));
     setEditing(true);
-  }, [eventId, isRedacted, item.actions?.editable_document, item.body]);
+    onEditFormOpenChange?.(eventId, true);
+  }, [eventId, isRedacted, item.actions?.editable_document, item.body, onEditFormOpenChange]);
 
   const closeEditForm = useCallback(() => {
     setEditing(false);
+    if (eventId) onEditFormOpenChange?.(eventId, false);
     setEditDocument(item.actions?.editable_document ?? documentFromText(item.body ?? ""));
     onMentionQueryChange?.(roomId, "edit", null);
-  }, [item.actions?.editable_document, item.body, onMentionQueryChange, roomId]);
+  }, [eventId, item.actions?.editable_document, item.body, onEditFormOpenChange, onMentionQueryChange, roomId]);
 
   const submitEditDocument = useCallback(
     (document: ComposerDocument) => {

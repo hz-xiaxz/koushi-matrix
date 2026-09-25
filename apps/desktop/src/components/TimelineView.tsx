@@ -169,8 +169,11 @@ const CLIENT_PLACEMENT_SCROLL_WRITES: ReadonlySet<TimelineScrollWriteReason> = n
   "liveEdge",
   "jumpToEvent",
   "jumpToBottom",
-  "roomRestore"
+  "roomRestore",
+  "editReveal"
 ]);
+/** Gap kept between an inline edit form's actions and the viewport bottom. */
+const EDIT_REVEAL_MARGIN_PX = 8;
 import {
 applyGlobalResync,
 applyRoomKeyRequestStateChanged,
@@ -549,6 +552,13 @@ export const TimelineView = memo(function TimelineView({
   const jumpViewportControlRef = useRef(false);
   /** Suppresses capture while programmatic scroll adjustments are running. */
   const suppressScrollAnchorCaptureRef = useRef(false);
+  /** #1001: the event whose open inline edit form is kept in view, until the
+   * reader scrolls or the form closes. */
+  const editRevealRef = useRef<string | null>(null);
+  const onEditFormOpenChange = useCallback((eventId: string, open: boolean) => {
+    if (open) editRevealRef.current = eventId;
+    else if (editRevealRef.current === eventId) editRevealRef.current = null;
+  }, []);
 
   const lastPersistedViewportAnchorSignatureRef = useRef<string | null>(null);
   const restoredRoomScrollAnchorSignatureRef = useRef<string | null>(null);
@@ -967,7 +977,9 @@ export const TimelineView = memo(function TimelineView({
             bottomArrivalRef.current = "programmatic";
           }
         }
-        if (reason === "roomRestore") captureStableAnchor(container);
+        // A placement write moves the reader on purpose; the stable anchor must
+        // follow it, or the next resize would scroll back to the old position.
+        if (reason === "roomRestore" || reason === "editReveal") captureStableAnchor(container);
       } finally {
         const writeGeneration = owner.currentWriteGeneration();
         scheduleViewportFrame(() => {
@@ -1207,6 +1219,8 @@ export const TimelineView = memo(function TimelineView({
     // unchanged (for example another free-scroll wheel event). A queued
     // projection frame must never reclaim that viewport position.
     advanceViewportEpoch();
+    // The reader took over: an open edit form is no longer kept in view.
+    editRevealRef.current = null;
     // The programmatic write already completed synchronously. Its epoch-cancelled
     // cleanup frame must not leave later genuine anchor capture suppressed.
     suppressScrollAnchorCaptureRef.current = false;
@@ -2288,6 +2302,7 @@ export const TimelineView = memo(function TimelineView({
       if (timelineKeyHashRef.current !== timelineKeyHash || timelineGenerationRef.current !== generation ||
           jumpViewportControlRef.current || roomScrollAnchorRestorePendingRef.current) return;
       const container = containerRef.current;
+      if (container && revealEditForm(container)) return;
       const owner = viewportTransactionRef.current;
       if (container && userScrollInputPendingRef.current) owner.accountForInput(container.scrollTop);
       const anchor = owner.active()?.anchor ?? stableAnchor();
@@ -2314,6 +2329,25 @@ export const TimelineView = memo(function TimelineView({
         setViewportTransactionRevision((revision) => revision + 1);
       }
     });
+
+    /** #1001: an inline edit form grows downward from a fixed top. Keep its
+     * actions above the viewport bottom through the owner's placement write. */
+    function revealEditForm(container: HTMLElement): boolean {
+      const eventId = editRevealRef.current;
+      if (!eventId) return false;
+      const row = container.querySelector<HTMLElement>(`[data-event-id="${CSS.escape(eventId)}"]`);
+      const actions = row?.querySelector<HTMLElement>(".message-edit-actions");
+      if (!actions) return false;
+      const viewportBottom = container.getBoundingClientRect().top + container.clientHeight - EDIT_REVEAL_MARGIN_PX;
+      const overflow = actions.getBoundingClientRect().bottom - viewportBottom;
+      if (overflow <= 0.5) return false;
+      runWithScrollWriteReason("editReveal", () => {
+        container.scrollTop += overflow;
+      });
+      updateViewportMetrics();
+      reportViewportObservation();
+      return true;
+    }
 
     function resumeObservation() {
       if (disposed) return;
@@ -3532,6 +3566,7 @@ export const TimelineView = memo(function TimelineView({
               ) : (
                 <TimelineItemRow
                 item={item}
+                onEditFormOpenChange={onEditFormOpenChange}
                 rowId={row.row_id}
                 contentEventId={contentEventId}
                 activityEventId={activityEventId}
