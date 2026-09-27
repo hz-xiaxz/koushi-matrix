@@ -4,7 +4,11 @@ use super::account::{
 };
 use super::*;
 use crate::dto::FrontendDesktopSnapshot;
-use crate::oidc_browser::{OidcBrowserLaunchFailure, launch_oidc_authorization_url};
+#[cfg(not(target_os = "linux"))]
+use crate::oidc_browser::launch_oidc_authorization_url;
+use crate::oidc_browser::{OidcBrowserLaunchFailure, launch_oidc_authorization_url_with_fallback};
+#[cfg(target_os = "linux")]
+use crate::oidc_browser::{launch_linux_default_browser, running_under_wsl};
 use tauri_plugin_opener::OpenerExt;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
@@ -142,14 +146,7 @@ pub async fn start_oidc_login(
         "desktop.oidc_browser",
         "authorization_created",
     ));
-    let outcome = match launch_oidc_authorization_url(&authorization_url, |url| {
-        record(DiagnosticEvent::new(
-            DiagnosticLevel::Info,
-            "desktop.oidc_browser",
-            "browser_launch_requested",
-        ));
-        app.opener().open_url(url, None::<&str>)
-    }) {
+    let outcome = match launch_oidc_browser(&app, &authorization_url) {
         Ok(()) => OidcBrowserLaunchOutcome::Launched,
         Err(OidcBrowserLaunchFailure::InvalidAuthorizationUrl) => {
             OidcBrowserLaunchOutcome::InvalidAuthorizationUrl
@@ -175,6 +172,53 @@ pub async fn start_oidc_login(
     Ok(OidcBrowserLaunchResponse {
         outcome,
         settlement: FrontendCommandSettlement::from_published_generation(generation),
+    })
+}
+
+fn launch_oidc_browser(
+    app: &AppHandle,
+    authorization_url: &str,
+) -> Result<(), OidcBrowserLaunchFailure> {
+    #[cfg(target_os = "linux")]
+    {
+        let request_recorded = std::rc::Rc::new(std::cell::Cell::new(false));
+        let native_recorded = std::rc::Rc::clone(&request_recorded);
+        let native = move |url: &str| {
+            if !native_recorded.replace(true) {
+                record(DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "desktop.oidc_browser",
+                    "browser_launch_requested",
+                ));
+            }
+            app.opener().open_url(url, None::<&str>).map_err(|_| ())
+        };
+        let linux_recorded = std::rc::Rc::clone(&request_recorded);
+        let linux = move |url: &str| {
+            if !linux_recorded.replace(true) {
+                record(DiagnosticEvent::new(
+                    DiagnosticLevel::Info,
+                    "desktop.oidc_browser",
+                    "browser_launch_requested",
+                ));
+            }
+            launch_linux_default_browser(url).map_err(|_| ())
+        };
+        return if running_under_wsl() {
+            launch_oidc_authorization_url_with_fallback(authorization_url, linux, native)
+        } else {
+            launch_oidc_authorization_url_with_fallback(authorization_url, native, linux)
+        };
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    launch_oidc_authorization_url(authorization_url, |url| {
+        record(DiagnosticEvent::new(
+            DiagnosticLevel::Info,
+            "desktop.oidc_browser",
+            "browser_launch_requested",
+        ));
+        app.opener().open_url(url, None::<&str>)
     })
 }
 

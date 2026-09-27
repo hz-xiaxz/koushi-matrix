@@ -14,6 +14,23 @@ If Koushi says the server is unsupported, ask the server administrator about
 Element X-compatible Simplified Sliding Sync support. A server that works in
 another Matrix client may not offer the sync capability Koushi requires.
 
+### The browser does not open for OIDC or Single sign-on
+
+Koushi opens the authorization page in the operating system's default browser.
+On Linux, check that the desktop opener exists and has a default browser:
+
+```bash
+command -v xdg-open
+xdg-open https://example.com
+xdg-settings get default-web-browser
+```
+
+Install `xdg-utils` when `xdg-open` is missing, then retry **Single sign-on**.
+When running Linux under WSLg, start Koushi inside the same `dbus-run-session`
+as the desktop session. Keep Koushi running until the provider redirects to
+the registered callback scheme. If Koushi shows a browser-launch error, fix
+the default-browser configuration and select **Single sign-on** again.
+
 An expired or revoked session requires signing in again. A verification screen
 requires the [session verification flow](security-and-recovery.md#verify-a-session-after-sign-in),
 not repeated password attempts.

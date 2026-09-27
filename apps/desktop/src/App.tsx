@@ -5966,13 +5966,14 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
 
   if (sessionKind !== "ready") {
     return (
-      <><AuthScreen
+      <AuthScreen
         deviceName={loginDeviceName}
         homeserver={loginHomeserver}
         isBusy={isBusy || sessionKind === "authenticating"}
         passwordFilled={loginPasswordFilled}
         passwordInputRef={loginPasswordRef}
         snapshot={snapshot}
+        transportError={loginTransportError}
         username={loginUsername}
         onDiscoverLoginMethods={() => runInBackground(discoverLoginMethods())}
         onDeviceNameChange={setLoginDeviceName}
@@ -5981,7 +5982,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
         onStartOidcLogin={() => runInBackground(startOidcLogin())}
         onSubmit={submitLogin}
         onUsernameChange={setLoginUsername}
-      />{loginTransportError && <p role="alert">{loginTransportError}</p>}</>
+      />
     );
   }
 

@@ -55,6 +55,8 @@ if (!args.has("--skip-preflight")) {
   run("node", ["scripts/desktop-release-preflight.mjs", "--check-config"], repoRoot);
 }
 
+run("node", ["scripts/check-linux-build-deps.mjs"], repoRoot);
+
 const buildStartMs = Date.now();
 run("npm", buildCommand, desktopDir);
 

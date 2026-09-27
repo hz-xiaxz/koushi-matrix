@@ -1,5 +1,11 @@
 use url::Url;
 
+#[cfg(target_os = "linux")]
+use std::{
+    env,
+    process::{Command, Stdio},
+};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum OidcBrowserLaunchFailure {
     InvalidAuthorizationUrl,
@@ -25,6 +31,42 @@ pub(crate) fn launch_oidc_authorization_url<E>(
         return Err(OidcBrowserLaunchFailure::InvalidAuthorizationUrl);
     }
     launch(authorization_url).map_err(|_| OidcBrowserLaunchFailure::BrowserLaunchFailed)
+}
+
+/// Launch through one native desktop opener and retry with a second native
+/// opener when the first one cannot be started. WSL needs the Linux opener
+/// first: the generic opener delegates to `powershell.exe` there, whose
+/// detached process can report success even when no Windows browser is
+/// configured for the WSL session.
+pub(crate) fn launch_oidc_authorization_url_with_fallback<E>(
+    authorization_url: &str,
+    primary: impl FnOnce(&str) -> Result<(), E>,
+    fallback: impl FnOnce(&str) -> Result<(), E>,
+) -> Result<(), OidcBrowserLaunchFailure> {
+    launch_oidc_authorization_url(authorization_url, |url| {
+        primary(url).or_else(|_| fallback(url))
+    })
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn launch_linux_default_browser(authorization_url: &str) -> std::io::Result<()> {
+    Command::new("xdg-open")
+        .arg(authorization_url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .and_then(|status| {
+            status
+                .success()
+                .then_some(())
+                .ok_or_else(|| std::io::Error::other("xdg-open exited unsuccessfully"))
+        })
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn running_under_wsl() -> bool {
+    env::var_os("WSL_INTEROP").is_some() || env::var_os("WSL_DISTRO_NAME").is_some()
 }
 
 #[cfg(test)]
@@ -83,5 +125,43 @@ mod tests {
         assert!(!debug.contains("identity.example.invalid"));
         assert!(!debug.contains("opaque"));
         assert!(!debug.contains("native error"));
+    }
+
+    #[test]
+    fn oidc_browser_uses_primary_launcher_before_fallback() {
+        let calls = std::cell::Cell::new(0);
+        let result = launch_oidc_authorization_url_with_fallback(
+            "https://identity.example.invalid/authorize",
+            |_| {
+                calls.set(1);
+                Ok::<(), ()>(())
+            },
+            |_| {
+                calls.set(2);
+                Ok::<(), ()>(())
+            },
+        );
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn oidc_browser_uses_native_fallback_when_primary_launcher_fails() {
+        let calls = std::cell::Cell::new(0);
+        let result = launch_oidc_authorization_url_with_fallback(
+            "https://identity.example.invalid/authorize",
+            |_| {
+                calls.set(1);
+                Err::<(), _>(())
+            },
+            |_| {
+                calls.set(2);
+                Ok::<(), ()>(())
+            },
+        );
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(calls.get(), 2);
     }
 }

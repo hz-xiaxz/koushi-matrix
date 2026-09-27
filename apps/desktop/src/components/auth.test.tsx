@@ -44,6 +44,32 @@ describe("AuthScreen", () => {
     ).toBeTruthy();
   });
 
+  it("keeps SSO launch errors inside the visible auth panel", () => {
+    render(
+      <AuthScreen
+        deviceName="Koushi test"
+        homeserver="matrix.org"
+        isBusy={false}
+        passwordFilled={false}
+        passwordInputRef={createRef<HTMLInputElement>()}
+        snapshot={snapshot({ session: { kind: "signedOut" } })}
+        transportError="Could not open the browser for single sign-on"
+        username=""
+        onDeviceNameChange={vi.fn()}
+        onDiscoverLoginMethods={vi.fn()}
+        onHomeserverChange={vi.fn()}
+        onPasswordPresenceChange={vi.fn()}
+        onStartOidcLogin={vi.fn()}
+        onSubmit={vi.fn()}
+        onUsernameChange={vi.fn()}
+      />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("Could not open the browser");
+    expect(alert.closest(".auth-panel")).toBeTruthy();
+  });
+
   it("adds a localpart hint to login failures", () => {
     render(
       <AuthScreen

@@ -190,7 +190,7 @@ One-time package install needs `sudo`/root, but tests and smoke then run as a
 normal user; no `su` or root shell is needed for the fast loop. On Ubuntu 24.04:
 
 ```bash
-sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential ca-certificates curl dbus-x11 file fontconfig fonts-dejavu-core fonts-noto-color-emoji fonts-noto-core git libayatana-appindicator3-dev libnss-wrapper libssl-dev libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev pkg-config webkit2gtk-driver xvfb
+sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential ca-certificates curl dbus-x11 file fontconfig fonts-dejavu-core fonts-noto-color-emoji fonts-noto-core git libayatana-appindicator3-dev libnss-wrapper libssl-dev libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev pkg-config webkit2gtk-driver x11-utils xdg-utils xvfb
 cargo install tauri-driver --locked
 ```
 
@@ -201,6 +201,9 @@ cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 node scripts/desktop-linux-gui-qa.mjs --check-tools
 node scripts/desktop-linux-gui-qa.mjs --list
 ```
+
+For a direct release-binary launch check under WSLg, use the
+[Linux/WSL release and GUI procedure in the README](../../README.md#build-on-linux--wsl-ubuntu-2404).
 
 Reuse the existing Cargo, npm, and GUI target caches during the inner loop.
 
