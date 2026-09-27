@@ -1,10 +1,7 @@
 use url::Url;
 
 #[cfg(target_os = "linux")]
-use std::{
-    env,
-    process::{Command, Stdio},
-};
+use std::env;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum OidcBrowserLaunchFailure {
@@ -49,19 +46,21 @@ pub(crate) fn launch_oidc_authorization_url_with_fallback<E>(
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn launch_linux_default_browser(authorization_url: &str) -> std::io::Result<()> {
-    Command::new("xdg-open")
-        .arg(authorization_url)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .and_then(|status| {
-            status
-                .success()
-                .then_some(())
-                .ok_or_else(|| std::io::Error::other("xdg-open exited unsuccessfully"))
-        })
+pub(crate) fn launch_linux_default_browser(
+    authorization_url: &str,
+) -> Result<(), tauri_plugin_opener::Error> {
+    launch_linux_browser_with(authorization_url, "xdg-open")
+}
+
+#[cfg(target_os = "linux")]
+fn launch_linux_browser_with(
+    authorization_url: &str,
+    program: &str,
+) -> Result<(), tauri_plugin_opener::Error> {
+    // The native opener owns detached process launch/reaping. An xdg-open
+    // process may live as long as the browser, so never wait for its exit.
+    // Success means dispatch, not that the browser painted a window.
+    tauri_plugin_opener::open_url(authorization_url, Some(program))
 }
 
 #[cfg(target_os = "linux")]
@@ -72,6 +71,65 @@ pub(crate) fn running_under_wsl() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn oidc_browser_returns_while_launcher_is_still_running() {
+        use std::{
+            io::{Read, Write},
+            os::unix::fs::PermissionsExt,
+            process::Command,
+            sync::mpsc,
+            time::Duration,
+        };
+
+        let temp = tempfile::tempdir().unwrap();
+        let fifo = temp.path().join("release");
+        let ack = temp.path().join("release.ack");
+        assert!(
+            Command::new("mkfifo")
+                .arg(&fifo)
+                .arg(&ack)
+                .status()
+                .unwrap()
+                .success()
+        );
+        // O_RDWR keeps the pipe open without blocking on the launcher. The
+        // launcher cannot exit until the test explicitly releases it.
+        let mut release = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&fifo)
+            .unwrap();
+        let program = temp.path().join("browser");
+        let mut acknowledged = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&ack)
+            .unwrap();
+        std::fs::write(
+            &program,
+            "#!/bin/sh\nread release < \"$1\"\nprintf x > \"$1.ack\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let result =
+                launch_linux_browser_with(fifo.to_str().unwrap(), program.to_str().unwrap());
+            tx.send(result).unwrap();
+        });
+        let outcome = rx.recv_timeout(Duration::from_secs(2));
+        writeln!(release, "done").unwrap();
+        worker.join().unwrap();
+        // Keep the fixture executable and pipes alive until the detached
+        // process has actually consumed its release signal.
+        acknowledged.read_exact(&mut [0u8; 1]).unwrap();
+        assert!(
+            matches!(outcome, Ok(Ok(()))),
+            "launch must settle before browser exit"
+        );
+    }
 
     #[test]
     fn oidc_browser_launches_original_http_and_https_urls() {
