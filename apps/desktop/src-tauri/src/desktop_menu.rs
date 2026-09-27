@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use tauri::{
     Manager,
-    menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder},
+    menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
 };
 
 pub(super) const MENU_EVENT_NAME: &str = "koushi-desktop://menu";
@@ -18,6 +20,9 @@ pub(super) const MENU_ID_TOGGLE_FULLSCREEN: &str = "toggle_fullscreen";
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct DesktopMenuItem {
     pub id: &'static str,
+    /// Catalog message id for the user-facing label, per docs/architecture/i18n.md.
+    /// `label` stays as the English fallback used before the webview resolves it.
+    pub label_key: &'static str,
     pub label: &'static str,
     pub menu: &'static str,
     pub accelerator: &'static str,
@@ -36,42 +41,49 @@ pub(crate) fn desktop_menu_items() -> Vec<DesktopMenuItem> {
     vec![
         DesktopMenuItem {
             id: MENU_ID_ABOUT,
+            label_key: "menu.aboutKoushi",
             label: "About Koushi",
             menu: "app",
             accelerator: "",
         },
         DesktopMenuItem {
             id: MENU_ID_OPEN_USER_SETTINGS,
+            label_key: "menu.settings",
             label: "Settings…",
             menu: "app",
             accelerator: "CmdOrCtrl+,",
         },
         DesktopMenuItem {
             id: MENU_ID_SIGN_OUT,
+            label_key: "menu.signOut",
             label: "Sign Out",
             menu: "app",
             accelerator: "",
         },
         DesktopMenuItem {
             id: MENU_ID_TOGGLE_RIGHT_PANEL,
+            label_key: "menu.toggleRightPanel",
             label: "Toggle Right Panel",
             menu: "view",
             accelerator: "CmdOrCtrl+.",
         },
         DesktopMenuItem {
             id: MENU_ID_SHOW_HELP,
+            label_key: "menu.koushiHelp",
             label: "Koushi Help",
             menu: "help",
             accelerator: "",
         },
         DesktopMenuItem {
             id: MENU_ID_CHECK_FOR_UPDATES,
+            label_key: "menu.checkForUpdates",
             label: "Check for Updates…",
             menu: "app",
             accelerator: "",
         },
         DesktopMenuItem {
             id: MENU_ID_ZOOM_IN,
+            label_key: "menu.zoomIn",
             label: "Zoom In",
             menu: "view",
             // AppKit receives the '+' character for NumpadAdd, including '+'
@@ -80,12 +92,14 @@ pub(crate) fn desktop_menu_items() -> Vec<DesktopMenuItem> {
         },
         DesktopMenuItem {
             id: MENU_ID_ZOOM_OUT,
+            label_key: "menu.zoomOut",
             label: "Zoom Out",
             menu: "view",
             accelerator: "CmdOrCtrl+-",
         },
         DesktopMenuItem {
             id: MENU_ID_RESET_ZOOM,
+            label_key: "menu.actualSize",
             label: "Actual Size",
             menu: "view",
             accelerator: "CmdOrCtrl+0",
@@ -93,6 +107,7 @@ pub(crate) fn desktop_menu_items() -> Vec<DesktopMenuItem> {
         #[cfg(target_os = "macos")]
         DesktopMenuItem {
             id: MENU_ID_TOGGLE_FULLSCREEN,
+            label_key: "menu.toggleFullscreen",
             label: "Toggle Fullscreen",
             menu: "view",
             accelerator: "Ctrl+Command+F",
@@ -133,20 +148,102 @@ pub(super) fn desktop_menu_action_id(menu_id: &str) -> Option<&'static str> {
     }
 }
 
+/// Catalog message ids and English fallbacks for the menu labels that are not
+/// built from `DesktopMenuItem`: the submenu titles Koushi authors, and the
+/// predefined items muda would otherwise title with its own English text.
+const MENU_PLAIN_LABELS: [(&str, &str); 12] = [
+    ("menu.file", "File"),
+    ("menu.edit", "Edit"),
+    ("menu.view", "View"),
+    ("menu.help", "Help"),
+    ("menu.undo", "Undo"),
+    ("menu.redo", "Redo"),
+    ("menu.cut", "Cut"),
+    ("menu.copy", "Copy"),
+    ("menu.paste", "Paste"),
+    ("menu.selectAll", "Select All"),
+    ("menu.closeWindow", "Close Window"),
+    ("menu.quit", "Quit Koushi"),
+];
+
+/// Localized labels resolved by the webview, keyed by the catalog message ids
+/// this module owns. Missing keys fall back to the built-in English literals.
+pub(super) type MenuLabels = HashMap<String, String>;
+
+fn localized<'a>(labels: &'a MenuLabels, key: &str) -> &'a str {
+    let fallback = MENU_PLAIN_LABELS
+        .iter()
+        .find(|(label_key, _)| *label_key == key)
+        .map(|(_, fallback)| *fallback)
+        .or_else(|| {
+            desktop_menu_items()
+                .iter()
+                .find(|item| item.label_key == key)
+                .map(|item| item.label)
+        })
+        .expect("menu label key should be registered");
+    labels.get(key).map(String::as_str).unwrap_or(fallback)
+}
+
+fn native_menu_label_ids() -> Vec<String> {
+    let mut ids: Vec<String> = desktop_menu_items()
+        .iter()
+        .map(|item| item.label_key)
+        .chain(MENU_PLAIN_LABELS.iter().map(|(key, _)| *key))
+        .map(str::to_owned)
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// The catalog message ids the native menu is built from. The webview resolves
+/// them and pushes the localized strings back through `set_native_menu_labels`.
+#[tauri::command]
+pub(crate) fn native_menu_label_keys() -> Vec<String> {
+    native_menu_label_ids()
+}
+
+#[tauri::command]
+pub(crate) fn set_native_menu_labels(
+    app: tauri::AppHandle,
+    labels: MenuLabels,
+) -> Result<(), String> {
+    // The menu is built before the webview knows the catalog locale, so the
+    // resolved labels are pushed back and the menu is rebuilt and re-applied.
+    let menu = build_desktop_menu(&app, &labels).map_err(|error| error.to_string())?;
+    app.set_menu(menu).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 pub(super) fn build_desktop_menu<R: tauri::Runtime, M: Manager<R>>(
     manager: &M,
+    labels: &MenuLabels,
 ) -> tauri::Result<tauri::menu::Menu<R>> {
-    let open_user_settings = menu_item(manager, MENU_ID_OPEN_USER_SETTINGS)?;
-    let sign_out = menu_item(manager, MENU_ID_SIGN_OUT)?;
-    let toggle_right_panel = menu_item(manager, MENU_ID_TOGGLE_RIGHT_PANEL)?;
-    let show_help = menu_item(manager, MENU_ID_SHOW_HELP)?;
-    let check_for_updates = menu_item(manager, MENU_ID_CHECK_FOR_UPDATES)?;
-    let zoom_in = menu_item(manager, MENU_ID_ZOOM_IN)?;
-    let zoom_out = menu_item(manager, MENU_ID_ZOOM_OUT)?;
-    let reset_zoom = menu_item(manager, MENU_ID_RESET_ZOOM)?;
+    let open_user_settings = menu_item(manager, MENU_ID_OPEN_USER_SETTINGS, labels)?;
+    let sign_out = menu_item(manager, MENU_ID_SIGN_OUT, labels)?;
+    let toggle_right_panel = menu_item(manager, MENU_ID_TOGGLE_RIGHT_PANEL, labels)?;
+    let show_help = menu_item(manager, MENU_ID_SHOW_HELP, labels)?;
+    let check_for_updates = menu_item(manager, MENU_ID_CHECK_FOR_UPDATES, labels)?;
+    let zoom_in = menu_item(manager, MENU_ID_ZOOM_IN, labels)?;
+    let zoom_out = menu_item(manager, MENU_ID_ZOOM_OUT, labels)?;
+    let reset_zoom = menu_item(manager, MENU_ID_RESET_ZOOM, labels)?;
 
     #[cfg(target_os = "macos")]
-    let toggle_fullscreen = menu_item(manager, MENU_ID_TOGGLE_FULLSCREEN)?;
+    let toggle_fullscreen = menu_item(manager, MENU_ID_TOGGLE_FULLSCREEN, labels)?;
+
+    // muda titles predefined items in English unless it is given text, so the
+    // whole menu bar resolves through the catalog.
+    let undo = PredefinedMenuItem::undo(manager, Some(localized(labels, "menu.undo")))?;
+    let redo = PredefinedMenuItem::redo(manager, Some(localized(labels, "menu.redo")))?;
+    let cut = PredefinedMenuItem::cut(manager, Some(localized(labels, "menu.cut")))?;
+    let copy = PredefinedMenuItem::copy(manager, Some(localized(labels, "menu.copy")))?;
+    let paste = PredefinedMenuItem::paste(manager, Some(localized(labels, "menu.paste")))?;
+    let select_all =
+        PredefinedMenuItem::select_all(manager, Some(localized(labels, "menu.selectAll")))?;
+    let close_window =
+        PredefinedMenuItem::close_window(manager, Some(localized(labels, "menu.closeWindow")))?;
+    let quit = PredefinedMenuItem::quit(manager, Some(localized(labels, "menu.quit")))?;
 
     let about_metadata = AboutMetadata {
         name: manager
@@ -163,28 +260,28 @@ pub(super) fn build_desktop_menu<R: tauri::Runtime, M: Manager<R>>(
         ..Default::default()
     };
     let app_menu = SubmenuBuilder::new(manager, "Koushi")
-        .about_with_text("About Koushi", Some(about_metadata))
+        .about_with_text(localized(labels, "menu.aboutKoushi"), Some(about_metadata))
         .item(&check_for_updates)
         .separator()
         .item(&open_user_settings)
         .item(&sign_out)
         .separator()
-        .quit()
+        .item(&quit)
         .build()?;
-    let file_menu = SubmenuBuilder::new(manager, "File")
-        .close_window()
+    let file_menu = SubmenuBuilder::new(manager, localized(labels, "menu.file"))
+        .item(&close_window)
         .build()?;
-    let edit_menu = SubmenuBuilder::new(manager, "Edit")
-        .undo()
-        .redo()
+    let edit_menu = SubmenuBuilder::new(manager, localized(labels, "menu.edit"))
+        .item(&undo)
+        .item(&redo)
         .separator()
-        .cut()
-        .copy()
-        .paste()
-        .select_all()
+        .item(&cut)
+        .item(&copy)
+        .item(&paste)
+        .item(&select_all)
         .build()?;
     let view_menu = {
-        let builder = SubmenuBuilder::new(manager, "View")
+        let builder = SubmenuBuilder::new(manager, localized(labels, "menu.view"))
             .item(&toggle_right_panel)
             .separator()
             .item(&zoom_in)
@@ -195,7 +292,7 @@ pub(super) fn build_desktop_menu<R: tauri::Runtime, M: Manager<R>>(
         let builder = builder.item(&toggle_fullscreen);
         builder.build()?
     };
-    let help_menu = SubmenuBuilder::new(manager, "Help")
+    let help_menu = SubmenuBuilder::new(manager, localized(labels, "menu.help"))
         .item(&show_help)
         .build()?;
 
@@ -220,12 +317,13 @@ pub(super) fn toggle_main_window_fullscreen(app: &tauri::AppHandle) {
 fn menu_item<R: tauri::Runtime, M: Manager<R>>(
     manager: &M,
     id: &str,
+    labels: &MenuLabels,
 ) -> tauri::Result<tauri::menu::MenuItem<R>> {
     let item = desktop_menu_items()
         .into_iter()
         .find(|item| item.id == id)
         .expect("desktop menu item id should be registered");
-    let builder = MenuItemBuilder::with_id(item.id, item.label);
+    let builder = MenuItemBuilder::with_id(item.id, localized(labels, item.label_key));
     if item.accelerator.is_empty() {
         builder.build(manager)
     } else {
@@ -235,7 +333,9 @@ fn menu_item<R: tauri::Runtime, M: Manager<R>>(
 
 #[cfg(test)]
 mod tests {
-    use super::{desktop_menu_action_id, desktop_menu_items};
+    use super::{
+        MenuLabels, desktop_menu_action_id, desktop_menu_items, localized, native_menu_label_keys,
+    };
 
     #[test]
     fn native_zoom_keys_dispatch_to_the_shared_webview_zoom_owner() {
@@ -267,5 +367,45 @@ mod tests {
         assert_eq!(check.label, "Check for Updates…");
         assert_eq!(check.menu, "app");
         assert_eq!(desktop_menu_action_id(check.id), Some("checkForUpdates"));
+    }
+
+    #[test]
+    fn every_koushi_authored_label_resolves_through_the_message_catalog() {
+        let ids = native_menu_label_keys();
+        for key in [
+            "menu.aboutKoushi",
+            "menu.settings",
+            "menu.signOut",
+            "menu.toggleRightPanel",
+            "menu.koushiHelp",
+            "menu.checkForUpdates",
+            "menu.zoomIn",
+            "menu.zoomOut",
+            "menu.actualSize",
+            "menu.file",
+            "menu.edit",
+            "menu.view",
+            "menu.help",
+            "menu.undo",
+            "menu.redo",
+            "menu.cut",
+            "menu.copy",
+            "menu.paste",
+            "menu.selectAll",
+            "menu.closeWindow",
+            "menu.quit",
+        ] {
+            assert!(
+                ids.contains(&key.to_owned()),
+                "{key} is not offered to the webview"
+            );
+        }
+
+        // English stays the fallback for any key the webview has not resolved.
+        let japanese = MenuLabels::from([("menu.view".to_owned(), "表示".to_owned())]);
+        assert_eq!(localized(&japanese, "menu.view"), "表示");
+        assert_eq!(localized(&japanese, "menu.actualSize"), "Actual Size");
+        assert_eq!(localized(&japanese, "menu.copy"), "Copy");
+        assert_eq!(localized(&Default::default(), "menu.view"), "View");
     }
 }

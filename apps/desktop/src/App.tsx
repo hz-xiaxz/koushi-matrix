@@ -115,7 +115,8 @@ import {
   type ContextMenuItem
 } from "./domain/contextMenus";
 import { shortcutActionFromMenuPayload } from "./domain/shortcuts";
-import { listenForAppShortcuts } from "./app/keyboardShortcuts";
+import { createLatestShortcutHandler, listenForAppShortcuts } from "./app/keyboardShortcuts";
+import { syncNativeMenuLabels } from "./backend/tauri/nativeMenuLabels";
 import {
   effectiveRightPanelModeForSnapshot,
   type PeoplePanelScope,
@@ -1051,6 +1052,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
   const [loginPasswordFilled, setLoginPasswordFilled] = useState(false);
   const [recoverySecretFilled, setRecoverySecretFilled] = useState(false);
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>("closed");
+  const shortcutHandler = useRef(createLatestShortcutHandler()).current;
   const [selectedProfileUserId, setSelectedProfileUserId] = useState<string | null>(null);
   const [peoplePanelScope, setPeoplePanelScope] = useState<PeoplePanelScope | null>(null);
   const [startSpaceMembersInInviteMode, setStartSpaceMembersInInviteMode] = useState(false);
@@ -1821,6 +1823,8 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     }
   }
 
+  shortcutHandler.register(handleShortcutAction);
+
   function openContextMenu(
     event: MouseEvent<HTMLElement>,
     target: ContextMenuTarget,
@@ -2135,7 +2139,16 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     };
   }, []);
 
-  useEffect(() => listenForAppShortcuts(handleShortcutAction), []);
+  useEffect(() => listenForAppShortcuts((id) => shortcutHandler.handle(id)), [shortcutHandler]);
+
+  const catalogLocale = snapshot?.state.domain.locale_profile.catalog_locale;
+  const pseudoLocale = snapshot?.state.domain.locale_profile.pseudo_locale;
+  useEffect(() => {
+    // #1016: the native menu is built before this webview resolves the
+    // catalog, so a locale change re-applies the menu with localized labels.
+    if (!catalogLocale) return;
+    runInBackground(syncNativeMenuLabels(catalogLocale, pseudoLocale));
+  }, [catalogLocale, pseudoLocale]);
 
   useEffect(() => {
     // A file dropped outside a Composer otherwise triggers the WebView's
@@ -2187,7 +2200,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
         .listenMenuActions((payload) => {
           const shortcutId = shortcutActionFromMenuPayload(payload);
           if (shortcutId) {
-            handleShortcutAction(shortcutId);
+            shortcutHandler.handle(shortcutId);
           }
         })
         .then((dispose) => {
@@ -2203,7 +2216,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
       disposed = true;
       unlisten?.();
     };
-  }, []);
+  }, [shortcutHandler]);
 
   // App-level timeline store: apply CoreEvent::Timeline diffs once, then feed
   // the resulting store into every TimelineView. This keeps Matrix timeline
