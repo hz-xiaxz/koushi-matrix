@@ -886,7 +886,9 @@ pub fn run() {
             app_updates::spawn_auto_update_loop(app.handle().clone(), update_settings_connection);
             install_oidc_deep_link_handler(app)?;
 
-            let menu = build_desktop_menu(app)?;
+            // Built before the webview resolves the catalog locale; the
+            // localized labels arrive through set_native_menu_labels.
+            let menu = build_desktop_menu(app, &Default::default())?;
             app.set_menu(menu)?;
             // Best-effort by contract: a session with no status-notifier host
             // simply has no tray, and close-to-hide stays off there.
@@ -1123,6 +1125,8 @@ pub fn run() {
             commands::settings::import_legacy_settings,
             commands::settings::rebuild_search_index,
             commands::settings::set_room_url_preview_override,
+            desktop_menu::native_menu_label_keys,
+            desktop_menu::set_native_menu_labels,
             commands::native_attention::play_native_attention_sound,
             commands::native_attention::set_native_attention_badge,
             commands::native_attention::notification::show_native_attention_notification,

@@ -54,6 +54,28 @@ export type MessageId =
   | "app.title"
   | "app.versionMismatch.title"
   | "app.versionMismatch.detail"
+  | "menu.aboutKoushi"
+  | "menu.settings"
+  | "menu.signOut"
+  | "menu.toggleRightPanel"
+  | "menu.koushiHelp"
+  | "menu.checkForUpdates"
+  | "menu.zoomIn"
+  | "menu.zoomOut"
+  | "menu.actualSize"
+  | "menu.toggleFullscreen"
+  | "menu.file"
+  | "menu.edit"
+  | "menu.view"
+  | "menu.help"
+  | "menu.undo"
+  | "menu.redo"
+  | "menu.cut"
+  | "menu.copy"
+  | "menu.paste"
+  | "menu.selectAll"
+  | "menu.closeWindow"
+  | "menu.quit"
   | "auth.failureForbidden"
   | "auth.failureNetwork"
   | "auth.failureSdk"
@@ -1646,6 +1668,30 @@ const en: Catalog = {
   "app.versionMismatch.title": "Koushi needs to restart",
   "app.versionMismatch.detail":
     "Koushi couldn't load this session because its components are out of sync. Please fully quit and reopen the app.",
+  // Native menu bar. Title Case matches the platform menu convention, so these
+  // are separate from the sentence-case shortcut sheet labels.
+  "menu.aboutKoushi": "About Koushi",
+  "menu.settings": "Settings…",
+  "menu.signOut": "Sign Out",
+  "menu.toggleRightPanel": "Toggle Right Panel",
+  "menu.koushiHelp": "Koushi Help",
+  "menu.checkForUpdates": "Check for Updates…",
+  "menu.zoomIn": "Zoom In",
+  "menu.zoomOut": "Zoom Out",
+  "menu.actualSize": "Actual Size",
+  "menu.toggleFullscreen": "Toggle Fullscreen",
+  "menu.file": "File",
+  "menu.edit": "Edit",
+  "menu.view": "View",
+  "menu.help": "Help",
+  "menu.undo": "Undo",
+  "menu.redo": "Redo",
+  "menu.cut": "Cut",
+  "menu.copy": "Copy",
+  "menu.paste": "Paste",
+  "menu.selectAll": "Select All",
+  "menu.closeWindow": "Close Window",
+  "menu.quit": "Quit Koushi",
   "auth.failureForbidden": "Login methods are not available for this account",
   "auth.failureNetwork": "Could not reach the homeserver",
   "auth.failureSdk": "Could not check login methods",
@@ -3163,6 +3209,28 @@ const ja: Catalog = {
   "app.versionMismatch.title": "Koushi の再起動が必要です",
   "app.versionMismatch.detail":
     "コンポーネントの同期が取れていないため、このセッションを読み込めませんでした。Koushi を完全に終了してから、もう一度開いてください。",
+  "menu.aboutKoushi": "Koushi について",
+  "menu.settings": "設定…",
+  "menu.signOut": "サインアウト",
+  "menu.toggleRightPanel": "右パネルを切り替え",
+  "menu.koushiHelp": "Koushi ヘルプ",
+  "menu.checkForUpdates": "更新を確認…",
+  "menu.zoomIn": "拡大",
+  "menu.zoomOut": "縮小",
+  "menu.actualSize": "実際のサイズ",
+  "menu.toggleFullscreen": "全画面を切り替え",
+  "menu.file": "ファイル",
+  "menu.edit": "編集",
+  "menu.view": "表示",
+  "menu.help": "ヘルプ",
+  "menu.undo": "取り消す",
+  "menu.redo": "やり直す",
+  "menu.cut": "カット",
+  "menu.copy": "コピー",
+  "menu.paste": "ペースト",
+  "menu.selectAll": "すべてを選択",
+  "menu.closeWindow": "ウインドウを閉じる",
+  "menu.quit": "Koushi を終了",
   "auth.matrixAccount": "Matrixアカウント",
   "auth.matrixDesktop": "Koushi（光子・格子）",
   "auth.noLoginMethods": "ログイン方法がありません",
@@ -4620,9 +4688,13 @@ const pseudo: Catalog = Object.fromEntries(
 
 export const catalogs: Record<Locale, Catalog> = { en, ja, pseudo };
 
-export function t(id: MessageId, values: MessageValues = {}, locale?: Locale): string {
+export function t(
+  id: MessageId,
+  values: MessageValues = {},
+  locale?: Locale,
+  pseudoMode: ActivePseudoLocaleMode = locale ? "accented" : activePseudoLocale
+): string {
   const selectedLocale = locale ?? activeLocale;
-  const pseudoMode = locale ? "accented" : activePseudoLocale;
   const template =
     selectedLocale === "pseudo" && pseudoMode === "bidi"
       ? pseudoLocalize(catalogs.en[id], "bidi")
