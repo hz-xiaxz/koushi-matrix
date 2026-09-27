@@ -76,11 +76,11 @@ mod tests {
     #[test]
     fn oidc_browser_returns_while_launcher_is_still_running() {
         use std::{
-            io::{Read, Write},
+            io::Write,
             os::unix::fs::PermissionsExt,
             process::Command,
             sync::mpsc,
-            time::Duration,
+            time::{Duration, Instant},
         };
 
         let temp = tempfile::tempdir().unwrap();
@@ -89,7 +89,6 @@ mod tests {
         assert!(
             Command::new("mkfifo")
                 .arg(&fifo)
-                .arg(&ack)
                 .status()
                 .unwrap()
                 .success()
@@ -102,11 +101,6 @@ mod tests {
             .open(&fifo)
             .unwrap();
         let program = temp.path().join("browser");
-        let mut acknowledged = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&ack)
-            .unwrap();
         std::fs::write(
             &program,
             "#!/bin/sh\nread release < \"$1\"\nprintf x > \"$1.ack\"\n",
@@ -122,13 +116,21 @@ mod tests {
         let outcome = rx.recv_timeout(Duration::from_secs(2));
         writeln!(release, "done").unwrap();
         worker.join().unwrap();
-        // Keep the fixture executable and pipes alive until the detached
-        // process has actually consumed its release signal.
-        acknowledged.read_exact(&mut [0u8; 1]).unwrap();
         assert!(
             matches!(outcome, Ok(Ok(()))),
             "launch must settle before browser exit"
         );
+        // Keep the executable alive until the detached process consumes its
+        // release signal. A regular-file marker cannot block in read(2), and
+        // the deadline also covers a child that exits without acknowledging.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while std::fs::read(&ack).ok().as_deref() != Some(b"x") {
+            assert!(
+                Instant::now() < deadline,
+                "launcher did not acknowledge release"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
