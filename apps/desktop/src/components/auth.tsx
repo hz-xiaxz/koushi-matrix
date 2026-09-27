@@ -142,6 +142,7 @@ export function AuthScreen({
   passwordFilled,
   passwordInputRef,
   snapshot,
+  transportError,
   username,
   onDeviceNameChange,
   onDiscoverLoginMethods,
@@ -157,6 +158,7 @@ export function AuthScreen({
   passwordFilled: boolean;
   passwordInputRef: RefObject<HTMLInputElement | null>;
   snapshot: DesktopSnapshot;
+  transportError?: string | null;
   username: string;
   onDeviceNameChange: (value: string) => void;
   onDiscoverLoginMethods: () => void;
@@ -191,6 +193,11 @@ export function AuthScreen({
             <p>{sessionLabel(session.kind)}</p>
           </div>
         </div>
+        {transportError ? (
+          <div className="auth-error" role="alert">
+            {transportError}
+          </div>
+        ) : null}
         {isLockedSession ? (
           <>
             <div className="auth-session-summary">
@@ -226,7 +233,7 @@ export function AuthScreen({
                 type="button"
                 onClick={onStartOidcLogin}
               >
-                {authFlowLabel(oidcFlow)}
+                {isBusy ? t("auth.connecting") : authFlowLabel(oidcFlow)}
               </button>
             ) : null}
           </>
@@ -262,7 +269,7 @@ export function AuthScreen({
                   type="button"
                   onClick={onStartOidcLogin}
                 >
-                  {authFlowLabel(oidcFlow)}
+                  {isBusy ? t("auth.connecting") : authFlowLabel(oidcFlow)}
                 </button>
                 {registrationUrl ? (
                   <a className="auth-create-account" href={registrationUrl}>

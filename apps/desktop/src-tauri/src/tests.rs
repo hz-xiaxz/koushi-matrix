@@ -291,6 +291,23 @@ fn oidc_callback_url_accepts_only_expected_auth_callback_shape() {
     ));
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_deep_link_desktop_entry_uses_xdg_open_compatible_exec() {
+    let generated = "[Desktop Entry]\nExec=\"/opt/koushi/koushi-desktop\" %u\n";
+    let repaired = super::repair_linux_deep_link_desktop_entry_contents(generated);
+    assert_eq!(
+        repaired,
+        "[Desktop Entry]\nExec=/opt/koushi/koushi-desktop %u\n"
+    );
+
+    let path_with_spaces = "[Desktop Entry]\nExec=\"/opt/Koushi Desktop/koushi-desktop\" %u\n";
+    assert_eq!(
+        super::repair_linux_deep_link_desktop_entry_contents(path_with_spaces),
+        path_with_spaces
+    );
+}
+
 #[test]
 fn desktop_menu_items_include_element_compatible_shortcuts() {
     let items = desktop_menu_items();

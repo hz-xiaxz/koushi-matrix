@@ -687,6 +687,61 @@ fn is_oidc_callback_url(url: &str) -> bool {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn repair_linux_deep_link_desktop_entry_contents(contents: &str) -> String {
+    let repaired = contents
+        .lines()
+        .map(|line| {
+            let Some(executable) = line
+                .strip_prefix("Exec=\"")
+                .and_then(|value| value.strip_suffix("\" %u"))
+            else {
+                return line.to_owned();
+            };
+            // xdg-open's shell parser understands backslash escapes but not
+            // quote marks. Only remove the quotes when the executable path is
+            // safe as an unquoted desktop-entry argument; paths containing
+            // whitespace retain the standards-compliant form for launchers
+            // that implement the full Desktop Entry specification.
+            if executable
+                .chars()
+                .any(|character| character.is_whitespace() || character == '"')
+            {
+                line.to_owned()
+            } else {
+                format!("Exec={executable} %u")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if contents.ends_with('\n') {
+        format!("{repaired}\n")
+    } else {
+        repaired
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn repair_linux_deep_link_desktop_entry(app: &tauri::App) -> tauri::Result<()> {
+    let executable = tauri::utils::platform::current_exe()?;
+    let Some(file_name) = executable.file_name() else {
+        return Ok(());
+    };
+    let desktop_entry = app
+        .path()
+        .data_dir()?
+        .join("applications")
+        .join(format!("{}-handler.desktop", file_name.to_string_lossy()));
+    let Ok(contents) = std::fs::read_to_string(&desktop_entry) else {
+        return Ok(());
+    };
+    let repaired = repair_linux_deep_link_desktop_entry_contents(&contents);
+    if repaired != contents {
+        std::fs::write(desktop_entry, repaired)?;
+    }
+    Ok(())
+}
+
 fn submit_oidc_callback_url(app: tauri::AppHandle, callback_url: String) {
     if !is_oidc_callback_url(&callback_url) {
         return;
@@ -725,7 +780,10 @@ fn install_oidc_deep_link_handler(app: &tauri::App) -> tauri::Result<()> {
     });
 
     #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
-    let _ = app.deep_link().register_all();
+    if app.deep_link().register_all().is_ok() {
+        #[cfg(target_os = "linux")]
+        let _ = repair_linux_deep_link_desktop_entry(app);
+    }
 
     Ok(())
 }

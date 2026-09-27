@@ -65,10 +65,12 @@
     "linux": {
       "deb": {
         "desktopTemplate": "./koushi.desktop",
+        "depends": ["xdg-utils"],
         "recommends": ["hunspell-en-us"]
       },
       "rpm": {
         "desktopTemplate": "./koushi.desktop",
+        "depends": ["xdg-utils"],
         "recommends": ["hunspell-en-US"]
       }
     },
