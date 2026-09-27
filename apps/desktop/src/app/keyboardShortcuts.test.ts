@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { afterEach, expect, test, vi } from "vitest";
-import { listenForAppShortcuts } from "./keyboardShortcuts";
+import { createLatestShortcutHandler, listenForAppShortcuts } from "./keyboardShortcuts";
 
 let dispose = () => {};
 afterEach(() => {
@@ -16,6 +16,30 @@ function press(target: EventTarget, key: string, ctrlKey = true) {
   target.dispatchEvent(event);
   return event;
 }
+
+test("a globally installed listener dispatches to the latest registered handler", () => {
+  // #1015: listeners subscribe once, so the first render's closure must not
+  // outlive it or a state-dependent action (toggleRightPanel) freezes.
+  let panel = "closed";
+  const firstRender = vi.fn(() => { panel = "roomInfo"; return true; });
+  const shortcutHandler = createLatestShortcutHandler();
+  shortcutHandler.register(firstRender);
+  dispose = listenForAppShortcuts((id) => shortcutHandler.handle(id));
+
+  expect(press(document.body, ".", false).defaultPrevented).toBe(true);
+  expect(panel).toBe("roomInfo");
+  // A rerender replaces the closure read by both the keyboard and native menu.
+  shortcutHandler.register((id) => {
+    expect(id).toBe("toggleRightPanel");
+    panel = panel === "closed" ? "roomInfo" : "closed";
+    return true;
+  });
+  expect(press(document.body, ".", false).defaultPrevented).toBe(true);
+  expect(panel).toBe("closed");
+  shortcutHandler.handle("toggleRightPanel");
+  expect(panel).toBe("roomInfo");
+  expect(firstRender).toHaveBeenCalledTimes(1);
+});
 
 test("fullscreen works while a modal dialog is open", () => {
   const handle = vi.fn(() => true);

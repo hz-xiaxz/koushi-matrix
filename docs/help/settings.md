@@ -38,6 +38,7 @@ Use **Ctrl + -** / **Ctrl + +** (on macOS
 **Ctrl + 0** (macOS **Cmd + 0**) to reset it. **Ctrl/Cmd + =** also enlarges
 the interface on keyboards with an unshifted equals key.
 The **View** menu also offers **Zoom In**, **Zoom Out**, and **Actual Size**.
+Koushi's native menu labels follow the app language; in Japanese, **View** is **表示**.
 On macOS, **Cmd + Ctrl + F** toggles fullscreen. These window shortcuts
 remain available while an in-app dialog is open.
 

@@ -2,6 +2,23 @@ import { shortcutIdForKeyboardEvent } from "../domain/shortcuts";
 
 const windowShortcutIds = new Set(["toggleFullscreen", "zoomIn", "zoomOut", "resetZoom"]);
 
+// Global listeners are installed once, so they must not close over one render's
+// handler. Re-register the handler every render and dispatch through this box.
+export function createLatestShortcutHandler(): {
+  register(handler: (id: string) => boolean): void;
+  handle(id: string): boolean;
+} {
+  let current: (id: string) => boolean = () => false;
+  return {
+    register(handler) {
+      current = handler;
+    },
+    handle(id) {
+      return current(id);
+    }
+  };
+}
+
 export function listenForAppShortcuts(handleShortcut: (id: string) => boolean): () => void {
   // Window operations remain available in dialogs and focused widgets that stop
   // bubbling keys. Room/composer shortcuts still defer to those local handlers.
