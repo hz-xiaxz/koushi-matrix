@@ -58,7 +58,8 @@ can find and join it.
 A public room without a name has no address to suggest, so it can be created
 without one. It is still public and listed in the directory, where people can
 find and join it. If you enter an address for an unnamed room, the
-room shows that address as its name until you give it one.
+room shows the name part of that address (for example `lobby`) until you give
+it a name.
 
 While you type, Koushi checks whether the address is already used and shows
 the result under the address field. This check is only advice: an address that
