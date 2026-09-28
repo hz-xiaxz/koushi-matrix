@@ -31,7 +31,7 @@ use super::verification::recovery_failure_token;
 /// Which flow revealed the recovery key currently held by AccountActor.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RecoveryKeyRevealSource {
-    /// Secure Backup setup, re-enable, or re-export: confirmation clears the
+    /// Secure Backup setup, re-enable, or key reset: confirmation clears the
     /// persisted delivery marker and re-inspects the gate.
     Setup,
     /// Passphrase change: confirmation only dismisses the reveal.
@@ -914,7 +914,15 @@ impl AccountActor {
             SecureBackupSetupIntent::Reenable { confirmed: true } => {
                 session.reenable_secure_backup(passphrase.as_ref()).await
             }
-            SecureBackupSetupIntent::Reenable { confirmed: false } => {
+            SecureBackupSetupIntent::ResetRecoveryKey { confirmed: true } => {
+                session
+                    .reset_secure_backup_recovery_key(passphrase.as_ref())
+                    .await
+            }
+            // Core admission rejects unconfirmed intents before routing; this
+            // arm only keeps the actor fail-closed.
+            SecureBackupSetupIntent::Reenable { confirmed: false }
+            | SecureBackupSetupIntent::ResetRecoveryKey { confirmed: false } => {
                 Err(koushi_sdk::E2eeTrustError::SecureBackupReenableConfirmationRequired)
             }
         };

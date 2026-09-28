@@ -211,12 +211,14 @@ export function SessionVerificationGate({
   const [confirmDeviceCleanup, setConfirmDeviceCleanup] = useState(false);
   const [confirmEraseLocalAnyway, setConfirmEraseLocalAnyway] = useState(false);
   const [confirmSecureBackupReenable, setConfirmSecureBackupReenable] = useState(false);
+  const [confirmRecoveryKeyReset, setConfirmRecoveryKeyReset] = useState(false);
   const secureBackupConfirmationOwner =
     "user_id" in session
       ? `${session.homeserver}\u0000${session.user_id}\u0000${session.device_id}`
       : session.kind;
   useEffect(() => {
     setConfirmSecureBackupReenable(false);
+    setConfirmRecoveryKeyReset(false);
   }, [secureBackupConfirmationOwner, secureBackupGate.kind]);
   // #927: the revealed key is read straight from the Rust snapshot and is
   // never copied into component state.
@@ -290,12 +292,18 @@ export function SessionVerificationGate({
         : undefined
     );
   };
-  // Re-shows the key after an interrupted reveal: Rust re-exports it.
-  const showSecureBackupRecoveryKey = () => {
+  // After an interrupted reveal the unconfirmed key is gone; the only way on
+  // is an explicitly confirmed reset that creates a NEW recovery key.
+  const resetSecureBackupRecoveryKey = () => {
+    setConfirmRecoveryKeyReset(false);
     void runSecureBackup(
       "setup",
       operations.bootstrapSecureBackup
-        ? () => operations.bootstrapSecureBackup!(null, { kind: "initialSetup" })
+        ? () =>
+            operations.bootstrapSecureBackup!(null, {
+              kind: "resetRecoveryKey",
+              confirmed: true
+            })
         : undefined
     );
   };
@@ -438,6 +446,9 @@ export function SessionVerificationGate({
       </ImeSafeForm>
     )}
     {secureBackupGateRequired && secureBackupRevealingKey && revealedSetupKey && (
+      <p>{t("gate.secureBackupDeliveryRequired")}</p>
+    )}
+    {secureBackupGateRequired && secureBackupRevealingKey && revealedSetupKey && (
       <RecoveryKeyReveal
         key={revealedSetupKey.request_id}
         recoveryKey={revealedSetupKey.recovery_key}
@@ -462,15 +473,44 @@ export function SessionVerificationGate({
       secureBackupGate.kind === "recoveryKeyDeliveryRequired" &&
       !secureBackupRevealingKey && (
         <>
-          <p>{t("gate.secureBackupDeliveryRequired")}</p>
+          <p>{t("gate.secureBackupRecoveryKeyLost")}</p>
           <button
             className="dialog-button is-primary"
             disabled={secureBackupOperation !== null}
             type="button"
-            onClick={showSecureBackupRecoveryKey}
+            onClick={() => setConfirmRecoveryKeyReset(true)}
           >
-            {t("gate.secureBackupShowRecoveryKey")}
+            {t("gate.secureBackupResetRecoveryKey")}
           </button>
+          {confirmRecoveryKeyReset && (
+            <div
+              className="trust-verification-dialog"
+              role="region"
+              aria-labelledby="secure-backup-reset-title"
+            >
+              <h2 id="secure-backup-reset-title">
+                {t("gate.secureBackupResetRecoveryKeyTitle")}
+              </h2>
+              <p>{t("gate.secureBackupResetRecoveryKeyWarning")}</p>
+              <div className="dialog-actions">
+                <button
+                  className="dialog-button danger"
+                  disabled={secureBackupOperation !== null}
+                  type="button"
+                  onClick={resetSecureBackupRecoveryKey}
+                >
+                  {t("gate.secureBackupResetRecoveryKeyConfirm")}
+                </button>
+                <button
+                  className="dialog-button"
+                  type="button"
+                  onClick={() => setConfirmRecoveryKeyReset(false)}
+                >
+                  {t("action.cancel")}
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
     {secureBackupGateRequired && secureBackupGate.kind === "explicitlyDisabledRequiresSetup" && (

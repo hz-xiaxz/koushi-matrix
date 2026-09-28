@@ -1222,7 +1222,7 @@ normal QA-title mode and cannot change product title semantics.
   password), `EnableKeyBackup` (optional recovery passphrase), and
   `RestoreKeyBackup` (recovery secret). Their reducer actions, effects, events,
   snapshots, logs, and `Debug` output must remain secret-free.
-- Secure-backup setup/re-export/passphrase-change reveal the SDK-produced
+- Secure-backup setup/recovery-key reset/passphrase-change reveal the SDK-produced
   recovery key on screen (#927). The reducer owns it only as
   `RecoveryKeyMaterial` inside `SecureBackupSetupState::RecoveryKeyReady` /
   `SecureBackupPassphraseChangeState::Changed`; AccountActor holds the one

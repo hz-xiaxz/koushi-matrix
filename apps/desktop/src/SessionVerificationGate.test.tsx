@@ -10,7 +10,8 @@ import type {
   DesktopSnapshot,
   ProvisionalPhase,
   RecoveryKeyDeliveryState,
-  SecureBackupGateState
+  SecureBackupGateState,
+  SecureBackupSetupIntent
 } from "./domain/types";
 
 const commandReceipt: CommandReceipt = { protocolVersion: 1, admittedGeneration: 1 };
@@ -68,7 +69,7 @@ describe("SessionVerificationGate interactions", () => {
       recoverSecureBackup: (secret: string) => Promise<CommandReceipt>;
       bootstrapSecureBackup: (
         passphrase: string | null,
-        intent: { kind: "initialSetup" } | { kind: "reenable"; confirmed: boolean }
+        intent: SecureBackupSetupIntent
       ) => Promise<CommandReceipt>;
       copyRecoveryKey: (recoveryKey: string) => Promise<void>;
       saveSecureBackupRecoveryKey: (revealRequestId: number) => Promise<CommandReceipt | null>;
@@ -915,7 +916,7 @@ describe("SessionVerificationGate interactions", () => {
     expect(confirmSecureBackupRecoveryKeySaved).not.toHaveBeenCalled();
   });
 
-  test("re-shows the recovery key after an interrupted reveal without a passphrase or file", async () => {
+  test("replaces a lost, unconfirmed recovery key only after confirming a NEW key", async () => {
     const snapshot = secureBackupSnapshot(
       await createDesktopApiFixture().getSnapshot(),
       { kind: "recoveryKeyDeliveryRequired" }
@@ -931,12 +932,32 @@ describe("SessionVerificationGate interactions", () => {
       />
     );
 
-    expect(screen.getByText("Save the recovery key — copy it or save it to a file — before continuing.")).toBeTruthy();
+    // The previous key is never re-shown or re-exported.
+    expect(screen.getByText(/cannot be shown again/i)).toBeTruthy();
     expect(screen.queryByLabelText("Secure backup passphrase")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Show recovery key" }));
-    await vi.waitFor(() =>
-      expect(bootstrapSecureBackup).toHaveBeenCalledWith(null, { kind: "initialSetup" })
+    expect(screen.queryByRole("button", { name: /show recovery key/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create new recovery key" }));
+    let dialog = screen.getByRole("region", { name: "Create a new recovery key?" });
+    expect(within(dialog).getByText(/previous recovery key .*stop working/i)).toBeTruthy();
+    expect(bootstrapSecureBackup).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("region", { name: "Create a new recovery key?" })).toBeNull();
+    expect(bootstrapSecureBackup).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create new recovery key" }));
+    dialog = screen.getByRole("region", { name: "Create a new recovery key?" });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Yes, create a new recovery key" })
     );
+    await vi.waitFor(() =>
+      expect(bootstrapSecureBackup).toHaveBeenCalledWith(null, {
+        kind: "resetRecoveryKey",
+        confirmed: true
+      })
+    );
+    expect(bootstrapSecureBackup).toHaveBeenCalledTimes(1);
   });
 
   test("renders typed upload progress without exposing a raw count or error", async () => {

@@ -336,7 +336,7 @@ conflict is being resolved.
   printed in test output, checked into fixtures, or copied into screenshots.
   Credential/key material must not be returned to the webview after entry.
   The single exception is a Secure Backup recovery key the SDK just generated
-  or re-exported for the user to record: it may cross only as the live
+  or reset for the user to record: it may cross only as the live
   on-screen reveal state defined in
   [engineering rule 11](docs/policies/engineering-rules.md), never as entered
   input echoed back.

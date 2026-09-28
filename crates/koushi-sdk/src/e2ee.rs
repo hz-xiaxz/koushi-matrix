@@ -1202,7 +1202,7 @@ pub struct RoomKeyImportSummary {
     pub total_count: u64,
 }
 
-/// Result of secure-backup setup, re-export, or passphrase change: the
+/// Result of secure-backup setup, key reset, or passphrase change: the
 /// recovery key for on-screen reveal (#927). Zeroized on drop; `Debug` is
 /// redacted.
 #[derive(Clone, Eq, PartialEq)]
@@ -1756,6 +1756,30 @@ pub async fn bootstrap_secure_backup(
                 .await?
         }
         None => recovery.enable().wait_for_backups_to_upload().await?,
+    };
+    Ok(SecureBackupSetupSummary {
+        recovery_key: Zeroizing::new(recovery_key),
+    })
+}
+
+/// Creates a NEW secret-storage recovery key with upstream
+/// `recovery().reset_key()` (the Element X approach) and returns it for
+/// on-screen reveal. The previous recovery key and security phrase stop
+/// working. Never substitute `backups().local_recovery_key()`: that exports
+/// the backup decryption key, which `recovery().recover()` rejects.
+pub async fn reset_recovery_key(
+    session: &MatrixClientSession,
+    passphrase: Option<&AuthSecret>,
+) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
+    let recovery = session.client().encryption().recovery();
+    let recovery_key = match passphrase {
+        Some(passphrase) => {
+            recovery
+                .reset_key()
+                .with_passphrase(passphrase.expose_secret())
+                .await?
+        }
+        None => recovery.reset_key().await?,
     };
     Ok(SecureBackupSetupSummary {
         recovery_key: Zeroizing::new(recovery_key),
@@ -2465,6 +2489,9 @@ mod secure_backup_inspection_tests;
 #[cfg(test)]
 mod e2ee_trust_tests;
 
+#[cfg(test)]
+mod recovery_key_reveal_tests;
+
 pub(super) const DESKTOP_SQLITE_STORE_POOL_MAX_SIZE: usize = 4;
 
 impl MatrixClientSession {
@@ -2747,10 +2774,10 @@ impl MatrixClientSession {
         self.setup_secure_backup_with_confirmation(passphrase, true)
             .await
     }
-    /// Creates (or re-exports) the recovery key for on-screen reveal. The
-    /// persisted delivery-pending marker stays set until the user explicitly
-    /// confirms the key was saved ([`Self::confirm_recovery_key_delivered`]),
-    /// so an interrupted reveal re-enters `RecoveryKeyDeliveryRequired`.
+    /// Creates the recovery key for on-screen reveal. The persisted
+    /// delivery-pending marker stays set until the user explicitly confirms
+    /// the key was saved ([`Self::confirm_recovery_key_delivered`]), so an
+    /// interrupted reveal re-enters `RecoveryKeyDeliveryRequired`.
     async fn setup_secure_backup_with_confirmation(
         &self,
         passphrase: Option<&AuthSecret>,
@@ -2765,20 +2792,10 @@ impl MatrixClientSession {
         }
         match inspection.server {
             MatrixSecureBackupServerState::Absent => {}
+            // An existing backup is never re-exported: the only locally
+            // stored key is the backup decryption key, which is not a
+            // recovery key. A lost reveal uses `reset_secure_backup_recovery_key`.
             MatrixSecureBackupServerState::Present => {
-                if inspection.local == MatrixSecureBackupLocalState::Enabled
-                    && inspection.trust == MatrixSecureBackupTrustState::Trusted
-                {
-                    let recovery_key = self
-                        .client()
-                        .encryption()
-                        .backups()
-                        .local_recovery_key()
-                        .await?
-                        .ok_or(E2eeTrustError::SecureBackupInspectionInconclusive)?;
-                    self.set_recovery_key_delivery_pending(true).await?;
-                    return Ok(SecureBackupSetupSummary { recovery_key });
-                }
                 return Err(E2eeTrustError::SecureBackupAlreadyExists);
             }
             MatrixSecureBackupServerState::Unknown => {
@@ -2790,6 +2807,26 @@ impl MatrixClientSession {
         let summary = bootstrap_secure_backup(self, passphrase).await?;
         self.wait_for_secure_backup_steady_state().await?;
         Ok(summary)
+    }
+    /// Replaces the recovery key of the existing, trusted, locally enabled
+    /// backup with a NEW one via upstream `recovery().reset_key()` and returns
+    /// it for on-screen reveal. The previous recovery key stops working. The
+    /// delivery-pending marker stays set until the saved confirmation.
+    pub async fn reset_secure_backup_recovery_key(
+        &self,
+        passphrase: Option<&AuthSecret>,
+    ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
+        let inspection = self.inspect_secure_backup().await?;
+        // Without an authoritative, locally enabled, trusted backup the new
+        // secret store could not carry the backup secrets.
+        if inspection.server != MatrixSecureBackupServerState::Present
+            || inspection.local != MatrixSecureBackupLocalState::Enabled
+            || inspection.trust != MatrixSecureBackupTrustState::Trusted
+        {
+            return Err(E2eeTrustError::SecureBackupInspectionInconclusive);
+        }
+        self.set_recovery_key_delivery_pending(true).await?;
+        reset_recovery_key(self, passphrase).await
     }
     /// Clears the persisted delivery-pending marker after the user's explicit
     /// "I saved the recovery key" confirmation.

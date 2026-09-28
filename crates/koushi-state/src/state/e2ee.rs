@@ -103,7 +103,7 @@ pub enum RecoveryKeyDeliveryState {
     WriteFailed,
 }
 
-/// A recovery key generated (or re-exported) by the SDK for on-screen reveal.
+/// A recovery key generated (or reset) by the SDK for on-screen reveal.
 ///
 /// Privacy contract (#927): the value may cross to the WebView only through
 /// the live `RecoveryKeyReady`/`Changed` snapshot projection so the user can

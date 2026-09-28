@@ -1,6 +1,6 @@
 use koushi_state::{
-    AppAction, AppState, SecureBackupGateState, SecureBackupSetupIntent, SecureBackupSetupState,
-    SessionInfo, SessionState, reduce,
+    AppAction, AppState, SecureBackupGateState, SecureBackupSetupAdmission,
+    SecureBackupSetupIntent, SecureBackupSetupState, SessionInfo, SessionState, reduce,
 };
 
 fn ready_state(gate: SecureBackupGateState) -> AppState {
@@ -39,11 +39,9 @@ fn secure_backup_setup_admission_covers_each_gate_and_intent() {
     ];
 
     for gate in gates {
-        let initial_allowed = matches!(
-            gate,
-            SecureBackupGateState::SetupRequired
-                | SecureBackupGateState::RecoveryKeyDeliveryRequired
-        );
+        // #927: an existing backup is never re-exported; a lost reveal uses
+        // the confirmed `ResetRecoveryKey` intent instead.
+        let initial_allowed = gate == SecureBackupGateState::SetupRequired;
         let mut state = ready_state(gate.clone());
         let effects = reduce(
             &mut state,
@@ -96,6 +94,46 @@ fn secure_backup_setup_admission_covers_each_gate_and_intent() {
             gate == SecureBackupGateState::ExplicitlyDisabledRequiresSetup,
             "confirmed re-enable admission for {gate:?}"
         );
+
+        let delivery_required = gate == SecureBackupGateState::RecoveryKeyDeliveryRequired;
+        assert_eq!(
+            SecureBackupSetupIntent::ResetRecoveryKey { confirmed: false }.admission(&gate),
+            if delivery_required {
+                SecureBackupSetupAdmission::ConfirmationRequired
+            } else {
+                SecureBackupSetupAdmission::FailedNoOp
+            },
+            "unconfirmed recovery-key reset admission for {gate:?}"
+        );
+        let mut state = ready_state(gate.clone());
+        let effects = reduce(
+            &mut state,
+            AppAction::SecureBackupSetupRequested {
+                request_id: 4,
+                intent: SecureBackupSetupIntent::ResetRecoveryKey { confirmed: false },
+            },
+        );
+        assert!(effects.is_empty(), "unconfirmed reset for {gate:?}");
+
+        let mut state = ready_state(gate.clone());
+        let effects = reduce(
+            &mut state,
+            AppAction::SecureBackupSetupRequested {
+                request_id: 5,
+                intent: SecureBackupSetupIntent::ResetRecoveryKey { confirmed: true },
+            },
+        );
+        assert_eq!(
+            !effects.is_empty(),
+            delivery_required,
+            "confirmed recovery-key reset admission for {gate:?}"
+        );
+        if delivery_required {
+            assert!(matches!(
+                state.e2ee_trust.key_management.secure_backup_setup,
+                SecureBackupSetupState::SettingUp { request_id: 5 }
+            ));
+        }
     }
 }
 

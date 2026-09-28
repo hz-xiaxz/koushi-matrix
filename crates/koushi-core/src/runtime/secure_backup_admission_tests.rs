@@ -82,6 +82,40 @@ fn secure_backup_projection_gate_returns_typed_private_safe_failures() {
     );
 }
 
+#[test]
+fn recovery_key_reset_requires_explicit_confirmation_before_routing() {
+    // #927: a lost reveal is never re-exported; replacing the key needs the
+    // confirmed reset intent because the previous key stops working.
+    let state = ready_state(SecureBackupGateState::RecoveryKeyDeliveryRequired);
+    assert_eq!(
+        secure_backup_setup_projection_failure(
+            &state,
+            &request(SecureBackupSetupIntent::ResetRecoveryKey { confirmed: false }),
+        ),
+        Some(CoreFailure::SecureBackupSetupConfirmationRequired)
+    );
+    assert_eq!(
+        secure_backup_setup_projection_failure(
+            &state,
+            &request(SecureBackupSetupIntent::InitialSetup),
+        ),
+        Some(CoreFailure::SecureBackupSetupFailedNoOp)
+    );
+    let mut projected = state.clone();
+    let effects = koushi_state::reduce(
+        &mut projected,
+        account_command_projected_action(&request(SecureBackupSetupIntent::ResetRecoveryKey {
+            confirmed: true,
+        }))
+        .expect("projected action"),
+    );
+    assert!(!effects.is_empty());
+    assert!(matches!(
+        projected.e2ee_trust.key_management.secure_backup_setup,
+        SecureBackupSetupState::SettingUp { request_id: 7 }
+    ));
+}
+
 fn request_id(sequence: u64) -> RequestId {
     RequestId {
         connection_id: RuntimeConnectionId(1),

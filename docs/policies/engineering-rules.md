@@ -233,7 +233,7 @@ Rules:
    restore. `KeyBackupRestoreSummary.scope` stays `JoinedRooms` for the MVP
    path unless a later upstream/public API decision explicitly broadens it.
    Secure-backup recovery keys may be produced by the SDK (setup, re-enable,
-   re-export, or passphrase change) and shown on screen for the user to record
+   confirmed `recovery().reset_key()`, or passphrase change) and shown on screen for the user to record
    (#927). The key exists only in the reveal state:
    `SecureBackupSetupState::RecoveryKeyReady` or
    `SecureBackupPassphraseChangeState::Changed`, carried as the zeroizing
@@ -248,7 +248,10 @@ Rules:
    confirmation, logout, account switch, and session teardown drop and
    zeroize both copies. Saving to a file is optional: Core writes its held
    copy to a user-selected native destination and reports only a coarse
-   `Written`/`WriteFailed` status.
+   `Written`/`WriteFailed` status. Only keys returned by `enable()`,
+   `reset_key()`, or `recover_and_reset()` are recovery keys; the fork's
+   `backups().local_recovery_key()` backup decryption key must never be
+   revealed, saved, or labelled as one.
    Verified-device admission and Secure Backup health are independent. Secure
    Backup must be recoverable, trusted, locally enabled, and monitored, but an
    upload delay or degraded backup state does not block ordinary encrypted user

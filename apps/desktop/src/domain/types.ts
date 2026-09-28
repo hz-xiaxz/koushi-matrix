@@ -634,7 +634,8 @@ export type RecoveryMethod = "recoveryKey" | "securityPhrase";
 
 export type SecureBackupSetupIntent =
   | { kind: "initialSetup" }
-  | { kind: "reenable"; confirmed: boolean };
+  | { kind: "reenable"; confirmed: boolean }
+  | { kind: "resetRecoveryKey"; confirmed: boolean };
 
 export type SecureBackupGateFailureKind =
   | "network"

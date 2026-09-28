@@ -995,7 +995,11 @@ export type MessageId =
   | "gate.secureBackupSaveRecoveryKeyToFile"
   | "gate.secureBackupRecoveryKeySavedToFile"
   | "gate.secureBackupRecoveryKeySaveFailed"
-  | "gate.secureBackupShowRecoveryKey"
+  | "gate.secureBackupRecoveryKeyLost"
+  | "gate.secureBackupResetRecoveryKey"
+  | "gate.secureBackupResetRecoveryKeyTitle"
+  | "gate.secureBackupResetRecoveryKeyWarning"
+  | "gate.secureBackupResetRecoveryKeyConfirm"
   | "gate.secureBackupSetup"
   | "gate.secureBackupExplicitDisabledTitle"
   | "gate.secureBackupExplicitDisabledCopy"
@@ -2662,7 +2666,11 @@ const en: Catalog = {
   "gate.secureBackupSaveRecoveryKeyToFile": "Save to file…",
   "gate.secureBackupRecoveryKeySavedToFile": "Recovery key saved to file.",
   "gate.secureBackupRecoveryKeySaveFailed": "Could not save the recovery key to a file. Choose a new file name and try again.",
-  "gate.secureBackupShowRecoveryKey": "Show recovery key",
+  "gate.secureBackupRecoveryKeyLost": "Your recovery key was not confirmed as saved, and for security it cannot be shown again. Create a new recovery key to continue.",
+  "gate.secureBackupResetRecoveryKey": "Create new recovery key",
+  "gate.secureBackupResetRecoveryKeyTitle": "Create a new recovery key?",
+  "gate.secureBackupResetRecoveryKeyWarning": "This creates a NEW recovery key for your account. Your previous recovery key and security phrase will stop working, including in other Matrix clients. Save the new key when it is shown.",
+  "gate.secureBackupResetRecoveryKeyConfirm": "Yes, create a new recovery key",
   "gate.secureBackupSetup": "Set up secure backup",
   "gate.secureBackupExplicitDisabledTitle": "Secure backup was disabled",
   "gate.secureBackupExplicitDisabledCopy": "Re-enabling Secure Backup changes this account-wide setting and affects other Matrix clients signed in to this account. Confirm only if you want those clients to use the updated backup.",
@@ -4214,7 +4222,11 @@ const ja: Catalog = {
   "gate.secureBackupSaveRecoveryKeyToFile": "ファイルに保存…",
   "gate.secureBackupRecoveryKeySavedToFile": "リカバリーキーをファイルに保存しました。",
   "gate.secureBackupRecoveryKeySaveFailed": "リカバリーキーをファイルに保存できませんでした。新しいファイル名を選んで、もう一度お試しください。",
-  "gate.secureBackupShowRecoveryKey": "リカバリーキーを表示",
+  "gate.secureBackupRecoveryKeyLost": "リカバリーキーの保存が確認されていません。安全のため、同じキーを再表示することはできません。続行するには新しいリカバリーキーを作成してください。",
+  "gate.secureBackupResetRecoveryKey": "新しいリカバリーキーを作成",
+  "gate.secureBackupResetRecoveryKeyTitle": "新しいリカバリーキーを作成しますか？",
+  "gate.secureBackupResetRecoveryKeyWarning": "アカウントの新しいリカバリーキーを作成します。以前のリカバリーキーとセキュリティフレーズは、他の Matrix クライアントも含めて使えなくなります。新しいキーが表示されたら保存してください。",
+  "gate.secureBackupResetRecoveryKeyConfirm": "新しいリカバリーキーを作成する",
   "gate.secureBackupSetup": "安全なバックアップを設定",
   "gate.secureBackupExplicitDisabledTitle": "安全なバックアップが無効になっています",
   "gate.secureBackupExplicitDisabledCopy": "安全なバックアップを再有効化すると、このアカウント全体の設定が変わり、このアカウントでサインインしている他の Matrix クライアントにも影響します。これらのクライアントで更新後のバックアップを使う場合のみ確認してください。",
