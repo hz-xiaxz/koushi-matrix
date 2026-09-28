@@ -882,6 +882,26 @@ describe("SessionVerificationGate interactions", () => {
     expect(screen.queryByRole("region", { name: "Your recovery key" })).toBeNull();
   });
 
+  test("keeps the reveal while the gate briefly leaves delivery-required", async () => {
+    const snapshot = revealSnapshot(await createDesktopApiFixture().getSnapshot());
+    snapshot.state.domain.secure_backup_gate = { kind: "checking" };
+
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onReceipt={async () => undefined}
+        onSignOut={() => undefined}
+        operations={secureBackupOperations(snapshot, {})}
+      />
+    );
+
+    const reveal = screen.getByRole("region", { name: "Your recovery key" });
+    expect(within(reveal).getByText(SYNTHETIC_RECOVERY_KEY)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "I saved the recovery key" })).toBeTruthy();
+    // The lost-key reset is never offered while the key is still held.
+    expect(screen.queryByRole("button", { name: "Create new recovery key" })).toBeNull();
+  });
+
   test("reports copy and save-to-file failures without leaving the reveal", async () => {
     const snapshot = revealSnapshot(await createDesktopApiFixture().getSnapshot());
     const copyRecoveryKey = vi.fn(async () => {

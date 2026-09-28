@@ -433,6 +433,11 @@ stateDiagram-v2
   `Reenable { confirmed: true }` is admitted only by
   `ExplicitlyDisabledRequiresSetup`; `ResetRecoveryKey { confirmed: true }` is
   admitted only by `RecoveryKeyDeliveryRequired` without a revealed key.
+  Inspection projects `RecoveryKeyDeliveryRequired` from the persisted marker
+  only once `reset_key()` can succeed (server backup present, local backup
+  `Enabled`, trust `Trusted`, secret storage `Enabled`); until local state
+  settles (for example right after a restart) it stays `Checking`, and the SDK
+  reset re-checks the same precondition.
   Initial setup, unconfirmed re-enable or reset, duplicate setup, and stale/forged confirmation produce a typed
   confirmation-required or failed-no-op result before `AccountActor` routing.
   The SDK's fresh server/local/trust inspection remains authoritative and may
@@ -447,8 +452,20 @@ stateDiagram-v2
   request is rejected while a key is revealed. Only
   `ConfirmSecureBackupRecoveryKeySaved` for the matching reveal id leaves the
   reveal: the reducer drops the key and moves the gate to `Checking`, and
-  AccountActor drops its copy, clears the persisted marker, and re-inspects.
-  A stale confirmation is a typed failed no-op. Logout, account switch, and
+  AccountActor clears the persisted marker first, then drops its copy and
+  re-inspects. If the marker cannot be cleared, AccountActor keeps its copy
+  and `SecureBackupRecoveryKeyConfirmFailed` restores the reveal (with its
+  save status) and `RecoveryKeyDeliveryRequired`, so the saved key is never
+  invalidated by a forced reset; the user may confirm again.
+  A stale confirmation is a typed failed no-op. While AccountActor holds a
+  setup key, inspection results keep the gate in `RecoveryKeyDeliveryRequired`,
+  and React renders the reveal whenever `secure_backup_setup` is
+  `recoveryKeyReady`, even if the gate is transiently `Checking`.
+  A failed setup, re-enable, or reset leaves `CreatingBackup` for `Checking`
+  and re-inspects, so the gate re-projects a recoverable state (for example
+  `SetupRequired`, or `RecoveryKeyDeliveryRequired` again after a failed
+  reset). Upload steady-state after `enable()` is observational: a failure
+  there never drops the created key; inspection and monitoring settle it. Logout, account switch, and
   session teardown drop the key. After an interrupted reveal (restart), the
   persisted marker re-enters `RecoveryKeyDeliveryRequired` without a key.
   The unconfirmed key is never re-shown or re-exported (the fork's
@@ -456,8 +473,10 @@ stateDiagram-v2
   `recovery().recover()` rejects). The user must explicitly confirm creating a
   NEW recovery key; `ResetRecoveryKey { confirmed: true }` calls upstream
   `recovery().reset_key()`, the previous key stops working, and the new key
-  enters the same reveal. Only one key is revealed at a time:
-  setup and passphrase change are rejected while either awaits confirmation.
+  enters the same reveal. Only one key flow runs at a time: setup (including
+  re-enable and reset) and passphrase change are each rejected while either is
+  in flight (`SettingUp`/`Changing`) or awaits confirmation
+  (`RecoveryKeyReady`/`Changed`), because AccountActor holds a single copy.
   Passphrase change reveals its new key in
   `SecureBackupPassphraseChangeState::Changed` with the same copy/save/confirm
   rules, without touching the gate.
@@ -470,8 +489,11 @@ stateDiagram-v2
     SetupRequired --> SetupRequired: Reenable(any) / failed-no-op, no actor effect
     CreatingBackup --> CreatingBackup: duplicate intent / failed-no-op, no actor effect
     CreatingBackup --> RecoveryKeyDeliveryRequired: setup succeeded / reveal key on screen
+    CreatingBackup --> Checking: setup, re-enable, or reset failed / SecureBackupSetupFailed, re-inspect
     RecoveryKeyDeliveryRequired --> RecoveryKeyDeliveryRequired: copy or save to file / reveal stays
     RecoveryKeyDeliveryRequired --> Checking: ConfirmSecureBackupRecoveryKeySaved(reveal id) / drop key, clear marker, inspect
+    Checking --> RecoveryKeyDeliveryRequired: SecureBackupRecoveryKeyConfirmFailed(reveal id) / marker clear failed, restore reveal
+    Checking --> RecoveryKeyDeliveryRequired: inspection with marker [reset_key() can succeed]
     RecoveryKeyDeliveryRequired --> RecoveryKeyDeliveryRequired: InitialSetup or ResetRecoveryKey(unconfirmed) / typed reject, no actor effect
     RecoveryKeyDeliveryRequired --> CreatingBackup: ResetRecoveryKey(confirmed) without a revealed key / reset_key, reveal NEW key
 ```
@@ -3688,23 +3710,21 @@ stateDiagram-v2
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> SettingUp: SecureBackupSetupRequested [Ready]
-    Enabled --> SettingUp: SecureBackupSetupRequested [Ready]
-    Failed --> SettingUp: SecureBackupSetupRequested [Ready]
+    Idle --> SettingUp: SecureBackupSetupRequested [Ready, no passphrase change Changing/Changed]
+    Enabled --> SettingUp: SecureBackupSetupRequested [Ready, no passphrase change Changing/Changed]
+    Failed --> SettingUp: SecureBackupSetupRequested [Ready, no passphrase change Changing/Changed]
     SettingUp --> RecoveryKeyReady: SecureBackupRecoveryKeyReady [matching request_id]
-    RecoveryKeyReady --> RecoveryKeyReady: SecureBackupRecoveryKeyReady [matching request_id]
-    SettingUp --> Enabled: SecureBackupSetupEnabled [matching request_id]
-    RecoveryKeyReady --> Enabled: SecureBackupSetupEnabled [matching request_id]
     SettingUp --> Failed: SecureBackupSetupFailed [matching request_id]
-    RecoveryKeyReady --> Failed: SecureBackupSetupFailed [matching request_id]
+    RecoveryKeyReady --> Enabled: SecureBackupRecoveryKeyConfirmed [matching reveal id]
+    Enabled --> RecoveryKeyReady: SecureBackupRecoveryKeyConfirmFailed [matching reveal id, no other key flow]
 ```
 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> Changing: SecureBackupPassphraseChangeRequested [Ready]
-    Changed --> Changing: SecureBackupPassphraseChangeRequested [Ready]
-    Failed --> Changing: SecureBackupPassphraseChangeRequested [Ready]
+    Idle --> Changing: SecureBackupPassphraseChangeRequested [Ready, no setup SettingUp/RecoveryKeyReady]
+    Failed --> Changing: SecureBackupPassphraseChangeRequested [Ready, no setup SettingUp/RecoveryKeyReady]
+    Changed --> Idle: SecureBackupRecoveryKeyConfirmed [matching reveal id]
     Changing --> Changed: SecureBackupPassphraseChanged [matching request_id]
     Changing --> Failed: SecureBackupPassphraseChangeFailed [matching request_id]
 ```
@@ -3717,9 +3737,10 @@ stateDiagram-v2
   Element clients use. Koushi must not wrap the encrypted Megolm session data
   in a custom JSON/archive format, and must not parse/decrypt the export file
   only to derive UI metadata.
-- Secure-backup setup and passphrase-change state may report recovery-key
-  delivery status, but recovery-key material itself never reaches reducer state,
-  DTO snapshots, React state, logs, QA tokens, or issue comments.
+- Secure-backup setup and passphrase-change state report recovery-key
+  delivery status. Recovery-key material reaches reducer state and the live DTO
+  snapshot only in the reveal states (`RecoveryKeyReady`/`Changed`, #927);
+  it never reaches React component state, logs, QA tokens, or issue comments.
 
 QR login:
 

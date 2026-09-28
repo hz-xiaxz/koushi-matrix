@@ -406,6 +406,16 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::SecureBackupRecoveryKeyConfirmed { reveal_request_id } => {
             e2ee::handle_secure_backup_recovery_key_confirmed(state, reveal_request_id)
         }
+        AppAction::SecureBackupRecoveryKeyConfirmFailed {
+            reveal_request_id,
+            recovery_key,
+            delivery,
+        } => e2ee::handle_secure_backup_recovery_key_confirm_failed(
+            state,
+            reveal_request_id,
+            recovery_key,
+            delivery,
+        ),
         AppAction::SecureBackupPassphraseChangeFailed { request_id, kind } => {
             e2ee::handle_secure_backup_passphrase_change_failed(state, request_id, kind)
         }

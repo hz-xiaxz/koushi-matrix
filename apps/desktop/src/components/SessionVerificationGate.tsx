@@ -383,6 +383,8 @@ export function SessionVerificationGate({
   };
   const heading = authenticationInvalidated
     ? t("gate.sessionExpired")
+    : secureBackupGateRequired && revealedSetupKey !== null
+    ? t("gate.secureBackupDeliveryTitle")
     : secureBackupGateRequired
     ? secureBackupGateHeading(secureBackupGate)
     : checking
@@ -393,8 +395,10 @@ export function SessionVerificationGate({
           ? t("gate.verifying")
           : t("gate.title");
   const secureBackupFailureKind = secureBackupGateFailure(secureBackupGate);
-  const secureBackupRevealingKey =
-    secureBackupGate.kind === "recoveryKeyDeliveryRequired" && revealedSetupKey !== null;
+  // The reveal follows the Rust-held key, not the gate: a transient gate
+  // projection (for example `checking` after a retry) must not hide a key
+  // that is still awaiting the saved confirmation.
+  const secureBackupRevealingKey = revealedSetupKey !== null;
   const secureBackupNeedsRecovery =
     secureBackupGate.kind === "existingBackupNeedsRecovery" ||
     secureBackupGate.kind === "secureStorageIncomplete";

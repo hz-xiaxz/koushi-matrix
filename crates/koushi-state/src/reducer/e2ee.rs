@@ -844,16 +844,18 @@ pub(crate) fn handle_room_key_import_failed(
     e2ee_key_management_events()
 }
 
-/// At most one recovery key is revealed at a time (#927): AccountActor holds a
-/// single copy, so neither setup nor passphrase change may start while either
-/// flow still awaits the saved confirmation.
-fn recovery_key_revealed(state: &AppState) -> bool {
+/// At most one recovery key flow runs at a time (#927): AccountActor holds a
+/// single revealed-key copy, so setup (including re-enable and key reset) and
+/// passphrase change exclude each other from admission until the revealed
+/// key is confirmed, and also while either is still in flight.
+fn recovery_key_flow_busy(state: &AppState) -> bool {
     matches!(
         state.e2ee_trust.key_management.secure_backup_setup,
-        SecureBackupSetupState::RecoveryKeyReady { .. }
+        SecureBackupSetupState::SettingUp { .. } | SecureBackupSetupState::RecoveryKeyReady { .. }
     ) || matches!(
         state.e2ee_trust.key_management.passphrase_change,
-        SecureBackupPassphraseChangeState::Changed { .. }
+        SecureBackupPassphraseChangeState::Changing { .. }
+            | SecureBackupPassphraseChangeState::Changed { .. }
     )
 }
 
@@ -862,13 +864,8 @@ pub(crate) fn handle_secure_backup_setup_requested(
     request_id: u64,
     intent: crate::state::SecureBackupSetupIntent,
 ) -> Vec<AppEffect> {
-    // A revealed key must be confirmed before another setup may replace it.
     if !is_session_ready(state)
-        || recovery_key_revealed(state)
-        || matches!(
-            state.e2ee_trust.key_management.secure_backup_setup,
-            SecureBackupSetupState::SettingUp { .. }
-        )
+        || recovery_key_flow_busy(state)
         || !matches!(
             intent.admission(&state.secure_backup_gate),
             crate::state::SecureBackupSetupAdmission::Allowed
@@ -925,14 +922,7 @@ pub(crate) fn handle_secure_backup_passphrase_change_requested(
     state: &mut AppState,
     request_id: u64,
 ) -> Vec<AppEffect> {
-    // A revealed key must be confirmed before another change may replace it.
-    if !is_session_ready(state)
-        || recovery_key_revealed(state)
-        || matches!(
-            state.e2ee_trust.key_management.passphrase_change,
-            SecureBackupPassphraseChangeState::Changing { .. }
-        )
-    {
+    if !is_session_ready(state) || recovery_key_flow_busy(state) {
         return Vec::new();
     }
     state.e2ee_trust.key_management.passphrase_change =
@@ -1038,6 +1028,39 @@ pub(crate) fn handle_secure_backup_recovery_key_confirmed(
         return e2ee_key_management_events();
     }
     Vec::new()
+}
+
+/// Restores the setup reveal after AccountActor failed to clear the
+/// persisted delivery marker. Applies only while the matching confirmation
+/// is the latest setup transition and no other key flow has started.
+pub(crate) fn handle_secure_backup_recovery_key_confirm_failed(
+    state: &mut AppState,
+    reveal_request_id: u64,
+    recovery_key: crate::state::RecoveryKeyMaterial,
+    delivery: crate::state::RecoveryKeyDeliveryState,
+) -> Vec<AppEffect> {
+    if !is_session_ready(state)
+        || recovery_key_flow_busy(state)
+        || !matches!(
+            state.e2ee_trust.key_management.secure_backup_setup,
+            SecureBackupSetupState::Enabled { request_id } if request_id == reveal_request_id
+        )
+    {
+        return Vec::new();
+    }
+    state.e2ee_trust.key_management.secure_backup_setup =
+        SecureBackupSetupState::RecoveryKeyReady {
+            request_id: reveal_request_id,
+            recovery_key,
+            delivery,
+        };
+    let mut effects = e2ee_key_management_events();
+    if state.secure_backup_gate != crate::state::SecureBackupGateState::RecoveryKeyDeliveryRequired
+    {
+        state.secure_backup_gate = crate::state::SecureBackupGateState::RecoveryKeyDeliveryRequired;
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SessionChanged));
+    }
+    effects
 }
 
 pub(crate) fn handle_secure_backup_passphrase_change_failed(

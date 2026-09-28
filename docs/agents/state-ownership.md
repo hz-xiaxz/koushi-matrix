@@ -1245,7 +1245,9 @@ normal QA-title mode and cannot change product title semantics.
   copy used by `SaveSecureBackupRecoveryKey`. React renders the key from the
   snapshot (TS mirror `recovery_key: string`) and never copies it into state,
   refs, or storage. Copy and the optional save never leave the reveal; only
-  `ConfirmSecureBackupRecoveryKeySaved` does. The privacy contract is
+  `ConfirmSecureBackupRecoveryKeySaved` does. If AccountActor cannot then
+  clear the persisted delivery marker it keeps its copy and
+  `SecureBackupRecoveryKeyConfirmFailed` restores the setup reveal. The privacy contract is
   [engineering rule 11](../policies/engineering-rules.md); the gate
   transitions are in the [state machines](../architecture/state-machine.md).
 - Secure-backup setup/re-enable confirmation policy is Rust-owned. The closed

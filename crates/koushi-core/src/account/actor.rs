@@ -296,6 +296,10 @@ pub(crate) enum AccountMessage {
     ConfigureSecureBackupDeferWait {
         wait: Duration,
     },
+    #[cfg(test)]
+    SeedRevealedRecoveryKey {
+        revealed: super::recovery_backup::RevealedRecoveryKey,
+    },
     CheckCurrentDeviceTrust,
     InspectSecureBackup,
     SyncConnectivityChanged {
@@ -615,6 +619,7 @@ pub(crate) struct SecureBackupOwnersSnapshot {
     pub(super) has_defer_deadline: bool,
     pub(super) trust_generation: u64,
     pub(super) defer_serial: u64,
+    pub(super) holds_revealed_recovery_key: bool,
 }
 
 /// Handle to the AccountActor background task.
@@ -2274,11 +2279,16 @@ impl AccountActor {
                         has_defer_deadline: self.secure_backup_defer_deadline_task.is_some(),
                         trust_generation: self.trust_generation,
                         defer_serial: self.secure_backup_defer_serial,
+                        holds_revealed_recovery_key: self.revealed_recovery_key.is_some(),
                     });
                 }
                 #[cfg(test)]
                 AccountMessage::ConfigureSecureBackupDeferWait { wait } => {
                     self.secure_backup_connectivity_wait = wait;
+                }
+                #[cfg(test)]
+                AccountMessage::SeedRevealedRecoveryKey { revealed } => {
+                    self.revealed_recovery_key = Some(revealed);
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::InspectSyncOwners { response } => {
