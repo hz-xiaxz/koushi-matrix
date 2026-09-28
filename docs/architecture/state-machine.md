@@ -2970,7 +2970,9 @@ stateDiagram-v2
   `Opening`/`Open` key (accepted main send from anchored history, room switch,
   subscription failure, replacement, live fallback), AppActor unsubscribes
   that `TimelineKind::Focused` key, which drops its actor and room lease, and
-  drops a pending main-pane navigation for the same key. Unsubscribe is
+  drops a pending main-pane navigation for the same key; one without an
+  event-navigation owner (date jump, `OpenAnchoredTimeline`) settles
+  `Superseded`, an owned one is settled by its owner. Unsubscribe is
   idempotent, so paths that also unsubscribe explicitly stay correct. Account
   teardown (logout, account switch) is excluded because it drops the whole
   timeline manager. `ReturnMainTimelineToLive` leaves `focused_context`, and so

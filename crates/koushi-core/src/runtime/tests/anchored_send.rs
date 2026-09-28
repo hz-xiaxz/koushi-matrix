@@ -223,6 +223,77 @@ async fn room_switch_releases_the_focused_timeline() {
 }
 
 #[tokio::test]
+async fn room_switch_during_a_loading_date_jump_settles_the_jump_superseded() {
+    // Releasing the focused timeline drops the jump's pending navigation, so
+    // Core must publish its terminal instead of leaving the waiter to time out.
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let mut state = selected_room_state();
+    reduce(
+        &mut state,
+        AppAction::OpenFocusedContext {
+            room_id: ROOM.to_owned(),
+            event_id: EVENT.to_owned(),
+        },
+    );
+    let (
+        mut actor,
+        _command_tx,
+        action_tx,
+        mut account_rx,
+        mut event_rx,
+        mut snapshot_rx,
+        _navigation_projection_rx,
+        _event_navigation_prepared_tx,
+        _focused_projection_tx,
+    ) = app_actor_event_navigation_fixture(data_dir.path(), state);
+    let jump_request_id = request(7);
+    let key = focused_key(ROOM, EVENT);
+    actor.pending_focused_navigation = Some(PendingFocusedNavigation {
+        projection_request_id: jump_request_id,
+        key: key.clone(),
+        room_id: ROOM.to_owned(),
+        event_id: EVENT.to_owned(),
+        allow_live_fallback: true,
+        generation: None,
+    });
+    actor.pending_select.insert(
+        OTHER_ROOM.to_owned(),
+        std::collections::VecDeque::from([request(8)]),
+    );
+    let actor_task = tokio::spawn(actor.run());
+
+    action_tx
+        .send(vec![AppAction::SelectRoom {
+            room_id: OTHER_ROOM.to_owned(),
+        }])
+        .await
+        .expect("room switch action");
+
+    wait_for_snapshot(&mut snapshot_rx, |state| {
+        state.navigation.active_room_id.as_deref() == Some(OTHER_ROOM)
+    })
+    .await;
+    expect_unsubscribe(&mut account_rx, &key).await;
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if matches!(
+                event_rx.recv().await.expect("core event"),
+                CoreEvent::IntentLifecycle {
+                    request_id,
+                    outcome: IntentOutcome::BenignNoOp(IntentNoOpReason::Superseded),
+                    ..
+                } if request_id == jump_request_id
+            ) {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("the dropped date jump must settle Superseded");
+    actor_task.abort();
+}
+
+#[tokio::test]
 async fn accepted_send_cancels_a_loading_date_jump_before_its_projection_lands() {
     // Jump-to-date with a cached target: Core opened the focused timeline and
     // waits for its projection ACK before EnterAnchoredTimeline. The main pane

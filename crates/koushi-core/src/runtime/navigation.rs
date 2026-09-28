@@ -1091,14 +1091,21 @@ impl AppActor {
     /// #1037/#1046: release a `TimelineKind::Focused` actor (and its room
     /// lease) whose focused context the reducer closed or replaced. A pending
     /// main-pane navigation for the same key can no longer commit, so it is
-    /// dropped too. Unsubscribe is idempotent in the timeline manager.
+    /// dropped too; one without an event-navigation owner (date jump,
+    /// `OpenAnchoredTimeline`) settles `Superseded` here, while an owned one
+    /// is settled by its event-navigation owner. Unsubscribe is idempotent in
+    /// the timeline manager.
     pub(super) async fn release_focused_timeline(&mut self, key: TimelineKey) {
-        if self
+        if let Some(pending) = self
             .pending_focused_navigation
-            .as_ref()
-            .is_some_and(|pending| pending.key == key)
+            .take_if(|pending| pending.key == key)
+            && pending.generation.is_none()
         {
-            self.pending_focused_navigation = None;
+            self.emit(CoreEvent::IntentLifecycle {
+                request_id: pending.projection_request_id,
+                outcome: IntentOutcome::BenignNoOp(IntentNoOpReason::Superseded),
+                published_generation: self.state_generation,
+            });
         }
         let request_id = self.next_internal_request_id();
         self.send_timeline_command_or_fail(
