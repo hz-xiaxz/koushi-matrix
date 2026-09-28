@@ -15,13 +15,15 @@ fn request(sequence: u64) -> RequestId {
 }
 
 fn ready_state(user_id: &str) -> AppState {
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(SessionInfo {
-        homeserver: "https://example.invalid".to_owned(),
-        user_id: user_id.to_owned(),
-        device_id: "DEVICE".to_owned(),
-        authentication_method: Default::default(),
-    });
+    let state = AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://example.invalid".to_owned(),
+            user_id: user_id.to_owned(),
+            device_id: "DEVICE".to_owned(),
+            authentication_method: Default::default(),
+        }),
+        ..Default::default()
+    };
     state
 }
 

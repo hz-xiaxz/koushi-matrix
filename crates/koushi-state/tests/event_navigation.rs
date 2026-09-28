@@ -122,10 +122,12 @@ fn current_missing_target_uses_rust_owned_source_policy_and_new_intent_clears_fa
 
 #[test]
 fn event_navigation_is_transient_when_navigation_is_persisted() {
-    let mut navigation = koushi_state::NavigationState::default();
-    navigation.event_navigation = EventNavigationState::Opening {
-        generation: 7,
-        source: EventNavigationSource::Search,
+    let navigation = koushi_state::NavigationState {
+        event_navigation: EventNavigationState::Opening {
+            generation: 7,
+            source: EventNavigationSource::Search,
+        },
+        ..Default::default()
     };
 
     let persisted = navigation.persistence_view();

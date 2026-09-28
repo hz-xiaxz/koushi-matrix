@@ -4,13 +4,15 @@ use koushi_state::{
 };
 
 fn ready_state() -> AppState {
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(SessionInfo {
-        homeserver: "https://matrix.example.invalid".to_owned(),
-        user_id: "@attention:example.invalid".to_owned(),
-        device_id: "ATTENTION".to_owned(),
-        authentication_method: SessionAuthenticationMethod::Unknown,
-    });
+    let mut state = AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://matrix.example.invalid".to_owned(),
+            user_id: "@attention:example.invalid".to_owned(),
+            device_id: "ATTENTION".to_owned(),
+            authentication_method: SessionAuthenticationMethod::Unknown,
+        }),
+        ..Default::default()
+    };
     state.settings.values = SettingsValues::default();
     state
 }

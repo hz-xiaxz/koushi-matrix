@@ -9,23 +9,25 @@ use std::collections::BTreeSet;
 #[test]
 fn activity_resolution_cannot_succeed_while_room_placeholders_remain() {
     let generation = 7;
-    let mut state = AppState::default();
-    state.activity = ActivityState::Open {
-        active_tab: ActivityTab::Unread,
-        recent: ActivityStream::default(),
-        unread: ActivityStream {
-            rows: vec![ActivityRow {
-                kind: ActivityRowKind::RoomUnread,
-                room_id: "!room:example.invalid".to_owned(),
-                ..ActivityRow::default()
-            }],
-            next_batch: None,
-            resolution: ActivityResolutionState::Resolving {
-                generation,
-                unresolved_room_count: 1,
+    let state = AppState {
+        activity: ActivityState::Open {
+            active_tab: ActivityTab::Unread,
+            recent: ActivityStream::default(),
+            unread: ActivityStream {
+                rows: vec![ActivityRow {
+                    kind: ActivityRowKind::RoomUnread,
+                    room_id: "!room:example.invalid".to_owned(),
+                    ..ActivityRow::default()
+                }],
+                next_batch: None,
+                resolution: ActivityResolutionState::Resolving {
+                    generation,
+                    unresolved_room_count: 1,
+                },
             },
+            mark_read: Default::default(),
         },
-        mark_read: Default::default(),
+        ..Default::default()
     };
 
     assert_eq!(
@@ -44,19 +46,21 @@ fn activity_resolution_cannot_succeed_while_room_placeholders_remain() {
 #[test]
 fn activity_resolution_rows_are_generation_guarded() {
     let generation = 7;
-    let mut state = AppState::default();
-    state.activity = ActivityState::Open {
-        active_tab: ActivityTab::Unread,
-        recent: ActivityStream::default(),
-        unread: ActivityStream {
-            rows: Vec::new(),
-            next_batch: None,
-            resolution: ActivityResolutionState::Resolving {
-                generation,
-                unresolved_room_count: 1,
+    let state = AppState {
+        activity: ActivityState::Open {
+            active_tab: ActivityTab::Unread,
+            recent: ActivityStream::default(),
+            unread: ActivityStream {
+                rows: Vec::new(),
+                next_batch: None,
+                resolution: ActivityResolutionState::Resolving {
+                    generation,
+                    unresolved_room_count: 1,
+                },
             },
+            mark_read: Default::default(),
         },
-        mark_read: Default::default(),
+        ..Default::default()
     };
     let row = ActivityRow::event(
         "!room:example.invalid".to_owned(),
@@ -118,42 +122,44 @@ fn activity_resolution_request_batch_has_an_account_wide_cap() {
 
 #[test]
 fn activity_projection_ignores_plain_unread_count_for_activity_unread() {
-    let mut state = AppState::default();
-    state.rooms = vec![RoomSummary {
-        room_id: "!room:example.invalid".to_owned(),
-        display_name: "Room".to_owned(),
-        display_label: "Room".to_owned(),
-        original_display_label: "Room".to_owned(),
-        avatar: None,
-        is_dm: false,
-        dm_user_ids: Vec::new(),
-        tags: RoomTags::default(),
-        unread_count: 3,
-        notification_count: 0,
-        highlight_count: 0,
-        marked_unread: false,
-        recency_stamp: Some(42),
-        conversation_activity: Some(ConversationActivity {
-            timestamp_ms: 42,
-            source: ConversationActivitySource::Message,
-        }),
-        latest_event: Some(RoomLatestEventSummary {
-            event_id: "$latest:example.invalid".to_owned(),
-            relation_type: None,
-            relation_event_id: None,
-            thread_root_event_id: None,
-            sender_id: Some("@sender:example.invalid".to_owned()),
-            sender_label: Some("Sender".to_owned()),
-            sender_avatar: None,
-            preview: Some("body".to_owned()),
-            timestamp_ms: 42,
-            is_redacted: false,
-        }),
-        parent_space_ids: Vec::new(),
-        dm_space_ids: Vec::new(),
-        is_encrypted: false,
-        joined_members: 2,
-    }];
+    let state = AppState {
+        rooms: vec![RoomSummary {
+            room_id: "!room:example.invalid".to_owned(),
+            display_name: "Room".to_owned(),
+            display_label: "Room".to_owned(),
+            original_display_label: "Room".to_owned(),
+            avatar: None,
+            is_dm: false,
+            dm_user_ids: Vec::new(),
+            tags: RoomTags::default(),
+            unread_count: 3,
+            notification_count: 0,
+            highlight_count: 0,
+            marked_unread: false,
+            recency_stamp: Some(42),
+            conversation_activity: Some(ConversationActivity {
+                timestamp_ms: 42,
+                source: ConversationActivitySource::Message,
+            }),
+            latest_event: Some(RoomLatestEventSummary {
+                event_id: "$latest:example.invalid".to_owned(),
+                relation_type: None,
+                relation_event_id: None,
+                thread_root_event_id: None,
+                sender_id: Some("@sender:example.invalid".to_owned()),
+                sender_label: Some("Sender".to_owned()),
+                sender_avatar: None,
+                preview: Some("body".to_owned()),
+                timestamp_ms: 42,
+                is_redacted: false,
+            }),
+            parent_space_ids: Vec::new(),
+            dm_space_ids: Vec::new(),
+            is_encrypted: false,
+            joined_members: 2,
+        }],
+        ..Default::default()
+    };
 
     let mut projection = ActivityProjection::default();
     let (recent, unread, _excluded_room_ids) = projection.snapshot(&state);
@@ -386,8 +392,10 @@ fn activity_projection_bounds_recent_history_to_newest_observed_rows() {
 
 #[test]
 fn activity_projection_keeps_old_unread_rows_outside_recent_window() {
-    let mut state = AppState::default();
-    state.rooms = vec![unread_diagnostic_room("!room:example.invalid")];
+    let state = AppState {
+        rooms: vec![unread_diagnostic_room("!room:example.invalid")],
+        ..Default::default()
+    };
 
     let rows = (0..=ACTIVITY_RECENT_MAX_ROWS)
         .map(|index| {
@@ -425,28 +433,30 @@ fn activity_projection_keeps_old_unread_rows_outside_recent_window() {
 
 #[test]
 fn activity_projection_ignores_plain_unread_count_for_ingested_event_rows() {
-    let mut state = AppState::default();
-    state.rooms = vec![RoomSummary {
-        room_id: "!room:example.invalid".to_owned(),
-        display_name: "Room".to_owned(),
-        display_label: "Room".to_owned(),
-        original_display_label: "Room".to_owned(),
-        avatar: None,
-        is_dm: false,
-        dm_user_ids: Vec::new(),
-        tags: RoomTags::default(),
-        unread_count: 3,
-        notification_count: 0,
-        highlight_count: 0,
-        marked_unread: false,
-        recency_stamp: Some(42),
-        conversation_activity: None,
-        latest_event: None,
-        parent_space_ids: Vec::new(),
-        dm_space_ids: Vec::new(),
-        is_encrypted: false,
-        joined_members: 2,
-    }];
+    let state = AppState {
+        rooms: vec![RoomSummary {
+            room_id: "!room:example.invalid".to_owned(),
+            display_name: "Room".to_owned(),
+            display_label: "Room".to_owned(),
+            original_display_label: "Room".to_owned(),
+            avatar: None,
+            is_dm: false,
+            dm_user_ids: Vec::new(),
+            tags: RoomTags::default(),
+            unread_count: 3,
+            notification_count: 0,
+            highlight_count: 0,
+            marked_unread: false,
+            recency_stamp: Some(42),
+            conversation_activity: None,
+            latest_event: None,
+            parent_space_ids: Vec::new(),
+            dm_space_ids: Vec::new(),
+            is_encrypted: false,
+            joined_members: 2,
+        }],
+        ..Default::default()
+    };
 
     let mut projection = ActivityProjection::default();
     projection.ingest(vec![ActivityRow::event(
@@ -472,42 +482,44 @@ fn activity_projection_ignores_plain_unread_count_for_ingested_event_rows() {
 
 #[test]
 fn activity_projection_skips_recent_rows_for_mentions_mode_without_highlight() {
-    let mut state = AppState::default();
-    state.rooms = vec![RoomSummary {
-        room_id: "!room:example.invalid".to_owned(),
-        display_name: "Room".to_owned(),
-        display_label: "Room".to_owned(),
-        original_display_label: "Room".to_owned(),
-        avatar: None,
-        is_dm: false,
-        dm_user_ids: Vec::new(),
-        tags: RoomTags::default(),
-        unread_count: 1,
-        notification_count: 1,
-        highlight_count: 0,
-        marked_unread: false,
-        recency_stamp: Some(42),
-        conversation_activity: Some(ConversationActivity {
-            timestamp_ms: 42,
-            source: ConversationActivitySource::Message,
-        }),
-        latest_event: Some(RoomLatestEventSummary {
-            event_id: "$latest:example.invalid".to_owned(),
-            relation_type: None,
-            relation_event_id: None,
-            thread_root_event_id: None,
-            sender_id: Some("@sender:example.invalid".to_owned()),
-            sender_label: Some("Sender".to_owned()),
-            sender_avatar: None,
-            preview: Some("body".to_owned()),
-            timestamp_ms: 42,
-            is_redacted: false,
-        }),
-        parent_space_ids: Vec::new(),
-        dm_space_ids: Vec::new(),
-        is_encrypted: false,
-        joined_members: 2,
-    }];
+    let mut state = AppState {
+        rooms: vec![RoomSummary {
+            room_id: "!room:example.invalid".to_owned(),
+            display_name: "Room".to_owned(),
+            display_label: "Room".to_owned(),
+            original_display_label: "Room".to_owned(),
+            avatar: None,
+            is_dm: false,
+            dm_user_ids: Vec::new(),
+            tags: RoomTags::default(),
+            unread_count: 1,
+            notification_count: 1,
+            highlight_count: 0,
+            marked_unread: false,
+            recency_stamp: Some(42),
+            conversation_activity: Some(ConversationActivity {
+                timestamp_ms: 42,
+                source: ConversationActivitySource::Message,
+            }),
+            latest_event: Some(RoomLatestEventSummary {
+                event_id: "$latest:example.invalid".to_owned(),
+                relation_type: None,
+                relation_event_id: None,
+                thread_root_event_id: None,
+                sender_id: Some("@sender:example.invalid".to_owned()),
+                sender_label: Some("Sender".to_owned()),
+                sender_avatar: None,
+                preview: Some("body".to_owned()),
+                timestamp_ms: 42,
+                is_redacted: false,
+            }),
+            parent_space_ids: Vec::new(),
+            dm_space_ids: Vec::new(),
+            is_encrypted: false,
+            joined_members: 2,
+        }],
+        ..Default::default()
+    };
     state.room_notification_settings.insert(
         "!room:example.invalid".to_owned(),
         RoomNotificationSettings {
@@ -536,50 +548,52 @@ fn activity_projection_skips_recent_rows_for_mentions_mode_without_highlight() {
 
 #[test]
 fn activity_projection_context_label_uses_space_and_room_names() {
-    let mut state = AppState::default();
-    state.spaces = vec![SpaceSummary {
-        space_id: "!space:example.invalid".to_owned(),
-        raw_name: None,
-        display_name: "Science".to_owned(),
-        avatar: None,
-        join_rule: None,
-        child_room_ids: vec!["!room:example.invalid".to_owned()],
-    }];
-    state.rooms = vec![RoomSummary {
-        room_id: "!room:example.invalid".to_owned(),
-        display_name: "Room".to_owned(),
-        display_label: "Papers".to_owned(),
-        original_display_label: "Room".to_owned(),
-        avatar: None,
-        is_dm: false,
-        dm_user_ids: Vec::new(),
-        tags: RoomTags::default(),
-        unread_count: 0,
-        notification_count: 0,
-        highlight_count: 0,
-        marked_unread: false,
-        recency_stamp: Some(42),
-        conversation_activity: Some(ConversationActivity {
-            timestamp_ms: 42,
-            source: ConversationActivitySource::Message,
-        }),
-        latest_event: Some(RoomLatestEventSummary {
-            event_id: "$latest:example.invalid".to_owned(),
-            relation_type: None,
-            relation_event_id: None,
-            thread_root_event_id: None,
-            sender_id: Some("@sender:example.invalid".to_owned()),
-            sender_label: Some("Sender".to_owned()),
-            sender_avatar: None,
-            preview: Some("body".to_owned()),
-            timestamp_ms: 42,
-            is_redacted: false,
-        }),
-        parent_space_ids: vec!["!space:example.invalid".to_owned()],
-        dm_space_ids: Vec::new(),
-        is_encrypted: false,
-        joined_members: 2,
-    }];
+    let state = AppState {
+        spaces: vec![SpaceSummary {
+            space_id: "!space:example.invalid".to_owned(),
+            raw_name: None,
+            display_name: "Science".to_owned(),
+            avatar: None,
+            join_rule: None,
+            child_room_ids: vec!["!room:example.invalid".to_owned()],
+        }],
+        rooms: vec![RoomSummary {
+            room_id: "!room:example.invalid".to_owned(),
+            display_name: "Room".to_owned(),
+            display_label: "Papers".to_owned(),
+            original_display_label: "Room".to_owned(),
+            avatar: None,
+            is_dm: false,
+            dm_user_ids: Vec::new(),
+            tags: RoomTags::default(),
+            unread_count: 0,
+            notification_count: 0,
+            highlight_count: 0,
+            marked_unread: false,
+            recency_stamp: Some(42),
+            conversation_activity: Some(ConversationActivity {
+                timestamp_ms: 42,
+                source: ConversationActivitySource::Message,
+            }),
+            latest_event: Some(RoomLatestEventSummary {
+                event_id: "$latest:example.invalid".to_owned(),
+                relation_type: None,
+                relation_event_id: None,
+                thread_root_event_id: None,
+                sender_id: Some("@sender:example.invalid".to_owned()),
+                sender_label: Some("Sender".to_owned()),
+                sender_avatar: None,
+                preview: Some("body".to_owned()),
+                timestamp_ms: 42,
+                is_redacted: false,
+            }),
+            parent_space_ids: vec!["!space:example.invalid".to_owned()],
+            dm_space_ids: Vec::new(),
+            is_encrypted: false,
+            joined_members: 2,
+        }],
+        ..Default::default()
+    };
 
     let mut projection = ActivityProjection::default();
     let (recent, _unread, _excluded_room_ids) = projection.snapshot(&state);
@@ -768,39 +782,41 @@ fn room_unread_placeholder_guards_latest_identity_and_timestamp() {
 
 #[test]
 fn activity_projection_does_not_append_annotation_latest_event() {
-    let mut state = AppState::default();
-    state.rooms = vec![RoomSummary {
-        room_id: "!room:example.invalid".to_owned(),
-        display_name: "Room".to_owned(),
-        display_label: "Room".to_owned(),
-        original_display_label: "Room".to_owned(),
-        avatar: None,
-        is_dm: false,
-        dm_user_ids: Vec::new(),
-        tags: RoomTags::default(),
-        unread_count: 0,
-        notification_count: 0,
-        highlight_count: 0,
-        marked_unread: false,
-        recency_stamp: Some(42),
-        conversation_activity: None,
-        latest_event: Some(RoomLatestEventSummary {
-            event_id: "$reaction:example.invalid".to_owned(),
-            relation_type: Some("m.annotation".to_owned()),
-            relation_event_id: Some("$target:example.invalid".to_owned()),
-            thread_root_event_id: None,
-            sender_id: Some("@sender:example.invalid".to_owned()),
-            sender_label: Some("Sender".to_owned()),
-            sender_avatar: None,
-            preview: None,
-            timestamp_ms: 42,
-            is_redacted: false,
-        }),
-        parent_space_ids: Vec::new(),
-        dm_space_ids: Vec::new(),
-        is_encrypted: false,
-        joined_members: 2,
-    }];
+    let state = AppState {
+        rooms: vec![RoomSummary {
+            room_id: "!room:example.invalid".to_owned(),
+            display_name: "Room".to_owned(),
+            display_label: "Room".to_owned(),
+            original_display_label: "Room".to_owned(),
+            avatar: None,
+            is_dm: false,
+            dm_user_ids: Vec::new(),
+            tags: RoomTags::default(),
+            unread_count: 0,
+            notification_count: 0,
+            highlight_count: 0,
+            marked_unread: false,
+            recency_stamp: Some(42),
+            conversation_activity: None,
+            latest_event: Some(RoomLatestEventSummary {
+                event_id: "$reaction:example.invalid".to_owned(),
+                relation_type: Some("m.annotation".to_owned()),
+                relation_event_id: Some("$target:example.invalid".to_owned()),
+                thread_root_event_id: None,
+                sender_id: Some("@sender:example.invalid".to_owned()),
+                sender_label: Some("Sender".to_owned()),
+                sender_avatar: None,
+                preview: None,
+                timestamp_ms: 42,
+                is_redacted: false,
+            }),
+            parent_space_ids: Vec::new(),
+            dm_space_ids: Vec::new(),
+            is_encrypted: false,
+            joined_members: 2,
+        }],
+        ..Default::default()
+    };
 
     let (recent, unread, _excluded) = ActivityProjection::default().snapshot(&state);
 

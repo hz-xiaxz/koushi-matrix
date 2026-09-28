@@ -93,8 +93,10 @@ fn session_info() -> SessionInfo {
 }
 
 fn ready_state() -> AppState {
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(session_info());
+    let state = AppState {
+        session: SessionState::Ready(session_info()),
+        ..Default::default()
+    };
     state
 }
 

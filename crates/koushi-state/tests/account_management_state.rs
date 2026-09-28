@@ -82,8 +82,10 @@ fn capabilities_load_failure_resets_to_unknown() {
 
 #[test]
 fn password_change_request_enters_working_state() {
-    let mut state = AppState::default();
-    state.session = ready_session();
+    let mut state = AppState {
+        session: ready_session(),
+        ..Default::default()
+    };
 
     let effects = reduce(
         &mut state,
@@ -108,8 +110,10 @@ fn password_change_request_enters_working_state() {
 
 #[test]
 fn deactivation_request_enters_working_state() {
-    let mut state = AppState::default();
-    state.session = ready_session();
+    let mut state = AppState {
+        session: ready_session(),
+        ..Default::default()
+    };
 
     reduce(
         &mut state,
@@ -130,11 +134,13 @@ fn deactivation_request_enters_working_state() {
 
 #[test]
 fn uia_challenge_transitions_to_awaiting_uia() {
-    let mut state = AppState::default();
-    state.session = ready_session();
-    state.account_management = AccountManagementState::Working {
-        request_id: 3,
-        operation: AccountManagementOperation::ChangePassword,
+    let mut state = AppState {
+        session: ready_session(),
+        account_management: AccountManagementState::Working {
+            request_id: 3,
+            operation: AccountManagementOperation::ChangePassword,
+        },
+        ..Default::default()
     };
 
     reduce(
@@ -158,11 +164,13 @@ fn uia_challenge_transitions_to_awaiting_uia() {
 
 #[test]
 fn password_change_success_settles_state() {
-    let mut state = AppState::default();
-    state.session = ready_session();
-    state.account_management = AccountManagementState::Working {
-        request_id: 4,
-        operation: AccountManagementOperation::ChangePassword,
+    let mut state = AppState {
+        session: ready_session(),
+        account_management: AccountManagementState::Working {
+            request_id: 4,
+            operation: AccountManagementOperation::ChangePassword,
+        },
+        ..Default::default()
     };
 
     reduce(
@@ -184,11 +192,13 @@ fn password_change_success_settles_state() {
 
 #[test]
 fn password_change_failure_settles_state() {
-    let mut state = AppState::default();
-    state.session = ready_session();
-    state.account_management = AccountManagementState::Working {
-        request_id: 5,
-        operation: AccountManagementOperation::ChangePassword,
+    let mut state = AppState {
+        session: ready_session(),
+        account_management: AccountManagementState::Working {
+            request_id: 5,
+            operation: AccountManagementOperation::ChangePassword,
+        },
+        ..Default::default()
     };
 
     reduce(
@@ -212,8 +222,10 @@ fn password_change_failure_settles_state() {
 
 #[test]
 fn logout_clears_capabilities() {
-    let mut state = AppState::default();
-    state.session = ready_session();
+    let mut state = AppState {
+        session: ready_session(),
+        ..Default::default()
+    };
     state.account_management_capabilities.change_password = CapabilityState::Enabled;
 
     reduce(&mut state, AppAction::LogoutRequested);

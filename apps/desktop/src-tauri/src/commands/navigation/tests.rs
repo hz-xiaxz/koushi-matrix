@@ -178,13 +178,15 @@ async fn focused_context_close_wait_uses_core_outcome_guards() {
     let request_id = fake_request_id(44);
     let account_key = AccountKey("@alice:example.org".to_owned());
     let room_id = Some("!room:example.org".to_owned());
-    let mut state = koushi_state::AppState::default();
-    state.session = koushi_state::SessionState::Ready(koushi_state::SessionInfo {
-        homeserver: "https://example.org".to_owned(),
-        user_id: account_key.0.clone(),
-        device_id: "DEVICE".to_owned(),
-        authentication_method: Default::default(),
-    });
+    let mut state = koushi_state::AppState {
+        session: koushi_state::SessionState::Ready(koushi_state::SessionInfo {
+            homeserver: "https://example.org".to_owned(),
+            user_id: account_key.0.clone(),
+            device_id: "DEVICE".to_owned(),
+            authentication_method: Default::default(),
+        }),
+        ..Default::default()
+    };
     state.navigation.active_room_id = room_id.clone();
     state.focused_context = koushi_state::FocusedContextState::Closed;
     control.send_event(CoreEvent::IntentLifecycle {

@@ -15,8 +15,10 @@ fn session_info() -> SessionInfo {
 }
 
 fn ready_state() -> AppState {
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(session_info());
+    let mut state = AppState {
+        session: SessionState::Ready(session_info()),
+        ..Default::default()
+    };
     state.rooms.push(RoomSummary {
         room_id: "!known:example.invalid".to_owned(),
         display_name: "Known Room".to_owned(),

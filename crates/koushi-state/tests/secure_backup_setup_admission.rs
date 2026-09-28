@@ -4,14 +4,16 @@ use koushi_state::{
 };
 
 fn ready_state(gate: SecureBackupGateState) -> AppState {
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(SessionInfo {
-        homeserver: "https://server.example.invalid".to_owned(),
-        user_id: "@alice:example.invalid".to_owned(),
-        device_id: "DEVICE".to_owned(),
-        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
-    });
-    state.secure_backup_gate = gate;
+    let state = AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://server.example.invalid".to_owned(),
+            user_id: "@alice:example.invalid".to_owned(),
+            device_id: "DEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        }),
+        secure_backup_gate: gate,
+        ..Default::default()
+    };
     state
 }
 

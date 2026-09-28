@@ -65,32 +65,34 @@ fn tag_favourite(mut room: RoomSummary) -> RoomSummary {
 /// Home scope, one of each conversation shape. Rooms carry unread counts so an
 /// aggregate that forgot to exclude low priority is visible as a number.
 fn mixed_state() -> AppState {
-    let mut state = AppState::default();
-    state.spaces = vec![SpaceSummary {
-        space_id: SPACE_ID.to_owned(),
-        raw_name: None,
-        display_name: "Space".to_owned(),
-        avatar: None,
-        join_rule: None,
-        child_room_ids: vec![
-            "!plain:example.invalid".to_owned(),
-            "!fav:example.invalid".to_owned(),
-            "!low-room:example.invalid".to_owned(),
+    let state = AppState {
+        spaces: vec![SpaceSummary {
+            space_id: SPACE_ID.to_owned(),
+            raw_name: None,
+            display_name: "Space".to_owned(),
+            avatar: None,
+            join_rule: None,
+            child_room_ids: vec![
+                "!plain:example.invalid".to_owned(),
+                "!fav:example.invalid".to_owned(),
+                "!low-room:example.invalid".to_owned(),
+            ],
+        }],
+        rooms: vec![
+            room("!plain:example.invalid", "Plain", false, 5, 1),
+            tag_favourite(room("!fav:example.invalid", "Favourite", false, 0, 0)),
+            tag_low_priority(with_activity(
+                room("!low-room:example.invalid", "Zed Low", false, 8, 2),
+                200,
+            )),
+            room("!dm:example.invalid", "Person", true, 3, 0),
+            tag_low_priority(with_activity(
+                room("!low-dm:example.invalid", "Alpha Low", true, 6, 4),
+                100,
+            )),
         ],
-    }];
-    state.rooms = vec![
-        room("!plain:example.invalid", "Plain", false, 5, 1),
-        tag_favourite(room("!fav:example.invalid", "Favourite", false, 0, 0)),
-        tag_low_priority(with_activity(
-            room("!low-room:example.invalid", "Zed Low", false, 8, 2),
-            200,
-        )),
-        room("!dm:example.invalid", "Person", true, 3, 0),
-        tag_low_priority(with_activity(
-            room("!low-dm:example.invalid", "Alpha Low", true, 6, 4),
-            100,
-        )),
-    ];
+        ..Default::default()
+    };
     state
 }
 
