@@ -119,9 +119,12 @@ async fn stop_incoming_verification_observation_with_timeout(
 }
 
 pub(super) struct PendingVerificationRequest {
-    request_id: RequestId,
-    target: VerificationTarget,
-    handle: koushi_sdk::MatrixVerificationRequestHandle,
+    pub(super) request_id: RequestId,
+    pub(super) target: VerificationTarget,
+    pub(super) handle: koushi_sdk::MatrixVerificationRequestHandle,
+    /// Our own **Verify user** request (#1024): as the requester we start
+    /// SAS once the contact accepts.
+    pub(super) start_sas_when_ready: bool,
 }
 
 pub(super) struct PendingSasVerification {
@@ -665,9 +668,10 @@ impl AccountActor {
                     request_id,
                     target: target.clone(),
                     handle: handle.clone(),
+                    start_sas_when_ready: false,
                 });
                 self.observe_verification_request(request_id, target.clone(), handle.clone());
-                self.send_actions(vec![AppAction::VerificationRequested {
+                self.send_actions(vec![AppAction::VerificationRequestSent {
                     request_id: request_id.sequence,
                     target: target.clone(),
                 }])
@@ -675,6 +679,7 @@ impl AccountActor {
                 self.emit_verification_progress(VerificationFlowState::Requested {
                     request_id: request_id.sequence,
                     target,
+                    initiator: koushi_state::VerificationInitiator::Us,
                 });
                 self.project_verification_request_state(request_id, handle.state())
                     .await;
@@ -937,6 +942,7 @@ impl AccountActor {
             request_id,
             target: target.clone(),
             handle: handle.clone(),
+            start_sas_when_ready: false,
         });
         self.observe_verification_request(request_id, target.clone(), handle.clone());
         self.send_actions(vec![AppAction::VerificationRequested {
@@ -947,6 +953,7 @@ impl AccountActor {
         self.emit_verification_progress(VerificationFlowState::Requested {
             request_id: request_id.sequence,
             target,
+            initiator: koushi_state::VerificationInitiator::Them,
         });
         self.project_verification_request_state(request_id, handle.state())
             .await;
@@ -1172,7 +1179,7 @@ impl AccountActor {
         }
     }
 
-    fn observe_verification_request(
+    pub(super) fn observe_verification_request(
         &mut self,
         request_id: RequestId,
         target: VerificationTarget,
@@ -1330,7 +1337,7 @@ impl AccountActor {
         self.project_sas_state(request_id, target, state).await;
     }
 
-    async fn project_verification_request_state(
+    pub(super) async fn project_verification_request_state(
         &mut self,
         request_id: RequestId,
         state: koushi_sdk::MatrixVerificationRequestState,
@@ -1343,6 +1350,7 @@ impl AccountActor {
                     request_id: request_id.sequence,
                 }])
                 .await;
+                self.start_user_verification_sas_if_ready(request_id).await;
                 if let Some((flow_id, handle)) = self.own_user_verification.as_ref()
                     && *flow_id == request_id.sequence
                     && self.sas_verification.is_none()
@@ -1434,7 +1442,7 @@ impl AccountActor {
         }
     }
 
-    async fn store_sas_verification(
+    pub(super) async fn store_sas_verification(
         &mut self,
         request_id: RequestId,
         target: VerificationTarget,
@@ -1641,6 +1649,7 @@ impl AccountActor {
                     request_id: flow_id,
                 }])
                 .await;
+                self.refresh_open_contact_security(&target.user_id).await;
                 self.request_authoritative_trust_recheck();
                 record_sas_verification_event(sas_waiting_event(
                     flow_id,
@@ -1721,7 +1730,7 @@ impl AccountActor {
         }
     }
 
-    async fn project_verification_failure(
+    pub(super) async fn project_verification_failure(
         &mut self,
         flow_id: u64,
         _target: VerificationTarget,
@@ -1731,7 +1740,7 @@ impl AccountActor {
             .await;
     }
 
-    fn emit_verification_progress(&self, state: VerificationFlowState) {
+    pub(super) fn emit_verification_progress(&self, state: VerificationFlowState) {
         if let Some(account_key) = self.active_account_key() {
             self.emit(CoreEvent::E2eeTrust(E2eeTrustEvent::VerificationProgress {
                 account_key,

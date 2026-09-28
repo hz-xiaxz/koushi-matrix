@@ -941,6 +941,12 @@ impl fmt::Debug for MatrixVerificationRequestHandle {
 }
 
 impl MatrixVerificationRequestHandle {
+    pub(crate) fn from_sdk(
+        inner: matrix_sdk::encryption::verification::VerificationRequest,
+    ) -> Self {
+        Self { inner }
+    }
+
     pub fn flow_id(&self) -> &str {
         self.inner.flow_id()
     }
@@ -1294,6 +1300,10 @@ impl From<matrix_sdk::Error> for E2eeTrustError {
             other => Self::Sdk(other.to_string()),
         }
     }
+}
+
+pub(crate) fn trust_failure_kind(error: &matrix_sdk::Error) -> E2eeTrustFailureKind {
+    e2ee_trust_failure_kind(error)
 }
 
 fn e2ee_trust_failure_kind(error: &matrix_sdk::Error) -> E2eeTrustFailureKind {

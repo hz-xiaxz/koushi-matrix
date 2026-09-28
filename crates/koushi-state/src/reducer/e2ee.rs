@@ -226,6 +226,7 @@ pub(crate) fn handle_verification_requested(
     state: &mut AppState,
     request_id: u64,
     target: VerificationTarget,
+    initiator: crate::state::VerificationInitiator,
 ) -> Vec<AppEffect> {
     if !is_session_ready(state)
         || !matches!(
@@ -241,6 +242,7 @@ pub(crate) fn handle_verification_requested(
     state.e2ee_trust.verification = VerificationFlowState::Requested {
         request_id,
         target: target.clone(),
+        initiator,
     };
     vec![
         AppEffect::RequestVerification { request_id, target },
@@ -252,16 +254,22 @@ pub(crate) fn handle_verification_accepted(
     state: &mut AppState,
     request_id: u64,
 ) -> Vec<AppEffect> {
-    let VerificationFlowState::Requested { target, .. } = &state.e2ee_trust.verification else {
+    let VerificationFlowState::Requested {
+        target, initiator, ..
+    } = &state.e2ee_trust.verification
+    else {
         return Vec::new();
     };
     if verification_request_id(&state.e2ee_trust.verification) != Some(request_id) {
         return Vec::new();
     }
 
+    // For our own request this is the other side's acceptance, projected by
+    // the account actor from the SDK request state.
     state.e2ee_trust.verification = VerificationFlowState::Accepted {
         request_id,
         target: target.clone(),
+        initiator: *initiator,
     };
     vec![
         AppEffect::AcceptVerification { request_id },

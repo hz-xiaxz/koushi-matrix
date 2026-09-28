@@ -227,6 +227,7 @@ fn verification_flow_is_rust_owned_guarded_and_request_correlated() {
         VerificationFlowState::Requested {
             request_id: 7,
             target: target.clone(),
+            initiator: koushi_state::VerificationInitiator::Them,
         }
     );
 
@@ -242,6 +243,7 @@ fn verification_flow_is_rust_owned_guarded_and_request_correlated() {
         VerificationFlowState::Requested {
             request_id: 7,
             target: target.clone(),
+            initiator: koushi_state::VerificationInitiator::Them,
         }
     );
 
@@ -447,6 +449,7 @@ fn verification_mismatch_cancel_is_ignored_before_sas_is_presented() {
         VerificationFlowState::Requested {
             request_id: 12,
             target,
+            initiator: koushi_state::VerificationInitiator::Them,
         }
     );
 }

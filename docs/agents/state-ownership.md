@@ -1334,7 +1334,13 @@ normal QA-title mode and cannot change product title semantics.
   verification stay two rows: never merge them into one badge, never color
   routine unconfirmed devices or never-verified contacts red, and never infer
   either from `e2ee_trust.devices` or per-message shields. The slice carries
-  no device ids; label devices by ordinal. Focused checks: `cargo test -p
+  no device ids; label devices by ordinal. **Verify user** availability is
+  the Rust `summary.verification` offer; React owns only the confirmation
+  step's visibility and dispatches `request_contact_verification` from its
+  Send action, never from opening an explanation. The SAS dialog in the
+  "Your verification" row renders `e2ee_trust.verification` only when its
+  `target.user_id` is the open contact, and offers Accept only for
+  `initiator: "them"`. Focused checks: `cargo test -p
   koushi-state --test contact_security_state`, `cargo test -p koushi-sdk --lib
   contact_security`, `cargo test -p koushi-core --lib contact_security`, and
   `npm --prefix apps/desktop test -- --run

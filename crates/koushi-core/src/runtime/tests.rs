@@ -1615,6 +1615,24 @@ fn contact_security_commands_project_checking_and_close_before_account_route() {
     );
     let debug = format!("{load:?}");
     assert!(!debug.contains("bob"), "{debug}");
+    let verify = AccountCommand::ContactSecurity {
+        request_id,
+        request: koushi_protocol::command::ContactSecurityRequest::RequestVerification {
+            user_id: "@bob:example.test".to_owned(),
+        },
+    };
+    assert_eq!(
+        account_command_projected_action(&verify),
+        Some(AppAction::VerificationRequestSent {
+            request_id: 12,
+            target: koushi_state::VerificationTarget {
+                user_id: "@bob:example.test".to_owned(),
+                device_id: String::new(),
+            },
+        })
+    );
+    let debug = format!("{verify:?}");
+    assert!(!debug.contains("bob"), "{debug}");
     assert_eq!(
         account_command_projected_action(&AccountCommand::ContactSecurity {
             request_id,

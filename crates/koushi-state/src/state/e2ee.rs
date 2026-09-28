@@ -169,10 +169,16 @@ pub enum VerificationFlowState {
     Requested {
         request_id: u64,
         target: VerificationTarget,
+        /// Who sent the request. Only an incoming request (`Them`) can be
+        /// accepted; our own request waits for the other side (#1024).
+        #[serde(default)]
+        initiator: VerificationInitiator,
     },
     Accepted {
         request_id: u64,
         target: VerificationTarget,
+        #[serde(default)]
+        initiator: VerificationInitiator,
     },
     SasPresented {
         request_id: u64,
@@ -194,6 +200,17 @@ pub enum VerificationFlowState {
         #[serde(rename = "failureKind")]
         kind: TrustOperationFailureKind,
     },
+}
+
+/// Which side started a verification request.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum VerificationInitiator {
+    /// This device sent the request (for example **Verify user**).
+    Us,
+    /// Another device or user sent the request to us.
+    #[default]
+    Them,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

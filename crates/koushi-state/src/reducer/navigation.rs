@@ -331,8 +331,7 @@ pub(crate) fn handle_select_space(
     // Issue #961: the new Space's advertised children are not the previous
     // Space's. Clearing here also bumps the generation the frontend must quote
     // when it asks for them.
-    let space_children_changed =
-        super::space_children::handle_selected(state, selected_space_id);
+    let space_children_changed = super::space_children::handle_selected(state, selected_space_id);
     recompute_room_list_projection(state);
     if state.navigation.active_space_id.is_none() {
         let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)];

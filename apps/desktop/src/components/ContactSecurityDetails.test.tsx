@@ -6,7 +6,8 @@ import { ProfilePanel } from "./PeoplePanel";
 import type {
   ContactSecurityState,
   ContactSecuritySummary,
-  RoomManagementState
+  RoomManagementState,
+  VerificationFlowState
 } from "../domain/types";
 
 const CONTACT = "@ada:example.invalid";
@@ -31,6 +32,7 @@ function summary(partial: Partial<ContactSecuritySummary>): ContactSecuritySumma
     },
     device_signatures: ["ownerSigned", "ownerSigned"],
     identity: "notVerifiedByYou",
+    verification: { kind: "notOffered" },
     ...partial
   };
 }
@@ -52,8 +54,24 @@ function loaded(value: ContactSecuritySummary, userId = CONTACT): ContactSecurit
   return { user_id: userId, load: { kind: "loaded", request_id: 4 }, summary: value };
 }
 
-function renderProfile(state: ContactSecurityState, userId = CONTACT) {
-  const actions = { load: vi.fn(), close: vi.fn() };
+function mockActions() {
+  return {
+    load: vi.fn(),
+    close: vi.fn(),
+    requestVerification: vi.fn(),
+    acceptVerification: vi.fn(),
+    confirmSas: vi.fn(),
+    mismatchSas: vi.fn(),
+    cancelVerification: vi.fn()
+  };
+}
+
+function renderProfile(
+  state: ContactSecurityState,
+  userId = CONTACT,
+  verification: VerificationFlowState = { kind: "idle" }
+) {
+  const actions = mockActions();
   const view = render(
     <ProfilePanel
       userId={userId}
@@ -62,6 +80,7 @@ function renderProfile(state: ContactSecurityState, userId = CONTACT) {
       roomManagement={roomManagement}
       profileUsers={{}}
       contactSecurity={state}
+      verification={verification}
       contactSecurityActions={actions}
       onBack={() => undefined}
     />
@@ -145,8 +164,7 @@ describe("ContactSecurityDetails", () => {
     expect(document.querySelector(".is-attention")).toBeNull();
     expect(document.querySelector("[role='alert']")).toBeNull();
     expect(document.querySelector("[class*='danger']")).toBeNull();
-    // No prompt to verify is shown just because verification is not done.
-    expect(screen.queryByRole("button", { name: /verify/i })).toBeNull();
+    expect(screen.queryByText(/Verify this person/)).toBeNull();
   });
 
   test("an identity change after your verification is a distinct attention state", () => {
@@ -262,5 +280,140 @@ describe("ContactSecurityDetails", () => {
     const { actions } = renderProfile(loaded(summary({}), ME), ME);
     expect(screen.queryByText("Security")).toBeNull();
     expect(actions.load).not.toHaveBeenCalled();
+  });
+});
+
+const offered = (direct_chat: "existingEncrypted" | "existingUnencrypted" | "new") =>
+  ({ kind: "offered", direct_chat }) as const;
+
+const target = { user_id: CONTACT, device_id: "" };
+const emojis = Array.from({ length: 7 }, (_, index) => ({
+  symbol: ["🐶", "🐱", "🦁", "🐎", "🦄", "🐷", "🐘"][index]!,
+  description: `emoji ${index}`
+}));
+
+describe("Verify user", () => {
+  test("is an optional action that sends nothing until the confirmation step", () => {
+    const { actions } = renderProfile(loaded(summary({ verification: offered("new") })));
+    const verify = screen.getByRole("button", { name: "Verify user" });
+    expect(verify.className).toContain("profile-text-button");
+    // Opening explanations never starts verification.
+    fireEvent.click(within(row("Your verification")).getByRole("button", { name: /Details/ }));
+    expect(actions.requestVerification).not.toHaveBeenCalled();
+
+    fireEvent.click(verify);
+    expect(
+      screen.getByText(
+        "You don't have a direct chat with this person yet. Koushi creates a new encrypted direct chat with them and sends the request there. If they don't see the request, try again after they have joined the chat."
+      )
+    ).toBeTruthy();
+    expect(actions.requestVerification).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(actions.requestVerification).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Send request" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Verify user" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+    expect(actions.requestVerification).toHaveBeenCalledTimes(1);
+    expect(actions.requestVerification).toHaveBeenCalledWith(CONTACT);
+  });
+
+  test("names the existing direct chat it will use", () => {
+    renderProfile(loaded(summary({ verification: offered("existingEncrypted") })));
+    fireEvent.click(screen.getByRole("button", { name: "Verify user" }));
+    expect(
+      screen.getByText(
+        "Koushi sends the verification request in your encrypted direct chat with this person."
+      )
+    ).toBeTruthy();
+  });
+
+  test("is offered only when Rust offers it", () => {
+    renderProfile(loaded(summary({ identity: "verifiedByYou" })));
+    expect(screen.queryByRole("button", { name: /Verify/ })).toBeNull();
+    cleanup();
+
+    renderProfile(loaded(summary({ verification: { kind: "requiresYourCrossSigning" } })));
+    expect(screen.queryByRole("button", { name: /Verify/ })).toBeNull();
+    expect(screen.getByText(/this session needs your own cross-signing keys/)).toBeTruthy();
+    cleanup();
+
+    renderProfile(
+      loaded(
+        summary({ identity: "changedAfterVerification", verification: offered("existingEncrypted") })
+      )
+    );
+    expect(screen.getByRole("button", { name: "Verify again" })).toBeTruthy();
+  });
+
+  test("our own request waits for them instead of offering Accept, and can be cancelled", () => {
+    const { actions } = renderProfile(
+      loaded(summary({ verification: offered("new") })),
+      CONTACT,
+      { kind: "requested", request_id: 17, target, initiator: "us" }
+    );
+    expect(screen.getByText("Waiting for them to accept the request in their app…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Verify user" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(actions.cancelVerification).toHaveBeenCalledWith(17);
+  });
+
+  test("a request from them can be accepted", () => {
+    const { actions } = renderProfile(loaded(summary({})), CONTACT, {
+      kind: "requested",
+      request_id: 18,
+      target,
+      initiator: "them"
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    expect(actions.acceptVerification).toHaveBeenCalledWith(18);
+  });
+
+  test("emoji comparison lives in the Your verification area", () => {
+    const { actions } = renderProfile(loaded(summary({ verification: offered("new") })), CONTACT, {
+      kind: "sasPresented",
+      request_id: 19,
+      target,
+      emojis
+    });
+    const list = screen.getByRole("list", { name: "Emoji to compare" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(7);
+    fireEvent.click(screen.getByRole("button", { name: "They match" }));
+    expect(actions.confirmSas).toHaveBeenCalledWith(19);
+    fireEvent.click(screen.getByRole("button", { name: "They don't match" }));
+    expect(actions.mismatchSas).toHaveBeenCalledWith(19);
+  });
+
+  test("failure is explained and verification can be tried again", () => {
+    renderProfile(loaded(summary({ verification: offered("new") })), CONTACT, {
+      kind: "failed",
+      request_id: 20,
+      target,
+      failureKind: "mismatch"
+    });
+    expect(screen.getByText("The emoji didn't match. Nothing was verified.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Verify user" })).toBeTruthy();
+  });
+
+  test("completion shows the Rust-refreshed identity row", () => {
+    renderProfile(loaded(summary({ identity: "verifiedByYou" })), CONTACT, {
+      kind: "done",
+      request_id: 21,
+      target
+    });
+    expect(screen.getByText("Verification complete.")).toBeTruthy();
+    expect(within(row("Your verification")).getByText("Verified by you")).toBeTruthy();
+  });
+
+  test("a verification with someone else is not shown here", () => {
+    renderProfile(loaded(summary({ verification: offered("new") })), CONTACT, {
+      kind: "sasPresented",
+      request_id: 22,
+      target: { user_id: OTHER, device_id: "" },
+      emojis
+    });
+    expect(screen.queryByRole("list", { name: "Emoji to compare" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Verify user" })).toBeTruthy();
   });
 });

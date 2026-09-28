@@ -377,7 +377,11 @@
             "ownerSignatureInvalid"
           ],
           "devices": "someNotOwnerSigned",
-          "identity": "verifiedByYou"
+          "identity": "changedAfterVerification",
+          "verification": {
+            "direct_chat": "new",
+            "kind": "offered"
+          }
         },
         "user_id": "@contact:example.invalid"
       },

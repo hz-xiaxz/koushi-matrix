@@ -129,6 +129,20 @@ pub async fn load_contact_security(
     .await
 }
 
+/// **Verify user**: send an interactive SAS request to the contact in the
+/// direct chat with them. Progress is the Rust `e2ee_trust.verification`.
+#[tauri::command]
+pub async fn request_contact_verification(
+    user_id: String,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    submit_contact_security(
+        state.inner(),
+        koushi_protocol::command::ContactSecurityRequest::RequestVerification { user_id },
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn close_contact_security(
     state: State<'_, CoreRuntimeState>,

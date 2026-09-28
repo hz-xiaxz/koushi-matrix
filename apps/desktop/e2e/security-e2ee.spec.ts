@@ -166,6 +166,36 @@ test("Security settings render local encryption health and dispatch probe comman
   await expect(page.getByText("Not checked")).toBeVisible();
 });
 
+test("our own verification request waits for the other side instead of offering Accept (#1024)", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await page.evaluate(() => {
+    const next = window.__harness.e2eeTrustSnapshot();
+    const verification = next.state.domain.e2ee_trust.verification;
+    if (verification.kind === "requested") {
+      next.state.domain.e2ee_trust.verification = { ...verification, initiator: "us" };
+    }
+    window.__harness.setSnapshot(next);
+    window.__harness.setCommandResponse("refresh_current_session_status", () =>
+      window.__harness.currentSnapshot()
+    );
+    window.__harness.pushStateUpdate();
+  });
+
+  await page.getByRole("button", { name: "User settings" }).click();
+  await page.getByRole("tab", { name: "Encryption", exact: true }).click();
+  await expect(page.getByText(t("trust.statusVerificationWaiting"))).toBeVisible();
+  await expect(page.getByRole("button", { name: t("trust.acceptVerification") })).toHaveCount(0);
+  await page.evaluate(() => window.__harness.clearInvocations());
+  await page
+    .getByRole("dialog", { name: t("trust.verification") })
+    .getByRole("button", { name: t("trust.closeVerification") })
+    .click();
+  await expect.poll(() => invocationCount(page, "cancel_verification")).toBe(1);
+  expect(await invocationCount(page, "accept_verification")).toBe(0);
+});
+
 test("E2EE trust controls dispatch Rust-owned commands and render snapshot updates", async ({
   page
 }) => {

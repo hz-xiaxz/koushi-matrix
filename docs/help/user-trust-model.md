@@ -59,6 +59,16 @@ separate rows:
   highlighted for attention; verification needs to be repeated. If you never
   verified the person, an identity change stays neutral.
 
+To verify the person yourself, choose **Verify user** (or **Verify again**
+after their identity changed) under **Your verification**. Koushi first shows
+which direct chat it will use for the request — your existing chat with them,
+or a new encrypted chat — and sends nothing until you
+choose **Send request**. When they accept in their app, compare the emoji
+with them in person or over another trusted channel and choose **They match**
+or **They don't match**. Verifying them does not confirm devices they have
+not confirmed themselves. If this session does not have your own
+cross-signing keys, Koushi explains that instead of offering the action.
+
 Choose **Details** on a row for a short explanation, device counts, and a
 device list. Opening the details changes nothing. **Status unavailable** means
 Koushi could not retrieve the person's keys; it is not a confirmation. These

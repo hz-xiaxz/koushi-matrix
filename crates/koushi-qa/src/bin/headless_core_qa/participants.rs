@@ -950,7 +950,7 @@ pub(super) fn verification_state_is_at_least_accepted(
     }
 }
 
-fn verification_state_sas(
+pub(super) fn verification_state_sas(
     state: &VerificationFlowState,
     flow_id: u64,
     label: &str,

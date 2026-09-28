@@ -77,6 +77,7 @@ const checks = [
   "scenario read_state_convergence",
   "scenario thread_late_joiner",
   "scenario account_notifications",
+  "scenario user_verification",
   "verify installed Tuwunel binary",
   "verify local Synapse Docker runtime when --server=synapse",
   "start disposable local homeserver",
@@ -181,6 +182,9 @@ async function run() {
   if (scenarios.includes("account_notifications") && !runCoreQa) {
     throw new Error("--scenario=account_notifications requires --core because it validates Core state");
   }
+  if (scenarios.includes("user_verification") && !runCoreQa) {
+    throw new Error("--scenario=user_verification requires --core because it validates Core state");
+  }
   if (fixtureRunOption !== undefined) {
     if (scenarios.length !== 1 || scenarios[0] !== "timeline_stress") {
       throw new Error("--fixture-run is currently supported only with --scenario=timeline_stress");
@@ -244,7 +248,8 @@ async function runForServer(serverKind, scenario) {
       scenario !== "timeline_stress" &&
       scenario !== "encryption_debug" &&
       scenario !== "avatar_demand" &&
-      scenario !== "account_notifications"
+      scenario !== "account_notifications" &&
+      scenario !== "user_verification"
     ) {
       const sdkUsers = await registerQaUsers(homeserver, "sdk");
 
@@ -624,7 +629,7 @@ function safeTimestamp() {
 
 function printUsage() {
   console.log(
-    "Usage: desktop-headless-local-qa.mjs --run [--server=tuwunel|synapse|both] [--scenario=all|session_status|device_cleanup|timeline_reconnect|timeline_stress|encryption_debug|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview|search_crawler|search_crawler_catchup|read_state_convergence|thread_late_joiner|account_notifications[,scenario...]] [--core] [--cargo-profile=dev|ci|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
+    "Usage: desktop-headless-local-qa.mjs --run [--server=tuwunel|synapse|both] [--scenario=all|session_status|device_cleanup|timeline_reconnect|timeline_stress|encryption_debug|directory|room_management|room_people_projection|activity|composer|credential_health|native_attention|send_queue|live_signals|link_preview|search_crawler|search_crawler_catchup|read_state_convergence|thread_late_joiner|account_notifications|user_verification[,scenario...]] [--core] [--cargo-profile=dev|ci|release] [--fixture-run=<local-run-dir>] [--e2ee-recipient-second-device] [--e2ee-pause-sync-before-multi-device-send]"
   );
   console.log("Starts a disposable local homeserver and runs non-GUI Matrix SDK QA.");
   console.log("  --server=both  Runs the positive Sliding Sync fixtures: Tuwunel and Synapse.");

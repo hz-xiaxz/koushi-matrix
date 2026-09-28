@@ -3763,9 +3763,9 @@ Verification flow:
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> Requested: VerificationRequested
-    Done --> Requested: VerificationRequested
-    Failed --> Requested: VerificationRequested
+    Idle --> Requested: VerificationRequested [initiator them] / VerificationRequestSent [initiator us]
+    Done --> Requested: VerificationRequested / VerificationRequestSent
+    Failed --> Requested: VerificationRequested / VerificationRequestSent
     Requested --> Accepted: VerificationAccepted [matching request_id]
     Requested --> SasPresented: VerificationSasPresented [matching request_id]
     Accepted --> SasPresented: VerificationSasPresented [matching request_id]
@@ -3786,6 +3786,16 @@ stateDiagram-v2
     SasPresented --> Failed: VerificationFailed [matching request_id]
     Confirming --> Failed: VerificationFailed [matching request_id]
 ```
+
+- `Requested` and `Accepted` record the `initiator` (#1024). An incoming
+  request (`VerificationRequested`, initiator `them`) offers Accept/Decline;
+  our own request (`VerificationRequestSent`, initiator `us`: a device request
+  or **Verify user**) only waits for the other side and can be cancelled.
+  For our own request, `VerificationAccepted` is the actor's projection of the
+  other side's acceptance. All `VerificationRequested*` actions require a
+  Ready session and an idle/settled flow, so a session still at the
+  verification gate (`SessionState::Verifying`) keeps its own-device SAS flow
+  unchanged, and a request the reducer refuses is not routed to the actor.
 
 Cross-signing status:
 
@@ -5129,9 +5139,28 @@ stateDiagram-v2
   `VerifiedByYou` when the contact adds an unsigned device. The details carry
   no device ids, names, or key material; the GUI labels devices by ordinal and
   states that the details do not show whether a conversation is encrypted.
-- The interactive **Verify user** request is not part of this slice (see
-  #1024 follow-up); this slice only projects its outcome through
-  `ContactIdentityVerification`.
+- **Verify user.** `ContactSecuritySummary.verification` is the Rust-owned
+  offer: `NotOffered` for a contact you already verified or one without an
+  identity; `RequiresYourCrossSigning` when this session lacks your private
+  user-signing key (explained, no button); otherwise `Offered { direct_chat }`
+  (also after `ChangedAfterVerification`, as re-verification). `direct_chat`
+  mirrors the SDK's choice for `UserIdentity::request_verification*`: its
+  first DM with the contact (`ExistingEncrypted` or `ExistingUnencrypted`),
+  else a new encrypted DM (`New`). The GUI shows a confirmation step naming
+  that chat; only its Send action dispatches
+  `ContactSecurityRequest::RequestVerification`, which the runtime projects as
+  `VerificationRequestSent` (routed only if the reducer accepted it). The
+  AccountActor sends the in-room request, starts SAS as the requester once the
+  contact accepts, and reuses the shared confirm/mismatch/cancel/timeout
+  paths; on completion it re-reads the open contact so the row shows
+  `VerifiedByYou`. Failure and cancellation settle the shared flow as
+  `Failed`/`Idle`, after which the offer is shown again.
+- A recipient on Simplified Sliding Sync who joins a brand-new DM after the
+  request was sent receives the request only if their server delivers that
+  event through sync (Tuwunel does); Synapse returns it through gap repair,
+  which the SDK does not feed to its verification machine. The confirmation
+  step therefore says only that the request is sent in that chat and to try
+  again once the contact has joined if they do not see it.
 
 ## Desktop Application Updates
 

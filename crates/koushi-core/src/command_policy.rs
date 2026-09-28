@@ -272,7 +272,8 @@ fn account_command_requires_ready_session(command: &AccountCommand) -> bool {
             | AccountCommand::SubmitAccountManagementUia { .. }
             | AccountCommand::AccountNotifications { .. }
             | AccountCommand::ContactSecurity {
-                request: koushi_protocol::command::ContactSecurityRequest::Load { .. },
+                request: koushi_protocol::command::ContactSecurityRequest::Load { .. }
+                    | koushi_protocol::command::ContactSecurityRequest::RequestVerification { .. },
                 ..
             }
             | AccountCommand::ExportRoomKeys { .. }

@@ -1513,7 +1513,10 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
                 koushi_state::ContactDeviceSignature::NotOwnerSigned,
                 koushi_state::ContactDeviceSignature::OwnerSignatureInvalid,
             ],
-            identity: koushi_state::ContactIdentityVerification::VerifiedByYou,
+            identity: koushi_state::ContactIdentityVerification::ChangedAfterVerification,
+            verification: koushi_state::ContactVerificationOffer::Offered {
+                direct_chat: koushi_state::ContactVerificationDirectChat::New,
+            },
         }),
     };
 

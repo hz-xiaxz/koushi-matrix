@@ -39,6 +39,15 @@ export const HEADLESS_LOCAL_QA_SCENARIO_TOKENS = Object.freeze({
     "crawl_catchup_restart=ok",
     "search_crawler_catchup=ok"
   ]),
+  user_verification: Object.freeze([
+    "user_verification_offered=ok",
+    "user_verification_request_waiting=ok",
+    "user_verification_accepted=ok",
+    "user_verification_sas_match=ok",
+    "user_verification_done=ok",
+    "user_verification_identity_verified=ok",
+    "user_verification=ok"
+  ]),
   account_notifications: Object.freeze([
     "account_notifications_load=ok",
     "account_notifications_no_write_on_open=ok",

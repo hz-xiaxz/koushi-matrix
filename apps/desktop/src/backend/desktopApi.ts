@@ -168,6 +168,8 @@ export interface DesktopApi {
   /** Contact security details (#1024); read-only. */
   loadContactSecurity(userId: string): Promise<CommandAdmission>;
   closeContactSecurity(): Promise<CommandAdmission>;
+  /** Verify user (#1024): request SAS verification of the contact. */
+  requestContactVerification(userId: string): Promise<CommandAdmission>;
   setNotificationCategory(category: NotificationCategory, enabled: boolean): Promise<CommandAdmission>;
   setAccountPushEnabled(enabled: boolean): Promise<CommandAdmission>;
   requestNotificationEmailToken(address: string, lang: string): Promise<CommandAdmission>;

@@ -660,7 +660,8 @@ function e2eeTrustFixture(): E2eeTrustState {
       target: {
         user_id: "redacted-trust-target",
         device_id: "TRUSTDEVICE"
-      }
+      },
+      initiator: "them"
     },
     cross_signing: { kind: "missing" },
     key_backup: { kind: "disabled" },
@@ -2319,7 +2320,8 @@ mock.setCommandResponse("accept_verification", ({ flowId }: { flowId: number }) 
         verification: {
           kind: "accepted",
           request_id: flowId,
-          target: verification.target
+          target: verification.target,
+          initiator: "them"
         }
       }
       },

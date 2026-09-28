@@ -240,7 +240,8 @@ test("Profile loads Rust-owned contact security details and closes them on back 
             excluded_dehydrated: 0
           },
           device_signatures: ["ownerSigned", "notOwnerSigned"],
-          identity: "verifiedByYou"
+          identity: "verifiedByYou",
+          verification: { kind: "notOffered" }
         }
       };
       window.__harness.setSnapshot(next);

@@ -257,6 +257,12 @@ pub enum ContactSecurityRequest {
     Load {
         user_id: String,
     },
+    /// **Verify user**: send an interactive SAS request to the contact in
+    /// the direct chat with them (created, encrypted, when none exists).
+    /// Progress is `E2eeTrustState.verification` with initiator `Us`.
+    RequestVerification {
+        user_id: String,
+    },
     Close,
 }
 
@@ -265,6 +271,10 @@ impl fmt::Debug for ContactSecurityRequest {
         match self {
             Self::Load { .. } => formatter
                 .debug_struct("Load")
+                .field("user_id", &"<redacted>")
+                .finish(),
+            Self::RequestVerification { .. } => formatter
+                .debug_struct("RequestVerification")
                 .field("user_id", &"<redacted>")
                 .finish(),
             Self::Close => formatter.write_str("Close"),

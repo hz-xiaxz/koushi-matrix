@@ -564,6 +564,12 @@ pub enum AppAction {
         request_id: u64,
         target: VerificationTarget,
     },
+    /// We sent a verification request (device request or **Verify user**,
+    /// #1024); it waits for the other side instead of offering Accept.
+    VerificationRequestSent {
+        request_id: u64,
+        target: VerificationTarget,
+    },
     VerificationAccepted {
         request_id: u64,
     },

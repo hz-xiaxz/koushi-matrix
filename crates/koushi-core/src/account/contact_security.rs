@@ -10,11 +10,15 @@ use futures_util::{FutureExt, StreamExt};
 use koushi_protocol::command::ContactSecurityRequest;
 use koushi_protocol::failure::CoreFailure;
 use koushi_protocol::ids::RequestId;
-use koushi_state::{AppAction, ContactSecurityFailureKind, ContactSecuritySummary};
+use koushi_state::{
+    AppAction, ContactSecurityFailureKind, ContactSecuritySummary, TrustOperationFailureKind,
+    VerificationFlowState, VerificationInitiator, VerificationTarget,
+};
 use tokio::sync::oneshot;
 
 use super::actor::{AccountActor, AccountMessage};
-use super::verification::send_observer_output_until_stopped;
+use super::recovery_backup::classify_e2ee_trust_error;
+use super::verification::{PendingVerificationRequest, send_observer_output_until_stopped};
 
 /// The open contact and its store-change observer task.
 pub(super) struct ContactSecurityObservation {
@@ -45,8 +49,107 @@ impl AccountActor {
             ContactSecurityRequest::Load { user_id } => {
                 self.load_contact_security(request_id, user_id).await;
             }
+            ContactSecurityRequest::RequestVerification { user_id } => {
+                self.request_user_verification(request_id, user_id).await;
+            }
             ContactSecurityRequest::Close => self.stop_contact_security_observer().await,
         }
+    }
+
+    /// **Verify user** (#1024). The runtime already projected
+    /// `VerificationRequestSent` (initiator `Us`); this sends the in-room
+    /// request and settles it as failed if it cannot be sent.
+    async fn request_user_verification(&mut self, request_id: RequestId, user_id: String) {
+        let target = VerificationTarget {
+            user_id: user_id.clone(),
+            device_id: String::new(),
+        };
+        let Some(session) = self.session.clone() else {
+            self.send_actions(vec![AppAction::VerificationFailed {
+                request_id: request_id.sequence,
+                kind: TrustOperationFailureKind::Sdk,
+            }])
+            .await;
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        };
+        self.cancel_verification_handles().await;
+        match koushi_sdk::request_user_verification(&session, &user_id).await {
+            Ok(handle) => {
+                self.verification_request = Some(PendingVerificationRequest {
+                    request_id,
+                    target: target.clone(),
+                    handle: handle.clone(),
+                    start_sas_when_ready: true,
+                });
+                self.observe_verification_request(request_id, target.clone(), handle.clone());
+                self.emit_verification_progress(VerificationFlowState::Requested {
+                    request_id: request_id.sequence,
+                    target,
+                    initiator: VerificationInitiator::Us,
+                });
+                self.project_verification_request_state(request_id, handle.state())
+                    .await;
+            }
+            Err(error) => {
+                self.send_actions(vec![AppAction::VerificationFailed {
+                    request_id: request_id.sequence,
+                    kind: classify_e2ee_trust_error(&error),
+                }])
+                .await;
+            }
+        }
+    }
+
+    /// As the requester of a user verification, start SAS once the contact
+    /// accepted. If they already started it, the SDK reports `SasStarted`
+    /// and the existing adoption path takes over.
+    pub(super) async fn start_user_verification_sas_if_ready(&mut self, request_id: RequestId) {
+        let Some((target, handle)) = self
+            .verification_request
+            .as_ref()
+            .filter(|pending| {
+                pending.request_id.sequence == request_id.sequence && pending.start_sas_when_ready
+            })
+            .map(|pending| (pending.target.clone(), pending.handle.clone()))
+        else {
+            return;
+        };
+        if self.sas_verification.is_some() {
+            return;
+        }
+        match koushi_sdk::start_sas_verification(&handle).await {
+            Ok(Some(sas)) => {
+                let request_id = self
+                    .verification_request
+                    .as_ref()
+                    .map_or(request_id, |pending| pending.request_id);
+                self.store_sas_verification(request_id, target, sas).await;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.project_verification_failure(
+                    request_id.sequence,
+                    target,
+                    classify_e2ee_trust_error(&error),
+                )
+                .await;
+            }
+        }
+    }
+
+    /// Re-read the open contact right after a verification with them
+    /// completed, so the row shows the result without waiting for sync.
+    pub(super) async fn refresh_open_contact_security(&mut self, user_id: &str) {
+        let Some(generation) = self
+            .contact_security
+            .as_ref()
+            .filter(|observation| observation.user_id == user_id)
+            .map(|observation| observation.generation)
+        else {
+            return;
+        };
+        self.handle_contact_security_store_changed(generation).await;
     }
 
     async fn load_contact_security(&mut self, request_id: RequestId, user_id: String) {
