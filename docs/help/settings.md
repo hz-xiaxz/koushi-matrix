@@ -94,7 +94,8 @@ What you can do with addresses depends on the server:
 - When adding is available, **Add email address** (or **Add another email
   address**) sends a confirmation email. Open its link, then press
   **Continue**; a password prompt may appear. The new address is registered
-  after confirmation; if email notifications are on, they move to it.
+  after confirmation; if email notifications are on, they move to it from
+  the current address, which stays registered.
 - **This server does not allow adding email addresses here.** means the server
   disallows adding addresses from clients. Addresses already listed stay
   registered, and you can still turn email notifications on or off for them.

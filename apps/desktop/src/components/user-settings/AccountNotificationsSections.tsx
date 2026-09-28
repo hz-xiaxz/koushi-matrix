@@ -517,7 +517,7 @@ export function EmailNotificationsSection({
             onClick={() => setShowAddForm(true)}
             data-testid="email-add"
           >
-            {verified.length > 0 ? t("settings.emailChange") : t("settings.emailAdd")}
+            {verified.length > 0 ? t("settings.emailAddAnother") : t("settings.emailAdd")}
           </button>
         </div>
       ) : null}
