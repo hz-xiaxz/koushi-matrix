@@ -17,7 +17,7 @@ fn request(connection_id: u64, sequence: u64) -> RequestId {
 }
 
 fn account_state(user_id: &str) -> AppState {
-    let state = AppState {
+    AppState {
         session: SessionState::Ready(SessionInfo {
             homeserver: "https://example.invalid".to_owned(),
             user_id: user_id.to_owned(),
@@ -25,8 +25,7 @@ fn account_state(user_id: &str) -> AppState {
             authentication_method: Default::default(),
         }),
         ..Default::default()
-    };
-    state
+    }
 }
 
 fn room_summary(room_id: &str) -> koushi_state::RoomSummary {

@@ -8,7 +8,7 @@ use koushi_state::{
 use serde_json::json;
 
 fn ready_state() -> AppState {
-    let state = AppState {
+    AppState {
         session: SessionState::Ready(SessionInfo {
             homeserver: "https://server.example.invalid".to_owned(),
             user_id: "@alice:example.invalid".to_owned(),
@@ -16,8 +16,7 @@ fn ready_state() -> AppState {
             authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }),
         ..Default::default()
-    };
-    state
+    }
 }
 
 fn target() -> VerificationTarget {

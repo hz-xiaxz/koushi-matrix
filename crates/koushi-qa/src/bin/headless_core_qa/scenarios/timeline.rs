@@ -545,6 +545,10 @@ impl StressRoomCoordinates {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) async fn run_timeline_stress_room_messages(
     config: &QaConfig,
     sender_conn: &mut CoreConnection,
@@ -5576,6 +5580,10 @@ impl<'a> RoomThreadSummaryObserver<'a> {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) async fn wait_for_room_timeline_thread_summary(
     conn: &mut CoreConnection,
     key: &TimelineKey,
@@ -5635,6 +5643,10 @@ pub(super) async fn wait_for_room_timeline_thread_summary(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) async fn wait_for_thread_panel_and_room_summary(
     conn: &mut CoreConnection,
     room_key: &TimelineKey,

@@ -65,7 +65,7 @@ fn tag_favourite(mut room: RoomSummary) -> RoomSummary {
 /// Home scope, one of each conversation shape. Rooms carry unread counts so an
 /// aggregate that forgot to exclude low priority is visible as a number.
 fn mixed_state() -> AppState {
-    let state = AppState {
+    AppState {
         spaces: vec![SpaceSummary {
             space_id: SPACE_ID.to_owned(),
             raw_name: None,
@@ -92,8 +92,7 @@ fn mixed_state() -> AppState {
             )),
         ],
         ..Default::default()
-    };
-    state
+    }
 }
 
 fn names(items: &[koushi_state::RoomListItem]) -> Vec<&str> {

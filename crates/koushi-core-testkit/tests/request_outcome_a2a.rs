@@ -19,7 +19,7 @@ fn request(sequence: u64) -> RequestId {
 }
 
 fn ready_state(user_id: &str) -> AppState {
-    let state = AppState {
+    AppState {
         session: SessionState::Ready(SessionInfo {
             homeserver: "https://example.invalid".to_owned(),
             user_id: user_id.to_owned(),
@@ -27,8 +27,7 @@ fn ready_state(user_id: &str) -> AppState {
             authentication_method: Default::default(),
         }),
         ..Default::default()
-    };
-    state
+    }
 }
 
 fn versioned(

@@ -93,11 +93,10 @@ fn session_info() -> SessionInfo {
 }
 
 fn ready_state() -> AppState {
-    let state = AppState {
+    AppState {
         session: SessionState::Ready(session_info()),
         ..Default::default()
-    };
-    state
+    }
 }
 
 fn ready_with_room(room_id: &str) -> AppState {

@@ -649,6 +649,10 @@ impl From<QaParticipantLoginOutcome> for QaOwnedRuntimeParticipant {
     }
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "QA recipient selector built once per scenario step; boxing adds churn without a measurable benefit"
+)]
 pub(super) enum QaE2eeRecipient<'a> {
     Borrowed {
         conn: &'a mut CoreConnection,
@@ -742,6 +746,10 @@ where
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) async fn login_synced_participant_for_qa(
     homeserver: &str,
     data_dir: std::path::PathBuf,

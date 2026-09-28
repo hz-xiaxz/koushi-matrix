@@ -787,7 +787,6 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
             restart_stopped_qa_participant(stopped, "e2ee login-store cleanup B").await
     {
         owner_b = Some(participant);
-        stopped_b = None;
     }
     if owner_a.is_none()
         && let Some(stopped) = stopped_a.clone()
@@ -795,7 +794,6 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
             restart_stopped_qa_participant(stopped, "e2ee login-store cleanup A").await
     {
         owner_a = Some(participant);
-        stopped_a = None;
     }
 
     let mut cleanup_failures = Vec::new();

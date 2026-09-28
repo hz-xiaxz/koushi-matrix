@@ -4,7 +4,7 @@ use koushi_state::{
 };
 
 fn ready_state(gate: SecureBackupGateState) -> AppState {
-    let state = AppState {
+    AppState {
         session: SessionState::Ready(SessionInfo {
             homeserver: "https://server.example.invalid".to_owned(),
             user_id: "@alice:example.invalid".to_owned(),
@@ -13,8 +13,7 @@ fn ready_state(gate: SecureBackupGateState) -> AppState {
         }),
         secure_backup_gate: gate,
         ..Default::default()
-    };
-    state
+    }
 }
 
 #[test]
