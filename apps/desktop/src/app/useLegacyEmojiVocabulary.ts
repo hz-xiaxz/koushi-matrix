@@ -20,8 +20,10 @@ export type LegacyEmojiVocabulary =
  * list never consult the vocabulary, so they are `ready` immediately and no
  * chunk is fetched. If the chunk fails to load the vocabulary is
  * `unavailable`: the other legacy preferences still migrate, and the legacy
- * recent-emoji list, which cannot be validated, is left out of the import.
- * Navigation preferences never wait for the vocabulary.
+ * recent-emoji list, which cannot be validated, is left out of the import
+ * while its storage key is kept for a later launch (see
+ * `legacyRecentEmojiFollowUp`). Navigation preferences never wait for the
+ * vocabulary.
  */
 export function useLegacyEmojiVocabulary(): LegacyEmojiVocabulary {
   const [vocabulary, setVocabulary] = useState<LegacyEmojiVocabulary>(() =>

@@ -4885,7 +4885,11 @@ stateDiagram-v2
   error so it cannot overwrite unreadable existing data. Admission prepares the
   same canonical settings update, saves it with a one-time marker, and projects
   the matching settings action only after save success; a marked replay
-  cannot overwrite a later user edit.
+  cannot overwrite a later user edit. If the emoji vocabulary chunk is
+  unavailable when the import runs (#1035), the legacy recent-emoji list is
+  left out and its browser key is kept; a later launch with the vocabulary
+  appends the valid entries after the current MRU through an ordinary
+  `UpdateSettings` and removes the key only after Rust confirms them.
 - Settings updates are optimistic: the reducer applies the typed patch before
   persistence completes, records the latest saving request id, and ignores stale
   persist completions.

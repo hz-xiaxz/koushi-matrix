@@ -62,8 +62,12 @@ test("legacy Space presentation migrates through Rust-shaped navigation and clea
 });
 
 test("a failed emoji vocabulary chunk gates only the legacy emoji list (#1035)", async ({ page }) => {
-  await page.route(/\/src\/components\/emojiData\.ts(\?.*)?$/, (route) => route.abort());
+  const emojiDataRoute = /\/src\/components\/emojiData\.ts(\?.*)?$/;
+  await page.route(emojiDataRoute, (route) => route.abort());
   await page.addInitScript(() => {
+    // Seed the legacy profile once; a reload models a later launch.
+    if (sessionStorage.getItem("legacy-seeded") === "1") return;
+    sessionStorage.setItem("legacy-seeded", "1");
     localStorage.setItem("koushi.homeSelection.v1", JSON.stringify({ kind: "activity" }));
     localStorage.setItem("koushi.displayDensity.v1", "compact");
     localStorage.setItem("koushi-recent-emojis", JSON.stringify(["😀"]));
@@ -102,4 +106,32 @@ test("a failed emoji vocabulary chunk gates only the legacy emoji list (#1035)",
       )
     )
     .toEqual([null, null, null]);
+  // The unvalidated list is neither imported nor discarded.
+  expect(
+    await page.evaluate(
+      () => window.__harness.currentSnapshot().state.domain.settings.values.composer.recent_emojis
+    )
+  ).toEqual([]);
+  expect(await page.evaluate(() => localStorage.getItem("koushi-recent-emojis"))).toBe(
+    JSON.stringify(["😀"])
+  );
+
+  // A later launch: Rust already recorded the one-shot import, and the
+  // emoji chunk now loads, so the kept list is imported through an ordinary
+  // settings update and only then removed from browser storage.
+  await page.unroute(emojiDataRoute);
+  await page.goto("/appHarness.html?legacySettingsImported=1");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.__harness.currentSnapshot().state.domain.settings.values.composer.recent_emojis
+      )
+    )
+    .toEqual(["😀"]);
+  expect(
+    await page.evaluate(() => window.__harness.invocationsOf("import_legacy_settings").length)
+  ).toBe(0);
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("koushi-recent-emojis")))
+    .toBeNull();
 });
