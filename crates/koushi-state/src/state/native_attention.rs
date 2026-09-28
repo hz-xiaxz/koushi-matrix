@@ -8,9 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::locale_profile::DisplayPlatform;
 
 use super::errors::OperationFailureKind;
-use super::room::{
-    RoomAttentionKind, RoomLatestEventSummary, RoomSummary, room_attention_summary,
-};
+use super::room::{RoomAttentionKind, RoomLatestEventSummary, RoomSummary, room_attention_summary};
 
 /// Longest preview the desktop adapter may render in an OS notification body.
 ///
@@ -322,20 +320,22 @@ pub fn native_attention_projection_from_rooms(
     let mut candidate = candidate_entry.map(|entry| entry.candidate.clone());
     let mut dispatch = NativeAttentionDispatchState::Idle;
 
-    if let Some(entry) = candidate_entry {
-        if let Some(reason) = native_attention_suppression_reason(input, entry) {
-            candidate = None;
-            dispatch = NativeAttentionDispatchState::Suppressed { reason };
-        }
+    if let Some(entry) = candidate_entry
+        && let Some(reason) = native_attention_suppression_reason(input, entry)
+    {
+        candidate = None;
+        dispatch = NativeAttentionDispatchState::Suppressed { reason };
     }
 
     // A suppressed candidate must not produce OS notification text either, so
     // the payload is derived after suppression, from the same entry that won
     // the candidate selection.
     let notification = match (candidate_entry, candidate.as_ref()) {
-        (Some(entry), Some(candidate)) => {
-            Some(native_notification_payload(entry, candidate, input.message_previews))
-        }
+        (Some(entry), Some(candidate)) => Some(native_notification_payload(
+            entry,
+            candidate,
+            input.message_previews,
+        )),
         _ => None,
     };
 
@@ -392,8 +392,7 @@ fn native_notification_payload(
         target: NativeNotificationTarget {
             room_id: entry.room_id.to_owned(),
             event_id: latest_event.map(|event| event.event_id.clone()),
-            thread_root_event_id: latest_event
-                .and_then(|event| event.thread_root_event_id.clone()),
+            thread_root_event_id: latest_event.and_then(|event| event.thread_root_event_id.clone()),
         },
     }
 }

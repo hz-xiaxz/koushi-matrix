@@ -85,7 +85,7 @@ async fn event_before_projection_waits_for_authoritative_snapshot_and_returns_ge
         request_id,
         room_id: room_id.to_owned(),
     }));
-    assert!(matches!(waiter.as_mut().now_or_never(), None));
+    assert!(waiter.as_mut().now_or_never().is_none());
     control.send_snapshot(published.clone());
     assert_eq!(
         waiter.await.expect("room creation outcome"),

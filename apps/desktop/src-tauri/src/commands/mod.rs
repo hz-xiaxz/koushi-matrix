@@ -26,22 +26,20 @@ use koushi_core::{
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_protocol::{
     AccountCommand, AccountKey, AppCommand, CoreCommand, CoreEvent, CoreFailure, CreateRoomOptions,
-    IntentNoOpReason, IntentOutcome, MediaDownloadSelection, PaginationDirection, RequestId,
-    RoomCommand, RoomKeyExportRequest, RoomKeyImportRequest, SearchCommand, SearchScope,
+    IntentNoOpReason, MediaDownloadSelection, PaginationDirection, RequestId, RoomCommand,
+    RoomKeyExportRequest, RoomKeyImportRequest, SearchCommand, SearchScope,
     SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest, SyncCommand,
-    TimelineBatchId, TimelineBottomArrival, TimelineCommand, TimelineEvent, TimelineGapId,
-    TimelineGeneration, TimelineKey, TimelineKind, TimelineViewportObservation,
+    TimelineBottomArrival, TimelineCommand, TimelineGapId, TimelineKey, TimelineKind,
+    TimelineViewportObservation,
 };
 use koushi_state::{
     ActivityMarkReadTarget, ActivityTab, AttachmentFilter, AttachmentSort, AuthSecret,
-    ComposerDocument, ComposerDraftRevision, ComposerFormattingOptions, ComposerKeyEvent,
-    ComposerResolvedAction, ComposerResolverContext, ComposerSurface, DirectoryQuery,
-    DisplayPlatform, FilesViewScope, IdentityResetAuthRequest, ImageUploadCompressionMode,
-    InviteScopeSelection, LoginRequest, MentionIntent, MentionSurface, PresenceKind,
+    ComposerDocument, ComposerDraftRevision, ComposerKeyEvent, ComposerResolvedAction,
+    ComposerResolverContext, ComposerSurface, DirectoryQuery, DisplayPlatform, FilesViewScope,
+    IdentityResetAuthRequest, InviteScopeSelection, LoginRequest, MentionSurface, PresenceKind,
     RecoveryRequest, RoomListFilter, RoomModerationAction, RoomNotificationMode, RoomSettingChange,
     RoomTagKind, SessionInfo, SettingsPatch, StagedUploadCompressionChoice, SubmissionId,
     ThreadOpenIntent, ThreadsListScope, TimelineScrollAnchor, VerificationCancelReason,
-    build_formatted_message_draft,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -49,8 +47,8 @@ use tauri::{AppHandle, Manager, State};
 use crate::{
     CoreRuntimeState,
     dto::{
-        FrontendCommandAdmission, FrontendCommandResult, FrontendCommandSettlement,
-        FrontendCreateRoomSettlement, SearchScopeKind,
+        FrontendCommandAdmission, FrontendCommandSettlement, FrontendCreateRoomSettlement,
+        SearchScopeKind,
     },
 };
 

@@ -165,11 +165,10 @@ async fn installed_scope_owns_reader_leases_until_retirement_and_delivery_releas
             Some(crate::view_scope_lifecycle::ScopeError::InvalidModel)
         );
         let mut wrong_model = model.clone();
-        if let ViewModel::ReaderReady(window) = &mut wrong_model {
-            if let Some(AvatarThumbnailState::Ready { source_ref, .. }) = &mut window.rows[0].avatar
-            {
-                *source_ref = "avatar/0000000000000000".into();
-            }
+        if let ViewModel::ReaderReady(window) = &mut wrong_model
+            && let Some(AvatarThumbnailState::Ready { source_ref, .. }) = &mut window.rows[0].avatar
+        {
+            *source_ref = "avatar/0000000000000000".into();
         }
         let original = &resolved.avatar_resources[0];
         let wrong_resources = vec![crate::timeline::ReaderAvatarResource {

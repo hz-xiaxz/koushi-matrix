@@ -1671,7 +1671,7 @@ async fn run_fast_send_queue_feedback() {
         .and(path("/_matrix/client/v3/login"))
         .respond_with(EchoRequestedLoginDevice)
         .expect(1)
-        .mount(&server.server())
+        .mount(server.server())
         .await;
     server
         .mock_room_state_encryption()
@@ -1685,7 +1685,7 @@ async fn run_fast_send_queue_feedback() {
             room_id: room_id.to_string(),
             request_count: AtomicUsize::new(0),
         })
-        .mount(&server.server())
+        .mount(server.server())
         .await;
 
     let runtime = CoreRuntime::start_with_data_dir_and_file_credentials(

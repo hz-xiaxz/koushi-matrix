@@ -1,5 +1,3 @@
-use super::super::test_source::item_body;
-
 use std::collections::{BTreeSet, HashMap};
 
 use std::sync::{Arc, Mutex};
@@ -2775,7 +2773,6 @@ fn room_navigation_preserves_hidden_receipt_position_and_thread_scope() {
     assert_eq!(thread.newer_event_count, 1);
 }
 
-
 #[test]
 fn confirmed_thread_receipt_cannot_display_before_an_older_local_boundary() {
     let mut own = timeline_item("$own:test", Some("edited own reply"), "@me:test", false);
@@ -2928,10 +2925,9 @@ async fn replay_initial_items_republishes_unchanged_read_navigation() {
         loop {
             if let CoreEvent::Timeline(TimelineEvent::NavigationUpdated { snapshot, .. }) =
                 events.recv().await.unwrap()
+                && snapshot.local_viewed_event_id.as_deref() == Some(latest.as_str())
             {
-                if snapshot.local_viewed_event_id.as_deref() == Some(latest.as_str()) {
-                    break snapshot;
-                }
+                break snapshot;
             }
         }
     })

@@ -1,6 +1,5 @@
 //! Runtime timeline / composer integration tests.
 
-use koushi_core::executor;
 use koushi_core::runtime::CoreRuntime;
 use koushi_protocol::SessionKeyId;
 use koushi_protocol::command::{AppCommand, CoreCommand, TimelineCommand};

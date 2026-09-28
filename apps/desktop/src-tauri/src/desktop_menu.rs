@@ -353,11 +353,16 @@ mod tests {
     #[test]
     fn fullscreen_menu_opt_out_preserves_one_authored_toggle() {
         super::configure_fullscreen_menu();
-        assert!(!objc2_foundation::NSUserDefaults::standardUserDefaults().boolForKey(
-            &objc2_foundation::NSString::from_str("NSFullScreenMenuItemEverywhere"),
-        ));
+        assert!(
+            !objc2_foundation::NSUserDefaults::standardUserDefaults().boolForKey(
+                &objc2_foundation::NSString::from_str("NSFullScreenMenuItemEverywhere"),
+            )
+        );
         let items = desktop_menu_items();
-        let fullscreen: Vec<_> = items.iter().filter(|item| item.id == "toggle_fullscreen").collect();
+        let fullscreen: Vec<_> = items
+            .iter()
+            .filter(|item| item.id == "toggle_fullscreen")
+            .collect();
         assert_eq!(fullscreen.len(), 1);
         assert_eq!(fullscreen[0].accelerator, "Ctrl+Command+F");
         assert_eq!(fullscreen[0].label_key, "menu.toggleFullscreen");

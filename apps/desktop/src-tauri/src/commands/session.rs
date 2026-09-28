@@ -204,11 +204,11 @@ fn launch_oidc_browser(
             }
             launch_linux_default_browser(url).map_err(|_| ())
         };
-        return if running_under_wsl() {
+        if running_under_wsl() {
             launch_oidc_authorization_url_with_fallback(authorization_url, linux, native)
         } else {
             launch_oidc_authorization_url_with_fallback(authorization_url, native, linux)
-        };
+        }
     }
 
     #[cfg(not(target_os = "linux"))]

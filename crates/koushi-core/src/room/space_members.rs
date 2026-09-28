@@ -374,7 +374,7 @@ fn space_members_update_affects_demand(
     child_room_ids: &BTreeSet<String>,
     updated_room_ids: Option<&BTreeSet<String>>,
 ) -> bool {
-    updated_room_ids.map_or(true, |updated| {
+    updated_room_ids.is_none_or(|updated| {
         updated.contains(space_id)
             || updated
                 .iter()
@@ -840,10 +840,8 @@ impl RoomActor {
             }
         }
 
-        if should_refresh_again {
-            if let Some(demand) = self.space_member_demand.clone() {
-                self.start_space_member_refresh(demand);
-            }
+        if should_refresh_again && let Some(demand) = self.space_member_demand.clone() {
+            self.start_space_member_refresh(demand);
         }
     }
 
@@ -981,7 +979,7 @@ impl RoomActor {
             space_id: space_id.clone(),
             user_id: user_id.clone(),
             generation,
-            outcome: outcome.clone(),
+            outcome,
             sent_revision,
             projection,
         }])

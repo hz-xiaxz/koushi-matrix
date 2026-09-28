@@ -301,7 +301,7 @@ fn dismissing_a_navigation_failure_clears_it_without_cancelling_a_live_navigatio
             source: EventNavigationSource::Pinned,
         },
     );
-    let opening = state.navigation.event_navigation.clone();
+    let opening = state.navigation.event_navigation;
     reduce(&mut state, AppAction::EventNavigationFailureDismissed);
     assert_eq!(&state.navigation.event_navigation, &opening);
 

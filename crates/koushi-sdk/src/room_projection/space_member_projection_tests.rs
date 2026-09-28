@@ -194,7 +194,7 @@ async fn projection_uses_local_join_and_invite_filters_and_unions_child_joins() 
         projection
             .child_room_profiles
             .iter()
-            .any(|entry| entry.user_id == both.to_string())
+            .any(|entry| entry.user_id == *both)
     );
     assert_eq!(
         projection.child_room_only[0].child_room_ids,

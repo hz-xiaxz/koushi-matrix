@@ -3,8 +3,6 @@ use super::operations::{classify_room_error, operation_failure_kind};
 use koushi_protocol::event::{CoreEvent, RoomEvent};
 use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
 use koushi_protocol::ids::RequestId;
-#[cfg(test)]
-use koushi_sdk::MatrixRoomMemberRoleOption;
 use koushi_sdk::{
     MatrixRoomHistoryVisibility, MatrixRoomJoinRule, MatrixRoomMemberRole, MatrixRoomMemberSummary,
     MatrixRoomModerationAction, MatrixRoomPermissionFacts, MatrixRoomSettingChange,

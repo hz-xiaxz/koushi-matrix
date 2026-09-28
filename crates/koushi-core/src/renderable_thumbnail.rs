@@ -392,7 +392,7 @@ pub fn lookup_renderable_thumbnail(source_ref: &str) -> Option<RenderableThumbna
     let mut cache = renderable_thumbnail_cache()
         .lock()
         .expect("renderable thumbnail cache should not be poisoned");
-    cache.get(&cache_key)
+    cache.get(cache_key)
 }
 
 pub fn clear_renderable_thumbnail_cache() {

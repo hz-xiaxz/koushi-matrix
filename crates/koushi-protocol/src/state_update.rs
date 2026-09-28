@@ -12,8 +12,8 @@ use koushi_state::{
     RoomNotificationSettings, RoomPreferencesState, RoomSummary, SearchCrawlerLastActive,
     SearchCrawlerRoomState, SearchCrawlerState, SearchState, SecureBackupGateState, SessionState,
     SettingsState, SidebarModel, SoftLogoutReauthState, SpaceChildrenState, SpaceMembersState,
-    SpaceSummary, SyncState,
-    ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState, UserProfile,
+    SpaceSummary, SyncState, ThreadAttentionState, ThreadPaneState, ThreadsListState,
+    TimelinePaneState, UserProfile,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};

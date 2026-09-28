@@ -6,11 +6,10 @@ use super::{
     timeline_item_has_thread_summary_reply, timeline_item_has_visible_payload,
 };
 use crate::contracts::{
-    ScriptedQaEventSource, reconnect_test_bodies, reconnect_test_items, reconnect_test_request,
-    synthetic_timeline_item,
+    reconnect_test_bodies, reconnect_test_items, reconnect_test_request, synthetic_timeline_item,
 };
 use crate::diagnostics::QaCannedMessagesPage;
-use crate::event_wait::{QaEventSource, find_timeline_item_with_body, projection_timeline_item};
+use crate::event_wait::{find_timeline_item_with_body, projection_timeline_item};
 use crate::registry::{
     QaScenario, QaStage, TIMELINE_RECONNECT_EXPECTED_BODY_COUNT, final_tokens_for_scenario,
     stages_for_scenario,
@@ -1013,13 +1012,12 @@ fn room_thread_summary_observer_waits_for_late_summary_diff() {
     );
 
     assert!(
-        observer
+        !observer
             .observe_diffs(&[TimelineDiff::Set {
                 index: 0,
                 item: root_with_summary,
             }])
-            .unwrap()
-            == false,
+            .unwrap(),
         "the root summary alone is insufficient without Rust display activity metadata"
     );
 }

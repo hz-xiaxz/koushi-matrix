@@ -574,7 +574,7 @@ impl CoreConnection {
                 tokio::select! {
                     biased;
                     changed = self.snapshot_rx.changed() => SnapshotWake::from_changed(changed),
-                    event = self.event_rx.recv() => SnapshotWake::from_event(event, &self),
+                    event = self.event_rx.recv() => SnapshotWake::from_event(event, self),
                 }
             })
             .await;
@@ -1812,7 +1812,10 @@ pub(super) fn progress_generation_is_eligible(
     snapshot_generation > baseline_generation
         || (snapshot_generation == baseline_generation
             && expectation.request_id() == progress_request_id
-            && matches!(expectation, RequestOutcomeExpectation::InviteWorkflow { .. }))
+            && matches!(
+                expectation,
+                RequestOutcomeExpectation::InviteWorkflow { .. }
+            ))
         || (expectation.request_id() == progress_request_id
             && matches!(
                 expectation,

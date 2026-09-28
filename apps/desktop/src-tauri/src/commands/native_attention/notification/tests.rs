@@ -33,7 +33,10 @@ fn pending_notification_requires_a_ready_session() {
     state.native_attention.notification = Some(payload());
     state.session = SessionState::SignedOut;
 
-    assert_eq!(pending_notification(&state).err(), Some("session_unavailable"));
+    assert_eq!(
+        pending_notification(&state).err(),
+        Some("session_unavailable")
+    );
 }
 
 #[test]
@@ -100,13 +103,9 @@ fn activation_event_carries_the_target_without_preview_text() {
 
 #[test]
 fn outcome_tokens_stay_stable_for_diagnostics() {
+    assert_eq!(NativeNotificationOutcome::Delivered.token(), "delivered");
     assert_eq!(
-        NativeNotificationOutcome::Delivered.token(),
-        "delivered"
-    );
-    assert_eq!(
-        serde_json::to_value(NativeNotificationOutcome::DisplayOnly)
-            .expect("outcome serializes"),
+        serde_json::to_value(NativeNotificationOutcome::DisplayOnly).expect("outcome serializes"),
         serde_json::json!("displayOnly")
     );
 }

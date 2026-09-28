@@ -5,11 +5,11 @@ use super::diagnostics::{
 use super::event_wait::{
     QaEventDeadline, SendQueueLocalEcho, cancel_send_queue_item, find_timeline_item_with_body,
     retry_send_queue_item, send_text_expect_local_echo, start_sync_for_qa, stop_sync_for_qa,
-    subscribe_timeline_for_qa, timeline_item_body_matches, timeline_item_event_id,
-    timeline_item_is_decryption_failure, timeline_item_transaction_id, visit_timeline_diff_items,
-    wait_for_dm_room_in_room_list, wait_for_encrypted_room_projection_for_qa,
-    wait_for_event_item_with_body, wait_for_event_item_with_body_or_retry_not_sent,
-    wait_for_initial_items, wait_for_invite_in_snapshot, wait_for_item_with_body,
+    timeline_item_body_matches, timeline_item_event_id, timeline_item_is_decryption_failure,
+    timeline_item_transaction_id, visit_timeline_diff_items, wait_for_dm_room_in_room_list,
+    wait_for_encrypted_room_projection_for_qa, wait_for_event_item_with_body,
+    wait_for_event_item_with_body_or_retry_not_sent, wait_for_initial_items,
+    wait_for_invite_in_snapshot, wait_for_item_with_body,
     wait_for_item_with_body_or_decryption_failure, wait_for_link_preview_item_projection,
     wait_for_logged_in, wait_for_logged_out, wait_for_media_download_completed,
     wait_for_media_item, wait_for_media_send_flow_completion, wait_for_ready_snapshot,
@@ -458,7 +458,7 @@ async fn wait_for_stress_replay_paginate(
             CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
                 key: ev_key, diffs, ..
             }) if ev_key == key => {
-                visit_timeline_diff_items(&diffs, |item| {
+                visit_timeline_diff_items(diffs, |item| {
                     if timeline_item_is_visible_event_row(item)
                         && !timeline_item_has_visible_payload(item)
                     {
@@ -468,13 +468,13 @@ async fn wait_for_stress_replay_paginate(
                     }
                     Ok(())
                 })?;
-                message_rows += count_visible_payload_event_rows_in_diffs(&diffs);
+                message_rows += count_visible_payload_event_rows_in_diffs(diffs);
             }
             CoreEvent::Timeline(TimelineEvent::InitialItems {
                 key: ev_key, items, ..
             }) if ev_key == key => {
-                assert_no_blank_visible_event_rows(&items, label)?;
-                message_rows += count_visible_payload_event_rows(&items);
+                assert_no_blank_visible_event_rows(items, label)?;
+                message_rows += count_visible_payload_event_rows(items);
             }
             CoreEvent::Timeline(TimelineEvent::PaginationStateChanged {
                 key: ev_key,
@@ -1507,7 +1507,7 @@ pub(super) async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), 
                     key: ref ev_key,
                     ref status,
                 }) if ev_req == restore_req && ev_key == &key => {
-                    break status.clone();
+                    break *status;
                 }
                 _ => {}
             }
@@ -1628,7 +1628,7 @@ pub(super) async fn run_cache_restore_scenario(config: &QaConfig) -> Result<(), 
                 key: ref ev_key,
                 ref status,
             }) if ev_req == shallow_restore_req && ev_key == &shallow_key2 => {
-                break status.clone();
+                break *status;
             }
             _ => {}
         }
@@ -3513,12 +3513,12 @@ pub(super) async fn wait_for_cancelled_or_removed_send(
                         {
                             cancelled = true;
                         }
-                        TimelineDiff::Reset { items } => {
+                        TimelineDiff::Reset { items }
                             if items.iter().all(|item| {
                                 timeline_item_transaction_id(item) != Some(sdk_transaction_id)
-                            }) {
-                                cancelled = true;
-                            }
+                            }) =>
+                        {
+                            cancelled = true;
                         }
                         _ => {}
                     }
@@ -5627,10 +5627,8 @@ pub(super) async fn wait_for_room_timeline_thread_summary(
                 key: ref ev_key,
                 diffs,
                 ..
-            }) if ev_key == key => {
-                if observer.observe_diffs(&diffs)? {
-                    return Ok(());
-                }
+            }) if ev_key == key && observer.observe_diffs(&diffs)? => {
+                return Ok(());
             }
             _ => {}
         }
@@ -5865,13 +5863,12 @@ pub(super) async fn wait_for_redact_diff(
                 for diff in &diffs {
                     match diff {
                         koushi_protocol::event::TimelineDiff::Remove { .. } => return Ok(()),
-                        koushi_protocol::event::TimelineDiff::Set { item, .. } => {
+                        koushi_protocol::event::TimelineDiff::Set { item, .. }
                             // SDK emits a Set with a redacted body (None or empty) when it
                             // replaces the message body in-place with a "Message redacted" tombstone.
-                            if item.body.is_none() || item.body.as_deref() == Some("") {
+                            if (item.body.is_none() || item.body.as_deref() == Some("")) => {
                                 return Ok(());
                             }
-                        }
                         _ => {}
                     }
                 }

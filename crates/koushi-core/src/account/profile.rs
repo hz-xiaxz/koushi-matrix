@@ -141,7 +141,7 @@ fn avatar_thumbnail_for_request(
     match thumbnail {
         AvatarThumbnailState::Failed { kind, .. } => AvatarThumbnailState::Failed {
             request_id: request_id.sequence,
-            kind: kind.clone(),
+            kind: *kind,
         },
         other => other.clone(),
     }
@@ -581,10 +581,10 @@ impl AccountActor {
             != self
                 .avatar_session_generation
                 .load(std::sync::atomic::Ordering::Acquire)
-            || !self
+            || self
                 .avatar_fetch_abort_handles
                 .get(&mxc_uri)
-                .is_some_and(|handle| handle.id() == fetch_id)
+                .is_none_or(|handle| handle.id() != fetch_id)
         {
             return;
         }

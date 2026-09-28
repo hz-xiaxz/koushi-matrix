@@ -1735,10 +1735,10 @@ impl TimelineActor {
         duration_ms: u128,
     ) {
         if actor_generation != self.actor_generation
-            || !self
+            || self
                 .live_tail_refresh
                 .as_ref()
-                .is_some_and(|(current, _, _)| *current == operation_generation)
+                .is_none_or(|(current, _, _)| *current != operation_generation)
         {
             return;
         }
@@ -2177,15 +2177,15 @@ impl TimelineActor {
                             }
                             GapRepairSelection::DirectCommittedResponse => {
                                 self.missing_committed_response_retry = None;
-                                if let Some(checkpoint) = committed_response.as_ref() {
-                                    if consume_room_subscription_checkpoint(
+                                if let Some(checkpoint) = committed_response.as_ref()
+                                    && consume_room_subscription_checkpoint(
                                         &mut self.room_subscription_checkpoint,
                                         &mut self.deferred_room_subscription_checkpoint,
                                         checkpoint,
-                                    ) {
-                                        self.gap_repair
-                                            .queue_inspection(TimelineGapRepairTrigger::LiveEdge);
-                                    }
+                                    )
+                                {
+                                    self.gap_repair
+                                        .queue_inspection(TimelineGapRepairTrigger::LiveEdge);
                                 }
                                 (None, "committed_response", true)
                             }

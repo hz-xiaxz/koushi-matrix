@@ -1373,20 +1373,20 @@ impl TimelineManagerActor {
             .state
             .complete(&read_key, operation.fence(), outcome);
         let disposition = completion.disposition();
-        if disposition == ReadCompletionDisposition::Succeeded {
-            if let Some(timeline_key) = self.read_timeline_key_for_operation(&operation) {
-                let actor_generation = self
-                    .read_workers
-                    .local_read_correlations
-                    .get(&timeline_key)
-                    .map_or(0, |correlation| correlation.actor_generation);
-                self.update_local_server_confirmation(
-                    &timeline_key,
-                    actor_generation,
-                    &read_key,
-                    Some(operation.target().event_id()),
-                );
-            }
+        if disposition == ReadCompletionDisposition::Succeeded
+            && let Some(timeline_key) = self.read_timeline_key_for_operation(&operation)
+        {
+            let actor_generation = self
+                .read_workers
+                .local_read_correlations
+                .get(&timeline_key)
+                .map_or(0, |correlation| correlation.actor_generation);
+            self.update_local_server_confirmation(
+                &timeline_key,
+                actor_generation,
+                &read_key,
+                Some(operation.target().event_id()),
+            );
         }
         record_read_completion(&read_key, completion.diagnostic());
         let settlements = completion.settlements().to_vec();
@@ -1876,13 +1876,11 @@ impl TimelineManagerActor {
                         if let Some(superseded) = admission.superseded_operation() {
                             self.read_workers.cancel(superseded);
                         }
-                        if matches!(admission.status(), ReadAdmissionStatus::Rejected(_)) {
-                            if let Some(correlation) =
+                        if matches!(admission.status(), ReadAdmissionStatus::Rejected(_))
+                            && let Some(correlation) =
                                 self.read_workers.local_read_correlations.get_mut(key)
-                            {
-                                correlation.admission_failure =
-                                    Some(ReadStateFailureKind::Capacity);
-                            }
+                        {
+                            correlation.admission_failure = Some(ReadStateFailureKind::Capacity);
                         }
                     }
                 }

@@ -8,9 +8,7 @@
 use koushi_protocol::event::{CoreEvent, RoomEvent};
 use koushi_protocol::failure::CoreFailure;
 use koushi_protocol::ids::RequestId;
-use koushi_state::{
-    AppAction, OperationFailureKind, SpaceChildMembership, SpaceChildSummary,
-};
+use koushi_state::{AppAction, OperationFailureKind, SpaceChildMembership, SpaceChildSummary};
 
 use super::RoomActor;
 use super::normalization::avatar_from_mxc_uri;
@@ -89,4 +87,3 @@ fn space_child_summary(entry: &MatrixSpaceChildEntry) -> SpaceChildSummary {
         joined_members: entry.joined_members,
     }
 }
-

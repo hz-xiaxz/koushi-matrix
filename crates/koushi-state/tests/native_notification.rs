@@ -6,7 +6,7 @@
 //! must never be built for a suppressed candidate.
 
 use koushi_state::{
-    NativeAttentionCapabilities, NativeAttentionCapability, NativeAttentionCandidate,
+    NativeAttentionCandidate, NativeAttentionCapabilities, NativeAttentionCapability,
     NativeAttentionObservationKind, NativeAttentionProjectionInput, RoomAttentionKind,
     RoomLatestEventSummary, RoomNotificationMode, RoomSummary, RoomTags,
     native_attention_projection_from_rooms,
@@ -89,7 +89,11 @@ fn previews_off_keeps_message_content_out_of_the_notification() {
     // The same triggering event serves both runs, so the only difference is the
     // device-local setting.
     let mut dm = room("!dm:example.invalid", true, 2, 0);
-    dm.latest_event = Some(latest_event("$secret:example.invalid", "Alice", "private body"));
+    dm.latest_event = Some(latest_event(
+        "$secret:example.invalid",
+        "Alice",
+        "private body",
+    ));
 
     let without_previews = project(
         &[dm.clone()],
@@ -159,7 +163,10 @@ fn previews_on_keeps_the_thread_root_of_the_triggering_reply() {
 #[test]
 fn previews_on_uses_the_projected_fallback_text_for_unavailable_content() {
     for (preview, expected) in [
-        ("Unable to decrypt message", "Alice: Unable to decrypt message"),
+        (
+            "Unable to decrypt message",
+            "Alice: Unable to decrypt message",
+        ),
         ("Message deleted", "Alice: Message deleted"),
         ("m.sticker", "Alice: m.sticker"),
     ] {
@@ -243,7 +250,11 @@ fn missing_room_history_still_opens_the_room() {
 #[test]
 fn suppressed_candidates_never_produce_notification_text() {
     let mut room = room("!room:example.invalid", false, 2, 0);
-    room.latest_event = Some(latest_event("$event:example.invalid", "Alice", "private body"));
+    room.latest_event = Some(latest_event(
+        "$event:example.invalid",
+        "Alice",
+        "private body",
+    ));
 
     for observation in [
         NativeAttentionObservationKind::InitialSync,
@@ -257,10 +268,15 @@ fn suppressed_candidates_never_produce_notification_text() {
 
     // Deduplication: an unchanged candidate is suppressed and must not produce
     // a second banner payload.
-    let candidate = project(&[room.clone()], true, NativeAttentionObservationKind::Live, None)
-        .summary
-        .candidate
-        .expect("candidate");
+    let candidate = project(
+        &[room.clone()],
+        true,
+        NativeAttentionObservationKind::Live,
+        None,
+    )
+    .summary
+    .candidate
+    .expect("candidate");
     let duplicate = project(
         &[room],
         true,
@@ -274,7 +290,11 @@ fn suppressed_candidates_never_produce_notification_text() {
 #[test]
 fn muted_rooms_produce_no_notification_text() {
     let mut room = room("!room:example.invalid", false, 2, 0);
-    room.latest_event = Some(latest_event("$event:example.invalid", "Alice", "private body"));
+    room.latest_event = Some(latest_event(
+        "$event:example.invalid",
+        "Alice",
+        "private body",
+    ));
 
     let modes = HashMap::from([(
         "!room:example.invalid".to_owned(),
@@ -301,7 +321,11 @@ fn muted_rooms_produce_no_notification_text() {
 #[test]
 fn notification_debug_redacts_the_body_and_the_target() {
     let mut room = room("!room:example.invalid", false, 1, 0);
-    room.latest_event = Some(latest_event("$event:example.invalid", "Alice", "private body"));
+    room.latest_event = Some(latest_event(
+        "$event:example.invalid",
+        "Alice",
+        "private body",
+    ));
 
     let state = project(&[room], true, NativeAttentionObservationKind::Live, None);
     let rendered = format!("{:?}", state);

@@ -2041,7 +2041,7 @@ impl AccountActor {
         let store_config = self
             .store
             .existing_account_store_config(key_id)
-            .map_err(|failure| {
+            .inspect_err(|_failure| {
                 record(
                     DiagnosticEvent::new(
                         DiagnosticLevel::Warn,
@@ -2050,7 +2050,6 @@ impl AccountActor {
                     )
                     .field(DiagnosticField::token("stage", "store_config")),
                 );
-                failure
             })?;
         record_restore_store_event(
             restore_store_event("store_config_ready", None)

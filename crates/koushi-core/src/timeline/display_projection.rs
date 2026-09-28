@@ -1226,16 +1226,16 @@ fn root_display_item(
     display_timestamp_ms: Option<u64>,
 ) -> TimelineItem {
     let mut item = root.item.clone().unwrap_or_else(|| fallback.clone());
-    let summary =
-        item.thread_summary
-            .get_or_insert_with(|| koushi_protocol::event::ThreadSummaryDto {
-                reply_count: 0,
-                latest_event_id: None,
-                latest_sender: None,
-                latest_sender_label: None,
-                latest_body_preview: None,
-                latest_timestamp_ms: None,
-            });
+    let summary = item
+        .thread_summary
+        .get_or_insert(koushi_protocol::event::ThreadSummaryDto {
+            reply_count: 0,
+            latest_event_id: None,
+            latest_sender: None,
+            latest_sender_label: None,
+            latest_body_preview: None,
+            latest_timestamp_ms: None,
+        });
     summary.reply_count = root.aggregate.reply_count;
     summary.latest_event_id = root.aggregate.latest_event_id.clone();
     summary.latest_sender = root.aggregate.latest_sender.clone();

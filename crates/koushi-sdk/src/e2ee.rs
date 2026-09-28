@@ -1528,7 +1528,7 @@ pub async fn download_joined_room_keys_from_backup(
     }
 
     let backup_status = map_backup_state_to_desktop(encryption.backups().state());
-    let backup_version = version.map(str::to_owned).or_else(|| match backup_status {
+    let backup_version = version.map(str::to_owned).or(match backup_status {
         KeyBackupStatus::Enabled { version } => Some(version),
         KeyBackupStatus::Restoring { version, .. } => version,
         _ => None,
@@ -3108,8 +3108,8 @@ fn record_initial_share_diagnostic(
         }
     };
     counters.increment(counter);
-    match event.stage {
-        Stage::Eligible => match event.device_class {
+    if event.stage == Stage::Eligible {
+        match event.device_class {
             Class::VerifiedOwn | Class::UnverifiedOwn => {
                 counters.increment("initial_share_eligible_own")
             }
@@ -3117,8 +3117,7 @@ fn record_initial_share_diagnostic(
                 counters.increment("initial_share_eligible_peer")
             }
             Class::Dehydrated | Class::Unknown => {}
-        },
-        _ => {}
+        }
     }
 
     let mut diagnostic = DiagnosticEvent::new(DiagnosticLevel::Info, "core.initial_share", "stage")
@@ -3602,7 +3601,7 @@ mod megolm_send_parity_tests {
             .mount(server.server())
             .await;
 
-        let room = alice.get_room(&room_id).unwrap();
+        let room = alice.get_room(room_id).unwrap();
         room.send(RoomMessageEventContent::text_plain("first"))
             .await
             .unwrap();
@@ -3894,7 +3893,11 @@ pub struct MatrixRoomKeyReceiveDiagnostics {
 pub async fn incoming_verification_request_protection_counters(
     session: &MatrixClientSession,
 ) -> IncomingVerificationRequestProtectionCounters {
-    session.client().encryption().incoming_verification_request_protection_counters().await
+    session
+        .client()
+        .encryption()
+        .incoming_verification_request_protection_counters()
+        .await
 }
 
 /// Snapshot the privacy-safe receive-side room-key diagnostics for a session.

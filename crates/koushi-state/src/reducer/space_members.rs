@@ -348,15 +348,14 @@ fn apply_reconciled_projection_during_invite(
     if resolved.incomplete_child_room_count > 0 {
         merge_incomplete_projection(&state.space_members, &mut resolved);
     }
-    if let Some((_, _, user_id, _)) = pending {
-        if !authoritative {
-            if let Some(mut entry) = pending_entry {
-                remove_projection_entry(&mut resolved, &user_id);
-                entry.membership = SpaceMemberMembership::SpaceInvited;
-                entry.invite_pending = true;
-                resolved.space_invited.push(entry);
-            }
-        }
+    if let Some((_, _, user_id, _)) = pending
+        && !authoritative
+        && let Some(mut entry) = pending_entry
+    {
+        remove_projection_entry(&mut resolved, &user_id);
+        entry.membership = SpaceMemberMembership::SpaceInvited;
+        entry.invite_pending = true;
+        resolved.space_invited.push(entry);
     }
     sort_projection(&mut resolved);
     apply_projection(&mut state.space_members, resolved);

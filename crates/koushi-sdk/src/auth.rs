@@ -325,10 +325,7 @@ fn is_discovered_http_url(value: &str) -> bool {
 /// Any error (network, status, malformed body, missing metadata, unsupported
 /// scheme) yields empty links so login discovery never depends on it.
 fn discover_delegated_auth_links(homeserver: &Homeserver) -> DelegatedAuthLinks {
-    match fetch_well_known_client(homeserver) {
-        Some(links) => links,
-        None => DelegatedAuthLinks::default(),
-    }
+    fetch_well_known_client(homeserver).unwrap_or_default()
 }
 
 fn fetch_well_known_client(homeserver: &Homeserver) -> Option<DelegatedAuthLinks> {

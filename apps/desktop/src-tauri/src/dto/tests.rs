@@ -176,7 +176,8 @@ fn frontend_snapshot_serializes_to_the_typescript_contract() {
             frontend_display_platform()
         ))
         .expect("capability profile serializes")
-    );    assert_eq!(
+    );
+    assert_eq!(
         value["state"]["domain"]["cjk_text_policy"]["japanese_catalog"]["catalog_locale"],
         json!("en")
     );

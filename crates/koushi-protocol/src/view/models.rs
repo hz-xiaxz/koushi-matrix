@@ -291,7 +291,7 @@ mod tests {
         for value in [0, 1, 8_640_000_000_000_000] {
             let stamp =
                 ReceiptTimestamp::from_sdk(Some(value), koushi_state::CatalogLocale::Ja).unwrap();
-            let wire = serde_json::to_value(&stamp).unwrap();
+            let wire = serde_json::to_value(stamp).unwrap();
             assert_eq!(wire["unix_ms"], value.to_string());
             assert_eq!(wire["locale"], "ja");
             assert_eq!(

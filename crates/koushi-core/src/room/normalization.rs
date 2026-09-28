@@ -61,12 +61,11 @@ pub(super) fn normalize_rooms_with_previous(
         .rooms
         .iter()
         .map(|room| {
-            let display_label = room
-                .display_name
-                .trim()
-                .is_empty()
-                .then(|| room.room_id.clone())
-                .unwrap_or_else(|| room.display_name.trim().to_owned());
+            let display_label = if room.display_name.trim().is_empty() {
+                room.room_id.clone()
+            } else {
+                room.display_name.trim().to_owned()
+            };
             RoomSummary {
                 room_id: room.room_id.clone(),
                 display_name: room.display_name.clone(),

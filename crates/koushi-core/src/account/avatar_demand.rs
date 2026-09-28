@@ -16,10 +16,10 @@ impl AccountActor {
                 != self
                     .avatar_session_generation
                     .load(std::sync::atomic::Ordering::Acquire)
-                || !self
+                || self
                     .session
                     .as_ref()
-                    .is_some_and(|session| session.info.user_id == context.account_id)
+                    .is_none_or(|session| session.info.user_id != context.account_id)
             {
                 return;
             }

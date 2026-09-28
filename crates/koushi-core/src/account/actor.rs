@@ -54,7 +54,7 @@ use super::recovery_backup::{
     PendingRecoveryCompletion, PendingRecoveryTask, SECURE_BACKUP_CONNECTIVITY_WAIT_TIMEOUT,
     secure_backup_monitor_wakeup_is_current,
 };
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 use super::session_lifecycle::PendingOidcFlow;
 use super::session_lifecycle::{
     LockedSessionRecord, PendingOidcAttempt, PendingSessionTeardown, SessionChangeObservation,
@@ -1840,12 +1840,8 @@ impl AccountActor {
                 }
                 #[cfg(test)]
                 AccountMessage::InspectSessionCheckTimer { response } => {
-                    let _ = response.send(
-                        self.session_check
-                            .timer
-                            .as_ref()
-                            .map(|(token, _)| *token),
-                    );
+                    let _ =
+                        response.send(self.session_check.timer.as_ref().map(|(token, _)| *token));
                 }
                 #[cfg(test)]
                 AccountMessage::ConfigureSessionCheckClock { base_epoch_ms } => {

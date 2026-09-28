@@ -215,7 +215,7 @@ async fn normal_runtime_waits_for_full_all_rooms_reconciliation_and_reuses_one_s
         .and(path("/_matrix/client/v3/login"))
         .respond_with(EchoRequestedLoginDevice)
         .expect(1)
-        .mount(&server.server())
+        .mount(server.server())
         .await;
 
     let room_list_requests = Arc::new(AtomicUsize::new(0));
@@ -234,7 +234,7 @@ async fn normal_runtime_waits_for_full_all_rooms_reconciliation_and_reuses_one_s
             first_response_release: first_response_release.clone(),
             complete_range_release: complete_range_release.clone(),
         })
-        .mount(&server.server())
+        .mount(server.server())
         .await;
 
     let data_dir = tempfile::tempdir().expect("runtime data directory");

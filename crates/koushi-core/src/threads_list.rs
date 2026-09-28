@@ -68,7 +68,7 @@ pub(crate) struct AggregateRefresh {
     pub hydrate_root: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub(crate) struct AuthoritativeThreadAggregate {
     pub reply_count: u32,
     pub latest_event_id: Option<String>,
@@ -76,19 +76,6 @@ pub(crate) struct AuthoritativeThreadAggregate {
     pub latest_sender_label: Option<String>,
     pub latest_body_preview: Option<String>,
     pub latest_timestamp_ms: Option<u64>,
-}
-
-impl Default for AuthoritativeThreadAggregate {
-    fn default() -> Self {
-        Self {
-            reply_count: 0,
-            latest_event_id: None,
-            latest_sender: None,
-            latest_sender_label: None,
-            latest_body_preview: None,
-            latest_timestamp_ms: None,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -191,7 +178,7 @@ impl ThreadRootProjectionRecord {
     }
 
     pub(crate) fn failure_kind(&self) -> Option<OperationFailureKind> {
-        self.aggregate_failure.or_else(|| match self.attempt {
+        self.aggregate_failure.or(match self.attempt {
             ThreadRootProjectionAttempt::Failed(kind) => Some(kind),
             ThreadRootProjectionAttempt::Pending
             | ThreadRootProjectionAttempt::Canonical
@@ -690,35 +677,31 @@ impl ThreadRootProjectionService {
             if let Some(record) = self
                 .attempts
                 .get_mut(&(room_id.to_owned(), root_event_id.clone()))
+                && activity != &record.activity
             {
-                if activity != &record.activity {
-                    let newer = activity_is_newer(activity, &record.activity);
-                    let invalidated_latest =
-                        record
-                            .invalidated_activity
-                            .as_ref()
-                            .is_some_and(|(event_id, _)| {
-                                event_id == &record.activity.activity_event_id
-                            });
-                    if !newer && !invalidated_latest {
-                        continue;
-                    }
-                    if record.activity_revision == u64::MAX {
-                        record.retired = true;
-                        record.aggregate_refresh = None;
+                let newer = activity_is_newer(activity, &record.activity);
+                let invalidated_latest = record
+                    .invalidated_activity
+                    .as_ref()
+                    .is_some_and(|(event_id, _)| event_id == &record.activity.activity_event_id);
+                if !newer && !invalidated_latest {
+                    continue;
+                }
+                if record.activity_revision == u64::MAX {
+                    record.retired = true;
+                    record.aggregate_refresh = None;
+                } else {
+                    let previous = record.activity.clone();
+                    record.activity_revision += 1;
+                    record.activity = activity.clone();
+                    record.aggregate_failure = None;
+                    record.pending_rollback = None;
+                    if newer {
+                        update_live_activity_floor(record, activity.clone(), &previous);
                     } else {
-                        let previous = record.activity.clone();
-                        record.activity_revision += 1;
-                        record.activity = activity.clone();
-                        record.aggregate_failure = None;
-                        record.pending_rollback = None;
-                        if newer {
-                            update_live_activity_floor(record, activity.clone(), &previous);
-                        } else {
-                            record.live_activity_floor = None;
-                        }
-                        changed.insert(root_event_id.clone());
+                        record.live_activity_floor = None;
                     }
+                    changed.insert(root_event_id.clone());
                 }
             }
         }
@@ -821,9 +804,8 @@ impl ThreadRootProjectionService {
         let mut roots = self
             .attempts
             .iter()
-            .filter_map(|((entry_room_id, _), record)| {
-                (entry_room_id == room_id && !record.retired).then(|| record.display_data())
-            })
+            .filter(|&((entry_room_id, _), record)| entry_room_id == room_id && !record.retired)
+            .map(|((_entry_room_id, _), record)| record.display_data())
             .collect::<Vec<_>>();
         roots.sort_by(|left, right| left.root_event_id.cmp(&right.root_event_id));
         roots
@@ -852,9 +834,11 @@ impl ThreadRootProjectionService {
     ) -> HashMap<String, ThreadRootProjectionActivity> {
         self.attempts
             .iter()
-            .filter_map(|((entry_room_id, root_event_id), record)| {
-                (entry_room_id == room_id && !record.retired)
-                    .then(|| (root_event_id.clone(), record.activity.clone()))
+            .filter(|&((entry_room_id, _root_event_id), record)| {
+                entry_room_id == room_id && !record.retired
+            })
+            .map(|((_entry_room_id, root_event_id), record)| {
+                (root_event_id.clone(), record.activity.clone())
             })
             .collect()
     }

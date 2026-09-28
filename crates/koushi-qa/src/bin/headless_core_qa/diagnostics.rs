@@ -604,18 +604,13 @@ enum QaMessagesProxyExpectation {
     BackwardFrom { token: String },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 enum QaMessagesProxyPhase {
+    #[default]
     Open,
     Armed,
     Served,
     Rejected,
-}
-
-impl Default for QaMessagesProxyPhase {
-    fn default() -> Self {
-        Self::Open
-    }
 }
 
 struct QaMessagesProxyState {

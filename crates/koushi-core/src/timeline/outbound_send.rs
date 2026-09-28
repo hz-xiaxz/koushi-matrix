@@ -1293,16 +1293,15 @@ impl TimelineManagerActor {
         let client_txn_id = transaction_id.clone();
         if let Some(action) =
             send_submitted_action(key, projection, transaction_id.clone(), body.clone())
+            && self.action_tx.send(vec![action]).await.is_err()
         {
-            if self.action_tx.send(vec![action]).await.is_err() {
-                self.emit_failure(
-                    request_id,
-                    CoreFailure::TimelineOperationFailed {
-                        kind: TimelineFailureKind::QueueOverflow,
-                    },
-                );
-                return;
-            }
+            self.emit_failure(
+                request_id,
+                CoreFailure::TimelineOperationFailed {
+                    kind: TimelineFailureKind::QueueOverflow,
+                },
+            );
+            return;
         }
         let mut registration = SendCompletionRegistration::begin_with_projection(
             Arc::clone(&self.send_completion),
@@ -1790,10 +1789,10 @@ pub(super) fn matching_remote_thread_reply_event_id<'a>(
         return None;
     }
     let event_id = matching_thread_reply_event_id(item, root_event_id)?;
-    if let (Some(sender), Some(own_user_id)) = (item.sender.as_deref(), own_user_id) {
-        if sender == own_user_id {
-            return None;
-        }
+    if let (Some(sender), Some(own_user_id)) = (item.sender.as_deref(), own_user_id)
+        && sender == own_user_id
+    {
+        return None;
     }
     Some(event_id)
 }
@@ -1868,18 +1867,17 @@ pub(super) fn newest_provable_receipt_event_id(
         })
         .collect::<HashMap<_, _>>();
     let mut candidates = vec![requested_event_id.to_owned()];
-    if let Some(queried_event_id) = queried_event_id {
-        if !candidates.contains(&queried_event_id) {
-            candidates.push(queried_event_id);
-        }
+    if let Some(queried_event_id) = queried_event_id
+        && !candidates.contains(&queried_event_id)
+    {
+        candidates.push(queried_event_id);
     }
-    if let Some(current_event_id) = current_event_id {
-        if !candidates
+    if let Some(current_event_id) = current_event_id
+        && !candidates
             .iter()
             .any(|candidate| candidate == current_event_id)
-        {
-            candidates.push(current_event_id.to_owned());
-        }
+    {
+        candidates.push(current_event_id.to_owned());
     }
 
     let newest_visible = candidates
@@ -2071,7 +2069,7 @@ impl TimelineActor {
                 self.send_handles.remove(&sdk_txn_str);
             }
             RoomSendQueueUpdate::ReplacedLocalEvent { transaction_id, .. } => {
-                self.update_send_status(&transaction_id.to_string(), TimelineSendState::Sending);
+                self.update_send_status(transaction_id.as_ref(), TimelineSendState::Sending);
             }
             RoomSendQueueUpdate::SendError {
                 transaction_id,
@@ -3465,17 +3463,17 @@ impl SendCompletionCoordinator {
                 let retain_projection =
                     pending.submission_id.is_some() || !pending.local_echo_observed;
                 let mut projection = pending.projection.take();
-                if let Some(projection) = projection.as_mut() {
-                    if retain_projection {
-                        pending.lifecycle_trace.stage_once("sdk_local_echo_missing");
-                        projection.terminal_event_id = Some(event_id.clone());
-                        projection.phase = PendingSendPhase::SentAwaitingRemote;
-                        projection.item.id = TimelineItemId::Event {
-                            event_id: event_id.clone(),
-                        };
-                        projection.item.send_state = Some(TimelineSendState::Sent);
-                        projection.handle = None;
-                    }
+                if let Some(projection) = projection.as_mut()
+                    && retain_projection
+                {
+                    pending.lifecycle_trace.stage_once("sdk_local_echo_missing");
+                    projection.terminal_event_id = Some(event_id.clone());
+                    projection.phase = PendingSendPhase::SentAwaitingRemote;
+                    projection.item.id = TimelineItemId::Event {
+                        event_id: event_id.clone(),
+                    };
+                    projection.item.send_state = Some(TimelineSendState::Sent);
+                    projection.handle = None;
                 }
                 if !retain_projection {
                     projection = None;

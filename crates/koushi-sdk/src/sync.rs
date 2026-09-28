@@ -45,7 +45,7 @@ mod provisional_encryption_sync_tests {
             ))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "pos": "0" })))
             .expect(1)
-            .mount(&server.server())
+            .mount(server.server())
             .await;
 
         super::provisional_encryption_sync_loop(

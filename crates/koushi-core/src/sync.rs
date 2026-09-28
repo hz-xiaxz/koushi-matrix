@@ -594,14 +594,13 @@ impl SyncActor {
         // Join the observer before the final SDK stop. If a recoverable
         // Terminated observation was already in its backoff/start path, this
         // barrier lets that path finish first and the final stop still wins.
-        if let Some(mut task) = self.sync_task.take() {
-            if executor::timeout(SYNC_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut task)
+        if let Some(mut task) = self.sync_task.take()
+            && executor::timeout(SYNC_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut task)
                 .await
                 .is_err()
-            {
-                task.abort();
-                let _ = task.await;
-            }
+        {
+            task.abort();
+            let _ = task.await;
         }
         if let Some(service) = service {
             let _ = executor::timeout(SYNC_SERVICE_STOP_TIMEOUT, service.stop()).await;

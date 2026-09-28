@@ -368,7 +368,7 @@ pub async fn set_room_tag(
     let settlement = submit_room_operation(
         state.inner(),
         request_id,
-        build_set_room_tag_command(request_id, room_id.clone(), tag.clone(), order),
+        build_set_room_tag_command(request_id, room_id.clone(), tag, order),
         room_id,
         RoomOperationKind::RoomTagSet { tag },
         "room tag update",
@@ -389,7 +389,7 @@ pub async fn remove_room_tag(
     let settlement = submit_room_operation(
         state.inner(),
         request_id,
-        build_remove_room_tag_command(request_id, room_id.clone(), tag.clone()),
+        build_remove_room_tag_command(request_id, room_id.clone(), tag),
         room_id,
         RoomOperationKind::RoomTagRemoved { tag },
         "room tag removal",

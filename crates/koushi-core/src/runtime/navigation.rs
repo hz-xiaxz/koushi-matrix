@@ -1142,7 +1142,7 @@ pub(super) fn cancel_replaced_room_timeline_pagination_key(
 ) -> Option<TimelineKey> {
     current_key.filter(|current_key| match &current_key.kind {
         TimelineKind::Room { room_id } => {
-            replacement_room_id.map_or(true, |replacement| room_id != replacement)
+            replacement_room_id.is_none_or(|replacement| room_id != replacement)
         }
         TimelineKind::Thread { .. } | TimelineKind::Focused { .. } => false,
     })
@@ -1154,7 +1154,7 @@ pub(super) fn cancel_replaced_room_timeline_link_previews_key(
 ) -> Option<TimelineKey> {
     current_key.filter(|current_key| match &current_key.kind {
         TimelineKind::Room { room_id } => {
-            replacement_room_id.map_or(true, |replacement| room_id != replacement)
+            replacement_room_id.is_none_or(|replacement| room_id != replacement)
         }
         TimelineKind::Thread { .. } | TimelineKind::Focused { .. } => false,
     })

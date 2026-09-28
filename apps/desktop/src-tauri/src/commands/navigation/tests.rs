@@ -1,5 +1,6 @@
 use super::*;
 use crate::commands::contracts::fake_request_id;
+use koushi_protocol::IntentOutcome;
 
 #[test]
 fn open_timeline_at_timestamp_command_routes_through_app_command() {

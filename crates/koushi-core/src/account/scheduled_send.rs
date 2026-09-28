@@ -129,8 +129,7 @@ impl AccountActor {
         // exact-session secure-backup fence.
         if server_delayed_events_are_safe(encryption)
             && capability == ScheduledSendCapability::ServerDelayedEvents
-        {
-            match self
+            && let Ok(delay_id) = self
                 .send_server_delayed_message(
                     session,
                     &room_id,
@@ -139,34 +138,30 @@ impl AccountActor {
                     send_at_ms,
                 )
                 .await
-            {
-                Ok(delay_id) => {
-                    send_scheduled_acceptance_actions(
-                        &self.action_tx,
-                        vec![
-                            AppAction::ScheduledSendCapabilityChanged {
-                                capability: ScheduledSendCapability::ServerDelayedEvents,
-                            },
-                            AppAction::ScheduledSendCreatedAtRevision {
-                                item: ScheduledSendItem {
-                                    scheduled_id,
-                                    room_id,
-                                    thread_root_event_id,
-                                    body,
-                                    send_at_ms,
-                                    handle: ScheduledSendHandle::Server { delay_id },
-                                    is_dispatching: false,
-                                },
-                                draft_revision,
-                            },
-                        ],
-                        composer_permit,
-                    )
-                    .await;
-                    return;
-                }
-                Err(()) => {}
-            }
+        {
+            send_scheduled_acceptance_actions(
+                &self.action_tx,
+                vec![
+                    AppAction::ScheduledSendCapabilityChanged {
+                        capability: ScheduledSendCapability::ServerDelayedEvents,
+                    },
+                    AppAction::ScheduledSendCreatedAtRevision {
+                        item: ScheduledSendItem {
+                            scheduled_id,
+                            room_id,
+                            thread_root_event_id,
+                            body,
+                            send_at_ms,
+                            handle: ScheduledSendHandle::Server { delay_id },
+                            is_dispatching: false,
+                        },
+                        draft_revision,
+                    },
+                ],
+                composer_permit,
+            )
+            .await;
+            return;
         }
 
         send_scheduled_acceptance_actions(

@@ -1760,7 +1760,9 @@ fn event_cache_item_diagnostic_event(
     .field(DiagnosticField::boolean("sender_present", sender_present))
     .field(DiagnosticField::boolean(
         "redacted",
-        item.raw().deserialize().is_ok_and(|event| event.is_redacted()),
+        item.raw()
+            .deserialize()
+            .is_ok_and(|event| event.is_redacted()),
     ))
     .field(DiagnosticField::count(
         "timestamp_minute",
@@ -1776,11 +1778,13 @@ fn event_cache_item_diagnostic_event(
     ))
     .field(DiagnosticField::boolean(
         "push_notify",
-        item.push_actions().is_some_and(|actions| actions.iter().any(|action| action.should_notify())),
+        item.push_actions()
+            .is_some_and(|actions| actions.iter().any(|action| action.should_notify())),
     ))
     .field(DiagnosticField::boolean(
         "push_highlight",
-        item.push_actions().is_some_and(|actions| actions.iter().any(|action| action.is_highlight())),
+        item.push_actions()
+            .is_some_and(|actions| actions.iter().any(|action| action.is_highlight())),
     ))
     .field(DiagnosticField::token("relation", relation.rel_type))
     .field(DiagnosticField::boolean(
@@ -1817,18 +1821,40 @@ pub(super) fn trace_room_receipt_cache(
     items: &[matrix_sdk_base::event_cache::Event],
 ) {
     let receipts = room.read_receipts();
-    let active_index = receipts.latest_active.as_ref().and_then(|active|
-        items.iter().rposition(|item| item.event_id() == Some(active.event_id.as_ref())));
+    let active_index = receipts.latest_active.as_ref().and_then(|active| {
+        items
+            .iter()
+            .rposition(|item| item.event_id() == Some(active.event_id.as_ref()))
+    });
     koushi_diagnostics::record(
-        DiagnosticEvent::new(DiagnosticLevel::Debug, "core.room_receipt_cache", "snapshot")
-            .field(DiagnosticField::token("timeline", timeline_key_trace_kind(key)))
-            .field(DiagnosticField::count("items", items.len() as u64))
-            .field(DiagnosticField::boolean("active_present", receipts.latest_active.is_some()))
-            .field(DiagnosticField::boolean("active_in_cache", active_index.is_some()))
-            .field(DiagnosticField::count("active_index", active_index.unwrap_or(0) as u64))
-            .field(DiagnosticField::count("unread", receipts.num_unread))
-            .field(DiagnosticField::count("notifications", receipts.num_notifications))
-            .field(DiagnosticField::count("mentions", receipts.num_mentions))
+        DiagnosticEvent::new(
+            DiagnosticLevel::Debug,
+            "core.room_receipt_cache",
+            "snapshot",
+        )
+        .field(DiagnosticField::token(
+            "timeline",
+            timeline_key_trace_kind(key),
+        ))
+        .field(DiagnosticField::count("items", items.len() as u64))
+        .field(DiagnosticField::boolean(
+            "active_present",
+            receipts.latest_active.is_some(),
+        ))
+        .field(DiagnosticField::boolean(
+            "active_in_cache",
+            active_index.is_some(),
+        ))
+        .field(DiagnosticField::count(
+            "active_index",
+            active_index.unwrap_or(0) as u64,
+        ))
+        .field(DiagnosticField::count("unread", receipts.num_unread))
+        .field(DiagnosticField::count(
+            "notifications",
+            receipts.num_notifications,
+        ))
+        .field(DiagnosticField::count("mentions", receipts.num_mentions)),
     );
 }
 
@@ -1851,22 +1877,28 @@ pub(super) fn trace_event_cache_items(
         ))
         .field(DiagnosticField::count("count", items.len() as u64)),
     );
-    let positions: std::collections::HashMap<_, _> = items.iter().enumerate()
+    let positions: std::collections::HashMap<_, _> = items
+        .iter()
+        .enumerate()
         .filter_map(|(index, item)| item.event_id().map(|id| (id.as_str(), index)))
         .collect();
     for (index, item) in items.iter().enumerate() {
         let relation = event_cache_relation_trace(item);
-        let target_index = relation.relation_event_id.as_deref()
+        let target_index = relation
+            .relation_event_id
+            .as_deref()
             .and_then(|id| positions.get(id).copied());
-        events.push(event_cache_item_diagnostic_event(
-            stage,
-            key,
-            "item",
-            Some(index),
-            item,
-        )
-        .field(DiagnosticField::boolean("relation_target_in_cache", target_index.is_some()))
-        .field(DiagnosticField::count("relation_target_index", target_index.unwrap_or(0) as u64)));
+        events.push(
+            event_cache_item_diagnostic_event(stage, key, "item", Some(index), item)
+                .field(DiagnosticField::boolean(
+                    "relation_target_in_cache",
+                    target_index.is_some(),
+                ))
+                .field(DiagnosticField::count(
+                    "relation_target_index",
+                    target_index.unwrap_or(0) as u64,
+                )),
+        );
     }
     koushi_diagnostics::record_batch(events);
 }

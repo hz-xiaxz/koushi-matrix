@@ -318,7 +318,7 @@ fn desktop_menu_items_include_element_compatible_shortcuts() {
     assert!(
         items
             .iter()
-            .any(|item| item.id == "sign_out" && item.accelerator == "" && item.menu == "app")
+            .any(|item| item.id == "sign_out" && item.accelerator.is_empty() && item.menu == "app")
     );
     let about_index = items
         .iter()

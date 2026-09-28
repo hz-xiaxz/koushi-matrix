@@ -158,7 +158,7 @@ fn both_channel_directions_fence_late_success_empty_and_failure() {
                 if auto_check {
                     let (new, work) = lifecycle.claim_work().unwrap();
                     assert_ne!(old.generation, new.generation);
-                    assert!(matches!(work, Work::Check(channel) if channel == !initial));
+                    assert!(matches!(work, Work::Check(channel) if channel != initial));
                 } else {
                     assert_eq!(lifecycle.state, DesktopUpdateState::Idle);
                     assert!(lifecycle.claim_work().is_none());
@@ -231,7 +231,7 @@ fn policy_toggle_invalidates_unapproved_but_freezes_all_consented_phases() {
         );
         assert!(lifecycle.begin_check());
         assert!(
-            matches!(lifecycle.claim_work().unwrap().1, Work::Check(value) if value == !channel)
+            matches!(lifecycle.claim_work().unwrap().1, Work::Check(value) if value != channel)
         );
     }
 }

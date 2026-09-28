@@ -817,7 +817,7 @@ pub fn run() {
                 )
                 .field(DiagnosticField::token("action", "show_main_window")),
             );
-            ensure_main_window_visible_for_handle(&app);
+            ensure_main_window_visible_for_handle(app);
         }));
     }
 
@@ -960,33 +960,29 @@ pub fn run() {
                 // Only Linux enables native drag/drop (tauri.linux.conf.json).
                 if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) =
                     event
-                {
-                    if let Some(ledger) =
+                    && let Some(ledger) =
                         window.try_state::<commands::dropped_files::DroppedFileLedger>()
-                    {
-                        ledger.record_drop(paths);
-                    }
+                {
+                    ledger.record_drop(paths);
                 }
-                if let Some(focused) = observed_native_window_focus(event) {
-                    if let Some(core_state) = window.try_state::<CoreRuntimeState>() {
-                        if let Some(observation_generation) = next_native_window_focus_generation(
-                            &core_state.native_window_focus_generation,
-                        ) {
-                            let app_handle = window.app_handle().clone();
-                            tauri::async_runtime::spawn(async move {
-                                let core_state = app_handle.state::<CoreRuntimeState>();
-                                let request_id =
-                                    core_state.connection.lock().await.next_request_id();
-                                let command = commands::native_attention::
-                                    build_observe_native_window_focus_command(
-                                        request_id,
-                                        focused,
-                                        observation_generation,
-                                    );
-                                let _ = commands::submit_core_command(&core_state, command).await;
-                            });
-                        }
-                    }
+                if let Some(focused) = observed_native_window_focus(event)
+                    && let Some(core_state) = window.try_state::<CoreRuntimeState>()
+                    && let Some(observation_generation) = next_native_window_focus_generation(
+                        &core_state.native_window_focus_generation,
+                    )
+                {
+                    let app_handle = window.app_handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        let core_state = app_handle.state::<CoreRuntimeState>();
+                        let request_id = core_state.connection.lock().await.next_request_id();
+                        let command =
+                            commands::native_attention::build_observe_native_window_focus_command(
+                                request_id,
+                                focused,
+                                observation_generation,
+                            );
+                        let _ = commands::submit_core_command(&core_state, command).await;
+                    });
                 }
                 let viewport_trigger = match event {
                     tauri::WindowEvent::Resized(_) => {
@@ -1325,19 +1321,19 @@ pub fn run() {
             // window-destroy path, so `AppCommand::Shutdown` is submitted
             // exactly once whether the product window was hidden or destroyed,
             // and `ExitRequested` is treated the same for any exit code.
-            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
-                if let Some(core_state) = app.try_state::<CoreRuntimeState>() {
-                    let stage = QuitStage::from_repr(core_state.quit_stage.load(Ordering::Acquire));
-                    match quit_request_action(stage) {
-                        QuitRequestAction::BeginShutdown => {
-                            api.prevent_exit();
-                            if claim_core_shutdown(&core_state.quit_stage) {
-                                begin_graceful_shutdown(app.clone());
-                            }
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event
+                && let Some(core_state) = app.try_state::<CoreRuntimeState>()
+            {
+                let stage = QuitStage::from_repr(core_state.quit_stage.load(Ordering::Acquire));
+                match quit_request_action(stage) {
+                    QuitRequestAction::BeginShutdown => {
+                        api.prevent_exit();
+                        if claim_core_shutdown(&core_state.quit_stage) {
+                            begin_graceful_shutdown(app.clone());
                         }
-                        QuitRequestAction::AwaitShutdown => api.prevent_exit(),
-                        QuitRequestAction::Exit => {}
                     }
+                    QuitRequestAction::AwaitShutdown => api.prevent_exit(),
+                    QuitRequestAction::Exit => {}
                 }
             }
             #[cfg(target_os = "macos")]

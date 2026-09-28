@@ -57,10 +57,7 @@ mod tests {
             classify_io_error(std::io::Error::from(std::io::ErrorKind::InvalidInput)),
             MediaSaveIoError::InvalidInput
         );
-        let error = classify_io_error(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "/private/path should not escape",
-        ));
+        let error = classify_io_error(std::io::Error::other("/private/path should not escape"));
         assert_eq!(error, MediaSaveIoError::Other);
         assert!(!format!("{error:?}").contains("private"));
         assert!(!error.to_string().contains("private"));

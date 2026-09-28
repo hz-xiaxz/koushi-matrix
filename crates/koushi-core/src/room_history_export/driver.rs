@@ -194,10 +194,10 @@ where
             let mut line = serde_json::to_vec(&event.json).unwrap_or_default();
             line.push(b'\n');
             events.write_all(&line).map_err(FetchFailure::Write)?;
-            if let Some(sender) = event.json.get("sender").and_then(serde_json::Value::as_str) {
-                if !fetched.senders.contains(sender) {
-                    fetched.senders.insert(sender.to_owned());
-                }
+            if let Some(sender) = event.json.get("sender").and_then(serde_json::Value::as_str)
+                && !fetched.senders.contains(sender)
+            {
+                fetched.senders.insert(sender.to_owned());
             }
             if !element_renders(&event, own_user_id) {
                 continue;

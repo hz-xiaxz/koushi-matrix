@@ -398,17 +398,17 @@ async fn scoped_avatar_capacity_defers_without_losing_demand_and_reuses_terminal
         timeout(Duration::from_secs(15), async {
             while settled.len() < 264 {
                 for action in actions.recv().await.expect("actor action stream") {
-                    if let AppAction::AvatarThumbnailUpdated { mxc_uri, thumbnail } = action {
-                        if mxc_uri.starts_with("mxc://localhost/capacity-") {
-                            assert!(matches!(
-                                thumbnail,
-                                AvatarThumbnailState::Failed {
-                                    kind: AvatarThumbnailFailureKind::Network,
-                                    ..
-                                }
-                            ));
-                            settled.insert(mxc_uri);
-                        }
+                    if let AppAction::AvatarThumbnailUpdated { mxc_uri, thumbnail } = action
+                        && mxc_uri.starts_with("mxc://localhost/capacity-")
+                    {
+                        assert!(matches!(
+                            thumbnail,
+                            AvatarThumbnailState::Failed {
+                                kind: AvatarThumbnailFailureKind::Network,
+                                ..
+                            }
+                        ));
+                        settled.insert(mxc_uri);
                     }
                 }
             }
@@ -475,10 +475,9 @@ async fn scoped_avatar_rehydrates_evicted_ready_bytes_from_sdk_cache() {
                         mxc_uri,
                         thumbnail: AvatarThumbnailState::Ready { source_ref, .. },
                     } = action
+                        && mxc_uri == uri
                     {
-                        if mxc_uri == uri {
-                            break 'ready source_ref;
-                        }
+                        break 'ready source_ref;
                     }
                 }
             }
@@ -761,10 +760,9 @@ async fn canceled_avatar_completion_cannot_settle_a_replacement_in_the_same_sess
                 thumbnail,
                 ..
             }) = event_rx.recv().await.unwrap()
+                && request_id == replacement
             {
-                if request_id == replacement {
-                    break thumbnail;
-                }
+                break thumbnail;
             }
         }
     })
@@ -900,10 +898,9 @@ async fn avatar_actor_drops_a_late_completion_from_a_retired_session() {
                 thumbnail,
                 ..
             }) = event_rx.recv().await.expect("avatar event")
+                && request_id == current_request
             {
-                if request_id == current_request {
-                    break thumbnail;
-                }
+                break thumbnail;
             }
         }
     })

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use koushi_state::{AppAction, TimelineThreadRootOrder};
 
 use tokio::sync::{broadcast, mpsc};
@@ -13,11 +11,11 @@ use koushi_protocol::ids::{TimelineBatchId, TimelineGeneration};
 
 use super::super::item_projection::timeline_item_event_id;
 use super::super::navigation::{
-    ROOM_REPLAY_INITIAL_ITEMS_MAX, RestoreSettlement, TimelineActorGenerationGate,
-    derive_timeline_navigation_snapshot, publish_restore_settlement_for_generation,
+    ROOM_REPLAY_INITIAL_ITEMS_MAX, RestoreSettlement, derive_timeline_navigation_snapshot,
+    publish_restore_settlement_for_generation,
 };
 use super::super::test_support::{
-    fake_rid, focused_key, replacement_generation_fixture, room_key, thread_key, timeline_item,
+    fake_rid, replacement_generation_fixture, room_key, thread_key, timeline_item,
     timeline_media_item,
 };
 use super::{
@@ -1617,7 +1615,6 @@ fn thread_reply_items_survive_room_order_setting_toggle() {
         );
     }
 }
-
 
 #[test]
 fn edited_thread_root_keeps_latest_document_through_service_and_display() {

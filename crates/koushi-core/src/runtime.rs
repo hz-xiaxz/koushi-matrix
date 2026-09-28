@@ -58,6 +58,8 @@ use std::sync::{Arc, atomic::AtomicU64};
 use std::time::Duration;
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+#[cfg(any(test, feature = "test-hooks"))]
+use koushi_state::ComposerDraftStore;
 use koushi_state::{
     AccountManagementOperation, ActivityRowKind, ActivityState, AppAction, AppEffect, AppState,
     ComposerTarget, LoginAttemptId, ProfileUpdateRequest, ScheduledSendCapability,
@@ -66,8 +68,8 @@ use koushi_state::{
     ThreadPaneState, UiEvent, admit_space_member_cancellation, admit_space_member_invite,
     admit_space_member_role, admit_space_members_load, reduce,
 };
-#[cfg(any(test, feature = "test-hooks"))]
-use koushi_state::{ComposerDraftStore, NavigationState, OperationFailureKind};
+#[cfg(test)]
+use koushi_state::{NavigationState, OperationFailureKind};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::account::{AccountActorHandle, AccountMessage};
@@ -97,7 +99,7 @@ use crate::native_artifact::{NativeArtifactPort, RejectingNativeArtifactPort};
 use crate::settings::SettingsStore;
 use crate::state_delta::build_state_delta;
 use crate::store::StoreActor;
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 use crate::store::session_key_id_from_info;
 use koushi_protocol::failure::{CoreFailure, RoomFailureKind, TimelineFailureKind};
 use koushi_protocol::ids::{
@@ -1269,10 +1271,9 @@ impl AppActor {
                             continue;
                         };
                         if let AppAction::SelectRoom { room_id } = &action
-                            && !self
+                            && self
                                 .pending_select
-                                .get(room_id)
-                                .is_some_and(|queue| !queue.is_empty())
+                                .get(room_id).is_none_or(|queue| queue.is_empty())
                             && !batch_origin.is_test_injected()
                         {
                             // A cancelled internal selection has no request owner left;
@@ -1337,8 +1338,7 @@ impl AppActor {
                             Some(projection_request_id),
                             AppAction::OpenFocusedContext { room_id, event_id },
                         ) = (self.pending_date_navigation_request_id, &action)
-                        {
-                            if let Some(account_key) = self.current_account_key() {
+                            && let Some(account_key) = self.current_account_key() {
                                 self.pending_focused_navigation = Some(PendingFocusedNavigation {
                                     projection_request_id,
                                     key: TimelineKey {
@@ -1354,7 +1354,6 @@ impl AppActor {
                                     generation: None,
                                 });
                             }
-                        }
                         if self.pending_date_navigation_request_id.is_some()
                             && matches!(&action, AppAction::EnterAnchoredTimeline { .. })
                         {
@@ -1667,7 +1666,7 @@ impl AppActor {
                                 intent_outcome_token(&outcome),
                             )),
                         );
-                        self.handle_event_navigation_select_outcome(request_id, outcome.clone())
+                        self.handle_event_navigation_select_outcome(request_id, outcome)
                             .await;
                         self.emit(CoreEvent::IntentLifecycle {
                             request_id,
@@ -2133,17 +2132,16 @@ impl AppActor {
             CoreCommand::Account(account_command) => {
                 if let AccountCommand::LoginPassword { request_id, .. }
                 | AccountCommand::CompleteOidcLogin { request_id, .. } = &account_command
-                {
-                    if !matches!(
+                    && !matches!(
                         self.state.session,
                         SessionState::SignedOut | SessionState::Authenticating { .. }
-                    ) {
-                        self.emit(CoreEvent::OperationFailed {
-                            request_id: *request_id,
-                            failure: CoreFailure::SessionRequired,
-                        });
-                        return false;
-                    }
+                    )
+                {
+                    self.emit(CoreEvent::OperationFailed {
+                        request_id: *request_id,
+                        failure: CoreFailure::SessionRequired,
+                    });
+                    return false;
                 }
                 let current_session_status_already_checking = matches!(
                     self.state.current_session_status,
@@ -2223,11 +2221,9 @@ impl AppActor {
                     command => AccountMessage::Command(command),
                 };
                 let sent = self.account_actor.send(message).await;
-                if !sent {
-                    if let Some((request_id, kind)) = native_artifact {
-                        self.account_actor
-                            .unregister_native_artifact(request_id, kind);
-                    }
+                if !sent && let Some((request_id, kind)) = native_artifact {
+                    self.account_actor
+                        .unregister_native_artifact(request_id, kind);
                 }
                 projected_state_changed
             }
@@ -2688,14 +2684,14 @@ impl AppActor {
                                     intent,
                                 })
                                 .await;
-                            if effects_open_thread_timeline(&effects) {
-                                if let Some(key) = replaced_thread_key {
-                                    self.send_timeline_command_or_fail(
-                                        request_id,
-                                        TimelineCommand::Unsubscribe { request_id, key },
-                                    )
-                                    .await;
-                                }
+                            if effects_open_thread_timeline(&effects)
+                                && let Some(key) = replaced_thread_key
+                            {
+                                self.send_timeline_command_or_fail(
+                                    request_id,
+                                    TimelineCommand::Unsubscribe { request_id, key },
+                                )
+                                .await;
                             }
                             self.handle_app_effects(request_id, effects).await;
                             true
@@ -3204,31 +3200,31 @@ impl AppActor {
                                 .reduce_app_action(AppAction::ActivityTabSelected { tab })
                                 .await;
                             self.handle_app_effects(request_id, effects).await;
-                            if let Some(previous_tab) = previous_tab {
-                                if previous_tab != tab {
-                                    record(
-                                        DiagnosticEvent::new(
-                                            DiagnosticLevel::Info,
-                                            "core.activity",
-                                            "tab_selected",
-                                        )
-                                        .field(DiagnosticField::request_id(
-                                            "request_id",
-                                            request_id.connection_id.0,
-                                            request_id.sequence,
-                                        ))
-                                        .field(DiagnosticField::token(
-                                            "previous_tab",
-                                            activity_tab_token(previous_tab),
-                                        ))
-                                        .field(
-                                            DiagnosticField::token(
-                                                "selected_tab",
-                                                activity_tab_token(tab),
-                                            ),
+                            if let Some(previous_tab) = previous_tab
+                                && previous_tab != tab
+                            {
+                                record(
+                                    DiagnosticEvent::new(
+                                        DiagnosticLevel::Info,
+                                        "core.activity",
+                                        "tab_selected",
+                                    )
+                                    .field(DiagnosticField::request_id(
+                                        "request_id",
+                                        request_id.connection_id.0,
+                                        request_id.sequence,
+                                    ))
+                                    .field(DiagnosticField::token(
+                                        "previous_tab",
+                                        activity_tab_token(previous_tab),
+                                    ))
+                                    .field(
+                                        DiagnosticField::token(
+                                            "selected_tab",
+                                            activity_tab_token(tab),
                                         ),
-                                    );
-                                }
+                                    ),
+                                );
                             }
                             self.emit(CoreEvent::Activity(ActivityEvent::TabSelected {
                                 request_id,
@@ -3747,18 +3743,16 @@ impl AppActor {
                     .account_actor
                     .send(crate::account::AccountMessage::RoomCommand(room_command))
                     .await;
-                if !forwarded {
-                    if let Some((request_id, failure_action)) = forward_failure {
-                        let effects = self.reduce_app_action(failure_action).await;
-                        self.handle_ui_event_effects(&effects).await;
-                        self.emit(CoreEvent::OperationFailed {
-                            request_id,
-                            failure: CoreFailure::RoomOperationFailed {
-                                kind: RoomFailureKind::Sdk,
-                            },
-                        });
-                        state_changed = true;
-                    }
+                if !forwarded && let Some((request_id, failure_action)) = forward_failure {
+                    let effects = self.reduce_app_action(failure_action).await;
+                    self.handle_ui_event_effects(&effects).await;
+                    self.emit(CoreEvent::OperationFailed {
+                        request_id,
+                        failure: CoreFailure::RoomOperationFailed {
+                            kind: RoomFailureKind::Sdk,
+                        },
+                    });
+                    state_changed = true;
                 }
                 state_changed
             }
@@ -4811,11 +4805,9 @@ fn history_export_projection_failure(command: &AccountCommand) -> Option<CoreFai
         command,
         AccountCommand::ExportHistory { .. } | AccountCommand::RetryHistoryExport { .. }
     )
-    .then_some(
-        CoreFailure::RoomOperationFailed {
-            kind: RoomFailureKind::Sdk,
-        },
-    )
+    .then_some(CoreFailure::RoomOperationFailed {
+        kind: RoomFailureKind::Sdk,
+    })
 }
 
 fn secure_backup_setup_projection_failure(

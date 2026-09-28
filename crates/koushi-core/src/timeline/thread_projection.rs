@@ -32,8 +32,8 @@ use super::actor::{ThreadSummaryProjectionWake, TimelineActor};
 use super::item_projection::{
     MessageProjection, eligible_activity_preview, is_attention_eligible_event,
     link_ranges_for_message_projection, mentioned_user_ids_from_event_json,
-    message_projection_from_msgtype, non_user_content_projection, sticker_projection_from_body,
-    timeline_content_is_renderable, timeline_item_event_id,
+    message_projection_from_msgtype, sticker_projection_from_body, timeline_content_is_renderable,
+    timeline_item_event_id,
 };
 use super::manager::{TimelineManagerActor, TimelineMessage};
 use super::navigation::TimelineActorGenerationGate;
@@ -1608,24 +1608,23 @@ impl ThreadAttentionTracker {
         tracker.observe_without_increment(key, items);
         if let (TimelineKind::Thread { root_event_id, .. }, Some(receipt_event_id)) =
             (&key.kind, tracker.receipt_event_id.as_deref())
-        {
-            if let Some(receipt_position) = items.iter().position(|item| {
+            && let Some(receipt_position) = items.iter().position(|item| {
                 matches!(
                     &item.id,
                     TimelineItemId::Event { event_id } if event_id == receipt_event_id
                 )
-            }) {
-                tracker.attention_event_ids.extend(
-                    items
-                        .iter()
-                        .skip(receipt_position.saturating_add(1))
-                        .filter_map(|item| {
-                            matching_remote_thread_reply_event_id(item, root_event_id, own_user_id)
-                                .map(str::to_owned)
-                        }),
-                );
-                tracker.refresh_counts();
-            }
+            })
+        {
+            tracker.attention_event_ids.extend(
+                items
+                    .iter()
+                    .skip(receipt_position.saturating_add(1))
+                    .filter_map(|item| {
+                        matching_remote_thread_reply_event_id(item, root_event_id, own_user_id)
+                            .map(str::to_owned)
+                    }),
+            );
+            tracker.refresh_counts();
         }
         tracker
     }

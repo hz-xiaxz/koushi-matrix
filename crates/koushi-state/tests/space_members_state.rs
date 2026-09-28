@@ -505,11 +505,11 @@ fn background_projection_settles_an_invite_when_authoritative_invite_or_join_app
                 generation: 2,
                 projection: SpaceMembersProjection {
                     space_joined: (membership == SpaceMemberMembership::SpaceJoined)
-                        .then(|| space_entry(membership.clone()))
+                        .then(|| space_entry(membership))
                         .into_iter()
                         .collect(),
                     space_invited: (membership == SpaceMemberMembership::SpaceInvited)
-                        .then(|| space_entry(membership.clone()))
+                        .then(|| space_entry(membership))
                         .into_iter()
                         .collect(),
                     ..projection(2, vec![])

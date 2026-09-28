@@ -1,4 +1,5 @@
 use super::*;
+use koushi_protocol::TimelineEvent;
 
 fn ready_state(room_id: &str) -> koushi_state::AppState {
     let mut state = koushi_state::AppState::default();

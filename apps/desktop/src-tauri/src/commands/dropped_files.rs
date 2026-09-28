@@ -93,7 +93,7 @@ impl DroppedFileLedger {
 
 fn regular_file_len(path: &Path) -> Option<u64> {
     let metadata = std::fs::metadata(path).ok()?;
-    metadata.is_file().then(|| metadata.len())
+    metadata.is_file().then_some(metadata.len())
 }
 
 /// The shared-mime-info type the desktop itself would report for the file,

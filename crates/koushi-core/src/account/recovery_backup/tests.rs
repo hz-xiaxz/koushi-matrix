@@ -174,7 +174,7 @@ fn inconclusive_backup_probe_does_not_revoke_existing_send_admission() {
     inspection.trust = koushi_sdk::MatrixSecureBackupTrustState::Unknown;
 
     assert!(matches!(
-        secure_backup_inspection_completion_action(5, true, true, 5, Ok(inspection.clone())),
+        secure_backup_inspection_completion_action(5, true, true, 5, Ok(inspection)),
         Some(AppAction::SecureBackupGateChanged(
             koushi_state::SecureBackupGateState::DegradedRetrying {
                 failure: koushi_state::SecureBackupGateFailureKind::Network
@@ -995,7 +995,7 @@ async fn repeated_defers_coalesce_onto_one_deadline() {
 /// inspection instead of failing the gate.
 #[tokio::test]
 async fn proven_connectivity_before_deadline_disarms_deadline_and_starts_inspection() {
-    let (handle, mut action_rx) = verified_actor_with_short_deadline(Duration::from_secs(30)).await;
+    let (handle, _action_rx) = verified_actor_with_short_deadline(Duration::from_secs(30)).await;
     handle.send(AccountMessage::InspectSecureBackup).await;
     let owners = inspect_secure_backup_owners(&handle).await;
     assert!(owners.has_defer_deadline);

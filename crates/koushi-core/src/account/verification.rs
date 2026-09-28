@@ -54,7 +54,10 @@ pub(super) fn record_incoming_verification_protection_summary(
             "unknown_sender_deferred",
             counters.unknown_sender_deferred,
         ))
-        .field(DiagnosticField::count("key_query_replays", counters.key_query_replays))
+        .field(DiagnosticField::count(
+            "key_query_replays",
+            counters.key_query_replays,
+        ))
         .field(DiagnosticField::count(
             "released_deliveries",
             counters.released_deliveries,
@@ -1272,14 +1275,14 @@ impl AccountActor {
         _target: VerificationTarget,
         state: koushi_sdk::MatrixVerificationRequestState,
     ) {
-        if !self
+        if self
             .verification_request
             .as_ref()
-            .is_some_and(|pending| pending.request_id.sequence == request_id.sequence)
-            && !self
+            .is_none_or(|pending| pending.request_id.sequence != request_id.sequence)
+            && self
                 .own_user_verification
                 .as_ref()
-                .is_some_and(|(flow_id, _)| *flow_id == request_id.sequence)
+                .is_none_or(|(flow_id, _)| *flow_id != request_id.sequence)
         {
             return;
         }
@@ -1319,10 +1322,10 @@ impl AccountActor {
         target: VerificationTarget,
         state: koushi_sdk::MatrixSasState,
     ) {
-        if !self
+        if self
             .sas_verification
             .as_ref()
-            .is_some_and(|pending| pending.request_id.sequence == request_id.sequence)
+            .is_none_or(|pending| pending.request_id.sequence != request_id.sequence)
         {
             return;
         }
@@ -1577,14 +1580,14 @@ impl AccountActor {
                         })
                     })
             })
-            .or_else(|| {
+            .or({
                 #[cfg(test)]
                 {
-                    return self.synthetic_verification.as_ref().and_then(
-                        |(active_flow_id, target)| {
+                    self.synthetic_verification
+                        .as_ref()
+                        .and_then(|(active_flow_id, target)| {
                             (*active_flow_id == flow_id).then(|| target.clone())
-                        },
-                    );
+                        })
                 }
                 #[cfg(not(test))]
                 None

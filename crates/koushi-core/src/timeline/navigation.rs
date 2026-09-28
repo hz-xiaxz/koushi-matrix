@@ -802,12 +802,12 @@ impl TimelineManagerActor {
         let actions = self
             .live_tail_refreshes
             .activate(key.clone(), self.room_subscription_service_epoch);
-        if let Some(previous) = previous_foreground {
-            if let Some(handle) = self.timelines.get(&previous) {
-                // Generation invalidation above makes late old-room work inert;
-                // cleanup is best-effort and must never hold the new room.
-                handle.end_gap_repair_demand();
-            }
+        if let Some(previous) = previous_foreground
+            && let Some(handle) = self.timelines.get(&previous)
+        {
+            // Generation invalidation above makes late old-room work inert;
+            // cleanup is best-effort and must never hold the new room.
+            handle.end_gap_repair_demand();
         }
         record_live_tail_state(
             from,
@@ -1924,19 +1924,27 @@ pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
         .or(fully_read_event_id)
         .map(ToOwned::to_owned);
     let local_viewed_event_id = local_viewed_event_id.map(ToOwned::to_owned);
-    let local_position = local_viewed_event_id.as_deref()
+    let local_position = local_viewed_event_id
+        .as_deref()
         .and_then(|event_id| item_index_for_event_id(items, event_id));
-    let confirmed_position = server_confirmed_read_event_id.as_deref()
+    let confirmed_position = server_confirmed_read_event_id
+        .as_deref()
         .and_then(|event_id| item_index_for_event_id(items, event_id));
     let display_marker = match (local_position, confirmed_position) {
         (Some(local), Some(confirmed)) if confirmed > local => {
             // A stored local observation may predate a successful receipt from
             // this or another view. Never place the divider behind that receipt.
             // Hidden edits remain boundaries but are not rendered divider rows.
-            items[local..=confirmed].iter().rev()
-                .find(|item| !item.is_hidden && navigation_item_in_scope(kind, item)
-                    && timeline_item_event_id(item).is_some())
-                .and_then(timeline_item_event_id).map(ToOwned::to_owned)
+            items[local..=confirmed]
+                .iter()
+                .rev()
+                .find(|item| {
+                    !item.is_hidden
+                        && navigation_item_in_scope(kind, item)
+                        && timeline_item_event_id(item).is_some()
+                })
+                .and_then(timeline_item_event_id)
+                .map(ToOwned::to_owned)
         }
         (Some(_), _) => local_viewed_event_id.clone(),
         _ => None,
@@ -1994,7 +2002,7 @@ pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
             .filter(|(_, item)| {
                 navigation_item_in_scope(kind, item) && is_own_visible_event(item, own_user_id)
             })
-            .last()
+            .next_back()
             .and_then(|(_, item)| timeline_item_event_id(item).map(ToOwned::to_owned));
     }
     snapshot
@@ -2038,9 +2046,18 @@ fn timeline_unread_consistency_diagnostic_event(
         .read_marker_event_id
         .as_deref()
         .and_then(event_position);
-    let local_position = snapshot.local_viewed_event_id.as_deref().and_then(event_position);
-    let confirmed_position = snapshot.server_confirmed_read_event_id.as_deref().and_then(event_position);
-    let marker_display_position = snapshot.read_marker_display_event_id.as_deref().and_then(event_position);
+    let local_position = snapshot
+        .local_viewed_event_id
+        .as_deref()
+        .and_then(event_position);
+    let confirmed_position = snapshot
+        .server_confirmed_read_event_id
+        .as_deref()
+        .and_then(event_position);
+    let marker_display_position = snapshot
+        .read_marker_display_event_id
+        .as_deref()
+        .and_then(event_position);
     let first_unread_item = snapshot
         .first_unread_event_id
         .as_deref()
@@ -2220,7 +2237,7 @@ fn is_own_visible_event(item: &TimelineItem, own_user_id: Option<&str>) -> bool 
     if item.is_hidden || !has_user_visible_content(item) {
         return false;
     }
-    if !own_user_id.is_some_and(|own| item.sender.as_deref() == Some(own)) {
+    if own_user_id.is_none_or(|own| item.sender.as_deref() != Some(own)) {
         return false;
     }
     matches!(item.id, TimelineItemId::Event { .. })

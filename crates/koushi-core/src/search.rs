@@ -984,9 +984,7 @@ impl SearchActor {
         filter: AttachmentFilter,
         sort: AttachmentSort,
     ) {
-        let results = self
-            .document_store
-            .attachments(&scope, &filter, sort.clone());
+        let results = self.document_store.attachments(&scope, &filter, sort);
 
         let _ = self
             .action_tx

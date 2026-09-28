@@ -480,7 +480,7 @@ async fn explicit_empty_direct_map_overrides_cached_room_direct_targets() {
         })
         .await;
 
-    let room = client.get_room(&room_id).expect("joined test room");
+    let room = client.get_room(room_id).expect("joined test room");
     assert!(
         !room.direct_targets().is_empty(),
         "test room must have cached direct targets"

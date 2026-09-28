@@ -82,11 +82,11 @@ pub(crate) fn handle_settings_update_requested(
         recompute_room_list_projection(state);
         effects.push(AppEffect::EmitUiEvent(UiEvent::RoomListChanged));
     }
-    if state.settings.values.thread_list_order != prev_thread_list_order {
-        if let crate::state::ThreadsListState::Open { items, .. } = &mut state.threads_list {
-            sort_threads_list_items(items, state.settings.values.thread_list_order);
-            effects.push(AppEffect::EmitUiEvent(UiEvent::ThreadsListChanged));
-        }
+    if state.settings.values.thread_list_order != prev_thread_list_order
+        && let crate::state::ThreadsListState::Open { items, .. } = &mut state.threads_list
+    {
+        sort_threads_list_items(items, state.settings.values.thread_list_order);
+        effects.push(AppEffect::EmitUiEvent(UiEvent::ThreadsListChanged));
     }
 
     let mut emit_search_crawler_changed = false;
@@ -318,16 +318,16 @@ pub(crate) fn handle_room_notification_mode_completed(
         return Vec::new();
     }
     let mut completed_mode = None;
-    if let Some(entry) = state.room_notification_settings.get_mut(&room_id) {
-        if matches!(
+    if let Some(entry) = state.room_notification_settings.get_mut(&room_id)
+        && matches!(
             entry.operation,
             RoomNotificationModeOperation::Pending {
                 request_id: pending_id,
             } if pending_id == request_id
-        ) {
-            entry.operation = RoomNotificationModeOperation::Idle;
-            completed_mode = Some(entry.mode);
-        }
+        )
+    {
+        entry.operation = RoomNotificationModeOperation::Idle;
+        completed_mode = Some(entry.mode);
     }
     let mut effects = Vec::new();
     if let Some(mode) = completed_mode {
@@ -400,19 +400,19 @@ pub(crate) fn handle_room_notification_mode_failed(
     if !is_session_ready(state) {
         return Vec::new();
     }
-    if let Some(entry) = state.room_notification_settings.get_mut(&room_id) {
-        if matches!(
+    if let Some(entry) = state.room_notification_settings.get_mut(&room_id)
+        && matches!(
             entry.operation,
             crate::state::RoomNotificationModeOperation::Pending {
                 request_id: pending_id,
             } if pending_id == request_id
-        ) {
-            state.room_notification_awaiting_echo.remove(&room_id);
-            entry.operation = crate::state::RoomNotificationModeOperation::Failed {
-                request_id,
-                failure_kind: kind,
-            };
-        }
+        )
+    {
+        state.room_notification_awaiting_echo.remove(&room_id);
+        entry.operation = crate::state::RoomNotificationModeOperation::Failed {
+            request_id,
+            failure_kind: kind,
+        };
     }
     vec![AppEffect::EmitUiEvent(
         UiEvent::RoomNotificationSettingsChanged,
@@ -509,10 +509,10 @@ pub(crate) fn handle_room_notification_mode_confirmed(
     mode: RoomNotificationMode,
 ) -> Vec<AppEffect> {
     if !is_session_ready(state)
-        || !state
+        || state
             .room_notification_awaiting_echo
             .get(&room_id)
-            .is_some_and(|(id, _)| *id == request_id)
+            .is_none_or(|(id, _)| *id != request_id)
     {
         return Vec::new();
     }

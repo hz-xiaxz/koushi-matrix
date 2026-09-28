@@ -1,5 +1,3 @@
-use super::super::test_source::item_body;
-
 use std::collections::{HashMap, HashSet};
 
 use std::sync::{Arc, Mutex};
@@ -24,8 +22,6 @@ use crate::threads_list::{
     ThreadRootProjectionService,
 };
 use koushi_protocol::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
-
-use std::future::poll_fn;
 
 use matrix_sdk::ruma::{OwnedUserId, uint};
 
