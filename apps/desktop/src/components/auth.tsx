@@ -1,7 +1,7 @@
 import { type FormEvent, type RefObject } from "react";
 import { KeyRound, ShieldAlert, ShieldCheck } from "lucide-react";
 // Byte-identical mirror of the shipped app icon (src-tauri/icons/icon.svg),
-// kept in sync by auth.test.tsx. Vite inlines it under the CSP `data:` img-src.
+// kept in sync by assets/koushiLogo.test.ts. Vite inlines it under the CSP `data:` img-src.
 import koushiLogoUrl from "../assets/koushi-logo.svg";
 import { t } from "../i18n/messages";
 import type {
