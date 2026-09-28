@@ -74,8 +74,13 @@ pub enum SecureBackupSetupState {
     SettingUp {
         request_id: u64,
     },
+    /// The generated recovery key is revealed on screen until the user
+    /// explicitly confirms it was saved (#927). Together with
+    /// `SecureBackupPassphraseChangeState::Changed`, this is the only state
+    /// that carries recovery-key material.
     RecoveryKeyReady {
         request_id: u64,
+        recovery_key: RecoveryKeyMaterial,
         delivery: RecoveryKeyDeliveryState,
     },
     Enabled {
@@ -88,12 +93,51 @@ pub enum SecureBackupSetupState {
     },
 }
 
+/// Outcome of the optional "Save to file" action for a revealed key.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum RecoveryKeyDeliveryState {
     #[default]
     NotWritten,
     Written,
+    WriteFailed,
+}
+
+/// A recovery key generated (or reset) by the SDK for on-screen reveal.
+///
+/// Privacy contract (#927): the value may cross to the WebView only through
+/// the live `RecoveryKeyReady`/`Changed` snapshot projection so the user can
+/// read or copy it. `Debug` is redacted, the allocation is zeroized on drop,
+/// and it must never enter diagnostics, logs, QA tokens, or persisted state.
+#[derive(Clone, Eq, PartialEq)]
+pub struct RecoveryKeyMaterial(zeroize::Zeroizing<String>);
+
+impl RecoveryKeyMaterial {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(zeroize::Zeroizing::new(value.into()))
+    }
+
+    pub fn expose_secret(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl std::fmt::Debug for RecoveryKeyMaterial {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("RecoveryKeyMaterial(..)")
+    }
+}
+
+impl Serialize for RecoveryKeyMaterial {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.expose_secret())
+    }
+}
+
+impl<'de> Deserialize<'de> for RecoveryKeyMaterial {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self::new)
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -104,8 +148,10 @@ pub enum SecureBackupPassphraseChangeState {
     Changing {
         request_id: u64,
     },
+    /// The new recovery key is revealed until the user confirms it was saved.
     Changed {
         request_id: u64,
+        recovery_key: RecoveryKeyMaterial,
         delivery: RecoveryKeyDeliveryState,
     },
     Failed {

@@ -3,10 +3,10 @@ use koushi_state::{
     AccountManagementOperation, AccountManagementState, AppAction, AppEffect, AppState,
     AuthDiscoveryState, AuthFailureKind, DelegatedAuthLinks, E2eeKeyManagementState,
     LoginAttemptId, LoginFlow, LoginFlowKind, OperationFailureKind, QrLoginState,
-    RecoveryKeyDeliveryState, RoomKeyExportState, RoomKeyImportState, RoomListEntryKind,
-    RoomListFilter, RoomListProjectionItem, RoomSummary, RoomTagInfo,
-    SecureBackupPassphraseChangeState, SecureBackupSetupState, SessionInfo, SessionState,
-    SoftLogoutReauthState, TrustOperationFailureKind, UiEvent, reduce,
+    RecoveryKeyMaterial, RoomKeyExportState, RoomKeyImportState, RoomListEntryKind, RoomListFilter,
+    RoomListProjectionItem, RoomSummary, RoomTagInfo, SecureBackupPassphraseChangeState,
+    SecureBackupSetupState, SessionInfo, SessionState, SoftLogoutReauthState,
+    TrustOperationFailureKind, UiEvent, reduce,
 };
 
 fn session_info() -> SessionInfo {
@@ -269,7 +269,7 @@ fn key_management_and_qr_login_are_duplicate_guarded_and_request_correlated() {
         &mut state,
         AppAction::SecureBackupRecoveryKeyReady {
             request_id: 30,
-            delivery: RecoveryKeyDeliveryState::Written,
+            recovery_key: RecoveryKeyMaterial::new("synthetic-idle-key"),
         },
     );
     assert!(effects.is_empty());

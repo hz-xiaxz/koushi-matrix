@@ -696,7 +696,8 @@ export type RecoveryMethod = "recoveryKey" | "securityPhrase";
 
 export type SecureBackupSetupIntent =
   | { kind: "initialSetup" }
-  | { kind: "reenable"; confirmed: boolean };
+  | { kind: "reenable"; confirmed: boolean }
+  | { kind: "resetRecoveryKey"; confirmed: boolean };
 
 export type SecureBackupGateFailureKind =
   | "network"
@@ -2115,16 +2116,31 @@ export type RoomKeyImportState =
 export type SecureBackupSetupState =
   | { kind: "idle" }
   | { kind: "settingUp"; request_id: number }
-  | { kind: "recoveryKeyReady"; request_id: number; delivery: RecoveryKeyDeliveryState }
+  // #927: `recovery_key` is the live on-screen reveal. Render it only; never
+  // copy it into React state, storage, logs, or diagnostics.
+  | {
+      kind: "recoveryKeyReady";
+      request_id: number;
+      recovery_key: string;
+      delivery: RecoveryKeyDeliveryState;
+    }
   | { kind: "enabled"; request_id: number }
   | { kind: "failed"; request_id: number; failureKind: TrustOperationFailureKind };
 
-export type RecoveryKeyDeliveryState = { kind: "notWritten" } | { kind: "written" };
+export type RecoveryKeyDeliveryState =
+  | { kind: "notWritten" }
+  | { kind: "written" }
+  | { kind: "writeFailed" };
 
 export type SecureBackupPassphraseChangeState =
   | { kind: "idle" }
   | { kind: "changing"; request_id: number }
-  | { kind: "changed"; request_id: number; delivery: RecoveryKeyDeliveryState }
+  | {
+      kind: "changed";
+      request_id: number;
+      recovery_key: string;
+      delivery: RecoveryKeyDeliveryState;
+    }
   | { kind: "failed"; request_id: number; failureKind: TrustOperationFailureKind };
 
 export type VerificationFlowState =

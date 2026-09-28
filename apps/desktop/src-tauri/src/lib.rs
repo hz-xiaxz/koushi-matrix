@@ -1168,6 +1168,8 @@ pub fn run() {
             commands::e2ee::recover_secure_backup,
             commands::e2ee::retry_secure_backup_inspection,
             commands::e2ee::change_secure_backup_passphrase,
+            commands::e2ee::save_secure_backup_recovery_key,
+            commands::e2ee::confirm_secure_backup_recovery_key_saved,
             commands::e2ee::export_room_keys,
             commands::e2ee::import_room_keys,
             commands::history_export::history_export_time_zone,

@@ -2174,6 +2174,8 @@ impl AppActor {
                 let requires_projection_acceptance = matches!(
                     &account_command,
                     AccountCommand::BootstrapSecureBackup { .. }
+                        | AccountCommand::ChangeSecureBackupPassphrase { .. }
+                        | AccountCommand::ConfirmSecureBackupRecoveryKeySaved { .. }
                         | AccountCommand::RestoreSession { .. }
                         | AccountCommand::RestoreLastSession { .. }
                         | AccountCommand::ResetLocalData { .. }
@@ -4811,17 +4813,28 @@ fn history_export_projection_failure(command: &AccountCommand) -> Option<CoreFai
         command,
         AccountCommand::ExportHistory { .. } | AccountCommand::RetryHistoryExport { .. }
     )
-    .then_some(
-        CoreFailure::RoomOperationFailed {
-            kind: RoomFailureKind::Sdk,
-        },
-    )
+    .then_some(CoreFailure::RoomOperationFailed {
+        kind: RoomFailureKind::Sdk,
+    })
 }
 
 fn secure_backup_setup_projection_failure(
     state: &AppState,
     command: &AccountCommand,
 ) -> Option<CoreFailure> {
+    match command {
+        // Stale or forged confirmation: no revealed key matches (#927).
+        AccountCommand::ConfirmSecureBackupRecoveryKeySaved { .. } => {
+            return Some(CoreFailure::SecureBackupSetupFailedNoOp);
+        }
+        // A passphrase change that would replace a revealed key or duplicate
+        // one in flight; without a ready session it stays SessionRequired.
+        AccountCommand::ChangeSecureBackupPassphrase { .. } => {
+            return matches!(state.session, SessionState::Ready(_))
+                .then_some(CoreFailure::SecureBackupSetupFailedNoOp);
+        }
+        _ => {}
+    }
     let AccountCommand::BootstrapSecureBackup { request, .. } = command else {
         return None;
     };
@@ -5016,6 +5029,11 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
                 request_id: request_id.sequence,
             })
         }
+        AccountCommand::ConfirmSecureBackupRecoveryKeySaved {
+            reveal_request_id, ..
+        } => Some(AppAction::SecureBackupRecoveryKeyConfirmed {
+            reveal_request_id: *reveal_request_id,
+        }),
         AccountCommand::ResetIdentity { request_id } => Some(AppAction::ResetIdentityRequested {
             request_id: request_id.sequence,
         }),
@@ -5175,6 +5193,8 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
         | AccountCommand::Logout { .. }
         | AccountCommand::CancelVerification { .. }
         | AccountCommand::RetryCurrentDeviceTrustDiscovery { .. }
+        // The actor validates the revealed key and settles the save outcome.
+        | AccountCommand::SaveSecureBackupRecoveryKey { .. }
         | AccountCommand::SwitchAccount { .. } => None,
     }
 }

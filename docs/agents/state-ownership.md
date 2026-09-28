@@ -1238,11 +1238,16 @@ normal QA-title mode and cannot change product title semantics.
   password), `EnableKeyBackup` (optional recovery passphrase), and
   `RestoreKeyBackup` (recovery secret). Their reducer actions, effects, events,
   snapshots, logs, and `Debug` output must remain secret-free.
-- Secure-backup setup/passphrase-change may produce a new recovery key through
-  the SDK. Do not project that key into reducer state, Tauri DTO snapshots, React
-  state, logs, QA tokens, screenshots, or issue comments. Desktop recovery-key
-  delivery writes through the Rust/Tauri native artifact path and reports only
-  `Written`/`NotWritten` style status.
+- Secure-backup setup/recovery-key reset/passphrase-change reveal the SDK-produced
+  recovery key on screen (#927). The reducer owns it only as
+  `RecoveryKeyMaterial` inside `SecureBackupSetupState::RecoveryKeyReady` /
+  `SecureBackupPassphraseChangeState::Changed`; AccountActor holds the one
+  copy used by `SaveSecureBackupRecoveryKey`. React renders the key from the
+  snapshot (TS mirror `recovery_key: string`) and never copies it into state,
+  refs, or storage. Copy and the optional save never leave the reveal; only
+  `ConfirmSecureBackupRecoveryKeySaved` does. The privacy contract is
+  [engineering rule 11](../policies/engineering-rules.md); the gate
+  transitions are in the [state machines](../architecture/state-machine.md).
 - Secure-backup setup/re-enable confirmation policy is Rust-owned. The closed
   `SecureBackupSetupIntent` must ride both reducer projection and actor command;
   Core admits it against the projected gate before actor routing and preserves

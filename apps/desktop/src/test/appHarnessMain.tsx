@@ -2215,61 +2215,92 @@ mock.setCommandResponse("import_room_keys", () =>
     }
   })
 );
+// #927: synthetic, non-secret key shown by the reveal; setup and passphrase
+// change never take a destination.
+const HARNESS_RECOVERY_KEY = "synthetic-harness-recovery-key";
+function withKeyManagement(
+  update: (
+    keyManagement: DesktopSnapshot["state"]["domain"]["e2ee_trust"]["key_management"]
+  ) => DesktopSnapshot["state"]["domain"]["e2ee_trust"]["key_management"]
+) {
+  return setCurrentSnapshot({
+    ...currentSnapshot,
+    state: {
+      ...currentSnapshot.state,
+      domain: {
+        ...currentSnapshot.state.domain,
+        e2ee_trust: {
+          ...currentSnapshot.state.domain.e2ee_trust,
+          key_management: update(currentSnapshot.state.domain.e2ee_trust.key_management)
+        }
+      }
+    }
+  });
+}
 mock.setCommandResponse(
   "bootstrap_secure_backup",
-  ({ recoveryKeyDestinationPath, intent }: {
-    recoveryKeyDestinationPath?: string | null;
+  ({ intent }: {
     intent: { kind: "initialSetup" } | { kind: "reenable"; confirmed: boolean };
   }) => {
     void intent;
-    return setCurrentSnapshot({
-      ...currentSnapshot,
-      state: {
-        ...currentSnapshot.state,
-        domain: {
-          ...currentSnapshot.state.domain,
-        e2ee_trust: {
-          ...currentSnapshot.state.domain.e2ee_trust,
-          key_management: {
-            ...currentSnapshot.state.domain.e2ee_trust.key_management,
-            secure_backup_setup: {
-              kind: "recoveryKeyReady",
-              request_id: 9_202,
-              delivery: recoveryKeyDestinationPath?.trim()
-                ? { kind: "written" }
-                : { kind: "notWritten" }
-            }
-          }
-        }
-        },
+    return withKeyManagement((keyManagement) => ({
+      ...keyManagement,
+      secure_backup_setup: {
+        kind: "recoveryKeyReady",
+        request_id: 9_202,
+        recovery_key: HARNESS_RECOVERY_KEY,
+        delivery: { kind: "notWritten" }
       }
-    });
+    }));
   }
 );
+mock.setCommandResponse("change_secure_backup_passphrase", () =>
+  withKeyManagement((keyManagement) => ({
+    ...keyManagement,
+    passphrase_change: {
+      kind: "changed",
+      request_id: 9_203,
+      recovery_key: HARNESS_RECOVERY_KEY,
+      delivery: { kind: "notWritten" }
+    }
+  }))
+);
 mock.setCommandResponse(
-  "change_secure_backup_passphrase",
-  ({ recoveryKeyDestinationPath }: { recoveryKeyDestinationPath?: string | null }) =>
-    setCurrentSnapshot({
-      ...currentSnapshot,
-      state: {
-        ...currentSnapshot.state,
-        domain: {
-          ...currentSnapshot.state.domain,
-        e2ee_trust: {
-          ...currentSnapshot.state.domain.e2ee_trust,
-          key_management: {
-            ...currentSnapshot.state.domain.e2ee_trust.key_management,
-            passphrase_change: {
-              kind: "changed",
-              request_id: 9_203,
-              delivery: recoveryKeyDestinationPath?.trim()
-                ? { kind: "written" }
-                : { kind: "notWritten" }
-            }
-          }
-        }
-        },
-      }
+  "save_secure_backup_recovery_key",
+  ({ revealRequestId }: { revealRequestId: number }) =>
+    withKeyManagement((keyManagement) => {
+      const setup = keyManagement.secure_backup_setup;
+      const change = keyManagement.passphrase_change;
+      return {
+        ...keyManagement,
+        secure_backup_setup:
+          setup.kind === "recoveryKeyReady" && setup.request_id === revealRequestId
+            ? { ...setup, delivery: { kind: "written" } }
+            : setup,
+        passphrase_change:
+          change.kind === "changed" && change.request_id === revealRequestId
+            ? { ...change, delivery: { kind: "written" } }
+            : change
+      };
+    })
+);
+mock.setCommandResponse(
+  "confirm_secure_backup_recovery_key_saved",
+  ({ revealRequestId }: { revealRequestId: number }) =>
+    withKeyManagement((keyManagement) => {
+      const setup = keyManagement.secure_backup_setup;
+      const change = keyManagement.passphrase_change;
+      return {
+        ...keyManagement,
+        secure_backup_setup:
+          setup.kind === "recoveryKeyReady" && setup.request_id === revealRequestId
+            ? { kind: "enabled", request_id: revealRequestId }
+            : setup,
+        passphrase_change:
+          change.kind === "changed" && change.request_id === revealRequestId
+            ? { kind: "idle" }
+            : change
+      };
     })
 );
 mock.setCommandResponse("accept_verification", ({ flowId }: { flowId: number }) => {

@@ -81,3 +81,155 @@ fn secure_backup_projection_gate_returns_typed_private_safe_failures() {
         Some(CoreFailure::SecureBackupSetupFailedNoOp)
     );
 }
+
+#[test]
+fn recovery_key_reset_requires_explicit_confirmation_before_routing() {
+    // #927: a lost reveal is never re-exported; replacing the key needs the
+    // confirmed reset intent because the previous key stops working.
+    let state = ready_state(SecureBackupGateState::RecoveryKeyDeliveryRequired);
+    assert_eq!(
+        secure_backup_setup_projection_failure(
+            &state,
+            &request(SecureBackupSetupIntent::ResetRecoveryKey { confirmed: false }),
+        ),
+        Some(CoreFailure::SecureBackupSetupConfirmationRequired)
+    );
+    assert_eq!(
+        secure_backup_setup_projection_failure(
+            &state,
+            &request(SecureBackupSetupIntent::InitialSetup),
+        ),
+        Some(CoreFailure::SecureBackupSetupFailedNoOp)
+    );
+    let mut projected = state.clone();
+    let effects = koushi_state::reduce(
+        &mut projected,
+        account_command_projected_action(&request(SecureBackupSetupIntent::ResetRecoveryKey {
+            confirmed: true,
+        }))
+        .expect("projected action"),
+    );
+    assert!(!effects.is_empty());
+    assert!(matches!(
+        projected.e2ee_trust.key_management.secure_backup_setup,
+        SecureBackupSetupState::SettingUp { request_id: 7 }
+    ));
+}
+
+fn request_id(sequence: u64) -> RequestId {
+    RequestId {
+        connection_id: RuntimeConnectionId(1),
+        sequence,
+    }
+}
+
+#[test]
+fn secure_backup_setup_and_passphrase_change_never_require_a_destination() {
+    // #927: the key is revealed on screen, so neither setup nor passphrase
+    // change consumes a native destination; only the optional save does.
+    assert_eq!(
+        crate::command_policy::native_artifact_for_account_command(&request(
+            SecureBackupSetupIntent::InitialSetup
+        )),
+        None
+    );
+    assert_eq!(
+        crate::command_policy::native_artifact_for_account_command(
+            &AccountCommand::ChangeSecureBackupPassphrase {
+                request_id: request_id(8),
+                request: koushi_protocol::SecureBackupPassphraseChangeRequest {
+                    old_secret: koushi_state::AuthSecret::new("old-synthetic-phrase"),
+                    new_passphrase: koushi_state::AuthSecret::new("new-synthetic-phrase"),
+                },
+            }
+        ),
+        None
+    );
+    assert_eq!(
+        crate::command_policy::native_artifact_for_account_command(
+            &AccountCommand::SaveSecureBackupRecoveryKey {
+                request_id: request_id(9),
+                reveal_request_id: 7,
+            }
+        ),
+        Some((
+            request_id(9),
+            crate::native_artifact::NativeArtifactKind::RecoveryKeyDestination
+        ))
+    );
+}
+
+#[test]
+fn saved_confirmation_projects_the_reveal_exit_and_rejects_stale_reveals() {
+    let command = AccountCommand::ConfirmSecureBackupRecoveryKeySaved {
+        request_id: request_id(10),
+        reveal_request_id: 7,
+    };
+    assert_eq!(
+        account_command_projected_action(&command),
+        Some(AppAction::SecureBackupRecoveryKeyConfirmed {
+            reveal_request_id: 7,
+        })
+    );
+    assert_eq!(
+        secure_backup_setup_projection_failure(
+            &ready_state(SecureBackupGateState::RecoveryKeyDeliveryRequired),
+            &command,
+        ),
+        Some(CoreFailure::SecureBackupSetupFailedNoOp)
+    );
+    // Saving is validated by the actor against its held key and is never a
+    // reducer transition by itself.
+    assert_eq!(
+        account_command_projected_action(&AccountCommand::SaveSecureBackupRecoveryKey {
+            request_id: request_id(11),
+            reveal_request_id: 7,
+        }),
+        None
+    );
+}
+
+#[test]
+fn setup_is_rejected_while_a_revealed_key_awaits_confirmation() {
+    let mut state = ready_state(SecureBackupGateState::RecoveryKeyDeliveryRequired);
+    state.e2ee_trust.key_management.secure_backup_setup =
+        SecureBackupSetupState::RecoveryKeyReady {
+            request_id: 3,
+            recovery_key: koushi_state::RecoveryKeyMaterial::new("synthetic-admission-key"),
+            delivery: koushi_state::RecoveryKeyDeliveryState::NotWritten,
+        };
+    let before = state.clone();
+    let effects = koushi_state::reduce(
+        &mut state,
+        AppAction::SecureBackupSetupRequested {
+            request_id: 7,
+            intent: SecureBackupSetupIntent::InitialSetup,
+        },
+    );
+    assert!(effects.is_empty());
+    assert_eq!(state, before);
+
+    // A passphrase change would rotate the key while the revealed one is
+    // still unconfirmed: the projection rejects it with a typed no-op.
+    let change = AccountCommand::ChangeSecureBackupPassphrase {
+        request_id: request_id(12),
+        request: koushi_protocol::SecureBackupPassphraseChangeRequest {
+            old_secret: koushi_state::AuthSecret::new("old-synthetic-phrase"),
+            new_passphrase: koushi_state::AuthSecret::new("new-synthetic-phrase"),
+        },
+    };
+    let effects = koushi_state::reduce(
+        &mut state,
+        account_command_projected_action(&change).expect("projected action"),
+    );
+    assert!(effects.is_empty());
+    assert_eq!(state, before);
+    assert_eq!(
+        secure_backup_setup_projection_failure(&state, &change),
+        Some(CoreFailure::SecureBackupSetupFailedNoOp)
+    );
+    assert_eq!(
+        secure_backup_setup_projection_failure(&AppState::default(), &change),
+        None
+    );
+}

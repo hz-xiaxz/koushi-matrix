@@ -17,6 +17,7 @@ mod directory;
 mod e2ee;
 mod errors;
 mod files_view;
+mod history_export;
 mod invite_workflow;
 mod live_signals;
 mod local_encryption;
@@ -25,7 +26,6 @@ mod native_attention;
 mod navigation;
 mod profile;
 mod room;
-mod history_export;
 mod room_interactions;
 mod room_management;
 mod search;
@@ -88,8 +88,8 @@ pub use session::{
     VerificationMethodCapability,
 };
 pub use session_status::{
-    CurrentSessionBackupState, CurrentSessionStatusDetails, CurrentSessionStatusFailureKind,
-    ArmedSessionStatusCheck, CurrentSessionStatusState, CurrentSessionSyncState,
+    ArmedSessionStatusCheck, CurrentSessionBackupState, CurrentSessionStatusDetails,
+    CurrentSessionStatusFailureKind, CurrentSessionStatusState, CurrentSessionSyncState,
     OwnIdentityVerification, SESSION_STATUS_FAILURE_BACKOFF_BASE_MS,
     SESSION_STATUS_FAILURE_BACKOFF_CAP_MS, SESSION_STATUS_FRESHNESS_MS,
     SESSION_STATUS_SCHEDULED_REQUEST_ID_BASE, SessionStatusCheckDecision, SessionStatusCheckStats,
@@ -202,8 +202,8 @@ pub use room_management::{
 pub use e2ee::{
     CrossSigningStatus, DeviceTrustLevel, DeviceTrustSummary, E2eeKeyManagementState,
     E2eeRecoveryState, E2eeTrustState, IdentityResetAuthType, IdentityResetState, KeyBackupStatus,
-    RecoveryKeyDeliveryState, RoomKeyExportState, RoomKeyImportState, SasEmoji,
-    SecureBackupPassphraseChangeState, SecureBackupSetupState, TrustOperationFailureKind,
+    RecoveryKeyDeliveryState, RecoveryKeyMaterial, RoomKeyExportState, RoomKeyImportState,
+    SasEmoji, SecureBackupPassphraseChangeState, SecureBackupSetupState, TrustOperationFailureKind,
     VerificationCancelReason, VerificationFlowState, VerificationTarget,
 };
 
@@ -268,7 +268,6 @@ pub use history_export::{
     HistoryExportRoomFailureKind, HistoryExportRoomPhase, HistoryExportRoomSkipReason,
     HistoryExportScope, HistoryExportState,
 };
-
 
 // ── Re-exports: basic_operation ─────────────────────────────────────────────
 pub use basic_operation::{

@@ -111,21 +111,16 @@ pub(crate) fn native_artifact_for_account_command(
         AccountCommand::ExportHistory { request_id, .. } => {
             Some((*request_id, NativeArtifactKind::HistoryExportDirectory))
         }
-        AccountCommand::BootstrapSecureBackup {
-            request_id,
-            request,
-        }
-        | AccountCommand::StartSessionBootstrap {
+        AccountCommand::StartSessionBootstrap {
             request_id,
             request,
             ..
         } if request.recovery_key_destination_requested => {
             Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
         }
-        AccountCommand::ChangeSecureBackupPassphrase {
-            request_id,
-            request,
-        } if request.recovery_key_destination_requested => {
+        // Secure Backup setup and passphrase change reveal the key on screen
+        // (#927); only the optional save command consumes a destination.
+        AccountCommand::SaveSecureBackupRecoveryKey { request_id, .. } => {
             Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
         }
         _ => None,
@@ -289,6 +284,8 @@ fn account_command_requires_ready_session(command: &AccountCommand) -> bool {
             | AccountCommand::RecoverSecureBackup { .. }
             | AccountCommand::RetrySecureBackupInspection { .. }
             | AccountCommand::ChangeSecureBackupPassphrase { .. }
+            | AccountCommand::SaveSecureBackupRecoveryKey { .. }
+            | AccountCommand::ConfirmSecureBackupRecoveryKeySaved { .. }
             | AccountCommand::SetPresence { .. }
             | AccountCommand::SetDisplayName { .. }
             | AccountCommand::SetLocalUserAlias { .. }

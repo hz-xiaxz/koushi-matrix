@@ -1052,3 +1052,75 @@ async fn retry_when_unproven_requests_sync_status_reprojection() {
     ));
     shutdown_and_ack(&handle).await;
 }
+
+fn revealed_key(reveal_request_id: u64) -> super::RevealedRecoveryKey {
+    super::RevealedRecoveryKey {
+        reveal_request_id,
+        source: super::RecoveryKeyRevealSource::Setup,
+        key: koushi_state::RecoveryKeyMaterial::new("synthetic-actor-held-key"),
+    }
+}
+
+#[test]
+fn saving_a_revealed_key_writes_the_held_copy_and_keeps_it_revealed() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("koushi-recovery-key.txt");
+    let revealed = revealed_key(7);
+
+    assert_eq!(
+        super::save_revealed_recovery_key(Some(&revealed), 7, Some(path.clone())),
+        Some(true)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read saved key"),
+        "synthetic-actor-held-key"
+    );
+    // A second save to the same (now existing) path fails closed without
+    // overwriting, and without consuming the revealed key.
+    assert_eq!(
+        super::save_revealed_recovery_key(Some(&revealed), 7, Some(path)),
+        Some(false)
+    );
+    assert_eq!(
+        super::save_revealed_recovery_key(Some(&revealed), 7, None),
+        Some(false)
+    );
+    assert_eq!(revealed.key.expose_secret(), "synthetic-actor-held-key");
+}
+
+#[test]
+fn stale_save_is_rejected_without_writing() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("stale.txt");
+
+    assert_eq!(
+        super::save_revealed_recovery_key(Some(&revealed_key(7)), 8, Some(path.clone())),
+        None
+    );
+    assert_eq!(
+        super::save_revealed_recovery_key(None, 7, Some(path.clone())),
+        None
+    );
+    assert!(!path.exists());
+}
+
+#[test]
+fn saved_confirmation_drops_only_the_matching_revealed_key() {
+    let mut slot = Some(revealed_key(7));
+
+    assert_eq!(super::take_revealed_recovery_key(&mut slot, 8), None);
+    assert!(slot.is_some(), "a stale confirmation must keep the key");
+
+    assert_eq!(
+        super::take_revealed_recovery_key(&mut slot, 7),
+        Some(super::RecoveryKeyRevealSource::Setup)
+    );
+    assert!(slot.is_none(), "confirmation must drop the held key");
+    assert_eq!(super::take_revealed_recovery_key(&mut slot, 7), None);
+}
+
+#[test]
+fn revealed_key_debug_is_redacted() {
+    let debug = format!("{:?}", revealed_key(7));
+    assert!(!debug.contains("synthetic-actor-held-key"), "{debug}");
+}

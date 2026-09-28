@@ -361,16 +361,13 @@ describe("TauriDesktopApi", () => {
     const api = new TauriDesktopApi();
     await api.exportRoomKeys("/tmp/export.txt", "room-key-passphrase");
     await api.importRoomKeys("/tmp/import.txt", "room-key-passphrase");
-    await api.bootstrapSecureBackup(
-      "secure-backup-passphrase",
-      "/tmp/recovery.txt",
-      { kind: "initialSetup" }
-    );
+    await api.bootstrapSecureBackup("secure-backup-passphrase", { kind: "initialSetup" });
     await api.changeSecureBackupPassphrase(
       "old-secure-backup-passphrase",
-      "new-secure-backup-passphrase",
-      "/tmp/recovery.txt"
+      "new-secure-backup-passphrase"
     );
+    await api.saveSecureBackupRecoveryKey(41, "/tmp/recovery.txt");
+    await api.confirmSecureBackupRecoveryKeySaved(41);
 
     expect(invoke).toHaveBeenCalledWith("export_room_keys", {
       destinationPath: "/tmp/export.txt",
@@ -380,15 +377,24 @@ describe("TauriDesktopApi", () => {
       sourcePath: "/tmp/import.txt",
       passphrase: "room-key-passphrase"
     });
+    // #927: setup and passphrase change reveal the key on screen; no
+    // destination is part of either command.
     expect(invoke).toHaveBeenCalledWith("bootstrap_secure_backup", {
       passphrase: "secure-backup-passphrase",
-      recoveryKeyDestinationPath: "/tmp/recovery.txt",
       intent: { kind: "initialSetup" }
     });
     expect(invoke).toHaveBeenCalledWith("change_secure_backup_passphrase", {
       oldSecret: "old-secure-backup-passphrase",
-      newPassphrase: "new-secure-backup-passphrase",
+      newPassphrase: "new-secure-backup-passphrase"
+    });
+    // The optional save and the explicit confirmation carry only the reveal
+    // correlation (and the native path); the key never travels back.
+    expect(invoke).toHaveBeenCalledWith("save_secure_backup_recovery_key", {
+      revealRequestId: 41,
       recoveryKeyDestinationPath: "/tmp/recovery.txt"
+    });
+    expect(invoke).toHaveBeenCalledWith("confirm_secure_backup_recovery_key_saved", {
+      revealRequestId: 41
     });
   });
 
@@ -397,16 +403,8 @@ describe("TauriDesktopApi", () => {
 
     const api = new TauriDesktopApi();
     await api.recoverSecureBackup("secure-backup-recovery-key");
-    await api.bootstrapSecureBackup(
-      "secure-backup-passphrase",
-      "/tmp/recovery.txt",
-      { kind: "initialSetup" }
-    );
-    await api.bootstrapSecureBackup(
-      "reenable-passphrase",
-      "/tmp/reenable-recovery.txt",
-      { kind: "reenable", confirmed: true }
-    );
+    await api.bootstrapSecureBackup("secure-backup-passphrase", { kind: "initialSetup" });
+    await api.bootstrapSecureBackup("reenable-passphrase", { kind: "reenable", confirmed: true });
     await api.retrySecureBackupInspection();
 
     expect(invoke).toHaveBeenCalledWith("recover_secure_backup", {
@@ -414,12 +412,10 @@ describe("TauriDesktopApi", () => {
     });
     expect(invoke).toHaveBeenCalledWith("bootstrap_secure_backup", {
       passphrase: "secure-backup-passphrase",
-      recoveryKeyDestinationPath: "/tmp/recovery.txt",
       intent: { kind: "initialSetup" }
     });
     expect(invoke).toHaveBeenCalledWith("bootstrap_secure_backup", {
       passphrase: "reenable-passphrase",
-      recoveryKeyDestinationPath: "/tmp/reenable-recovery.txt",
       intent: { kind: "reenable", confirmed: true }
     });
     expect(invoke).toHaveBeenCalledWith("retry_secure_backup_inspection");

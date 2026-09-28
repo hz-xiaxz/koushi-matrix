@@ -1,0 +1,127 @@
+//! #927: the recovery key Koushi reveals on screen must be the secret-storage
+//! key that `recovery().recover()` accepts. The fork's
+//! `backups().local_recovery_key()` returns the backup decryption key instead,
+//! which `recover()` rejects, so it must never be revealed or saved.
+
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
+use matrix_sdk::test_utils::mocks::MatrixMockServer;
+use wiremock::{Mock, Request, Respond, ResponseTemplate, matchers::path_regex};
+
+use super::{MatrixClientSession, SessionInfo, reset_recovery_key};
+
+/// Minimal in-memory global account-data store so secret storage written by
+/// one call can be read back by `recover()`.
+#[derive(Clone, Default)]
+struct AccountDataStore(Arc<Mutex<HashMap<String, serde_json::Value>>>);
+
+impl AccountDataStore {
+    fn event_type(request: &Request) -> String {
+        request
+            .url
+            .path()
+            .rsplit('/')
+            .next()
+            .expect("account data path has an event type")
+            .to_owned()
+    }
+}
+
+impl Respond for AccountDataStore {
+    fn respond(&self, request: &Request) -> ResponseTemplate {
+        let event_type = Self::event_type(request);
+        let mut store = self.0.lock().expect("account data store lock");
+        if request.method.as_str() == "PUT" {
+            let body = serde_json::from_slice(&request.body).expect("account data body is JSON");
+            store.insert(event_type, body);
+            return ResponseTemplate::new(200).set_body_json(serde_json::json!({}));
+        }
+        match store.get(&event_type) {
+            Some(content) => ResponseTemplate::new(200).set_body_json(content),
+            None => ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "errcode": "M_NOT_FOUND",
+                "error": "Account data not found"
+            })),
+        }
+    }
+}
+
+async fn session_with_account_data() -> (MatrixMockServer, MatrixClientSession) {
+    let server = MatrixMockServer::new().await;
+    Mock::given(path_regex(
+        r"^/_matrix/client/(r0|v3)/user/[^/]+/account_data/[^/]+$",
+    ))
+    .respond_with(AccountDataStore::default())
+    .mount(server.server())
+    .await;
+    server.mock_query_keys().ok().mount().await;
+    let client = server.client_builder().build().await;
+    let info = SessionInfo {
+        homeserver: server.server().uri(),
+        user_id: client.user_id().expect("mock user").to_string(),
+        device_id: client.device_id().expect("mock device").to_string(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    };
+    (
+        server,
+        MatrixClientSession::from_client_for_testing(client, info),
+    )
+}
+
+#[tokio::test]
+async fn reset_recovery_key_reveals_a_key_that_recover_accepts() {
+    let (_server, session) = session_with_account_data().await;
+
+    let summary = reset_recovery_key(&session, None)
+        .await
+        .expect("reset_key creates a new secret store");
+    let recovery = session.client().encryption().recovery();
+
+    recovery
+        .recover(summary.recovery_key.as_str())
+        .await
+        .expect("the revealed key must unlock secret storage");
+}
+
+#[tokio::test]
+async fn setup_reveals_the_key_enable_returned_and_recover_accepts_it() {
+    let (server, session) = session_with_account_data().await;
+    server.mock_room_keys_version().none().mount().await;
+    server.mock_add_room_keys_version().ok().mount().await;
+
+    let summary = super::bootstrap_secure_backup(&session, None)
+        .await
+        .expect("recovery().enable() creates backup and secret storage");
+
+    session
+        .client()
+        .encryption()
+        .recovery()
+        .recover(summary.recovery_key.as_str())
+        .await
+        .expect("the revealed setup key must unlock secret storage");
+}
+
+#[tokio::test]
+async fn a_backup_decryption_key_is_not_a_recovery_key() {
+    let (_server, session) = session_with_account_data().await;
+    reset_recovery_key(&session, None)
+        .await
+        .expect("reset_key creates a new secret store");
+
+    // What `backups().local_recovery_key()` would export: a base58 backup
+    // decryption key. `recover()` must reject it, so Koushi never reveals it.
+    let backup_key = matrix_sdk_base::crypto::store::types::BackupDecryptionKey::new();
+    assert!(
+        session
+            .client()
+            .encryption()
+            .recovery()
+            .recover(&backup_key.to_base58())
+            .await
+            .is_err()
+    );
+}

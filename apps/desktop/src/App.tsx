@@ -2861,20 +2861,30 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
 
   async function bootstrapSecureBackup(
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null,
     intent: SecureBackupSetupIntent
   ) {
-    await settleCommand(api.bootstrapSecureBackup(passphrase, recoveryKeyDestinationPath, intent));
+    await settleCommand(api.bootstrapSecureBackup(passphrase, intent));
   }
 
-  async function changeSecureBackupPassphrase(
-    oldSecret: string,
-    newPassphrase: string,
-    recoveryKeyDestinationPath: string | null
-  ) {
-    await settleCommand(
-      api.changeSecureBackupPassphrase(oldSecret, newPassphrase, recoveryKeyDestinationPath)
-    );
+  async function changeSecureBackupPassphrase(oldSecret: string, newPassphrase: string) {
+    await settleCommand(api.changeSecureBackupPassphrase(oldSecret, newPassphrase));
+  }
+
+  // #927: optional "Save to file…" for the revealed recovery key. Rust writes
+  // its own held copy; only the native path crosses the bridge.
+  async function requestSecureBackupRecoveryKeySave(revealRequestId: number) {
+    const destination = await chooseSecureBackupDestination();
+    if (!destination) return null;
+    return api.saveSecureBackupRecoveryKey(revealRequestId, destination);
+  }
+
+  async function saveSecureBackupRecoveryKey(revealRequestId: number) {
+    const receipt = await requestSecureBackupRecoveryKeySave(revealRequestId);
+    if (receipt) await applyCommandReceipt(receipt);
+  }
+
+  async function confirmSecureBackupRecoveryKeySaved(revealRequestId: number) {
+    await settleCommand(api.confirmSecureBackupRecoveryKeySaved(revealRequestId));
   }
 
   async function probeLocalEncryptionHealth() {
@@ -5919,9 +5929,11 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           startOwnUserSas: () => api.startOwnUserSas(),
           submitRecovery: (secret) => api.submitRecovery(secret),
           recoverSecureBackup: api.recoverSecureBackup,
-          bootstrapSecureBackup: (passphrase, destination, intent) =>
-            api.bootstrapSecureBackup(passphrase, destination, intent),
-          chooseSecureBackupDestination,
+          bootstrapSecureBackup: (passphrase, intent) =>
+            api.bootstrapSecureBackup(passphrase, intent),
+          saveSecureBackupRecoveryKey: requestSecureBackupRecoveryKeySave,
+          confirmSecureBackupRecoveryKeySaved: (revealRequestId) =>
+            api.confirmSecureBackupRecoveryKeySaved(revealRequestId),
           retrySecureBackupInspection: api.retrySecureBackupInspection,
           openSecureBackupDiagnostics: openDiagnostics
         }}
@@ -6727,28 +6739,21 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           }}
           onChooseRoomKeyExportDestination={chooseRoomKeyExportDestination}
           onChooseRoomKeyImportSource={chooseRoomKeyImportSource}
-          onChooseSecureBackupDestination={chooseSecureBackupDestination}
           onExportRoomKeys={(destinationPath, passphrase) => {
             runInBackground(exportRoomKeys(destinationPath, passphrase));
           }}
           onImportRoomKeys={(sourcePath, passphrase) => {
             runInBackground(importRoomKeys(sourcePath, passphrase));
           }}
-          onBootstrapSecureBackup={(passphrase, recoveryKeyDestinationPath, intent) => {
-            runInBackground(bootstrapSecureBackup(passphrase, recoveryKeyDestinationPath, intent));
+          onBootstrapSecureBackup={(passphrase, intent) => {
+            runInBackground(bootstrapSecureBackup(passphrase, intent));
           }}
-          onChangeSecureBackupPassphrase={(
-            oldSecret,
-            newPassphrase,
-            recoveryKeyDestinationPath
-          ) => {
-            runInBackground(
-              changeSecureBackupPassphrase(
-                oldSecret,
-                newPassphrase,
-                recoveryKeyDestinationPath
-              )
-            );
+          onChangeSecureBackupPassphrase={(oldSecret, newPassphrase) => {
+            runInBackground(changeSecureBackupPassphrase(oldSecret, newPassphrase));
+          }}
+          onSaveSecureBackupRecoveryKey={saveSecureBackupRecoveryKey}
+          onConfirmSecureBackupRecoveryKeySaved={(revealRequestId) => {
+            runInBackground(confirmSecureBackupRecoveryKeySaved(revealRequestId));
           }}
           onEnableKeyBackup={() => {
             runInBackground(enableKeyBackup());

@@ -101,6 +101,8 @@ impl CoreCommand {
                 | AccountCommand::RecoverSecureBackup { request_id, .. }
                 | AccountCommand::RetrySecureBackupInspection { request_id }
                 | AccountCommand::ChangeSecureBackupPassphrase { request_id, .. }
+                | AccountCommand::SaveSecureBackupRecoveryKey { request_id, .. }
+                | AccountCommand::ConfirmSecureBackupRecoveryKeySaved { request_id, .. }
                 | AccountCommand::ProbeLocalEncryptionHealth { request_id }
                 | AccountCommand::ResetLocalData { request_id }
                 | AccountCommand::StartDeviceCleanup { request_id }

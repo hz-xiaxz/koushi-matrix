@@ -921,6 +921,9 @@ pub struct AccountActor {
     pub(super) session_check: super::session_check::SessionCheckCoordinator,
     pub(super) secure_backup_ready: bool,
     pub(super) recovery_key_delivery_pending: bool,
+    /// The recovery key currently revealed on screen (#927), held only until
+    /// the explicit saved confirmation, session teardown, or account switch.
+    pub(super) revealed_recovery_key: Option<super::recovery_backup::RevealedRecoveryKey>,
     pub(super) secure_backup_inspection_task: Option<crate::executor::JoinHandle<()>>,
     pub(super) secure_backup_monitor_task: Option<crate::executor::JoinHandle<()>>,
     /// One-shot deadline task owned while an inspection is deferred waiting
@@ -1250,6 +1253,7 @@ impl AccountActor {
             session_check: super::session_check::SessionCheckCoordinator::default(),
             secure_backup_ready: false,
             recovery_key_delivery_pending: false,
+            revealed_recovery_key: None,
             secure_backup_inspection_task: None,
             secure_backup_monitor_task: None,
             secure_backup_defer_deadline_task: None,
@@ -1850,12 +1854,8 @@ impl AccountActor {
                 }
                 #[cfg(test)]
                 AccountMessage::InspectSessionCheckTimer { response } => {
-                    let _ = response.send(
-                        self.session_check
-                            .timer
-                            .as_ref()
-                            .map(|(token, _)| *token),
-                    );
+                    let _ =
+                        response.send(self.session_check.timer.as_ref().map(|(token, _)| *token));
                 }
                 #[cfg(test)]
                 AccountMessage::ConfigureSessionCheckClock { base_epoch_ms } => {
@@ -2779,6 +2779,20 @@ impl AccountActor {
                 request,
             } => {
                 self.handle_change_secure_backup_passphrase(request_id, request)
+                    .await;
+            }
+            AccountCommand::SaveSecureBackupRecoveryKey {
+                request_id,
+                reveal_request_id,
+            } => {
+                self.handle_save_secure_backup_recovery_key(request_id, reveal_request_id)
+                    .await;
+            }
+            AccountCommand::ConfirmSecureBackupRecoveryKeySaved {
+                request_id,
+                reveal_request_id,
+            } => {
+                self.handle_confirm_secure_backup_recovery_key_saved(request_id, reveal_request_id)
                     .await;
             }
             AccountCommand::ProbeLocalEncryptionHealth { request_id } => {
