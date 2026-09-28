@@ -5113,7 +5113,12 @@ stateDiagram-v2
   previous summary; the actor performs a `/keys/query` for the contact
   (`Encryption::request_user_identity`) and then reads the SDK store. A failed
   retrieval is `Failed` with no summary ("status unavailable"), never a
-  confirmation. An empty device list is `NoDevices`, and a contact without
+  confirmation. `/keys/query` answers HTTP 200 even when the contact's
+  homeserver was unreachable, listing it under `failures` while the SDK keeps
+  its cached keys; the SDK call does not surface that, so the actor issues the
+  same typed query and treats the contact's server under `failures` as
+  `Failed { Network }` (Verify user likewise refuses with `Network`) rather
+  than showing the cached answer. An empty device list is `NoDevices`, and a contact without
   cross-signing is `OwnerIdentityMissing`/`Unknown`; neither is confirmation.
 - **Fences.** Results whose `user_id` or `request_id` do not match the
   in-flight load are dropped, so a late answer for a previous contact or a

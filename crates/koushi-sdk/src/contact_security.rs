@@ -10,6 +10,9 @@
 //!   key signed the contact's master key) and
 //!   `has_verification_violation()` (verified before, not any more).
 //!
+//! A retrieval counts as fresh only when the contact's homeserver answered
+//! `/keys/query`; otherwise the cached store answer is not projected.
+//!
 //! Nothing here pins identities, verifies, withdraws verification, or sets
 //! local trust. Devices whose own self-signature is invalid are rejected by
 //! the SDK during `/keys/query` and never reach this projection; deleted
@@ -166,7 +169,32 @@ fn classify_retrieval_error(error: &matrix_sdk::Error) -> ContactSecurityFailure
     }
 }
 
-/// Fresh retrieval: `/keys/query` for the contact, then the store read.
+/// Whether the homeserver answered `/keys/query` for the contact's server.
+///
+/// `/keys/query` succeeds with HTTP 200 even when the contact's homeserver
+/// could not be reached: that server is listed under `failures` and the SDK
+/// keeps serving its cached keys, which may be arbitrarily stale (for
+/// example a verification from before an identity reset). The SDK's
+/// `request_user_identity` does not surface `failures`, so the same typed
+/// query is issued here and a listed server means the retrieval was not
+/// fresh.
+async fn contact_server_answered(
+    client: &matrix_sdk::Client,
+    user_id: &UserId,
+) -> Result<bool, matrix_sdk::HttpError> {
+    use matrix_sdk::ruma::api::client::keys::get_keys;
+
+    let mut request = get_keys::v3::Request::new();
+    request.device_keys.insert(user_id.to_owned(), Vec::new());
+    let response = client.send(request).await?;
+    Ok(!response
+        .failures
+        .contains_key(user_id.server_name().as_str()))
+}
+
+/// Fresh retrieval: `/keys/query` for the contact, then the store read. A
+/// query the contact's homeserver did not answer is a failed retrieval,
+/// never the cached answer.
 pub async fn load_contact_security(
     session: &MatrixClientSession,
     user_id: &str,
@@ -178,6 +206,12 @@ pub async fn load_contact_security(
         .request_user_identity(user_id)
         .await
         .map_err(|error| classify_retrieval_error(&error))?;
+    if !contact_server_answered(&session.client, user_id)
+        .await
+        .map_err(|_| ContactSecurityFailureKind::Network)?
+    {
+        return Err(ContactSecurityFailureKind::Network);
+    }
     read_contact_security_from_store(&session.client, user_id).await
 }
 
@@ -247,6 +281,16 @@ pub async fn request_user_verification(
             crate::E2eeTrustError::Classified(crate::e2ee::trust_failure_kind(&error))
         })?
         .ok_or_else(|| crate::E2eeTrustError::Sdk("contact has no identity".to_owned()))?;
+    // Never request against a cached identity the contact's server did not
+    // confirm just now.
+    if !contact_server_answered(&session.client, user_id)
+        .await
+        .map_err(|_| crate::E2eeTrustError::Classified(crate::E2eeTrustFailureKind::Network))?
+    {
+        return Err(crate::E2eeTrustError::Classified(
+            crate::E2eeTrustFailureKind::Network,
+        ));
+    }
     if identity.is_verified() {
         return Err(crate::E2eeTrustError::Sdk(
             "contact is already verified".to_owned(),

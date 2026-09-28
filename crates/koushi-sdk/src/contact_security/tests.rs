@@ -250,6 +250,75 @@ async fn identity_change_is_attention_only_after_you_verified_it() {
     );
 }
 
+/// `/keys/query` answers 200 with the contact's homeserver under `failures`
+/// when it could not be reached; the SDK then keeps its cached keys. That is
+/// not a fresh retrieval, so it must not re-confirm a cached verification.
+#[tokio::test]
+async fn keys_query_failure_for_the_contact_server_is_not_a_fresh_retrieval() {
+    let server = MatrixMockServer::new().await;
+    server.mock_crypto_endpoints_preset().await;
+    let alice = cross_signed_client(
+        &server,
+        user_id!("@alice:example.test"),
+        device_id!("ALICE1"),
+    )
+    .await;
+    let alice_session = session(&alice, server.uri());
+    let bob_id = user_id!("@bob:example.test");
+    let bob = cross_signed_client(&server, bob_id, device_id!("BOB1")).await;
+    verify_contact(&alice, bob_id).await;
+    let cached = load_contact_security(&alice_session, bob_id.as_str())
+        .await
+        .expect("load");
+    assert_eq!(cached.identity, ContactIdentityVerification::VerifiedByYou);
+    assert_eq!(cached.devices, ContactDevicesStatus::AllOwnerSigned);
+
+    // Bob resets his identity while his homeserver is unreachable from ours.
+    bob.encryption()
+        .bootstrap_cross_signing(None)
+        .await
+        .expect("bob identity reset");
+    // Answers the SDK's query and the freshness check of two retrievals.
+    // (Not a scoped mock: wiremock 0.6 deactivates scoped mocks by an index
+    // that its priority sort has reordered.)
+    Mock::given(method("POST"))
+        .and(path_regex(r"^/_matrix/client/.*/keys/query"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "device_keys": {},
+            "failures": {
+                "example.test": {
+                    "errcode": "M_UNAVAILABLE",
+                    "error": "synthetic federation failure",
+                },
+            },
+        })))
+        .with_priority(1)
+        .up_to_n_times(4)
+        .expect(4)
+        .mount(server.server())
+        .await;
+    assert_eq!(
+        load_contact_security(&alice_session, bob_id.as_str()).await,
+        Err(ContactSecurityFailureKind::Network)
+    );
+    // Verify user does not act on the unconfirmed cached identity either.
+    assert!(matches!(
+        crate::request_user_verification(&alice_session, bob_id.as_str()).await,
+        Err(crate::E2eeTrustError::Classified(
+            crate::E2eeTrustFailureKind::Network
+        ))
+    ));
+
+    // Once the server answers, the change is shown.
+    let fresh = load_contact_security(&alice_session, bob_id.as_str())
+        .await
+        .expect("load");
+    assert_eq!(
+        fresh.identity,
+        ContactIdentityVerification::ChangedAfterVerification
+    );
+}
+
 #[tokio::test]
 async fn key_store_changes_are_observed_and_reread_without_network() {
     let server = MatrixMockServer::new().await;
@@ -344,7 +413,8 @@ async fn serve_keys_query(server: &MatrixMockServer, body: Value) {
     Mock::given(method("POST"))
         .and(path_regex(r"^/_matrix/client/.*/keys/query"))
         .respond_with(ResponseTemplate::new(200).set_body_json(body))
-        .up_to_n_times(1)
+        // One retrieval issues the SDK's query and the freshness check.
+        .up_to_n_times(2)
         .mount(server.server())
         .await;
 }
