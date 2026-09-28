@@ -141,6 +141,10 @@ mtime. This is safe only because the key pins the SDK gitlink, the lockfile,
 every workspace manifest, `ci.yml`, the toolchain and the profile; a different
 feature set still selects a different fingerprint hash. Keep that key complete
 when changing any of those inputs, because an exact hit is never re-saved.
+rust-cache has the same property, and its key hashes only manifests, the
+lockfile and the toolchain. When a change to the cargo command set changes the
+resolved dependency feature graph, bump the Rust job's `shared-key` suffix, or
+the newly required dependency builds recompile on every run.
 
 The Rust job runs `cargo test --profile ci --workspace --exclude
 sidebar-composition --exclude key-management` once. `koushi-core-testkit` and

@@ -151,7 +151,11 @@ jobs:
         with:
           # The root workspace owns the Tauri crate and the only Cargo.lock.
           workspaces: . -> target-ci
-          shared-key: koushi-rust-ci
+          # rust-cache never re-saves an exact hit, and its key hashes only
+          # manifests, the lockfile and the toolchain. Bump this suffix when the
+          # cargo command set changes the resolved feature graph, or the new
+          # graph's dependencies recompile on every run.
+          shared-key: koushi-rust-ci-unified-v1
       - name: Read vendored Matrix SDK revision
         id: sdk-revision
         run: echo "revision=$(git -C vendor/matrix-rust-sdk rev-parse HEAD)" >> "$GITHUB_OUTPUT"
