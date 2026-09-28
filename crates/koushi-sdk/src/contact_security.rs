@@ -279,10 +279,9 @@ pub async fn request_user_verification(
         .await
         .map_err(|error| {
             crate::E2eeTrustError::Classified(crate::e2ee::trust_failure_kind(&error))
-        })?
-        .ok_or_else(|| crate::E2eeTrustError::Sdk("contact has no identity".to_owned()))?;
-    // Never request against a cached identity the contact's server did not
-    // confirm just now.
+        })?;
+    // Never act on a cached identity (or its absence) the contact's server
+    // did not confirm just now.
     if !contact_server_answered(&session.client, user_id)
         .await
         .map_err(|_| crate::E2eeTrustError::Classified(crate::E2eeTrustFailureKind::Network))?
@@ -291,6 +290,8 @@ pub async fn request_user_verification(
             crate::E2eeTrustFailureKind::Network,
         ));
     }
+    let identity =
+        identity.ok_or_else(|| crate::E2eeTrustError::Sdk("contact has no identity".to_owned()))?;
     if identity.is_verified() {
         return Err(crate::E2eeTrustError::Sdk(
             "contact is already verified".to_owned(),
