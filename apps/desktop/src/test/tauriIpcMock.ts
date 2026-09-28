@@ -315,7 +315,7 @@ export function defaultSnapshotResponse() {
             code_block_wrap: true,
             hide_redacted: true,
             url_previews_enabled: true,
-            encrypted_url_previews_enabled: true
+            encrypted_url_previews_enabled: false
           },
           window: { close_to_tray: true },
           updates: { auto_check: true, include_prereleases: false },
