@@ -17,7 +17,6 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
 use koushi_state::NativeAttentionCapability;
 use tauri::{
-    Manager,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
 };

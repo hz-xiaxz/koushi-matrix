@@ -390,12 +390,16 @@ fn qa_window_visibility_mode_enabled() -> bool {
     matches!(std::env::var("KOUSHI_QA_TITLE").ok().as_deref(), Some("1"))
 }
 
+// Pure decision for the macOS window-close path; compiled for its macOS caller
+// and for the cross-platform window-close tests.
+#[cfg(any(target_os = "macos", test))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum MacosCloseRequestedAction {
     Hide,
     ExitFullscreenAndHide,
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn macos_close_requested_action(is_fullscreen: Option<bool>) -> MacosCloseRequestedAction {
     if is_fullscreen == Some(true) {
         MacosCloseRequestedAction::ExitFullscreenAndHide
@@ -404,8 +408,8 @@ fn macos_close_requested_action(is_fullscreen: Option<bool>) -> MacosCloseReques
     }
 }
 
+#[cfg(target_os = "macos")]
 impl MacosCloseRequestedAction {
-    #[cfg(target_os = "macos")]
     fn diagnostic_token(self) -> &'static str {
         match self {
             Self::Hide => "hide",
@@ -529,6 +533,10 @@ impl<R: tauri::Runtime> ApplicationExit for tauri::AppHandle<R> {
     }
 }
 
+// Restart-after-shutdown barrier shared by every updater install backend. It
+// is compiled where a backend can request a relaunch and in the
+// platform-neutral restart-barrier tests (see app_updates.rs).
+#[cfg(any(koushi_updater_backend, test))]
 fn request_application_restart_with(
     quit_stage: &AtomicU8,
     restart_after_shutdown: &AtomicBool,
@@ -547,6 +555,7 @@ fn request_application_restart_with(
     }
 }
 
+#[cfg(koushi_updater_backend)]
 pub(crate) fn request_application_restart(app: &tauri::AppHandle) {
     let core_state = app.state::<CoreRuntimeState>();
     request_application_restart_with(

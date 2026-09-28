@@ -9,17 +9,21 @@ use koushi_state::UpdatesSettings;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{Notify, watch};
-#[cfg(target_os = "macos")]
-use url::Url;
 
+// Compilation boundary (#1035, overview.md "Desktop Application Updates"):
+// everything in this file is the platform-neutral facade and lifecycle engine
+// and is compiled and tested on every desktop target. A platform contributes
+// only a `Backend` implementation plus its candidate type. Targets without an
+// install backend use the uninhabited `PlatformBackend` below, so the engine
+// stays type-checked there while no update work can ever start.
+#[cfg(any(koushi_updater_backend, test))]
+mod channel_policy;
 #[cfg(target_os = "macos")]
-use tauri_plugin_updater::{Update, UpdaterExt};
+mod macos_backend;
+#[cfg(target_os = "macos")]
+use macos_backend::{Candidate, MacosBackend as PlatformBackend};
 
 pub const DESKTOP_UPDATE_EVENT_NAME: &str = "koushi-desktop://update";
-pub const STABLE_UPDATE_ENDPOINT: &str =
-    "https://github.com/shinaoka/koushi-matrix/releases/latest/download/latest.json";
-pub const BETA_UPDATE_ENDPOINT: &str =
-    "https://github.com/shinaoka/koushi-matrix/releases/download/latest-beta/latest-beta.json";
 const UPDATE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -46,6 +50,8 @@ pub enum DesktopUpdateFailureStage {
 
 struct PendingUpdate<C> {
     version: String,
+    // Read only by an install backend; unused where no backend is compiled.
+    #[cfg_attr(not(koushi_updater_backend), allow(dead_code))]
     update: C,
     bytes: Option<Vec<u8>>,
 }
@@ -387,10 +393,37 @@ impl<C> Shared<C> {
     }
 }
 
-#[cfg(target_os = "macos")]
-type Candidate = Update;
-#[cfg(not(target_os = "macos"))]
+/// Placeholder backend for installations without a supported install path.
+/// It is uninhabited: `for_app` can only return `None`, so the owner is never
+/// started, while the shared engine remains compiled against the same
+/// `Backend` contract a future Linux backend implements.
+#[cfg(not(koushi_updater_backend))]
+enum PlatformBackend {}
+#[cfg(not(koushi_updater_backend))]
 type Candidate = ();
+
+#[cfg(not(koushi_updater_backend))]
+impl PlatformBackend {
+    fn for_app(_app: &AppHandle) -> Option<Self> {
+        None
+    }
+}
+
+#[cfg(not(koushi_updater_backend))]
+impl Backend<Candidate> for PlatformBackend {
+    fn start(&self, _work: Work<Candidate>) -> UpdateFuture<'static, Completion<Candidate>> {
+        match *self {}
+    }
+    fn emit(&self, _state: DesktopUpdateState) {
+        match *self {}
+    }
+    fn current_version(&self) -> &str {
+        match *self {}
+    }
+    fn restart(&self) {
+        match *self {}
+    }
+}
 
 pub struct DesktopUpdateManager {
     shared: Arc<Shared<Candidate>>,
@@ -408,11 +441,15 @@ impl DesktopUpdateManager {
     }
 }
 
+// Backend-facing seam: only an install backend reads `Work` payloads and
+// constructs `Completion`s, so builds without a backend never touch them.
+#[cfg_attr(not(koushi_updater_backend), allow(dead_code))]
 enum Work<C> {
     Check(bool),
     Download(PendingUpdate<C>),
     Install(PendingUpdate<C>),
 }
+#[cfg_attr(not(koushi_updater_backend), allow(dead_code))]
 enum Completion<C> {
     Check(Result<Option<PendingUpdate<C>>, ()>),
     Download(Result<PendingUpdate<C>, ()>),
@@ -537,7 +574,9 @@ async fn run_owner<C: Send + 'static>(
 }
 
 fn initial_state() -> DesktopUpdateState {
-    if cfg!(target_os = "macos") && configured_updater_public_key().is_some() {
+    // `Unsupported` is the capability of this installation, not a permanent
+    // platform policy: it changes once the target has an install backend.
+    if cfg!(koushi_updater_backend) && configured_updater_public_key().is_some() {
         DesktopUpdateState::Idle
     } else {
         DesktopUpdateState::Unsupported
@@ -549,36 +588,26 @@ pub(crate) fn configured_updater_public_key() -> Option<&'static str> {
 }
 
 pub fn spawn_auto_update_loop(app: AppHandle, connection: CoreConnection) {
-    #[cfg(target_os = "macos")]
-    {
-        if configured_updater_public_key().is_none() {
-            return;
-        }
-        let snapshot = connection.versioned_snapshot();
-        let shared = app.state::<DesktopUpdateManager>().shared.clone();
-        shared.transition(
-            |state| {
-                let _ = app.emit(DESKTOP_UPDATE_EVENT_NAME, state);
-            },
-            |lifecycle| {
-                lifecycle.observe(PolicySnapshot {
-                    generation: snapshot.generation,
-                    settings: snapshot.state.settings.values.updates,
-                });
-            },
-        );
-        let current_version = app.package_info().version.to_string();
-        start_owner(
-            shared,
-            NativeBackend {
-                app,
-                current_version,
-            },
-            connection,
-        );
+    if configured_updater_public_key().is_none() {
+        return;
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = (app, connection);
+    let Some(backend) = PlatformBackend::for_app(&app) else {
+        return;
+    };
+    let snapshot = connection.versioned_snapshot();
+    let shared = app.state::<DesktopUpdateManager>().shared.clone();
+    shared.transition(
+        |state| {
+            let _ = app.emit(DESKTOP_UPDATE_EVENT_NAME, state);
+        },
+        |lifecycle| {
+            lifecycle.observe(PolicySnapshot {
+                generation: snapshot.generation,
+                settings: snapshot.state.settings.values.updates,
+            });
+        },
+    );
+    start_owner(shared, backend, connection);
 }
 
 pub async fn shutdown(app: &AppHandle) {
@@ -605,174 +634,6 @@ pub async fn check_for_update(
 
 fn no_update_state(version: String) -> DesktopUpdateState {
     DesktopUpdateState::UpToDate { version }
-}
-
-#[cfg(target_os = "macos")]
-struct NativeBackend {
-    app: AppHandle,
-    current_version: String,
-}
-
-#[cfg(target_os = "macos")]
-impl Backend<Update> for NativeBackend {
-    fn start(&self, work: Work<Update>) -> UpdateFuture<'static, Completion<Update>> {
-        let app = self.app.clone();
-        match work {
-            Work::Check(include_prereleases) => Box::pin(async move {
-                let mut update = None;
-                let endpoints = if include_prereleases {
-                    vec![STABLE_UPDATE_ENDPOINT, BETA_UPDATE_ENDPOINT]
-                } else {
-                    vec![STABLE_UPDATE_ENDPOINT]
-                };
-                for endpoint in endpoints {
-                    match check_update_endpoint(&app, endpoint).await {
-                        Ok(Some(candidate)) => {
-                            update = Some(select_newer_update(update, candidate))
-                        }
-                        Ok(None) => {}
-                        Err(()) => return Completion::Check(Err(())),
-                    }
-                }
-                Completion::Check(Ok(update.map(|update| PendingUpdate {
-                    version: update.version.clone(),
-                    update,
-                    bytes: None,
-                })))
-            }),
-            Work::Download(mut pending) => Box::pin(async move {
-                match pending.update.download(|_, _| {}, || {}).await {
-                    Ok(bytes) => {
-                        pending.bytes = Some(bytes);
-                        Completion::Download(Ok(pending))
-                    }
-                    Err(_) => Completion::Download(Err(())),
-                }
-            }),
-            Work::Install(pending) => {
-                // Retain the blocking handle inside an owner-polled future. The
-                // owner joins this future, even on shutdown, instead of aborting it.
-                let install = tauri::async_runtime::spawn_blocking(move || {
-                    let bytes = pending.bytes.ok_or(())?;
-                    pending.update.install(&bytes).map_err(|_| ())
-                });
-                Box::pin(async move { Completion::Install(install.await.unwrap_or(Err(()))) })
-            }
-        }
-    }
-    fn emit(&self, state: DesktopUpdateState) {
-        let _ = self.app.emit(DESKTOP_UPDATE_EVENT_NAME, state);
-    }
-    fn current_version(&self) -> &str {
-        &self.current_version
-    }
-    fn restart(&self) {
-        // restart() blocks its calling thread, which would deadlock the graceful
-        // shutdown barrier waiting to join this owner. Request exit and return.
-        crate::request_application_restart(&self.app);
-    }
-}
-
-#[cfg(target_os = "macos")]
-async fn check_update_endpoint(app: &AppHandle, endpoint: &str) -> Result<Option<Update>, ()> {
-    let endpoint = Url::parse(endpoint).map_err(|_| ())?;
-    let updater = app
-        .updater_builder()
-        .endpoints(vec![endpoint])
-        .map_err(|_| ())?
-        .build()
-        .map_err(|_| ())?;
-    updater.check().await.map_err(|_| ())
-}
-
-#[cfg(target_os = "macos")]
-fn select_newer_update(current: Option<Update>, candidate: Update) -> Update {
-    match current {
-        None => candidate,
-        Some(current) => {
-            if candidate_version_is_newer(&current.version, &candidate.version) {
-                candidate
-            } else {
-                current
-            }
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn candidate_version_is_newer(current: &str, candidate: &str) -> bool {
-    compare_semver(candidate, current) == std::cmp::Ordering::Greater
-}
-
-#[cfg(target_os = "macos")]
-fn compare_semver(left: &str, right: &str) -> std::cmp::Ordering {
-    let left = parse_semver(left);
-    let right = parse_semver(right);
-    for (left_part, right_part) in left.core.iter().zip(right.core.iter()) {
-        match left_part.cmp(right_part) {
-            std::cmp::Ordering::Equal => {}
-            ordering => return ordering,
-        }
-    }
-    match (left.prerelease.as_slice(), right.prerelease.as_slice()) {
-        ([], []) => std::cmp::Ordering::Equal,
-        ([], _) => std::cmp::Ordering::Greater,
-        (_, []) => std::cmp::Ordering::Less,
-        (left, right) => {
-            for (left_part, right_part) in left.iter().zip(right.iter()) {
-                match compare_prerelease_identifier(left_part, right_part) {
-                    std::cmp::Ordering::Equal => {}
-                    ordering => return ordering,
-                }
-            }
-            left.len().cmp(&right.len())
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-struct ParsedSemVer<'a> {
-    core: [u64; 3],
-    prerelease: Vec<&'a str>,
-}
-
-#[cfg(target_os = "macos")]
-fn parse_semver(version: &str) -> ParsedSemVer<'_> {
-    let version = version
-        .split_once('+')
-        .map_or(version, |(version, _)| version);
-    let (core, prerelease) = match version.split_once('-') {
-        Some((core, prerelease)) => (core, prerelease.split('.').collect::<Vec<_>>()),
-        None => (version, Vec::new()),
-    };
-    let mut core_parts = core.split('.');
-    let core = [
-        core_parts
-            .next()
-            .and_then(|part| part.parse().ok())
-            .expect("tauri updater returns valid SemVer"),
-        core_parts
-            .next()
-            .and_then(|part| part.parse().ok())
-            .expect("tauri updater returns valid SemVer"),
-        core_parts
-            .next()
-            .and_then(|part| part.parse().ok())
-            .expect("tauri updater returns valid SemVer"),
-    ];
-    ParsedSemVer { core, prerelease }
-}
-
-#[cfg(target_os = "macos")]
-fn compare_prerelease_identifier(left: &str, right: &str) -> std::cmp::Ordering {
-    let left_numeric = left.parse::<u64>();
-    let right_numeric = right.parse::<u64>();
-    match (left_numeric, right_numeric) {
-        (Ok(left), Ok(right)) => left.cmp(&right),
-        (Ok(_), Err(_)) => std::cmp::Ordering::Less,
-        (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
-        (Err(_), Err(_)) => left.cmp(right),
-    }
 }
 
 pub async fn download_and_prepare(

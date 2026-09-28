@@ -95,19 +95,6 @@ impl FrontendCommandAdmission {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FrontendCommandResult<T> {
-    pub result: T,
-    pub settlement: FrontendCommandSettlement,
-}
-
-impl<T> FrontendCommandResult<T> {
-    pub(crate) fn new(result: T, settlement: FrontendCommandSettlement) -> Self {
-        Self { result, settlement }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrontendCommandSettlement {
@@ -138,9 +125,19 @@ pub struct FrontendCreateRoomSettlement {
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StateUpdateSnapshotReason {
+    // Protocol v1 wire vocabulary, mirrored by `StateUpdateSnapshotReason` in
+    // coreEvents.ts and emitted by the browser harness fakes. The Rust
+    // forwarder produces only `Lag` today; retiring the others is a two-sided
+    // protocol change, not dead-code cleanup (#1035 audit).
+    #[expect(dead_code, reason = "v1 wire vocabulary; no Rust producer yet")]
     Initial,
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "v1 wire vocabulary; no Rust producer yet")
+    )]
     Gap,
     Lag,
+    #[expect(dead_code, reason = "v1 wire vocabulary; no Rust producer yet")]
     Settlement,
 }
 
@@ -150,12 +147,12 @@ pub enum FrontendStateUpdateEnvelope {
     Delta {
         protocol_version: u8,
         generation: u64,
-        changed: FrontendDesktopSnapshotChangedSlices,
+        changed: Box<FrontendDesktopSnapshotChangedSlices>,
     },
     Snapshot {
         protocol_version: u8,
         generation: u64,
-        snapshot: FrontendDesktopSnapshot,
+        snapshot: Box<FrontendDesktopSnapshot>,
         reason: StateUpdateSnapshotReason,
     },
 }
@@ -165,7 +162,7 @@ impl FrontendStateUpdateEnvelope {
         Self::Delta {
             protocol_version: STATE_UPDATE_PROTOCOL_VERSION,
             generation: delta.generation,
-            changed: delta.changed,
+            changed: Box::new(delta.changed),
         }
     }
 
@@ -176,7 +173,10 @@ impl FrontendStateUpdateEnvelope {
         Self::Snapshot {
             protocol_version: STATE_UPDATE_PROTOCOL_VERSION,
             generation: snapshot.generation,
-            snapshot: FrontendDesktopSnapshot::from_versioned(snapshot.state, snapshot.generation),
+            snapshot: Box::new(FrontendDesktopSnapshot::from_versioned(
+                snapshot.state,
+                snapshot.generation,
+            )),
             reason,
         }
     }
@@ -264,7 +264,7 @@ pub struct FrontendDomainStateChangedSlices {
     pub profile_update: Option<ProfileUpdateState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_room_users_by_room:
-        Option<BTreeMap<String, Option<BTreeMap<String, Option<UserProfile>>>>>,
+        Option<koushi_protocol::state_update::RoomProfileReplacementsDelta>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub space_children: Option<SpaceChildrenState>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -902,6 +902,10 @@ impl From<SyncState> for FrontendSyncState {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "pane state is held once and cloned rarely; a few hundred bytes does not justify boxing"
+)]
 pub enum FrontendThreadPaneState {
     Closed,
     Opening {

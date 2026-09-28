@@ -203,6 +203,8 @@ pub(crate) fn validate_observation(
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum NativeViewportSupport {
+    // Receipt contract variant produced only by the macOS native repair path.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Supported,
     Unsupported,
 }
@@ -210,7 +212,10 @@ pub(crate) enum NativeViewportSupport {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ViewportSyncDecision {
+    // Receipt contract variants produced only by the macOS native repair path.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     InSync,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     RepairToParentBounds,
     Unsupported,
 }
@@ -222,6 +227,7 @@ pub(crate) fn rects_align(left: ViewportRect, right: ViewportRect) -> bool {
         && approx_equal(left.height, right.height)
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn viewport_sync_decision(
     parent_bounds: ViewportRect,
     webview_frame: ViewportRect,
@@ -254,10 +260,6 @@ fn dom_js_is_aligned(observation: &ViewportSyncObservation) -> bool {
                 )
                 && approx_zero(observation.visual_viewport.offset_left)
                 && approx_zero(observation.visual_viewport.offset_top)))
-}
-
-pub(crate) fn dom_is_aligned(observation: &ViewportSyncObservation) -> bool {
-    dom_js_is_aligned(observation) && dom_root_is_aligned(observation)
 }
 
 fn approx_equal(left: f64, right: f64) -> bool {

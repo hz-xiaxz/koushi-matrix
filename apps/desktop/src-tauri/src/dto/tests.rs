@@ -1,9 +1,9 @@
 use serde_json::json;
 
 use super::{
-    FrontendCommandAdmission, FrontendCommandResult, FrontendCommandSettlement,
-    FrontendCreateRoomSettlement, FrontendDesktopSnapshot, FrontendDesktopSnapshotDelta,
-    FrontendSyncState, frontend_display_platform,
+    FrontendCommandAdmission, FrontendCommandSettlement, FrontendCreateRoomSettlement,
+    FrontendDesktopSnapshot, FrontendDesktopSnapshotDelta, FrontendSyncState,
+    frontend_display_platform,
 };
 use koushi_state::{
     AppState, AvatarImage, AvatarThumbnailState, EmojiPreference, FontPreference, InvitePreview,
@@ -2102,26 +2102,6 @@ fn command_admission_serializes_as_v1_camel_case_dto() {
         json!({
             "protocolVersion": 1,
             "admittedGeneration": 42,
-        })
-    );
-}
-
-#[test]
-fn command_result_nests_the_typed_result_and_v1_settlement() {
-    let value = serde_json::to_value(FrontendCommandResult::new(
-        "accepted",
-        FrontendCommandSettlement::from_published_generation(43),
-    ))
-    .expect("command result should serialize");
-
-    assert_eq!(
-        value,
-        json!({
-            "result": "accepted",
-            "settlement": {
-                "protocolVersion": 1,
-                "publishedGeneration": 43,
-            },
         })
     );
 }

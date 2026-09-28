@@ -21,14 +21,6 @@ pub(super) fn fake_request_id(sequence: u64) -> koushi_protocol::RequestId {
     }
 }
 
-pub(super) fn synthetic_session_key() -> koushi_protocol::SessionKeyId {
-    koushi_protocol::SessionKeyId {
-        homeserver: "https://example.org".to_owned(),
-        user_id: "@alice:example.org".to_owned(),
-        device_id: "DEVICE".to_owned(),
-    }
-}
-
 #[test]
 fn tauri_command_routes_build_expected_core_commands() {
     let active_account_key = AccountKey("@alice:example.org".to_owned());
