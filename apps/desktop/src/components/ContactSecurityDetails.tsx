@@ -113,13 +113,20 @@ export function ContactSecurityDetails({
         status={t(DEVICE_STATUS[devicesView])}
         statusKind={devicesView}
         attention={false}
+        action={
+          unavailable ? (
+            <button
+              className="profile-text-button"
+              type="button"
+              onClick={() => actionsRef.current.load(userId)}
+            >
+              {t("people.security.retry")}
+            </button>
+          ) : null
+        }
       >
         {devicesView === "checking" ? null : (
-          <DevicesExplanation
-            view={devicesView}
-            summary={summary}
-            onRetry={() => actionsRef.current.load(userId)}
-          />
+          <DevicesExplanation view={devicesView} summary={summary} />
         )}
       </SecurityRow>
       <SecurityRow
@@ -143,12 +150,15 @@ function SecurityRow({
   status,
   statusKind,
   attention,
+  action = null,
   children
 }: {
   label: string;
   status: string;
   statusKind: string;
   attention: boolean;
+  /** An action for this property, kept in the same row as its status. */
+  action?: ReactNode;
   children: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -166,6 +176,7 @@ function SecurityRow({
           <Icon size={ICON_SIZE.small} aria-hidden="true" />
           <strong>{status}</strong>
         </span>
+        {action}
         {hasDetails ? (
           <button
             className="profile-text-button"
@@ -190,23 +201,16 @@ function SecurityRow({
 
 function DevicesExplanation({
   view,
-  summary,
-  onRetry
+  summary
 }: {
   view: DevicesView;
   summary: ContactSecuritySummary | null;
-  onRetry: () => void;
 }) {
   const explanation = DEVICE_EXPLANATION[view];
   const counts = summary?.device_counts;
   return (
     <>
       {explanation ? <p>{t(explanation)}</p> : null}
-      {view === "unavailable" ? (
-        <button className="profile-text-button" type="button" onClick={onRetry}>
-          {t("people.security.retry")}
-        </button>
-      ) : null}
       {summary && counts && counts.total > 0 ? (
         <>
           {view !== "ownerIdentityMissing" ? (

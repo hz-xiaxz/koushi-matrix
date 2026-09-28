@@ -203,8 +203,8 @@ describe("ContactSecurityDetails", () => {
     expect(within(row("Their devices")).getByText("Status unavailable")).toBeTruthy();
     expect(within(row("Your verification")).getByText("Status unavailable")).toBeTruthy();
     expect(screen.queryByText(/confirmed by their owner/)).toBeNull();
-    fireEvent.click(within(row("Their devices")).getByRole("button", { name: /Details/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    // Retry sits next to the status, not behind the collapsed details.
+    fireEvent.click(within(row("Their devices")).getByRole("button", { name: "Retry" }));
     expect(actions.load).toHaveBeenCalledTimes(2);
     expect(actions.load).toHaveBeenLastCalledWith(CONTACT);
   });

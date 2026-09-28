@@ -220,6 +220,64 @@ test("People rows open Profile while preserving Rust member identity", async ({ 
   await expect(panel).toContainText(HARNESS_MEMBERS[0].userId);
 });
 
+test("Profile loads Rust-owned contact security details and closes them on back (#1024)", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await page.evaluate((userId) => {
+    window.__harness.setCommandResponse("load_contact_security", () => {
+      const next = structuredClone(window.__harness.currentSnapshot());
+      next.state.domain.contact_security = {
+        user_id: userId,
+        load: { kind: "loaded", request_id: 1 },
+        summary: {
+          devices: "someNotOwnerSigned",
+          device_counts: {
+            total: 2,
+            owner_signed: 1,
+            not_owner_signed: 1,
+            owner_signature_invalid: 0,
+            excluded_dehydrated: 0
+          },
+          device_signatures: ["ownerSigned", "notOwnerSigned"],
+          identity: "verifiedByYou"
+        }
+      };
+      window.__harness.setSnapshot(next);
+      return next;
+    });
+  }, HARNESS_MEMBERS[0].userId);
+
+  await openRoomPeopleFromHeader(page);
+  const panel = contextPanel(page);
+  await clearInvocations(page);
+  await panel
+    .getByRole("button", {
+      name: t("people.openProfile", { name: HARNESS_MEMBERS[0].label })
+    })
+    .click();
+
+  await expect.poll(() => invocationCount(page, "load_contact_security")).toBe(1);
+  expect(await firstInvocationArgs<{ userId: string }>(page, "load_contact_security")).toEqual({
+    userId: HARNESS_MEMBERS[0].userId
+  });
+  const security = panel.getByRole("region", { name: t("people.security.title") });
+  await expect(security).toContainText(t("people.security.devicesSomeUnconfirmed"));
+  await expect(security).toContainText(t("people.security.identityVerified"));
+  const details = security.getByRole("button", {
+    name: t("people.security.detailsFor", { topic: t("people.security.devicesLabel") })
+  });
+  await details.focus();
+  await page.keyboard.press("Enter");
+  await expect(details).toHaveAttribute("aria-expanded", "true");
+  await expect(security).toContainText(t("people.security.devicesSomeUnconfirmedExplain"));
+  // Opening an explanation dispatches nothing.
+  expect(await invocationCount(page, "load_contact_security")).toBe(1);
+
+  await panel.getByRole("button", { name: t("action.back") }).click();
+  await expect.poll(() => invocationCount(page, "close_contact_security")).toBe(1);
+});
+
 // ─────────────────────────────────────────────────────────────
 //  SPACE entry points
 // ─────────────────────────────────────────────────────────────
