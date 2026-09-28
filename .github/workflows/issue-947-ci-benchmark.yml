@@ -42,7 +42,16 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
+            libdbus-1-dev
+      # Mirrors ci.yml: checkout stamps sources "now"; without this every
+      # restored vendored SDK artifact is stale by mtime.
+      - name: Normalize vendored Matrix SDK source mtimes
+        working-directory: vendor/matrix-rust-sdk
+        run: git ls-files -z | xargs -0 touch -h -d '2000-01-01T00:00:00Z'
       - name: Rust cache report contract tests
         run: node --test scripts/ci-rust-cache-report.test.mjs scripts/ci-rust-cache-metrics.test.mjs
       - name: Remove target directory for cold run
@@ -55,7 +64,7 @@ jobs:
           set -o pipefail
           set +e
           start=$(date +%s)
-          cargo test --profile ci --workspace --exclude koushi-core-testkit --exclude koushi-desktop --exclude sidebar-composition --exclude key-management 2>&1 | tee artifacts/issue-947-cold-cargo.log
+          cargo test --profile ci --workspace --exclude sidebar-composition --exclude key-management 2>&1 | tee artifacts/issue-947-cold-cargo.log
           status=${PIPESTATUS[0]}
           end=$(date +%s)
           set -e
@@ -110,7 +119,16 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
+            libdbus-1-dev
+      # Mirrors ci.yml: checkout stamps sources "now"; without this every
+      # restored vendored SDK artifact is stale by mtime.
+      - name: Normalize vendored Matrix SDK source mtimes
+        working-directory: vendor/matrix-rust-sdk
+        run: git ls-files -z | xargs -0 touch -h -d '2000-01-01T00:00:00Z'
       - name: Run warm workspace suite
         id: cargo
         continue-on-error: true
@@ -119,7 +137,7 @@ jobs:
           set -o pipefail
           set +e
           start=$(date +%s)
-          cargo test --profile ci --workspace --exclude koushi-core-testkit --exclude koushi-desktop --exclude sidebar-composition --exclude key-management 2>&1 | tee artifacts/issue-947-warm-cargo.log
+          cargo test --profile ci --workspace --exclude sidebar-composition --exclude key-management 2>&1 | tee artifacts/issue-947-warm-cargo.log
           status=${PIPESTATUS[0]}
           end=$(date +%s)
           set -e

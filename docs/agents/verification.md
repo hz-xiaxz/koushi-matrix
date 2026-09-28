@@ -108,7 +108,7 @@ A subagent's "gates passed" claim is not evidence — re-run the gate yourself.
 | --- | --- |
 | `Frontend (typecheck / vitest / build / secret-scan)` | typecheck, vitest, build, secret scan, ESLint import boundaries, Tauri adapter boundary, domain-crate platform deps |
 | `Browser headless (Playwright DOM tier)` | `npx playwright test` — a red spec is a blocked merge |
-| `Rust (workspace / src-tauri / wasm)` | submodule guard, diagnostic-isolation guard, the workspace suite, explicit `koushi-core-testkit` and `koushi-desktop` package tests, wasm build, `cargo-deny`, `cargo-machete`, and the CI-cache report |
+| `Rust (workspace / src-tauri / wasm)` | submodule guard, diagnostic-isolation guard, one feature-unified workspace suite (including the `koushi-core-testkit` integration targets and the `koushi-desktop` DTO/IPC contract tests), wasm build, `cargo-deny`, `cargo-machete`, the CI-cache report, and workspace cargo metrics |
 | `macOS Tauri cargo check` | `cargo check --profile ci -p koushi-desktop` on macOS, including `#[cfg(target_os = "macos")]` paths excluded by Linux CI |
 | `Core invitations (tuwunel)` / `Core invitations (synapse)` | real homeserver `--core --scenario=invites_dm` per server |
 | `Core QA binary tests` | `cargo test -p koushi-qa --features qa-bin --bin headless-core-qa` |
@@ -126,17 +126,35 @@ hosted builds. Local `dev` and production `release` behavior is unchanged.
 Every job that sets `CARGO_TARGET_DIR` gives the rust-cache action the matching
 workspace mapping (`. -> target-ci`, `. -> target-macos-check`, or
 `. -> target-windows-overlay`). The scheduled Issue #738 probe uses the same
-explicit mapping. The primary Rust job also reports target size, profile,
-fingerprint count, and representative vendored Matrix SDK artifacts; a claimed
-SDK cache hit fails closed if those artifacts are absent. This distinguishes a
-real artifact restore from a cache archive that merely restored dependencies.
+explicit mapping. The primary Rust job's cache report fails closed when
+rust-cache claims an exact hit but representative registry and git dependency
+artifacts (`tokio`, `serde`, `ruma`) are absent from `target-ci/ci/deps`, or
+when the SDK cache claims a hit without SDK fingerprints and artifacts. The
+workspace metrics step records total and vendored-SDK `Compiling` lines and test
+totals, so a restored archive that Cargo does not reuse is visible.
 
-The workspace job excludes `koushi-core-testkit` and `koushi-desktop`, then runs
-each package exactly once with the explicit `ci` profile. This preserves the
-leaf-crate contract's required Core integration gate and the Tauri DTO/IPC gate
-without compiling either package twice. QA binaries, wasm, macOS, Windows, and
-homeserver jobs stay separate because they provide distinct feature, platform,
-target, or runtime coverage.
+rust-cache prunes path dependencies under the repository root, so the vendored
+Matrix SDK has its own exact-keyed artifact cache. Cargo judges path
+dependencies by source mtime and checkout stamps every file with the current
+time, so the job first normalizes the SDK's tracked sources to a fixed old
+mtime. This is safe only because the key pins the SDK gitlink, the lockfile,
+every workspace manifest, `ci.yml`, the toolchain and the profile; a different
+feature set still selects a different fingerprint hash. Keep that key complete
+when changing any of those inputs, because an exact hit is never re-saved.
+
+The Rust job runs `cargo test --profile ci --workspace --exclude
+sidebar-composition --exclude key-management` once. `koushi-core-testkit` and
+`koushi-desktop` are workspace members, so this runs every test the former
+standalone `-p` steps ran. Those steps added no test: each resolved its own
+package's dependency graph and feature set (for example `koushi-core/test-hooks`
+from their dev-dependencies), which only recompiled the vendored SDK and Koushi
+stack (20 and 11 crates, about 2m10s each on warm main runs). No test is
+gated on `not(feature = "test-hooks")`, and the `koushi-core` lib suite lists
+the same tests with and without `test-hooks`. Production feature sets
+(without dev-dependency features) are compiled by `macOS Tauri cargo check`
+and the release workflow. QA binaries, wasm, macOS, Windows, and homeserver
+jobs stay separate because they provide distinct feature, platform, target, or
+runtime coverage.
 
 Do not assume a green PR means a homeserver job passed — check the job
 explicitly, and confirm whether it is a required check before treating it as a

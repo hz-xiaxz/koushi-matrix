@@ -83,6 +83,19 @@ function directRustFiles(root, relativeDirectory) {
     .sort();
 }
 
+// The testkit is a non-default member, so CI must select it either by name or
+// through a `--workspace` test invocation that does not exclude it.
+function ciRunsCoreTestkit(ci) {
+  if (ci.includes("cargo test -p koushi-core-testkit")) return true;
+  return ci
+    .split("\n")
+    .some(
+      (line) =>
+        /\bcargo test\b[^\n]*--workspace\b/u.test(line) &&
+        !/--exclude[ =]koushi-core-testkit\b/u.test(line)
+    );
+}
+
 export function findLeafCrateBoundaryViolations(root) {
   const violations = [];
   const workspace = read(root, "Cargo.toml") ?? "";
@@ -341,8 +354,8 @@ export function findLeafCrateBoundaryViolations(root) {
   if (JSON.stringify(movedTargets) !== JSON.stringify([...testkitTargets].sort())) {
     violations.push("unexpected Rust integration target set in koushi-core-testkit");
   }
-  if (!ci.includes("cargo test -p koushi-core-testkit")) {
-    violations.push("CI must run koushi-core-testkit explicitly");
+  if (!ciRunsCoreTestkit(ci)) {
+    violations.push("CI must run koushi-core-testkit");
   }
 
   if (!manifestHasDependency(coreManifest, "koushi-store")) {

@@ -36,3 +36,31 @@ kept as pre-change measurements; this change does not claim a post-change
 speedup until a cold cache population run and a compatible warm run are
 available. The CI cache report provides the measurements needed to compare
 target paths, restored artifacts, target size, and later compilation behavior.
+
+## Follow-up (2026-09-28): measured post-#946 behavior
+
+Warm main runs 36308871002 and 36309650449 (the Rust job took 10m22s and
+10m13s, against the 16m15s baseline) showed:
+
+- The `target-ci` mapping works: an exact rust-cache hit, and no registry or git
+  dependency appears in any `Compiling` list.
+- The three cargo test invocations still compiled 20, 20 and 11 crates, which
+  is the whole vendored SDK and Koushi stack each time (2m35s, 2m10s and 2m16s
+  of compilation). Within one job, this only happens when feature sets differ,
+  so the standalone `-p koushi-core-testkit` and `-p koushi-desktop` steps
+  moved the recompilation rather than removing it. They ran no test the
+  workspace suite could not run: no test is gated on
+  `not(feature = "test-hooks")`, and `cargo test --profile ci -p koushi-core
+  --lib -- --list` lists 1265 tests both with and without `--features
+  test-hooks`.
+- The vendored SDK cache missed, and it could not have helped on a hit.
+  Locally, restoring older SDK artifacts after touching the sources to "now"
+  (what checkout does) recompiled `matrix-sdk-common` and the rest of the SDK.
+  With the sources normalized to a fixed old mtime, the same artifacts were
+  fresh. The cache also omitted `build/matrix-sdk-*` build-script outputs, and
+  its key did not cover the manifests and command that select the feature set.
+
+The follow-up change runs one unified workspace invocation, normalizes vendored
+SDK source mtimes before the exact-keyed SDK restore, adds build-script outputs
+and a complete key, checks representative rust-cache dependency artifacts, and
+records `Compiling` counts (total and vendored SDK) for every Rust job run.

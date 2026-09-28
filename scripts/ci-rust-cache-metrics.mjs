@@ -8,9 +8,12 @@ const mode = optionValue("--mode") ?? "unknown";
 const cacheHit = optionValue("--cache-hit") ?? "false";
 const elapsedSeconds = Number(optionValue("--elapsed-seconds") ?? "0");
 const outputPath = optionValue("--output");
-const log = readFileSync(logPath, "utf8");
+// Hosted runners force Cargo color output; strip SGR sequences before counting.
+const log = readFileSync(logPath, "utf8").replace(/\u001b\[[0-9;]*m/gu, "");
 
 const compiling = countLines(log, /^\s*Compiling\s+/gmu);
+// Proves (or disproves) reuse of the vendored SDK artifact cache after checkout.
+const vendoredSdkCompiling = countLines(log, /^\s*Compiling\s+\S+ v\S+ \([^)]*vendor\/matrix-rust-sdk\//gmu);
 const checking = countLines(log, /^\s*Checking\s+/gmu);
 const finished = countLines(log, /^\s*Finished\s+/gmu);
 const testCounts = [...log.matchAll(/test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored/gu)].reduce(
@@ -26,6 +29,7 @@ const record = {
   cache_hit: cacheHit === "true",
   elapsed_seconds: elapsedSeconds,
   compiling_lines: compiling,
+  vendored_sdk_compiling_lines: vendoredSdkCompiling,
   checking_lines: checking,
   finished_lines: finished,
   test_counts: testCounts,
@@ -43,11 +47,12 @@ if (summaryPath) {
   appendFileSync(
     summaryPath,
     [
-      `### Rust cache benchmark: ${mode}`,
+      `### Rust cargo metrics: ${mode}`,
       "",
       `- cache hit: \`${record.cache_hit}\``,
       `- elapsed: ${elapsedSeconds} s`,
       `- Compiling lines: ${compiling}`,
+      `- vendored SDK Compiling lines: ${vendoredSdkCompiling}`,
       `- Checking lines: ${checking}`,
       `- Finished lines: ${finished}`,
       `- tests: ${testCounts.passed} passed, ${testCounts.failed} failed, ${testCounts.ignored} ignored`,
@@ -66,8 +71,11 @@ function requiredOption(name) {
 
 function optionValue(name) {
   const prefix = `${name}=`;
-  const inline = process.argv.slice(2).find((arg) => arg.startsWith(prefix));
-  return inline ? inline.slice(prefix.length) : undefined;
+  const args = process.argv.slice(2);
+  const inline = args.find((arg) => arg.startsWith(prefix));
+  if (inline) return inline.slice(prefix.length);
+  const index = args.indexOf(name);
+  return index >= 0 ? args[index + 1] : undefined;
 }
 
 function countLines(value, pattern) {
