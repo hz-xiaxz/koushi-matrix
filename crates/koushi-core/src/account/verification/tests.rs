@@ -404,6 +404,27 @@ async fn actor_sas_settlement_emits_exactly_one_terminal_and_clears_runtime() {
 }
 
 #[test]
+fn sdk_cancellation_with_the_timeout_code_settles_as_timeout() {
+    use koushi_sdk::MatrixVerificationCancelKind as CancelKind;
+    assert_eq!(
+        super::verification_cancel_failure_kind(CancelKind::Timeout),
+        TrustOperationFailureKind::Timeout
+    );
+    for kind in [
+        CancelKind::UnknownMethod,
+        CancelKind::KeyMismatch,
+        CancelKind::User,
+        CancelKind::AcceptedElsewhere,
+        CancelKind::Other,
+    ] {
+        assert_eq!(
+            super::verification_cancel_failure_kind(kind),
+            TrustOperationFailureKind::Cancelled
+        );
+    }
+}
+
+#[test]
 fn sas_verification_tokens_are_closed_and_private_safe() {
     use koushi_sdk::MatrixSasState as SasState;
     use koushi_sdk::MatrixVerificationCancelKind as CancelKind;

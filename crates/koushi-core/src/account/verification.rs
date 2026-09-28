@@ -266,6 +266,21 @@ fn verification_cancel_kind_token(kind: koushi_sdk::MatrixVerificationCancelKind
     }
 }
 
+/// Failure kind for an SDK-reported cancellation. A cancellation with the
+/// `m.timeout` code is a timeout, not a user cancellation.
+pub(super) fn verification_cancel_failure_kind(
+    kind: koushi_sdk::MatrixVerificationCancelKind,
+) -> TrustOperationFailureKind {
+    match kind {
+        koushi_sdk::MatrixVerificationCancelKind::Timeout => TrustOperationFailureKind::Timeout,
+        koushi_sdk::MatrixVerificationCancelKind::UnknownMethod
+        | koushi_sdk::MatrixVerificationCancelKind::KeyMismatch
+        | koushi_sdk::MatrixVerificationCancelKind::User
+        | koushi_sdk::MatrixVerificationCancelKind::AcceptedElsewhere
+        | koushi_sdk::MatrixVerificationCancelKind::Other => TrustOperationFailureKind::Cancelled,
+    }
+}
+
 fn sas_state_token(state: &koushi_sdk::MatrixSasState) -> &'static str {
     match state {
         koushi_sdk::MatrixSasState::Created => "created",
@@ -1423,15 +1438,11 @@ impl AccountActor {
             koushi_sdk::MatrixVerificationRequestState::Done => {
                 self.project_verification_completed(request_id).await;
             }
-            koushi_sdk::MatrixVerificationRequestState::Cancelled {
-                kind,
-                cancelled_by_us,
-            } => {
-                let _ = (kind, cancelled_by_us);
+            koushi_sdk::MatrixVerificationRequestState::Cancelled { kind, .. } => {
                 self.project_active_or_missing_verification_failure_with_kind(
                     request_id,
                     request_id.sequence,
-                    TrustOperationFailureKind::Cancelled,
+                    verification_cancel_failure_kind(kind),
                 )
                 .await;
             }
@@ -1548,11 +1559,11 @@ impl AccountActor {
             koushi_sdk::MatrixSasState::Done => {
                 self.project_verification_completed(request_id).await;
             }
-            koushi_sdk::MatrixSasState::Cancelled { .. } => {
+            koushi_sdk::MatrixSasState::Cancelled { kind, .. } => {
                 self.project_verification_failure(
                     request_id.sequence,
                     target,
-                    TrustOperationFailureKind::Cancelled,
+                    verification_cancel_failure_kind(kind),
                 )
                 .await;
             }
