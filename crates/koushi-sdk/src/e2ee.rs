@@ -258,17 +258,30 @@ pub struct MatrixSecureBackupInspection {
     pub upload: MatrixSecureBackupUploadState,
     pub trust: MatrixSecureBackupTrustState,
     pub recovery_key_delivery_pending: bool,
+    /// All three cross-signing private keys are held locally, so a new
+    /// secret store created by `reset_key()` carries them.
+    #[serde(default)]
+    pub local_cross_signing_complete: bool,
 }
 
 impl MatrixSecureBackupInspection {
     /// `recovery().reset_key()` can re-upload every secret only for an
-    /// authoritative, locally enabled, trusted backup whose secrets are all
-    /// held locally.
+    /// authoritative, locally enabled, trusted backup (so the backup key is
+    /// local) whose other secrets are held locally too: either secret storage
+    /// is fully enabled, or it was never created (for example `enable()`
+    /// created the backup but was interrupted before `create_secret_store`)
+    /// and all cross-signing private keys are local. An `Incomplete` secret
+    /// store is refused: its missing secrets would be lost.
     pub fn recovery_key_reset_is_possible(&self) -> bool {
+        use MatrixSecureBackupRecoveryState as Recovery;
         self.server == MatrixSecureBackupServerState::Present
             && self.local == MatrixSecureBackupLocalState::Enabled
             && self.trust == MatrixSecureBackupTrustState::Trusted
-            && self.recovery == MatrixSecureBackupRecoveryState::Enabled
+            && match self.recovery {
+                Recovery::Enabled => true,
+                Recovery::Unknown | Recovery::Disabled => self.local_cross_signing_complete,
+                Recovery::Incomplete => false,
+            }
     }
 
     pub fn recommended_gate_state(&self) -> SecureBackupGateState {
@@ -2802,6 +2815,9 @@ impl MatrixClientSession {
             upload,
             trust,
             recovery_key_delivery_pending: self.recovery_key_delivery_pending().await?,
+            local_cross_signing_complete: encryption.cross_signing_status().await.is_some_and(
+                |status| status.has_master && status.has_self_signing && status.has_user_signing,
+            ),
         })
     }
     pub async fn recover_secure_backup(

@@ -889,6 +889,7 @@ pub(crate) fn handle_secure_backup_recovery_key_ready(
             request_id,
             recovery_key,
             delivery: crate::state::RecoveryKeyDeliveryState::NotWritten,
+            confirmation_failed: false,
         };
     e2ee_key_management_events()
 }
@@ -1046,6 +1047,7 @@ pub(crate) fn handle_secure_backup_recovery_key_confirm_failed(
             request_id: reveal_request_id,
             recovery_key,
             delivery,
+            confirmation_failed: true,
         };
     let mut effects = e2ee_key_management_events();
     if state.secure_backup_gate != crate::state::SecureBackupGateState::RecoveryKeyDeliveryRequired

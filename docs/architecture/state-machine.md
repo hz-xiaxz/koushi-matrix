@@ -434,10 +434,14 @@ stateDiagram-v2
   `ExplicitlyDisabledRequiresSetup`; `ResetRecoveryKey { confirmed: true }` is
   admitted only by `RecoveryKeyDeliveryRequired` without a revealed key.
   Inspection projects `RecoveryKeyDeliveryRequired` from the persisted marker
-  only once `reset_key()` can succeed (server backup present, local backup
-  `Enabled`, trust `Trusted`, secret storage `Enabled`); until local state
-  settles (for example right after a restart) it stays `Checking`, and the SDK
-  reset re-checks the same precondition.
+  only once `reset_key()` can succeed without losing a secret: server backup
+  present, local backup `Enabled`, trust `Trusted`, and either secret storage
+  `Enabled` or secret storage never created (`Unknown`/`Disabled`, for example
+  `enable()` interrupted before `create_secret_store`) with all three
+  cross-signing private keys held locally. An `Incomplete` secret store is
+  refused (`SecureStorageIncomplete`). Otherwise, until local state settles
+  (for example right after a restart), it stays `Checking`, and the SDK reset
+  re-checks the same precondition.
   Initial setup, unconfirmed re-enable or reset, duplicate setup, and stale/forged confirmation produce a typed
   confirmation-required or failed-no-op result before `AccountActor` routing.
   The SDK's fresh server/local/trust inspection remains authoritative and may
@@ -455,8 +459,9 @@ stateDiagram-v2
   AccountActor clears the persisted marker first, then drops its copy and
   re-inspects. If the marker cannot be cleared, AccountActor keeps its copy
   and `SecureBackupRecoveryKeyConfirmFailed` restores the reveal (with its
-  save status) and `RecoveryKeyDeliveryRequired`, so the saved key is never
-  invalidated by a forced reset; the user may confirm again.
+  save status and `confirmation_failed: true`, which React renders as a
+  catalog status line) and `RecoveryKeyDeliveryRequired`, so the saved key is
+  never invalidated by a forced reset; the user may confirm again.
   A stale confirmation is a typed failed no-op. While AccountActor holds a
   setup key, inspection results keep the gate in `RecoveryKeyDeliveryRequired`,
   and React renders the reveal whenever `secure_backup_setup` is

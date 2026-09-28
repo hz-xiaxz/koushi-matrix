@@ -198,6 +198,7 @@ fn setup_is_rejected_while_a_revealed_key_awaits_confirmation() {
             request_id: 3,
             recovery_key: koushi_state::RecoveryKeyMaterial::new("synthetic-admission-key"),
             delivery: koushi_state::RecoveryKeyDeliveryState::NotWritten,
+            confirmation_failed: false,
         };
     let before = state.clone();
     let effects = koushi_state::reduce(

@@ -2256,7 +2256,8 @@ mock.setCommandResponse(
         kind: "recoveryKeyReady",
         request_id: 9_202,
         recovery_key: HARNESS_RECOVERY_KEY,
-        delivery: { kind: "notWritten" }
+        delivery: { kind: "notWritten" },
+        confirmation_failed: false
       }
     }));
   }

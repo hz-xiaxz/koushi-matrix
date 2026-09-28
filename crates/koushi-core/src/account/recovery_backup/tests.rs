@@ -107,6 +107,7 @@ fn ready_secure_backup_inspection() -> koushi_sdk::MatrixSecureBackupInspection 
         upload: koushi_sdk::MatrixSecureBackupUploadState::Settled,
         trust: koushi_sdk::MatrixSecureBackupTrustState::Trusted,
         recovery_key_delivery_pending: false,
+        local_cross_signing_complete: true,
     }
 }
 
