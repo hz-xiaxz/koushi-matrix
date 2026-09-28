@@ -3714,11 +3714,7 @@ stateDiagram-v2
     Enabled --> SettingUp: SecureBackupSetupRequested [Ready, no passphrase change Changing/Changed]
     Failed --> SettingUp: SecureBackupSetupRequested [Ready, no passphrase change Changing/Changed]
     SettingUp --> RecoveryKeyReady: SecureBackupRecoveryKeyReady [matching request_id]
-    RecoveryKeyReady --> RecoveryKeyReady: SecureBackupRecoveryKeyReady [matching request_id]
-    SettingUp --> Enabled: SecureBackupSetupEnabled [matching request_id]
-    RecoveryKeyReady --> Enabled: SecureBackupSetupEnabled [matching request_id]
     SettingUp --> Failed: SecureBackupSetupFailed [matching request_id]
-    RecoveryKeyReady --> Failed: SecureBackupSetupFailed [matching request_id]
     RecoveryKeyReady --> Enabled: SecureBackupRecoveryKeyConfirmed [matching reveal id]
     Enabled --> RecoveryKeyReady: SecureBackupRecoveryKeyConfirmFailed [matching reveal id, no other key flow]
 ```
