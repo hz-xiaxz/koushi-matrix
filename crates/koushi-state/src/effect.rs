@@ -118,6 +118,14 @@ pub enum AppEffect {
         room_id: String,
         event_id: String,
     },
+    /// #1037: a main-composer send (text or attachments) was accepted for the
+    /// active room. Pending echoes project only into the live Room timeline,
+    /// so Core cancels every main-pane navigation for `room_id` that it still
+    /// owns and the reducer cannot see (a date jump or event navigation
+    /// awaiting its focused projection), releasing its focused timeline.
+    CancelPendingMainTimelineNavigation {
+        room_id: String,
+    },
     SearchMessages {
         request_id: u64,
         query: String,

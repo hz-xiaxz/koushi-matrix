@@ -142,7 +142,18 @@ fn expected_send_effects(transaction_id: &str, body: &str) -> Vec<AppEffect> {
         AppEffect::EmitUiEvent(UiEvent::TimelineChanged {
             room_id: ROOM.to_owned(),
         }),
+        cancel_pending_navigation_effect(),
     ]
+}
+
+/// Core cancels main-pane navigation it owns but the reducer cannot see (a
+/// date jump or event navigation awaiting its focused projection); the Core
+/// runtime tests in `koushi-core` (`runtime::tests::anchored_send`) prove a
+/// late completion then cannot re-anchor.
+fn cancel_pending_navigation_effect() -> AppEffect {
+    AppEffect::CancelPendingMainTimelineNavigation {
+        room_id: ROOM.to_owned(),
+    }
 }
 
 fn accepted(submission_id: &str, room_id: &str, transaction_id: &str, body: &str) -> AppAction {
@@ -236,35 +247,96 @@ fn legacy_send_text_submitted_returns_anchored_main_pane_to_live() {
 }
 
 #[test]
-fn late_focused_navigation_completion_cannot_reanchor_after_accepted_send() {
+fn accepted_send_from_a_live_pane_still_asks_core_to_cancel_pending_navigation() {
+    // A date jump in flight leaves the main pane live (Core closed the old
+    // context and has not entered the anchor yet), so the reducer cannot see
+    // the intent. The accepted send must still hand Core the cancel request.
+    let mut state = selected_room_state();
+    reduce(
+        &mut state,
+        AppAction::OpenFocusedContext {
+            room_id: ROOM.to_owned(),
+            event_id: ANCHOR_EVENT.to_owned(),
+        },
+    );
+    assert_eq!(state.navigation.main_timeline_anchor, None);
+
+    let effects = reduce(&mut state, accepted("sub-jump", ROOM, "txn-jump", "hello"));
+
+    assert_eq!(effects, expected_send_effects("txn-jump", "hello"));
+}
+
+fn accepted_attachments(room_id: &str, state: &AppState) -> AppAction {
+    AppAction::ComposerDraftAccepted {
+        target: koushi_state::ComposerTarget::Main {
+            room_id: room_id.to_owned(),
+        },
+        submitted_revision: state.composer_drafts.room_revision(room_id),
+    }
+}
+
+#[test]
+fn accepted_attachment_send_returns_anchored_main_pane_to_live() {
+    // Prepared-upload sends accept the main draft through ComposerDraftAccepted
+    // after every upload was queued (their echoes are already live).
     let mut state = selected_room_state();
     anchor_main_pane(&mut state);
-    // A second event navigation is in flight when the user sends.
-    let late_generation = state.navigation.event_navigation.generation() + 1;
-    reduce(
-        &mut state,
-        AppAction::EventNavigationStarted {
-            source: EventNavigationSource::Pinned,
-        },
-    );
 
-    reduce(&mut state, accepted("sub-late", ROOM, "txn-late", "hello"));
-    assert_returned_to_live(&state);
+    let action = accepted_attachments(ROOM, &state);
+    let effects = reduce(&mut state, action);
 
-    // The in-flight navigation completing afterwards is fenced by generation.
-    reduce(
-        &mut state,
-        AppAction::EventNavigationAnchored {
-            generation: late_generation,
-        },
-    );
-    reduce(
-        &mut state,
-        AppAction::EventNavigationLiveFallback {
-            generation: late_generation,
-        },
+    assert_eq!(
+        effects,
+        vec![
+            AppEffect::EmitUiEvent(UiEvent::TimelineChanged {
+                room_id: ROOM.to_owned(),
+            }),
+            cancel_pending_navigation_effect(),
+        ]
     );
     assert_returned_to_live(&state);
+}
+
+#[test]
+fn rejected_or_other_target_attachment_acceptance_keeps_navigation() {
+    let mut state = selected_room_state();
+    anchor_main_pane(&mut state);
+
+    // A stale (exhausted) revision is rejected.
+    let stale = reduce(
+        &mut state,
+        AppAction::ComposerDraftAccepted {
+            target: koushi_state::ComposerTarget::Main {
+                room_id: ROOM.to_owned(),
+            },
+            submitted_revision: koushi_state::ComposerDraftRevision::MAX,
+        },
+    );
+    assert!(stale.is_empty());
+    assert_anchored(&state);
+
+    // A background room's draft acceptance does not touch the selected room.
+    let action = accepted_attachments(OTHER_ROOM, &state);
+    let background = reduce(&mut state, action);
+    assert!(background.is_empty());
+    assert_anchored(&state);
+
+    // A thread-target attachment send leaves main navigation alone.
+    let thread = reduce(
+        &mut state,
+        AppAction::ComposerDraftAccepted {
+            target: koushi_state::ComposerTarget::Thread {
+                room_id: ROOM.to_owned(),
+                root_event_id: "$root:example.test".to_owned(),
+            },
+            submitted_revision: 0.into(),
+        },
+    );
+    assert!(
+        !thread.contains(&cancel_pending_navigation_effect()),
+        "thread sends must not cancel main-pane navigation"
+    );
+    assert_anchored(&state);
 }
 
 #[test]

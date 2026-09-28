@@ -1315,6 +1315,7 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         pending_focused_navigation: None,
         latest_focused_projection_generation: HashMap::new(),
         pending_date_navigation_request_id: None,
+        cancelled_date_navigation_request_id: None,
     };
     let actor_task = executor::spawn(actor.run());
 
@@ -1494,6 +1495,7 @@ async fn same_batch_select_room_settles_only_final_selection() {
         pending_focused_navigation: None,
         latest_focused_projection_generation: HashMap::new(),
         pending_date_navigation_request_id: None,
+        cancelled_date_navigation_request_id: None,
     };
     let actor_task = executor::spawn(actor.run());
 
@@ -3085,6 +3087,7 @@ fn app_actor_event_navigation_fixture(
         pending_focused_navigation: None,
         latest_focused_projection_generation: HashMap::new(),
         pending_date_navigation_request_id: None,
+        cancelled_date_navigation_request_id: None,
     };
     (
         actor,
@@ -4448,3 +4451,5 @@ async fn wait_for_runtime_sync_running(runtime: &CoreRuntime, stage: &'static st
         )
     });
 }
+
+mod anchored_send;

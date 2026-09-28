@@ -673,6 +673,7 @@ impl CoreRuntime {
             pending_focused_navigation: None,
             latest_focused_projection_generation: HashMap::new(),
             pending_date_navigation_request_id: None,
+            cancelled_date_navigation_request_id: None,
         };
         let view_lifetime = crate::view_scope_lifecycle::ViewRuntimeLifetime(view_scopes.clone());
         let (actor_completion_tx, actor_completion_rx) = watch::channel(None);
@@ -997,6 +998,11 @@ struct AppActor {
     pending_focused_navigation: Option<PendingFocusedNavigation>,
     latest_focused_projection_generation: HashMap<TimelineKey, (u64, TimelineGeneration)>,
     pending_date_navigation_request_id: Option<RequestId>,
+    /// #1037: a date jump superseded by an accepted main send while its
+    /// server lookup was in flight. The account actor's late
+    /// `OpenFocusedContext` + `EnterAnchoredTimeline` reply is dropped and its
+    /// focused subscription released instead of re-anchoring the main pane.
+    cancelled_date_navigation_request_id: Option<RequestId>,
 }
 
 #[derive(Clone, Copy)]
@@ -1278,6 +1284,7 @@ impl AppActor {
                     let mut state_changed = false;
                     let mut pending_select_settlements = Vec::new();
                     let mut post_projection_work: Vec<PostProjectionWork> = Vec::new();
+                    let mut cancelled_date_navigation_keys: Vec<TimelineKey> = Vec::new();
                     for action in actions {
                         let Some(action) = normalize_activity_resolution_action(&self.state, action)
                         else {
@@ -1346,6 +1353,31 @@ impl AppActor {
                                 self.activity_projection.ingest_resolution_rows(rows.clone());
                             }
                             _ => {}
+                        }
+                        if self.cancelled_date_navigation_request_id.is_some() {
+                            // #1037: an accepted send superseded this date jump
+                            // while its server lookup was in flight. Drop the
+                            // account actor's atomic reply pair and release the
+                            // focused timeline it subscribed after sending it.
+                            match &action {
+                                AppAction::OpenFocusedContext { room_id, event_id } => {
+                                    if let Some(account_key) = self.current_account_key() {
+                                        cancelled_date_navigation_keys.push(TimelineKey {
+                                            account_key,
+                                            kind: TimelineKind::Focused {
+                                                room_id: room_id.clone(),
+                                                event_id: event_id.clone(),
+                                            },
+                                        });
+                                    }
+                                    continue;
+                                }
+                                AppAction::EnterAnchoredTimeline { .. } => {
+                                    self.cancelled_date_navigation_request_id = None;
+                                    continue;
+                                }
+                                _ => {}
+                            }
                         }
                         if let (
                             Some(projection_request_id),
@@ -1719,6 +1751,9 @@ impl AppActor {
                         if self.state != before_post_projection {
                             self.publish_state_change(&before_post_projection);
                         }
+                    }
+                    for key in cancelled_date_navigation_keys {
+                        self.release_focused_timeline(key).await;
                     }
                     // Apply every captured persistence effect before loading the
                     // final session's views. In particular, an old-account draft
@@ -2869,6 +2904,8 @@ impl AppActor {
                             room_id,
                             timestamp_ms,
                         } => {
+                            // A newer jump owns the next account-actor reply.
+                            self.cancelled_date_navigation_request_id = None;
                             let focused_key = self.current_focused_context_timeline_key();
                             let effects =
                                 self.reduce_app_action(AppAction::CloseFocusedContext).await;
@@ -4057,6 +4094,9 @@ impl AppActor {
                     )
                     .await;
                 }
+                AppEffect::CancelPendingMainTimelineNavigation { room_id } => {
+                    Box::pin(self.cancel_pending_main_timeline_navigation(&room_id)).await;
+                }
                 AppEffect::OpenFocusedTimeline { room_id, event_id } => {
                     let Some(account_key) = self.current_account_key() else {
                         self.emit(CoreEvent::OperationFailed {
@@ -4500,6 +4540,11 @@ impl AppActor {
                             sync_state: current_session_sync_state(&self.state.sync),
                         })
                         .await;
+                }
+                // Actor-projected accepted sends need Core-owned navigation
+                // cleanup (not a replayed Matrix operation) post-commit too.
+                AppEffect::CancelPendingMainTimelineNavigation { room_id } => {
+                    Box::pin(self.cancel_pending_main_timeline_navigation(room_id)).await;
                 }
                 AppEffect::RestoreSession
                 | AppEffect::DiscoverLogin { .. }

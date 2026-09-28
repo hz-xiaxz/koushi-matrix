@@ -1882,6 +1882,7 @@ stateDiagram-v2
     Projecting --> Anchored: FocusedProjectionCommitted [same request/key/actor/timeline generation, target present]
     Projecting --> Live: FocusedProjectionCommitted [exact projection, target absent]
     Projecting --> Live: CloseFocusedContext / replacement / room change
+    Projecting --> Live: accepted main-composer send [active room] / Core cancels owner
     Anchored --> Projecting: OpenAnchoredTimeline [other event, active room]
     Anchored --> Live: CloseFocusedContext (live-edge return)
     Anchored --> Live: accepted main-composer send [active room]
@@ -1912,17 +1913,29 @@ stateDiagram-v2
   live edge rather than a stale pre-jump position. `ReturnMainTimelineToLive`
   clears the anchor for the active room without touching focused-context state.
 - An accepted main-composer send for the active room (`ComposerSubmissionAccepted`,
-  its `AtRevision` form, and legacy `SendTextSubmitted`, plain or reply) returns
-  an anchored main pane to `Live` on local acceptance, because pending outbound
-  echoes are projected only into the live Room timeline (#1037). The reducer
-  applies the `CloseFocusedContext` transition and then the
-  `ReturnMainTimelineToLive` transition after every acceptance, revision,
-  target-room, and duplicate guard; it does not wait for server acknowledgement
+  its `AtRevision` form, legacy `SendTextSubmitted`, plain or reply, and the
+  attachment path's main-target `ComposerDraftAccepted`, which prepared-upload
+  sends reduce after every upload was queued) returns the main pane to `Live`
+  on local acceptance, because pending outbound echoes are projected only into
+  the live Room timeline (#1037). It does not wait for server acknowledgement
   or a remote echo, and captured reply metadata and the payload are unchanged.
-  Event navigation becomes `Idle`, so Core releases any in-flight navigation
-  owner and a late completion cannot re-anchor. Rejected, duplicate,
-  other-room, and thread-composer sends leave navigation unchanged; a send from
-  a live main pane leaves an independent right-panel focused context open.
+  After every acceptance, revision, target-room, and duplicate guard:
+  - an anchored main pane applies the `CloseFocusedContext` transition and then
+    the `ReturnMainTimelineToLive` transition (event navigation becomes `Idle`);
+  - the reducer always emits `CancelPendingMainTimelineNavigation { room_id }`.
+    Core then cancels every main-pane navigation for that room that the
+    reducer cannot observe: a Focused navigation awaiting its projection ACK
+    (cached date jump, `OpenAnchoredTimeline`, or a located event navigation)
+    closes its focused context, is dropped, and settles `Superseded` when it
+    has no event-navigation owner; an event-navigation owner for the room is
+    cancelled (`Superseded`); and a date jump still awaiting the server is
+    fenced, so the account actor's late `OpenFocusedContext` +
+    `EnterAnchoredTimeline` pair is dropped and its focused subscription
+    released. A late projection commit therefore finds no owner and cannot
+    re-anchor the pane over the pending echo.
+  Rejected, duplicate, other-room, and thread-composer sends leave navigation
+  unchanged; a send from a live main pane with no pending main-pane navigation
+  leaves an independent right-panel focused context open.
 - Any room change (`SelectRoom`, `SelectSpace`) and account clear/logout reset
   the anchor to `Live` through `select_active_room_for_navigation` /
   `clear_active_room_for_navigation`.
@@ -2973,6 +2986,19 @@ stateDiagram-v2
   runtime unsubscribes the previous focused timeline before subscribing the new
   key. Reopening the same focused key is idempotent as far as runtime
   subscription ownership allows.
+- Focused timeline release is core-owned for every reducer transition, not only
+  the explicit `CloseFocusedContext` command (#1037, #1046). Whenever a reduce
+  within the same account leaves `focused_context` without its previous
+  `Opening`/`Open` key (accepted main send from anchored history, room switch,
+  subscription failure, replacement, live fallback), AppActor unsubscribes
+  that `TimelineKind::Focused` key, which drops its actor and room lease, and
+  drops a pending main-pane navigation for the same key; one without an
+  event-navigation owner (date jump, `OpenAnchoredTimeline`) settles
+  `Superseded`, an owned one is settled by its owner. Unsubscribe is
+  idempotent, so paths that also unsubscribe explicitly stay correct. Account
+  teardown (logout, account switch) is excluded because it drops the whole
+  timeline manager. `ReturnMainTimelineToLive` leaves `focused_context`, and so
+  its subscription, untouched.
 - focused timelines do not own composer/send state. The selected room composer
   and the thread composer are separate Rust state machines; focused timelines do
   not submit sends, clear drafts, repair reply mode, or settle pending
