@@ -42,10 +42,106 @@ pub(super) enum RecoveryKeyRevealSource {
 /// optional "Save to file" action. `RecoveryKeyMaterial` redacts `Debug` and
 /// zeroizes on drop.
 #[derive(Debug)]
-pub(super) struct RevealedRecoveryKey {
+pub(crate) struct RevealedRecoveryKey {
     pub(super) reveal_request_id: u64,
     pub(super) source: RecoveryKeyRevealSource,
     pub(super) key: koushi_state::RecoveryKeyMaterial,
+    /// Latest "Save to file" outcome, so a restored reveal keeps it.
+    pub(super) delivery: koushi_state::RecoveryKeyDeliveryState,
+}
+
+/// Holds a recovery key that setup (initial, re-enable, or reset) just
+/// created and projects its reveal. The persisted delivery marker stays set
+/// (`delivery_pending`) and the gate blocks until the saved confirmation.
+pub(super) fn hold_created_setup_recovery_key(
+    slot: &mut Option<RevealedRecoveryKey>,
+    delivery_pending: &mut bool,
+    reveal_request_id: u64,
+    created_key: &str,
+) -> Vec<AppAction> {
+    *delivery_pending = true;
+    let recovery_key = koushi_state::RecoveryKeyMaterial::new(created_key);
+    *slot = Some(RevealedRecoveryKey {
+        reveal_request_id,
+        source: RecoveryKeyRevealSource::Setup,
+        key: recovery_key.clone(),
+        delivery: koushi_state::RecoveryKeyDeliveryState::NotWritten,
+    });
+    vec![
+        AppAction::SecureBackupRecoveryKeyReady {
+            request_id: reveal_request_id,
+            recovery_key,
+        },
+        AppAction::SecureBackupGateChanged(
+            koushi_state::SecureBackupGateState::RecoveryKeyDeliveryRequired,
+        ),
+    ]
+}
+
+/// A failed setup, re-enable, or reset must not leave the gate in
+/// `CreatingBackup` (which offers no controls): it returns to `Checking` and
+/// the caller re-inspects, so the gate re-projects a recoverable state.
+pub(super) fn project_secure_backup_setup_failure(
+    request_id: u64,
+    kind: TrustOperationFailureKind,
+) -> Vec<AppAction> {
+    vec![
+        AppAction::SecureBackupSetupFailed { request_id, kind },
+        AppAction::SecureBackupGateChanged(koushi_state::SecureBackupGateState::Checking),
+    ]
+}
+
+/// Outcome of the explicit saved confirmation for the held key.
+#[derive(Debug)]
+pub(super) enum RecoveryKeyConfirmOutcome {
+    /// No held key matches (stale confirmation or racing teardown).
+    Stale,
+    /// A passphrase-change reveal was dismissed; the key is dropped.
+    Dismissed,
+    /// The persisted marker was cleared first; the key is dropped.
+    MarkerCleared,
+    /// The marker could not be cleared: the key stays held and the reveal is
+    /// restored, so the key the user just saved is not invalidated.
+    MarkerClearFailed {
+        restore: Box<AppAction>,
+        error: koushi_sdk::E2eeTrustError,
+    },
+}
+
+/// Applies the saved confirmation to the held key. For setup the persisted
+/// delivery marker is cleared (`clear_marker`) BEFORE the key is dropped.
+pub(super) async fn confirm_revealed_recovery_key<F>(
+    slot: &mut Option<RevealedRecoveryKey>,
+    reveal_request_id: u64,
+    clear_marker: F,
+) -> RecoveryKeyConfirmOutcome
+where
+    F: std::future::Future<Output = Result<(), koushi_sdk::E2eeTrustError>>,
+{
+    let Some(revealed) = slot
+        .as_ref()
+        .filter(|revealed| revealed.reveal_request_id == reveal_request_id)
+    else {
+        return RecoveryKeyConfirmOutcome::Stale;
+    };
+    if revealed.source == RecoveryKeyRevealSource::PassphraseChange {
+        *slot = None;
+        return RecoveryKeyConfirmOutcome::Dismissed;
+    }
+    match clear_marker.await {
+        Ok(()) => {
+            *slot = None;
+            RecoveryKeyConfirmOutcome::MarkerCleared
+        }
+        Err(error) => RecoveryKeyConfirmOutcome::MarkerClearFailed {
+            restore: Box::new(AppAction::SecureBackupRecoveryKeyConfirmFailed {
+                reveal_request_id,
+                recovery_key: revealed.key.clone(),
+                delivery: revealed.delivery.clone(),
+            }),
+            error,
+        },
+    }
 }
 
 /// Writes the held key for `reveal_request_id` to `destination`. Returns
@@ -60,22 +156,6 @@ pub(super) fn save_revealed_recovery_key(
     Some(destination.is_some_and(|path| {
         koushi_sdk::write_recovery_key_material(revealed.key.expose_secret(), path).is_ok()
     }))
-}
-
-/// Drops (zeroizes) the held key for `reveal_request_id` and reports which
-/// flow revealed it. A non-matching key is left in place.
-pub(super) fn take_revealed_recovery_key(
-    slot: &mut Option<RevealedRecoveryKey>,
-    reveal_request_id: u64,
-) -> Option<RecoveryKeyRevealSource> {
-    if slot
-        .as_ref()
-        .is_some_and(|revealed| revealed.reveal_request_id == reveal_request_id)
-    {
-        slot.take().map(|revealed| revealed.source)
-    } else {
-        None
-    }
 }
 
 const RECOVERY_TRUST_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(20);
@@ -932,33 +1012,22 @@ impl AccountActor {
                 // The gate stays blocking in `RecoveryKeyDeliveryRequired`
                 // until the explicit saved confirmation; copying or saving
                 // alone never advances it.
-                self.recovery_key_delivery_pending = true;
                 self.set_secure_backup_send_admitted(false);
-                let recovery_key =
-                    koushi_state::RecoveryKeyMaterial::new(summary.recovery_key.as_str());
+                let actions = hold_created_setup_recovery_key(
+                    &mut self.revealed_recovery_key,
+                    &mut self.recovery_key_delivery_pending,
+                    request_id.sequence,
+                    summary.recovery_key.as_str(),
+                );
                 drop(summary);
-                self.revealed_recovery_key = Some(RevealedRecoveryKey {
-                    reveal_request_id: request_id.sequence,
-                    source: RecoveryKeyRevealSource::Setup,
-                    key: recovery_key.clone(),
-                });
-                self.send_actions(vec![
-                    AppAction::SecureBackupRecoveryKeyReady {
-                        request_id: request_id.sequence,
-                        recovery_key,
-                    },
-                    AppAction::SecureBackupGateChanged(
-                        koushi_state::SecureBackupGateState::RecoveryKeyDeliveryRequired,
-                    ),
-                ])
-                .await;
+                self.send_actions(actions).await;
             }
             Err(error) => {
                 let kind = classify_e2ee_trust_error(&error);
-                self.send_actions(vec![AppAction::SecureBackupSetupFailed {
-                    request_id: request_id.sequence,
+                self.send_actions(project_secure_backup_setup_failure(
+                    request_id.sequence,
                     kind,
-                }])
+                ))
                 .await;
                 self.emit_failure(
                     request_id,
@@ -966,6 +1035,7 @@ impl AccountActor {
                         kind: classify_e2ee_trust_auth_failure(&error),
                     },
                 );
+                self.start_secure_backup_inspection();
             }
         }
     }
@@ -1038,6 +1108,7 @@ impl AccountActor {
                     reveal_request_id: request_id.sequence,
                     source: RecoveryKeyRevealSource::PassphraseChange,
                     key: recovery_key.clone(),
+                    delivery: koushi_state::RecoveryKeyDeliveryState::NotWritten,
                 });
                 self.send_actions(vec![AppAction::SecureBackupPassphraseChanged {
                     request_id: request_id.sequence,
@@ -1081,6 +1152,14 @@ impl AccountActor {
             self.emit_failure(request_id, CoreFailure::SecureBackupSetupFailedNoOp);
             return;
         };
+        if let Some(revealed) = self.revealed_recovery_key.as_mut() {
+            // A failed retry must not erase an earlier successful write.
+            if written {
+                revealed.delivery = koushi_state::RecoveryKeyDeliveryState::Written;
+            } else if revealed.delivery != koushi_state::RecoveryKeyDeliveryState::Written {
+                revealed.delivery = koushi_state::RecoveryKeyDeliveryState::WriteFailed;
+            }
+        }
         record(
             DiagnosticEvent::new(
                 DiagnosticLevel::Info,
@@ -1099,29 +1178,47 @@ impl AccountActor {
         .await;
     }
 
-    /// The explicit "I saved the recovery key" confirmation (#927). Drops the
-    /// actor-held key; for setup it clears the persisted delivery marker and
-    /// hands the gate back to authoritative inspection.
+    /// The explicit "I saved the recovery key" confirmation (#927). For setup
+    /// it clears the persisted delivery marker first and only then drops the
+    /// actor-held key and hands the gate back to authoritative inspection. If
+    /// the marker cannot be cleared the key stays held and the reveal is
+    /// restored, so the saved key is never invalidated by a forced reset.
     pub(super) async fn handle_confirm_secure_backup_recovery_key_saved(
         &mut self,
-        _request_id: RequestId,
+        request_id: RequestId,
         reveal_request_id: u64,
     ) {
-        match take_revealed_recovery_key(&mut self.revealed_recovery_key, reveal_request_id) {
-            Some(RecoveryKeyRevealSource::PassphraseChange) => {}
-            Some(RecoveryKeyRevealSource::Setup) => {
-                // A failed marker clear keeps the gate fail-closed: the next
-                // inspection projects `RecoveryKeyDeliveryRequired` again.
-                if let Some(session) = self.session.clone()
-                    && session.confirm_recovery_key_delivered().await.is_ok()
-                {
-                    self.recovery_key_delivery_pending = false;
-                }
+        let session = self.session.clone();
+        let clear_marker = async move {
+            match session {
+                Some(session) => session.confirm_recovery_key_delivered().await,
+                None => Err(koushi_sdk::E2eeTrustError::SecureBackupInspectionInconclusive),
+            }
+        };
+        match confirm_revealed_recovery_key(
+            &mut self.revealed_recovery_key,
+            reveal_request_id,
+            clear_marker,
+        )
+        .await
+        {
+            RecoveryKeyConfirmOutcome::Dismissed => {}
+            RecoveryKeyConfirmOutcome::MarkerCleared => {
+                self.recovery_key_delivery_pending = false;
                 self.start_secure_backup_inspection();
+            }
+            RecoveryKeyConfirmOutcome::MarkerClearFailed { restore, error } => {
+                self.send_actions(vec![*restore]).await;
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::AccountOperationFailed {
+                        kind: classify_e2ee_trust_auth_failure(&error),
+                    },
+                );
             }
             // The actor copy is already gone (for example a racing teardown):
             // keep the persisted marker and re-project the authoritative gate.
-            None => self.start_secure_backup_inspection(),
+            RecoveryKeyConfirmOutcome::Stale => self.start_secure_backup_inspection(),
         }
     }
 
@@ -1733,11 +1830,19 @@ impl AccountActor {
             }
             return;
         };
-        if self.recovery_key_delivery_pending
-            && matches!(
-                action,
-                AppAction::SecureBackupGateChanged(koushi_state::SecureBackupGateState::Ready)
-            )
+        // While a setup reveal is held the gate stays in
+        // `RecoveryKeyDeliveryRequired` whatever a background inspection
+        // reports, so the reveal is never replaced before the confirmation.
+        let setup_key_held = self
+            .revealed_recovery_key
+            .as_ref()
+            .is_some_and(|revealed| revealed.source == RecoveryKeyRevealSource::Setup);
+        if setup_key_held
+            || (self.recovery_key_delivery_pending
+                && matches!(
+                    action,
+                    AppAction::SecureBackupGateChanged(koushi_state::SecureBackupGateState::Ready)
+                ))
         {
             action = AppAction::SecureBackupGateChanged(
                 koushi_state::SecureBackupGateState::RecoveryKeyDeliveryRequired,

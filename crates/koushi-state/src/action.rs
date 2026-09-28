@@ -743,6 +743,14 @@ pub enum AppAction {
     SecureBackupRecoveryKeyConfirmed {
         reveal_request_id: u64,
     },
+    /// AccountActor could not clear the persisted delivery marker after the
+    /// confirmation, so it kept its copy and restores the setup reveal (and
+    /// the blocking gate) instead of forcing a reset of the saved key.
+    SecureBackupRecoveryKeyConfirmFailed {
+        reveal_request_id: u64,
+        recovery_key: crate::state::RecoveryKeyMaterial,
+        delivery: crate::state::RecoveryKeyDeliveryState,
+    },
     SecureBackupPassphraseChangeFailed {
         request_id: u64,
         kind: TrustOperationFailureKind,

@@ -245,8 +245,12 @@ Rules:
    logs, QA tokens, window titles, screenshots, fixtures, persisted state,
    issue comments, or any command sent back from the WebView. Only the
    explicit "I saved the recovery key" confirmation leaves the reveal state;
-   confirmation, logout, account switch, and session teardown drop and
-   zeroize both copies. Saving to a file is optional: Core writes its held
+   confirmation, logout, account switch, and session teardown drop both
+   Rust-owned copies (reducer state and the AccountActor copy), which zeroize
+   on drop. Copies outside Rust ownership are released, not zeroized: the
+   serialized DTO/IPC string, the WebView's JS string, and any `StateDelta`
+   still buffered in the event broadcast ring. A copied key stays in the OS
+   clipboard, under platform control, until it is overwritten. Saving to a file is optional: Core writes its held
    copy to a user-selected native destination and reports only a coarse
    `Written`/`WriteFailed` status. Only keys returned by `enable()`,
    `reset_key()`, or `recover_and_reset()` are recovery keys; the fork's

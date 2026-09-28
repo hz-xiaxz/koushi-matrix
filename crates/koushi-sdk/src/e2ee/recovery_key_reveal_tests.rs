@@ -107,21 +107,50 @@ async fn setup_reveals_the_key_enable_returned_and_recover_accepts_it() {
 
 #[tokio::test]
 async fn a_backup_decryption_key_is_not_a_recovery_key() {
-    let (_server, session) = session_with_account_data().await;
-    reset_recovery_key(&session, None)
+    let (server, session) = session_with_account_data().await;
+    server.mock_room_keys_version().none().mount().await;
+    server.mock_add_room_keys_version().ok().mount().await;
+    let summary = super::bootstrap_secure_backup(&session, None)
         .await
-        .expect("reset_key creates a new secret store");
+        .expect("recovery().enable() creates backup and secret storage");
 
-    // What `backups().local_recovery_key()` would export: a base58 backup
-    // decryption key. `recover()` must reject it, so Koushi never reveals it.
-    let backup_key = matrix_sdk_base::crypto::store::types::BackupDecryptionKey::new();
+    // The actual export of the fork's `backups().local_recovery_key()`: the
+    // base58 backup decryption key. `recover()` must reject it, so Koushi
+    // never reveals it as a recovery key.
+    let backup_key = session
+        .client()
+        .encryption()
+        .backups()
+        .local_recovery_key()
+        .await
+        .expect("local backup key lookup succeeds")
+        .expect("enable() stored a local backup decryption key");
+    assert_ne!(backup_key.as_str(), summary.recovery_key.as_str());
     assert!(
         session
             .client()
             .encryption()
             .recovery()
-            .recover(&backup_key.to_base58())
+            .recover(backup_key.as_str())
             .await
             .is_err()
     );
+}
+
+/// The key returned by `recovery().enable()` is the only copy once setup
+/// has created secret storage, so an upload steady-state failure after that
+/// point must never drop it (#927 audit regression).
+#[tokio::test]
+async fn an_upload_settlement_failure_still_reveals_the_created_key() {
+    let summary = super::SecureBackupSetupSummary {
+        recovery_key: zeroize::Zeroizing::new("synthetic-created-key-927".to_owned()),
+    };
+
+    let revealed = super::reveal_created_recovery_key(summary, async {
+        Err(super::E2eeTrustError::SecureBackupUploadFailed)
+    })
+    .await
+    .expect("a created key is revealed even when upload has not settled");
+
+    assert_eq!(revealed.recovery_key.as_str(), "synthetic-created-key-927");
 }

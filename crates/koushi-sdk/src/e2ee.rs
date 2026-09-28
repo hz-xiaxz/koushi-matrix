@@ -261,6 +261,16 @@ pub struct MatrixSecureBackupInspection {
 }
 
 impl MatrixSecureBackupInspection {
+    /// `recovery().reset_key()` can re-upload every secret only for an
+    /// authoritative, locally enabled, trusted backup whose secrets are all
+    /// held locally.
+    pub fn recovery_key_reset_is_possible(&self) -> bool {
+        self.server == MatrixSecureBackupServerState::Present
+            && self.local == MatrixSecureBackupLocalState::Enabled
+            && self.trust == MatrixSecureBackupTrustState::Trusted
+            && self.recovery == MatrixSecureBackupRecoveryState::Enabled
+    }
+
     pub fn recommended_gate_state(&self) -> SecureBackupGateState {
         use MatrixSecureBackupLocalState as Local;
         use MatrixSecureBackupRecoveryState as Recovery;
@@ -284,9 +294,6 @@ impl MatrixSecureBackupInspection {
 
         match self.server {
             Server::Present => {
-                if self.recovery_key_delivery_pending {
-                    return SecureBackupGateState::RecoveryKeyDeliveryRequired;
-                }
                 match self.local {
                     Local::Unknown
                     | Local::Creating
@@ -300,6 +307,19 @@ impl MatrixSecureBackupInspection {
                         };
                     }
                     Local::Enabled => {}
+                }
+
+                // An unconfirmed reveal offers the lost-key reset only once
+                // `reset_key()` can succeed; until secret storage and trust
+                // settle (for example right after a restart) keep checking.
+                if self.recovery_key_delivery_pending {
+                    return if self.recovery_key_reset_is_possible() {
+                        SecureBackupGateState::RecoveryKeyDeliveryRequired
+                    } else if self.recovery == Recovery::Disabled {
+                        SecureBackupGateState::ExistingBackupNeedsRecovery { failure: None }
+                    } else {
+                        SecureBackupGateState::Checking
+                    };
                 }
 
                 if matches!(self.recovery, Recovery::Unknown | Recovery::Disabled) {
@@ -1776,6 +1796,27 @@ pub async fn bootstrap_secure_backup(
     })
 }
 
+/// Hands a freshly created recovery key to the reveal (#927). Once
+/// `recovery().enable()` returns, `summary` holds the only copy of a valid
+/// key, so an upload steady-state failure is recorded but never drops it;
+/// Secure Backup inspection and monitoring settle the upload state.
+async fn reveal_created_recovery_key(
+    summary: SecureBackupSetupSummary,
+    upload_settled: impl std::future::Future<Output = Result<(), E2eeTrustError>>,
+) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
+    if upload_settled.await.is_err() {
+        record(
+            DiagnosticEvent::new(
+                DiagnosticLevel::Info,
+                "sdk.secure_backup",
+                "setup_upload_unsettled",
+            )
+            .field(DiagnosticField::token("outcome", "key_revealed")),
+        );
+    }
+    Ok(summary)
+}
+
 /// Creates a NEW secret-storage recovery key with upstream
 /// `recovery().reset_key()` (the Element X approach) and returns it for
 /// on-screen reveal. The previous recovery key and security phrase stop
@@ -2819,8 +2860,7 @@ impl MatrixClientSession {
 
         self.set_recovery_key_delivery_pending(true).await?;
         let summary = bootstrap_secure_backup(self, passphrase).await?;
-        self.wait_for_secure_backup_steady_state().await?;
-        Ok(summary)
+        reveal_created_recovery_key(summary, self.wait_for_secure_backup_steady_state()).await
     }
     /// Replaces the recovery key of the existing, trusted, locally enabled
     /// backup with a NEW one via upstream `recovery().reset_key()` and returns
@@ -2831,12 +2871,10 @@ impl MatrixClientSession {
         passphrase: Option<&AuthSecret>,
     ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
         let inspection = self.inspect_secure_backup().await?;
-        // Without an authoritative, locally enabled, trusted backup the new
-        // secret store could not carry the backup secrets.
-        if inspection.server != MatrixSecureBackupServerState::Present
-            || inspection.local != MatrixSecureBackupLocalState::Enabled
-            || inspection.trust != MatrixSecureBackupTrustState::Trusted
-        {
+        // Without an authoritative, locally enabled, trusted backup whose
+        // secrets are all held locally (recovery `Enabled`), the new secret
+        // store could not carry every secret.
+        if !inspection.recovery_key_reset_is_possible() {
             return Err(E2eeTrustError::SecureBackupInspectionInconclusive);
         }
         self.set_recovery_key_delivery_pending(true).await?;

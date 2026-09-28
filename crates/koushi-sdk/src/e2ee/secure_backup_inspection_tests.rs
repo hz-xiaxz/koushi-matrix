@@ -280,3 +280,71 @@ fn secure_backup_inspection_has_no_secret_or_identifier_surface() {
     assert!(!format!("{error:?}").contains("raw SDK failure"));
     assert!(!format!("{error:?}").contains("recovery-key-secret"));
 }
+
+/// Right after a restart the persisted delivery marker may be read before the
+/// local backup and secret storage settle. The lost-key reset is offered
+/// (`RecoveryKeyDeliveryRequired`) only once `reset_key()` can succeed.
+#[test]
+fn pending_delivery_offers_the_reset_only_when_the_reset_can_succeed() {
+    let settled = || {
+        let mut inspection = inspection(
+            MatrixSecureBackupServerState::Present,
+            MatrixSecureBackupLocalState::Enabled,
+            MatrixSecureBackupRecoveryState::Enabled,
+            MatrixSecureBackupUploadState::Unknown,
+            MatrixSecureBackupTrustState::Trusted,
+        );
+        inspection.recovery_key_delivery_pending = true;
+        inspection
+    };
+    assert!(settled().recovery_key_reset_is_possible());
+    assert_eq!(
+        settled().recommended_gate_state(),
+        SecureBackupGateState::RecoveryKeyDeliveryRequired
+    );
+
+    for local in [
+        MatrixSecureBackupLocalState::Unknown,
+        MatrixSecureBackupLocalState::Enabling,
+        MatrixSecureBackupLocalState::Resuming,
+        MatrixSecureBackupLocalState::Downloading,
+    ] {
+        let unsettled = MatrixSecureBackupInspection { local, ..settled() };
+        assert!(!unsettled.recovery_key_reset_is_possible());
+        assert_eq!(
+            unsettled.recommended_gate_state(),
+            SecureBackupGateState::Checking,
+            "{local:?}"
+        );
+    }
+    for (recovery, trust) in [
+        (
+            MatrixSecureBackupRecoveryState::Unknown,
+            MatrixSecureBackupTrustState::Trusted,
+        ),
+        (
+            MatrixSecureBackupRecoveryState::Enabled,
+            MatrixSecureBackupTrustState::Unknown,
+        ),
+    ] {
+        let unsettled = MatrixSecureBackupInspection {
+            recovery,
+            trust,
+            ..settled()
+        };
+        assert!(!unsettled.recovery_key_reset_is_possible());
+        assert_eq!(
+            unsettled.recommended_gate_state(),
+            SecureBackupGateState::Checking,
+            "{recovery:?} {trust:?}"
+        );
+    }
+    let disabled = MatrixSecureBackupInspection {
+        local: MatrixSecureBackupLocalState::Disabled,
+        ..settled()
+    };
+    assert_eq!(
+        disabled.recommended_gate_state(),
+        SecureBackupGateState::ExistingBackupNeedsRecovery { failure: None }
+    );
+}
