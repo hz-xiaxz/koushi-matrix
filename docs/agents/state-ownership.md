@@ -617,8 +617,8 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   for the current draft; an `aliasInUse` create failure is rendered with the
   attempted full address and server captured from that preview. A submitted
   alias is never renamed or retried automatically. The preview's
-  `without_address` (#1023) is Rust's verdict that a public room whose name
-  offers no suggestion (an unnamed room) may be created without an address;
+  `without_address` (#1023) is Rust's verdict that an unnamed public room
+  may be created without an address (a named room never is);
   React renders it and does not decide when an address is optional.
 - The create-room dialog's initial choices (#1023) are
   `SidebarModel.create_room_defaults` (`create_room_defaults_for_state`): public

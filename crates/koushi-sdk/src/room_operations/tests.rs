@@ -233,19 +233,26 @@ fn create_room_request_keeps_an_explicit_address_for_an_unnamed_public_room() {
 
 #[test]
 fn create_room_request_still_requires_an_address_for_a_named_public_room() {
-    for alias_localpart in [None, Some(String::new()), Some("  ".to_owned())] {
-        assert!(matches!(
-            create_room_request(MatrixCreateRoomOptions {
-                name: "Synthetic Public".to_owned(),
-                topic: None,
-                alias_localpart,
-                encrypted: false,
-                invited_only: false,
-                visibility: MatrixCreateRoomVisibility::Public,
-                parent_space: None,
-            }),
-            Err(MatrixRoomOperationError::InvalidRoomAlias)
-        ));
+    // #1023 exempts only unnamed rooms: a name without letters or digits
+    // offers no suggestion but still needs a manual address (#1006).
+    for name in ["Synthetic Public", "🎉", "!!!"] {
+        for alias_localpart in [None, Some(String::new()), Some("  ".to_owned())] {
+            assert!(
+                matches!(
+                    create_room_request(MatrixCreateRoomOptions {
+                        name: name.to_owned(),
+                        topic: None,
+                        alias_localpart,
+                        encrypted: false,
+                        invited_only: false,
+                        visibility: MatrixCreateRoomVisibility::Public,
+                        parent_space: None,
+                    }),
+                    Err(MatrixRoomOperationError::InvalidRoomAlias)
+                ),
+                "{name:?}"
+            );
+        }
     }
 }
 
