@@ -176,6 +176,7 @@ import type {
   AttachmentSort,
   ComposerTarget,
   CommandReceipt,
+  CreateRoomDefaults,
   CreateRoomRequest,
   DesktopSnapshot,
   DirectoryRoomSummary,
@@ -450,8 +451,16 @@ const VALID_EMOJIS = new Set(
   )
 );
 
-function defaultCreateRoomDialogOptions(): CreateRoomDialogOptions {
-  return { ...DEFAULT_CREATE_ROOM_OPTIONS };
+/** Seed the dialog from the Rust-projected defaults for the active scope
+ * (#1023); the constant only covers a snapshot that has not arrived yet. */
+function defaultCreateRoomDialogOptions(defaults?: CreateRoomDefaults | null): CreateRoomDialogOptions {
+  if (!defaults) return { ...DEFAULT_CREATE_ROOM_OPTIONS };
+  return {
+    ...DEFAULT_CREATE_ROOM_OPTIONS,
+    visibility: defaults.visibility,
+    encrypted: defaults.encrypted,
+    invitedOnly: defaults.invited_only
+  };
 }
 
 /** Pause after the last address edit before the advisory lookup (#1006). */
@@ -3622,7 +3631,9 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     setCreateRoomAliasCollision(null);
     setCreateRoomManualAlias(null);
     setCreateDraftName("");
-    setCreateRoomDraftOptions(defaultCreateRoomDialogOptions());
+    setCreateRoomDraftOptions(
+      defaultCreateRoomDialogOptions(snapshotRef.current?.sidebar.create_room_defaults)
+    );
     setCreateDialog(kind);
   }
 
@@ -3970,9 +3981,11 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
         ?.display_name ?? "";
     // Guard against double-submit: a create already in flight (isBusy) or a
     // pending basic_operation (Rust-owned) must block re-entry.
+    // #1023: only a Space needs a name; an unnamed room omits `m.room.name`
+    // and shows the SDK-calculated name.
     if (
       !kind ||
-      !name ||
+      (kind === "space" && !name) ||
       (kind === "room" &&
         createRoomDraftOptions.visibility === "public" &&
         (!createRoomAddressPreview || createRoomAddressPreview.error !== null)) ||
@@ -6926,7 +6939,16 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
         >
           <div className="confirmation-content">
             <p role="alert">
-              {createdRoomLinkFailure.reason === "forbidden"
+              {!createdRoomLinkFailure.roomName
+                ? createdRoomLinkFailure.reason === "forbidden"
+                  ? t("spaceAddRooms.createdLinkFailedForbiddenUnnamed", {
+                      spaceName: createdRoomLinkFailure.spaceName
+                    })
+                  : t("spaceAddRooms.createdLinkFailedUnnamed", {
+                      spaceName: createdRoomLinkFailure.spaceName,
+                      reason: operationFailureLabel(createdRoomLinkFailure.reason)
+                    })
+                : createdRoomLinkFailure.reason === "forbidden"
                 ? t("spaceAddRooms.createdLinkFailedForbidden", {
                     roomName: createdRoomLinkFailure.roomName,
                     spaceName: createdRoomLinkFailure.spaceName

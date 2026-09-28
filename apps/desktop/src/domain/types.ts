@@ -8,6 +8,9 @@ export interface RoomAddressPreview {
   error: "empty" | "invalid" | "notReady" | null;
   /** The server whose alias namespace every Space on it shares (#1006). */
   server_name: string | null;
+  /** The room is created without an address (#1023): its name offers no
+   * suggestion and none was entered. `error` is then null. */
+  without_address?: boolean;
 }
 
 export interface CreateRoomRequest {
@@ -21,6 +24,14 @@ export interface CreateRoomRequest {
 }
 
 export type CreateRoomVisibility = "private" | "public";
+
+/** Rust-projected initial choices of the create-room dialog (#1023). */
+export interface CreateRoomDefaults {
+  visibility: CreateRoomVisibility;
+  /** The private option's encryption choice; public rooms are unencrypted. */
+  encrypted: boolean;
+  invited_only: boolean;
+}
 
 /** Core derives both relationship events' routing from the SDK (#1007). */
 export interface CreateRoomParentSpace {
@@ -2596,6 +2607,8 @@ export interface SidebarModel {
   sections: SidebarSections;
   /** Rust-projected Add existing room rows for the active Space (#1007). */
   space_add_rooms?: SpaceAddRoomsModel | null;
+  /** Rust-projected create-room dialog defaults for the active scope (#1023). */
+  create_room_defaults?: CreateRoomDefaults;
 }
 
 export interface SpaceAddRoomsModel {

@@ -46,13 +46,8 @@ impl fmt::Debug for CreateRoomOptions {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum CreateRoomVisibility {
-    #[default]
-    Private,
-    Public,
-}
+/// Owned by `koushi-state`, whose create-room defaults (#1023) use it.
+pub use koushi_state::CreateRoomVisibility;
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -9,6 +9,11 @@
       "unread_count": 3
     },
     "active_space_id": "!space:example.invalid",
+    "create_room_defaults": {
+      "encrypted": true,
+      "invited_only": false,
+      "visibility": "private"
+    },
     "dm_highlight_count": 0,
     "dm_unread_count": 0,
     "dms_collapsed": false,
