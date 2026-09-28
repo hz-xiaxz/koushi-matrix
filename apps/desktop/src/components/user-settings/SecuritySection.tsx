@@ -14,6 +14,7 @@ import {
 
 import { t } from "../../i18n/messages";
 import { ImeSafeForm, SecureImeTextField } from "../ImeTextControl";
+import { RecoveryKeyReveal } from "../RecoveryKeyReveal";
 import {
   DetailRow,
   TrustActionButton,
@@ -41,9 +42,10 @@ export function SecuritySection({
   onImportRoomKeys,
   onChooseRoomKeyExportDestination,
   onChooseRoomKeyImportSource,
-  onChooseSecureBackupDestination,
   onBootstrapSecureBackup,
   onChangeSecureBackupPassphrase,
+  onSaveSecureBackupRecoveryKey,
+  onConfirmSecureBackupRecoveryKeySaved = () => undefined,
   onOpenRecovery,
   onProbeLocalEncryption,
   onResetLocalData
@@ -55,17 +57,12 @@ export function SecuritySection({
   onImportRoomKeys: (sourcePath: string, passphrase: string) => void;
   onChooseRoomKeyExportDestination: () => Promise<string | null>;
   onChooseRoomKeyImportSource: () => Promise<string | null>;
-  onChooseSecureBackupDestination: () => Promise<string | null>;
-  onBootstrapSecureBackup: (
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null,
-    intent: SecureBackupSetupIntent
-  ) => void;
-  onChangeSecureBackupPassphrase: (
-    oldSecret: string,
-    newPassphrase: string,
-    recoveryKeyDestinationPath: string | null
-  ) => void;
+  onBootstrapSecureBackup: (passphrase: string | null, intent: SecureBackupSetupIntent) => void;
+  onChangeSecureBackupPassphrase: (oldSecret: string, newPassphrase: string) => void;
+  /** Optional "Save to file…" for a revealed recovery key (#927). */
+  onSaveSecureBackupRecoveryKey?: (revealRequestId: number) => Promise<void>;
+  /** Explicit "I saved the recovery key" confirmation (#927). */
+  onConfirmSecureBackupRecoveryKeySaved?: (revealRequestId: number) => void | Promise<void>;
   onOpenRecovery: () => void;
   onProbeLocalEncryption: () => void;
   onResetLocalData: () => void;
@@ -119,35 +116,50 @@ export function SecuritySection({
     setRoomKeyPassphraseRequest(null);
   }
 
-  async function submitSecureBackupSetup(event: FormEvent<HTMLFormElement>) {
+  // #927: the revealed key is rendered straight from the Rust snapshot.
+  const secureBackupSetup = keyManagement.secure_backup_setup;
+  const passphraseChange = keyManagement.passphrase_change;
+  function recoveryKeyReveal(reveal: {
+    request_id: number;
+    recovery_key: string;
+    delivery: RecoveryKeyDeliveryState;
+  }) {
+    return (
+      <RecoveryKeyReveal
+        key={reveal.request_id}
+        recoveryKey={reveal.recovery_key}
+        delivery={reveal.delivery}
+        onSaveToFile={
+          onSaveSecureBackupRecoveryKey
+            ? () => onSaveSecureBackupRecoveryKey(reveal.request_id)
+            : undefined
+        }
+        onConfirmSaved={async () => {
+          await onConfirmSecureBackupRecoveryKeySaved(reveal.request_id);
+        }}
+      />
+    );
+  }
+
+  // #927: setup and passphrase change reveal the key on screen; choosing a
+  // file is an optional follow-up, never a precondition.
+  function submitSecureBackupSetup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const passphrase = secureBackupPassphraseRef.current?.value ?? "";
-    const recoveryPath = await onChooseSecureBackupDestination();
-    if (!recoveryPath) {
-      return;
-    }
-    onBootstrapSecureBackup(
-      passphrase.length > 0 ? passphrase : null,
-      recoveryPath,
-      { kind: "initialSetup" }
-    );
+    onBootstrapSecureBackup(passphrase.length > 0 ? passphrase : null, { kind: "initialSetup" });
     if (secureBackupPassphraseRef.current) {
       secureBackupPassphraseRef.current.value = "";
     }
   }
 
-  async function submitSecureBackupPassphraseChange(event: FormEvent<HTMLFormElement>) {
+  function submitSecureBackupPassphraseChange(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const oldSecret = oldSecureBackupSecretRef.current?.value ?? "";
     const newPassphrase = newSecureBackupPassphraseRef.current?.value ?? "";
     if (!oldSecret || !newPassphrase) {
       return;
     }
-    const recoveryPath = await onChooseSecureBackupDestination();
-    if (!recoveryPath) {
-      return;
-    }
-    onChangeSecureBackupPassphrase(oldSecret, newPassphrase, recoveryPath);
+    onChangeSecureBackupPassphrase(oldSecret, newPassphrase);
     if (oldSecureBackupSecretRef.current) {
       oldSecureBackupSecretRef.current.value = "";
     }
@@ -256,6 +268,16 @@ export function SecuritySection({
             </div>
           </ImeSafeForm>
 
+          {secureBackupSetup.kind === "recoveryKeyReady" ? (
+            <div className="profile-settings-form">
+              <KeyManagementStatus
+                label={t("settings.secureBackup")}
+                value={secureBackupSetupStatusLabel(secureBackupSetup)}
+                testId="secure-backup-state"
+              />
+              {recoveryKeyReveal(secureBackupSetup)}
+            </div>
+          ) : (
           <ImeSafeForm
             aria-label={t("settings.secureBackup")}
             className="profile-settings-form"
@@ -280,7 +302,18 @@ export function SecuritySection({
               </button>
             </div>
           </ImeSafeForm>
+          )}
 
+          {passphraseChange.kind === "changed" ? (
+            <div className="profile-settings-form">
+              <KeyManagementStatus
+                label={t("settings.changeSecureBackupPassphrase")}
+                value={secureBackupPassphraseChangeStatusLabel(passphraseChange)}
+                testId="secure-backup-passphrase-change-state"
+              />
+              {recoveryKeyReveal(passphraseChange)}
+            </div>
+          ) : (
           <ImeSafeForm
             aria-label={t("settings.changeSecureBackupPassphrase")}
             className="profile-settings-form"
@@ -312,6 +345,7 @@ export function SecuritySection({
               </button>
             </div>
           </ImeSafeForm>
+          )}
         </div>
       </section>
       {roomKeyPassphraseRequest ? (
@@ -516,6 +550,7 @@ function recoveryKeyDeliveryLabel(delivery: RecoveryKeyDeliveryState): string {
     case "written":
       return t("settings.recoveryKeySaved");
     case "notWritten":
+    case "writeFailed":
       return t("settings.recoveryKeyReady");
   }
 }

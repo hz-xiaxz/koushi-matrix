@@ -1,9 +1,9 @@
 use koushi_state::{
     AppAction, AppEffect, AppState, CrossSigningStatus, E2eeTrustState, IdentityResetAuthType,
-    IdentityResetState, KeyBackupStatus, RecoveryKeyDeliveryState, RoomKeyExportState, SasEmoji,
-    SecureBackupPassphraseChangeState, SecureBackupSetupState, SessionInfo, SessionState,
-    TrustOperationFailureKind, UiEvent, VerificationCancelReason, VerificationFlowState,
-    VerificationTarget, reduce,
+    IdentityResetState, KeyBackupStatus, RecoveryKeyDeliveryState, RecoveryKeyMaterial,
+    RoomKeyExportState, SasEmoji, SecureBackupPassphraseChangeState, SecureBackupSetupState,
+    SessionInfo, SessionState, TrustOperationFailureKind, UiEvent, VerificationCancelReason,
+    VerificationFlowState, VerificationTarget, reduce,
 };
 use serde_json::json;
 
@@ -129,7 +129,7 @@ fn room_key_export_completion_can_leave_session_count_unknown() {
 }
 
 #[test]
-fn secure_backup_setup_recovery_key_ready_has_no_key_material() {
+fn secure_backup_setup_recovery_key_ready_redacts_key_material_in_debug() {
     let mut state = ready_state();
     state.secure_backup_gate = koushi_state::SecureBackupGateState::SetupRequired;
 
@@ -151,7 +151,7 @@ fn secure_backup_setup_recovery_key_ready_has_no_key_material() {
             &mut state,
             AppAction::SecureBackupRecoveryKeyReady {
                 request_id: 33,
-                delivery: RecoveryKeyDeliveryState::Written,
+                recovery_key: RecoveryKeyMaterial::new("synthetic-setup-key"),
             },
         ),
         vec![
@@ -163,16 +163,17 @@ fn secure_backup_setup_recovery_key_ready_has_no_key_material() {
         state.e2ee_trust.key_management.secure_backup_setup,
         SecureBackupSetupState::RecoveryKeyReady {
             request_id: 33,
-            delivery: RecoveryKeyDeliveryState::Written,
+            recovery_key: RecoveryKeyMaterial::new("synthetic-setup-key"),
+            delivery: RecoveryKeyDeliveryState::NotWritten,
         }
     );
     let debug = format!("{:?}", state.e2ee_trust.key_management.secure_backup_setup);
-    assert!(debug.contains("Written"));
-    assert!(!debug.contains("RecoveryKey("));
+    assert!(debug.contains("NotWritten"));
+    assert!(!debug.contains("synthetic-setup-key"), "{debug}");
 }
 
 #[test]
-fn secure_backup_passphrase_change_reports_delivery_without_key_material() {
+fn secure_backup_passphrase_change_redacts_key_material_in_debug() {
     let mut state = ready_state();
 
     reduce(
@@ -183,7 +184,7 @@ fn secure_backup_passphrase_change_reports_delivery_without_key_material() {
         &mut state,
         AppAction::SecureBackupPassphraseChanged {
             request_id: 34,
-            delivery: RecoveryKeyDeliveryState::NotWritten,
+            recovery_key: RecoveryKeyMaterial::new("synthetic-changed-key"),
         },
     );
 
@@ -191,12 +192,13 @@ fn secure_backup_passphrase_change_reports_delivery_without_key_material() {
         state.e2ee_trust.key_management.passphrase_change,
         SecureBackupPassphraseChangeState::Changed {
             request_id: 34,
+            recovery_key: RecoveryKeyMaterial::new("synthetic-changed-key"),
             delivery: RecoveryKeyDeliveryState::NotWritten,
         }
     );
     let debug = format!("{:?}", state.e2ee_trust.key_management.passphrase_change);
     assert!(debug.contains("NotWritten"));
-    assert!(!debug.contains("RecoveryKey("));
+    assert!(!debug.contains("synthetic-changed-key"), "{debug}");
 }
 
 #[test]

@@ -416,7 +416,7 @@ fn secure_backup_commands_are_correlated_ready_gated_redacted_and_path_free() {
             request_id,
             request: SecureBackupSetupRequest {
                 passphrase: Some(AuthSecret::new(setup_phrase)),
-                recovery_key_destination_requested: true,
+                recovery_key_destination_requested: false,
                 intent: koushi_state::SecureBackupSetupIntent::InitialSetup,
             },
         }),
@@ -425,8 +425,15 @@ fn secure_backup_commands_are_correlated_ready_gated_redacted_and_path_free() {
             request: SecureBackupPassphraseChangeRequest {
                 old_secret: AuthSecret::new(old_phrase),
                 new_passphrase: AuthSecret::new(new_phrase),
-                recovery_key_destination_requested: true,
             },
+        }),
+        CoreCommand::Account(AccountCommand::SaveSecureBackupRecoveryKey {
+            request_id,
+            reveal_request_id: 7,
+        }),
+        CoreCommand::Account(AccountCommand::ConfirmSecureBackupRecoveryKeySaved {
+            request_id,
+            reveal_request_id: 7,
         }),
     ];
 
@@ -437,7 +444,6 @@ fn secure_backup_commands_are_correlated_ready_gated_redacted_and_path_free() {
         assert!(!debug.contains(setup_phrase), "{debug}");
         assert!(!debug.contains(old_phrase), "{debug}");
         assert!(!debug.contains(new_phrase), "{debug}");
-        assert!(debug.contains("has_recovery_key_destination"), "{debug}");
         assert!(!debug.contains("destination_path"), "{debug}");
     }
 }

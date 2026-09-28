@@ -9,10 +9,13 @@ import type {
   CommandReceipt,
   DesktopSnapshot,
   ProvisionalPhase,
+  RecoveryKeyDeliveryState,
   SecureBackupGateState
 } from "./domain/types";
 
 const commandReceipt: CommandReceipt = { protocolVersion: 1, admittedGeneration: 1 };
+// Synthetic, non-secret fixture; deliberately not shaped like a real key.
+const SYNTHETIC_RECOVERY_KEY = "synthetic-revealed-recovery-key-927";
 
 function sessionSnapshot(kind: "locked" | "needsRecovery"): DesktopSnapshot {
   const snapshot = structuredClone(defaultSnapshotResponse()) as unknown as DesktopSnapshot;
@@ -65,10 +68,11 @@ describe("SessionVerificationGate interactions", () => {
       recoverSecureBackup: (secret: string) => Promise<CommandReceipt>;
       bootstrapSecureBackup: (
         passphrase: string | null,
-        recoveryKeyDestinationPath: string | null,
         intent: { kind: "initialSetup" } | { kind: "reenable"; confirmed: boolean }
       ) => Promise<CommandReceipt>;
-      chooseSecureBackupDestination: () => Promise<string | null>;
+      copyRecoveryKey: (recoveryKey: string) => Promise<void>;
+      saveSecureBackupRecoveryKey: (revealRequestId: number) => Promise<CommandReceipt | null>;
+      confirmSecureBackupRecoveryKeySaved: (revealRequestId: number) => Promise<CommandReceipt>;
       retrySecureBackupInspection: () => Promise<CommandReceipt>;
       openSecureBackupDiagnostics: () => Promise<void>;
     }> = {}
@@ -78,7 +82,9 @@ describe("SessionVerificationGate interactions", () => {
       submitRecovery: async () => commandReceipt,
       recoverSecureBackup: async () => commandReceipt,
       bootstrapSecureBackup: async () => commandReceipt,
-      chooseSecureBackupDestination: async () => "/tmp/recovery-key.txt",
+      copyRecoveryKey: async () => undefined,
+      saveSecureBackupRecoveryKey: async () => commandReceipt,
+      confirmSecureBackupRecoveryKeySaved: async () => commandReceipt,
       retrySecureBackupInspection: async () => commandReceipt,
       openSecureBackupDiagnostics: async () => undefined,
       ...overrides
@@ -722,45 +728,33 @@ describe("SessionVerificationGate interactions", () => {
     expect(screen.queryByRole("button", { name: "Set up secure backup" })).toBeNull();
   });
 
-  test("submits setup passphrase and native destination selection without retaining either value", async () => {
+  test("creates the secure backup without choosing a file destination and clears the passphrase", async () => {
     const snapshot = secureBackupSnapshot(
       await createDesktopApiFixture().getSnapshot(),
       { kind: "setupRequired" }
     );
     const bootstrapSecureBackup = vi.fn(async () => commandReceipt);
-    const chooseSecureBackupDestination = vi.fn(async () => "/tmp/recovery-key.txt");
 
     render(
       <SessionVerificationGate
         snapshot={snapshot}
         onReceipt={async () => undefined}
         onSignOut={() => undefined}
-        operations={secureBackupOperations(snapshot, {
-          bootstrapSecureBackup,
-          chooseSecureBackupDestination
-        })}
+        operations={secureBackupOperations(snapshot, { bootstrapSecureBackup })}
       />
     );
 
+    expect(screen.getByText(/shown on screen/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /destination/i })).toBeNull();
+    expect(screen.queryByText(/destination/i)).toBeNull();
     const passphrase = screen.getByLabelText("Secure backup passphrase") as HTMLInputElement;
-    expect(screen.queryByLabelText("Recovery key destination")).toBeNull();
-    expect(screen.getByText("No recovery key destination selected.")).toBeTruthy();
     fireEvent.change(passphrase, { target: { value: "synthetic-passphrase" } });
-    fireEvent.click(screen.getByRole("button", { name: "Choose recovery key destination" }));
-
-    await vi.waitFor(() => expect(chooseSecureBackupDestination).toHaveBeenCalledTimes(1));
-    await vi.waitFor(() =>
-      expect(screen.getByText("Recovery key destination selected.")).toBeTruthy()
-    );
-    expect(screen.queryByText("/tmp/recovery-key.txt")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Set up secure backup" }));
 
     await vi.waitFor(() =>
-      expect(bootstrapSecureBackup).toHaveBeenCalledWith(
-        "synthetic-passphrase",
-        "/tmp/recovery-key.txt",
-        { kind: "initialSetup" }
-      )
+      expect(bootstrapSecureBackup).toHaveBeenCalledWith("synthetic-passphrase", {
+        kind: "initialSetup"
+      })
     );
     expect(passphrase.value).toBe("");
   });
@@ -771,17 +765,13 @@ describe("SessionVerificationGate interactions", () => {
       { kind: "explicitlyDisabledRequiresSetup" }
     );
     const bootstrapSecureBackup = vi.fn(async () => commandReceipt);
-    const chooseSecureBackupDestination = vi.fn(async () => "/tmp/reenable-recovery-key.txt");
 
     const renderGate = (nextSnapshot = snapshot) => (
       <SessionVerificationGate
         snapshot={nextSnapshot}
         onReceipt={async () => undefined}
         onSignOut={() => undefined}
-        operations={secureBackupOperations(nextSnapshot, {
-          bootstrapSecureBackup,
-          chooseSecureBackupDestination
-        })}
+        operations={secureBackupOperations(nextSnapshot, { bootstrapSecureBackup })}
       />
     );
     const { rerender } = render(renderGate());
@@ -791,12 +781,6 @@ describe("SessionVerificationGate interactions", () => {
     let dialog = screen.getByRole("region", { name: "Re-enable secure backup" });
     expect(dialog).toBeTruthy();
     expect(bootstrapSecureBackup).not.toHaveBeenCalled();
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Choose recovery key destination" })
-    );
-    await vi.waitFor(() =>
-      expect(within(dialog).getByText("Recovery key destination selected.")).toBeTruthy()
-    );
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("region", { name: "Re-enable secure backup" })).toBeNull();
     expect(bootstrapSecureBackup).not.toHaveBeenCalled();
@@ -808,30 +792,151 @@ describe("SessionVerificationGate interactions", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Re-enable secure backup" }));
     dialog = screen.getByRole("region", { name: "Re-enable secure backup" });
-    expect(within(dialog).getByText("No recovery key destination selected.")).toBeTruthy();
+    expect(within(dialog).queryByRole("button", { name: /destination/i })).toBeNull();
     const passphrase = within(dialog).getByLabelText(
       "Secure backup passphrase"
     ) as HTMLInputElement;
     fireEvent.change(passphrase, { target: { value: "reenable-passphrase" } });
-    expect(within(dialog).queryByLabelText("Recovery key destination")).toBeNull();
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Choose recovery key destination" })
-    );
-    await vi.waitFor(() => expect(chooseSecureBackupDestination).toHaveBeenCalledTimes(2));
-    await vi.waitFor(() =>
-      expect(within(dialog).getByText("Recovery key destination selected.")).toBeTruthy()
-    );
-    expect(within(dialog).queryByText("/tmp/reenable-recovery-key.txt")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Confirm re-enable" }));
 
     await vi.waitFor(() =>
-      expect(bootstrapSecureBackup).toHaveBeenCalledWith(
-        "reenable-passphrase",
-        "/tmp/reenable-recovery-key.txt",
-        { kind: "reenable", confirmed: true }
-      )
+      expect(bootstrapSecureBackup).toHaveBeenCalledWith("reenable-passphrase", {
+        kind: "reenable",
+        confirmed: true
+      })
     );
     expect(passphrase.value).toBe("");
+  });
+
+  function revealSnapshot(
+    snapshot: DesktopSnapshot,
+    delivery: RecoveryKeyDeliveryState = { kind: "notWritten" }
+  ): DesktopSnapshot {
+    const revealed = secureBackupSnapshot(snapshot, { kind: "recoveryKeyDeliveryRequired" });
+    revealed.state.domain.e2ee_trust.key_management.secure_backup_setup = {
+      kind: "recoveryKeyReady",
+      request_id: 41,
+      recovery_key: SYNTHETIC_RECOVERY_KEY,
+      delivery
+    };
+    return revealed;
+  }
+
+  test("shows the recovery key on screen; copy and save never advance the gate", async () => {
+    const snapshot = revealSnapshot(await createDesktopApiFixture().getSnapshot());
+    const bootstrapSecureBackup = vi.fn(async () => commandReceipt);
+    const copyRecoveryKey = vi.fn(async () => undefined);
+    const saveSecureBackupRecoveryKey = vi.fn(async () => commandReceipt);
+    const confirmSecureBackupRecoveryKeySaved = vi.fn(async () => commandReceipt);
+    const renderGate = (nextSnapshot: DesktopSnapshot) => (
+      <SessionVerificationGate
+        snapshot={nextSnapshot}
+        onReceipt={async () => undefined}
+        onSignOut={() => undefined}
+        operations={secureBackupOperations(nextSnapshot, {
+          bootstrapSecureBackup,
+          copyRecoveryKey,
+          saveSecureBackupRecoveryKey,
+          confirmSecureBackupRecoveryKeySaved
+        })}
+      />
+    );
+    const { rerender } = render(renderGate(snapshot));
+
+    const reveal = screen.getByRole("region", { name: "Your recovery key" });
+    const keyText = within(reveal).getByText(SYNTHETIC_RECOVERY_KEY);
+    expect(keyText.tagName).toBe("CODE");
+    expect(keyText.className).toContain("recovery-key-value");
+    // The setup form is replaced while a key is revealed.
+    expect(screen.queryByRole("button", { name: "Set up secure backup" })).toBeNull();
+    expect(screen.queryByLabelText("Secure backup passphrase")).toBeNull();
+
+    fireEvent.click(within(reveal).getByRole("button", { name: "Copy" }));
+    await vi.waitFor(() => expect(copyRecoveryKey).toHaveBeenCalledWith(SYNTHETIC_RECOVERY_KEY));
+    await vi.waitFor(() => expect(within(reveal).getByText("Copied")).toBeTruthy());
+
+    fireEvent.click(within(reveal).getByRole("button", { name: "Save to file…" }));
+    await vi.waitFor(() => expect(saveSecureBackupRecoveryKey).toHaveBeenCalledWith(41));
+
+    expect(confirmSecureBackupRecoveryKeySaved).not.toHaveBeenCalled();
+    expect(bootstrapSecureBackup).not.toHaveBeenCalled();
+    expect(screen.getByText(SYNTHETIC_RECOVERY_KEY)).toBeTruthy();
+
+    // A saved file is reported, but the key stays revealed until confirmation.
+    rerender(renderGate(revealSnapshot(structuredClone(snapshot), { kind: "written" })));
+    expect(screen.getByText("Recovery key saved to file.")).toBeTruthy();
+    expect(screen.getByText(SYNTHETIC_RECOVERY_KEY)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "I saved the recovery key" }));
+    await vi.waitFor(() => expect(confirmSecureBackupRecoveryKeySaved).toHaveBeenCalledWith(41));
+
+    // Rust drops the key on confirmation; the gate renders nothing of it.
+    const confirmed = secureBackupSnapshot(structuredClone(snapshot), { kind: "checking" });
+    confirmed.state.domain.e2ee_trust.key_management.secure_backup_setup = {
+      kind: "enabled",
+      request_id: 41
+    };
+    rerender(renderGate(confirmed));
+    expect(screen.queryByText(SYNTHETIC_RECOVERY_KEY)).toBeNull();
+    expect(screen.queryByRole("region", { name: "Your recovery key" })).toBeNull();
+  });
+
+  test("reports copy and save-to-file failures without leaving the reveal", async () => {
+    const snapshot = revealSnapshot(await createDesktopApiFixture().getSnapshot());
+    const copyRecoveryKey = vi.fn(async () => {
+      throw new Error("clipboard unavailable");
+    });
+    const confirmSecureBackupRecoveryKeySaved = vi.fn(async () => commandReceipt);
+    const renderGate = (nextSnapshot: DesktopSnapshot) => (
+      <SessionVerificationGate
+        snapshot={nextSnapshot}
+        onReceipt={async () => undefined}
+        onSignOut={() => undefined}
+        operations={secureBackupOperations(nextSnapshot, {
+          copyRecoveryKey,
+          confirmSecureBackupRecoveryKeySaved
+        })}
+      />
+    );
+    const { rerender } = render(renderGate(snapshot));
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await vi.waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("Could not copy")
+    );
+
+    rerender(renderGate(revealSnapshot(structuredClone(snapshot), { kind: "writeFailed" })));
+    expect(
+      screen.getAllByRole("alert").some((alert) =>
+        alert.textContent?.includes("Could not save the recovery key to a file")
+      )
+    ).toBe(true);
+    expect(screen.getByText(SYNTHETIC_RECOVERY_KEY)).toBeTruthy();
+    expect(confirmSecureBackupRecoveryKeySaved).not.toHaveBeenCalled();
+  });
+
+  test("re-shows the recovery key after an interrupted reveal without a passphrase or file", async () => {
+    const snapshot = secureBackupSnapshot(
+      await createDesktopApiFixture().getSnapshot(),
+      { kind: "recoveryKeyDeliveryRequired" }
+    );
+    const bootstrapSecureBackup = vi.fn(async () => commandReceipt);
+
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onReceipt={async () => undefined}
+        onSignOut={() => undefined}
+        operations={secureBackupOperations(snapshot, { bootstrapSecureBackup })}
+      />
+    );
+
+    expect(screen.getByText("Save the recovery key — copy it or save it to a file — before continuing.")).toBeTruthy();
+    expect(screen.queryByLabelText("Secure backup passphrase")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show recovery key" }));
+    await vi.waitFor(() =>
+      expect(bootstrapSecureBackup).toHaveBeenCalledWith(null, { kind: "initialSetup" })
+    );
   });
 
   test("renders typed upload progress without exposing a raw count or error", async () => {

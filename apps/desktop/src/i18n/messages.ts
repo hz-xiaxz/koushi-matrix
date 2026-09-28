@@ -987,16 +987,22 @@ export type MessageId =
   | "gate.secureBackupSetupCopy"
   | "gate.secureBackupPassphrase"
   | "gate.secureBackupRecoveryKeyDestination"
-  | "gate.secureBackupChooseDestination"
-  | "gate.secureBackupDestinationSelected"
-  | "gate.secureBackupDestinationNotSelected"
-  | "gate.secureBackupDestinationSelectionFailed"
+  | "gate.secureBackupRecoveryKeyTitle"
+  | "gate.secureBackupRecoveryKeyCopy"
+  | "gate.secureBackupCopyRecoveryKey"
+  | "gate.secureBackupRecoveryKeyCopied"
+  | "gate.secureBackupRecoveryKeyCopyFailed"
+  | "gate.secureBackupSaveRecoveryKeyToFile"
+  | "gate.secureBackupRecoveryKeySavedToFile"
+  | "gate.secureBackupRecoveryKeySaveFailed"
+  | "gate.secureBackupShowRecoveryKey"
   | "gate.secureBackupSetup"
   | "gate.secureBackupExplicitDisabledTitle"
   | "gate.secureBackupExplicitDisabledCopy"
   | "gate.secureBackupReenable"
   | "gate.secureBackupReenableConfirm"
   | "gate.secureBackupCreating"
+  | "gate.secureBackupDeliveryTitle"
   | "gate.secureBackupDeliveryRequired"
   | "gate.secureBackupUploading"
   | "gate.secureBackupPendingZero"
@@ -2645,20 +2651,26 @@ const en: Catalog = {
   "gate.secureBackupRecoveryKey": "Secure backup recovery key",
   "gate.secureBackupRecover": "Recover secure backup",
   "gate.secureBackupSetupTitle": "Set up secure backup",
-  "gate.secureBackupSetupCopy": "Create and protect a Secure Backup before encrypted messaging is available. Save the recovery key to a secure destination.",
+  "gate.secureBackupSetupCopy": "Create and protect a Secure Backup before encrypted messaging is available. Your recovery key will be shown on screen so you can copy it or save it to a file.",
   "gate.secureBackupPassphrase": "Secure backup passphrase",
   "gate.secureBackupRecoveryKeyDestination": "Recovery key destination",
-  "gate.secureBackupChooseDestination": "Choose recovery key destination",
-  "gate.secureBackupDestinationSelected": "Recovery key destination selected.",
-  "gate.secureBackupDestinationNotSelected": "No recovery key destination selected.",
-  "gate.secureBackupDestinationSelectionFailed": "Could not open the recovery key destination picker. Try again.",
+  "gate.secureBackupRecoveryKeyTitle": "Your recovery key",
+  "gate.secureBackupRecoveryKeyCopy": "Store this recovery key somewhere safe, such as a password manager. You need it to read encrypted messages on a new device or after signing out.",
+  "gate.secureBackupCopyRecoveryKey": "Copy",
+  "gate.secureBackupRecoveryKeyCopied": "Copied",
+  "gate.secureBackupRecoveryKeyCopyFailed": "Could not copy the recovery key. Select it and copy it manually.",
+  "gate.secureBackupSaveRecoveryKeyToFile": "Save to file…",
+  "gate.secureBackupRecoveryKeySavedToFile": "Recovery key saved to file.",
+  "gate.secureBackupRecoveryKeySaveFailed": "Could not save the recovery key to a file. Choose a new file name and try again.",
+  "gate.secureBackupShowRecoveryKey": "Show recovery key",
   "gate.secureBackupSetup": "Set up secure backup",
   "gate.secureBackupExplicitDisabledTitle": "Secure backup was disabled",
   "gate.secureBackupExplicitDisabledCopy": "Re-enabling Secure Backup changes this account-wide setting and affects other Matrix clients signed in to this account. Confirm only if you want those clients to use the updated backup.",
   "gate.secureBackupReenable": "Re-enable secure backup",
   "gate.secureBackupReenableConfirm": "Confirm re-enable",
   "gate.secureBackupCreating": "Creating secure backup…",
-  "gate.secureBackupDeliveryRequired": "Save the recovery key before continuing.",
+  "gate.secureBackupDeliveryTitle": "Save your recovery key",
+  "gate.secureBackupDeliveryRequired": "Save the recovery key — copy it or save it to a file — before continuing.",
   "gate.secureBackupUploading": "Uploading existing encrypted keys…",
   "gate.secureBackupPendingZero": "No encrypted keys remain to upload.",
   "gate.secureBackupPendingOne": "Uploading existing encrypted keys: 1 remaining.",
@@ -4191,20 +4203,26 @@ const ja: Catalog = {
   "gate.secureBackupRecoveryKey": "安全なバックアップのリカバリーキー",
   "gate.secureBackupRecover": "安全なバックアップを復旧",
   "gate.secureBackupSetupTitle": "安全なバックアップを設定",
-  "gate.secureBackupSetupCopy": "暗号化メッセージを利用する前に、安全なバックアップを作成して保護してください。リカバリーキーを安全な保存先に保存します。",
+  "gate.secureBackupSetupCopy": "暗号化メッセージを利用する前に、安全なバックアップを作成して保護してください。リカバリーキーは画面に表示されるので、コピーするかファイルに保存できます。",
   "gate.secureBackupPassphrase": "安全なバックアップのパスフレーズ",
   "gate.secureBackupRecoveryKeyDestination": "リカバリーキーの保存先",
-  "gate.secureBackupChooseDestination": "リカバリーキーの保存先を選択",
-  "gate.secureBackupDestinationSelected": "リカバリーキーの保存先を選択しました。",
-  "gate.secureBackupDestinationNotSelected": "リカバリーキーの保存先が選択されていません。",
-  "gate.secureBackupDestinationSelectionFailed": "リカバリーキーの保存先を開けませんでした。もう一度お試しください。",
+  "gate.secureBackupRecoveryKeyTitle": "リカバリーキー",
+  "gate.secureBackupRecoveryKeyCopy": "このリカバリーキーはパスワードマネージャーなどの安全な場所に保管してください。新しいデバイスやサインアウト後に暗号化メッセージを読むために必要です。",
+  "gate.secureBackupCopyRecoveryKey": "コピー",
+  "gate.secureBackupRecoveryKeyCopied": "コピーしました",
+  "gate.secureBackupRecoveryKeyCopyFailed": "リカバリーキーをコピーできませんでした。選択して手動でコピーしてください。",
+  "gate.secureBackupSaveRecoveryKeyToFile": "ファイルに保存…",
+  "gate.secureBackupRecoveryKeySavedToFile": "リカバリーキーをファイルに保存しました。",
+  "gate.secureBackupRecoveryKeySaveFailed": "リカバリーキーをファイルに保存できませんでした。新しいファイル名を選んで、もう一度お試しください。",
+  "gate.secureBackupShowRecoveryKey": "リカバリーキーを表示",
   "gate.secureBackupSetup": "安全なバックアップを設定",
   "gate.secureBackupExplicitDisabledTitle": "安全なバックアップが無効になっています",
   "gate.secureBackupExplicitDisabledCopy": "安全なバックアップを再有効化すると、このアカウント全体の設定が変わり、このアカウントでサインインしている他の Matrix クライアントにも影響します。これらのクライアントで更新後のバックアップを使う場合のみ確認してください。",
   "gate.secureBackupReenable": "安全なバックアップを再有効化",
   "gate.secureBackupReenableConfirm": "再有効化を確認",
   "gate.secureBackupCreating": "安全なバックアップを作成中…",
-  "gate.secureBackupDeliveryRequired": "続行する前にリカバリーキーを保存してください。",
+  "gate.secureBackupDeliveryTitle": "リカバリーキーを保存してください",
+  "gate.secureBackupDeliveryRequired": "続行する前に、リカバリーキーをコピーするかファイルに保存してください。",
   "gate.secureBackupUploading": "既存の暗号化キーをアップロード中…",
   "gate.secureBackupPendingZero": "アップロードする暗号化キーは残っていません。",
   "gate.secureBackupPendingOne": "既存の暗号化キーをアップロード中: 残り 1 件。",

@@ -168,11 +168,12 @@ export function ContextualRightPanel({
   onConfirmSasVerification,
   onChooseRoomKeyExportDestination = async () => null,
   onChooseRoomKeyImportSource = async () => null,
-  onChooseSecureBackupDestination = async () => null,
   onExportRoomKeys,
   onImportRoomKeys,
   onBootstrapSecureBackup,
   onChangeSecureBackupPassphrase,
+  onSaveSecureBackupRecoveryKey,
+  onConfirmSecureBackupRecoveryKeySaved,
   onEnableKeyBackup,
   onResetIdentity,
   onCancelIdentityReset,
@@ -311,19 +312,12 @@ export function ContextualRightPanel({
   onConfirmSasVerification: (flowId: number) => void;
   onChooseRoomKeyExportDestination?: () => Promise<string | null>;
   onChooseRoomKeyImportSource?: () => Promise<string | null>;
-  onChooseSecureBackupDestination?: () => Promise<string | null>;
   onExportRoomKeys: (destinationPath: string, passphrase: string) => void;
   onImportRoomKeys: (sourcePath: string, passphrase: string) => void;
-  onBootstrapSecureBackup: (
-    passphrase: string | null,
-    recoveryKeyDestinationPath: string | null,
-    intent: SecureBackupSetupIntent
-  ) => void;
-  onChangeSecureBackupPassphrase: (
-    oldSecret: string,
-    newPassphrase: string,
-    recoveryKeyDestinationPath: string | null
-  ) => void;
+  onBootstrapSecureBackup: (passphrase: string | null, intent: SecureBackupSetupIntent) => void;
+  onChangeSecureBackupPassphrase: (oldSecret: string, newPassphrase: string) => void;
+  onSaveSecureBackupRecoveryKey?: (revealRequestId: number) => Promise<void>;
+  onConfirmSecureBackupRecoveryKeySaved?: (revealRequestId: number) => void | Promise<void>;
   onEnableKeyBackup: () => void;
   onResetIdentity: () => void;
   onCancelIdentityReset: (flowId: number) => void;
@@ -559,7 +553,8 @@ export function ContextualRightPanel({
           onConfirmSasVerification={onConfirmSasVerification}
           onChooseRoomKeyExportDestination={onChooseRoomKeyExportDestination}
           onChooseRoomKeyImportSource={onChooseRoomKeyImportSource}
-          onChooseSecureBackupDestination={onChooseSecureBackupDestination}
+          onSaveSecureBackupRecoveryKey={onSaveSecureBackupRecoveryKey}
+          onConfirmSecureBackupRecoveryKeySaved={onConfirmSecureBackupRecoveryKeySaved}
           onExportRoomKeys={onExportRoomKeys}
           onImportRoomKeys={onImportRoomKeys}
           onBootstrapSecureBackup={onBootstrapSecureBackup}

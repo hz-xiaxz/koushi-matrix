@@ -335,6 +335,11 @@ conflict is being resolved.
 - Secrets MUST NOT be logged, sent to telemetry, written to crash reports,
   printed in test output, checked into fixtures, or copied into screenshots.
   Credential/key material must not be returned to the webview after entry.
+  The single exception is a Secure Backup recovery key the SDK just generated
+  or re-exported for the user to record: it may cross only as the live
+  on-screen reveal state defined in
+  [engineering rule 11](docs/policies/engineering-rules.md), never as entered
+  input echoed back.
   Decrypted message bodies and attachment filenames may cross to the webview
   only as current visible UI state; they must not become logs, diagnostics,
   fixtures, screenshots, or secondary first-party stores.
@@ -361,7 +366,8 @@ conflict is being resolved.
 - E2EE trust, verification, cross-signing, key-backup, and identity-reset
   state may carry only app-owned DTOs and private-data-free failure kinds.
   Private keys, recovery secrets, room keys, key-backup secrets, and raw SDK
-  errors must never cross the command/event/snapshot boundary. Debug output and
+  errors must never cross the command/event/snapshot boundary, except the
+  generated recovery key in the Secure Backup reveal state above. Debug output and
   QA tokens for these flows must redact account keys, verification target user
   and device IDs, and backup version identifiers.
 - Manual room-key file export/import MUST use the Matrix key-export file

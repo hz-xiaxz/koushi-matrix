@@ -100,6 +100,8 @@ impl CoreCommand {
                 | AccountCommand::RecoverSecureBackup { request_id, .. }
                 | AccountCommand::RetrySecureBackupInspection { request_id }
                 | AccountCommand::ChangeSecureBackupPassphrase { request_id, .. }
+                | AccountCommand::SaveSecureBackupRecoveryKey { request_id, .. }
+                | AccountCommand::ConfirmSecureBackupRecoveryKeySaved { request_id, .. }
                 | AccountCommand::ProbeLocalEncryptionHealth { request_id }
                 | AccountCommand::ResetLocalData { request_id }
                 | AccountCommand::StartDeviceCleanup { request_id }
@@ -245,8 +247,9 @@ mod test_support;
 mod timeline;
 
 pub use account::{
-    AccountCommand, AccountNotificationsRequest, HistoryExportLabels, HistoryExportRequest, RoomKeyExportRequest, RoomKeyImportRequest,
-    SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
+    AccountCommand, AccountNotificationsRequest, HistoryExportLabels, HistoryExportRequest,
+    RoomKeyExportRequest, RoomKeyImportRequest, SecureBackupPassphraseChangeRequest,
+    SecureBackupSetupRequest, SetAvatarRequest,
 };
 pub use app::{AppCommand, EventNavigationMissingTargetPolicy};
 pub use room::{CreateRoomOptions, CreateRoomParentSpace, CreateRoomVisibility, RoomCommand};

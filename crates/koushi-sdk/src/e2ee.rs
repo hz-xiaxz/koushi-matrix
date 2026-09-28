@@ -1202,9 +1202,21 @@ pub struct RoomKeyImportSummary {
     pub total_count: u64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Result of secure-backup setup, re-export, or passphrase change: the
+/// recovery key for on-screen reveal (#927). Zeroized on drop; `Debug` is
+/// redacted.
+#[derive(Clone, Eq, PartialEq)]
 pub struct SecureBackupSetupSummary {
-    pub recovery_key_written: bool,
+    pub recovery_key: Zeroizing<String>,
+}
+
+impl fmt::Debug for SecureBackupSetupSummary {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SecureBackupSetupSummary")
+            .field("recovery_key", &"RecoveryKey(..)")
+            .finish()
+    }
 }
 
 #[derive(Clone, Eq, Error, PartialEq)]
@@ -1727,10 +1739,12 @@ pub async fn import_room_keys_from_file(
     })
 }
 
+/// Creates the account-wide Secure Backup and returns the generated recovery
+/// key for on-screen reveal. Saving the key to a file is a separate, optional
+/// step ([`write_recovery_key_material`]).
 pub async fn bootstrap_secure_backup(
     session: &MatrixClientSession,
     passphrase: Option<&AuthSecret>,
-    recovery_key_destination_path: Option<PathBuf>,
 ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
     let recovery = session.client().encryption().recovery();
     let recovery_key = match passphrase {
@@ -1743,10 +1757,8 @@ pub async fn bootstrap_secure_backup(
         }
         None => recovery.enable().wait_for_backups_to_upload().await?,
     };
-    let recovery_key_written =
-        write_recovery_key_if_requested(recovery_key, recovery_key_destination_path)?;
     Ok(SecureBackupSetupSummary {
-        recovery_key_written,
+        recovery_key: Zeroizing::new(recovery_key),
     })
 }
 
@@ -1754,7 +1766,6 @@ pub async fn change_secure_backup_passphrase(
     session: &MatrixClientSession,
     old_secret: &AuthSecret,
     new_passphrase: &AuthSecret,
-    recovery_key_destination_path: Option<PathBuf>,
 ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
     let recovery_key = session
         .client()
@@ -1763,30 +1774,18 @@ pub async fn change_secure_backup_passphrase(
         .recover_and_reset(old_secret.expose_secret())
         .with_passphrase(new_passphrase.expose_secret())
         .await?;
-    let recovery_key_written =
-        write_recovery_key_if_requested(recovery_key, recovery_key_destination_path)?;
     Ok(SecureBackupSetupSummary {
-        recovery_key_written,
+        recovery_key: Zeroizing::new(recovery_key),
     })
 }
 
-fn write_recovery_key_if_requested(
-    recovery_key: String,
-    destination_path: Option<PathBuf>,
-) -> Result<bool, E2eeTrustError> {
-    let recovery_key = Zeroizing::new(recovery_key);
-    write_recovery_key_material(&recovery_key, destination_path)
-}
-
-fn write_recovery_key_material(
+/// Writes recovery-key material to a user-selected native destination as a
+/// new 0600 file. Refuses to follow or overwrite an existing path.
+pub fn write_recovery_key_material(
     recovery_key: &str,
-    destination_path: Option<PathBuf>,
-) -> Result<bool, E2eeTrustError> {
+    destination_path: PathBuf,
+) -> Result<(), E2eeTrustError> {
     use std::io::Write as _;
-
-    let Some(destination_path) = destination_path else {
-        return Ok(false);
-    };
 
     let mut options = std::fs::OpenOptions::new();
     // The native save dialog is expected to return a new artifact path. Refuse
@@ -1811,7 +1810,7 @@ fn write_recovery_key_material(
         let _ = std::fs::remove_file(&destination_path);
         return Err(E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed);
     }
-    Ok(true)
+    Ok(())
 }
 
 pub async fn reset_identity(
@@ -2737,23 +2736,24 @@ impl MatrixClientSession {
     pub async fn setup_secure_backup(
         &self,
         passphrase: Option<&AuthSecret>,
-        recovery_key_destination_path: Option<PathBuf>,
     ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
-        self.setup_secure_backup_with_confirmation(passphrase, recovery_key_destination_path, false)
+        self.setup_secure_backup_with_confirmation(passphrase, false)
             .await
     }
     pub async fn reenable_secure_backup(
         &self,
         passphrase: Option<&AuthSecret>,
-        recovery_key_destination_path: Option<PathBuf>,
     ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
-        self.setup_secure_backup_with_confirmation(passphrase, recovery_key_destination_path, true)
+        self.setup_secure_backup_with_confirmation(passphrase, true)
             .await
     }
+    /// Creates (or re-exports) the recovery key for on-screen reveal. The
+    /// persisted delivery-pending marker stays set until the user explicitly
+    /// confirms the key was saved ([`Self::confirm_recovery_key_delivered`]),
+    /// so an interrupted reveal re-enters `RecoveryKeyDeliveryRequired`.
     async fn setup_secure_backup_with_confirmation(
         &self,
         passphrase: Option<&AuthSecret>,
-        recovery_key_destination_path: Option<PathBuf>,
         explicit_reenable_confirmed: bool,
     ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
         let inspection = self.inspect_secure_backup().await?;
@@ -2776,14 +2776,8 @@ impl MatrixClientSession {
                         .local_recovery_key()
                         .await?
                         .ok_or(E2eeTrustError::SecureBackupInspectionInconclusive)?;
-                    let summary = SecureBackupSetupSummary {
-                        recovery_key_written: write_recovery_key_material(
-                            &recovery_key,
-                            recovery_key_destination_path,
-                        )?,
-                    };
-                    self.set_recovery_key_delivery_pending(false).await?;
-                    return Ok(summary);
+                    self.set_recovery_key_delivery_pending(true).await?;
+                    return Ok(SecureBackupSetupSummary { recovery_key });
                 }
                 return Err(E2eeTrustError::SecureBackupAlreadyExists);
             }
@@ -2793,11 +2787,14 @@ impl MatrixClientSession {
         }
 
         self.set_recovery_key_delivery_pending(true).await?;
-        let summary =
-            bootstrap_secure_backup(self, passphrase, recovery_key_destination_path).await?;
-        self.set_recovery_key_delivery_pending(false).await?;
+        let summary = bootstrap_secure_backup(self, passphrase).await?;
         self.wait_for_secure_backup_steady_state().await?;
         Ok(summary)
+    }
+    /// Clears the persisted delivery-pending marker after the user's explicit
+    /// "I saved the recovery key" confirmation.
+    pub async fn confirm_recovery_key_delivered(&self) -> Result<(), E2eeTrustError> {
+        self.set_recovery_key_delivery_pending(false).await
     }
     async fn recovery_key_delivery_pending(&self) -> Result<bool, E2eeTrustError> {
         const KEY: &[u8] = b"koushi.secure_backup.recovery_key_delivery_pending.v1";
@@ -3894,7 +3891,11 @@ pub struct MatrixRoomKeyReceiveDiagnostics {
 pub async fn incoming_verification_request_protection_counters(
     session: &MatrixClientSession,
 ) -> IncomingVerificationRequestProtectionCounters {
-    session.client().encryption().incoming_verification_request_protection_counters().await
+    session
+        .client()
+        .encryption()
+        .incoming_verification_request_protection_counters()
+        .await
 }
 
 /// Snapshot the privacy-safe receive-side room-key diagnostics for a session.

@@ -134,6 +134,10 @@ impl fmt::Debug for RoomKeyImportRequest {
 #[derive(Clone, Eq, PartialEq)]
 pub struct SecureBackupSetupRequest {
     pub passphrase: Option<koushi_state::AuthSecret>,
+    /// Session bootstrap only: whether a native destination was registered.
+    /// `BootstrapSecureBackup` reveals the key on screen instead (#927) and
+    /// never consumes a destination; it saves through
+    /// `SaveSecureBackupRecoveryKey`.
     pub recovery_key_destination_requested: bool,
     pub intent: koushi_state::SecureBackupSetupIntent,
 }
@@ -156,17 +160,12 @@ impl fmt::Debug for SecureBackupSetupRequest {
 pub struct SecureBackupPassphraseChangeRequest {
     pub old_secret: koushi_state::AuthSecret,
     pub new_passphrase: koushi_state::AuthSecret,
-    pub recovery_key_destination_requested: bool,
 }
 
 impl fmt::Debug for SecureBackupPassphraseChangeRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("SecureBackupPassphraseChangeRequest")
-            .field(
-                "has_recovery_key_destination",
-                &self.recovery_key_destination_requested,
-            )
             .field("old_secret", &"AuthSecret(..)")
             .field("new_passphrase", &"AuthSecret(..)")
             .finish()
@@ -363,6 +362,19 @@ pub enum AccountCommand {
     ChangeSecureBackupPassphrase {
         request_id: RequestId,
         request: SecureBackupPassphraseChangeRequest,
+    },
+    /// Optional "Save to file" for the revealed recovery key of the setup or
+    /// passphrase-change request `reveal_request_id`. Consumes one
+    /// `RecoveryKeyDestination` native artifact; never advances the gate.
+    SaveSecureBackupRecoveryKey {
+        request_id: RequestId,
+        reveal_request_id: u64,
+    },
+    /// Explicit "I saved the recovery key" confirmation for the revealed key
+    /// of `reveal_request_id`; the only way out of the reveal state.
+    ConfirmSecureBackupRecoveryKeySaved {
+        request_id: RequestId,
+        reveal_request_id: u64,
     },
     ProbeLocalEncryptionHealth {
         request_id: RequestId,
@@ -680,6 +692,22 @@ impl fmt::Debug for AccountCommand {
                 .debug_struct("ChangeSecureBackupPassphrase")
                 .field("request_id", request_id)
                 .field("request", request)
+                .finish(),
+            Self::SaveSecureBackupRecoveryKey {
+                request_id,
+                reveal_request_id,
+            } => formatter
+                .debug_struct("SaveSecureBackupRecoveryKey")
+                .field("request_id", request_id)
+                .field("reveal_request_id", reveal_request_id)
+                .finish(),
+            Self::ConfirmSecureBackupRecoveryKeySaved {
+                request_id,
+                reveal_request_id,
+            } => formatter
+                .debug_struct("ConfirmSecureBackupRecoveryKeySaved")
+                .field("request_id", request_id)
+                .field("reveal_request_id", reveal_request_id)
                 .finish(),
             Self::ProbeLocalEncryptionHealth { request_id } => formatter
                 .debug_struct("ProbeLocalEncryptionHealth")

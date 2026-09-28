@@ -20,6 +20,7 @@ mod avatar;
 mod basic_operation;
 mod directory;
 mod e2ee;
+mod history_export;
 mod invite_workflow;
 mod live_signals;
 mod local_encryption;
@@ -28,7 +29,6 @@ mod native_attention;
 mod navigation;
 mod profile;
 mod room;
-mod history_export;
 mod room_management;
 mod search;
 mod session;
@@ -373,11 +373,8 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         }
         AppAction::SecureBackupRecoveryKeyReady {
             request_id,
-            delivery,
-        } => e2ee::handle_secure_backup_recovery_key_ready(state, request_id, delivery),
-        AppAction::SecureBackupSetupEnabled { request_id } => {
-            e2ee::handle_secure_backup_setup_enabled(state, request_id)
-        }
+            recovery_key,
+        } => e2ee::handle_secure_backup_recovery_key_ready(state, request_id, recovery_key),
         AppAction::SecureBackupSetupFailed { request_id, kind } => {
             e2ee::handle_secure_backup_setup_failed(state, request_id, kind)
         }
@@ -386,8 +383,15 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         }
         AppAction::SecureBackupPassphraseChanged {
             request_id,
-            delivery,
-        } => e2ee::handle_secure_backup_passphrase_changed(state, request_id, delivery),
+            recovery_key,
+        } => e2ee::handle_secure_backup_passphrase_changed(state, request_id, recovery_key),
+        AppAction::SecureBackupRecoveryKeySaved {
+            reveal_request_id,
+            written,
+        } => e2ee::handle_secure_backup_recovery_key_saved(state, reveal_request_id, written),
+        AppAction::SecureBackupRecoveryKeyConfirmed { reveal_request_id } => {
+            e2ee::handle_secure_backup_recovery_key_confirmed(state, reveal_request_id)
+        }
         AppAction::SecureBackupPassphraseChangeFailed { request_id, kind } => {
             e2ee::handle_secure_backup_passphrase_change_failed(state, request_id, kind)
         }
@@ -1498,7 +1502,9 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             transaction_id,
             target,
             draft_revision,
-        } => submission::handle_queued(state, submission_id, transaction_id, target, draft_revision),
+        } => {
+            submission::handle_queued(state, submission_id, transaction_id, target, draft_revision)
+        }
         AppAction::ComposerSubmissionSettled {
             submission_id,
             transaction_id,

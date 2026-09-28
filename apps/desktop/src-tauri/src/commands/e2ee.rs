@@ -123,32 +123,54 @@ pub async fn enable_key_backup(
 #[tauri::command]
 pub async fn bootstrap_secure_backup(
     passphrase: Option<String>,
-    recovery_key_destination_path: Option<String>,
     intent: koushi_state::SecureBackupSetupIntent,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    let destination_requested = recovery_key_destination_path.is_some();
-    let command = build_bootstrap_secure_backup_command(
+    let command =
+        build_bootstrap_secure_backup_command(request_id, passphrase.map(AuthSecret::new), intent);
+    let admission = submit_core_command_with_admission(state.inner(), command).await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(admission)
+}
+
+/// Optional "Save to file" for the recovery key currently revealed on screen
+/// (#927). Core writes its own held copy; the key never travels back from
+/// the WebView.
+#[tauri::command]
+pub async fn save_secure_backup_recovery_key(
+    reveal_request_id: u64,
+    recovery_key_destination_path: String,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id(state.inner()).await;
+    let admission = submit_core_command_with_native_artifact(
+        state.inner(),
         request_id,
-        passphrase.map(AuthSecret::new),
-        destination_requested,
-        intent,
-    );
-    let admission = match recovery_key_destination_path {
-        Some(path) => {
-            submit_core_command_with_native_artifact(
-                state.inner(),
-                request_id,
-                NativeArtifactKind::RecoveryKeyDestination,
-                path,
-                command,
-            )
-            .await?
-        }
-        None => submit_core_command_with_admission(state.inner(), command).await?,
-    };
+        NativeArtifactKind::RecoveryKeyDestination,
+        recovery_key_destination_path,
+        build_save_secure_backup_recovery_key_command(request_id, reveal_request_id),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(admission)
+}
+
+/// The explicit "I saved the recovery key" confirmation (#927).
+#[tauri::command]
+pub async fn confirm_secure_backup_recovery_key_saved(
+    reveal_request_id: u64,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id(state.inner()).await;
+    let admission = submit_core_command_with_admission(
+        state.inner(),
+        build_confirm_secure_backup_recovery_key_saved_command(request_id, reveal_request_id),
+    )
+    .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(admission)
 }
@@ -188,31 +210,16 @@ pub async fn retry_secure_backup_inspection(
 pub async fn change_secure_backup_passphrase(
     old_secret: String,
     new_passphrase: String,
-    recovery_key_destination_path: Option<String>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendCommandAdmission, String> {
     let request_id = next_request_id(state.inner()).await;
-    let destination_requested = recovery_key_destination_path.is_some();
     let command = build_change_secure_backup_passphrase_command(
         request_id,
         AuthSecret::new(old_secret),
         AuthSecret::new(new_passphrase),
-        destination_requested,
     );
-    let admission = match recovery_key_destination_path {
-        Some(path) => {
-            submit_core_command_with_native_artifact(
-                state.inner(),
-                request_id,
-                NativeArtifactKind::RecoveryKeyDestination,
-                path,
-                command,
-            )
-            .await?
-        }
-        None => submit_core_command_with_admission(state.inner(), command).await?,
-    };
+    let admission = submit_core_command_with_admission(state.inner(), command).await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(admission)
 }
@@ -392,16 +399,37 @@ pub(super) fn build_enable_key_backup_command(
 pub(super) fn build_bootstrap_secure_backup_command(
     request_id: koushi_protocol::RequestId,
     passphrase: Option<AuthSecret>,
-    recovery_key_destination_requested: bool,
     intent: koushi_state::SecureBackupSetupIntent,
 ) -> CoreCommand {
+    // #927: the recovery key is revealed on screen; setup never consumes a
+    // native destination (see `build_save_secure_backup_recovery_key_command`).
     CoreCommand::Account(AccountCommand::BootstrapSecureBackup {
         request_id,
         request: SecureBackupSetupRequest {
             passphrase,
-            recovery_key_destination_requested,
+            recovery_key_destination_requested: false,
             intent,
         },
+    })
+}
+
+pub(super) fn build_save_secure_backup_recovery_key_command(
+    request_id: koushi_protocol::RequestId,
+    reveal_request_id: u64,
+) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::SaveSecureBackupRecoveryKey {
+        request_id,
+        reveal_request_id,
+    })
+}
+
+pub(super) fn build_confirm_secure_backup_recovery_key_saved_command(
+    request_id: koushi_protocol::RequestId,
+    reveal_request_id: u64,
+) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::ConfirmSecureBackupRecoveryKeySaved {
+        request_id,
+        reveal_request_id,
     })
 }
 
@@ -425,14 +453,12 @@ pub(super) fn build_change_secure_backup_passphrase_command(
     request_id: koushi_protocol::RequestId,
     old_secret: AuthSecret,
     new_passphrase: AuthSecret,
-    recovery_key_destination_requested: bool,
 ) -> CoreCommand {
     CoreCommand::Account(AccountCommand::ChangeSecureBackupPassphrase {
         request_id,
         request: SecureBackupPassphraseChangeRequest {
             old_secret,
             new_passphrase,
-            recovery_key_destination_requested,
         },
     })
 }

@@ -194,14 +194,19 @@ export interface DesktopApi {
   retryHistoryExport(targetRequestId: number): Promise<HistoryExportStart>;
   bootstrapSecureBackup(
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null,
     intent: SecureBackupSetupIntent
   ): Promise<CommandAdmission>;
   changeSecureBackupPassphrase(
     oldSecret: string,
-    newPassphrase: string,
-    recoveryKeyDestinationPath: string | null
+    newPassphrase: string
   ): Promise<CommandAdmission>;
+  /** Optional "Save to file" for the revealed recovery key (#927). */
+  saveSecureBackupRecoveryKey(
+    revealRequestId: number,
+    recoveryKeyDestinationPath: string
+  ): Promise<CommandAdmission>;
+  /** Explicit "I saved the recovery key" confirmation (#927). */
+  confirmSecureBackupRecoveryKeySaved(revealRequestId: number): Promise<CommandAdmission>;
   acceptVerification(flowId: number): Promise<CommandAdmission>;
   startOwnUserSas(): Promise<CommandAdmission>;
   retryCurrentDeviceTrustDiscovery(): Promise<CommandAdmission>;

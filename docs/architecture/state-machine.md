@@ -396,7 +396,7 @@ stateDiagram-v2
   blocking.
 - `SecureBackupGateState` distinguishes an existing backup needing recovery,
   incomplete secure storage, setup required, explicitly disabled setup,
-  creation, native Recovery Key delivery, upload settlement, retrying,
+  creation, on-screen Recovery Key reveal, upload settlement, retrying,
   terminal blocking failure, and ready. Server existence, local enablement,
   recovery completeness, and upload health remain distinct SDK inspection
   facts and are not collapsed into a boolean.
@@ -437,6 +437,22 @@ stateDiagram-v2
   The SDK's fresh server/local/trust inspection remains authoritative and may
   still require confirmation. React renders catalog text, cancel sends no
   command, confirm sends the explicit typed intent, and Tauri only maps it.
+- Setup no longer requires a file destination (#927). A successful setup,
+  re-enable, or re-export keeps the persisted delivery-pending marker set,
+  projects `SecureBackupSetupState::RecoveryKeyReady { recovery_key }`, and
+  holds the gate in `RecoveryKeyDeliveryRequired` (encrypted admission
+  closed). Copy and the optional `SaveSecureBackupRecoveryKey` only update the
+  reveal's coarse delivery status; they never change the gate. A new setup
+  request is rejected while a key is revealed. Only
+  `ConfirmSecureBackupRecoveryKeySaved` for the matching reveal id leaves the
+  reveal: the reducer drops the key and moves the gate to `Checking`, and
+  AccountActor drops its copy, clears the persisted marker, and re-inspects.
+  A stale confirmation is a typed failed no-op. Logout, account switch, and
+  session teardown drop the key. After an interrupted reveal (restart), the
+  persisted marker re-enters `RecoveryKeyDeliveryRequired` without a key and
+  `InitialSetup` re-exports it. Passphrase change reveals its new key in
+  `SecureBackupPassphraseChangeState::Changed` with the same copy/save/confirm
+  rules, without touching the gate.
 
 ```mermaid
 stateDiagram-v2
@@ -445,6 +461,10 @@ stateDiagram-v2
     SetupRequired --> CreatingBackup: InitialSetup / project admission then route
     SetupRequired --> SetupRequired: Reenable(any) / failed-no-op, no actor effect
     CreatingBackup --> CreatingBackup: duplicate intent / failed-no-op, no actor effect
+    CreatingBackup --> RecoveryKeyDeliveryRequired: setup succeeded / reveal key on screen
+    RecoveryKeyDeliveryRequired --> RecoveryKeyDeliveryRequired: copy or save to file / reveal stays
+    RecoveryKeyDeliveryRequired --> Checking: ConfirmSecureBackupRecoveryKeySaved(reveal id) / drop key, clear marker, inspect
+    RecoveryKeyDeliveryRequired --> CreatingBackup: InitialSetup without a revealed key / re-export
 ```
 - A genuine missing cross-signing identity may enter mandatory bootstrap. An
   existing identity without a verified other device or usable recovery method

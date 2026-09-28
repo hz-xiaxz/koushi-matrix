@@ -18,13 +18,12 @@ use crate::state::{
     MentionCandidatesCompleteness, MentionCandidatesFailureKind, MentionSurface,
     NativeAttentionDispatchId, NativeAttentionSoundOutcome, NativeAttentionState,
     NavigationPreferenceUpdate, NavigationState, OperationFailureKind, OwnProfile, PinnedEvent,
-    PresenceKind, ProfileUpdateRequest, RecoveryKeyDeliveryState, RecoveryMethod,
-    RoomListFailureKind, RoomListFilter, RoomListProjection, RoomListSource, RoomMentionPermission,
-    RoomModerationAction, RoomPreferencesState, RoomSettingChange, RoomSettingsSnapshot,
-    RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability,
-    ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope, SessionInfo,
-    SessionStatusRefreshTrigger, SettingsPatch, SettingsValues, SpaceChildLinkOutcome,
-    SpaceChildSummary,
+    PresenceKind, ProfileUpdateRequest, RecoveryMethod, RoomListFailureKind, RoomListFilter,
+    RoomListProjection, RoomListSource, RoomMentionPermission, RoomModerationAction,
+    RoomPreferencesState, RoomSettingChange, RoomSettingsSnapshot, RoomSummary, RoomTagInfo,
+    RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability, ScheduledSendHandle,
+    ScheduledSendItem, SearchResult, SearchScope, SessionInfo, SessionStatusRefreshTrigger,
+    SettingsPatch, SettingsValues, SpaceChildLinkOutcome, SpaceChildSummary,
     SpaceMemberInviteOutcome, SpaceMemberRoleUpdateOutcome, SpaceMembersProjection, SpaceSummary,
     StagedUploadCompressionChoice, StagedUploadItem, StagedUploadOutputSelection,
     SyncLifecycleStatus, TimelineContinuityInspection, TimelineGapRepairFailureKind,
@@ -690,10 +689,7 @@ pub enum AppAction {
     },
     SecureBackupRecoveryKeyReady {
         request_id: u64,
-        delivery: RecoveryKeyDeliveryState,
-    },
-    SecureBackupSetupEnabled {
-        request_id: u64,
+        recovery_key: crate::state::RecoveryKeyMaterial,
     },
     SecureBackupSetupFailed {
         request_id: u64,
@@ -704,7 +700,18 @@ pub enum AppAction {
     },
     SecureBackupPassphraseChanged {
         request_id: u64,
-        delivery: RecoveryKeyDeliveryState,
+        recovery_key: crate::state::RecoveryKeyMaterial,
+    },
+    /// Settles the optional "Save to file" action for the revealed key whose
+    /// setup/passphrase-change request id is `reveal_request_id`.
+    SecureBackupRecoveryKeySaved {
+        reveal_request_id: u64,
+        written: bool,
+    },
+    /// The explicit "I saved the recovery key" confirmation. It is the only
+    /// transition that leaves the reveal state and drops the key.
+    SecureBackupRecoveryKeyConfirmed {
+        reveal_request_id: u64,
     },
     SecureBackupPassphraseChangeFailed {
         request_id: u64,

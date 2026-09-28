@@ -364,13 +364,27 @@ export class TauriDesktopApi implements DesktopApi {
 
   async bootstrapSecureBackup(
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null,
     intent: import("../domain/types").SecureBackupSetupIntent
   ): Promise<CommandAdmission> {
     return this.invokeCommand<CommandAdmission>("bootstrap_secure_backup", {
       passphrase,
-      recoveryKeyDestinationPath,
       intent
+    });
+  }
+
+  async saveSecureBackupRecoveryKey(
+    revealRequestId: number,
+    recoveryKeyDestinationPath: string
+  ): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("save_secure_backup_recovery_key", {
+      revealRequestId,
+      recoveryKeyDestinationPath
+    });
+  }
+
+  async confirmSecureBackupRecoveryKeySaved(revealRequestId: number): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("confirm_secure_backup_recovery_key_saved", {
+      revealRequestId
     });
   }
 
@@ -380,13 +394,11 @@ export class TauriDesktopApi implements DesktopApi {
 
   async changeSecureBackupPassphrase(
     oldSecret: string,
-    newPassphrase: string,
-    recoveryKeyDestinationPath: string | null
+    newPassphrase: string
   ): Promise<CommandAdmission> {
     return this.invokeCommand<CommandAdmission>("change_secure_backup_passphrase", {
       oldSecret,
-      newPassphrase,
-      recoveryKeyDestinationPath
+      newPassphrase
     });
   }
 
