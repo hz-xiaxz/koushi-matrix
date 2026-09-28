@@ -237,7 +237,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install Rust toolchain (1.96.0 + clippy)
+      - name: Install Rust toolchain (1.96.0)
         uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: clippy
@@ -377,7 +377,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install Rust toolchain (1.96.0 + clippy)
+      - name: Install Rust toolchain (1.96.0)
         uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: clippy
