@@ -466,6 +466,9 @@ fn send_text_sets_pending_transaction_and_emits_send_effect() {
             AppEffect::EmitUiEvent(UiEvent::TimelineChanged {
                 room_id: "room-a".to_owned(),
             }),
+            AppEffect::CancelPendingMainTimelineNavigation {
+                room_id: "room-a".to_owned(),
+            },
         ]
     );
 }
@@ -553,7 +556,8 @@ fn duplicate_submission_id_is_accepted_once_and_stale_completion_is_ignored() {
         },
     );
 
-    assert_eq!(first.len(), 2);
+    // SendText, TimelineChanged, and the #1037 main-pane navigation cancel.
+    assert_eq!(first.len(), 3);
     assert!(duplicate.is_empty());
     assert!(stale.is_empty());
     assert_eq!(finished.len(), 1);
