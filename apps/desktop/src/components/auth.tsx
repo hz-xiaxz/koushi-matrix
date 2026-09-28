@@ -1,5 +1,8 @@
 import { type FormEvent, type RefObject } from "react";
-import { Hash, KeyRound, ShieldAlert, ShieldCheck } from "lucide-react";
+import { KeyRound, ShieldAlert, ShieldCheck } from "lucide-react";
+// Byte-identical mirror of the shipped app icon (src-tauri/icons/icon.svg),
+// kept in sync by auth.test.tsx. Vite inlines it under the CSP `data:` img-src.
+import koushiLogoUrl from "../assets/koushi-logo.svg";
 import { t } from "../i18n/messages";
 import type {
   AppError,
@@ -185,8 +188,9 @@ export function AuthScreen({
     <main className="auth-screen" data-testid="auth-screen">
       <ImeSafeForm className="auth-panel" onSubmit={onSubmit}>
         <div className="auth-brand">
-          <div className="auth-mark">
-            <Hash size={ICON_SIZE.large} />
+          <div className="auth-mark auth-logo-mark">
+            {/* Decorative: the adjacent "Koushi" heading already names the brand. */}
+            <img alt="" className="auth-logo" draggable={false} src={koushiLogoUrl} />
           </div>
           <div>
             <h1>{t("auth.matrixDesktop")}</h1>

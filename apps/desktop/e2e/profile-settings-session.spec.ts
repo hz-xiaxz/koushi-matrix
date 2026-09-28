@@ -180,6 +180,80 @@ test("auth form defaults to matrix.org and submits custom ports in the homeserve
   await expect(page.locator('input[name="port"]')).toHaveCount(0);
 });
 
+async function authLogoMetrics(page: Page) {
+  return page.evaluate(() => {
+    const mark = document.querySelector(".auth-brand .auth-mark");
+    const logo = mark?.querySelector<HTMLImageElement>("img.auth-logo");
+    const box = logo?.getBoundingClientRect();
+    return {
+      hasHash: Boolean(mark?.querySelector("svg.lucide-hash")),
+      loaded: Boolean(logo?.complete && logo.naturalWidth > 0),
+      isKoushiAsset: decodeURIComponent(logo?.currentSrc ?? "").includes("Koushi"),
+      width: box?.width ?? 0,
+      height: box?.height ?? 0,
+      opacity: logo ? getComputedStyle(logo).opacity : "",
+      visibility: logo ? getComputedStyle(logo).visibility : "",
+      markBackground: mark ? getComputedStyle(mark).backgroundColor : ""
+    };
+  });
+}
+
+async function selectExplicitTheme(page: Page, theme: "light" | "dark"): Promise<void> {
+  await page.evaluate((selected) => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          settings: {
+            ...snapshot.state.domain.settings,
+            values: {
+              ...snapshot.state.domain.settings.values,
+              appearance: { theme: selected }
+            }
+          }
+        }
+      }
+    });
+    window.__harness.pushStateUpdate();
+  }, theme);
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
+}
+
+test("signed-out auth screen renders the bundled Koushi logo visibly in every theme mode", async ({ page }) => {
+  const expectVisibleLogo = async () => {
+    await expect.poll(async () => (await authLogoMetrics(page)).loaded).toBe(true);
+    const metrics = await authLogoMetrics(page);
+    expect(metrics).toMatchObject({
+      hasHash: false,
+      isKoushiAsset: true,
+      width: 44,
+      height: 44,
+      opacity: "1",
+      visibility: "visible",
+      // The asset carries its own dark tile; the mark must not paint a
+      // theme token behind it.
+      markBackground: "rgba(0, 0, 0, 0)"
+    });
+    // Decorative next to the "Koushi" heading: no extra accessible image.
+    await expect(page.getByTestId("auth-screen").getByRole("img")).toHaveCount(0);
+  };
+
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await gotoSignedOutAuth(page);
+    await expectVisibleLogo();
+  }
+
+  await page.emulateMedia({ colorScheme: "light" });
+  await selectExplicitTheme(page, "dark");
+  await expectVisibleLogo();
+  await selectExplicitTheme(page, "light");
+  await expectVisibleLogo();
+});
+
 test("Rust-owned locale profile applies root lang and dir", async ({ page }) => {
   await gotoReadyShell(page);
 

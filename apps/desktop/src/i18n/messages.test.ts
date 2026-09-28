@@ -295,7 +295,9 @@ describe("i18n message catalog", () => {
           ts.isJsxAttribute(node) &&
           ["aria-label", "placeholder", "title", "alt"].includes(node.name.getText(sourceFile)) &&
           node.initializer &&
-          ts.isStringLiteral(node.initializer)
+          ts.isStringLiteral(node.initializer) &&
+          // alt="" marks a decorative image; it is not user-visible text.
+          !(node.name.getText(sourceFile) === "alt" && node.initializer.text === "")
         ) {
           findings.push(
             `${file}:${lineNumberAt(sourceFile, node)}: literal ${node.name.getText(sourceFile)} "${node.initializer.text}"`
