@@ -137,6 +137,24 @@ test("accepts the intended persistence and Core testkit boundaries", () => {
   assert.deepEqual(findLeafCrateBoundaryViolations(fixture()), []);
 });
 
+test("accepts CI running koushi-core-testkit through an unexcluded workspace test", () => {
+  const root = fixture();
+  fs.writeFileSync(
+    path.join(root, ".github/workflows/ci.yml"),
+    "- run: cargo test --profile ci --workspace --exclude sidebar-composition --exclude key-management\n"
+  );
+  assert.deepEqual(findLeafCrateBoundaryViolations(root), []);
+});
+
+test("rejects a workspace test that excludes koushi-core-testkit without an explicit run", () => {
+  const root = fixture();
+  fs.writeFileSync(
+    path.join(root, ".github/workflows/ci.yml"),
+    "- run: cargo test --profile ci --workspace --exclude koushi-core-testkit\n"
+  );
+  assert(findLeafCrateBoundaryViolations(root).includes("CI must run koushi-core-testkit"));
+});
+
 test("detects missing packages, dependency leaks, and retained Core crypto", () => {
   const root = fixture();
   fs.writeFileSync(
@@ -336,5 +354,5 @@ test("detects testkit default or production leakage, self-dependency, and missin
   );
   assert(violations.includes("unexpected Rust integration target set in koushi-core"));
   assert(violations.includes("unexpected Rust integration target set in koushi-core-testkit"));
-  assert(violations.includes("CI must run koushi-core-testkit explicitly"));
+  assert(violations.includes("CI must run koushi-core-testkit"));
 });
