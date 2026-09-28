@@ -174,6 +174,45 @@ test("composer and remote-message reaction pickers share Rust-owned recent emoji
     });
 });
 
+test("lazily loaded reaction picker owns focus, Escape, and outside-click dismissal", async ({ page }) => {
+  await gotoReadyShell(page);
+  await seedTimelineItems(page, [
+    {
+      id: { Event: { event_id: "$lazy-reaction:example.invalid" } },
+      sender: "@remote-user:example.invalid",
+      sender_label: "Remote User",
+      body: "Lazy reaction target",
+      timestamp_ms: 1_800_000_000_000,
+      in_reply_to_event_id: null,
+      thread_root: null,
+      thread_summary: null,
+      can_react: true,
+      is_redacted: false,
+      is_hidden: false,
+      can_redact: false,
+      is_edited: false,
+      can_edit: false,
+      reactions: []
+    }
+  ]);
+  const row = page.locator('[data-event-id="$lazy-reaction:example.invalid"]');
+  const trigger = row.getByRole("button", { name: t("timeline.addReaction") });
+  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+
+  await row.hover();
+  await trigger.click();
+  await expect(picker.getByRole("searchbox")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(picker).not.toBeVisible();
+  await expect(trigger).toBeFocused();
+
+  await row.hover();
+  await trigger.click();
+  await expect(picker).toBeVisible();
+  await page.locator(".sidebar").click();
+  await expect(picker).not.toBeVisible();
+});
+
 test("typing a search term filters the emoji grid", async ({ page }) => {
   await gotoReadyShell(page);
   await openEmojiPicker(page);

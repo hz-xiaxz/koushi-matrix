@@ -15,8 +15,6 @@ import {
   XCircle
 } from "lucide-react";
 import {
-  lazy,
-  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -36,6 +34,7 @@ import {
 } from "../../domain/contextMenus";
 import { getActiveLocale, t } from "../../i18n/messages";
 import { onMenuKeyDown } from "../ContextMenuSurface";
+import { LazyEmojiPicker } from "../LazyEmojiPicker";
 import { Tooltip } from "../Tooltip";
 
 import {
@@ -143,10 +142,6 @@ function reactionPickerBoundaryElement(anchor: Element): Element | null {
 }
 
 const ignoreSendQueueAction = () => undefined;
-
-const LazyEmojiPicker = lazy(() =>
-  import("../EmojiPicker").then((module) => ({ default: module.EmojiPicker }))
-);
 
 export type TimelineAliasTarget = {
   userId: string;
@@ -1208,8 +1203,7 @@ export function TimelineItemRow({
               <SmilePlus size={14} />
             </button>
             {isReactionPickerOpen ? (
-              <Suspense fallback={null}>
-                <LazyEmojiPicker
+              <LazyEmojiPicker
                   anchorRef={reactionTriggerRef}
                   align="end"
                   placement="below"
@@ -1220,7 +1214,6 @@ export function TimelineItemRow({
                   onSelect={submitReaction}
                   onClose={closeReactionPicker}
                 />
-              </Suspense>
             ) : null}
           </div>
         ) : null}

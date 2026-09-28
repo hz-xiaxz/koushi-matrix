@@ -141,6 +141,34 @@ export function readLegacyPreferenceMigration(
   return { settingsPatch, navigationImport, sourceKeys };
 }
 
+/** Whether this browser profile still carries the legacy recent-emoji list. */
+export function browserHasLegacyRecentEmojis(): boolean {
+  try {
+    return (
+      typeof window !== "undefined" &&
+      window.localStorage.getItem(LEGACY_PREFERENCE_KEYS.recentEmojis) !== null
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Loads the emoji vocabulary that validates legacy recent emojis. It lives in
+ * the on-demand emoji chunk (#1035), so startup fetches it only for a profile
+ * that still has a legacy list to migrate.
+ */
+export function loadLegacyEmojiVocabulary(): Promise<ReadonlySet<string>> {
+  return import("../components/emojiData").then(
+    ({ EMOJI_BY_CATEGORY, EMOJI_CATEGORIES }) =>
+      new Set(
+        EMOJI_CATEGORIES.flatMap((category) =>
+          EMOJI_BY_CATEGORY[category].map((entry) => entry.emoji)
+        )
+      )
+  );
+}
+
 export function readBrowserLegacyPreferenceMigration(
   validEmojis: ReadonlySet<string>,
   current: CurrentLegacySettings

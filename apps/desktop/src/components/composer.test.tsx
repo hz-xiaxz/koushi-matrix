@@ -1363,7 +1363,8 @@ describe("Composer", () => {
       const emojiButton = screen.getByRole("button", { name: "Emoji" });
       fireEvent.click(emojiButton);
       expect(emojiButton.getAttribute("aria-expanded")).toBe("true");
-      const picker = screen.getByRole("dialog", { name: "Emoji" });
+      // The picker is an on-demand chunk (#1035): it appears after it loads.
+      const picker = await screen.findByRole("dialog", { name: "Emoji" });
       fireEvent.click(within(picker).getAllByRole("button", { name: /grinning face$/i })[0]!);
 
       const nextDocument = onDocumentChange.mock.lastCall?.[0] as ComposerDocument;
@@ -1372,21 +1373,37 @@ describe("Composer", () => {
       await waitFor(() => expect(document.activeElement).toBe(editor));
     });
 
-    it("replaces a selected range with the chosen emoji", () => {
+    it("replaces a selected range with the chosen emoji", async () => {
       const { editor, onDocumentChange } = renderEditComposer();
       changeEditorText(editor, "Hello world");
       // Select "world" (6..11).
       setInlineMentionEditorSelection(editor, 6, 11);
 
       fireEvent.click(screen.getByRole("button", { name: "Emoji" }));
-      const picker = screen.getByRole("dialog", { name: "Emoji" });
+      const picker = await screen.findByRole("dialog", { name: "Emoji" });
       fireEvent.click(within(picker).getAllByRole("button", { name: /grinning face$/i })[0]!);
 
       const document = onDocumentChange.mock.lastCall?.[0] as ComposerDocument;
       expect(plainBodyFromDocument(document)).toBe("Hello 😀");
     });
 
-    it("never reuses a selection captured for a previous draft after the draft key changes", () => {
+    it("focuses the lazily loaded picker search, and Escape closes it back to the trigger", async () => {
+      renderEditComposer();
+      const emojiButton = screen.getByRole("button", { name: "Emoji" });
+      emojiButton.focus();
+      fireEvent.click(emojiButton);
+
+      const picker = await screen.findByRole("dialog", { name: "Emoji" });
+      const search = within(picker).getByRole("searchbox");
+      await waitFor(() => expect(document.activeElement).toBe(search));
+
+      fireEvent.keyDown(search, { key: "Escape" });
+      expect(screen.queryByRole("dialog", { name: "Emoji" })).toBeNull();
+      expect(emojiButton.getAttribute("aria-expanded")).toBe("false");
+      expect(document.activeElement).toBe(emojiButton);
+    });
+
+    it("never reuses a selection captured for a previous draft after the draft key changes", async () => {
       const onDocumentChange = vi.fn();
       const { container, rerender } = renderEditComposer(onDocumentChange, "edit:a");
       const editor = container.querySelector(".composer-inline-editor") as HTMLDivElement;
@@ -1417,7 +1434,7 @@ describe("Composer", () => {
       // Caret at the end of the new draft.
       setInlineMentionEditorSelection(newEditor, 8, 8);
       fireEvent.click(
-        within(screen.getByRole("dialog", { name: "Emoji" })).getAllByRole("button", {
+        within(await screen.findByRole("dialog", { name: "Emoji" })).getAllByRole("button", {
           name: /grinning face$/i
         })[0]!
       );
