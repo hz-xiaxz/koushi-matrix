@@ -276,7 +276,10 @@ fn account_command_requires_ready_session(command: &AccountCommand) -> bool {
             | AccountCommand::DeactivateAccount { .. }
             | AccountCommand::SubmitAccountManagementUia { .. }
             | AccountCommand::AccountNotifications { .. }
-            | AccountCommand::ContactSecurity { .. }
+            | AccountCommand::ContactSecurity {
+                request: koushi_protocol::command::ContactSecurityRequest::Load { .. },
+                ..
+            }
             | AccountCommand::ExportRoomKeys { .. }
             | AccountCommand::ExportHistory { .. }
             | AccountCommand::StopHistoryExport { .. }
@@ -361,12 +364,24 @@ mod tests {
             CoreCommand::Account(AccountCommand::EraseDeviceCleanupLocalDataAnyway {
                 request_id: id,
             }),
+            // Closing User info only tears down; it must settle quietly after
+            // sign-out, lock, or account switch unmounts the panel (#1024).
+            CoreCommand::Account(AccountCommand::ContactSecurity {
+                request_id: id,
+                request: koushi_protocol::command::ContactSecurityRequest::Close,
+            }),
         ] {
             assert!(!command.requires_ready_session());
         }
 
         for command in [
             CoreCommand::Sync(SyncCommand::Start { request_id: id }),
+            CoreCommand::Account(AccountCommand::ContactSecurity {
+                request_id: id,
+                request: koushi_protocol::command::ContactSecurityRequest::Load {
+                    user_id: "@contact:example.invalid".to_owned(),
+                },
+            }),
             CoreCommand::App(AppCommand::OpenTimelineAtTimestamp {
                 request_id: id,
                 room_id: "!room:example.invalid".to_owned(),

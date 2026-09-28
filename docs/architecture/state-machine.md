@@ -5032,7 +5032,9 @@ stateDiagram-v2
 - **Read-only.** Opening User info dispatches the load; closing it or opening
   another contact dispatches close/load. Nothing pins an identity, verifies,
   withdraws verification, sets local trust, or changes sending policy.
-  Expanding an explanation dispatches nothing.
+  Expanding an explanation dispatches nothing. Load requires a Ready session;
+  Close is admitted in any session state because sign-out, lock, and account
+  switch unmount User info, and it only tears down.
 - **Fresh retrieval, no stale confirmation.** `LoadRequested` clears the
   previous summary; the actor performs a `/keys/query` for the contact
   (`Encryption::request_user_identity`) and then reads the SDK store. A failed
