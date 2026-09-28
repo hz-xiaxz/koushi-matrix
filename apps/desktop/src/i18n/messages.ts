@@ -239,6 +239,7 @@ export type MessageId =
   | "room.shareLinkCopied"
   | "room.shareLinkCopyFailed"
   | "dialog.roomAddressInUse"
+  | "dialog.roomAddressInUseUnnamed"
   | "dialog.roomAddressChecking"
   | "dialog.roomAddressAvailable"
   | "dialog.roomAddressTaken"
@@ -251,6 +252,7 @@ export type MessageId =
   | "dialog.roomAddressHelp"
   | "dialog.roomAddressPreview"
   | "dialog.roomAddressEmpty"
+  | "dialog.roomAddressNone"
   | "dialog.roomAddressInvalid"
   | "dialog.roomAddressPending"
   | "dialog.roomTopic"
@@ -258,6 +260,8 @@ export type MessageId =
   | "dialog.sendInvite"
   | "dialog.removeInviteTarget"
   | "dialog.roomName"
+  | "dialog.roomNameOptional"
+  | "dialog.roomNameOptionalHelp"
   | "dialog.spaceName"
   | "dialog.standardRoomInSpace"
   | "dialog.privateRoomDescription"
@@ -566,6 +570,8 @@ export type MessageId =
   | "spaceAddRooms.createdLinkFailedTitle"
   | "spaceAddRooms.createdLinkFailed"
   | "spaceAddRooms.createdLinkFailedForbidden"
+  | "spaceAddRooms.createdLinkFailedUnnamed"
+  | "spaceAddRooms.createdLinkFailedForbiddenUnnamed"
   | "roomList.sectionUnreadAccessible"
   | "roomList.loading"
   | "roomList.failed"
@@ -1883,6 +1889,7 @@ const en: Catalog = {
   "room.shareLinkCopyFailed": "Could not copy the link. Select and copy the URL instead.",
   "dialog.roomAddress": "Room address",
   "dialog.roomAddressInUse": "The address {fullAddress} is already in use. Addresses are shared across all Spaces on {server}. You can keep the room name ‘{roomName}’; change only the room address, for example by adding a project name or number.",
+  "dialog.roomAddressInUseUnnamed": "The address {fullAddress} is already in use. Addresses are shared across all Spaces on {server}. Change the room address, for example by adding a project name or number, or clear it to create the room without an address.",
   "dialog.roomAddressChecking": "Checking whether {address} is in use…",
   "dialog.roomAddressAvailable": "{address} was not in use when checked. This does not reserve it; the server confirms the address when you create the room.",
   "dialog.roomAddressTaken": "{address} is already in use on {server}. Keep the room name and change only the address.",
@@ -1895,6 +1902,7 @@ const en: Catalog = {
   "dialog.roomAddressHelp": "This address lets people find and share this room. Enter only the room-specific name, without # or a server name. Availability is confirmed when you create the room.",
   "dialog.roomAddressPreview": "Full address: {address}",
   "dialog.roomAddressEmpty": "Enter an address for this public room.",
+  "dialog.roomAddressNone": "This room will be created without an address. People can still find it in the room directory and join it.",
   "dialog.roomAddressInvalid": "Use a room-specific name without spaces, # at the start, or a server suffix. Shorten it if needed.",
   "dialog.roomAddressPending": "Waiting for the address preview.",
   "dialog.roomTopic": "Topic",
@@ -1902,6 +1910,8 @@ const en: Catalog = {
   "dialog.sendInvite": "Send invite",
   "dialog.removeInviteTarget": "Remove invite target",
   "dialog.roomName": "Room name",
+  "dialog.roomNameOptional": "Room name (optional)",
+  "dialog.roomNameOptionalHelp": "Leave the name empty to show a name based on the room's address or members. You can set a name later.",
   "dialog.spaceName": "Space name",
   "dialog.standardRoomInSpace": "Standard room in {spaceName}: space members can join without approval.",
   "dialog.privateRoomDescription": "Only explicitly invited people can join.",
@@ -2216,6 +2226,8 @@ const en: Catalog = {
   "spaceAddRooms.createdLinkFailedTitle": "Room created",
   "spaceAddRooms.createdLinkFailed": "“{roomName}” was created, but it couldn't be added to {spaceName} ({reason}). You can add it again from Add existing room.",
   "spaceAddRooms.createdLinkFailedForbidden": "“{roomName}” was created, but you don't have permission to add rooms to {spaceName}.",
+  "spaceAddRooms.createdLinkFailedUnnamed": "The new room was created, but it couldn't be added to {spaceName} ({reason}). You can add it again from Add existing room.",
+  "spaceAddRooms.createdLinkFailedForbiddenUnnamed": "The new room was created, but you don't have permission to add rooms to {spaceName}.",
   "roomList.sectionUnreadAccessible": "{section} unread: {count}",
   "roomList.loading": "Loading rooms…",
   "roomList.failed": "Rooms could not be loaded",
@@ -3437,6 +3449,7 @@ const ja: Catalog = {
   "room.shareLinkCopyFailed": "リンクをコピーできませんでした。URLを選択してコピーしてください。",
   "dialog.roomAddress": "ルームアドレス",
   "dialog.roomAddressInUse": "アドレス {fullAddress} はすでに使われています。アドレスは {server} 上のすべての Space で共通です。ルーム名『{roomName}』はそのままで、ルームアドレスにプロジェクト名や数字などを追加してください。",
+  "dialog.roomAddressInUseUnnamed": "アドレス {fullAddress} はすでに使われています。アドレスは {server} 上のすべての Space で共通です。ルームアドレスにプロジェクト名や数字などを追加するか、空欄にしてアドレスなしでルームを作成してください。",
   "dialog.roomAddressChecking": "{address} が使われているか確認しています…",
   "dialog.roomAddressAvailable": "{address} は確認時点では使われていません。予約ではありません。アドレスはルーム作成時にサーバーで確定します。",
   "dialog.roomAddressTaken": "{address} は {server} ですでに使われています。ルーム名はそのままで、アドレスだけを変更してください。",
@@ -3449,6 +3462,7 @@ const ja: Catalog = {
   "dialog.roomAddressHelp": "このアドレスでルームを見つけたり共有したりできます。# やサーバー名を付けず、ルーム固有の名前だけ入力してください。使用可能かどうかは作成時に確認されます。",
   "dialog.roomAddressPreview": "完全なアドレス: {address}",
   "dialog.roomAddressEmpty": "公開ルームのアドレスを入力してください。",
+  "dialog.roomAddressNone": "このルームはアドレスなしで作成されます。ルームディレクトリから見つけて参加することはできます。",
   "dialog.roomAddressInvalid": "空白、先頭の #、サーバー名を除いたルーム固有の名前を入力してください。長すぎる場合は短くしてください。",
   "dialog.roomAddressPending": "アドレスのプレビューを待っています。",
   "dialog.roomTopic": "トピック",
@@ -3456,6 +3470,8 @@ const ja: Catalog = {
   "dialog.sendInvite": "招待を送信",
   "dialog.removeInviteTarget": "招待先を削除",
   "dialog.roomName": "ルーム名",
+  "dialog.roomNameOptional": "ルーム名（任意）",
+  "dialog.roomNameOptionalHelp": "名前を空欄にすると、ルームのアドレスやメンバーに基づく名前が表示されます。名前は後から設定できます。",
   "dialog.spaceName": "スペース名",
   "dialog.standardRoomInSpace": "{spaceName}内の標準ルーム：スペースメンバーは承認なしで参加できます",
   "dialog.privateRoomDescription": "明示的に招待された人だけが参加できます",
@@ -3770,6 +3786,8 @@ const ja: Catalog = {
   "spaceAddRooms.createdLinkFailedTitle": "ルームを作成しました",
   "spaceAddRooms.createdLinkFailed": "「{roomName}」は作成されましたが、{spaceName}に追加できませんでした（{reason}）。「既存のルームを追加」からもう一度追加できます。",
   "spaceAddRooms.createdLinkFailedForbidden": "「{roomName}」は作成されましたが、{spaceName}にルームを追加する権限がありません。",
+  "spaceAddRooms.createdLinkFailedUnnamed": "新しいルームは作成されましたが、{spaceName}に追加できませんでした（{reason}）。「既存のルームを追加」からもう一度追加できます。",
+  "spaceAddRooms.createdLinkFailedForbiddenUnnamed": "新しいルームは作成されましたが、{spaceName}にルームを追加する権限がありません。",
   "roomList.sectionUnreadAccessible": "{section}の未読 {count} 件",
   "roomList.loading": "ルームを読み込み中…",
   "roomList.failed": "ルームを読み込めませんでした",

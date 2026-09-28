@@ -616,7 +616,15 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   React keeps only whether the address was edited, and re-requests the preview
   for the current draft; an `aliasInUse` create failure is rendered with the
   attempted full address and server captured from that preview. A submitted
-  alias is never renamed or retried automatically.
+  alias is never renamed or retried automatically. The preview's
+  `without_address` (#1023) is Rust's verdict that a public room whose name
+  offers no suggestion (an unnamed room) may be created without an address;
+  React renders it and does not decide when an address is optional.
+- The create-room dialog's initial choices (#1023) are
+  `SidebarModel.create_room_defaults` (`create_room_defaults_for_state`): public
+  in a Space whose synced join rule is public, otherwise private. React seeds the
+  dialog from it when the dialog opens and keeps no default of its own beyond a
+  pre-snapshot fallback. The room name is optional; the Space name is not.
 - The advisory availability check (#1006) is Rust state
   (`ui.room_address_availability`): Core owns the lookup, its cancellation, the
   stale-result guard, the outcome, and the unchecked alternative. React only

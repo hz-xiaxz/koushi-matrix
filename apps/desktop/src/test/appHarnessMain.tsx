@@ -235,6 +235,7 @@ function readySnapshot(
     space_rooms: [sidebarRoom],
     not_joined_space_rooms: [],
     space_add_rooms: null,
+    create_room_defaults: { visibility: "private", encrypted: true, invited_only: false },
     global_dms: [],
     space_unread_count: 0,
     dm_unread_count: 0,

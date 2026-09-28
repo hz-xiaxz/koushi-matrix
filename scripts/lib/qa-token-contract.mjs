@@ -14,7 +14,13 @@ const ADDRESS_TOKENS = [
   "room_address_preview_create_share=ok",
   "room_address_collision=ok",
   "room_address_availability=ok",
-  "room_address_space_prefix=ok"
+  "room_address_space_prefix=ok",
+  "room_public_space_default=ok",
+  "room_unnamed_public_space=ok",
+  "room_unnamed_alias_name=ok",
+  "room_unnamed_alias_conflict=ok",
+  "room_unnamed_rename=ok",
+  "room_public_space_private_choice=ok"
 ];
 const IGNORE_RECOVERY_TOKEN = "ignored_user_history_recovery=ok";
 

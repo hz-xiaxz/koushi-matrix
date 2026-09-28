@@ -4,6 +4,8 @@ mod address;
 mod space_access;
 #[path = "rooms/space_add_existing.rs"]
 mod space_add_existing;
+#[path = "rooms/unnamed_public.rs"]
+mod unnamed_public;
 
 use super::event_wait::{
     QaEventDeadline, wait_for_dm_room_in_room_list, wait_for_initial_items,
@@ -235,6 +237,7 @@ pub(super) async fn run_directory_stage(
     .await?;
     println!("directory_join=ok");
     address::verify(config, conn_a, conn_b).await?;
+    unnamed_public::verify(conn_a).await?;
 
     Ok(())
 }

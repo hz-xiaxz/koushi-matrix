@@ -232,3 +232,136 @@ test("advisory availability offers an unchecked alternative and follows the show
   await expect.poll(() => page.evaluate(() =>
     window.__harness.invocationsOf("clear_room_address_availability").length)).toBeGreaterThan(0);
 });
+
+// #1023: the dialog seeds its access choice from the Rust-projected
+// `sidebar.create_room_defaults`, and a room may be created without a name.
+async function selectPublicSpace(page: import("@playwright/test").Page) {
+  await page.evaluate(() => {
+    const next = structuredClone(window.__harness.currentSnapshot());
+    next.state_generation = (next.state_generation ?? 0) + 1;
+    next.state.ui.navigation.active_space_id = "!open:example.invalid";
+    next.state.domain.spaces = [
+      ...next.state.domain.spaces,
+      {
+        space_id: "!open:example.invalid",
+        raw_name: "open-lab",
+        display_name: "open-lab",
+        avatar: null,
+        join_rule: "public",
+        child_room_ids: []
+      }
+    ];
+    next.sidebar.active_space_id = "!open:example.invalid";
+    next.sidebar.account_home.is_active = false;
+    next.sidebar.create_room_defaults = { visibility: "public", encrypted: true, invited_only: false };
+    next.sidebar.space_rail = [
+      ...next.sidebar.space_rail.map((space) => ({ ...space, is_active: false })),
+      {
+        space_id: "!open:example.invalid",
+        display_name: "open-lab",
+        avatar: null,
+        unread_count: 0,
+        highlight_count: 0,
+        is_active: true
+      }
+    ];
+    window.__harness.setSnapshot(next);
+    window.__harness.pushStateUpdate();
+    window.__harness.setCommandResponse("preview_room_address", ({ name, aliasLocalpart }) => {
+      const typed = (aliasLocalpart ?? "").trim();
+      const suggested = name.trim() ? `open-lab-${name.trim().toLowerCase()}` : "";
+      const localpart = typed || (aliasLocalpart === null ? suggested : "");
+      const withoutAddress = !name.trim() && !typed;
+      return {
+        localpart,
+        full_alias: localpart ? `#${localpart}:example.invalid` : null,
+        error: localpart || withoutAddress ? null : "empty",
+        server_name: "example.invalid",
+        without_address: withoutAddress
+      };
+    });
+    window.__harness.setCommandResponse("create_room", () => window.__harness.currentSnapshot());
+    window.__harness.clearInvocations();
+  });
+}
+
+test("a public Space selects a public room and creates an unnamed room without an address", async ({ page }) => {
+  await gotoReadyShell(page);
+  await selectPublicSpace(page);
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+  const name = page.getByRole("textbox", { name: "Room name" });
+  await expect(name).toHaveValue("");
+  await expect(page.getByRole("radio", { name: "Public room", exact: true })).toBeChecked();
+  await expect(page.getByText(/^Public room in open-lab:/)).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "without an address" })).toBeVisible();
+  const submit = page.getByRole("button", { name: "Submit create room" });
+  await expect(submit).toBeEnabled();
+  await submit.click();
+  await expect(name).toBeHidden();
+  expect(await page.evaluate(() => window.__harness.invocationsOf("create_room").map((call) => call.args.options)))
+    .toEqual([expect.objectContaining({
+      name: "",
+      visibility: "public",
+      aliasLocalpart: null,
+      encrypted: false,
+      parentSpace: { spaceId: "!open:example.invalid" }
+    })]);
+});
+
+test("choosing private in a public Space creates an encrypted private Space room", async ({ page }) => {
+  await gotoReadyShell(page);
+  await selectPublicSpace(page);
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+  await page.getByRole("textbox", { name: "Room name" }).fill("notes");
+  await expect(page.getByRole("textbox", { name: "Room address" })).toHaveValue("open-lab-notes");
+  await page.getByRole("radio", { name: "Private room", exact: true }).check();
+  await expect(page.getByRole("checkbox", { name: "Encrypted room" })).toBeChecked();
+  await page.getByRole("button", { name: "Submit create room" }).click();
+  await expect(page.getByRole("textbox", { name: "Room name" })).toBeHidden();
+  expect(await page.evaluate(() => window.__harness.invocationsOf("create_room").map((call) => call.args.options)))
+    .toEqual([expect.objectContaining({
+      name: "notes",
+      visibility: "private",
+      aliasLocalpart: null,
+      encrypted: true,
+      parentSpace: { spaceId: "!open:example.invalid" }
+    })]);
+});
+
+test("Home keeps the private default and an unnamed private room needs no name", async ({ page }) => {
+  await gotoReadyShell(page);
+  await page.evaluate(() => {
+    window.__harness.setCommandResponse("create_room", () => window.__harness.currentSnapshot());
+    window.__harness.clearInvocations();
+  });
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+  await expect(page.getByRole("radio", { name: "Private room", exact: true })).toBeChecked();
+  await page.getByRole("button", { name: "Submit create room" }).click();
+  await expect(page.getByRole("textbox", { name: "Room name" })).toBeHidden();
+  expect(await page.evaluate(() => window.__harness.invocationsOf("create_room").map((call) => call.args.options)))
+    .toEqual([expect.objectContaining({ name: "", visibility: "private", encrypted: true, parentSpace: null })]);
+});
+
+test("an unnamed public room's address conflict can be cleared to create it without an address", async ({ page }) => {
+  await gotoReadyShell(page);
+  await selectPublicSpace(page);
+  await page.evaluate(() => window.__harness.setCommandResponse("create_room", () => { throw { kind: "aliasInUse" }; }));
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+  const address = page.getByRole("textbox", { name: "Room address" });
+  await address.fill("lobby");
+  await page.getByRole("button", { name: "Submit create room" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "The address #lobby:example.invalid is already in use. Addresses are shared across all Spaces on example.invalid. Change the room address, for example by adding a project name or number, or clear it to create the room without an address."
+  );
+  await expect(address).toBeFocused();
+  await address.fill("");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page.evaluate(() => window.__harness.setCommandResponse("create_room", () => window.__harness.currentSnapshot()));
+  await page.getByRole("button", { name: "Submit create room" }).click();
+  await expect(address).toBeHidden();
+  expect(await page.evaluate(() => window.__harness.invocationsOf("create_room").map((call) => call.args.options)))
+    .toEqual([
+      expect.objectContaining({ name: "", aliasLocalpart: "lobby", visibility: "public" }),
+      expect.objectContaining({ name: "", aliasLocalpart: null, visibility: "public" })
+    ]);
+});

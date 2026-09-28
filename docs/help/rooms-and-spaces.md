@@ -32,12 +32,18 @@ rooms to join, whereas the top search field [searches messages](search.md).
 
 ## Create a room or Space
 
-Use **Create room** in the sidebar header, enter a name, and review the privacy
-and encryption choices before creating it. In the current creation dialog,
-choosing a public room turns encryption off. Review the final options rather
-than assuming every new room is encrypted.
+Use **Create room** in the sidebar header, optionally enter a name, and review
+the privacy and encryption choices before creating it. When the selected Space
+is public, the dialog starts with **Public room** selected; otherwise it starts
+with **Private room**. You can switch before creating. A public room is never
+encrypted. Review the final options rather than assuming every new room is
+encrypted.
 
-A public room also needs a **Room address**, shown in full (for example
+If you leave the room name empty, the room shows a name worked out from its
+address or its members instead; a room with only you in it can show as
+**Empty Room**. You can set or change the name later in the room's settings.
+
+A named public room also needs a **Room address**, shown in full (for example
 `#research-group-papers:example.org`) before you create it. The room name may
 repeat, but the address must be unique on your server, and every Space on that
 server shares the same addresses: a Space does not have addresses of its own.
@@ -48,6 +54,12 @@ likely but does not reserve the address. The suggestion follows the room name
 until you edit the address yourself. A public room created in a Space is listed
 in the public room directory, and anyone, including people outside the Space,
 can find and join it.
+
+A public room without a name has no address to suggest, so it can be created
+without one. It is still public and listed in the directory, where people can
+find and join it. If you enter an address for an unnamed room, the
+room shows the name part of that address (for example `lobby`) until you give
+it a name.
 
 While you type, Koushi checks whether the address is already used and shows
 the result under the address field. This check is only advice: an address that

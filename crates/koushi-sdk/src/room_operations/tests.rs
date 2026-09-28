@@ -170,6 +170,101 @@ fn create_room_request_projects_public_alias_without_encryption() {
     }));
 }
 
+/// #1023: an unnamed room omits `m.room.name` so the SDK's calculated
+/// display name is used, and a public room whose name offers no address
+/// suggestion is created without an alias while staying public (the join
+/// rule and directory listing are independent of an alias).
+#[test]
+fn create_room_request_omits_the_name_and_alias_of_an_unnamed_public_space_room() {
+    let request = create_room_request(MatrixCreateRoomOptions {
+        name: "   ".to_owned(),
+        topic: None,
+        alias_localpart: None,
+        encrypted: true,
+        invited_only: false,
+        visibility: MatrixCreateRoomVisibility::Public,
+        parent_space: Some(MatrixCreateRoomParentSpace {
+            space_id: "!space:example.invalid".to_owned(),
+            via_servers: vec!["example.invalid".to_owned()],
+        }),
+    })
+    .expect("an unnamed public room needs no address");
+
+    assert_eq!(request.name, None);
+    assert_eq!(request.room_alias_name, None);
+    assert_eq!(
+        request.visibility,
+        matrix_sdk::ruma::api::client::room::Visibility::Public
+    );
+    assert_eq!(
+        request.preset,
+        Some(matrix_sdk::ruma::api::client::room::create_room::v3::RoomPreset::PublicChat)
+    );
+    let initial_state = initial_state_json(&request);
+    assert!(initial_state.iter().any(|event| {
+        event.get("type").and_then(serde_json::Value::as_str) == Some("m.space.parent")
+            && event.get("state_key").and_then(serde_json::Value::as_str)
+                == Some("!space:example.invalid")
+    }));
+    // Public: no restricted rule, no encryption.
+    assert!(!initial_state.iter().any(|event| {
+        matches!(
+            event.get("type").and_then(serde_json::Value::as_str),
+            Some("m.room.join_rules" | "m.room.encryption")
+        )
+    }));
+}
+
+#[test]
+fn create_room_request_keeps_an_explicit_address_for_an_unnamed_public_room() {
+    let request = create_room_request(MatrixCreateRoomOptions {
+        name: String::new(),
+        topic: None,
+        alias_localpart: Some(" lobby ".to_owned()),
+        encrypted: false,
+        invited_only: false,
+        visibility: MatrixCreateRoomVisibility::Public,
+        parent_space: None,
+    })
+    .expect("request should build");
+    assert_eq!(request.name, None);
+    assert_eq!(request.room_alias_name.as_deref(), Some("lobby"));
+}
+
+#[test]
+fn create_room_request_still_requires_an_address_for_a_named_public_room() {
+    for alias_localpart in [None, Some(String::new()), Some("  ".to_owned())] {
+        assert!(matches!(
+            create_room_request(MatrixCreateRoomOptions {
+                name: "Synthetic Public".to_owned(),
+                topic: None,
+                alias_localpart,
+                encrypted: false,
+                invited_only: false,
+                visibility: MatrixCreateRoomVisibility::Public,
+                parent_space: None,
+            }),
+            Err(MatrixRoomOperationError::InvalidRoomAlias)
+        ));
+    }
+}
+
+#[test]
+fn create_room_request_omits_the_name_of_an_unnamed_private_room() {
+    let request = create_room_request(MatrixCreateRoomOptions {
+        name: String::new(),
+        topic: None,
+        alias_localpart: None,
+        encrypted: true,
+        invited_only: false,
+        visibility: MatrixCreateRoomVisibility::Private,
+        parent_space: None,
+    })
+    .expect("an unnamed private room is valid");
+    assert_eq!(request.name, None);
+    assert_eq!(request.room_alias_name, None);
+}
+
 #[test]
 fn create_room_request_projects_invited_only_space_room() {
     let request = create_room_request(MatrixCreateRoomOptions {

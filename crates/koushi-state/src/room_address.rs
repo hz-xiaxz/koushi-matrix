@@ -10,6 +10,11 @@ pub struct RoomAddressPreview {
     /// (shared by every Space on it). `None` until a Ready session exists.
     #[serde(default)]
     pub server_name: Option<String>,
+    /// The room will be created without an address (#1023). True only when
+    /// the room name offers no address suggestion (for example an unnamed
+    /// room) and no address was entered; `error` is then `None`.
+    #[serde(default)]
+    pub without_address: bool,
 }
 
 impl std::fmt::Debug for RoomAddressPreview {
@@ -20,6 +25,7 @@ impl std::fmt::Debug for RoomAddressPreview {
             .field("has_full_alias", &self.full_alias.is_some())
             .field("error", &self.error)
             .field("has_server_name", &self.server_name.is_some())
+            .field("without_address", &self.without_address)
             .finish()
     }
 }
@@ -42,6 +48,67 @@ pub fn suggest_room_alias_localpart(name: &str) -> String {
         .map(str::to_lowercase)
         .collect::<Vec<_>>()
         .join("-")
+}
+
+/// Whether a public room with this name must be created with an address
+/// (#1023). An address is required exactly when the name offers a
+/// suggestion; an unnamed room (or one whose name has no usable characters)
+/// may be public without one. The join rule and directory listing do not
+/// depend on this: an address only makes the room reachable by alias.
+pub fn public_room_address_required(name: &str) -> bool {
+    !suggest_room_alias_localpart(name).is_empty()
+}
+
+/// Access choice of the create-room dialog. Wire values match
+/// `koushi_protocol::CreateRoomVisibility`, which re-exports this type.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CreateRoomVisibility {
+    #[default]
+    Private,
+    Public,
+}
+
+/// Initial choices of the create-room dialog (#1023), projected on
+/// `SidebarModel.create_room_defaults`. React seeds the dialog from it and
+/// never derives a default itself.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CreateRoomDefaults {
+    pub visibility: CreateRoomVisibility,
+    /// The encryption choice of the private option; a public room is never
+    /// created encrypted.
+    pub encrypted: bool,
+    pub invited_only: bool,
+}
+
+impl Default for CreateRoomDefaults {
+    fn default() -> Self {
+        Self {
+            visibility: CreateRoomVisibility::Private,
+            encrypted: true,
+            invited_only: false,
+        }
+    }
+}
+
+/// A room created from a Space whose join rule is public starts as a public
+/// room; a private Space, a Space whose rule is not yet known, and Home keep
+/// the private default. This is a Koushi product choice (#1023).
+pub fn create_room_defaults_for_state(state: &crate::AppState) -> CreateRoomDefaults {
+    let public_space = state
+        .navigation
+        .active_space_id
+        .as_deref()
+        .and_then(|space_id| state.spaces.iter().find(|space| space.space_id == space_id))
+        .is_some_and(|space| space.join_rule == Some(crate::RoomJoinRule::Public));
+    CreateRoomDefaults {
+        visibility: if public_space {
+            CreateRoomVisibility::Public
+        } else {
+            CreateRoomVisibility::Private
+        },
+        ..CreateRoomDefaults::default()
+    }
 }
 
 /// Suggest an address for a room created from a Space (#1006):

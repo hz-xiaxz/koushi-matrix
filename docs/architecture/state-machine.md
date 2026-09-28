@@ -3178,6 +3178,27 @@ stateDiagram-v2
   child is removed, so it does not count as a child: the room is offered as
   `available` and can be repaired or added again.
 
+### Create-room defaults and optional names (#1023)
+
+- Initial access choice: `create_room_defaults_for_state` projects
+  `SidebarModel.create_room_defaults` from the active Space. A Space whose synced
+  `join_rule` is `public` selects a public room; a private or restricted Space, a
+  Space whose rule is not yet known (`None`), and Home select private. This is a
+  Koushi product choice, not Element's. The private option keeps its encrypted
+  default, so switching from public to private restores it; a public room is
+  always requested unencrypted.
+- Display name: optional for rooms, required for Spaces. An empty or blank name
+  omits `m.room.name`, and the room shows the SDK-calculated display name:
+  canonical alias (its localpart) before a member-derived name, then the SDK's
+  `Empty Room` fallback. Setting a name later replaces the calculated name.
+- Address: `public_room_address_required(name)` is true exactly when the name
+  offers an address suggestion. When it does not (an unnamed room), a public
+  room with no entered address is created without an alias, and
+  `preview_room_address` reports `without_address` instead of `empty`. A
+  cleared suggestion for a named room is still `empty`. The join rule (`public`
+  via the `public_chat` preset) and the directory listing do not depend on an
+  alias; `CreatePublicDirectoryRoom` still requires one.
+
 ### Advisory room address availability (#1006)
 
 The create-room dialog's address check is `AppState.room_address_availability`
