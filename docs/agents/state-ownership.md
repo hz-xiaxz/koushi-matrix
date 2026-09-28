@@ -997,7 +997,15 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   `settings_unavailable` and `operation_pending` keep it mounted but disabled
   with an explanation, so a transient room-management settings gap does not
   remove it. A disabled trigger opens no search and submits nothing; Rust
-  admission and account/Space fences stay authoritative.
+  admission and account/Space fences stay authoritative. The explanation is
+  both the `title` and an `aria-describedby` description, and a missing
+  `can_invite` / `can_kick` capability never resolves to `available`.
+- The room-management settings slot is shared with room-scoped loads (room
+  invite dialog, post-invite refresh, room People, room setting updates).
+  While Space info or Space Members is showing the active Space and the slot
+  holds another room, App requests `load_room_settings` for that Space again
+  (deduplicated per pending request), so header and row invite/cancel
+  availability recover without user action.
 - Tauri and Browser Fake paths mirror the same command shape and admission
   guards. Browser-headless tests must exercise full projection replacement,
   failure/retry, confirmation cancellation, and role-option rederivation rather

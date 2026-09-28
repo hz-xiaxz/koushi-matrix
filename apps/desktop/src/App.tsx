@@ -2361,20 +2361,31 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     snapshot?.state.domain.room_management.settings
   ]);
 
+  // Space info and Space Members both read the Space's permissions from the
+  // single Rust room_management slot, which room-scoped loads (room invite
+  // dialog, post-invite refresh, room People, RoomSettingUpdateSucceeded)
+  // overwrite. While either Space surface is visible, a mismatched slot is
+  // reloaded for the active Space (#1033).
+  const spaceMembersScopeSpaceId =
+    rightPanelMode === "people" && peoplePanelScope?.kind === "space"
+      ? peoplePanelScope.spaceId
+      : null;
   useEffect(() => {
-    if (!snapshot || rightPanelMode !== "spaceInfo") {
+    if (!snapshot) {
       return;
     }
     const activeSpaceId = snapshot.state.ui.navigation.active_space_id;
     if (!activeSpaceId) {
       return;
     }
+    if (rightPanelMode !== "spaceInfo" && spaceMembersScopeSpaceId !== activeSpaceId) {
+      return;
+    }
     const roomManagement = snapshot.state.domain.room_management;
-    if (
-      roomManagement.selected_room_id === activeSpaceId &&
-      roomManagement.settings
-    ) {
-      spaceSettingsLoadRef.current = activeSpaceId;
+    if (exactRoomSettingsForRoom(snapshot, activeSpaceId)) {
+      // Settled for this Space: a later overwrite of the slot must be able to
+      // request the Space again, so do not keep the dedupe marker.
+      spaceSettingsLoadRef.current = null;
       return;
     }
     if (
@@ -2392,6 +2403,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     });
   }, [
     rightPanelMode,
+    spaceMembersScopeSpaceId,
     snapshot?.state.ui.navigation.active_space_id,
     snapshot?.state.domain.room_management.operation,
     snapshot?.state.domain.room_management.selected_room_id,

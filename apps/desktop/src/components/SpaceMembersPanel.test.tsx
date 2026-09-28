@@ -1053,6 +1053,47 @@ describe("SpaceMembersPanel", () => {
     expect(screen.getByRole("searchbox", { name: "Name, alias, or Matrix ID" })).toBeTruthy();
   });
 
+  it("exposes the disabled header invite reason as an accessible description (#1033)", () => {
+    const renderPanel = (canInvite: boolean, reason: "available" | "settings_unavailable") => (
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={canInvite}
+        inviteAvailabilityReason={reason}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+      />
+    );
+    const { rerender } = render(renderPanel(false, "settings_unavailable"));
+    const trigger = screen.getByRole("button", { name: "Invite people" });
+    const describedBy = trigger.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy ?? "")?.textContent).toBe(
+      "Invitations are unavailable until space settings load"
+    );
+
+    rerender(renderPanel(true, "available"));
+    expect(
+      screen.getByRole("button", { name: "Invite people" }).getAttribute("aria-describedby")
+    ).toBeNull();
+  });
+
+  it("never resolves invite availability to available without invite permission (#1033)", () => {
+    render(
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={false}
+        inviteAvailabilityReason="available"
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: "Invite people" })).toBeNull();
+    for (const button of screen.queryAllByRole("button", { name: "Invite" })) {
+      expect(button).toHaveProperty("disabled", true);
+    }
+  });
+
   it("keeps the header invite control mounted but disabled while an operation is pending (#1033)", () => {
     render(
       <SpaceMembersPanel
