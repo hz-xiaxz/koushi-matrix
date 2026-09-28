@@ -172,9 +172,11 @@ mtime. This is safe only because the key pins the SDK gitlink, the lockfile,
 every workspace manifest, `ci.yml`, the profile, and the rustc release; a
 different feature set still selects a different fingerprint hash. The CI key
 reads that release from `rustc -vV` in the job, where rustup resolves it from
-`rust-toolchain.toml`, so a toolchain bump rekeys it automatically. The
-release workflow's SDK cache keys still carry a literal `rust-<version>`
-string that must be bumped together with `rust-toolchain.toml`. Keep every
+`rust-toolchain.toml`, so a toolchain bump rekeys it automatically. A
+toolchain bump still edits, together with `rust-toolchain.toml`, every
+`dtolnay/rust-toolchain@<version>` reference and step name in `ci.yml` and
+`release-desktop.yml`, and the literal `rust-<version>` in the release
+workflow's SDK cache keys. Keep every
 key complete when changing any of those inputs, because an exact hit is never
 re-saved.
 rust-cache has the same property, and its key hashes only manifests, the
