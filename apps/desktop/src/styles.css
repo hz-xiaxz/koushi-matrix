@@ -430,6 +430,18 @@ button:disabled {
   background: var(--rail);
 }
 
+/* The Koushi logo carries its own dark tile, so it stays legible on light and
+   dark surfaces without borrowing a contrast token meant for another fill. */
+.auth-logo-mark {
+  background: transparent;
+}
+
+.auth-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .auth-brand h1 {
   margin: 0;
   font-size: 23px;
