@@ -1078,17 +1078,13 @@ impl CoreConnection {
     /// Receive the next event. On lag, intermediate events were dropped for
     /// this consumer; resync from [`Self::snapshot`].
     pub async fn recv_event(&mut self) -> Result<CoreEvent, EventStreamLag> {
-        loop {
-            match self.event_rx.recv().await {
-                Ok(event) => return Ok(self.project_event_for_consumer(event)),
-                Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    return Err(EventStreamLag { skipped });
-                }
-                Err(broadcast::error::RecvError::Closed) => {
-                    // Runtime shut down; surface as lag so callers resync and
-                    // observe the final snapshot.
-                    return Err(EventStreamLag { skipped: 0 });
-                }
+        match self.event_rx.recv().await {
+            Ok(event) => Ok(self.project_event_for_consumer(event)),
+            Err(broadcast::error::RecvError::Lagged(skipped)) => Err(EventStreamLag { skipped }),
+            Err(broadcast::error::RecvError::Closed) => {
+                // Runtime shut down; surface as lag so callers resync and
+                // observe the final snapshot.
+                Err(EventStreamLag { skipped: 0 })
             }
         }
     }
