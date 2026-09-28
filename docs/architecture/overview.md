@@ -1209,6 +1209,20 @@ action so in-progress composer work is not discarded. Public failure state is co
 bodies, release URLs, local paths, signatures, key material, or raw library
 errors.
 
+The updater separates a platform-neutral engine from install backends. The
+engine (`app_updates.rs`: projection, policy watermarks, lifecycle transitions,
+operation generations, the owner loop and 24-hour scheduling, shutdown and
+restart coordination) and the channel policy (feed selection and
+greatest-SemVer choice) compile on every desktop target and are tested on Linux
+CI with a fake backend. A backend supplies only capability, feed access and
+signature verification, artifact installation, and the native relaunch
+request, behind the `Backend` trait. The `koushi_updater_backend` cfg, set by
+the desktop `build.rs`, marks targets that ship a backend (macOS today). Other
+targets compile against an uninhabited placeholder, so they report
+`unsupported` and never start update work. A future Linux backend implements
+the same trait and enables that cfg. It reuses the engine unchanged and must
+first settle which distribution formats it owns.
+
 The update adapter owns one serialized lifecycle and one cancellable worker.
 Generation-fenced completions and candidate-specific download approval prevent
 overlapping triggers or channel changes from substituting an unapproved release.
