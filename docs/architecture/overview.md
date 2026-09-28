@@ -1383,11 +1383,13 @@ Contact security details in User info (#1024) are Rust-owned
 keys and identity through `koushi-sdk::contact_security` (a fresh
 `/keys/query`, then SDK store reads refreshed from the device/identity
 streams) and projects two separate facts, owner confirmation of the
-contact's devices and your verification of the contact. The slice is
-read-only with respect to trust and send policy, fenced by contact and
-request id, and never carries device ids or keys. React dispatches only the
-load/close commands and renders the snapshot (state-machine.md, "Contact
-Security Details").
+contact's devices and your verification of the contact. Loading the details
+is read-only with respect to trust and send policy; the slice is fenced by
+contact and request id and never carries device ids or keys. React
+dispatches the load/close commands, plus `RequestVerification` from the
+Verify user confirmation step (which starts the shared SAS verification
+flow), and renders the snapshot (state-machine.md, "Contact Security
+Details").
 Message formatting is also projected before it reaches React:
 `TimelineItem.formatted` is sanitized in Rust from Matrix `formatted_body` and
 carries sanitized HTML plus plain-text/code-block metadata. Message type

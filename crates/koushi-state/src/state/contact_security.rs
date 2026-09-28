@@ -169,8 +169,10 @@ pub enum ContactIdentityVerification {
     /// Includes an identity that changed but was never verified by you:
     /// that stays neutral.
     NotVerifiedByYou,
-    /// You verified an earlier identity and the current one is not verified
-    /// (SDK verification violation). The only attention state.
+    /// You verified this contact before and their current identity is not
+    /// verified (SDK verification violation). Either identity may have been
+    /// reset: your own reset also invalidates the earlier signature. The only
+    /// attention state.
     ChangedAfterVerification,
     /// No cross-signing identity is known for the contact.
     Unknown,

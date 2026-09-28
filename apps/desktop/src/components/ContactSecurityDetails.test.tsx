@@ -177,11 +177,18 @@ describe("ContactSecurityDetails", () => {
     expect(screen.queryByText(/Verify this person/)).toBeNull();
   });
 
-  test("an identity change after your verification is a distinct attention state", () => {
+  test("a lapsed verification is a distinct attention state that blames neither side", () => {
     renderProfile(loaded(summary({ identity: "changedAfterVerification" })));
     const identity = row("Your verification");
     expect(identity.classList.contains("is-attention")).toBe(true);
-    expect(within(identity).getByText("Identity changed after you verified it")).toBeTruthy();
+    expect(within(identity).getByText("Your verification no longer applies")).toBeTruthy();
+    fireEvent.click(within(identity).getByRole("button", { name: /Details/ }));
+    // The SDK reports this when either identity was reset after you verified.
+    expect(
+      within(identity).getByText(
+        "You verified this person before, but their identity or yours has been reset since then, so that verification no longer applies. Choose Verify again to compare emoji with them."
+      )
+    ).toBeTruthy();
     expect(row("Their devices").classList.contains("is-attention")).toBe(false);
   });
 
@@ -334,7 +341,7 @@ describe("Verify user", () => {
     fireEvent.click(screen.getByRole("button", { name: "Verify user" }));
     expect(
       screen.getByText(
-        "Koushi sends the verification request in your encrypted direct chat with this person."
+        "Koushi sends the verification request in your encrypted direct chat with this person. If they have left that chat, Koushi invites them back to it."
       )
     ).toBeTruthy();
   });

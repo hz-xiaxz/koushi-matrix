@@ -5085,7 +5085,10 @@ User info shows two independent facts about another person (#1024), held in
   `OwnerIdentityMissing`.
 - **Your verification:** `UserIdentity::has_verification_violation()` →
   `ChangedAfterVerification`, else `is_verified()` → `VerifiedByYou`, else
-  `NotVerifiedByYou`; no identity → `Unknown`.
+  `NotVerifiedByYou`; no identity → `Unknown`. The SDK's violation is
+  "previously verified, not verified now", which also follows a reset of
+  *your* identity, so the GUI says the earlier verification no longer
+  applies without attributing the change to the contact.
 
 ```mermaid
 stateDiagram-v2

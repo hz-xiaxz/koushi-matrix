@@ -55,15 +55,19 @@ separate rows:
   their app. Verifying the person yourself does not confirm those devices.
 - **Your verification** — whether you verified that the account belongs to
   the person you know. This stays **Verified by you** when the person adds a
-  new device. **Identity changed after you verified it** is the only state
-  highlighted for attention; verification needs to be repeated. If you never
-  verified the person, an identity change stays neutral.
+  new device. **Your verification no longer applies** is the only state
+  highlighted for attention: you verified the person before, but their
+  identity or yours has been reset since, so verification needs to be
+  repeated. If you never verified the person, an identity change stays
+  neutral.
 
 To verify the person yourself, choose **Verify user** (or **Verify again**
-after their identity changed) under **Your verification**. Koushi first shows
-which direct chat it will use for the request — your existing chat with them,
+when your earlier verification no longer applies) under **Your
+verification**. Koushi first shows which direct chat it will use for the
+request — your existing chat with them (inviting them back if they left it),
 or a new encrypted chat — and sends nothing until you
-choose **Send request**. When they accept in their app, compare the emoji
+choose **Send request**. While another verification is in progress, Koushi
+says so instead of offering the action. When they accept in their app, compare the emoji
 with them in person or over another trusted channel and choose **They match**
 or **They don't match**. Verifying them does not confirm devices they have
 not confirmed themselves. If this session does not have your own
