@@ -64,9 +64,14 @@ type CurrentLegacySettings = {
   sidebar: SidebarSettings;
 };
 
+/**
+ * `validEmojis` is `null` when the emoji vocabulary is unavailable (#1035):
+ * the legacy recent-emoji list is then left out of the migration entirely,
+ * because it cannot be validated, while every other preference migrates.
+ */
 export function readLegacyPreferenceMigration(
   storage: Storage,
-  validEmojis: ReadonlySet<string>,
+  validEmojis: ReadonlySet<string> | null,
   current: CurrentLegacySettings
 ): LegacyPreferenceMigration {
   const sourceKeys: string[] = [];
@@ -108,8 +113,10 @@ export function readLegacyPreferenceMigration(
     sourceKeys.push(LEGACY_PREFERENCE_KEYS.collapsedSections);
   }
 
-  const recent = parseArray(storage.getItem(LEGACY_PREFERENCE_KEYS.recentEmojis));
-  if (recent && recent.every((value) => typeof value === "string")) {
+  const recent = validEmojis
+    ? parseArray(storage.getItem(LEGACY_PREFERENCE_KEYS.recentEmojis))
+    : null;
+  if (validEmojis && recent && recent.every((value) => typeof value === "string")) {
     const canonical = distinct(
       recent.filter((value): value is string => validEmojis.has(value))
     ).slice(0, MAX_RECENT_EMOJIS);
@@ -170,7 +177,7 @@ export function loadLegacyEmojiVocabulary(): Promise<ReadonlySet<string>> {
 }
 
 export function readBrowserLegacyPreferenceMigration(
-  validEmojis: ReadonlySet<string>,
+  validEmojis: ReadonlySet<string> | null,
   current: CurrentLegacySettings
 ): LegacyPreferenceMigration | null {
   return typeof window === "undefined"

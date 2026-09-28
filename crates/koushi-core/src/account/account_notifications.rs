@@ -374,10 +374,11 @@ impl AccountActor {
                 // address that no longer exists.
                 self.send_actions(vec![AppAction::AccountNotificationsPendingEmailVerified])
                     .await;
-                // "Change": if email notifications were active, move the
-                // single target to the newly verified address (add, then
-                // remove the old pusher). Otherwise the user turns email
-                // notifications on explicitly.
+                // "Add another email address": the previous address stays
+                // registered, but if email notifications were active the
+                // single delivery target moves to the newly confirmed address
+                // (add, then remove the old pusher). Otherwise the user turns
+                // email notifications on explicitly.
                 let carry_over = match koushi_sdk::email_notifications_active(&session).await {
                     Ok(true) => {
                         koushi_sdk::set_email_notification_target(

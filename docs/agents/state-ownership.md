@@ -617,8 +617,8 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   for the current draft; an `aliasInUse` create failure is rendered with the
   attempted full address and server captured from that preview. A submitted
   alias is never renamed or retried automatically. The preview's
-  `without_address` (#1023) is Rust's verdict that a public room whose name
-  offers no suggestion (an unnamed room) may be created without an address;
+  `without_address` (#1023) is Rust's verdict that an unnamed public room
+  may be created without an address (a named room never is);
   React renders it and does not decide when an address is optional.
 - The create-room dialog's initial choices (#1023) are
   `SidebarModel.create_room_defaults` (`create_room_defaults_for_state`): public
@@ -997,7 +997,15 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   `settings_unavailable` and `operation_pending` keep it mounted but disabled
   with an explanation, so a transient room-management settings gap does not
   remove it. A disabled trigger opens no search and submits nothing; Rust
-  admission and account/Space fences stay authoritative.
+  admission and account/Space fences stay authoritative. The explanation is
+  both the `title` and an `aria-describedby` description, and a missing
+  `can_invite` / `can_kick` capability never resolves to `available`.
+- The room-management settings slot is shared with room-scoped loads (room
+  invite dialog, post-invite refresh, room People, room setting updates).
+  While Space info or Space Members is showing the active Space and the slot
+  holds another room, App requests `load_room_settings` for that Space again
+  (deduplicated per pending request), so header and row invite/cancel
+  availability recover without user action.
 - Tauri and Browser Fake paths mirror the same command shape and admission
   guards. Browser-headless tests must exercise full projection replacement,
   failure/retry, confirmation cancellation, and role-option rederivation rather

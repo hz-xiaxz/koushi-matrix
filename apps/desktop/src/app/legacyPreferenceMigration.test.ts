@@ -111,4 +111,23 @@ describe("legacy frontend preference migration", () => {
       sourceKeys: ["koushi.displayDensity.v1", "koushi-recent-emojis"]
     });
   });
+
+  test("an unavailable emoji vocabulary leaves only the recent-emoji list out (#1035)", () => {
+    const storage = memoryStorage({
+      "koushi.displayDensity.v1": "compact",
+      "koushi.homeSelection.v1": JSON.stringify({ kind: "activity" }),
+      "koushi-recent-emojis": JSON.stringify(["🚀"])
+    });
+
+    expect(readLegacyPreferenceMigration(storage, null, currentSettings)).toEqual({
+      settingsPatch: { appearance: { theme: "dark", density: "compact" } },
+      navigationImport: {
+        kind: "importLegacy",
+        home_selection: { kind: "activity" },
+        space_local_presentations: {}
+      },
+      sourceKeys: ["koushi.displayDensity.v1", "koushi.homeSelection.v1"]
+    });
+    expect(storage.getItem("koushi-recent-emojis")).toBe(JSON.stringify(["🚀"]));
+  });
 });

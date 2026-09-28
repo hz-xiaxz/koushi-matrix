@@ -10,9 +10,9 @@ pub struct RoomAddressPreview {
     /// (shared by every Space on it). `None` until a Ready session exists.
     #[serde(default)]
     pub server_name: Option<String>,
-    /// The room will be created without an address (#1023). True only when
-    /// the room name offers no address suggestion (for example an unnamed
-    /// room) and no address was entered; `error` is then `None`.
+    /// The room will be created without an address (#1023). True only for
+    /// an unnamed room (empty or blank name) with no entered address; `error`
+    /// is then `None`. A named room keeps the #1006 requirement.
     #[serde(default)]
     pub without_address: bool,
 }
@@ -40,7 +40,9 @@ pub enum RoomAddressError {
 
 /// Suggest an editable room-alias local part, without claiming availability.
 /// Preserve Unicode letters/numbers (including Japanese); separate name segments
-/// with hyphens. An unsuitable name returns empty and requires a manual address.
+/// with hyphens. A name without letters or digits returns empty; a public room
+/// with such a name still requires a manually entered address (see
+/// [`public_room_address_required`]).
 /// The SDK still validates the complete alias and the server owns availability.
 pub fn suggest_room_alias_localpart(name: &str) -> String {
     name.split(|character: char| !character.is_alphanumeric())
@@ -50,13 +52,14 @@ pub fn suggest_room_alias_localpart(name: &str) -> String {
         .join("-")
 }
 
-/// Whether a public room with this name must be created with an address
-/// (#1023). An address is required exactly when the name offers a
-/// suggestion; an unnamed room (or one whose name has no usable characters)
-/// may be public without one. The join rule and directory listing do not
-/// depend on this: an address only makes the room reachable by alias.
+/// Whether a public room with this name must be created with an address.
+/// Only an unnamed room (empty or blank name) may be public without one
+/// (#1023); every named room keeps the #1006 rule, so a name that offers no
+/// suggestion (for example "🎉") needs a manually entered address. The join
+/// rule and directory listing do not depend on this: an address only makes
+/// the room reachable by alias.
 pub fn public_room_address_required(name: &str) -> bool {
-    !suggest_room_alias_localpart(name).is_empty()
+    !name.trim().is_empty()
 }
 
 /// Access choice of the create-room dialog. Wire values match
@@ -116,8 +119,9 @@ pub fn create_room_defaults_for_state(state: &crate::AppState) -> CreateRoomDefa
 ///
 /// A Space has no alias namespace of its own; the prefix only makes a
 /// collision with an unrelated room on the same server less likely. A Space
-/// name with no usable characters falls back to the room-only suggestion, and
-/// a room name with none still requires a manual address (empty). The caller
+/// name without letters or digits falls back to the room-only suggestion. A
+/// room name without any yields no suggestion (empty): a named room then
+/// requires a manual address, and only an unnamed room may skip it. The caller
 /// falls back to the room-only suggestion when the prefixed alias would
 /// exceed Matrix's 255-byte limit.
 pub fn suggest_space_room_alias_localpart(space_name: Option<&str>, room_name: &str) -> String {

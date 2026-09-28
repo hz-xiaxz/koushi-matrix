@@ -794,7 +794,7 @@ export type MessageId =
   | "settings.emailResend"
   | "settings.emailConfirm"
   | "settings.emailAdd"
-  | "settings.emailChange"
+  | "settings.emailAddAnother"
   | "settings.emailAddressLabel"
   | "settings.emailAddHint"
   | "settings.emailSendVerification"
@@ -2536,9 +2536,9 @@ const en: Catalog = {
   "settings.emailResend": "Resend",
   "settings.emailConfirm": "Continue",
   "settings.emailAdd": "Add email address",
-  "settings.emailChange": "Add another email address",
+  "settings.emailAddAnother": "Add another email address",
   "settings.emailAddressLabel": "Email address",
-  "settings.emailAddHint": "The address is registered with your account after you confirm you own it. If email notifications are on, they are then sent to the new address.",
+  "settings.emailAddHint": "The address is registered with your account after you confirm you own it. If email notifications are on, they then go to the new address instead of the current one.",
   "settings.emailSendVerification": "Send confirmation email",
   "settings.notificationFailureUnsupported": "This server does not support this.",
   "settings.notificationFailureEmailInUse": "This email address is already in use.",
@@ -4164,7 +4164,7 @@ const ja: Catalog = {
   "settings.emailResend": "再送",
   "settings.emailConfirm": "続行",
   "settings.emailAdd": "メールアドレスを追加",
-  "settings.emailChange": "別のメールアドレスを追加",
+  "settings.emailAddAnother": "別のメールアドレスを追加",
   "settings.emailAddressLabel": "メールアドレス",
   "settings.emailAddHint": "所有を確認すると、このアドレスがアカウントに登録されます。メール通知がオンの場合は、送信先が新しいアドレスに切り替わります。",
   "settings.emailSendVerification": "確認メールを送信",

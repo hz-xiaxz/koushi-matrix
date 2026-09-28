@@ -145,6 +145,17 @@ Rules:
    and encrypted rooms (`encrypted_url_previews_enabled`, default false). The
    encrypted-room default remains privacy-conservative, but it is an explicit
    user setting rather than a hidden UI-only special case.
+   `settings/settings.json` carries a top-level `schema_version`
+   (`koushi_core::settings::SETTINGS_SCHEMA_VERSION`). Because the store writes
+   the whole `SettingsValues`, a saved file records every default in force when
+   any setting was saved; a default change that must not be inherited from
+   such files needs a schema bump plus a migration in `SettingsStore::load`,
+   which rewrites the file at the new version. Version 1 (#1034) resets
+   `encrypted_url_previews_enabled` to false for unversioned files, since they
+   may carry the retired `true` default without an opt-in; opt-ins saved at
+   version 1 or later are preserved. Release notes for the version that ships
+   this migration must tell users who had enabled encrypted-room link
+   previews to re-enable them in Settings.
    Per-room URL-preview overrides are not settings-file data because the key is
    a Matrix room identifier. They live in Rust-owned non-persisted
    `AppState.link_preview_settings.room_overrides`, are changed only through a

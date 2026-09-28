@@ -387,6 +387,59 @@ test("Space Members can cancel a pending Space invitation", async ({ page }) => 
   ).toHaveCount(0);
 });
 
+test("Space Members reloads Space settings after a room-scoped load overwrites the slot (#1033)", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await openSpaceMembersFromSpaceInfo(page);
+
+  const headerInvite = contextPanel(page).locator(".space-members-invite-trigger");
+  await expect(headerInvite).toBeEnabled();
+  await expect(headerInvite).toHaveAttribute("data-invite-availability", "available");
+
+  await clearInvocations(page);
+  // A room-scoped settings load (room invite dialog, post-invite refresh,
+  // room People, RoomSettingUpdateSucceeded) replaces the single
+  // room_management slot while Space Members stays open.
+  await page.evaluate(async (roomId) => {
+    const harness = (
+      window as unknown as {
+        __harness: {
+          invoke(command: string, args: Record<string, unknown>): Promise<unknown>;
+          pushStateUpdate(): void;
+        };
+      }
+    ).__harness;
+    await harness.invoke("load_room_settings", { roomId });
+    harness.pushStateUpdate();
+  }, HARNESS_ROOM_ID);
+
+  // The App must request the Space settings again on its own; the spec never
+  // hand-feeds the Space snapshot back.
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        (spaceId) =>
+          (
+            window as unknown as {
+              __harness: { invocationsOf(c: string): { args: { roomId?: string } }[] };
+            }
+          ).__harness
+            .invocationsOf("load_room_settings")
+            .filter((invocation) => invocation.args.roomId === spaceId).length,
+        HARNESS_SPACE_ID
+      )
+    )
+    .toBe(1);
+  await expect(headerInvite).toBeEnabled();
+  await expect(headerInvite).toHaveAttribute("data-invite-availability", "available");
+  await expect(
+    contextPanel(page)
+      .getByRole("list", { name: t("spaceMembers.sectionChildOnly") })
+      .getByRole("button", { name: t("spaceMembers.invite") })
+  ).toBeEnabled();
+});
+
 test("Space Members Profile preserves the Space member context", async ({ page }) => {
   await gotoReadyShell(page);
 

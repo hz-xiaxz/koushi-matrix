@@ -101,17 +101,24 @@ fn space_rooms_are_suggested_with_the_space_prefix_on_the_accounts_server() {
         preview_room_address("papers", None, Some("!!!"), Some("@m:example.invalid")).localpart,
         "papers"
     );
-    // A room name without usable characters offers no suggestion; since
-    // #1023 the room may then be created without an address (the Space
-    // prefix alone is never an address).
-    let unsuggestable = preview_room_address(
-        "!!!",
-        None,
-        Some("research-group"),
-        Some("@m:example.invalid"),
-    );
-    assert_eq!(unsuggestable.error, None);
-    assert!(unsuggestable.without_address);
+    // A named room without usable characters offers no suggestion; it still
+    // needs a manually entered address (#1006; #1023 exempts only unnamed
+    // rooms), and the Space prefix alone is never an address.
+    for name in ["!!!", "🎉"] {
+        let unsuggestable = preview_room_address(
+            name,
+            None,
+            Some("research-group"),
+            Some("@m:example.invalid"),
+        );
+        assert_eq!(
+            unsuggestable.error,
+            Some(RoomAddressError::Empty),
+            "{name:?}"
+        );
+        assert!(!unsuggestable.without_address, "{name:?}");
+        assert_eq!(unsuggestable.localpart, "", "{name:?}");
+    }
     // A manually edited address is never prefixed.
     assert_eq!(
         preview_room_address(
@@ -138,17 +145,16 @@ fn an_overlong_space_prefix_is_dropped_instead_of_invalidating_the_suggestion() 
     assert_eq!(preview.localpart, "papers");
 }
 
-/// #1023: a room name that yields no address suggestion (empty, or without
-/// usable characters) lets a public room be created without an address. The
-/// Space prefix is never used alone as an address.
+/// #1023: an unnamed room (empty or blank name) lets a public room be
+/// created without an address. The Space prefix is never used alone as an
+/// address.
 #[test]
-fn an_unsuggestable_name_allows_a_public_room_without_an_address() {
+fn an_unnamed_room_allows_a_public_room_without_an_address() {
     for (name, space) in [
         ("", None),
         ("   ", None),
         ("", Some("research-group")),
         ("", Some("研究グループ")),
-        ("!!!", Some("research-group")),
     ] {
         for alias in [None, Some(""), Some("  ")] {
             let preview = preview_room_address(name, alias, space, Some("@member:example.invalid"));

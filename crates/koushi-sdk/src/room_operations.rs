@@ -859,9 +859,8 @@ pub(super) fn create_room_request(
                 validate_alias_localpart(alias_localpart)?;
                 request.room_alias_name = Some(alias_localpart.to_owned());
             }
-            // #1023: a name that offers no address suggestion (an unnamed
-            // room) may be public without an address; the room still gets
-            // the public join rule and directory listing below.
+            // #1023: only an unnamed room may be public without an address;
+            // it still gets the public join rule and directory listing below.
             None if koushi_state::public_room_address_required(&options.name) => {
                 return Err(MatrixRoomOperationError::InvalidRoomAlias);
             }
@@ -959,8 +958,9 @@ pub fn preview_room_address(
     let user = user_id.and_then(|id| matrix_sdk::ruma::UserId::parse(id).ok());
     let server_name = user.as_ref().map(|user| user.server_name().to_string());
     let alias_localpart = alias_localpart.map(str::trim);
-    // #1023: with no usable name there is nothing to suggest, and an empty
-    // address means "create without an address" rather than a missing one.
+    // #1023: an unnamed room has nothing to suggest, and an empty address
+    // means "create without an address" rather than a missing one. A named
+    // room without a suggestion falls through and reports `Empty` (#1006).
     if !koushi_state::public_room_address_required(name)
         && alias_localpart.is_none_or(str::is_empty)
     {
