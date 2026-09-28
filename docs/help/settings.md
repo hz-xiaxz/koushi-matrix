@@ -25,7 +25,7 @@ Japanese category names are included to help find them in a translated app.
 | Account (アカウント) | Language (Default (English), English, Japanese); profile display name and avatar; saved-account switching; account management page when provided by the server; change password and deactivate account when supported. |
 | Sessions (セッション) | Homeserver, user ID, device ID/name, verification, cross-signing, backup and local-store information; Sign out. This is current-session information, not a list of all remote devices. The status shown is the last checked result; Koushi re-checks it automatically when the app or account starts and after a connection outage, and the refresh action checks again immediately. |
 | Appearance (外観) | Theme; display density; UI font and emoji style. |
-| Notifications (通知) | Desktop notifications, notification sounds and badge counts. Operating-system permissions also apply. |
+| Notifications (通知) | Desktop notifications, notification sounds and badge counts. Operating-system permissions also apply. Account-wide notification rules and **Email notifications**; see [Email notifications](#email-notifications). |
 | Preferences (環境設定) | Code-block wrapping; URL previews in unencrypted/encrypted rooms; hiding removed messages; close to tray where configurable; automatic loading of older messages; placement of threaded conversations at their latest reply. |
 | Keyboard (キーボード) | Send-message shortcut (Enter or the platform modifier+Enter); reference list of keyboard shortcuts and their availability. |
 | Security & Privacy (セキュリティとプライバシー) | Sending read receipts and typing notifications. |
@@ -72,6 +72,35 @@ topmost dismissible dialog and returns focus to its opener.
 For consequences and prerequisites, see [Search](search.md),
 [Security and recovery](security-and-recovery.md), and
 [User trust model](user-trust-model.md) before changing the corresponding settings.
+
+## Email notifications
+
+**User settings → Notifications → Email notifications** has two separate parts:
+
+- The **Email notifications** switch controls delivery. **Off** means your
+  homeserver does not email you summaries, even when an address is listed.
+  With several addresses, **Send to** chooses the single delivery target.
+- **Registered email addresses** lists the email addresses your homeserver has
+  registered for your Matrix account. Koushi does not create them. Each shows
+  **Email confirmed** (Japanese: メールアドレス確認済み), meaning the homeserver
+  records that ownership of the address was confirmed by email; the current
+  delivery target shows **Email confirmed · Notification target**. This is
+  unrelated to device or contact verification (検証), and a listed address is
+  not a guarantee that mail to it is delivered. **Why is this address shown?**
+  repeats this explanation.
+
+What you can do with addresses depends on the server:
+
+- When adding is available, **Add email address** (or **Add another email
+  address**) sends a confirmation email. Open its link, then press
+  **Continue**; a password prompt may appear. The new address is registered
+  after confirmation; if email notifications are on, they move to it.
+- **This server does not allow adding email addresses here.** means the server
+  disallows adding addresses from clients. Addresses already listed stay
+  registered, and you can still turn email notifications on or off for them.
+- If your account uses an account management page, **Email addresses for this
+  account are managed on your account page.** appears with **Manage account &
+  devices** when the server provides that page.
 
 ## Ask for help
 

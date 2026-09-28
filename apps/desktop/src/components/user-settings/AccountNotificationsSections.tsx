@@ -363,7 +363,9 @@ export function EmailNotificationsSection({
                     : t("settings.emailNotificationsUnverifiedTarget")
                   : target
                     ? t("settings.emailNotificationsOff")
-                    : t("settings.emailNotificationsNeedsEmail")}
+                    : management === "available"
+                      ? t("settings.emailNotificationsNeedsEmail")
+                      : t("settings.emailNotificationsNeedsRegisteredEmail")}
               </span>
             </span>
             <span className="settings-switch-track" aria-hidden="true">
@@ -379,17 +381,6 @@ export function EmailNotificationsSection({
             count: snapshot.unverified_email_pusher_count
           })}
         </p>
-      ) : null}
-
-      {snapshot && verified.length > 0 ? (
-        <div className="settings-detail-list" data-testid="notification-email-list">
-          {verified.map((email) => (
-            <div className="settings-detail-row" key={email.address}>
-              <span>{email.address}</span>
-              <span>{t("settings.emailVerified")}</span>
-            </div>
-          ))}
-        </div>
       ) : null}
 
       {snapshot && verified.length > 1 ? (
@@ -418,6 +409,39 @@ export function EmailNotificationsSection({
         </label>
       ) : null}
 
+      {snapshot ? (
+        <div className="settings-email-group" data-testid="email-registered">
+          <h4 className="settings-subheading">{t("settings.emailRegisteredHeading")}</h4>
+          {verified.length > 0 ? (
+            <p className="profile-settings-hint">{t("settings.emailRegisteredDescription")}</p>
+          ) : null}
+          {verified.length > 0 ? (
+            <div className="settings-detail-list" data-testid="notification-email-list">
+              {verified.map((email) => (
+                <div className="settings-detail-row" key={email.address}>
+                  <span>{email.address}</span>
+                  <small>
+                    {email.notifications_active
+                      ? t("settings.emailVerifiedActive")
+                      : t("settings.emailVerified")}
+                  </small>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="settings-status-text" data-testid="notification-email-none">
+              {t("settings.emailRegisteredNone")}
+            </p>
+          )}
+          {verified.length > 0 ? (
+            <details className="settings-disclosure" data-testid="email-why-shown">
+              <summary>{t("settings.emailWhyShown")}</summary>
+              <p className="profile-settings-hint">{t("settings.emailWhyShownDetail")}</p>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+
       {snapshot && management === "delegatedToAccountManagement" ? (
         <div className="manage-account-row" data-testid="email-managed-externally">
           <p className="profile-settings-hint">{t("settings.emailManagedByAccount")}</p>
@@ -431,9 +455,14 @@ export function EmailNotificationsSection({
       ) : null}
 
       {snapshot && management === "unsupported" ? (
-        <p className="settings-status-text" data-testid="email-unsupported">
-          {t("settings.emailUnsupported")}
-        </p>
+        // `m.3pid_changes` is false: only adding here is blocked. Listed
+        // addresses stay registered and remain usable as delivery targets.
+        <div className="settings-email-group" data-testid="email-unsupported">
+          <p className="settings-status-text">{t("settings.emailUnsupported")}</p>
+          {verified.length > 0 ? (
+            <p className="settings-status-text">{t("settings.emailUnsupportedExisting")}</p>
+          ) : null}
+        </div>
       ) : null}
 
       {snapshot && management === "available" && pending ? (
