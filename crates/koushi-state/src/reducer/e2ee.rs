@@ -836,6 +836,19 @@ pub(crate) fn handle_room_key_import_failed(
     e2ee_key_management_events()
 }
 
+/// At most one recovery key is revealed at a time (#927): AccountActor holds a
+/// single copy, so neither setup nor passphrase change may start while either
+/// flow still awaits the saved confirmation.
+fn recovery_key_revealed(state: &AppState) -> bool {
+    matches!(
+        state.e2ee_trust.key_management.secure_backup_setup,
+        SecureBackupSetupState::RecoveryKeyReady { .. }
+    ) || matches!(
+        state.e2ee_trust.key_management.passphrase_change,
+        SecureBackupPassphraseChangeState::Changed { .. }
+    )
+}
+
 pub(crate) fn handle_secure_backup_setup_requested(
     state: &mut AppState,
     request_id: u64,
@@ -843,10 +856,10 @@ pub(crate) fn handle_secure_backup_setup_requested(
 ) -> Vec<AppEffect> {
     // A revealed key must be confirmed before another setup may replace it.
     if !is_session_ready(state)
+        || recovery_key_revealed(state)
         || matches!(
             state.e2ee_trust.key_management.secure_backup_setup,
             SecureBackupSetupState::SettingUp { .. }
-                | SecureBackupSetupState::RecoveryKeyReady { .. }
         )
         || !matches!(
             intent.admission(&state.secure_backup_gate),
@@ -906,10 +919,10 @@ pub(crate) fn handle_secure_backup_passphrase_change_requested(
 ) -> Vec<AppEffect> {
     // A revealed key must be confirmed before another change may replace it.
     if !is_session_ready(state)
+        || recovery_key_revealed(state)
         || matches!(
             state.e2ee_trust.key_management.passphrase_change,
             SecureBackupPassphraseChangeState::Changing { .. }
-                | SecureBackupPassphraseChangeState::Changed { .. }
         )
     {
         return Vec::new();

@@ -450,7 +450,11 @@ stateDiagram-v2
   A stale confirmation is a typed failed no-op. Logout, account switch, and
   session teardown drop the key. After an interrupted reveal (restart), the
   persisted marker re-enters `RecoveryKeyDeliveryRequired` without a key and
-  `InitialSetup` re-exports it. Passphrase change reveals its new key in
+  `InitialSetup` takes the existing re-export path (`local_recovery_key`),
+  which yields the locally stored backup decryption key rather than the
+  secret-storage key `enable()` returned. Only one key is revealed at a time:
+  setup and passphrase change are rejected while either awaits confirmation.
+  Passphrase change reveals its new key in
   `SecureBackupPassphraseChangeState::Changed` with the same copy/save/confirm
   rules, without touching the gate.
 
@@ -464,7 +468,7 @@ stateDiagram-v2
     CreatingBackup --> RecoveryKeyDeliveryRequired: setup succeeded / reveal key on screen
     RecoveryKeyDeliveryRequired --> RecoveryKeyDeliveryRequired: copy or save to file / reveal stays
     RecoveryKeyDeliveryRequired --> Checking: ConfirmSecureBackupRecoveryKeySaved(reveal id) / drop key, clear marker, inspect
-    RecoveryKeyDeliveryRequired --> CreatingBackup: InitialSetup without a revealed key / re-export
+    RecoveryKeyDeliveryRequired --> CreatingBackup: InitialSetup without a revealed key / re-export local backup key
 ```
 - A genuine missing cross-signing identity may enter mandatory bootstrap. An
   existing identity without a verified other device or usable recovery method

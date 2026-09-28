@@ -174,4 +174,28 @@ fn setup_is_rejected_while_a_revealed_key_awaits_confirmation() {
     );
     assert!(effects.is_empty());
     assert_eq!(state, before);
+
+    // A passphrase change would rotate the key while the revealed one is
+    // still unconfirmed: the projection rejects it with a typed no-op.
+    let change = AccountCommand::ChangeSecureBackupPassphrase {
+        request_id: request_id(12),
+        request: koushi_protocol::SecureBackupPassphraseChangeRequest {
+            old_secret: koushi_state::AuthSecret::new("old-synthetic-phrase"),
+            new_passphrase: koushi_state::AuthSecret::new("new-synthetic-phrase"),
+        },
+    };
+    let effects = koushi_state::reduce(
+        &mut state,
+        account_command_projected_action(&change).expect("projected action"),
+    );
+    assert!(effects.is_empty());
+    assert_eq!(state, before);
+    assert_eq!(
+        secure_backup_setup_projection_failure(&state, &change),
+        Some(CoreFailure::SecureBackupSetupFailedNoOp)
+    );
+    assert_eq!(
+        secure_backup_setup_projection_failure(&AppState::default(), &change),
+        None
+    );
 }

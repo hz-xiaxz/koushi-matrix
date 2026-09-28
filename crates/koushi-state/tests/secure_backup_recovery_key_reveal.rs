@@ -203,6 +203,39 @@ fn another_setup_request_cannot_replace_a_revealed_key() {
 }
 
 #[test]
+fn only_one_recovery_key_is_revealed_at_a_time() {
+    let mut setup_revealed = revealed_setup_state();
+    setup_revealed.secure_backup_gate = SecureBackupGateState::Ready;
+    let before = setup_revealed.clone();
+    reduce(
+        &mut setup_revealed,
+        AppAction::SecureBackupPassphraseChangeRequested { request_id: 12 },
+    );
+    assert_eq!(setup_revealed, before);
+
+    let mut change_revealed = ready_state(SecureBackupGateState::SetupRequired);
+    change_revealed.e2ee_trust.key_management.passphrase_change =
+        SecureBackupPassphraseChangeState::Changed {
+            request_id: 11,
+            recovery_key: key(),
+            delivery: RecoveryKeyDeliveryState::NotWritten,
+        };
+    let before = change_revealed.clone();
+    reduce(
+        &mut change_revealed,
+        AppAction::SecureBackupSetupRequested {
+            request_id: 13,
+            intent: SecureBackupSetupIntent::InitialSetup,
+        },
+    );
+    reduce(
+        &mut change_revealed,
+        AppAction::SecureBackupPassphraseChangeRequested { request_id: 14 },
+    );
+    assert_eq!(change_revealed, before);
+}
+
+#[test]
 fn passphrase_change_reveals_the_new_key_until_confirmation() {
     let mut state = ready_state(SecureBackupGateState::Ready);
     reduce(

@@ -2174,6 +2174,7 @@ impl AppActor {
                 let requires_projection_acceptance = matches!(
                     &account_command,
                     AccountCommand::BootstrapSecureBackup { .. }
+                        | AccountCommand::ChangeSecureBackupPassphrase { .. }
                         | AccountCommand::ConfirmSecureBackupRecoveryKeySaved { .. }
                         | AccountCommand::RestoreSession { .. }
                         | AccountCommand::RestoreLastSession { .. }
@@ -4821,12 +4822,18 @@ fn secure_backup_setup_projection_failure(
     state: &AppState,
     command: &AccountCommand,
 ) -> Option<CoreFailure> {
-    if matches!(
-        command,
-        AccountCommand::ConfirmSecureBackupRecoveryKeySaved { .. }
-    ) {
-        // Stale or forged confirmation: no revealed key matches.
-        return Some(CoreFailure::SecureBackupSetupFailedNoOp);
+    match command {
+        // Stale or forged confirmation: no revealed key matches (#927).
+        AccountCommand::ConfirmSecureBackupRecoveryKeySaved { .. } => {
+            return Some(CoreFailure::SecureBackupSetupFailedNoOp);
+        }
+        // A passphrase change that would replace a revealed key or duplicate
+        // one in flight; without a ready session it stays SessionRequired.
+        AccountCommand::ChangeSecureBackupPassphrase { .. } => {
+            return matches!(state.session, SessionState::Ready(_))
+                .then_some(CoreFailure::SecureBackupSetupFailedNoOp);
+        }
+        _ => {}
     }
     let AccountCommand::BootstrapSecureBackup { request, .. } = command else {
         return None;
