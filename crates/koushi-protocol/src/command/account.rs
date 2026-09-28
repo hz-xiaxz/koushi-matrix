@@ -249,6 +249,30 @@ impl fmt::Debug for AccountNotificationsRequest {
     }
 }
 
+/// Contact security details for User info (#1024). Read-only: neither
+/// request pins, verifies, or changes trust. `Debug` omits the contact.
+#[derive(Clone, Eq, PartialEq)]
+pub enum ContactSecurityRequest {
+    /// Fresh `/keys/query` for the contact, then keep the details current
+    /// from the SDK's key store until `Close` or another `Load`.
+    Load {
+        user_id: String,
+    },
+    Close,
+}
+
+impl fmt::Debug for ContactSecurityRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Load { .. } => formatter
+                .debug_struct("Load")
+                .field("user_id", &"<redacted>")
+                .finish(),
+            Self::Close => formatter.write_str("Close"),
+        }
+    }
+}
+
 // LoginRequest and RecoveryRequest redact their own Debug in
 // koushi-state (username, password, device name, recovery secret).
 pub enum AccountCommand {
@@ -320,6 +344,10 @@ pub enum AccountCommand {
     AccountNotifications {
         request_id: RequestId,
         request: AccountNotificationsRequest,
+    },
+    ContactSecurity {
+        request_id: RequestId,
+        request: ContactSecurityRequest,
     },
     SoftLogoutReauth {
         request_id: RequestId,
@@ -605,6 +633,14 @@ impl fmt::Debug for AccountCommand {
                 request,
             } => formatter
                 .debug_struct("AccountNotifications")
+                .field("request_id", request_id)
+                .field("request", request)
+                .finish(),
+            Self::ContactSecurity {
+                request_id,
+                request,
+            } => formatter
+                .debug_struct("ContactSecurity")
                 .field("request_id", request_id)
                 .field("request", request)
                 .finish(),

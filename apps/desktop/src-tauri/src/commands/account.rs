@@ -94,6 +94,52 @@ pub async fn submit_account_management_uia(
     Ok(admission)
 }
 
+// ── Contact security details (#1024) ────────────────────────────────────────
+
+pub(super) fn build_contact_security_command(
+    request_id: koushi_protocol::RequestId,
+    request: koushi_protocol::command::ContactSecurityRequest,
+) -> CoreCommand {
+    CoreCommand::Account(AccountCommand::ContactSecurity {
+        request_id,
+        request,
+    })
+}
+
+async fn submit_contact_security(
+    state: &CoreRuntimeState,
+    request: koushi_protocol::command::ContactSecurityRequest,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id(state).await;
+    submit_core_command_with_admission(state, build_contact_security_command(request_id, request))
+        .await
+}
+
+/// Read-only: retrieve and then keep current the security details of the
+/// contact whose User info is open. Never pins, verifies, or changes trust.
+#[tauri::command]
+pub async fn load_contact_security(
+    user_id: String,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    submit_contact_security(
+        state.inner(),
+        koushi_protocol::command::ContactSecurityRequest::Load { user_id },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn close_contact_security(
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    submit_contact_security(
+        state.inner(),
+        koushi_protocol::command::ContactSecurityRequest::Close,
+    )
+    .await
+}
+
 // ── Account notification settings (#981) ────────────────────────────────────
 
 async fn submit_account_notifications(

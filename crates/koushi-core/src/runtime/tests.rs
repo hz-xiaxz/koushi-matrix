@@ -1595,6 +1595,36 @@ fn bootstrap_cross_signing_command_projects_pending_state_before_account_route()
 }
 
 #[test]
+fn contact_security_commands_project_checking_and_close_before_account_route() {
+    let request_id = RequestId {
+        connection_id: RuntimeConnectionId(1),
+        sequence: 12,
+    };
+    let load = AccountCommand::ContactSecurity {
+        request_id,
+        request: koushi_protocol::command::ContactSecurityRequest::Load {
+            user_id: "@bob:example.test".to_owned(),
+        },
+    };
+    assert_eq!(
+        account_command_projected_action(&load),
+        Some(AppAction::ContactSecurityLoadRequested {
+            request_id: 12,
+            user_id: "@bob:example.test".to_owned(),
+        })
+    );
+    let debug = format!("{load:?}");
+    assert!(!debug.contains("bob"), "{debug}");
+    assert_eq!(
+        account_command_projected_action(&AccountCommand::ContactSecurity {
+            request_id,
+            request: koushi_protocol::command::ContactSecurityRequest::Close,
+        }),
+        Some(AppAction::ContactSecurityClosed)
+    );
+}
+
+#[test]
 fn identity_reset_auth_command_projects_pending_state_before_routing() {
     let request_id = RequestId {
         connection_id: RuntimeConnectionId(1),

@@ -407,6 +407,41 @@ export type MessageId =
   | "people.sendMessage"
   | "people.setAlias"
   | "people.unknownUser"
+  | "people.security.title"
+  | "people.security.scope"
+  | "people.security.details"
+  | "people.security.detailsFor"
+  | "people.security.retry"
+  | "people.security.devicesLabel"
+  | "people.security.devicesChecking"
+  | "people.security.devicesUnavailable"
+  | "people.security.devicesAllConfirmed"
+  | "people.security.devicesSomeUnconfirmed"
+  | "people.security.devicesNone"
+  | "people.security.devicesNoIdentity"
+  | "people.security.devicesAllConfirmedExplain"
+  | "people.security.devicesSomeUnconfirmedExplain"
+  | "people.security.devicesNoneExplain"
+  | "people.security.devicesNoIdentityExplain"
+  | "people.security.devicesUnavailableExplain"
+  | "people.security.devicesHowItWorks"
+  | "people.security.devicesCount"
+  | "people.security.devicesInvalidCount"
+  | "people.security.devicesDehydratedCount"
+  | "people.security.deviceOrdinal"
+  | "people.security.deviceOwnerSigned"
+  | "people.security.deviceNotOwnerSigned"
+  | "people.security.deviceSignatureInvalid"
+  | "people.security.deviceNoIdentity"
+  | "people.security.identityLabel"
+  | "people.security.identityVerified"
+  | "people.security.identityNotVerified"
+  | "people.security.identityChanged"
+  | "people.security.identityUnknown"
+  | "people.security.identityVerifiedExplain"
+  | "people.security.identityNotVerifiedExplain"
+  | "people.security.identityChangedExplain"
+  | "people.security.identityUnknownExplain"
   | "room.members"
   | "room.ban"
   | "room.banMember"
@@ -2048,6 +2083,41 @@ const en: Catalog = {
   "people.sendMessage": "Send message",
   "people.setAlias": "Set alias",
   "people.unknownUser": "Unknown user",
+  "people.security.title": "Security",
+  "people.security.scope": "These details are about this person's keys. They don't show whether a conversation is encrypted.",
+  "people.security.details": "Details",
+  "people.security.detailsFor": "Details: {topic}",
+  "people.security.retry": "Retry",
+  "people.security.devicesLabel": "Their devices",
+  "people.security.devicesChecking": "Checking…",
+  "people.security.devicesUnavailable": "Status unavailable",
+  "people.security.devicesAllConfirmed": "All confirmed by their owner",
+  "people.security.devicesSomeUnconfirmed": "Some not yet confirmed",
+  "people.security.devicesNone": "No devices found",
+  "people.security.devicesNoIdentity": "Can't be confirmed yet",
+  "people.security.devicesAllConfirmedExplain": "Every device Koushi retrieved for this person has been confirmed by them in their own app.",
+  "people.security.devicesSomeUnconfirmedExplain": "Some of this person's devices have not been confirmed yet. If you are concerned, ask them to confirm their devices in their app.",
+  "people.security.devicesNoneExplain": "No encryption devices were found for this person, so there is nothing to confirm.",
+  "people.security.devicesNoIdentityExplain": "This person hasn't set up cross-signing, so they can't confirm their devices yet.",
+  "people.security.devicesUnavailableExplain": "Koushi couldn't retrieve this person's devices. This is not a confirmation.",
+  "people.security.devicesHowItWorks": "A person confirms a device by signing it with their own identity in their app. This is about whose keys these are; it doesn't change how messages are encrypted.",
+  "people.security.devicesCount": "{confirmed} of {total} devices confirmed by their owner",
+  "people.security.devicesInvalidCount": "Device signatures that don't match this person's current identity: {count}",
+  "people.security.devicesDehydratedCount": "Offline recovery devices not counted: {count}",
+  "people.security.deviceOrdinal": "Device {index}",
+  "people.security.deviceOwnerSigned": "Confirmed by owner",
+  "people.security.deviceNotOwnerSigned": "Not yet confirmed",
+  "people.security.deviceSignatureInvalid": "Signature doesn't match",
+  "people.security.deviceNoIdentity": "Can't be confirmed",
+  "people.security.identityLabel": "Your verification",
+  "people.security.identityVerified": "Verified by you",
+  "people.security.identityNotVerified": "Not verified by you",
+  "people.security.identityChanged": "Identity changed after you verified it",
+  "people.security.identityUnknown": "Unknown",
+  "people.security.identityVerifiedExplain": "You verified that this account belongs to the person you know. This doesn't confirm devices they haven't confirmed themselves.",
+  "people.security.identityNotVerifiedExplain": "You have not checked that this account belongs to the person you know. Verifying a person is optional.",
+  "people.security.identityChangedExplain": "This person's identity changed after you verified it. Your earlier verification no longer applies, so it needs to be repeated.",
+  "people.security.identityUnknownExplain": "This person hasn't set up cross-signing, so there is no identity to verify yet.",
   "room.avatarUrl": "Room avatar URL",
   "room.avatar": "Avatar",
   "room.editAvatar": "Edit avatar",
@@ -3594,6 +3664,41 @@ const ja: Catalog = {
   "people.sendMessage": "メッセージを送信",
   "people.setAlias": "エイリアスを設定",
   "people.unknownUser": "不明なユーザー",
+  "people.security.title": "セキュリティ",
+  "people.security.scope": "ここに表示されるのはこの人の鍵に関する情報です。会話が暗号化されているかどうかは示しません。",
+  "people.security.details": "詳細",
+  "people.security.detailsFor": "詳細: {topic}",
+  "people.security.retry": "再試行",
+  "people.security.devicesLabel": "相手のデバイス",
+  "people.security.devicesChecking": "確認中…",
+  "people.security.devicesUnavailable": "状態を取得できません",
+  "people.security.devicesAllConfirmed": "すべて本人が確認済み",
+  "people.security.devicesSomeUnconfirmed": "一部は未確認",
+  "people.security.devicesNone": "デバイスが見つかりません",
+  "people.security.devicesNoIdentity": "まだ確認できません",
+  "people.security.devicesAllConfirmedExplain": "Koushiが取得したこの人のデバイスは、すべて本人が自分のアプリで確認しています。",
+  "people.security.devicesSomeUnconfirmedExplain": "この人のデバイスの一部はまだ確認されていません。気になる場合は、本人のアプリでデバイスを確認するよう依頼してください。",
+  "people.security.devicesNoneExplain": "この人の暗号化デバイスが見つからないため、確認できるものがありません。",
+  "people.security.devicesNoIdentityExplain": "この人はクロス署名を設定していないため、まだ自分のデバイスを確認できません。",
+  "people.security.devicesUnavailableExplain": "Koushiはこの人のデバイスを取得できませんでした。確認済みという意味ではありません。",
+  "people.security.devicesHowItWorks": "デバイスの確認は、本人が自分のアプリで自分のIDを使って署名することで行われます。これは鍵が誰のものかに関する情報で、メッセージの暗号化方式は変わりません。",
+  "people.security.devicesCount": "{total}台中{confirmed}台のデバイスを本人が確認済み",
+  "people.security.devicesInvalidCount": "この人の現在のIDと一致しないデバイス署名: {count}件",
+  "people.security.devicesDehydratedCount": "集計に含めていないオフライン復旧用デバイス: {count}台",
+  "people.security.deviceOrdinal": "デバイス{index}",
+  "people.security.deviceOwnerSigned": "本人が確認済み",
+  "people.security.deviceNotOwnerSigned": "未確認",
+  "people.security.deviceSignatureInvalid": "署名が一致しません",
+  "people.security.deviceNoIdentity": "確認できません",
+  "people.security.identityLabel": "あなたによる検証",
+  "people.security.identityVerified": "あなたが検証済み",
+  "people.security.identityNotVerified": "あなたは未検証",
+  "people.security.identityChanged": "検証後にIDが変わりました",
+  "people.security.identityUnknown": "不明",
+  "people.security.identityVerifiedExplain": "このアカウントが知っている本人のものであることを、あなたは検証済みです。本人が確認していないデバイスまで確認されるわけではありません。",
+  "people.security.identityNotVerifiedExplain": "このアカウントが知っている本人のものかどうかを、あなたはまだ確認していません。検証は任意です。",
+  "people.security.identityChangedExplain": "あなたが検証した後に、この人のIDが変わりました。以前の検証はもう有効ではないため、検証をやり直す必要があります。",
+  "people.security.identityUnknownExplain": "この人はクロス署名を設定していないため、まだ検証できるIDがありません。",
   "room.avatarUrl": "ルームアバターURL",
   "room.avatar": "アバター",
   "room.editAvatar": "アバターを編集",

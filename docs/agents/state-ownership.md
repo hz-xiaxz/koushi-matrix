@@ -1303,6 +1303,21 @@ normal QA-title mode and cannot change product title semantics.
   read-only load. Do not add React-local ON/OFF, target, or verification state,
   and never render ON from a requested or failed operation. The email address
   input uses `ImeTextField`; the UIA password uses `SecureImeTextField`.
+- Contact security details in User info (#1024) are Rust-owned
+  `AppState.contact_security` (mirrors: `koushi_state` → `koushi_protocol`
+  `state_update` changed slice → Tauri `dto.rs` domain slice → `types.ts`
+  `ContactSecurityState`). `ProfilePanel` dispatches only
+  `load_contact_security(userId)` on open/contact change and
+  `close_contact_security` on close; it renders "checking" unless
+  `contact_security.user_id` is the open contact. Device confirmation and your
+  verification stay two rows: never merge them into one badge, never color
+  routine unconfirmed devices or never-verified contacts red, and never infer
+  either from `e2ee_trust.devices` or per-message shields. The slice carries
+  no device ids; label devices by ordinal. Focused checks: `cargo test -p
+  koushi-state --test contact_security_state`, `cargo test -p koushi-sdk --lib
+  contact_security`, `cargo test -p koushi-core --lib contact_security`, and
+  `npm --prefix apps/desktop test -- --run
+  src/components/ContactSecurityDetails.test.tsx`.
 - Verification and device DTOs include user/device ids for Rust correlation, but
   the GUI should not display those ids by default. Use ordinal/status labels
   (`Device 1`, `Verified`, etc.) unless a Rust-owned redacted display model is

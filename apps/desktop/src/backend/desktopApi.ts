@@ -165,6 +165,9 @@ export interface DesktopApi {
   loadAccountManagementCapabilities(): Promise<CommandAdmission>;
   /** Account notification settings (#981). `load` is read-only. */
   loadAccountNotifications(): Promise<CommandAdmission>;
+  /** Contact security details (#1024); read-only. */
+  loadContactSecurity(userId: string): Promise<CommandAdmission>;
+  closeContactSecurity(): Promise<CommandAdmission>;
   setNotificationCategory(category: NotificationCategory, enabled: boolean): Promise<CommandAdmission>;
   setAccountPushEnabled(enabled: boolean): Promise<CommandAdmission>;
   requestNotificationEmailToken(address: string, lang: string): Promise<CommandAdmission>;

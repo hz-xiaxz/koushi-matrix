@@ -259,6 +259,14 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandAdmission>("load_account_notifications");
   }
 
+  async loadContactSecurity(userId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("load_contact_security", { userId });
+  }
+
+  async closeContactSecurity(): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("close_contact_security");
+  }
+
   async setNotificationCategory(
     category: NotificationCategory,
     enabled: boolean

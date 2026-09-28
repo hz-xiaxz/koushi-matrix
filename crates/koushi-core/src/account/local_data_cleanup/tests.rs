@@ -499,6 +499,8 @@ async fn reset_local_data_clears_current_account_persistence_and_signs_out_local
         sas_timeout_task: None,
         synthetic_verification: None,
         incoming_verification_observer: None,
+        contact_security: None,
+        contact_security_generation: 0,
         incoming_verification_session_generation: 0,
         session_change_observer: None,
         account_hydration_task: None,

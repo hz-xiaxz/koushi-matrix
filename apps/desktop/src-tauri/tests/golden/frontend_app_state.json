@@ -353,6 +353,29 @@
           "width_fold": true
         }
       },
+      "contact_security": {
+        "load": {
+          "kind": "loaded",
+          "request_id": 91
+        },
+        "summary": {
+          "device_counts": {
+            "excluded_dehydrated": 1,
+            "not_owner_signed": 2,
+            "owner_signature_invalid": 1,
+            "owner_signed": 1,
+            "total": 3
+          },
+          "device_signatures": [
+            "ownerSigned",
+            "notOwnerSigned",
+            "ownerSignatureInvalid"
+          ],
+          "devices": "someNotOwnerSigned",
+          "identity": "verifiedByYou"
+        },
+        "user_id": "@contact:example.invalid"
+      },
       "current_session_status": {
         "details": {
           "authentication_method": "oauth",

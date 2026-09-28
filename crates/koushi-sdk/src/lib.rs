@@ -14,6 +14,11 @@ pub use account_notifications::{
 };
 
 mod client_session;
+mod contact_security;
+pub use contact_security::{
+    ContactDeviceFacts, ContactIdentityFacts, ContactSecurityChanges, classify_contact_security,
+    load_contact_security, observe_contact_security_changes, read_contact_security,
+};
 
 mod e2ee;
 

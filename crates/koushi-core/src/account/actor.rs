@@ -554,6 +554,11 @@ pub(crate) enum AccountMessage {
     SasVerificationTimedOut {
         flow_id: u64,
     },
+    /// The SDK device/identity store changed while a contact's User info is
+    /// open (#1024); `generation` fences a replaced or closed contact.
+    ContactSecurityStoreChanged {
+        generation: u64,
+    },
     VerificationRequestObserverEnded {
         flow_id: u64,
     },
@@ -1079,6 +1084,9 @@ pub struct AccountActor {
     pub(super) synthetic_verification: Option<(u64, VerificationTarget)>,
     /// SDK incoming verification request observer for the active session.
     pub(super) incoming_verification_observer: Option<IncomingVerificationObservation>,
+    /// Open contact's security-details observer (#1024).
+    pub(super) contact_security: Option<super::contact_security::ContactSecurityObservation>,
+    pub(super) contact_security_generation: u64,
     /// Epoch attached to incoming verification messages from the active SDK client.
     pub(super) incoming_verification_session_generation: u64,
     /// SDK session-change observer for auth invalidation / soft logout.
@@ -1335,6 +1343,8 @@ impl AccountActor {
             #[cfg(test)]
             synthetic_verification: None,
             incoming_verification_observer: None,
+            contact_security: None,
+            contact_security_generation: 0,
             incoming_verification_session_generation: 0,
             session_change_observer: None,
             account_hydration_task: None,
@@ -2509,6 +2519,9 @@ impl AccountActor {
                 AccountMessage::SasVerificationTimedOut { flow_id } => {
                     self.handle_sas_verification_timeout(flow_id).await;
                 }
+                AccountMessage::ContactSecurityStoreChanged { generation } => {
+                    self.handle_contact_security_store_changed(generation).await;
+                }
                 AccountMessage::VerificationRequestObserverEnded { flow_id } => {
                     if self.active_verification_target(flow_id).is_some() {
                         record_sas_verification_event(
@@ -2681,6 +2694,12 @@ impl AccountActor {
                 request,
             } => {
                 self.handle_account_notifications(request_id, request).await;
+            }
+            AccountCommand::ContactSecurity {
+                request_id,
+                request,
+            } => {
+                self.handle_contact_security(request_id, request).await;
             }
             AccountCommand::SoftLogoutReauth {
                 request_id,

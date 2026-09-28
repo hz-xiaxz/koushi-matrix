@@ -276,6 +276,7 @@ fn account_command_requires_ready_session(command: &AccountCommand) -> bool {
             | AccountCommand::DeactivateAccount { .. }
             | AccountCommand::SubmitAccountManagementUia { .. }
             | AccountCommand::AccountNotifications { .. }
+            | AccountCommand::ContactSecurity { .. }
             | AccountCommand::ExportRoomKeys { .. }
             | AccountCommand::ExportHistory { .. }
             | AccountCommand::StopHistoryExport { .. }

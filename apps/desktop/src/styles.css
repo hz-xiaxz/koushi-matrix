@@ -6957,6 +6957,95 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   font-weight: 600;
 }
 
+/* Contact security details (#1024). Routine states stay neutral; only an
+   identity change after your verification uses the attention color. */
+.profile-security {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-security h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.profile-security-row {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.profile-security-row.is-attention {
+  border-color: var(--warning);
+}
+
+.profile-security-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.profile-security-label {
+  flex: 1 1 100%;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.profile-security-status {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+  color: var(--text);
+}
+
+.profile-security-row.is-attention .profile-security-status svg {
+  color: var(--warning);
+}
+
+.profile-security-status svg {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.profile-security-explanation {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.profile-security-explanation p,
+.profile-security-scope {
+  margin: 0;
+}
+
+.profile-security-scope {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.profile-security-devices {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.profile-security-devices li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .profile-member-actions {
   display: grid;
   gap: 8px;

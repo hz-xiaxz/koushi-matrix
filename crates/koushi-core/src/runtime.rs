@@ -5090,6 +5090,20 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
             request_id,
             request,
         } => Some(account_notifications_action(request_id.sequence, request)),
+        AccountCommand::ContactSecurity {
+            request_id,
+            request,
+        } => Some(match request {
+            koushi_protocol::command::ContactSecurityRequest::Load { user_id } => {
+                AppAction::ContactSecurityLoadRequested {
+                    request_id: request_id.sequence,
+                    user_id: user_id.clone(),
+                }
+            }
+            koushi_protocol::command::ContactSecurityRequest::Close => {
+                AppAction::ContactSecurityClosed
+            }
+        }),
         AccountCommand::SoftLogoutReauth { request_id, .. } => {
             Some(AppAction::SoftLogoutReauthRequested {
                 request_id: request_id.sequence,

@@ -4996,6 +4996,77 @@ Email notifications:
   account-management destination; `m.3pid_changes: false` projects
   `Unsupported`. Neither offers the add flow.
 
+## Contact Security Details
+
+User info shows two independent facts about another person (#1024), held in
+`AppState.contact_security` for the one contact whose User info is open:
+
+- **Their devices:** whether each retrieved encryption device key has a valid
+  signature from its owner's cross-signing identity
+  (`Device::is_cross_signed_by_owner()`, not `is_verified()`, which includes
+  your own and local trust). Aggregate: `AllOwnerSigned`,
+  `SomeNotOwnerSigned`, `NoDevices`, `OwnerIdentityMissing`; per device
+  `OwnerSigned`, `NotOwnerSigned`, `OwnerSignatureInvalid` (a signature by the
+  owner's account that does not validate against their current identity),
+  `OwnerIdentityMissing`.
+- **Your verification:** `UserIdentity::has_verification_violation()` →
+  `ChangedAfterVerification`, else `is_verified()` → `VerifiedByYou`, else
+  `NotVerifiedByYou`; no identity → `Unknown`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Loading: ContactSecurityLoadRequested [Ready]
+    Loaded --> Loading: ContactSecurityLoadRequested [Ready, same or other contact]
+    Failed --> Loading: ContactSecurityLoadRequested [Ready]
+    Loading --> Loading: ContactSecurityLoadRequested [Ready, replacement]
+    Loading --> Loaded: ContactSecurityLoaded [matching user_id and request_id]
+    Loading --> Failed: ContactSecurityLoadFailed [matching user_id and request_id]
+    Loaded --> Loaded: ContactSecurityRefreshed [matching user_id, changed summary]
+    Loading --> Idle: ContactSecurityClosed
+    Loaded --> Idle: ContactSecurityClosed
+    Failed --> Idle: ContactSecurityClosed
+    Loaded --> Idle: logout/lock/switch/session clear
+```
+
+- **Read-only.** Opening User info dispatches the load; closing it or opening
+  another contact dispatches close/load. Nothing pins an identity, verifies,
+  withdraws verification, sets local trust, or changes sending policy.
+  Expanding an explanation dispatches nothing.
+- **Fresh retrieval, no stale confirmation.** `LoadRequested` clears the
+  previous summary; the actor performs a `/keys/query` for the contact
+  (`Encryption::request_user_identity`) and then reads the SDK store. A failed
+  retrieval is `Failed` with no summary ("status unavailable"), never a
+  confirmation. An empty device list is `NoDevices`, and a contact without
+  cross-signing is `OwnerIdentityMissing`/`Unknown`; neither is confirmation.
+- **Fences.** Results whose `user_id` or `request_id` do not match the
+  in-flight load are dropped, so a late answer for a previous contact or a
+  previous account (the slice is reset with the other session views) never
+  appears. `Refreshed` applies only on top of `Loaded` for the same contact; it
+  is ignored while checking and after a failed retrieval.
+- **Live refresh.** While a contact is open the AccountActor observes the
+  SDK's `devices_stream()` and `user_identities_stream()`, re-reads the
+  contact from the store without network on any change (device additions,
+  removals, re-signing, identity changes, and changes to your own identity),
+  and projects `Refreshed` only when the summary changed. The observer is
+  generation-fenced and stopped on close, contact switch, and session teardown.
+- **SDK protections are unchanged.** Devices whose own self-signature is
+  invalid are rejected by the SDK during `/keys/query` and never counted.
+  Deleted devices leave the store. Dehydrated devices are excluded from the
+  aggregate, as in Element's user device list; the SDK withholds room keys from
+  unverified dehydrated devices on its own. Per-message shields and the send
+  policy do not read this slice.
+- **Presentation.** Routine unconfirmed devices and a contact you never
+  verified are neutral (no red, warning banner, or verification prompt), also
+  when a never-verified contact's identity changed. Only
+  `ChangedAfterVerification` is an attention state. Your verification stays
+  `VerifiedByYou` when the contact adds an unsigned device. The details carry
+  no device ids, names, or key material; the GUI labels devices by ordinal and
+  states that the details do not show whether a conversation is encrypted.
+- The interactive **Verify user** request is not part of this slice (see
+  #1024 follow-up); this slice only projects its outcome through
+  `ContactIdentityVerification`.
+
 ## Desktop Application Updates
 
 The desktop adapter owns one process-wide update lifecycle. It is independent
