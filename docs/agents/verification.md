@@ -102,7 +102,9 @@ A subagent's "gates passed" claim is not evidence — re-run the gate yourself.
 
 ## What CI actually gates
 
-`.github/workflows/ci.yml` runs on every pull request:
+`.github/workflows/ci.yml` runs on every pull request. Every job in the table
+below, including `Rust lint (rustfmt / clippy)`, is a required status check
+for merging into `main`:
 
 | Job | Covers |
 | --- | --- |
@@ -167,9 +169,14 @@ Matrix SDK has its own exact-keyed artifact cache. Cargo judges path
 dependencies by source mtime and checkout stamps every file with the current
 time, so the job first normalizes the SDK's tracked sources to a fixed old
 mtime. This is safe only because the key pins the SDK gitlink, the lockfile,
-every workspace manifest, `ci.yml`, the toolchain and the profile; a different
-feature set still selects a different fingerprint hash. Keep that key complete
-when changing any of those inputs, because an exact hit is never re-saved.
+every workspace manifest, `ci.yml`, the profile, and the rustc release; a
+different feature set still selects a different fingerprint hash. The CI key
+reads that release from `rustc -vV` in the job, where rustup resolves it from
+`rust-toolchain.toml`, so a toolchain bump rekeys it automatically. The
+release workflow's SDK cache keys still carry a literal `rust-<version>`
+string that must be bumped together with `rust-toolchain.toml`. Keep every
+key complete when changing any of those inputs, because an exact hit is never
+re-saved.
 rust-cache has the same property, and its key hashes only manifests, the
 lockfile and the toolchain. When a change to the cargo command set changes the
 resolved dependency feature graph, bump the Rust job's `shared-key` suffix, or

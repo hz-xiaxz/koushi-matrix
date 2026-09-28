@@ -159,6 +159,14 @@ jobs:
       - name: Read vendored Matrix SDK revision
         id: sdk-revision
         run: echo "revision=$(git -C vendor/matrix-rust-sdk rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # rustup resolves rustc from rust-toolchain.toml in the checkout, so the
+      # SDK cache key follows a toolchain bump without a hand-edited literal.
+      - name: Read active rustc release
+        id: rustc
+        run: |
+          release="$(rustc -vV | sed -n 's/^release: //p')"
+          test -n "$release"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
       # rust-cache prunes path dependencies under the repository root, so the
       # vendored SDK has its own exact-keyed cache. Cargo judges path
       # dependencies by source mtime, and checkout stamps every file "now",
@@ -180,7 +188,7 @@ jobs:
             target-ci/ci/deps/matrix_sdk*.d
           # Workspace manifests and this workflow's cargo command select the SDK
           # feature set. An exact hit is never re-saved, so all of them key it.
-          key: koushi-sdk-artifacts-v2-${{ runner.os }}-rust-1.96.0-ci-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/*/Cargo.toml', 'apps/desktop/src-tauri/Cargo.toml', 'tests/*/Cargo.toml', 'spikes/*/Cargo.toml', '.github/workflows/ci.yml') }}-${{ steps.sdk-revision.outputs.revision }}
+          key: koushi-sdk-artifacts-v2-${{ runner.os }}-rust-${{ steps.rustc.outputs.release }}-ci-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/*/Cargo.toml', 'apps/desktop/src-tauri/Cargo.toml', 'tests/*/Cargo.toml', 'spikes/*/Cargo.toml', '.github/workflows/ci.yml') }}-${{ steps.sdk-revision.outputs.revision }}
       - name: Report Rust cache state
         run: node scripts/ci-rust-cache-report.mjs --target-dir "$CARGO_TARGET_DIR" --profile ci --rust-cache-hit "${{ steps.rust-cache.outputs.cache-hit }}" --sdk-cache-hit "${{ steps.sdk-cache.outputs.cache-hit }}" --label rust
       - name: Install Tauri system dependencies

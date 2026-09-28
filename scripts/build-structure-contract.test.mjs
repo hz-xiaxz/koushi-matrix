@@ -115,6 +115,11 @@ test("CI and npm scripts use the unified workspace contracts", () => {
   assert.ok(normalize < rustJob.indexOf("cargo test"));
   assert.match(rustJob, /target-ci\/ci\/build\/matrix-sdk-\*/);
   assert.match(rustJob, /key: koushi-sdk-artifacts-v2-[^\n]*'\.github\/workflows\/ci\.yml'[^\n]*steps\.sdk-revision\.outputs\.revision/);
+  // The SDK cache key names the rustc that rustup resolves from
+  // rust-toolchain.toml, not a literal that must be bumped by hand.
+  assert.match(rustJob, /key: koushi-sdk-artifacts-v2-[^\n]*-rust-\$\{\{ steps\.rustc\.outputs\.release \}\}-/);
+  assert.doesNotMatch(rustJob, /key: koushi-sdk-artifacts-v2-[^\n]*-rust-\d/);
+  assert.match(rustJob, /id: rustc\n\s+run: \|[\s\S]*?rustc -vV/);
   assert.match(ci, /node --test scripts\/check-rust-test-structure\.test\.mjs/);
   assert.match(ci, /node scripts\/check-rust-test-structure\.mjs/);
   assert.match(ci, /node --test[^\n]*check-leaf-crate-boundaries\.test\.mjs/);
