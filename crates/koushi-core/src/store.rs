@@ -54,6 +54,11 @@ use koushi_store::{local_secret_error_health, record_local_unlock_secret};
 const COMPOSER_DRAFTS_FILE_MAGIC: &[u8] = b"KOUSHI-DRAFTS-V1\0";
 const PENDING_LOGIN_CAP: u8 = 8;
 
+/// Logout/account-removal cleanup left a credential or store directory behind.
+/// Carries no path or backend error so it is safe to log.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AccountCleanupIncomplete;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PendingLoginCleanupEvidence {
     NoRequestSent,
@@ -819,7 +824,10 @@ impl StoreActor {
     /// than a logout that fails. Matrix session JSON / pointers stored via the
     /// credential backend are cleaned up by AccountActor through the same
     /// backend.
-    pub fn delete_account_credentials(&self, key_id: &SessionKeyId) -> Result<(), ()> {
+    pub fn delete_account_credentials(
+        &self,
+        key_id: &SessionKeyId,
+    ) -> Result<(), AccountCleanupIncomplete> {
         let root = self.account_root_dir(key_id);
         let credential_deleted = self.credential_store.delete(key_id).is_ok()
             && self.credential_store.delete_local_store_id(key_id).is_ok();
@@ -831,7 +839,7 @@ impl StoreActor {
         if credential_deleted && directory_deleted {
             Ok(())
         } else {
-            Err(())
+            Err(AccountCleanupIncomplete)
         }
     }
 

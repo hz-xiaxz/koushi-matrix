@@ -47,7 +47,6 @@ use super::read_state::ReadRetrySource;
 /// receiving the actor acknowledgement. The scheduler invalidates the
 /// operation generation before entering this wait, so expiry is safe: a late
 /// actor completion is stale and room navigation may continue.
-
 pub(super) const LIVE_TAIL_CANCELLATION_DEADLINE: Duration = Duration::from_millis(100);
 
 impl TimelineManagerActor {
@@ -263,6 +262,10 @@ impl TimelineManagerActor {
             }
         }
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor message handler: parameters are the destructured message fields"
+    )]
     pub(super) async fn handle_live_tail_refresh_completed(
         &mut self,
         key: TimelineKey,

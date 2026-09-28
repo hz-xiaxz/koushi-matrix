@@ -730,6 +730,10 @@ impl TimelineActor {
             previous.abort();
         }
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor message handler: parameters are the destructured message fields"
+    )]
     pub(super) async fn handle_link_previews_fetched(
         &mut self,
         request_id: RequestId,
@@ -1785,18 +1789,6 @@ pub(super) fn timeline_item_should_be_hidden_for_key(
     timeline_item_should_be_hidden(has_renderable_content, is_redacted)
 }
 
-/// Koushi threads are linear, so a thread-keyed reply command is always an
-/// ordinary thread message: the relation is threaded and the target event is
-/// never promoted to a rich reply. The product UI offers no thread-pane reply
-/// action, and this projection keeps a thread rich reply unreachable even if a
-/// caller passes a non-root target.
-pub(super) fn reply_enforce_thread_for_key(key: &TimelineKey) -> EnforceThread {
-    match key.kind {
-        TimelineKind::Thread { .. } => EnforceThread::Threaded(ReplyWithinThread::No),
-        TimelineKind::Room { .. } | TimelineKind::Focused { .. } => EnforceThread::MaybeThreaded,
-    }
-}
-
 pub(super) fn attachment_reply_for_key(key: &TimelineKey) -> Option<Reply> {
     let TimelineKind::Thread { root_event_id, .. } = &key.kind else {
         return None;
@@ -2110,6 +2102,10 @@ async fn receipt_profiles_for_users(
     profiles
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) async fn emit_receipt_observation_actions(
     session: &MatrixClientSession,
     action_tx: &mpsc::Sender<Vec<AppAction>>,

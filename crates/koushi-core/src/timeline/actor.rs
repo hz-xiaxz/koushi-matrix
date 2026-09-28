@@ -1288,6 +1288,10 @@ impl TimelineActor {
     }
 
     /// Spawn the actor, emit InitialItems, and return the handle.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor wiring: independent owned handles moved into one task"
+    )]
     pub(super) async fn spawn(
         key: TimelineKey,
         timeline: Arc<Timeline>,

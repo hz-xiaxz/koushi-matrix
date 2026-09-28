@@ -221,6 +221,10 @@ pub enum ViewRetirement {
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "public protocol enum: boxing its largest variant changes every producer and consumer across crates (follow-up)"
+)]
 pub enum ViewDelivery {
     Model {
         scope: ViewScopeId,

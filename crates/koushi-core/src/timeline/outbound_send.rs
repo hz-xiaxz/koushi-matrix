@@ -64,7 +64,6 @@ use super::thread_projection::{ThreadAttentionBatchProvenance, ThreadAttentionCo
 /// One absolute deadline for the complete set of manager-owned enqueue workers.
 /// This is deliberately not a per-worker timeout, so shutdown latency cannot
 /// grow with the number of outstanding sends.
-
 const SEND_ENQUEUE_WORKER_SHUTDOWN_DEADLINE: Duration = Duration::from_secs(5);
 
 pub(super) struct TimelineSendCompletionDelivery {
@@ -326,6 +325,10 @@ async fn encrypted_send_diagnostic_snapshot(
     }
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "short-lived value moved once; boxing would add an allocation per message and churn every construction and match site"
+)]
 pub(super) enum TimelineSendEnqueuePayload {
     Text {
         document: ComposerDocument,
@@ -344,7 +347,7 @@ pub(super) enum TimelineSendEnqueuePayload {
 }
 
 #[cfg(test)]
-struct SyntheticSendEnqueueRequest {
+pub(super) struct SyntheticSendEnqueueRequest {
     payload: TimelineSendEnqueuePayload,
     response: oneshot::Sender<Result<SendEnqueueSuccess, TimelineFailureKind>>,
 }
@@ -355,7 +358,7 @@ struct MediaSendQueuedDelivery {
     transaction_id: String,
 }
 
-struct SendEnqueueSuccess {
+pub(super) struct SendEnqueueSuccess {
     sdk_transaction_id: String,
     handle: Option<matrix_sdk::send_queue::SendHandle>,
     media_queued: Option<MediaSendQueuedDelivery>,
@@ -1112,6 +1115,10 @@ impl TimelineManagerActor {
         }
     }
     async fn drain_send_enqueue_workers_until(&mut self, deadline: executor::Instant) -> bool {
+        #[expect(
+            clippy::large_enum_variant,
+            reason = "short-lived value moved once; boxing would add an allocation per message and churn every construction and match site"
+        )]
         enum DrainProgress {
             Worker(Option<SendEnqueueWorkerCompletion>),
             ObserverFinished,
@@ -1397,6 +1404,10 @@ impl TimelineManagerActor {
         self.drive_send_enqueue_until_preflight_started(preflight_started)
             .await;
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+    )]
     pub(super) async fn route_submission_to_worker(
         &mut self,
         request_id: RequestId,
@@ -2706,6 +2717,10 @@ impl SendCompletionRegistration {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+    )]
     pub(super) fn begin_with_projection(
         coordinator: SharedSendCompletionCoordinator,
         terminal_ingress: TimelineSendTerminalIngress,
@@ -2792,9 +2807,7 @@ impl SendCompletionRegistration {
         sdk_transaction_id: String,
         handle: Option<matrix_sdk::send_queue::SendHandle>,
     ) -> Option<TimelineKey> {
-        let Some(registration_id) = self.registration_id.take() else {
-            return None;
-        };
+        let registration_id = self.registration_id.take()?;
         self.lifecycle_trace
             .as_mut()
             .expect("active send registration must own lifecycle trace")
@@ -3052,9 +3065,7 @@ impl SendCompletionCoordinator {
                         .then(|| (correlation.clone(), projection.key.clone()))
                     })
             });
-        let Some((correlation, key)) = key else {
-            return None;
-        };
+        let (correlation, key) = key?;
         self.pending_sends.remove(&correlation);
         if let Some(mut retained) = self.retained_projections.remove(&correlation) {
             retained.lifecycle_trace.stage_once("remote_echo_converged");

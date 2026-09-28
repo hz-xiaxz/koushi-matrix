@@ -568,6 +568,10 @@ pub(super) fn emit_items_updated_for_generation(
 
 /// A fresh actor projection is already display-relative. Canonical navigation
 /// state remains actor-owned and is never sent through this event.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn emit_initial_items_for_generation(
     event_tx: &broadcast::Sender<CoreEvent>,
     timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
@@ -602,6 +606,10 @@ pub(super) struct RestoreSettlement {
     pub(super) terminal: Option<(RequestId, TimelineAnchorRestoreStatus)>,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn publish_restore_settlement_for_generation(
     restore_emit_buffer: &mut Vec<TimelineDiff>,
     force_items_updated: bool,
@@ -657,6 +665,10 @@ pub(super) struct PreparedInitialWindow {
     pub(super) emitted_items: Vec<TimelineItem>,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn commit_prepared_initial_window_for_generation(
     navigation_items: &mut Vec<TimelineItem>,
     display_projection: &mut DisplayProjectionState,
@@ -692,6 +704,10 @@ pub(super) fn commit_prepared_initial_window_for_generation(
     true
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn commit_prepared_initial_window_with_lease<F>(
     navigation_items: &mut Vec<TimelineItem>,
     display_projection: &mut DisplayProjectionState,
@@ -1102,6 +1118,10 @@ impl TimelineActor {
         self.emit_pagination_completion(request_id, direction, completion);
         completion.into_result()
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+    )]
     async fn paginate_once_for(
         request_id: RequestId,
         key: TimelineKey,
@@ -1910,6 +1930,10 @@ pub(super) fn derive_timeline_navigation_snapshot(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
     kind: &TimelineKind,
     items: &[TimelineItem],
@@ -1999,10 +2023,9 @@ pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
             .iter()
             .enumerate()
             .skip(read_marker_index)
-            .filter(|(_, item)| {
+            .rfind(|(_, item)| {
                 navigation_item_in_scope(kind, item) && is_own_visible_event(item, own_user_id)
             })
-            .next_back()
             .and_then(|(_, item)| timeline_item_event_id(item).map(ToOwned::to_owned));
     }
     snapshot

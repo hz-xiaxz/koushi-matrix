@@ -186,6 +186,10 @@ pub fn compose_sidebar_for_state(state: &AppState) -> SidebarModel {
     sidebar
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 fn compose_sidebar_with_preferences(
     active_space_id: Option<&str>,
     spaces: &[SpaceSummary],

@@ -260,6 +260,10 @@ pub enum CoreQaCommand {
     },
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "short-lived value moved once; boxing would add an allocation per message and churn every construction and match site"
+)]
 enum CoreCommandEnvelope {
     ReaderPrepared(readers::ReaderPrepared),
     #[cfg(test)]
@@ -1015,6 +1019,10 @@ impl ActionBatchOrigin {
     }
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "short-lived value moved once; boxing would add an allocation per message and churn every construction and match site"
+)]
 enum CommandDisposition {
     Handle(CoreCommandEnvelope),
     Shutdown,
@@ -1108,6 +1116,18 @@ struct ComposerDraftTestMutation {
     drafts: ComposerDraftStore,
     completion: oneshot::Sender<AppState>,
 }
+
+/// Reducer output deferred until the batch's projection is published:
+/// effects, settled generation, request, navigation cleanup, deferred side
+/// effects, and composer acceptance.
+type PostProjectionWork = (
+    Vec<AppEffect>,
+    Option<u64>,
+    Option<RequestId>,
+    crate::timeline::NavigationProjectionCleanup,
+    reducer_support::DeferredReducerSideEffects,
+    Option<ComposerAcceptanceIdentity>,
+);
 
 impl AppActor {
     /// Issue #450: the TimelineKey of the composer target a slash-command
@@ -1257,14 +1277,7 @@ impl AppActor {
                     let clone_ms = loop_started.elapsed().as_millis();
                     let mut state_changed = false;
                     let mut pending_select_settlements = Vec::new();
-                    let mut post_projection_work: Vec<(
-                        Vec<AppEffect>,
-                        Option<u64>,
-                        Option<RequestId>,
-                        crate::timeline::NavigationProjectionCleanup,
-                        reducer_support::DeferredReducerSideEffects,
-                        Option<ComposerAcceptanceIdentity>,
-                    )> = Vec::new();
+                    let mut post_projection_work: Vec<PostProjectionWork> = Vec::new();
                     for action in actions {
                         let Some(action) = normalize_activity_resolution_action(&self.state, action)
                         else {
@@ -1893,7 +1906,7 @@ impl AppActor {
     async fn handle_qa_command(&mut self, command: CoreQaCommand) -> bool {
         match command {
             CoreQaCommand::SetLocalDeviceBlacklisted {
-                request_id,
+                request_id: _,
                 target,
                 room_id,
                 acknowledged,
@@ -1902,7 +1915,6 @@ impl AppActor {
                     .account_actor
                     .send(
                         crate::account::AccountMessage::QaSetLocalDeviceBlacklisted {
-                            request_id,
                             target,
                             room_id,
                             acknowledged,
@@ -1911,7 +1923,7 @@ impl AppActor {
                     .await;
             }
             CoreQaCommand::RefreshDeviceKeysAndAssertKnown {
-                request_id,
+                request_id: _,
                 target,
                 acknowledged,
             } => {
@@ -1919,7 +1931,6 @@ impl AppActor {
                     .account_actor
                     .send(
                         crate::account::AccountMessage::QaRefreshDeviceKeysAndAssertKnown {
-                            request_id,
                             target,
                             acknowledged,
                         },
@@ -1927,7 +1938,7 @@ impl AppActor {
                     .await;
             }
             CoreQaCommand::AssertInboundSessionsStartAtZero {
-                request_id,
+                request_id: _,
                 room_id,
                 acknowledged,
             } => {
@@ -1935,7 +1946,6 @@ impl AppActor {
                     .account_actor
                     .send(
                         crate::account::AccountMessage::QaAssertInboundSessionsStartAtZero {
-                            request_id,
                             room_id,
                             acknowledged,
                         },

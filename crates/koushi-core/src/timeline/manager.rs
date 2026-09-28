@@ -69,7 +69,6 @@ use super::thread_projection::{
 // END GENERATED SIBLING IMPORTS
 
 /// Bounded diff queue capacity per subscribed timeline (overview.md, Async rule 10).
-
 pub const TIMELINE_DIFF_QUEUE_CAPACITY: usize = 128;
 
 fn initial_thread_backfill_is_authoritative(end_reached: bool, item_count: usize) -> bool {
@@ -326,6 +325,10 @@ impl TimelineManagerHandle {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor wiring: independent owned handles moved into one task"
+    )]
     pub(crate) fn spawn_with_session(
         session: Arc<MatrixClientSession>,
         read_session_generation: u64,
@@ -604,6 +607,10 @@ impl TimelineManagerActor {
     }
     /// Spawn with a session and a search index mutation sender.
     /// Called by `AccountActor::spawn_sync_actor` (Phase 6 wiring).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor wiring: independent owned handles moved into one task"
+    )]
     pub(crate) fn spawn_with_session(
         session: Arc<MatrixClientSession>,
         read_session_generation: u64,

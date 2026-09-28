@@ -564,6 +564,10 @@ pub fn admit_space_member_cancellation(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub fn admit_space_member_role(
     state: &AppState,
     space_id: &str,

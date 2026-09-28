@@ -429,7 +429,7 @@ impl SearchDocumentStore {
 
         match sort {
             AttachmentSort::NewestFirst => {
-                results.sort_by(|left, right| right.timestamp_ms.cmp(&left.timestamp_ms));
+                results.sort_by_key(|result| std::cmp::Reverse(result.timestamp_ms));
             }
             AttachmentSort::OldestFirst => {
                 results.sort_by_key(|left| left.timestamp_ms);

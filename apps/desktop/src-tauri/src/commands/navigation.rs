@@ -387,6 +387,10 @@ pub(super) fn invoke_error_from_select_room_error(error: koushi_core::SelectRoom
 }
 
 #[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tauri command: each parameter is a named IPC argument of the renderer contract"
+)]
 pub async fn observe_timeline_viewport(
     room_id: String,
     first_visible_event_id: Option<String>,

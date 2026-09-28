@@ -2956,10 +2956,7 @@ async fn receipt_resolution_borrows_current_alias_without_publishing_global_stat
     ));
 }
 
-fn app_actor_event_navigation_fixture(
-    data_dir: &std::path::Path,
-    state: AppState,
-) -> (
+type EventNavigationFixture = (
     AppActor,
     mpsc::Sender<CoreCommandEnvelope>,
     mpsc::Sender<Vec<AppAction>>,
@@ -2969,7 +2966,12 @@ fn app_actor_event_navigation_fixture(
     watch::Receiver<Option<crate::timeline::NavigationProjectionIntent>>,
     mpsc::UnboundedSender<EventNavigationPrepared>,
     mpsc::UnboundedSender<FocusedProjectionCommitted>,
-) {
+);
+
+fn app_actor_event_navigation_fixture(
+    data_dir: &std::path::Path,
+    state: AppState,
+) -> EventNavigationFixture {
     let (account_tx, account_rx) = mpsc::channel(8);
     let (navigation_projection, navigation_projection_rx) =
         crate::timeline::NavigationProjectionIngress::channel();

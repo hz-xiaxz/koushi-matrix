@@ -79,6 +79,10 @@ pub(crate) struct AuthoritativeThreadAggregate {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "short-lived value moved once; boxing would add an allocation per message and churn every construction and match site"
+)]
 pub(crate) enum ThreadRootProjectionRefreshResult {
     Hydrated {
         item: TimelineItem,
@@ -88,6 +92,10 @@ pub(crate) enum ThreadRootProjectionRefreshResult {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "short-lived value moved once; boxing would add an allocation per message and churn every construction and match site"
+)]
 pub(crate) enum ThreadRootProjectionCompletion {
     Updated(ThreadRootProjectionRecord),
     Cleared(ThreadRootProjectionActivity),
@@ -540,16 +548,6 @@ impl ThreadRootProjectionService {
         };
         record.aggregate_refresh = Some(refresh.clone());
         Some(refresh)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn pending_refresh(
-        &self,
-        activity: &ThreadRootProjectionActivity,
-    ) -> Option<AggregateRefresh> {
-        self.attempts
-            .get(&(activity.room_id.clone(), activity.root_event_id.clone()))
-            .and_then(ThreadRootProjectionRecord::pending_refresh)
     }
 
     pub(crate) fn complete_refresh(
@@ -1365,14 +1363,9 @@ impl ThreadsListActor {
             .map(|(room_id, service, mut subscriber)| {
                 let items_tx = items_tx.clone();
                 executor::spawn(async move {
-                    loop {
-                        match subscriber.next().await {
-                            Some(_) => {
-                                if items_tx.send(room_id.clone()).await.is_err() {
-                                    break;
-                                }
-                            }
-                            None => break,
+                    while subscriber.next().await.is_some() {
+                        if items_tx.send(room_id.clone()).await.is_err() {
+                            break;
                         }
                     }
                     drop(service);

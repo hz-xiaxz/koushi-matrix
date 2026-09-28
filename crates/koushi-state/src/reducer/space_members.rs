@@ -414,6 +414,10 @@ pub(crate) fn handle_load_failed(
     vec![AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged)]
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "actor message handler: parameters are the destructured message fields"
+)]
 pub(crate) fn handle_role_update_requested(
     state: &mut AppState,
     request_id: u64,
@@ -454,6 +458,10 @@ pub(crate) fn handle_role_update_requested(
     vec![AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged)]
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "actor message handler: parameters are the destructured message fields"
+)]
 pub(crate) fn handle_role_update_settled(
     state: &mut AppState,
     request_id: u64,

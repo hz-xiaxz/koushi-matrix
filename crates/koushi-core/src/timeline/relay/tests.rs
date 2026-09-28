@@ -7,8 +7,6 @@ use std::sync::{
 
 use std::time::Duration;
 
-use futures_util::StreamExt;
-
 use koushi_state::AppAction;
 
 use matrix_sdk_ui::timeline::TimelineItem as SdkTimelineItem;

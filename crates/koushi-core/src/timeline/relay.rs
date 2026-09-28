@@ -1370,6 +1370,10 @@ pub(super) fn accepted_relay_batch<T>(
     accept_relay_generation(current_generation, incoming_generation).then_some(batch)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn commit_authoritative_recovery_window<F>(
     navigation_items: &mut Vec<TimelineItem>,
     display_projection: &mut DisplayProjectionState,

@@ -296,6 +296,10 @@ pub struct SyncActor {
 }
 
 impl SyncActor {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor wiring: independent owned handles moved into one task"
+    )]
     pub(crate) fn spawn(
         session: Arc<MatrixClientSession>,
         action_tx: mpsc::Sender<Vec<AppAction>>,
@@ -1030,6 +1034,10 @@ use observer::{
     PendingRoomReconciliation, SyncObserverSignal as Signal, next_sync_observer_signal,
 };
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "actor wiring: independent owned handles moved into one task"
+)]
 async fn observe_sync_service(
     sync_service: Arc<matrix_sdk_ui::sync_service::SyncService>,
     observer_stop: Arc<SyncObserverStop>,

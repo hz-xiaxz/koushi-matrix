@@ -26,8 +26,6 @@ mod session_check;
 mod session_lifecycle;
 mod sliding_sync;
 #[cfg(test)]
-mod test_source;
-#[cfg(test)]
 mod test_support;
 mod trust_gate;
 mod verification;

@@ -1996,14 +1996,11 @@ impl TimelineActor {
             return None;
         };
         for visible_gap_id in &self.viewport_observation.visible_gap_ids {
-            let Some((gap_index, _)) = self
+            let (gap_index, _) = self
                 .gap_repair
                 .projected_gaps
                 .iter()
-                .find(|(_, gap)| gap.id == *visible_gap_id)
-            else {
-                return None;
-            };
+                .find(|(_, gap)| gap.id == *visible_gap_id)?;
             if *gap_index >= target_index {
                 return None;
             }
@@ -2211,9 +2208,7 @@ impl TimelineActor {
             super::receipt_endpoints::ReceiptEndpointChange,
         >,
     ) -> Option<(String, Vec<LiveEventReceipts>)> {
-        let Some(room_id) = timeline_room_id(&self.key) else {
-            return None;
-        };
+        let room_id = timeline_room_id(&self.key)?;
         let receipts_by_event =
             live_event_receipts_from_endpoint_changes(changes, &self.receipt_endpoints);
         if receipts_by_event.is_empty() {

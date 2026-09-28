@@ -136,6 +136,10 @@ pub(super) struct PendingSessionTeardown {
     pub(super) continuation: SessionTeardownContinuation,
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "short-lived value moved once; boxing would add an allocation per message and churn every construction and match site"
+)]
 pub(super) enum SessionTeardownContinuation {
     Logout {
         request_id: RequestId,

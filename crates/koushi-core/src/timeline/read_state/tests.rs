@@ -3105,8 +3105,8 @@ fn thread_viewport_still_reads_its_own_displayed_replies() {
     assert_eq!(
         viewed_boundary_target(
             &thread_kind,
-            &[reply.clone()],
-            &[reply],
+            std::slice::from_ref(&reply),
+            std::slice::from_ref(&reply),
             "$r1:test",
             TimelineBottomArrival::ContentFits,
         )

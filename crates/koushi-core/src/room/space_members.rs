@@ -399,6 +399,10 @@ fn space_members_refresh_is_current(
     result_space_id == demanded_space_id && result_generation == demanded_generation
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 fn space_member_refresh_fence_is_current(
     active_fence: Option<SpaceMemberRefreshFence>,
     expected_fence: SpaceMemberRefreshFence,
@@ -770,6 +774,10 @@ impl RoomActor {
         });
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor message handler: parameters are the destructured message fields"
+    )]
     pub(super) async fn handle_space_members_projection_refreshed(
         &mut self,
         request_id: RequestId,
@@ -923,6 +931,10 @@ impl RoomActor {
         }));
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor message handler: parameters are the destructured message fields"
+    )]
     pub(super) async fn handle_update_space_member_role(
         &self,
         request_id: RequestId,

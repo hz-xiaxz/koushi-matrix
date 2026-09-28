@@ -335,11 +335,11 @@ impl NavigationState {
                 presentation,
             } => match presentation {
                 Some(presentation) => {
-                    if self.space_local_presentations.0.get(&space_id) == Some(&presentation) {
-                        false
-                    } else if !self.space_local_presentations.0.contains_key(&space_id)
-                        && self.space_local_presentations.0.len() >= MAX_SPACE_LOCAL_PRESENTATIONS
-                    {
+                    let unchanged =
+                        self.space_local_presentations.0.get(&space_id) == Some(&presentation);
+                    let at_capacity = !self.space_local_presentations.0.contains_key(&space_id)
+                        && self.space_local_presentations.0.len() >= MAX_SPACE_LOCAL_PRESENTATIONS;
+                    if unchanged || at_capacity {
                         false
                     } else {
                         self.space_local_presentations

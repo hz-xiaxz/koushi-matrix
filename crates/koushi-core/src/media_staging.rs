@@ -990,6 +990,10 @@ impl MediaStagingService {
         self.preparation.transition().await.merge_prepared(prepared);
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+    )]
     async fn wait(
         &self,
         connection: &mut CoreConnection,

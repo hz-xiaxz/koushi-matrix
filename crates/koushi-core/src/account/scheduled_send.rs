@@ -94,6 +94,10 @@ async fn send_scheduled_acceptance_actions(
 }
 
 impl AccountActor {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor message handler: parameters are the destructured message fields"
+    )]
     pub(super) async fn handle_schedule_server_delayed_send(
         &self,
         request_id: RequestId,
@@ -291,6 +295,10 @@ impl AccountActor {
         }
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor message handler: parameters are the destructured message fields"
+    )]
     pub(super) async fn handle_reschedule_server_delayed_send(
         &self,
         request_id: RequestId,

@@ -1127,6 +1127,10 @@ impl SpaceMemberLookupStatus {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one bounded diagnostic field of a single record"
+)]
 pub(super) fn space_members_scope_diagnostic_event(
     space_room_lookup_outcome: &'static str,
     space_joined_lookup: SpaceMemberLookupStatus,
@@ -2459,6 +2463,10 @@ fn room_attention_unread_count(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn matrix_room_list_room_from_counts(
     room_id: String,
     display_name: String,

@@ -47,9 +47,12 @@ use super::outbound_send::{
 /// stale by construction. The optional revision distinguishes an aggregate
 /// worker from a root-hydration worker and fences an old aggregate completion
 /// from removing a newer worker for the same root.
+/// Registered fetch worker: (worker generation, optional fence, join handle).
+type ThreadRootFetchTask = (u64, Option<u64>, executor::JoinHandle<()>);
+
 #[derive(Default)]
 pub(super) struct ThreadRootProjectionFetchRegistry {
-    tasks: HashMap<(String, String), (u64, Option<u64>, executor::JoinHandle<()>)>,
+    tasks: HashMap<(String, String), ThreadRootFetchTask>,
 }
 
 impl ThreadRootProjectionFetchRegistry {

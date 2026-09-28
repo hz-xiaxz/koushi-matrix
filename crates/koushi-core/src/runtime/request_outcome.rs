@@ -872,6 +872,10 @@ impl EventProgress {
     }
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "short-lived value moved once; boxing would add an allocation per message and churn every construction and match site"
+)]
 enum SnapshotWake {
     SnapshotChanged,
     Event(CoreEvent),

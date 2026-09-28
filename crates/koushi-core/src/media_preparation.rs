@@ -1023,10 +1023,14 @@ fn descriptor_from_image_variant(
     selection: StagedUploadOutputSelection,
 ) -> PreparedUploadVariant {
     let byte_count = u64::try_from(variant.bytes.len()).unwrap_or(u64::MAX);
-    let savings_percent = if original_len == 0 {
-        0
-    } else {
-        100 - i64::try_from(variant.bytes.len().saturating_mul(100) / original_len).unwrap_or(100)
+    let savings_percent = match variant
+        .bytes
+        .len()
+        .saturating_mul(100)
+        .checked_div(original_len)
+    {
+        None => 0,
+        Some(ratio) => 100 - i64::try_from(ratio).unwrap_or(100),
     };
     PreparedUploadVariant {
         variant_id: MediaPreparationRegistry::output_identity(selection),

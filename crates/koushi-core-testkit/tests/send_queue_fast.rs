@@ -431,10 +431,7 @@ fn spawn_fast_proxy_pair(
         let mut upstream_reader = upstream;
         let mut client_writer = client;
         let mut response = [0_u8; 8 * 1024];
-        loop {
-            let Ok(read) = io::Read::read(&mut upstream_reader, &mut response) else {
-                break;
-            };
+        while let Ok(read) = io::Read::read(&mut upstream_reader, &mut response) {
             if read == 0 {
                 break;
             }
@@ -1112,6 +1109,10 @@ async fn wait_for_fast_send_queue_pending_removal(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 async fn wait_for_fast_send_queue_authoritative_completion(
     conn: &mut CoreConnection,
     projection: &mut Vec<TimelineItem>,

@@ -463,13 +463,13 @@ fn ordered_ids_are_subsequence<'a>(
     true
 }
 
+/// Changed activity rows keyed by row id; `None` removes a row.
+type ActivityRowDelta = Option<BTreeMap<String, Option<ActivityRow>>>;
+
 fn activity_row_deltas(
     previous: &ActivityState,
     next: &ActivityState,
-) -> Option<(
-    Option<BTreeMap<String, Option<ActivityRow>>>,
-    Option<BTreeMap<String, Option<ActivityRow>>>,
-)> {
+) -> Option<(ActivityRowDelta, ActivityRowDelta)> {
     let (
         ActivityState::Open {
             active_tab: previous_tab,

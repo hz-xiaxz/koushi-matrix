@@ -73,6 +73,10 @@ fn record_sliding_sync_capability_persistence(outcome: &'static str) {
     );
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "short-lived value moved once; boxing would add an allocation per message and churn every construction and match site"
+)]
 pub(super) enum PendingSlidingSyncAdmission {
     NewLogin {
         account_epoch: u64,

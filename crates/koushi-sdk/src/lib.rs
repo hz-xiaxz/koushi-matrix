@@ -40,9 +40,6 @@ mod timeline;
 
 mod sliding_sync_discovery;
 
-#[cfg(test)]
-mod test_source;
-
 pub use auth::{
     Homeserver, LOCAL_USER_ALIASES_ACCOUNT_DATA_TYPE, LoginDiscovery, LoginDiscoveryError,
     MatrixLoginDiscovery, MatrixLoginFlow, MatrixLoginFlowKind, OidcAuthorization,

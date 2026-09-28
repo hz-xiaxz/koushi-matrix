@@ -1,4 +1,8 @@
 #[path = "navigation_state/support.rs"]
+#[allow(
+    dead_code,
+    reason = "fixture module shared with navigation_state; this binary uses a subset"
+)]
 mod support;
 
 use koushi_state::{

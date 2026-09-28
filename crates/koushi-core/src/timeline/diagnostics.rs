@@ -344,6 +344,10 @@ pub(super) fn record_read_retry(
     );
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one bounded diagnostic field of a single record"
+)]
 fn record_read_state_diagnostic(
     stage: &'static str,
     key: &ReadStateKey,
@@ -758,6 +762,10 @@ pub(super) fn record_subscription_reconcile(
     koushi_diagnostics::record(event);
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one bounded diagnostic field of a single record"
+)]
 pub(crate) fn record_thread_summary_reconciliation(
     (room_ordinal, root_ordinal): (u64, u64),
     source: &'static str,
@@ -1200,6 +1208,10 @@ pub(super) fn record_timeline_gap_projection(
     );
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one bounded diagnostic field of a single record"
+)]
 pub(super) fn record_timeline_gap_projection_boundary(
     stage: &'static str,
     outcome: &'static str,
@@ -1498,8 +1510,7 @@ fn record_timeline_item(
 
 pub(super) fn trace_timeline_items(stage: &str, key: &TimelineKey, items: &[TimelineItem]) {
     let hidden = items.iter().filter(|item| item.is_hidden).count();
-    let mut events = Vec::with_capacity(1);
-    events.push(
+    let events = vec![
         DiagnosticEvent::new(
             DiagnosticLevel::Debug,
             "core.timeline_item",
@@ -1512,7 +1523,7 @@ pub(super) fn trace_timeline_items(stage: &str, key: &TimelineKey, items: &[Time
         ))
         .field(DiagnosticField::count("count", items.len() as u64))
         .field(DiagnosticField::count("hidden", hidden as u64)),
-    );
+    ];
     koushi_diagnostics::record_batch(events);
 }
 
@@ -2070,6 +2081,10 @@ pub(super) fn trace_timeline_route(
     );
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one bounded diagnostic field of a single record"
+)]
 pub(super) fn trace_timeline_paginate(
     stage: &str,
     request_id: RequestId,
@@ -2102,6 +2117,10 @@ pub(super) fn trace_timeline_paginate(
     );
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one bounded diagnostic field of a single record"
+)]
 pub(super) fn trace_timeline_link_preview(
     stage: &str,
     request_id: RequestId,

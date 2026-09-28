@@ -2173,13 +2173,10 @@ async fn gap_repair_room_switch_cancels_completion() {
     while event_rx.try_recv().is_ok() {}
 
     let _ = release_tx.send(());
-    let completion_forwarded = match tokio::time::timeout(Duration::from_secs(1), forwarded_rx)
+    let completion_forwarded = tokio::time::timeout(Duration::from_secs(1), forwarded_rx)
         .await
         .expect("paused repair worker must settle after old actor drop")
-    {
-        Ok(forwarded) => forwarded,
-        Err(_) => false,
-    };
+        .unwrap_or_default();
     let old_actor_closed = tokio::time::timeout(Duration::from_millis(100), old_actor_tx.closed())
         .await
         .is_ok();
