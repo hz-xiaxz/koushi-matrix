@@ -25,6 +25,7 @@ use tokio::sync::Mutex as TokioMutex;
 
 use tauri::{Emitter, Manager};
 
+#[cfg(any(debug_assertions, test))]
 pub(crate) use crate::core_event_forwarder::CORE_EVENT_NAME;
 use crate::core_event_forwarder::{CoreEventForwarderTask, spawn_core_event_forwarder};
 use crate::desktop_menu::{MENU_EVENT_NAME, build_desktop_menu, desktop_menu_action_id};
@@ -108,6 +109,8 @@ pub struct CoreRuntimeState {
     /// ring that already exists for the drained connections, and it never
     /// applies backpressure to senders. The snapshot side is a `watch`
     /// receiver, which is latest-wins by construction.
+    /// Read only by the non-macOS close-to-tray gate; macOS hides on close.
+    #[cfg(not(target_os = "macos"))]
     pub(crate) window_lifecycle_connection: CoreConnection,
     /// Tauri-side timeline item count (updated by event loop; QA title only).
     pub(crate) timeline_items_count: Arc<AtomicUsize>,
@@ -878,11 +881,13 @@ pub fn run() {
                 Arc::clone(&timeline_items_count),
             );
             // synchronous snapshot connection for the window-close gate
+            #[cfg(not(target_os = "macos"))]
             let window_lifecycle_connection = runtime.attach();
             let update_settings_connection = runtime.attach();
             let core_state = CoreRuntimeState {
                 runtime,
                 connection: TokioMutex::new(command_conn),
+                #[cfg(not(target_os = "macos"))]
                 window_lifecycle_connection,
                 timeline_items_count,
                 _forwarder_task: Some(forwarder_task),

@@ -5,7 +5,7 @@
 //! the native relaunch request. Lifecycle, policy, and shutdown coordination
 //! stay in the platform-neutral engine (`app_updates.rs`).
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use url::Url;
 

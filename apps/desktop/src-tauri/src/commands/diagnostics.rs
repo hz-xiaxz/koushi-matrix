@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
 use crate::{
@@ -94,7 +94,7 @@ use tauri::Emitter;
 // ---- QA login pipe (debug/test only) ----
 
 #[cfg(any(debug_assertions, test))]
-#[derive(Deserialize)]
+#[derive(serde::Deserialize)]
 struct QaLoginPipePayload {
     homeserver: String,
     username: String,
@@ -243,7 +243,7 @@ pub(super) fn qa_recovery_prompt_is_available(state: &koushi_state::AppState) ->
 // is gated to debug/test builds (release builds never read the env var).
 
 #[cfg(any(debug_assertions, test))]
-#[derive(Deserialize)]
+#[derive(serde::Deserialize)]
 struct QaControlPipeCommand {
     command: String,
 }

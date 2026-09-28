@@ -319,10 +319,10 @@ pub(super) fn configure_fullscreen_menu() {
 
 #[cfg(target_os = "macos")]
 pub(super) fn toggle_main_window_fullscreen(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        if let Ok(fullscreen) = window.is_fullscreen() {
-            let _ = window.set_fullscreen(!fullscreen);
-        }
+    if let Some(window) = app.get_webview_window("main")
+        && let Ok(fullscreen) = window.is_fullscreen()
+    {
+        let _ = window.set_fullscreen(!fullscreen);
     }
 }
 

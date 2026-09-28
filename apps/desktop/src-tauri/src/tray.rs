@@ -71,8 +71,8 @@ fn tray_capability_from_observation(observation: u8) -> NativeAttentionCapabilit
 /// `Unavailable` both answer `false`.
 ///
 /// Only the non-macOS close-to-hide gate consults this; macOS hides
-/// unconditionally, so on a macOS build it is exercised only by tests.
-#[cfg_attr(all(target_os = "macos", not(test)), allow(dead_code))]
+/// unconditionally and never reads it.
+#[cfg(not(target_os = "macos"))]
 pub(crate) fn tray_is_available() -> bool {
     matches!(
         observed_tray_capability(),
