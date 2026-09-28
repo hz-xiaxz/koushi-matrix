@@ -64,3 +64,18 @@ The follow-up change runs one unified workspace invocation, normalizes vendored
 SDK source mtimes before the exact-keyed SDK restore, adds build-script outputs
 and a complete key, checks representative rust-cache dependency artifacts, and
 records `Compiling` counts (total and vendored SDK) for every Rust job run.
+
+Measured on PR #1041. The rust-cache `shared-key` was bumped because the
+unified feature graph otherwise recompiled 36 registry and git crates on every
+exact, never re-saved hit:
+
+| Run | Rust job | Compiling (vendored SDK) | Cargo build | Tests |
+| --- | ---: | ---: | ---: | ---: |
+| Cold: new rust-cache and SDK keys (36387243973) | 8m36s | 620 (all) | 6m01s | 3089 |
+| Warm: both exact hits (36389004671) | 4m53s | 12 (0) | 2m10s | 3089 |
+
+Only the 12 Koushi workspace crates recompile on a warm run. The restored
+archives are about 729 MB (rust-cache) and 78 MB (SDK artifacts). 3089 equals
+the 2657 + 230 + 202 tests of the former three steps. The manual benchmark
+(36386470391, full `target-ci` restore) agreed: 620 crates compiled cold and 12
+warm.
