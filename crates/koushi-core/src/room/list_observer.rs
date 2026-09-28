@@ -1880,7 +1880,8 @@ impl RoomActor {
             // same live-service projection authoritative by retrying a few
             // bounded wakes; this never creates another service or network
             // sync loop.
-            let _ = executor::spawn(async move {
+            // Detached task: dropping the JoinHandle does not cancel it.
+            drop(executor::spawn(async move {
                 for delay in [
                     Duration::from_millis(100),
                     Duration::from_millis(300),
@@ -1897,7 +1898,7 @@ impl RoomActor {
                         break;
                     }
                 }
-            });
+            }));
         }
     }
 }

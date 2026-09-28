@@ -418,7 +418,7 @@ static REGISTERED_COUNTER_CONTEXTS: OnceLock<Mutex<Vec<Weak<DiagnosticCounterCon
 /// checks records so parallel tests cannot consume one another's evidence.
 #[doc(hidden)]
 pub mod test_support {
-    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use tokio::sync::{Mutex, MutexGuard};
 
     use super::{
         DEFAULT_DIAGNOSTIC_CAPACITY, DEFAULT_ROTATION_DIAGNOSTIC_CAPACITY, DiagnosticBuffer,
@@ -426,13 +426,23 @@ pub mod test_support {
         RotationDiagnosticSnapshot,
     };
 
-    static GLOBAL_DIAGNOSTIC_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    // An async-aware mutex: asynchronous tests hold this process-wide lock
+    // across await points for their whole body, so waiting must yield instead
+    // of blocking a runtime worker. As with the previous poison-recovering std
+    // lock, a panicking holder simply releases it.
+    static GLOBAL_DIAGNOSTIC_TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
+    /// Serialize a synchronous test against every other diagnostics test.
+    ///
+    /// Panics when called from inside an async runtime; asynchronous tests
+    /// must use [`lock_async`] so the guard can span await points safely.
     pub fn lock() -> MutexGuard<'static, ()> {
-        GLOBAL_DIAGNOSTIC_TEST_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        GLOBAL_DIAGNOSTIC_TEST_LOCK.blocking_lock()
+    }
+
+    /// Serialize an asynchronous test against every other diagnostics test.
+    pub async fn lock_async() -> MutexGuard<'static, ()> {
+        GLOBAL_DIAGNOSTIC_TEST_LOCK.lock().await
     }
 
     /// Snapshot only the bounded detail ring. Tests that compare positions

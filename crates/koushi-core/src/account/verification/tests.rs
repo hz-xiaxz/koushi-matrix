@@ -295,7 +295,7 @@ async fn incoming_verification_observer_join_has_a_bounded_abort_fallback() {
 
 #[tokio::test]
 async fn actor_sas_settlement_emits_exactly_one_terminal_and_clears_runtime() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
         .records
         .len();
@@ -596,7 +596,7 @@ fn sas_cancel_diagnostic_contains_only_closed_private_safe_fields() {
 
 #[tokio::test]
 async fn own_user_sas_start_helper_traces_started_pending_and_failed_results() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
         .records
         .len();

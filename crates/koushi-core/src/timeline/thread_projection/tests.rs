@@ -713,12 +713,13 @@ async fn aggregate_start_preserves_fetch_finished_worker_and_failed_hydration_te
         crate::threads_list::ThreadRootProjectionCompletion::Updated(record)
             if record.failure_kind() == Some(OperationFailureKind::Network)
     ));
-    let service = manager
-        .thread_root_projection_service
-        .lock()
-        .expect("service lock");
-    assert!(!service.has_pending_attempt(&activity));
-    drop(service);
+    assert!(
+        !manager
+            .thread_root_projection_service
+            .lock()
+            .expect("service lock")
+            .has_pending_attempt(&activity)
+    );
     manager
         .handle_aggregate_refresh_start(key, actor_generation, None, vec![refresh])
         .await;

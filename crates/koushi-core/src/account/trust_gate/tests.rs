@@ -713,7 +713,7 @@ async fn authoritative_trust_recheck_failure_settles_as_retryable_unknown_trust(
 
 #[tokio::test]
 async fn network_trust_recheck_settlement_records_generation_without_authentication_lock() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let (handle, mut action_rx) = login_gated_actor().await;
     consume_initial_unknown_trust_projection(&mut action_rx).await;
     handle
@@ -982,7 +982,7 @@ async fn explicit_trust_recheck_arriving_in_flight_is_replayed_after_settlement(
 
 #[tokio::test]
 async fn verification_to_normal_sync_handoff_has_one_owner() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
         .records
         .len();

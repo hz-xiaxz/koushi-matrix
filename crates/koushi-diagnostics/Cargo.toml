@@ -6,3 +6,5 @@ license.workspace = true
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+# Only the runtime-independent async mutex behind `test_support::lock_async`.
+tokio = { version = "1", default-features = false, features = ["sync"] }

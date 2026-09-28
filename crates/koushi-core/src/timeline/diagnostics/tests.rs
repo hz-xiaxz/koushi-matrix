@@ -536,7 +536,7 @@ fn thread_summary_diagnostic_is_closed_and_private_data_free() {
 
 #[tokio::test]
 async fn subscribe_replay_path_records_subscribed_done_stage() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let key = room_key();
     let (actor_tx, mut actor_rx) = mpsc::channel(1);
     let actor_task = executor::spawn(async move {
@@ -657,7 +657,7 @@ fn diagnostics_producer_paths_run_in_env_unset_child_process() {
 #[tokio::test]
 #[ignore]
 async fn diagnostics_producer_paths_run_without_trace_environment() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     for variable in [
         "KOUSHI_SUBSCRIBE_TRACE",
         "KOUSHI_TIMELINE_ITEM_TRACE",

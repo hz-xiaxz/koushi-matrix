@@ -440,7 +440,7 @@ async fn recovery_submission_pauses_and_failure_resumes_the_single_provisional_o
 
 #[tokio::test]
 async fn recovery_trust_settlement_timeout_returns_to_recovery_failure() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
         .records
         .len();

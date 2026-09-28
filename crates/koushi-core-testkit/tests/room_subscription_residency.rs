@@ -460,7 +460,7 @@ async fn room_subscription_residency_rapid_intents_serialize() {
 
 #[tokio::test]
 async fn room_subscription_residency_diagnostics_are_private_safe_and_closed() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let subscription_records_before = koushi_diagnostics::test_support::detail_snapshot()
         .records
         .into_iter()

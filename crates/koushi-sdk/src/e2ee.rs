@@ -2849,7 +2849,7 @@ mod current_device_trust_recheck_tests {
 
     #[tokio::test]
     async fn recheck_current_device_trust_queries_own_identity() {
-        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
         let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .len();
@@ -4286,7 +4286,7 @@ mod current_device_trust_recheck_classifier_tests {
 
     #[tokio::test]
     async fn unknown_token_keys_query_is_authentication() {
-        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
         let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .len();
@@ -4336,7 +4336,7 @@ mod current_device_trust_recheck_classifier_tests {
 
     #[tokio::test]
     async fn server_keys_query_failure_is_server() {
-        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
         let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .len();

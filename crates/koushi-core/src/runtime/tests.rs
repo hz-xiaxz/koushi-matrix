@@ -322,7 +322,7 @@ async fn run_closed_space_member_forwarding_case(
     membership: SpaceMemberMembership,
     command: impl FnOnce(RequestId) -> koushi_protocol::command::RoomCommand,
 ) -> (AppState, CoreFailure, u64) {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let runtime = CoreRuntime::start_with_event_capacity(64);
     let mut connection = runtime.attach();
     let space_id = "!closed-forward-space:example.invalid";

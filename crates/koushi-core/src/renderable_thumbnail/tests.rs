@@ -1,7 +1,11 @@
 use super::*;
 use std::fs;
-fn cache_test_lock() -> std::sync::MutexGuard<'static, ()> {
+fn cache_test_lock() -> tokio::sync::MutexGuard<'static, ()> {
     super::test_cache_lock()
+}
+
+async fn cache_test_lock_async() -> tokio::sync::MutexGuard<'static, ()> {
+    super::test_cache_lock_async().await
 }
 
 #[test]
@@ -103,7 +107,7 @@ fn resolved_reader_binds_ready_bytes_and_preserves_missing_avatar_demand() {
 async fn installed_scope_owns_reader_leases_until_retirement_and_delivery_release() {
     use crate::view_scope_lifecycle::{ScopeDelivery, ViewScopeRegistry};
     use koushi_protocol::view::{ReaderWindow, ResolvedReaderAnchor, ViewModel};
-    let _guard = cache_test_lock();
+    let _guard = cache_test_lock_async().await;
     clear_renderable_thumbnail_cache();
     for hold_delivery in [false, true] {
         let thumbnail = store_renderable_thumbnail(

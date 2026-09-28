@@ -758,7 +758,8 @@ impl RoomActor {
         let space_id = demand.space_id.clone();
         let generation = demand.generation;
         let demand_generation = demand.demand_generation;
-        let _ = executor::spawn(async move {
+        // Detached task: dropping the JoinHandle does not cancel it.
+        drop(executor::spawn(async move {
             let result = koushi_sdk::matrix_space_members_projection(&session, &space_id).await;
             let _ = room_tx
                 .send(RoomMessage::SpaceMembersProjectionRefreshed {
@@ -771,7 +772,7 @@ impl RoomActor {
                     result,
                 })
                 .await;
-        });
+        }));
     }
 
     #[expect(

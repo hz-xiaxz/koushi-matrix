@@ -1011,7 +1011,7 @@ mod tests {
 
     #[tokio::test]
     async fn avatar_download_survives_restart_and_offline_via_keyed_sdk_media_store() {
-        let _cache_guard = crate::renderable_thumbnail::test_cache_lock();
+        let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
         let server = MatrixMockServer::new().await;
         server.mock_versions().ok().mount().await;
         server

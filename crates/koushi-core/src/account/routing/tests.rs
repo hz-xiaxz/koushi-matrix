@@ -124,7 +124,7 @@ fn event_cache_repair_diagnostic_runs_without_trace_environment() {
 #[tokio::test]
 #[ignore]
 async fn event_cache_repair_diagnostic_records_without_trace_environment() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     assert!(std::env::var_os("KOUSHI_TIMELINE_ITEM_TRACE").is_none());
     assert!(std::env::var_os("KOUSHI_SUBSCRIBE_TRACE").is_none());
 
