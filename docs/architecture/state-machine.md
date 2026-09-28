@@ -5160,6 +5160,15 @@ stateDiagram-v2
   paths; on completion it re-reads the open contact so the row shows
   `VerifiedByYou`. Failure and cancellation settle the shared flow as
   `Failed`/`Idle`, after which the offer is shown again.
+- **Busy.** `ContactSecurityState.verification_busy` is derived by the reducer
+  after every action: `true` while a contact is open and the shared
+  `E2eeTrustState.verification` flow is in progress (`Requested`, `Accepted`,
+  `SasPresented`, `Confirming`, with anyone or for this session), else
+  `false`; a flip emits `ContactSecurityChanged`. While busy and the flow is
+  not with this contact, the GUI explains that another verification is in
+  progress instead of offering Verify user. A `RequestVerification` the
+  reducer refuses for that reason fails with `VerificationInProgress`, not
+  `SessionRequired`.
 - A recipient on Simplified Sliding Sync who joins a brand-new DM after the
   request was sent receives the request only if their server delivers that
   event through sync (Tuwunel does); Synapse returns it through gap repair,

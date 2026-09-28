@@ -228,14 +228,7 @@ pub(crate) fn handle_verification_requested(
     target: VerificationTarget,
     initiator: crate::state::VerificationInitiator,
 ) -> Vec<AppEffect> {
-    if !is_session_ready(state)
-        || !matches!(
-            state.e2ee_trust.verification,
-            VerificationFlowState::Idle
-                | VerificationFlowState::Done { .. }
-                | VerificationFlowState::Failed { .. }
-        )
-    {
+    if !is_session_ready(state) || state.e2ee_trust.verification.is_in_progress() {
         return Vec::new();
     }
 

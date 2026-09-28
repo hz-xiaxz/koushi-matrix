@@ -2208,6 +2208,9 @@ impl AppActor {
                     let failure =
                         secure_backup_setup_projection_failure(&self.state, &account_command)
                             .or_else(|| history_export_projection_failure(&account_command))
+                            .or_else(|| {
+                                contact_security_projection_failure(&self.state, &account_command)
+                            })
                             .unwrap_or(CoreFailure::SessionRequired);
                     self.emit(CoreEvent::OperationFailed {
                         request_id: command_request_id,
@@ -4826,6 +4829,25 @@ fn history_export_projection_failure(command: &AccountCommand) -> Option<CoreFai
     .then_some(CoreFailure::RoomOperationFailed {
         kind: RoomFailureKind::Sdk,
     })
+}
+
+/// Verify user refused by the reducer in a ready session: another
+/// verification flow is in progress (#1024). Without a ready session the
+/// refusal stays `SessionRequired`.
+fn contact_security_projection_failure(
+    state: &AppState,
+    command: &AccountCommand,
+) -> Option<CoreFailure> {
+    let AccountCommand::ContactSecurity {
+        request: koushi_protocol::command::ContactSecurityRequest::RequestVerification { .. },
+        ..
+    } = command
+    else {
+        return None;
+    };
+    (matches!(state.session, SessionState::Ready(_))
+        && state.e2ee_trust.verification.is_in_progress())
+    .then_some(CoreFailure::VerificationInProgress)
 }
 
 fn secure_backup_setup_projection_failure(

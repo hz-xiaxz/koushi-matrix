@@ -1587,6 +1587,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
                 direct_chat: koushi_state::ContactVerificationDirectChat::New,
             },
         }),
+        verification_busy: true,
     };
 
     // room_management — with settings snapshot

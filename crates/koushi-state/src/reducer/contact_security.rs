@@ -38,8 +38,27 @@ pub(crate) fn handle_load_requested(
         user_id: Some(user_id),
         load: ContactSecurityLoadState::Loading { request_id },
         summary: None,
+        verification_busy: false,
     };
+    // `verification_busy` is derived by `sync_verification_busy` after every
+    // action.
     changed()
+}
+
+/// Keep `verification_busy` derived from the shared verification flow. Runs
+/// after every reduced action, so any flow transition (incoming, outgoing,
+/// own-session, settle, session teardown) updates an open User info.
+pub(crate) fn sync_verification_busy(state: &mut AppState, effects: &mut Vec<AppEffect>) {
+    let busy =
+        state.contact_security.user_id.is_some() && state.e2ee_trust.verification.is_in_progress();
+    if state.contact_security.verification_busy == busy {
+        return;
+    }
+    state.contact_security.verification_busy = busy;
+    let event = AppEffect::EmitUiEvent(UiEvent::ContactSecurityChanged);
+    if !effects.contains(&event) {
+        effects.push(event);
+    }
 }
 
 pub(crate) fn handle_loaded(

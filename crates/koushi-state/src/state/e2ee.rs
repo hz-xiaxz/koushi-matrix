@@ -202,6 +202,20 @@ pub enum VerificationFlowState {
     },
 }
 
+impl VerificationFlowState {
+    /// A flow is in progress: another request cannot start until it settles
+    /// (`Done`/`Failed`) or is cancelled (`Idle`).
+    pub fn is_in_progress(&self) -> bool {
+        matches!(
+            self,
+            Self::Requested { .. }
+                | Self::Accepted { .. }
+                | Self::SasPresented { .. }
+                | Self::Confirming { .. }
+        )
+    }
+}
+
 /// Which side started a verification request.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

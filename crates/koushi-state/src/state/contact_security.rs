@@ -29,6 +29,12 @@ pub struct ContactSecurityState {
     /// checking or after a failed retrieval: a failure is never shown as
     /// confirmation, and a stale summary is never kept for another retrieval.
     pub summary: Option<ContactSecuritySummary>,
+    /// A verification flow (with anyone, or of this session) is in progress
+    /// while User info is open, so **Verify user** cannot start another one
+    /// until it settles. Derived by the reducer from
+    /// `E2eeTrustState.verification`; always `false` while no contact is open.
+    #[serde(default)]
+    pub verification_busy: bool,
 }
 
 impl fmt::Debug for ContactSecurityState {
@@ -38,6 +44,7 @@ impl fmt::Debug for ContactSecurityState {
             .field("has_user_id", &self.user_id.is_some())
             .field("load", &self.load)
             .field("summary", &self.summary)
+            .field("verification_busy", &self.verification_busy)
             .finish()
     }
 }

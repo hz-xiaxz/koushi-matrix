@@ -164,6 +164,7 @@ export function ContactSecurityDetails({
         userId={userId}
         offer={summary?.verification ?? null}
         identity={summary?.identity ?? null}
+        busy={current?.verification_busy ?? false}
         verification={verification}
         actionsRef={actionsRef}
       />
@@ -305,12 +306,15 @@ function VerifyUserPanel({
   userId,
   offer,
   identity,
+  busy,
   verification,
   actionsRef
 }: {
   userId: string;
   offer: ContactVerificationOffer | null;
   identity: ContactIdentityVerification | null;
+  /** Rust: another verification flow is in progress. */
+  busy: boolean;
   verification: VerificationFlowState;
   actionsRef: { current: ContactSecurityActions };
 }) {
@@ -325,8 +329,8 @@ function VerifyUserPanel({
       flow.kind === "confirming");
 
   useEffect(() => {
-    if (active) setConfirming(false);
-  }, [active]);
+    if (active || busy) setConfirming(false);
+  }, [active, busy]);
 
   if (active && flow) {
     const flowId = flow.request_id;
@@ -412,6 +416,14 @@ function VerifyUserPanel({
       <div className="profile-security-verify">
         {settled}
         <p>{t("people.security.verifyRequiresCrossSigning")}</p>
+      </div>
+    );
+  }
+  if (busy) {
+    return (
+      <div className="profile-security-verify">
+        {settled}
+        <p>{t("people.security.verifyBusy")}</p>
       </div>
     );
   }

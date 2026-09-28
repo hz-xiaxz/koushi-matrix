@@ -455,6 +455,7 @@ export type MessageId =
   | "people.security.verifyHow"
   | "people.security.verifySend"
   | "people.security.verifyRequiresCrossSigning"
+  | "people.security.verifyBusy"
   | "people.security.verifyWaiting"
   | "people.security.verifyIncoming"
   | "people.security.verifyAccept"
@@ -2179,6 +2180,7 @@ const en: Catalog = {
   "people.security.verifyHow": "They accept the request in their app. Then you both compare emoji, in person or over another trusted channel. Verifying them doesn't confirm devices they haven't confirmed themselves.",
   "people.security.verifySend": "Send request",
   "people.security.verifyRequiresCrossSigning": "To verify other people, this session needs your own cross-signing keys. Verify this session or set up cross-signing in User settings → Encryption first.",
+  "people.security.verifyBusy": "Another verification is in progress. You can verify this person after it finishes.",
   "people.security.verifyWaiting": "Waiting for them to accept the request in their app…",
   "people.security.verifyIncoming": "This person asked to verify you.",
   "people.security.verifyAccept": "Accept",
@@ -3808,6 +3810,7 @@ const ja: Catalog = {
   "people.security.verifyHow": "相手が自分のアプリでリクエストを承認した後、対面または別の信頼できる経路で、お互いに絵文字を比較します。検証しても、相手が確認していないデバイスが確認されるわけではありません。",
   "people.security.verifySend": "リクエストを送信",
   "people.security.verifyRequiresCrossSigning": "他の人を検証するには、このセッションにあなた自身のクロス署名鍵が必要です。先にこのセッションを検証するか、ユーザー設定 → 暗号化でクロス署名を設定してください。",
+  "people.security.verifyBusy": "別の検証が進行中です。完了した後にこの人を検証できます。",
   "people.security.verifyWaiting": "相手が自分のアプリでリクエストを承認するのを待っています…",
   "people.security.verifyIncoming": "この人があなたの検証を求めています。",
   "people.security.verifyAccept": "承認",

@@ -1644,6 +1644,48 @@ fn contact_security_commands_project_checking_and_close_before_account_route() {
 }
 
 #[test]
+fn refused_verify_user_reports_the_active_verification_not_a_missing_session() {
+    let request_id = RequestId {
+        connection_id: RuntimeConnectionId(1),
+        sequence: 13,
+    };
+    let verify = AccountCommand::ContactSecurity {
+        request_id,
+        request: koushi_protocol::command::ContactSecurityRequest::RequestVerification {
+            user_id: "@bob:example.test".to_owned(),
+        },
+    };
+    let mut state = AppState {
+        session: SessionState::Ready(koushi_state::SessionInfo {
+            homeserver: "https://example.test".to_owned(),
+            user_id: "@me:example.test".to_owned(),
+            device_id: "DEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        }),
+        ..AppState::default()
+    };
+    koushi_state::reduce(
+        &mut state,
+        AppAction::VerificationRequested {
+            request_id: 70,
+            target: koushi_state::VerificationTarget {
+                user_id: "@alice:example.test".to_owned(),
+                device_id: "ALICEDEVICE".to_owned(),
+            },
+        },
+    );
+    assert_eq!(
+        contact_security_projection_failure(&state, &verify),
+        Some(CoreFailure::VerificationInProgress)
+    );
+    // Without a ready session the refusal stays SessionRequired.
+    assert_eq!(
+        contact_security_projection_failure(&AppState::default(), &verify),
+        None
+    );
+}
+
+#[test]
 fn identity_reset_auth_command_projects_pending_state_before_routing() {
     let request_id = RequestId {
         connection_id: RuntimeConnectionId(1),

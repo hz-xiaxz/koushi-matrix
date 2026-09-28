@@ -28,7 +28,8 @@ describe("appStore projection cache", () => {
     const contactSecurity = {
       user_id: "@contact:example.invalid",
       load: { kind: "loaded" as const, request_id: 7 },
-      summary: null
+      summary: null,
+      verification_busy: false
     };
     previous.state.domain.contact_security = contactSecurity;
     // The Rust-generated wire shape of a delta that changes only another slice.
@@ -1500,7 +1501,7 @@ function makeSnapshot(): DesktopSnapshot {
           pending_email: null,
           operation: { kind: "idle" }
         },
-        contact_security: { user_id: null, load: { kind: "idle" }, summary: null },
+        contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
         account_management_capabilities: { change_password: { kind: "unknown" } },
         soft_logout_reauth: { kind: "idle" },
         qr_login: { kind: "idle" },
