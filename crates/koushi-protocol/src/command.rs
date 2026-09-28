@@ -4,6 +4,10 @@
 use crate::ids::{RequestId, RuntimeConnectionId};
 
 #[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "public protocol enum: boxing its largest variant changes every producer and consumer across crates (follow-up)"
+)]
 pub enum CoreCommand {
     App(AppCommand),
     Account(AccountCommand),
@@ -90,6 +94,7 @@ impl CoreCommand {
                 | AccountCommand::DeactivateAccount { request_id, .. }
                 | AccountCommand::SubmitAccountManagementUia { request_id, .. }
                 | AccountCommand::AccountNotifications { request_id, .. }
+                | AccountCommand::ContactSecurity { request_id, .. }
                 | AccountCommand::SoftLogoutReauth { request_id, .. }
                 | AccountCommand::ExportRoomKeys { request_id, .. }
                 | AccountCommand::ExportHistory { request_id, .. }
@@ -100,6 +105,8 @@ impl CoreCommand {
                 | AccountCommand::RecoverSecureBackup { request_id, .. }
                 | AccountCommand::RetrySecureBackupInspection { request_id }
                 | AccountCommand::ChangeSecureBackupPassphrase { request_id, .. }
+                | AccountCommand::SaveSecureBackupRecoveryKey { request_id, .. }
+                | AccountCommand::ConfirmSecureBackupRecoveryKeySaved { request_id, .. }
                 | AccountCommand::ProbeLocalEncryptionHealth { request_id }
                 | AccountCommand::ResetLocalData { request_id }
                 | AccountCommand::StartDeviceCleanup { request_id }
@@ -245,7 +252,8 @@ mod test_support;
 mod timeline;
 
 pub use account::{
-    AccountCommand, AccountNotificationsRequest, HistoryExportLabels, HistoryExportRequest, RoomKeyExportRequest, RoomKeyImportRequest,
+    AccountCommand, AccountNotificationsRequest, ContactSecurityRequest, HistoryExportLabels,
+    HistoryExportRequest, RoomKeyExportRequest, RoomKeyImportRequest,
     SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
 };
 pub use app::{AppCommand, EventNavigationMissingTargetPolicy};

@@ -114,6 +114,10 @@ pub struct VerificationGateState {
 pub enum SecureBackupSetupIntent {
     InitialSetup,
     Reenable { confirmed: bool },
+    // Replace a lost, unconfirmed recovery key of the existing backup with a
+    // NEW one via `recovery().reset_key()` (#927). The previous key stops
+    // working, so it requires explicit confirmation.
+    ResetRecoveryKey { confirmed: bool },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -178,11 +182,17 @@ pub enum SecureBackupGateState {
 impl SecureBackupSetupIntent {
     pub fn admission(self, gate: &SecureBackupGateState) -> SecureBackupSetupAdmission {
         match (self, gate) {
+            (Self::InitialSetup, SecureBackupGateState::SetupRequired) => {
+                SecureBackupSetupAdmission::Allowed
+            }
             (
-                Self::InitialSetup,
-                SecureBackupGateState::SetupRequired
-                | SecureBackupGateState::RecoveryKeyDeliveryRequired,
+                Self::ResetRecoveryKey { confirmed: true },
+                SecureBackupGateState::RecoveryKeyDeliveryRequired,
             ) => SecureBackupSetupAdmission::Allowed,
+            (
+                Self::ResetRecoveryKey { confirmed: false },
+                SecureBackupGateState::RecoveryKeyDeliveryRequired,
+            ) => SecureBackupSetupAdmission::ConfirmationRequired,
             (
                 Self::Reenable { confirmed: true },
                 SecureBackupGateState::ExplicitlyDisabledRequiresSetup,

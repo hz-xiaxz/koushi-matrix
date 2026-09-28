@@ -215,7 +215,7 @@ async fn normal_runtime_waits_for_full_all_rooms_reconciliation_and_reuses_one_s
         .and(path("/_matrix/client/v3/login"))
         .respond_with(EchoRequestedLoginDevice)
         .expect(1)
-        .mount(&server.server())
+        .mount(server.server())
         .await;
 
     let room_list_requests = Arc::new(AtomicUsize::new(0));
@@ -234,7 +234,7 @@ async fn normal_runtime_waits_for_full_all_rooms_reconciliation_and_reuses_one_s
             first_response_release: first_response_release.clone(),
             complete_range_release: complete_range_release.clone(),
         })
-        .mount(&server.server())
+        .mount(server.server())
         .await;
 
     let data_dir = tempfile::tempdir().expect("runtime data directory");
@@ -339,33 +339,34 @@ async fn normal_runtime_waits_for_full_all_rooms_reconciliation_and_reuses_one_s
             .all(|request| request.url.path() != "/_matrix/client/v3/sync"),
         "normal runtime must never issue classic /v3/sync"
     );
-    let bodies = request_bodies.lock().expect("request capture lock");
-    let conn_ids = bodies
-        .iter()
-        .filter_map(|body| body["conn_id"].as_str())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(conn_ids, BTreeSet::from(["encryption", "room-list"]));
-    assert!(encryption_requests.load(Ordering::Acquire) > 0);
-    let first_room_list = bodies
-        .iter()
-        .find(|body| body["conn_id"] == "room-list")
-        .expect("room-list request body");
-    assert_eq!(
-        first_room_list["lists"]
-            .as_object()
-            .expect("room-list lists object")
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-        ["all_rooms"]
-    );
-    assert!(
-        first_room_list["lists"]["all_rooms"]["filters"]
-            .get("is_invite")
-            .is_none_or(Value::is_null),
-        "all_rooms must be unfiltered so joined and invited rooms share one list"
-    );
-    drop(bodies);
+    {
+        let bodies = request_bodies.lock().expect("request capture lock");
+        let conn_ids = bodies
+            .iter()
+            .filter_map(|body| body["conn_id"].as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(conn_ids, BTreeSet::from(["encryption", "room-list"]));
+        assert!(encryption_requests.load(Ordering::Acquire) > 0);
+        let first_room_list = bodies
+            .iter()
+            .find(|body| body["conn_id"] == "room-list")
+            .expect("room-list request body");
+        assert_eq!(
+            first_room_list["lists"]
+                .as_object()
+                .expect("room-list lists object")
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["all_rooms"]
+        );
+        assert!(
+            first_room_list["lists"]["all_rooms"]["filters"]
+                .get("is_invite")
+                .is_none_or(Value::is_null),
+            "all_rooms must be unfiltered so joined and invited rooms share one list"
+        );
+    }
     drop(connection);
 
     tokio::time::timeout(Duration::from_secs(15), runtime.shutdown())

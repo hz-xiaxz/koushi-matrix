@@ -32,6 +32,7 @@ pub fn build_state_delta(
     changed_slice!(account_management);
     changed_slice!(account_management_capabilities);
     changed_slice!(account_notifications);
+    changed_slice!(contact_security);
     changed_slice!(soft_logout_reauth);
     changed_slice!(qr_login);
     changed_slice!(settings);
@@ -463,13 +464,13 @@ fn ordered_ids_are_subsequence<'a>(
     true
 }
 
+/// Changed activity rows keyed by row id; `None` removes a row.
+type ActivityRowDelta = Option<BTreeMap<String, Option<ActivityRow>>>;
+
 fn activity_row_deltas(
     previous: &ActivityState,
     next: &ActivityState,
-) -> Option<(
-    Option<BTreeMap<String, Option<ActivityRow>>>,
-    Option<BTreeMap<String, Option<ActivityRow>>>,
-)> {
+) -> Option<(ActivityRowDelta, ActivityRowDelta)> {
     let (
         ActivityState::Open {
             active_tab: previous_tab,
@@ -549,6 +550,7 @@ fn audit_app_state_delta_slices(state: &AppState) {
         account_management: _,
         account_management_capabilities: _,
         account_notifications: _,
+        contact_security: _,
         soft_logout_reauth: _,
         qr_login: _,
         settings: _,

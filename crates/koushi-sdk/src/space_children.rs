@@ -76,12 +76,8 @@ pub async fn matrix_space_children_projection(
     let mut entries = Vec::new();
     for room in room_list.rooms().await {
         let room_id = room.room_id.to_string();
-        let joined_members = local_joined_member_count(
-            session,
-            &room_id,
-            room.num_joined_members,
-        )
-        .await;
+        let joined_members =
+            local_joined_member_count(session, &room_id, room.num_joined_members).await;
         entries.push(MatrixSpaceChildEntry {
             room_id,
             raw_name: room
@@ -129,12 +125,8 @@ pub async fn matrix_space_children_projection(
                 .or_else(|| raw_name.clone())
                 .unwrap_or_else(|| room_id.clone());
             let state = room.state();
-            let joined_members = local_joined_member_count(
-                session,
-                &room_id,
-                room.joined_members_count(),
-            )
-            .await;
+            let joined_members =
+                local_joined_member_count(session, &room_id, room.joined_members_count()).await;
             let can_join = local_room_can_join(&room);
             entries.push(MatrixSpaceChildEntry {
                 room_id,

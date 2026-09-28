@@ -166,6 +166,36 @@ test("Security settings render local encryption health and dispatch probe comman
   await expect(page.getByText("Not checked")).toBeVisible();
 });
 
+test("our own verification request waits for the other side instead of offering Accept (#1024)", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await page.evaluate(() => {
+    const next = window.__harness.e2eeTrustSnapshot();
+    const verification = next.state.domain.e2ee_trust.verification;
+    if (verification.kind === "requested") {
+      next.state.domain.e2ee_trust.verification = { ...verification, initiator: "us" };
+    }
+    window.__harness.setSnapshot(next);
+    window.__harness.setCommandResponse("refresh_current_session_status", () =>
+      window.__harness.currentSnapshot()
+    );
+    window.__harness.pushStateUpdate();
+  });
+
+  await page.getByRole("button", { name: "User settings" }).click();
+  await page.getByRole("tab", { name: "Encryption", exact: true }).click();
+  await expect(page.getByText(t("trust.statusVerificationWaiting"))).toBeVisible();
+  await expect(page.getByRole("button", { name: t("trust.acceptVerification") })).toHaveCount(0);
+  await page.evaluate(() => window.__harness.clearInvocations());
+  await page
+    .getByRole("dialog", { name: t("trust.verification") })
+    .getByRole("button", { name: t("trust.closeVerification") })
+    .click();
+  await expect.poll(() => invocationCount(page, "cancel_verification")).toBe(1);
+  expect(await invocationCount(page, "accept_verification")).toBe(0);
+});
+
 test("E2EE trust controls dispatch Rust-owned commands and render snapshot updates", async ({
   page
 }) => {
@@ -312,21 +342,39 @@ test("security settings drive Rust-owned room-key transfer and secure backup sta
   await secureBackupForm
     .getByLabel("Secure backup passphrase", { exact: true })
     .fill("synthetic-secure-backup-passphrase");
-  await page.evaluate(() =>
-    window.__harness.setCommandResponse("plugin:dialog|save", "/tmp/recovery-key.txt")
-  );
+  // #927: setup needs no destination; the key is revealed on screen.
   await secureBackupForm.getByRole("button", { name: "Set up secure backup" }).click();
   await expect.poll(() => invocationCount(page, "bootstrap_secure_backup")).toBe(1);
-  await expect(page.getByTestId("secure-backup-state")).toHaveText("Recovery key saved");
   await expect
     .poll(async () =>
       page.evaluate(() => window.__harness.invocationsOf("bootstrap_secure_backup")[0]?.args)
     )
     .toEqual({
       passphrase: "[REDACTED]",
-      recoveryKeyDestinationPath: "[REDACTED]",
       intent: { kind: "initialSetup" }
     });
+  const setupReveal = page.getByRole("region", { name: "Your recovery key" });
+  await expect(setupReveal.getByText("synthetic-harness-recovery-key")).toBeVisible();
+  await page.evaluate(() =>
+    window.__harness.setCommandResponse("plugin:dialog|save", "/tmp/recovery-key.txt")
+  );
+  await setupReveal.getByRole("button", { name: "Save to file…" }).click();
+  await expect.poll(() => invocationCount(page, "save_secure_backup_recovery_key")).toBe(1);
+  await expect(page.getByTestId("secure-backup-state")).toHaveText("Recovery key saved");
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () => window.__harness.invocationsOf("save_secure_backup_recovery_key")[0]?.args
+      )
+    )
+    .toEqual({ revealRequestId: 9_202, recoveryKeyDestinationPath: "[REDACTED]" });
+  // Saving never dismisses the reveal; only the explicit confirmation does.
+  await expect(setupReveal.getByText("synthetic-harness-recovery-key")).toBeVisible();
+  await setupReveal.getByRole("button", { name: "I saved the recovery key" }).click();
+  await expect
+    .poll(() => invocationCount(page, "confirm_secure_backup_recovery_key_saved"))
+    .toBe(1);
+  await expect(page.getByTestId("secure-backup-state")).toHaveText("Enabled");
 
   const passphraseChangeForm = page.getByRole("form", {
     name: "Change secure backup passphrase",
@@ -338,16 +386,11 @@ test("security settings drive Rust-owned room-key transfer and secure backup sta
   await passphraseChangeForm
     .getByLabel("New secure backup passphrase")
     .fill("synthetic-new-secure-backup-passphrase");
-  await page.evaluate(() =>
-    window.__harness.setCommandResponse("plugin:dialog|save", "/tmp/changed-recovery-key.txt")
-  );
   await passphraseChangeForm
     .getByRole("button", { name: "Update secure backup passphrase" })
     .click();
   await expect.poll(() => invocationCount(page, "change_secure_backup_passphrase")).toBe(1);
-  await expect(page.getByTestId("secure-backup-passphrase-change-state")).toHaveText(
-    "Changed; recovery key saved"
-  );
+  await expect(page.getByTestId("secure-backup-passphrase-change-state")).toHaveText("Changed");
   await expect
     .poll(async () =>
       page.evaluate(
@@ -356,9 +399,18 @@ test("security settings drive Rust-owned room-key transfer and secure backup sta
     )
     .toEqual({
       oldSecret: "[REDACTED]",
-      newPassphrase: "[REDACTED]",
-      recoveryKeyDestinationPath: "[REDACTED]"
+      newPassphrase: "[REDACTED]"
     });
+  const changeReveal = page.getByRole("region", { name: "Your recovery key" });
+  await expect(changeReveal.getByText("synthetic-harness-recovery-key")).toBeVisible();
+  await changeReveal.getByRole("button", { name: "I saved the recovery key" }).click();
+  await expect
+    .poll(() => invocationCount(page, "confirm_secure_backup_recovery_key_saved"))
+    .toBe(2);
+  await expect(page.getByTestId("secure-backup-passphrase-change-state")).toHaveText(
+    "No passphrase change"
+  );
+  await expect(page.getByText("synthetic-harness-recovery-key")).toHaveCount(0);
 
   const serializedPrivateState = await page.evaluate(() =>
     JSON.stringify(window.__harness.currentSnapshot().state.domain.e2ee_trust.key_management)

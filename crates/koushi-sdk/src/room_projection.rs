@@ -688,7 +688,7 @@ mod room_permission_tests {
             })
             .await;
 
-        let room = client.get_room(&room_id).expect("joined permission room");
+        let room = client.get_room(room_id).expect("joined permission room");
         let power_levels = room.power_levels_or_default().await;
         assert_eq!(power_levels.invite, matrix_sdk::ruma::Int::from(150));
         assert_eq!(power_levels.users_default, matrix_sdk::ruma::Int::from(100));
@@ -1127,6 +1127,10 @@ impl SpaceMemberLookupStatus {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one bounded diagnostic field of a single record"
+)]
 pub(super) fn space_members_scope_diagnostic_event(
     space_room_lookup_outcome: &'static str,
     space_joined_lookup: SpaceMemberLookupStatus,
@@ -1815,7 +1819,7 @@ fn direct_space_role_options(
     role_options_for_powers(
         own_power,
         target_power,
-        &target_user_id == room.own_user_id(),
+        target_user_id == room.own_user_id(),
         can_edit_roles,
     )
 }
@@ -2097,7 +2101,7 @@ async fn matrix_room_list_snapshot_from_diffs(
         match diff {
             eyeball_im::VectorDiff::Append { values }
             | eyeball_im::VectorDiff::Reset { values } => {
-                items.extend(values.into_iter());
+                items.extend(values);
             }
             eyeball_im::VectorDiff::PushFront { value }
             | eyeball_im::VectorDiff::PushBack { value }
@@ -2459,6 +2463,10 @@ fn room_attention_unread_count(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn matrix_room_list_room_from_counts(
     room_id: String,
     display_name: String,
@@ -2746,7 +2754,6 @@ async fn matrix_room_event_in_memory_by_id(
         .rfind_map_event_in_memory_by(|event| {
             event
                 .event_id()
-                .as_deref()
                 .is_some_and(|candidate| candidate.as_str() == event_id)
                 .then(|| event.clone())
         })
@@ -3121,7 +3128,9 @@ pub async fn matrix_room_is_dm(
     direct_targets_by_room: Option<&MatrixDirectTargetsByRoom>,
 ) -> bool {
     match direct_targets_by_room {
-        Some(direct_targets_by_room) => direct_targets_by_room.contains_key(room.room_id().as_str()),
+        Some(direct_targets_by_room) => {
+            direct_targets_by_room.contains_key(room.room_id().as_str())
+        }
         None => {
             if !room.direct_targets().is_empty() {
                 true

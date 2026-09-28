@@ -176,6 +176,7 @@ import type {
   AttachmentSort,
   ComposerTarget,
   CommandReceipt,
+  CreateRoomDefaults,
   CreateRoomRequest,
   DesktopSnapshot,
   DirectoryRoomSummary,
@@ -209,11 +210,15 @@ import { createCommandReceiptReconciler } from "./domain/commandWatermark";
 import { SNAPSHOT_SCHEMA_VERSION } from "./domain/types";
 import { selectJoinedRoomIfPresent } from "./domain/joinedRoomNavigation";
 import { createViewportSyncReporter } from "./app/viewportSyncReporter";
-import { EMOJI_BY_CATEGORY, EMOJI_CATEGORIES } from "./components/emojiData";
+import { useLegacyEmojiVocabulary } from "./app/useLegacyEmojiVocabulary";
 import {
   LEGACY_NAVIGATION_KEYS,
+  LEGACY_PREFERENCE_KEYS,
   LEGACY_SETTINGS_KEYS,
+  LEGACY_SETTINGS_KEYS_WITHOUT_RECENT_EMOJIS,
+  browserHasLegacyRecentEmojis,
   keysPresentInMigration,
+  legacyRecentEmojiFollowUp,
   legacyNavigationImportMatches,
   legacySettingsPatchMatches,
   readBrowserLegacyPreferenceMigration,
@@ -267,12 +272,18 @@ import {
 } from "./components/Shell";
 import { ContextualRightPanel } from "./components/rightPanel";
 import type { AccountNotificationActions } from "./components/user-settings/AccountNotificationsSections";
+import type { ContactSecurityActions } from "./components/ContactSecurityDetails";
 import type { HistoryExportControls } from "./components/HistoryExportDialog";
 import { historyExportLabels } from "./domain/historyExportLabels";
 import type {
   SpaceInviteAvailabilityReason,
   SpaceInviteCancellationAvailabilityReason
 } from "./components/SpaceMembersPanel";
+import {
+  exactRoomSettingsForRoom,
+  spaceInviteAvailabilityReasonForSnapshot,
+  spaceInviteCancellationAvailabilityReasonForSnapshot
+} from "./domain/spaceInviteAvailability";
 
 type ActivityOpenTrigger = "home_rail" | "activity_sidebar" | "initial_home" | "other";
 type SpaceMembersOpenTrigger = "sidebar" | "space_info";
@@ -287,20 +298,6 @@ type SpaceMembersLoadDemand = {
   key: string;
   promise: Promise<DesktopSnapshot | null> | null;
 };
-
-function exactRoomSettingsForRoom(
-  snapshot: Pick<DesktopSnapshot, "state"> | null,
-  roomId: string
-) {
-  if (!snapshot) {
-    return null;
-  }
-  const roomManagement = snapshot.state.domain.room_management;
-  return roomManagement.selected_room_id === roomId &&
-    roomManagement.settings?.room_id === roomId
-    ? roomManagement.settings
-    : null;
-}
 
 function spaceMembersFenceForSnapshot(snapshot: DesktopSnapshot | null): SpaceMemberFence | null {
   const account = readyComposerDraftAccountOwner(snapshot);
@@ -332,52 +329,6 @@ function spaceMembersSnapshotMatches(
 
 function spaceMembersLoadDemandKey(fence: SpaceMemberFence): string {
   return `${fence.accountOwnerKey}\u0000${fence.spaceId}\u0000${fence.generation}`;
-}
-
-function spaceInviteAvailabilityReasonForSnapshot(
-  snapshot: Pick<DesktopSnapshot, "state"> | null,
-  spaceId: string
-): SpaceInviteAvailabilityReason {
-  if (
-    snapshot?.state.ui.navigation.active_space_id !== spaceId ||
-    snapshot.state.domain.space_members.selected_space_id !== spaceId
-  ) {
-    return "settings_unavailable";
-  }
-  const settings = exactRoomSettingsForRoom(snapshot, spaceId);
-  if (!settings) {
-    return "settings_unavailable";
-  }
-  if (!settings.permissions.can_invite) {
-    return "permission_denied";
-  }
-  const operation = snapshot.state.domain.space_members.operation.kind;
-  return operation === "loading" || operation === "inviting" || operation === "cancellingInvite"
-    ? "operation_pending"
-    : "available";
-}
-
-function spaceInviteCancellationAvailabilityReasonForSnapshot(
-  snapshot: Pick<DesktopSnapshot, "state"> | null,
-  spaceId: string
-): SpaceInviteCancellationAvailabilityReason {
-  if (
-    snapshot?.state.ui.navigation.active_space_id !== spaceId ||
-    snapshot.state.domain.space_members.selected_space_id !== spaceId
-  ) {
-    return "settings_unavailable";
-  }
-  const settings = exactRoomSettingsForRoom(snapshot, spaceId);
-  if (!settings) {
-    return "settings_unavailable";
-  }
-  if (!settings.permissions.can_kick) {
-    return "permission_denied";
-  }
-  const operation = snapshot.state.domain.space_members.operation.kind;
-  return operation === "loading" || operation === "inviting" || operation === "cancellingInvite"
-    ? "operation_pending"
-    : "available";
 }
 
 const DEFAULT_HOMESERVER = "https://matrix.org";
@@ -444,14 +395,17 @@ const WIDE_RAIL_WIDTH = 72;
 const OVERLAY_TIMELINE_MIN_WIDTH = 360;
 const INLINE_TIMELINE_MIN_WIDTH = 420;
 const DEFAULT_HOME_SELECTION: HomeSelection = { kind: "activity" };
-const VALID_EMOJIS = new Set(
-  EMOJI_CATEGORIES.flatMap((category) =>
-    EMOJI_BY_CATEGORY[category].map((entry) => entry.emoji)
-  )
-);
 
-function defaultCreateRoomDialogOptions(): CreateRoomDialogOptions {
-  return { ...DEFAULT_CREATE_ROOM_OPTIONS };
+/** Seed the dialog from the Rust-projected defaults for the active scope
+ * (#1023); the constant only covers a snapshot that has not arrived yet. */
+function defaultCreateRoomDialogOptions(defaults?: CreateRoomDefaults | null): CreateRoomDialogOptions {
+  if (!defaults) return { ...DEFAULT_CREATE_ROOM_OPTIONS };
+  return {
+    ...DEFAULT_CREATE_ROOM_OPTIONS,
+    visibility: defaults.visibility,
+    encrypted: defaults.encrypted,
+    invitedOnly: defaults.invited_only
+  };
 }
 
 /** Pause after the last address edit before the advisory lookup (#1006). */
@@ -1287,19 +1241,50 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
   );
   const settingsMigrationInFlightRef = useRef(false);
   const navigationMigrationInFlightRef = useRef<Set<string>>(new Set());
+  const legacyEmojiVocabulary = useLegacyEmojiVocabulary();
 
   useEffect(() => {
     if (!snapshot) return;
     const values = snapshot.state.domain.settings.values;
     const navigation = snapshot.state.ui.navigation;
-    const migration = readBrowserLegacyPreferenceMigration(VALID_EMOJIS, values);
+    // #1035: only the settings import (which carries the legacy recent-emoji
+    // list) waits for the emoji vocabulary; navigation never does. An
+    // unavailable vocabulary imports the other settings without the emoji
+    // list and keeps its storage key, so a later launch can still import it.
+    const validEmojis =
+      legacyEmojiVocabulary.kind === "ready" ? legacyEmojiVocabulary.emojis : null;
+    const migration = readBrowserLegacyPreferenceMigration(validEmojis, values);
     if (!migration) return;
 
-    if (
+    if (legacyEmojiVocabulary.kind === "loading") {
+      // Settings import waits; the navigation import below does not.
+    } else if (
       values.legacy_frontend_preferences_imported &&
       !settingsMigrationInFlightRef.current
     ) {
-      removeBrowserLegacyPreferenceKeys(LEGACY_SETTINGS_KEYS);
+      removeBrowserLegacyPreferenceKeys(LEGACY_SETTINGS_KEYS_WITHOUT_RECENT_EMOJIS);
+      if (browserHasLegacyRecentEmojis()) {
+        const followUp = legacyRecentEmojiFollowUp(migration, validEmojis, values.composer);
+        if (followUp.kind === "remove") {
+          removeBrowserLegacyPreferenceKeys([LEGACY_PREFERENCE_KEYS.recentEmojis]);
+        } else if (followUp.kind === "import") {
+          // Rust's legacy import is one-shot and already recorded, so the
+          // deferred list goes through an ordinary settings update.
+          settingsMigrationInFlightRef.current = true;
+          void settleCommandSnapshot(api.updateSettings({ composer: followUp.composer }))
+            .then((next) => {
+              const confirmed = next.state.domain.settings.values.composer.recent_emojis;
+              if (
+                JSON.stringify(confirmed) === JSON.stringify(followUp.composer.recent_emojis)
+              ) {
+                removeBrowserLegacyPreferenceKeys([LEGACY_PREFERENCE_KEYS.recentEmojis]);
+              }
+            })
+            .finally(() => {
+              settingsMigrationInFlightRef.current = false;
+            });
+        }
+      }
     } else {
       const keys = keysPresentInMigration(migration, LEGACY_SETTINGS_KEYS);
       if (keys.length > 0 && !settingsMigrationInFlightRef.current) {
@@ -1349,7 +1334,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           navigationMigrationInFlightRef.current.delete(accountKey);
         });
     }
-  }, [snapshot]);
+  }, [snapshot, legacyEmojiVocabulary]);
 
   function setDisplayDensity(density: DisplayDensity) {
     const appearance = snapshotRef.current?.state.domain.settings.values.appearance;
@@ -2410,20 +2395,31 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     snapshot?.state.domain.room_management.settings
   ]);
 
+  // Space info and Space Members both read the Space's permissions from the
+  // single Rust room_management slot, which room-scoped loads (room invite
+  // dialog, post-invite refresh, room People, RoomSettingUpdateSucceeded)
+  // overwrite. While either Space surface is visible, a mismatched slot is
+  // reloaded for the active Space (#1033).
+  const spaceMembersScopeSpaceId =
+    rightPanelMode === "people" && peoplePanelScope?.kind === "space"
+      ? peoplePanelScope.spaceId
+      : null;
   useEffect(() => {
-    if (!snapshot || rightPanelMode !== "spaceInfo") {
+    if (!snapshot) {
       return;
     }
     const activeSpaceId = snapshot.state.ui.navigation.active_space_id;
     if (!activeSpaceId) {
       return;
     }
+    if (rightPanelMode !== "spaceInfo" && spaceMembersScopeSpaceId !== activeSpaceId) {
+      return;
+    }
     const roomManagement = snapshot.state.domain.room_management;
-    if (
-      roomManagement.selected_room_id === activeSpaceId &&
-      roomManagement.settings
-    ) {
-      spaceSettingsLoadRef.current = activeSpaceId;
+    if (exactRoomSettingsForRoom(snapshot, activeSpaceId)) {
+      // Settled for this Space: a later overwrite of the slot must be able to
+      // request the Space again, so do not keep the dedupe marker.
+      spaceSettingsLoadRef.current = null;
       return;
     }
     if (
@@ -2441,6 +2437,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     });
   }, [
     rightPanelMode,
+    spaceMembersScopeSpaceId,
     snapshot?.state.ui.navigation.active_space_id,
     snapshot?.state.domain.room_management.operation,
     snapshot?.state.domain.room_management.selected_room_id,
@@ -2705,6 +2702,18 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     disableEmail: () => runInBackground(settleCommand(api.disableEmailNotifications()))
   }), []);
 
+  // Contact security details in User info (#1024): read-only load and close.
+  const contactSecurityActions = useMemo<ContactSecurityActions>(() => ({
+    load: (userId) => runInBackground(settleCommand(api.loadContactSecurity(userId))),
+    close: () => runInBackground(settleCommand(api.closeContactSecurity())),
+    requestVerification: (userId) =>
+      runInBackground(settleCommand(api.requestContactVerification(userId))),
+    acceptVerification: (flowId) => runInBackground(settleCommand(api.acceptVerification(flowId))),
+    confirmSas: (flowId) => runInBackground(settleCommand(api.confirmSasVerification(flowId))),
+    mismatchSas: (flowId) => runInBackground(settleCommand(api.mismatchSasVerification(flowId))),
+    cancelVerification: (flowId) => runInBackground(settleCommand(api.cancelVerification(flowId)))
+  }), []);
+
   // The platform half of the Rust-owned history export. Memoized so an open
   // dialog loads the time zone once; the receipt reconciler is a ref.
   const historyExportControls = useMemo<HistoryExportControls>(() => ({
@@ -2900,20 +2909,30 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
 
   async function bootstrapSecureBackup(
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null,
     intent: SecureBackupSetupIntent
   ) {
-    await settleCommand(api.bootstrapSecureBackup(passphrase, recoveryKeyDestinationPath, intent));
+    await settleCommand(api.bootstrapSecureBackup(passphrase, intent));
   }
 
-  async function changeSecureBackupPassphrase(
-    oldSecret: string,
-    newPassphrase: string,
-    recoveryKeyDestinationPath: string | null
-  ) {
-    await settleCommand(
-      api.changeSecureBackupPassphrase(oldSecret, newPassphrase, recoveryKeyDestinationPath)
-    );
+  async function changeSecureBackupPassphrase(oldSecret: string, newPassphrase: string) {
+    await settleCommand(api.changeSecureBackupPassphrase(oldSecret, newPassphrase));
+  }
+
+  // #927: optional "Save to file…" for the revealed recovery key. Rust writes
+  // its own held copy; only the native path crosses the bridge.
+  async function requestSecureBackupRecoveryKeySave(revealRequestId: number) {
+    const destination = await chooseSecureBackupDestination();
+    if (!destination) return null;
+    return api.saveSecureBackupRecoveryKey(revealRequestId, destination);
+  }
+
+  async function saveSecureBackupRecoveryKey(revealRequestId: number) {
+    const receipt = await requestSecureBackupRecoveryKeySave(revealRequestId);
+    if (receipt) await applyCommandReceipt(receipt);
+  }
+
+  async function confirmSecureBackupRecoveryKeySaved(revealRequestId: number) {
+    await settleCommand(api.confirmSecureBackupRecoveryKeySaved(revealRequestId));
   }
 
   async function probeLocalEncryptionHealth() {
@@ -3622,7 +3641,9 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     setCreateRoomAliasCollision(null);
     setCreateRoomManualAlias(null);
     setCreateDraftName("");
-    setCreateRoomDraftOptions(defaultCreateRoomDialogOptions());
+    setCreateRoomDraftOptions(
+      defaultCreateRoomDialogOptions(snapshotRef.current?.sidebar.create_room_defaults)
+    );
     setCreateDialog(kind);
   }
 
@@ -3970,9 +3991,11 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
         ?.display_name ?? "";
     // Guard against double-submit: a create already in flight (isBusy) or a
     // pending basic_operation (Rust-owned) must block re-entry.
+    // #1023: only a Space needs a name; an unnamed room omits `m.room.name`
+    // and shows the SDK-calculated name.
     if (
       !kind ||
-      !name ||
+      (kind === "space" && !name) ||
       (kind === "room" &&
         createRoomDraftOptions.visibility === "public" &&
         (!createRoomAddressPreview || createRoomAddressPreview.error !== null)) ||
@@ -5954,9 +5977,11 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           startOwnUserSas: () => api.startOwnUserSas(),
           submitRecovery: (secret) => api.submitRecovery(secret),
           recoverSecureBackup: api.recoverSecureBackup,
-          bootstrapSecureBackup: (passphrase, destination, intent) =>
-            api.bootstrapSecureBackup(passphrase, destination, intent),
-          chooseSecureBackupDestination,
+          bootstrapSecureBackup: (passphrase, intent) =>
+            api.bootstrapSecureBackup(passphrase, intent),
+          saveSecureBackupRecoveryKey: requestSecureBackupRecoveryKeySave,
+          confirmSecureBackupRecoveryKeySaved: (revealRequestId) =>
+            api.confirmSecureBackupRecoveryKeySaved(revealRequestId),
           retrySecureBackupInspection: api.retrySecureBackupInspection,
           openSecureBackupDiagnostics: openDiagnostics
         }}
@@ -6762,28 +6787,21 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           }}
           onChooseRoomKeyExportDestination={chooseRoomKeyExportDestination}
           onChooseRoomKeyImportSource={chooseRoomKeyImportSource}
-          onChooseSecureBackupDestination={chooseSecureBackupDestination}
           onExportRoomKeys={(destinationPath, passphrase) => {
             runInBackground(exportRoomKeys(destinationPath, passphrase));
           }}
           onImportRoomKeys={(sourcePath, passphrase) => {
             runInBackground(importRoomKeys(sourcePath, passphrase));
           }}
-          onBootstrapSecureBackup={(passphrase, recoveryKeyDestinationPath, intent) => {
-            runInBackground(bootstrapSecureBackup(passphrase, recoveryKeyDestinationPath, intent));
+          onBootstrapSecureBackup={(passphrase, intent) => {
+            runInBackground(bootstrapSecureBackup(passphrase, intent));
           }}
-          onChangeSecureBackupPassphrase={(
-            oldSecret,
-            newPassphrase,
-            recoveryKeyDestinationPath
-          ) => {
-            runInBackground(
-              changeSecureBackupPassphrase(
-                oldSecret,
-                newPassphrase,
-                recoveryKeyDestinationPath
-              )
-            );
+          onChangeSecureBackupPassphrase={(oldSecret, newPassphrase) => {
+            runInBackground(changeSecureBackupPassphrase(oldSecret, newPassphrase));
+          }}
+          onSaveSecureBackupRecoveryKey={saveSecureBackupRecoveryKey}
+          onConfirmSecureBackupRecoveryKeySaved={(revealRequestId) => {
+            runInBackground(confirmSecureBackupRecoveryKeySaved(revealRequestId));
           }}
           onEnableKeyBackup={() => {
             runInBackground(enableKeyBackup());
@@ -6825,6 +6843,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
             runInBackground(submitAccountManagementUia(flowId, password));
           }}
           accountNotificationActions={accountNotificationActions}
+          contactSecurityActions={contactSecurityActions}
           onUpdateRoomSetting={(roomId, change) => {
             runInBackground(updateRoomSetting(roomId, change));
           }}
@@ -6926,7 +6945,16 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
         >
           <div className="confirmation-content">
             <p role="alert">
-              {createdRoomLinkFailure.reason === "forbidden"
+              {!createdRoomLinkFailure.roomName
+                ? createdRoomLinkFailure.reason === "forbidden"
+                  ? t("spaceAddRooms.createdLinkFailedForbiddenUnnamed", {
+                      spaceName: createdRoomLinkFailure.spaceName
+                    })
+                  : t("spaceAddRooms.createdLinkFailedUnnamed", {
+                      spaceName: createdRoomLinkFailure.spaceName,
+                      reason: operationFailureLabel(createdRoomLinkFailure.reason)
+                    })
+                : createdRoomLinkFailure.reason === "forbidden"
                 ? t("spaceAddRooms.createdLinkFailedForbidden", {
                     roomName: createdRoomLinkFailure.roomName,
                     spaceName: createdRoomLinkFailure.spaceName

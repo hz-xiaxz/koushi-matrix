@@ -9,6 +9,11 @@
       "unread_count": 3
     },
     "active_space_id": "!space:example.invalid",
+    "create_room_defaults": {
+      "encrypted": true,
+      "invited_only": false,
+      "visibility": "private"
+    },
     "dm_highlight_count": 0,
     "dm_unread_count": 0,
     "dms_collapsed": false,
@@ -352,6 +357,34 @@
           "kana_fold": true,
           "width_fold": true
         }
+      },
+      "contact_security": {
+        "load": {
+          "kind": "loaded",
+          "request_id": 91
+        },
+        "summary": {
+          "device_counts": {
+            "excluded_dehydrated": 1,
+            "not_owner_signed": 2,
+            "owner_signature_invalid": 1,
+            "owner_signed": 1,
+            "total": 3
+          },
+          "device_signatures": [
+            "ownerSigned",
+            "notOwnerSigned",
+            "ownerSignatureInvalid"
+          ],
+          "devices": "someNotOwnerSigned",
+          "identity": "changedAfterVerification",
+          "verification": {
+            "direct_chat": "new",
+            "kind": "offered"
+          }
+        },
+        "user_id": "@contact:example.invalid",
+        "verification_busy": true
       },
       "current_session_status": {
         "details": {
@@ -886,7 +919,7 @@
           },
           "display": {
             "code_block_wrap": true,
-            "encrypted_url_previews_enabled": true,
+            "encrypted_url_previews_enabled": false,
             "hide_redacted": true,
             "url_previews_enabled": true
           },

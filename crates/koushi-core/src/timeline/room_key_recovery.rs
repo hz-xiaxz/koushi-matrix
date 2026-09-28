@@ -9,8 +9,6 @@ use matrix_sdk_ui::timeline::{
     EncryptedMessage, TimelineItem as SdkTimelineItem, TimelineItemKind,
 };
 use tokio::sync::mpsc;
-#[cfg(test)]
-use tokio::sync::oneshot;
 
 use crate::executor;
 use koushi_protocol::event::{CoreEvent, TimelineEvent};
@@ -181,9 +179,9 @@ pub(super) fn decrypt_retry_diff_settlement(
         let TimelineItemKind::Event(event_item) = item.kind() else {
             return None;
         };
-        if !event_item
+        if event_item
             .event_id()
-            .is_some_and(|candidate| candidate.as_str() == event_id)
+            .is_none_or(|candidate| candidate.as_str() != event_id)
         {
             return None;
         }
@@ -357,13 +355,13 @@ impl TimelineActor {
             // its timeout task is gone — move its presentation to
             // still_waiting (the Matrix request is still outstanding; a late
             // key or withheld observation settles it further).
-            if let Some(state) = self.key_request_states.get_mut(&previous.event_id) {
-                if !matches!(
+            if let Some(state) = self.key_request_states.get_mut(&previous.event_id)
+                && !matches!(
                     state.stage,
                     "withheld" | "decryption_recovered" | "send_failed"
-                ) {
-                    state.stage = "still_waiting";
-                }
+                )
+            {
+                state.stage = "still_waiting";
             }
             if let Some(state) = self.key_request_states.get(&previous.event_id) {
                 self.publish_key_request_state(&previous.event_id, state);
@@ -473,7 +471,7 @@ impl TimelineActor {
             koushi_protocol::event::RoomEvent::RoomKeyRequestStateChanged {
                 key: self.key.clone(),
                 event_id: event_id.to_owned(),
-                request_id: state.request_id.clone(),
+                request_id: state.request_id,
                 stage: key_request_stage_token(state.stage),
                 withheld_code: state
                     .withheld_code
@@ -581,7 +579,7 @@ impl TimelineActor {
                     stage: state.stage,
                     withheld_code: state.withheld_code,
                     session_id: state.session_id.clone(),
-                    request_id: request_id.clone(),
+                    request_id,
                 };
                 self.publish_key_request_state(&requested_event_id, &correlated);
             }
@@ -617,7 +615,7 @@ impl TimelineActor {
                 },
                 withheld_code: None,
                 session_id: session_id.clone(),
-                request_id: request_id.clone(),
+                request_id,
             },
         );
         // Issue #460: publish the accepted initial state so the UI can move
@@ -840,10 +838,10 @@ impl TimelineActor {
             );
         }
         crate::room_key_receive::record_late_decryption_retry(session_ids.len(), requested);
-        if let Some(request_id) = request_id {
-            if !requested {
-                self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendState);
-            }
+        if let Some(request_id) = request_id
+            && !requested
+        {
+            self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidSendState);
         }
     }
     /// Start or join the standard-only recovery operation for a missing-session

@@ -61,6 +61,7 @@ fn inspection(
         upload,
         trust,
         recovery_key_delivery_pending: false,
+        local_cross_signing_complete: true,
     }
 }
 
@@ -279,4 +280,115 @@ fn secure_backup_inspection_has_no_secret_or_identifier_surface() {
     let error = E2eeTrustError::Sdk("raw SDK failure with a recovery-key-secret".to_owned());
     assert!(!format!("{error:?}").contains("raw SDK failure"));
     assert!(!format!("{error:?}").contains("recovery-key-secret"));
+}
+
+/// Right after a restart the persisted delivery marker may be read before the
+/// local backup and secret storage settle. The lost-key reset is offered
+/// (`RecoveryKeyDeliveryRequired`) only once `reset_key()` can succeed.
+#[test]
+fn pending_delivery_offers_the_reset_only_when_the_reset_can_succeed() {
+    let settled = || {
+        let mut inspection = inspection(
+            MatrixSecureBackupServerState::Present,
+            MatrixSecureBackupLocalState::Enabled,
+            MatrixSecureBackupRecoveryState::Enabled,
+            MatrixSecureBackupUploadState::Unknown,
+            MatrixSecureBackupTrustState::Trusted,
+        );
+        inspection.recovery_key_delivery_pending = true;
+        inspection
+    };
+    assert!(settled().recovery_key_reset_is_possible());
+    assert_eq!(
+        settled().recommended_gate_state(),
+        SecureBackupGateState::RecoveryKeyDeliveryRequired
+    );
+
+    for local in [
+        MatrixSecureBackupLocalState::Unknown,
+        MatrixSecureBackupLocalState::Enabling,
+        MatrixSecureBackupLocalState::Resuming,
+        MatrixSecureBackupLocalState::Downloading,
+    ] {
+        let unsettled = MatrixSecureBackupInspection { local, ..settled() };
+        assert!(!unsettled.recovery_key_reset_is_possible());
+        assert_eq!(
+            unsettled.recommended_gate_state(),
+            SecureBackupGateState::Checking,
+            "{local:?}"
+        );
+    }
+    let untrusted = MatrixSecureBackupInspection {
+        trust: MatrixSecureBackupTrustState::Unknown,
+        ..settled()
+    };
+    assert!(!untrusted.recovery_key_reset_is_possible());
+    assert_eq!(
+        untrusted.recommended_gate_state(),
+        SecureBackupGateState::Checking
+    );
+    let disabled = MatrixSecureBackupInspection {
+        local: MatrixSecureBackupLocalState::Disabled,
+        ..settled()
+    };
+    assert_eq!(
+        disabled.recommended_gate_state(),
+        SecureBackupGateState::ExistingBackupNeedsRecovery { failure: None }
+    );
+}
+
+/// NEW-1: `enable()` created and enabled the backup but secret storage was
+/// never created (network error or the app was killed). Nothing can be lost:
+/// the backup key and complete cross-signing keys are local, so the lost-key
+/// reset (`reset_key()`) is offered and admitted to finish the missing step.
+#[test]
+fn pending_delivery_without_secret_storage_offers_the_reset() {
+    let interrupted = |recovery| {
+        let mut inspection = inspection(
+            MatrixSecureBackupServerState::Present,
+            MatrixSecureBackupLocalState::Enabled,
+            recovery,
+            MatrixSecureBackupUploadState::Unknown,
+            MatrixSecureBackupTrustState::Trusted,
+        );
+        inspection.recovery_key_delivery_pending = true;
+        inspection
+    };
+    for recovery in [
+        MatrixSecureBackupRecoveryState::Unknown,
+        MatrixSecureBackupRecoveryState::Disabled,
+    ] {
+        assert!(
+            interrupted(recovery).recovery_key_reset_is_possible(),
+            "{recovery:?}"
+        );
+        assert_eq!(
+            interrupted(recovery).recommended_gate_state(),
+            SecureBackupGateState::RecoveryKeyDeliveryRequired,
+            "{recovery:?}"
+        );
+
+        // Incomplete local cross-signing keys would be lost by a new store.
+        let missing_keys = MatrixSecureBackupInspection {
+            local_cross_signing_complete: false,
+            ..interrupted(recovery)
+        };
+        assert!(
+            !missing_keys.recovery_key_reset_is_possible(),
+            "{recovery:?}"
+        );
+        assert_ne!(
+            missing_keys.recommended_gate_state(),
+            SecureBackupGateState::RecoveryKeyDeliveryRequired,
+            "{recovery:?}"
+        );
+    }
+
+    // Secret storage exists but secrets are missing locally: keep refusing.
+    let incomplete = interrupted(MatrixSecureBackupRecoveryState::Incomplete);
+    assert!(!incomplete.recovery_key_reset_is_possible());
+    assert_eq!(
+        incomplete.recommended_gate_state(),
+        SecureBackupGateState::SecureStorageIncomplete
+    );
 }

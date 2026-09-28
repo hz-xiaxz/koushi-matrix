@@ -396,7 +396,7 @@ stateDiagram-v2
   blocking.
 - `SecureBackupGateState` distinguishes an existing backup needing recovery,
   incomplete secure storage, setup required, explicitly disabled setup,
-  creation, native Recovery Key delivery, upload settlement, retrying,
+  creation, on-screen Recovery Key reveal, upload settlement, retrying,
   terminal blocking failure, and ready. Server existence, local enablement,
   recovery completeness, and upload health remain distinct SDK inspection
   facts and are not collapsed into a boolean.
@@ -429,14 +429,62 @@ stateDiagram-v2
   automatic monitor, and requires the explicit typed retry. Successful
   authoritative inspection resumes periodic monitoring every 30 minutes.
 - Secure-backup setup admission is Rust-owned and uses the closed
-  `SecureBackupSetupIntent`. `InitialSetup` is admitted only by `SetupRequired`
-  or recovery-key delivery retry; `Reenable { confirmed: true }` is admitted
-  only by `ExplicitlyDisabledRequiresSetup`. Initial setup, unconfirmed
-  re-enable, duplicate setup, and stale/forged confirmation produce a typed
+  `SecureBackupSetupIntent`. `InitialSetup` is admitted only by `SetupRequired`;
+  `Reenable { confirmed: true }` is admitted only by
+  `ExplicitlyDisabledRequiresSetup`; `ResetRecoveryKey { confirmed: true }` is
+  admitted only by `RecoveryKeyDeliveryRequired` without a revealed key.
+  Inspection projects `RecoveryKeyDeliveryRequired` from the persisted marker
+  only once `reset_key()` can succeed without losing a secret: server backup
+  present, local backup `Enabled`, trust `Trusted`, and either secret storage
+  `Enabled` or secret storage never created (`Unknown`/`Disabled`, for example
+  `enable()` interrupted before `create_secret_store`) with all three
+  cross-signing private keys held locally. An `Incomplete` secret store is
+  refused (`SecureStorageIncomplete`). Otherwise, until local state settles
+  (for example right after a restart), it stays `Checking`, and the SDK reset
+  re-checks the same precondition.
+  Initial setup, unconfirmed re-enable or reset, duplicate setup, and stale/forged confirmation produce a typed
   confirmation-required or failed-no-op result before `AccountActor` routing.
   The SDK's fresh server/local/trust inspection remains authoritative and may
   still require confirmation. React renders catalog text, cancel sends no
   command, confirm sends the explicit typed intent, and Tauri only maps it.
+- Setup no longer requires a file destination (#927). A successful setup,
+  re-enable, or recovery-key reset keeps the persisted delivery-pending marker set,
+  projects `SecureBackupSetupState::RecoveryKeyReady { recovery_key }`, and
+  holds the gate in `RecoveryKeyDeliveryRequired` (encrypted admission
+  closed). Copy and the optional `SaveSecureBackupRecoveryKey` only update the
+  reveal's coarse delivery status; they never change the gate. A new setup
+  request is rejected while a key is revealed. Only
+  `ConfirmSecureBackupRecoveryKeySaved` for the matching reveal id leaves the
+  reveal: the reducer drops the key and moves the gate to `Checking`, and
+  AccountActor clears the persisted marker first, then drops its copy and
+  re-inspects. If the marker cannot be cleared, AccountActor keeps its copy
+  and `SecureBackupRecoveryKeyConfirmFailed` restores the reveal (with its
+  save status and `confirmation_failed: true`, which React renders as a
+  catalog status line) and `RecoveryKeyDeliveryRequired`, so the saved key is
+  never invalidated by a forced reset; the user may confirm again.
+  A stale confirmation is a typed failed no-op. While AccountActor holds a
+  setup key, inspection results keep the gate in `RecoveryKeyDeliveryRequired`,
+  and React renders the reveal whenever `secure_backup_setup` is
+  `recoveryKeyReady`, even if the gate is transiently `Checking`.
+  A failed setup, re-enable, or reset leaves `CreatingBackup` for `Checking`
+  and re-inspects, so the gate re-projects a recoverable state (for example
+  `SetupRequired`, or `RecoveryKeyDeliveryRequired` again after a failed
+  reset). Upload steady-state after `enable()` is observational: a failure
+  there never drops the created key; inspection and monitoring settle it. Logout, account switch, and
+  session teardown drop the key. After an interrupted reveal (restart), the
+  persisted marker re-enters `RecoveryKeyDeliveryRequired` without a key.
+  The unconfirmed key is never re-shown or re-exported (the fork's
+  `backups().local_recovery_key()` yields the backup decryption key, which
+  `recovery().recover()` rejects). The user must explicitly confirm creating a
+  NEW recovery key; `ResetRecoveryKey { confirmed: true }` calls upstream
+  `recovery().reset_key()`, the previous key stops working, and the new key
+  enters the same reveal. Only one key flow runs at a time: setup (including
+  re-enable and reset) and passphrase change are each rejected while either is
+  in flight (`SettingUp`/`Changing`) or awaits confirmation
+  (`RecoveryKeyReady`/`Changed`), because AccountActor holds a single copy.
+  Passphrase change reveals its new key in
+  `SecureBackupPassphraseChangeState::Changed` with the same copy/save/confirm
+  rules, without touching the gate.
 
 ```mermaid
 stateDiagram-v2
@@ -445,6 +493,14 @@ stateDiagram-v2
     SetupRequired --> CreatingBackup: InitialSetup / project admission then route
     SetupRequired --> SetupRequired: Reenable(any) / failed-no-op, no actor effect
     CreatingBackup --> CreatingBackup: duplicate intent / failed-no-op, no actor effect
+    CreatingBackup --> RecoveryKeyDeliveryRequired: setup succeeded / reveal key on screen
+    CreatingBackup --> Checking: setup, re-enable, or reset failed / SecureBackupSetupFailed, re-inspect
+    RecoveryKeyDeliveryRequired --> RecoveryKeyDeliveryRequired: copy or save to file / reveal stays
+    RecoveryKeyDeliveryRequired --> Checking: ConfirmSecureBackupRecoveryKeySaved(reveal id) / drop key, clear marker, inspect
+    Checking --> RecoveryKeyDeliveryRequired: SecureBackupRecoveryKeyConfirmFailed(reveal id) / marker clear failed, restore reveal
+    Checking --> RecoveryKeyDeliveryRequired: inspection with marker [reset_key() can succeed]
+    RecoveryKeyDeliveryRequired --> RecoveryKeyDeliveryRequired: InitialSetup or ResetRecoveryKey(unconfirmed) / typed reject, no actor effect
+    RecoveryKeyDeliveryRequired --> CreatingBackup: ResetRecoveryKey(confirmed) without a revealed key / reset_key, reveal NEW key
 ```
 - A genuine missing cross-signing identity may enter mandatory bootstrap. An
   existing identity without a verified other device or usable recovery method
@@ -867,7 +923,7 @@ stateDiagram-v2
     Opening --> Anchored: exact generation + request + target + projection identity
     Opening --> LiveFallback: exact owner + authoritative Missing + Activity/Search policy
     Opening --> Failed: exact owner + current timeout or coarse current failure
-    Opening --> Idle: room/thread/date-jump/return-live/logout/account/session/room cleanup
+    Opening --> Idle: room/thread/date-jump/return-live/anchored-send/logout/account/session/room cleanup
     Anchored --> Opening: newer intent
     LiveFallback --> Opening: newer intent
     Failed --> Opening: newer intent
@@ -1831,8 +1887,10 @@ stateDiagram-v2
     Projecting --> Anchored: FocusedProjectionCommitted [same request/key/actor/timeline generation, target present]
     Projecting --> Live: FocusedProjectionCommitted [exact projection, target absent]
     Projecting --> Live: CloseFocusedContext / replacement / room change
+    Projecting --> Live: accepted main-composer send [active room] / Core cancels owner
     Anchored --> Projecting: OpenAnchoredTimeline [other event, active room]
     Anchored --> Live: CloseFocusedContext (live-edge return)
+    Anchored --> Live: accepted main-composer send [active room]
     Anchored --> Live: SelectRoom / room change
     Anchored --> Live: LogoutRequested/SessionCleared
 ```
@@ -1859,6 +1917,30 @@ stateDiagram-v2
   room's persisted `room_scroll_anchors` entry so the live timeline pins to the
   live edge rather than a stale pre-jump position. `ReturnMainTimelineToLive`
   clears the anchor for the active room without touching focused-context state.
+- An accepted main-composer send for the active room (`ComposerSubmissionAccepted`,
+  its `AtRevision` form, legacy `SendTextSubmitted`, plain or reply, and the
+  attachment path's main-target `ComposerDraftAccepted`, which prepared-upload
+  sends reduce after every upload was queued) returns the main pane to `Live`
+  on local acceptance, because pending outbound echoes are projected only into
+  the live Room timeline (#1037). It does not wait for server acknowledgement
+  or a remote echo, and captured reply metadata and the payload are unchanged.
+  After every acceptance, revision, target-room, and duplicate guard:
+  - an anchored main pane applies the `CloseFocusedContext` transition and then
+    the `ReturnMainTimelineToLive` transition (event navigation becomes `Idle`);
+  - the reducer always emits `CancelPendingMainTimelineNavigation { room_id }`.
+    Core then cancels every main-pane navigation for that room that the
+    reducer cannot observe: a Focused navigation awaiting its projection ACK
+    (cached date jump, `OpenAnchoredTimeline`, or a located event navigation)
+    closes its focused context, is dropped, and settles `Superseded` when it
+    has no event-navigation owner; an event-navigation owner for the room is
+    cancelled (`Superseded`); and a date jump still awaiting the server is
+    fenced, so the account actor's late `OpenFocusedContext` +
+    `EnterAnchoredTimeline` pair is dropped and its focused subscription
+    released. A late projection commit therefore finds no owner and cannot
+    re-anchor the pane over the pending echo.
+  Rejected, duplicate, other-room, and thread-composer sends leave navigation
+  unchanged; a send from a live main pane with no pending main-pane navigation
+  leaves an independent right-panel focused context open.
 - Any room change (`SelectRoom`, `SelectSpace`) and account clear/logout reset
   the anchor to `Live` through `select_active_room_for_navigation` /
   `clear_active_room_for_navigation`.
@@ -2909,6 +2991,19 @@ stateDiagram-v2
   runtime unsubscribes the previous focused timeline before subscribing the new
   key. Reopening the same focused key is idempotent as far as runtime
   subscription ownership allows.
+- Focused timeline release is core-owned for every reducer transition, not only
+  the explicit `CloseFocusedContext` command (#1037, #1046). Whenever a reduce
+  within the same account leaves `focused_context` without its previous
+  `Opening`/`Open` key (accepted main send from anchored history, room switch,
+  subscription failure, replacement, live fallback), AppActor unsubscribes
+  that `TimelineKind::Focused` key, which drops its actor and room lease, and
+  drops a pending main-pane navigation for the same key; one without an
+  event-navigation owner (date jump, `OpenAnchoredTimeline`) settles
+  `Superseded`, an owned one is settled by its owner. Unsubscribe is
+  idempotent, so paths that also unsubscribe explicitly stay correct. Account
+  teardown (logout, account switch) is excluded because it drops the whole
+  timeline manager. `ReturnMainTimelineToLive` leaves `focused_context`, and so
+  its subscription, untouched.
 - focused timelines do not own composer/send state. The selected room composer
   and the thread composer are separate Rust state machines; focused timelines do
   not submit sends, clear drafts, repair reply mode, or settle pending
@@ -3165,6 +3260,28 @@ stateDiagram-v2
   child is removed, so it does not count as a child: the room is offered as
   `available` and can be repaired or added again.
 
+### Create-room defaults and optional names (#1023)
+
+- Initial access choice: `create_room_defaults_for_state` projects
+  `SidebarModel.create_room_defaults` from the active Space. A Space whose synced
+  `join_rule` is `public` selects a public room; a private or restricted Space, a
+  Space whose rule is not yet known (`None`), and Home select private. This is a
+  Koushi product choice, not Element's. The private option keeps its encrypted
+  default, so switching from public to private restores it; a public room is
+  always requested unencrypted.
+- Display name: optional for rooms, required for Spaces. An empty or blank name
+  omits `m.room.name`, and the room shows the SDK-calculated display name:
+  canonical alias (its localpart) before a member-derived name, then the SDK's
+  `Empty Room` fallback. Setting a name later replaces the calculated name.
+- Address: `public_room_address_required(name)` is false only for an unnamed
+  room (empty or blank name). Then a public room with no entered address is
+  created without an alias, and `preview_room_address` reports
+  `without_address` instead of `empty`. Every named room keeps the #1006 rule:
+  a cleared suggestion, or a name that offers none (for example `🎉`), is
+  `empty` and needs a manually entered address. The join rule (`public`
+  via the `public_chat` preset) and the directory listing do not depend on an
+  alias; `CreatePublicDirectoryRoom` still requires one.
+
 ### Advisory room address availability (#1006)
 
 The create-room dialog's address check is `AppState.room_address_availability`
@@ -3385,8 +3502,9 @@ stateDiagram-v2
   do not admit a role command.
 - `role_options` and `can_edit_roles` are derived from direct Space power-level
   state in Rust. Child-room completion is not an authorization input: an
-  incomplete child projection may show a sync notice while an authorized role
-  control remains enabled. Child-only and invited entries never receive role
+  incomplete child projection is reported only as Rust-owned completeness
+  counts (no UI syncing notice) while an authorized role control remains
+  enabled. Child-only and invited entries never receive role
   options.
 - A matching authoritative success installs the full fresh Space Members
   projection before settling `Idle`; React must not patch the target role.
@@ -3624,23 +3742,21 @@ stateDiagram-v2
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> SettingUp: SecureBackupSetupRequested [Ready]
-    Enabled --> SettingUp: SecureBackupSetupRequested [Ready]
-    Failed --> SettingUp: SecureBackupSetupRequested [Ready]
+    Idle --> SettingUp: SecureBackupSetupRequested [Ready, no passphrase change Changing/Changed]
+    Enabled --> SettingUp: SecureBackupSetupRequested [Ready, no passphrase change Changing/Changed]
+    Failed --> SettingUp: SecureBackupSetupRequested [Ready, no passphrase change Changing/Changed]
     SettingUp --> RecoveryKeyReady: SecureBackupRecoveryKeyReady [matching request_id]
-    RecoveryKeyReady --> RecoveryKeyReady: SecureBackupRecoveryKeyReady [matching request_id]
-    SettingUp --> Enabled: SecureBackupSetupEnabled [matching request_id]
-    RecoveryKeyReady --> Enabled: SecureBackupSetupEnabled [matching request_id]
     SettingUp --> Failed: SecureBackupSetupFailed [matching request_id]
-    RecoveryKeyReady --> Failed: SecureBackupSetupFailed [matching request_id]
+    RecoveryKeyReady --> Enabled: SecureBackupRecoveryKeyConfirmed [matching reveal id]
+    Enabled --> RecoveryKeyReady: SecureBackupRecoveryKeyConfirmFailed [matching reveal id, no other key flow]
 ```
 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> Changing: SecureBackupPassphraseChangeRequested [Ready]
-    Changed --> Changing: SecureBackupPassphraseChangeRequested [Ready]
-    Failed --> Changing: SecureBackupPassphraseChangeRequested [Ready]
+    Idle --> Changing: SecureBackupPassphraseChangeRequested [Ready, no setup SettingUp/RecoveryKeyReady]
+    Failed --> Changing: SecureBackupPassphraseChangeRequested [Ready, no setup SettingUp/RecoveryKeyReady]
+    Changed --> Idle: SecureBackupRecoveryKeyConfirmed [matching reveal id]
     Changing --> Changed: SecureBackupPassphraseChanged [matching request_id]
     Changing --> Failed: SecureBackupPassphraseChangeFailed [matching request_id]
 ```
@@ -3653,9 +3769,10 @@ stateDiagram-v2
   Element clients use. Koushi must not wrap the encrypted Megolm session data
   in a custom JSON/archive format, and must not parse/decrypt the export file
   only to derive UI metadata.
-- Secure-backup setup and passphrase-change state may report recovery-key
-  delivery status, but recovery-key material itself never reaches reducer state,
-  DTO snapshots, React state, logs, QA tokens, or issue comments.
+- Secure-backup setup and passphrase-change state report recovery-key
+  delivery status. Recovery-key material reaches reducer state and the live DTO
+  snapshot only in the reveal states (`RecoveryKeyReady`/`Changed`, #927);
+  it never reaches React component state, logs, QA tokens, or issue comments.
 
 QR login:
 
@@ -3699,9 +3816,9 @@ Verification flow:
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> Requested: VerificationRequested
-    Done --> Requested: VerificationRequested
-    Failed --> Requested: VerificationRequested
+    Idle --> Requested: VerificationRequested [initiator them] / VerificationRequestSent [initiator us]
+    Done --> Requested: VerificationRequested / VerificationRequestSent
+    Failed --> Requested: VerificationRequested / VerificationRequestSent
     Requested --> Accepted: VerificationAccepted [matching request_id]
     Requested --> SasPresented: VerificationSasPresented [matching request_id]
     Accepted --> SasPresented: VerificationSasPresented [matching request_id]
@@ -3722,6 +3839,16 @@ stateDiagram-v2
     SasPresented --> Failed: VerificationFailed [matching request_id]
     Confirming --> Failed: VerificationFailed [matching request_id]
 ```
+
+- `Requested` and `Accepted` record the `initiator` (#1024). An incoming
+  request (`VerificationRequested`, initiator `them`) offers Accept/Decline;
+  our own request (`VerificationRequestSent`, initiator `us`: a device request
+  or **Verify user**) only waits for the other side and can be cancelled.
+  For our own request, `VerificationAccepted` is the actor's projection of the
+  other side's acceptance. All `VerificationRequested*` actions require a
+  Ready session and an idle/settled flow, so a session still at the
+  verification gate (`SessionState::Verifying`) keeps its own-device SAS flow
+  unchanged, and a request the reducer refuses is not routed to the actor.
 
 Cross-signing status:
 
@@ -4763,7 +4890,11 @@ stateDiagram-v2
   error so it cannot overwrite unreadable existing data. Admission prepares the
   same canonical settings update, saves it with a one-time marker, and projects
   the matching settings action only after save success; a marked replay
-  cannot overwrite a later user edit.
+  cannot overwrite a later user edit. If the emoji vocabulary chunk is
+  unavailable when the import runs (#1035), the legacy recent-emoji list is
+  left out and its browser key is kept; a later launch with the vocabulary
+  appends the valid entries after the current MRU through an ordinary
+  `UpdateSettings` and removes the key only after Rust confirms them.
 - Settings updates are optimistic: the reducer applies the typed patch before
   persistence completes, records the latest saving request id, and ignores stale
   persist completions.
@@ -4995,6 +5126,119 @@ Email notifications:
 - OAuth/MAS sessions project `DelegatedToAccountManagement` and link to the
   account-management destination; `m.3pid_changes: false` projects
   `Unsupported`. Neither offers the add flow.
+
+## Contact Security Details
+
+User info shows two independent facts about another person (#1024), held in
+`AppState.contact_security` for the one contact whose User info is open:
+
+- **Their devices:** whether each retrieved encryption device key has a valid
+  signature from its owner's cross-signing identity
+  (`Device::is_cross_signed_by_owner()`, not `is_verified()`, which includes
+  your own and local trust). Aggregate: `AllOwnerSigned`,
+  `SomeNotOwnerSigned`, `NoDevices`, `OwnerIdentityMissing`; per device
+  `OwnerSigned`, `NotOwnerSigned`, `OwnerSignatureInvalid` (a signature by the
+  owner's account that does not validate against their current identity),
+  `OwnerIdentityMissing`.
+- **Your verification:** `UserIdentity::has_verification_violation()` →
+  `ChangedAfterVerification`, else `is_verified()` → `VerifiedByYou`, else
+  `NotVerifiedByYou`; no identity → `Unknown`. The SDK's violation is
+  "previously verified, not verified now", which also follows a reset of
+  *your* identity, so the GUI says the earlier verification no longer
+  applies without attributing the change to the contact.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Loading: ContactSecurityLoadRequested [Ready]
+    Loaded --> Loading: ContactSecurityLoadRequested [Ready, same or other contact]
+    Failed --> Loading: ContactSecurityLoadRequested [Ready]
+    Loading --> Loading: ContactSecurityLoadRequested [Ready, replacement]
+    Loading --> Loaded: ContactSecurityLoaded [matching user_id and request_id]
+    Loading --> Failed: ContactSecurityLoadFailed [matching user_id and request_id]
+    Loaded --> Loaded: ContactSecurityRefreshed [matching user_id, changed summary]
+    Loading --> Idle: ContactSecurityClosed
+    Loaded --> Idle: ContactSecurityClosed
+    Failed --> Idle: ContactSecurityClosed
+    Loaded --> Idle: logout/lock/switch/session clear
+```
+
+- **Read-only.** Opening User info dispatches the load; closing it or opening
+  another contact dispatches close/load. Nothing pins an identity, verifies,
+  withdraws verification, sets local trust, or changes sending policy.
+  Expanding an explanation dispatches nothing. Load requires a Ready session;
+  Close is admitted in any session state because sign-out, lock, and account
+  switch unmount User info, and it only tears down.
+- **Fresh retrieval, no stale confirmation.** `LoadRequested` clears the
+  previous summary; the actor performs a `/keys/query` for the contact
+  (`Encryption::request_user_identity`) and then reads the SDK store. A failed
+  retrieval is `Failed` with no summary ("status unavailable"), never a
+  confirmation. `/keys/query` answers HTTP 200 even when the contact's
+  homeserver was unreachable, listing it under `failures` while the SDK keeps
+  its cached keys; the SDK call does not surface that, so the actor issues the
+  same typed query and treats the contact's server under `failures` as
+  `Failed { Network }` (Verify user likewise refuses with `Network`) rather
+  than showing the cached answer. An empty device list is `NoDevices`, and a contact without
+  cross-signing is `OwnerIdentityMissing`/`Unknown`; neither is confirmation.
+- **Fences.** Results whose `user_id` or `request_id` do not match the
+  in-flight load are dropped, so a late answer for a previous contact or a
+  previous account (the slice is reset with the other session views) never
+  appears. `Refreshed` applies only on top of `Loaded` for the same contact; it
+  is ignored while checking and after a failed retrieval.
+- **Live refresh.** While a contact is open the AccountActor observes the
+  SDK's `devices_stream()` and `user_identities_stream()`, re-reads the
+  contact from the store without network on any change (device additions,
+  removals, re-signing, identity changes, and changes to your own identity),
+  and projects `Refreshed` only when the summary changed. It also re-reads on
+  `m.direct` account-data changes (the direct chat Verify user would use, for
+  example one created by a failed first attempt), after a Verify user request
+  is sent or fails, and after a successful own-trust recheck (this session
+  gaining or losing your cross-signing keys changes the offer). The observer is
+  generation-fenced and stopped on close, contact switch, and session teardown.
+- **SDK protections are unchanged.** Devices whose own self-signature is
+  invalid are rejected by the SDK during `/keys/query` and never counted.
+  Deleted devices leave the store. Dehydrated devices are excluded from the
+  aggregate, as in Element's user device list; the SDK withholds room keys from
+  unverified dehydrated devices on its own. Per-message shields and the send
+  policy do not read this slice.
+- **Presentation.** Routine unconfirmed devices and a contact you never
+  verified are neutral (no red, warning banner, or verification prompt), also
+  when a never-verified contact's identity changed. Only
+  `ChangedAfterVerification` is an attention state. Your verification stays
+  `VerifiedByYou` when the contact adds an unsigned device. The details carry
+  no device ids, names, or key material; the GUI labels devices by ordinal and
+  states that the details do not show whether a conversation is encrypted.
+- **Verify user.** `ContactSecuritySummary.verification` is the Rust-owned
+  offer: `NotOffered` for a contact you already verified or one without an
+  identity; `RequiresYourCrossSigning` when this session lacks your private
+  user-signing key (explained, no button); otherwise `Offered { direct_chat }`
+  (also after `ChangedAfterVerification`, as re-verification). `direct_chat`
+  mirrors the SDK's choice for `UserIdentity::request_verification*`: its
+  first DM with the contact (`ExistingEncrypted` or `ExistingUnencrypted`),
+  else a new encrypted DM (`New`). The GUI shows a confirmation step naming
+  that chat; only its Send action dispatches
+  `ContactSecurityRequest::RequestVerification`, which the runtime projects as
+  `VerificationRequestSent` (routed only if the reducer accepted it). The
+  AccountActor sends the in-room request, starts SAS as the requester once the
+  contact accepts, and reuses the shared confirm/mismatch/cancel/timeout
+  paths; on completion it re-reads the open contact so the row shows
+  `VerifiedByYou`. Failure and cancellation settle the shared flow as
+  `Failed`/`Idle`, after which the offer is shown again.
+- **Busy.** `ContactSecurityState.verification_busy` is derived by the reducer
+  after every action: `true` while a contact is open and the shared
+  `E2eeTrustState.verification` flow is in progress (`Requested`, `Accepted`,
+  `SasPresented`, `Confirming`, with anyone or for this session), else
+  `false`; a flip emits `ContactSecurityChanged`. While busy and the flow is
+  not with this contact, the GUI explains that another verification is in
+  progress instead of offering Verify user. A `RequestVerification` the
+  reducer refuses for that reason fails with `VerificationInProgress`, not
+  `SessionRequired`.
+- A recipient on Simplified Sliding Sync who joins a brand-new DM after the
+  request was sent receives the request only if their server delivers that
+  event through sync (Tuwunel does); Synapse returns it through gap repair,
+  which the SDK does not feed to its verification machine. The confirmation
+  step therefore says only that the request is sent in that chat and to try
+  again once the contact has joined if they do not see it.
 
 ## Desktop Application Updates
 

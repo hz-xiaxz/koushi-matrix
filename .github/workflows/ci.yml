@@ -147,27 +147,50 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
         with:
           # The root workspace owns the Tauri crate and the only Cargo.lock.
           workspaces: . -> target-ci
-          shared-key: koushi-rust-ci
+          # rust-cache never re-saves an exact hit, and its key hashes only
+          # manifests, the lockfile and the toolchain. Bump this suffix when the
+          # cargo command set changes the resolved feature graph, or the new
+          # graph's dependencies recompile on every run.
+          shared-key: koushi-rust-ci-unified-v1
       - name: Read vendored Matrix SDK revision
         id: sdk-revision
         run: echo "revision=$(git -C vendor/matrix-rust-sdk rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # rustup resolves rustc from rust-toolchain.toml in the checkout, so the
+      # SDK cache key follows a toolchain bump without a hand-edited literal.
+      - name: Read active rustc release
+        id: rustc
+        run: |
+          release="$(rustc -vV | sed -n 's/^release: //p')"
+          test -n "$release"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+      # rust-cache prunes path dependencies under the repository root, so the
+      # vendored SDK has its own exact-keyed cache. Cargo judges path
+      # dependencies by source mtime, and checkout stamps every file "now",
+      # which makes restored artifacts stale. The key pins the SDK gitlink, so
+      # normalizing the SDK's tracked sources to a fixed old mtime cannot mark
+      # different source as fresh; a feature, profile, or rustc change still
+      # selects a different fingerprint hash and recompiles.
+      - name: Normalize vendored Matrix SDK source mtimes
+        working-directory: vendor/matrix-rust-sdk
+        run: git ls-files -z | xargs -0 touch -h -d '2000-01-01T00:00:00Z'
       - name: Cache vendored Matrix SDK CI artifacts
         id: sdk-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             target-ci/ci/.fingerprint/matrix-sdk-*
-            target-ci/ci/.fingerprint/matrix-sdk-base-*
-            target-ci/ci/.fingerprint/matrix-sdk-search-*
-            target-ci/ci/.fingerprint/matrix-sdk-ui-*
+            target-ci/ci/build/matrix-sdk-*
             target-ci/ci/deps/libmatrix_sdk*
             target-ci/ci/deps/matrix_sdk*.d
-          key: koushi-sdk-artifacts-${{ runner.os }}-rust-1.96.0-ci-experimental-search-sqlite-e2ee-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/koushi-sdk/Cargo.toml', 'crates/koushi-core/Cargo.toml') }}-${{ steps.sdk-revision.outputs.revision }}
+          # Workspace manifests and this workflow's cargo command select the SDK
+          # feature set. An exact hit is never re-saved, so all of them key it.
+          key: koushi-sdk-artifacts-v2-${{ runner.os }}-rust-${{ steps.rustc.outputs.release }}-ci-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/*/Cargo.toml', 'apps/desktop/src-tauri/Cargo.toml', 'tests/*/Cargo.toml', 'spikes/*/Cargo.toml', '.github/workflows/ci.yml') }}-${{ steps.sdk-revision.outputs.revision }}
       - name: Report Rust cache state
-        run: node scripts/ci-rust-cache-report.mjs --target-dir "$CARGO_TARGET_DIR" --profile ci --sdk-cache-hit "${{ steps.sdk-cache.outputs.cache-hit }}" --label rust
+        run: node scripts/ci-rust-cache-report.mjs --target-dir "$CARGO_TARGET_DIR" --profile ci --rust-cache-hit "${{ steps.rust-cache.outputs.cache-hit }}" --sdk-cache-hit "${{ steps.sdk-cache.outputs.cache-hit }}" --label rust
       - name: Install Tauri system dependencies
         run: |
           sudo apt-get update
@@ -203,12 +226,22 @@ jobs:
         run: node scripts/check-rust-test-structure.mjs
       - name: Rust cache report contract tests
         run: node --test scripts/ci-rust-cache-report.test.mjs scripts/ci-rust-cache-metrics.test.mjs
-      - name: Workspace tests
-        run: cargo test --profile ci --workspace --exclude koushi-core-testkit --exclude koushi-desktop --exclude sidebar-composition --exclude key-management
-      - name: Core testkit integration tests
-        run: cargo test -p koushi-core-testkit --profile ci
-      - name: Tauri DTO + IPC contract tests
-        run: cargo test -p koushi-desktop --profile ci
+      # One invocation runs the ordinary crates, the koushi-core-testkit
+      # integration targets, and the koushi-desktop DTO/IPC contract tests.
+      # Separate `-p` invocations resolved different feature sets and
+      # recompiled the vendored SDK and Koushi stack twice more without adding
+      # a test (see docs/agents/verification.md#what-ci-actually-gates).
+      - name: Workspace tests (incl. Core testkit and Tauri DTO/IPC contracts)
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/rust-metrics"
+          cargo test --profile ci --workspace --exclude sidebar-composition --exclude key-management 2>&1 | tee "$RUNNER_TEMP/rust-metrics/workspace-tests.log"
+      - name: Record workspace cargo metrics
+        if: ${{ !cancelled() }}
+        # Skip quietly when an earlier step failed before the suite wrote a log.
+        run: |
+          [ -f "$RUNNER_TEMP/rust-metrics/workspace-tests.log" ] || exit 0
+          node scripts/ci-rust-cache-metrics.mjs --log "$RUNNER_TEMP/rust-metrics/workspace-tests.log" --target-dir "$CARGO_TARGET_DIR" --mode rust-workspace --cache-hit "${{ steps.sdk-cache.outputs.cache-hit == 'true' }}"
       - name: wasm build check (state + search + protocol)
         run: cargo check --profile ci --target wasm32-unknown-unknown -p koushi-state -p koushi-search -p koushi-protocol
       # --- Dependency hygiene (#87 Phase 0) ---
@@ -239,12 +272,18 @@ jobs:
           submodules: recursive
       - name: Install Rust toolchain (1.96.0)
         uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target-macos-check
           shared-key: koushi-macos-cargo-check
       - name: Check the macOS Tauri crate
         run: cargo check --profile ci -p koushi-desktop
+      # Lint the macOS-only cfg paths Linux CI never compiles (#1035); reuses the
+      # dependency metadata from the check above.
+      - name: Clippy the macOS Tauri crate
+        run: cargo clippy --profile ci -p koushi-desktop --all-targets --locked -- -D warnings
 
   core-invites:
     # Prove invitation projection through the sole Simplified Sliding Sync
@@ -373,6 +412,8 @@ jobs:
           submodules: recursive
       - name: Install Rust toolchain (1.96.0)
         uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target-windows-overlay
@@ -381,3 +422,51 @@ jobs:
         run: cargo test --profile ci -p koushi-windows-overlay-acl windows_overlay_ipc_is_authorized -- --nocapture
       - name: Prove OIDC native browser launch outcomes
         run: cargo test --profile ci -p koushi-desktop oidc_browser --lib -- --nocapture
+      # Lint the Windows-only cfg paths Linux CI never compiles (#1035).
+      - name: Clippy the Windows Tauri crate
+        run: cargo clippy --profile ci -p koushi-desktop --all-targets --locked -- -D warnings
+
+  rust-lint:
+    # Workspace formatting and lint gate. Kept in its own job so it runs in
+    # parallel with the test jobs and never shares their target directory.
+    name: Rust lint (rustfmt / clippy)
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target-lint
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Rust toolchain (1.96.0 + clippy, rustfmt)
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target-lint
+          shared-key: koushi-rust-lint
+      # Formats workspace members only. Never `cargo fmt --all`: that also
+      # formats path dependencies, i.e. the vendored Matrix SDK.
+      - name: rustfmt check
+        run: cargo fmt --check
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
+            libdbus-1-dev
+      - name: Submodule sync guard
+        run: node scripts/check-sdk-submodule.mjs
+      - name: Clippy (workspace, all targets)
+        run: cargo clippy --profile ci --workspace --all-targets --locked -- -D warnings
+      # The QA binaries set `required-features = ["qa-bin"]`, so the workspace
+      # run above skips them.
+      - name: Clippy (QA binaries)
+        run: cargo clippy --profile ci -p koushi-qa --features qa-bin --all-targets --locked -- -D warnings
+      # Release builds compile without debug assertions, which removes QA/debug
+      # cfg paths; lint that configuration too (the #1035 warnings were
+      # release-only).
+      - name: Clippy (release configuration)
+        run: cargo clippy --release --workspace --locked -- -D warnings

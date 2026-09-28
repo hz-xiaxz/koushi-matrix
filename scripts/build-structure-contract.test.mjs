@@ -98,14 +98,28 @@ test("CI and npm scripts use the unified workspace contracts", () => {
   assert.doesNotMatch(packageJson, /--manifest-path src-tauri\/Cargo\.toml/);
   assert.match(packageJson, /cargo test -p koushi-desktop/);
   assert.doesNotMatch(ci, /apps\/desktop\/src-tauri\s*$/m);
+  // One feature-unified invocation covers the testkit and desktop packages;
+  // separate `-p` runs recompiled the vendored SDK stack per feature set.
   assert.match(
     rustJob,
-    /cargo test --profile ci --workspace --exclude koushi-core-testkit --exclude koushi-desktop --exclude sidebar-composition --exclude key-management/,
+    /cargo test --profile ci --workspace --exclude sidebar-composition --exclude key-management/,
   );
-  assert.match(rustJob, /cargo test -p koushi-core-testkit --profile ci/);
-  assert.match(rustJob, /cargo test -p koushi-desktop --profile ci/);
+  assert.doesNotMatch(rustJob, /--exclude koushi-core-testkit|--exclude koushi-desktop/);
+  assert.doesNotMatch(rustJob, /cargo test -p koushi-core-testkit|cargo test -p koushi-desktop/);
   assert.match(rustJob, /node --test scripts\/ci-rust-cache-report\.test\.mjs/);
-  assert.match(rustJob, /node scripts\/ci-rust-cache-report\.mjs/);
+  assert.match(rustJob, /node scripts\/ci-rust-cache-report\.mjs[^\n]*--rust-cache-hit "\$\{\{ steps\.rust-cache\.outputs\.cache-hit \}\}"/);
+  assert.match(rustJob, /node scripts\/ci-rust-cache-metrics\.mjs --log/);
+  // Normalization must precede the SDK cache restore and every cargo command.
+  const normalize = rustJob.indexOf("Normalize vendored Matrix SDK source mtimes");
+  assert.ok(normalize > 0 && normalize < rustJob.indexOf("Cache vendored Matrix SDK CI artifacts"));
+  assert.ok(normalize < rustJob.indexOf("cargo test"));
+  assert.match(rustJob, /target-ci\/ci\/build\/matrix-sdk-\*/);
+  assert.match(rustJob, /key: koushi-sdk-artifacts-v2-[^\n]*'\.github\/workflows\/ci\.yml'[^\n]*steps\.sdk-revision\.outputs\.revision/);
+  // The SDK cache key names the rustc that rustup resolves from
+  // rust-toolchain.toml, not a literal that must be bumped by hand.
+  assert.match(rustJob, /key: koushi-sdk-artifacts-v2-[^\n]*-rust-\$\{\{ steps\.rustc\.outputs\.release \}\}-/);
+  assert.doesNotMatch(rustJob, /key: koushi-sdk-artifacts-v2-[^\n]*-rust-\d/);
+  assert.match(rustJob, /id: rustc\n\s+run: \|[\s\S]*?rustc -vV/);
   assert.match(ci, /node --test scripts\/check-rust-test-structure\.test\.mjs/);
   assert.match(ci, /node scripts\/check-rust-test-structure\.mjs/);
   assert.match(ci, /node --test[^\n]*check-leaf-crate-boundaries\.test\.mjs/);
@@ -208,7 +222,8 @@ test("Rust CI cache paths match each job's explicit target directory", () => {
   assert.match(readRepoFile(".github/workflows/build-windows.yml"), /workspaces: \. -> target/);
   assert.match(
     readRepoFile(".github/workflows/issue-947-ci-benchmark.yml"),
-    /cargo test --profile ci --workspace --exclude koushi-core-testkit --exclude koushi-desktop --exclude sidebar-composition --exclude key-management/,
+    /cargo test --profile ci --workspace --exclude sidebar-composition --exclude key-management/,
   );
+  assert.doesNotMatch(readRepoFile(".github/workflows/issue-947-ci-benchmark.yml"), /--exclude koushi-core-testkit/);
   assert.match(readRepoFile(".github/workflows/issue-947-ci-benchmark.yml"), /actions\/cache\/(?:save|restore)@/);
 });

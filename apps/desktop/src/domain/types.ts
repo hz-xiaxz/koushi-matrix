@@ -8,6 +8,9 @@ export interface RoomAddressPreview {
   error: "empty" | "invalid" | "notReady" | null;
   /** The server whose alias namespace every Space on it shares (#1006). */
   server_name: string | null;
+  /** The room is created without an address (#1023): its name offers no
+   * suggestion and none was entered. `error` is then null. */
+  without_address?: boolean;
 }
 
 export interface CreateRoomRequest {
@@ -21,6 +24,14 @@ export interface CreateRoomRequest {
 }
 
 export type CreateRoomVisibility = "private" | "public";
+
+/** Rust-projected initial choices of the create-room dialog (#1023). */
+export interface CreateRoomDefaults {
+  visibility: CreateRoomVisibility;
+  /** The private option's encryption choice; public rooms are unencrypted. */
+  encrypted: boolean;
+  invited_only: boolean;
+}
 
 /** Core derives both relationship events' routing from the SDK (#1007). */
 export interface CreateRoomParentSpace {
@@ -72,6 +83,7 @@ export interface AppDomainState {
   account_management: AccountManagementState;
   account_management_capabilities: AccountManagementCapabilities;
   account_notifications: AccountNotificationsState;
+  contact_security: ContactSecurityState;
   soft_logout_reauth: SoftLogoutReauthState;
   qr_login: QrLoginState;
   settings: SettingsState;
@@ -466,11 +478,6 @@ export interface CreateRoomSettlement extends CommandSettlement {
   spaceLinkFailure: OperationFailureKind | null;
 }
 
-export interface CommandResult<T> {
-  result: T;
-  settlement: CommandSettlement;
-}
-
 export type CommandReceipt = CommandAdmission | CommandSettlement;
 
 export interface OidcBrowserLaunchResponse {
@@ -610,6 +617,67 @@ export interface AccountNotificationsState {
   operation: AccountNotificationsOperationState;
 }
 
+// Mirrors koushi_state::state::contact_security (#1024). Two independent
+// facts: the contact's devices confirmed (signed) by their owner, and your
+// verification of the contact's identity. No device ids or key material.
+export type ContactSecurityFailureKind = "sessionRequired" | "network" | "sdk";
+
+export type ContactSecurityLoadState =
+  | { kind: "idle" }
+  | { kind: "loading"; request_id: number }
+  | { kind: "loaded"; request_id: number }
+  | { kind: "failed"; request_id: number; failureKind: ContactSecurityFailureKind };
+
+export type ContactDevicesStatus =
+  | "allOwnerSigned"
+  | "someNotOwnerSigned"
+  | "noDevices"
+  | "ownerIdentityMissing";
+
+export type ContactDeviceSignature =
+  | "ownerSigned"
+  | "notOwnerSigned"
+  | "ownerSignatureInvalid"
+  | "ownerIdentityMissing";
+
+export type ContactIdentityVerification =
+  | "verifiedByYou"
+  | "notVerifiedByYou"
+  | "changedAfterVerification"
+  | "unknown";
+
+export interface ContactDeviceCounts {
+  total: number;
+  owner_signed: number;
+  not_owner_signed: number;
+  owner_signature_invalid: number;
+  excluded_dehydrated: number;
+}
+
+export type ContactVerificationDirectChat = "existingEncrypted" | "existingUnencrypted" | "new";
+
+export type ContactVerificationOffer =
+  | { kind: "notOffered" }
+  | { kind: "requiresYourCrossSigning" }
+  | { kind: "offered"; direct_chat: ContactVerificationDirectChat };
+
+export interface ContactSecuritySummary {
+  devices: ContactDevicesStatus;
+  device_counts: ContactDeviceCounts;
+  device_signatures: ContactDeviceSignature[];
+  identity: ContactIdentityVerification;
+  verification: ContactVerificationOffer;
+}
+
+export interface ContactSecurityState {
+  user_id: string | null;
+  load: ContactSecurityLoadState;
+  summary: ContactSecuritySummary | null;
+  /** Rust-derived: another verification flow is in progress, so Verify user
+   * cannot start one until it settles. */
+  verification_busy: boolean;
+}
+
 export type CapabilityState =
   | { kind: "unknown" }
   | { kind: "enabled" }
@@ -634,7 +702,8 @@ export type RecoveryMethod = "recoveryKey" | "securityPhrase";
 
 export type SecureBackupSetupIntent =
   | { kind: "initialSetup" }
-  | { kind: "reenable"; confirmed: boolean };
+  | { kind: "reenable"; confirmed: boolean }
+  | { kind: "resetRecoveryKey"; confirmed: boolean };
 
 export type SecureBackupGateFailureKind =
   | "network"
@@ -2053,22 +2122,53 @@ export type RoomKeyImportState =
 export type SecureBackupSetupState =
   | { kind: "idle" }
   | { kind: "settingUp"; request_id: number }
-  | { kind: "recoveryKeyReady"; request_id: number; delivery: RecoveryKeyDeliveryState }
+  // #927: `recovery_key` is the live on-screen reveal. Render it only; never
+  // copy it into React state, storage, logs, or diagnostics.
+  | {
+      kind: "recoveryKeyReady";
+      request_id: number;
+      recovery_key: string;
+      delivery: RecoveryKeyDeliveryState;
+      // Rust restored the reveal because the saved confirmation could not
+      // be persisted; ask the user to confirm again.
+      confirmation_failed: boolean;
+    }
   | { kind: "enabled"; request_id: number }
   | { kind: "failed"; request_id: number; failureKind: TrustOperationFailureKind };
 
-export type RecoveryKeyDeliveryState = { kind: "notWritten" } | { kind: "written" };
+export type RecoveryKeyDeliveryState =
+  | { kind: "notWritten" }
+  | { kind: "written" }
+  | { kind: "writeFailed" };
 
 export type SecureBackupPassphraseChangeState =
   | { kind: "idle" }
   | { kind: "changing"; request_id: number }
-  | { kind: "changed"; request_id: number; delivery: RecoveryKeyDeliveryState }
+  | {
+      kind: "changed";
+      request_id: number;
+      recovery_key: string;
+      delivery: RecoveryKeyDeliveryState;
+    }
   | { kind: "failed"; request_id: number; failureKind: TrustOperationFailureKind };
+
+/** Who sent a verification request (#1024). Only `them` can be accepted. */
+export type VerificationInitiator = "us" | "them";
 
 export type VerificationFlowState =
   | { kind: "idle" }
-  | { kind: "requested"; request_id: number; target: VerificationTarget }
-  | { kind: "accepted"; request_id: number; target: VerificationTarget }
+  | {
+      kind: "requested";
+      request_id: number;
+      target: VerificationTarget;
+      initiator: VerificationInitiator;
+    }
+  | {
+      kind: "accepted";
+      request_id: number;
+      target: VerificationTarget;
+      initiator: VerificationInitiator;
+    }
   | {
       kind: "sasPresented";
       request_id: number;
@@ -2596,6 +2696,8 @@ export interface SidebarModel {
   sections: SidebarSections;
   /** Rust-projected Add existing room rows for the active Space (#1007). */
   space_add_rooms?: SpaceAddRoomsModel | null;
+  /** Rust-projected create-room dialog defaults for the active scope (#1023). */
+  create_room_defaults?: CreateRoomDefaults;
 }
 
 export interface SpaceAddRoomsModel {

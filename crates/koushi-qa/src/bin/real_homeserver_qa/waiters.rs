@@ -247,10 +247,9 @@ pub(super) async fn wait_for_sync_stopped(
             request_id: ev_id,
             failure,
         } = event
+            && ev_id == request_id
         {
-            if ev_id == request_id {
-                return Err(format!("{label} failed: {failure:?}"));
-            }
+            return Err(format!("{label} failed: {failure:?}"));
         }
     }
 }
@@ -630,12 +629,11 @@ pub(super) async fn wait_for_redact_diff(
                 for diff in diffs {
                     match diff {
                         koushi_protocol::event::TimelineDiff::Remove { .. } => return Ok(()),
-                        koushi_protocol::event::TimelineDiff::Set { item, .. } => {
+                        koushi_protocol::event::TimelineDiff::Set { item, .. }
                             // A redacted item typically has no body.
-                            if item.body.is_none() || item.body.as_deref() == Some("") {
+                            if (item.body.is_none() || item.body.as_deref() == Some("")) => {
                                 return Ok(());
                             }
-                        }
                         _ => {}
                     }
                 }
@@ -738,11 +736,8 @@ pub(super) async fn wait_for_ready_or_recovery_required<S: QaSnapshotEventSource
         if matches!(conn.snapshot().session, SessionState::Ready(_)) {
             return Ok(ReadyRecoveryWaitOutcome::Ready);
         }
-        match event {
-            CoreEvent::Account(AccountEvent::RecoveryRequired { .. }) => {
-                return Ok(ReadyRecoveryWaitOutcome::RecoveryRequired);
-            }
-            _ => {}
+        if let CoreEvent::Account(AccountEvent::RecoveryRequired { .. }) = event {
+            return Ok(ReadyRecoveryWaitOutcome::RecoveryRequired);
         }
     }
 }
@@ -901,10 +896,10 @@ pub(super) async fn wait_for_operation_failed_and_signed_out<S: QaSnapshotEventS
     let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
     let mut operation_failure = None;
     loop {
-        if matches!(conn.snapshot().session, SessionState::SignedOut) {
-            if let Some(failure) = operation_failure.take() {
-                return Ok(failure);
-            }
+        if matches!(conn.snapshot().session, SessionState::SignedOut)
+            && let Some(failure) = operation_failure.take()
+        {
+            return Ok(failure);
         }
 
         let event = deadline
@@ -983,9 +978,7 @@ pub(super) async fn wait_for_body_substring_in_timeline(
                     }
                     _ => None,
                 };
-                item_opt.map_or(false, |it| {
-                    it.body.as_deref().unwrap_or("").contains(body_substring)
-                })
+                item_opt.is_some_and(|it| it.body.as_deref().unwrap_or("").contains(body_substring))
             }),
             CoreEvent::Timeline(TimelineEvent::InitialItems {
                 key: ev_key, items, ..

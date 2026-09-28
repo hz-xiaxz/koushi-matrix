@@ -463,7 +463,7 @@ async fn event_navigation_newer_generation_is_benign_success() {
 
 #[tokio::test]
 async fn event_navigation_generation_overflow_is_rejected() {
-    let (mut connection, mut control) = CoreConnection::new_for_testing(4);
+    let (mut connection, control) = CoreConnection::new_for_testing(4);
     control.send_snapshot(event_navigation_snapshot(
         1,
         EventNavigationState::Opening {

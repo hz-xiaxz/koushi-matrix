@@ -54,7 +54,10 @@ pub(super) fn record_incoming_verification_protection_summary(
             "unknown_sender_deferred",
             counters.unknown_sender_deferred,
         ))
-        .field(DiagnosticField::count("key_query_replays", counters.key_query_replays))
+        .field(DiagnosticField::count(
+            "key_query_replays",
+            counters.key_query_replays,
+        ))
         .field(DiagnosticField::count(
             "released_deliveries",
             counters.released_deliveries,
@@ -119,9 +122,12 @@ async fn stop_incoming_verification_observation_with_timeout(
 }
 
 pub(super) struct PendingVerificationRequest {
-    request_id: RequestId,
-    target: VerificationTarget,
-    handle: koushi_sdk::MatrixVerificationRequestHandle,
+    pub(super) request_id: RequestId,
+    pub(super) target: VerificationTarget,
+    pub(super) handle: koushi_sdk::MatrixVerificationRequestHandle,
+    /// Our own **Verify user** request (#1024): as the requester we start
+    /// SAS once the contact accepts.
+    pub(super) start_sas_when_ready: bool,
 }
 
 pub(super) struct PendingSasVerification {
@@ -257,6 +263,21 @@ fn verification_cancel_kind_token(kind: koushi_sdk::MatrixVerificationCancelKind
         koushi_sdk::MatrixVerificationCancelKind::Timeout => "timeout",
         koushi_sdk::MatrixVerificationCancelKind::AcceptedElsewhere => "accepted_elsewhere",
         koushi_sdk::MatrixVerificationCancelKind::Other => "other",
+    }
+}
+
+/// Failure kind for an SDK-reported cancellation. A cancellation with the
+/// `m.timeout` code is a timeout, not a user cancellation.
+pub(super) fn verification_cancel_failure_kind(
+    kind: koushi_sdk::MatrixVerificationCancelKind,
+) -> TrustOperationFailureKind {
+    match kind {
+        koushi_sdk::MatrixVerificationCancelKind::Timeout => TrustOperationFailureKind::Timeout,
+        koushi_sdk::MatrixVerificationCancelKind::UnknownMethod
+        | koushi_sdk::MatrixVerificationCancelKind::KeyMismatch
+        | koushi_sdk::MatrixVerificationCancelKind::User
+        | koushi_sdk::MatrixVerificationCancelKind::AcceptedElsewhere
+        | koushi_sdk::MatrixVerificationCancelKind::Other => TrustOperationFailureKind::Cancelled,
     }
 }
 
@@ -665,9 +686,10 @@ impl AccountActor {
                     request_id,
                     target: target.clone(),
                     handle: handle.clone(),
+                    start_sas_when_ready: false,
                 });
                 self.observe_verification_request(request_id, target.clone(), handle.clone());
-                self.send_actions(vec![AppAction::VerificationRequested {
+                self.send_actions(vec![AppAction::VerificationRequestSent {
                     request_id: request_id.sequence,
                     target: target.clone(),
                 }])
@@ -675,6 +697,7 @@ impl AccountActor {
                 self.emit_verification_progress(VerificationFlowState::Requested {
                     request_id: request_id.sequence,
                     target,
+                    initiator: koushi_state::VerificationInitiator::Us,
                 });
                 self.project_verification_request_state(request_id, handle.state())
                     .await;
@@ -937,6 +960,7 @@ impl AccountActor {
             request_id,
             target: target.clone(),
             handle: handle.clone(),
+            start_sas_when_ready: false,
         });
         self.observe_verification_request(request_id, target.clone(), handle.clone());
         self.send_actions(vec![AppAction::VerificationRequested {
@@ -947,6 +971,7 @@ impl AccountActor {
         self.emit_verification_progress(VerificationFlowState::Requested {
             request_id: request_id.sequence,
             target,
+            initiator: koushi_state::VerificationInitiator::Them,
         });
         self.project_verification_request_state(request_id, handle.state())
             .await;
@@ -1172,7 +1197,7 @@ impl AccountActor {
         }
     }
 
-    fn observe_verification_request(
+    pub(super) fn observe_verification_request(
         &mut self,
         request_id: RequestId,
         target: VerificationTarget,
@@ -1272,14 +1297,14 @@ impl AccountActor {
         _target: VerificationTarget,
         state: koushi_sdk::MatrixVerificationRequestState,
     ) {
-        if !self
+        if self
             .verification_request
             .as_ref()
-            .is_some_and(|pending| pending.request_id.sequence == request_id.sequence)
-            && !self
+            .is_none_or(|pending| pending.request_id.sequence != request_id.sequence)
+            && self
                 .own_user_verification
                 .as_ref()
-                .is_some_and(|(flow_id, _)| *flow_id == request_id.sequence)
+                .is_none_or(|(flow_id, _)| *flow_id != request_id.sequence)
         {
             return;
         }
@@ -1319,10 +1344,10 @@ impl AccountActor {
         target: VerificationTarget,
         state: koushi_sdk::MatrixSasState,
     ) {
-        if !self
+        if self
             .sas_verification
             .as_ref()
-            .is_some_and(|pending| pending.request_id.sequence == request_id.sequence)
+            .is_none_or(|pending| pending.request_id.sequence != request_id.sequence)
         {
             return;
         }
@@ -1330,7 +1355,7 @@ impl AccountActor {
         self.project_sas_state(request_id, target, state).await;
     }
 
-    async fn project_verification_request_state(
+    pub(super) async fn project_verification_request_state(
         &mut self,
         request_id: RequestId,
         state: koushi_sdk::MatrixVerificationRequestState,
@@ -1343,6 +1368,7 @@ impl AccountActor {
                     request_id: request_id.sequence,
                 }])
                 .await;
+                self.start_user_verification_sas_if_ready(request_id).await;
                 if let Some((flow_id, handle)) = self.own_user_verification.as_ref()
                     && *flow_id == request_id.sequence
                     && self.sas_verification.is_none()
@@ -1412,15 +1438,11 @@ impl AccountActor {
             koushi_sdk::MatrixVerificationRequestState::Done => {
                 self.project_verification_completed(request_id).await;
             }
-            koushi_sdk::MatrixVerificationRequestState::Cancelled {
-                kind,
-                cancelled_by_us,
-            } => {
-                let _ = (kind, cancelled_by_us);
+            koushi_sdk::MatrixVerificationRequestState::Cancelled { kind, .. } => {
                 self.project_active_or_missing_verification_failure_with_kind(
                     request_id,
                     request_id.sequence,
-                    TrustOperationFailureKind::Cancelled,
+                    verification_cancel_failure_kind(kind),
                 )
                 .await;
             }
@@ -1434,7 +1456,7 @@ impl AccountActor {
         }
     }
 
-    async fn store_sas_verification(
+    pub(super) async fn store_sas_verification(
         &mut self,
         request_id: RequestId,
         target: VerificationTarget,
@@ -1537,11 +1559,11 @@ impl AccountActor {
             koushi_sdk::MatrixSasState::Done => {
                 self.project_verification_completed(request_id).await;
             }
-            koushi_sdk::MatrixSasState::Cancelled { .. } => {
+            koushi_sdk::MatrixSasState::Cancelled { kind, .. } => {
                 self.project_verification_failure(
                     request_id.sequence,
                     target,
-                    TrustOperationFailureKind::Cancelled,
+                    verification_cancel_failure_kind(kind),
                 )
                 .await;
             }
@@ -1577,14 +1599,14 @@ impl AccountActor {
                         })
                     })
             })
-            .or_else(|| {
+            .or({
                 #[cfg(test)]
                 {
-                    return self.synthetic_verification.as_ref().and_then(
-                        |(active_flow_id, target)| {
+                    self.synthetic_verification
+                        .as_ref()
+                        .and_then(|(active_flow_id, target)| {
                             (*active_flow_id == flow_id).then(|| target.clone())
-                        },
-                    );
+                        })
                 }
                 #[cfg(not(test))]
                 None
@@ -1641,6 +1663,7 @@ impl AccountActor {
                     request_id: flow_id,
                 }])
                 .await;
+                self.refresh_open_contact_security(&target.user_id).await;
                 self.request_authoritative_trust_recheck();
                 record_sas_verification_event(sas_waiting_event(
                     flow_id,
@@ -1721,7 +1744,7 @@ impl AccountActor {
         }
     }
 
-    async fn project_verification_failure(
+    pub(super) async fn project_verification_failure(
         &mut self,
         flow_id: u64,
         _target: VerificationTarget,
@@ -1731,7 +1754,7 @@ impl AccountActor {
             .await;
     }
 
-    fn emit_verification_progress(&self, state: VerificationFlowState) {
+    pub(super) fn emit_verification_progress(&self, state: VerificationFlowState) {
         if let Some(account_key) = self.active_account_key() {
             self.emit(CoreEvent::E2eeTrust(E2eeTrustEvent::VerificationProgress {
                 account_key,

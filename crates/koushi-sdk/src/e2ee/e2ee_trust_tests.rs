@@ -12,7 +12,7 @@ use super::{
     map_identity_reset_auth_type_to_desktop, map_sdk_sas_emojis_to_desktop,
     map_sdk_verification_state, map_verification_method_facts, mismatch_sas_verification,
     observe_incoming_verification_requests, request_device_verification, reset_identity,
-    restore_key_backup, restore_session, start_sas_verification, write_recovery_key_if_requested,
+    restore_key_backup, restore_session, start_sas_verification, write_recovery_key_material,
 };
 use futures_util::stream;
 use koushi_state::{
@@ -637,12 +637,12 @@ fn room_key_file_transfer_summaries_are_private_data_free() {
 #[test]
 fn secure_backup_setup_summary_is_private_data_free() {
     let summary = SecureBackupSetupSummary {
-        recovery_key_written: true,
+        recovery_key: zeroize::Zeroizing::new("synthetic-summary-key".to_owned()),
     };
 
     let debug = format!("{summary:?}");
-    assert!(debug.contains("recovery_key_written"));
-    assert!(!debug.contains("RecoveryKey("));
+    assert!(debug.contains("recovery_key"));
+    assert!(!debug.contains("synthetic-summary-key"), "{debug}");
 }
 #[test]
 fn recovery_key_delivery_writes_native_artifact_without_debugging_material() {
@@ -650,10 +650,9 @@ fn recovery_key_delivery_writes_native_artifact_without_debugging_material() {
     let path = dir.path().join("recovery-artifact.txt");
     let artifact_payload = String::from("fixture-artifact-material");
 
-    let written = write_recovery_key_if_requested(artifact_payload.clone(), Some(path.clone()))
+    write_recovery_key_material(&artifact_payload, path.clone())
         .expect("artifact write should succeed");
 
-    assert!(written);
     assert_eq!(
         std::fs::read_to_string(&path).expect("read artifact"),
         artifact_payload
@@ -677,9 +676,8 @@ fn recovery_key_delivery_refuses_to_overwrite_an_existing_artifact() {
     let path = dir.path().join("existing-artifact.txt");
     std::fs::write(&path, "keep-me").expect("write existing artifact");
 
-    let error =
-        write_recovery_key_if_requested("fixture-artifact-material".to_owned(), Some(path.clone()))
-            .expect_err("existing artifact must not be overwritten");
+    let error = write_recovery_key_material("fixture-artifact-material", path.clone())
+        .expect_err("existing artifact must not be overwritten");
 
     assert_eq!(error, E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed);
     assert_eq!(

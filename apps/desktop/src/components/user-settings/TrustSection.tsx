@@ -203,7 +203,7 @@ function VerificationDialog({
         </ol>
       ) : null}
 
-      {verification.kind === "requested" ? (
+      {verification.kind === "requested" && verification.initiator === "them" ? (
         <div className="trust-dialog-actions">
           <TrustActionButton
             icon={<Check size={14} />}
@@ -235,7 +235,8 @@ function VerificationDialog({
         </div>
       ) : null}
 
-      {verification.kind === "accepted" ||
+      {(verification.kind === "requested" && verification.initiator === "us") ||
+      verification.kind === "accepted" ||
       verification.kind === "confirming" ||
       verification.kind === "failed" ? (
         <div className="trust-dialog-actions">
@@ -461,7 +462,10 @@ function verificationStatusLabel(status: VerificationFlowState): string {
     case "idle":
       return t("trust.statusIdle");
     case "requested":
-      return t("trust.statusVerificationRequested");
+      // Our own request (for example Verify user) waits for the other side.
+      return status.initiator === "us"
+        ? t("trust.statusVerificationWaiting")
+        : t("trust.statusVerificationRequested");
     case "accepted":
       return t("trust.statusVerificationAccepted");
     case "sasPresented":

@@ -165,6 +165,11 @@ export interface DesktopApi {
   loadAccountManagementCapabilities(): Promise<CommandAdmission>;
   /** Account notification settings (#981). `load` is read-only. */
   loadAccountNotifications(): Promise<CommandAdmission>;
+  /** Contact security details (#1024); read-only. */
+  loadContactSecurity(userId: string): Promise<CommandAdmission>;
+  closeContactSecurity(): Promise<CommandAdmission>;
+  /** Verify user (#1024): request SAS verification of the contact. */
+  requestContactVerification(userId: string): Promise<CommandAdmission>;
   setNotificationCategory(category: NotificationCategory, enabled: boolean): Promise<CommandAdmission>;
   setAccountPushEnabled(enabled: boolean): Promise<CommandAdmission>;
   requestNotificationEmailToken(address: string, lang: string): Promise<CommandAdmission>;
@@ -194,14 +199,19 @@ export interface DesktopApi {
   retryHistoryExport(targetRequestId: number): Promise<HistoryExportStart>;
   bootstrapSecureBackup(
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null,
     intent: SecureBackupSetupIntent
   ): Promise<CommandAdmission>;
   changeSecureBackupPassphrase(
     oldSecret: string,
-    newPassphrase: string,
-    recoveryKeyDestinationPath: string | null
+    newPassphrase: string
   ): Promise<CommandAdmission>;
+  /** Optional "Save to file" for the revealed recovery key (#927). */
+  saveSecureBackupRecoveryKey(
+    revealRequestId: number,
+    recoveryKeyDestinationPath: string
+  ): Promise<CommandAdmission>;
+  /** Explicit "I saved the recovery key" confirmation (#927). */
+  confirmSecureBackupRecoveryKeySaved(revealRequestId: number): Promise<CommandAdmission>;
   acceptVerification(flowId: number): Promise<CommandAdmission>;
   startOwnUserSas(): Promise<CommandAdmission>;
   retryCurrentDeviceTrustDiscovery(): Promise<CommandAdmission>;

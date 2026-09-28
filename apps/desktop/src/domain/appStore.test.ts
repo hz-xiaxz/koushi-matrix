@@ -16,10 +16,31 @@ import {
 } from "./appStore";
 import type { DesktopSnapshot } from "./types";
 import { COMPOSER_DRAFT_REVISION_ZERO } from "./composerDraftRevision";
+import generatedCoreEvents from "./coreEvents.generated.json";
 
 describe("appStore projection cache", () => {
   beforeEach(() => {
     clearAppStoreSnapshot();
+  });
+
+  test("an unrelated Rust delta keeps the open contact security details (#1024)", () => {
+    const previous = makeSnapshot();
+    const contactSecurity = {
+      user_id: "@contact:example.invalid",
+      load: { kind: "loaded" as const, request_id: 7 },
+      summary: null,
+      verification_busy: false
+    };
+    previous.state.domain.contact_security = contactSecurity;
+    // The Rust-generated wire shape of a delta that changes only another slice.
+    const delta = generatedCoreEvents.stateDeltaSearchCrawlerQueued as unknown as Parameters<
+      typeof applyDeltaToState
+    >[1];
+
+    const projected = applyDeltaToState(previous, delta);
+
+    expect(projected).not.toBeNull();
+    expect(projected?.state.domain.contact_security).toEqual(contactSecurity);
   });
 
   test("keeps identical-by-value snapshot references stable", () => {
@@ -1480,6 +1501,7 @@ function makeSnapshot(): DesktopSnapshot {
           pending_email: null,
           operation: { kind: "idle" }
         },
+        contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
         account_management_capabilities: { change_password: { kind: "unknown" } },
         soft_logout_reauth: { kind: "idle" },
         qr_login: { kind: "idle" },

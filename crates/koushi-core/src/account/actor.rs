@@ -54,7 +54,7 @@ use super::recovery_backup::{
     PendingRecoveryCompletion, PendingRecoveryTask, SECURE_BACKUP_CONNECTIVITY_WAIT_TIMEOUT,
     secure_backup_monitor_wakeup_is_current,
 };
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 use super::session_lifecycle::PendingOidcFlow;
 use super::session_lifecycle::{
     LockedSessionRecord, PendingOidcAttempt, PendingSessionTeardown, SessionChangeObservation,
@@ -118,6 +118,13 @@ pub(super) fn trace_account_request(
     );
 }
 
+/// Sessions observed at the residency install gap test hook: (old, new).
+#[cfg(any(test, feature = "test-hooks"))]
+pub(crate) type ResidencyInstallGapSessions = (
+    Option<Arc<MatrixClientSession>>,
+    Option<Arc<MatrixClientSession>>,
+);
+
 /// Messages routed to the AccountActor task.
 pub(crate) enum AccountMessage {
     ReadReceiptWindow {
@@ -138,20 +145,17 @@ pub(crate) enum AccountMessage {
     },
     #[cfg(any(test, feature = "test-hooks"))]
     QaSetLocalDeviceBlacklisted {
-        request_id: RequestId,
         target: VerificationTarget,
         room_id: String,
         acknowledged: oneshot::Sender<Result<(), ()>>,
     },
     #[cfg(any(test, feature = "test-hooks"))]
     QaRefreshDeviceKeysAndAssertKnown {
-        request_id: RequestId,
         target: VerificationTarget,
         acknowledged: oneshot::Sender<Result<(), ()>>,
     },
     #[cfg(any(test, feature = "test-hooks"))]
     QaAssertInboundSessionsStartAtZero {
-        request_id: RequestId,
         room_id: String,
         acknowledged: oneshot::Sender<Result<usize, ()>>,
     },
@@ -292,6 +296,10 @@ pub(crate) enum AccountMessage {
     ConfigureSecureBackupDeferWait {
         wait: Duration,
     },
+    #[cfg(test)]
+    SeedRevealedRecoveryKey {
+        revealed: super::recovery_backup::RevealedRecoveryKey,
+    },
     CheckCurrentDeviceTrust,
     InspectSecureBackup,
     SyncConnectivityChanged {
@@ -412,10 +420,6 @@ pub(crate) enum AccountMessage {
         observation: koushi_sdk::CurrentDeviceTrustObservation,
     },
     #[cfg(test)]
-    InspectSecureBackupScheduling {
-        response: oneshot::Sender<(bool, bool, bool, bool)>,
-    },
-    #[cfg(test)]
     InspectSessionRuntime {
         response: oneshot::Sender<(bool, bool, bool, bool)>,
     },
@@ -433,10 +437,7 @@ pub(crate) enum AccountMessage {
     },
     #[cfg(any(test, feature = "test-hooks"))]
     ResidencyTestConfigureInstallGap {
-        reached: oneshot::Sender<(
-            Option<Arc<MatrixClientSession>>,
-            Option<Arc<MatrixClientSession>>,
-        )>,
+        reached: oneshot::Sender<ResidencyInstallGapSessions>,
         release: oneshot::Receiver<()>,
         configured: oneshot::Sender<()>,
     },
@@ -554,6 +555,11 @@ pub(crate) enum AccountMessage {
     SasVerificationTimedOut {
         flow_id: u64,
     },
+    /// The SDK device/identity store changed while a contact's User info is
+    /// open (#1024); `generation` fences a replaced or closed contact.
+    ContactSecurityStoreChanged {
+        generation: u64,
+    },
     VerificationRequestObserverEnded {
         flow_id: u64,
     },
@@ -599,20 +605,21 @@ pub(crate) enum AccountMessage {
         actions: Vec<AppAction>,
         ignored_user_ids: Option<BTreeSet<String>>,
     },
+    /// Fire-and-forget stop used only by actor unit tests; production
+    /// shutdown always sends `ShutdownWithAck` from the runtime.
+    #[cfg(test)]
     Shutdown,
 }
 
 /// cfg(test)-only snapshot of the secure-backup inspection owner state.
 #[cfg(test)]
-pub(super) struct SecureBackupOwnersSnapshot {
+pub(crate) struct SecureBackupOwnersSnapshot {
     pub(super) inspection_pending: bool,
     pub(super) has_inspection_task: bool,
-    pub(super) has_monitor_task: bool,
     pub(super) has_defer_deadline: bool,
-    pub(super) proven: bool,
     pub(super) trust_generation: u64,
-    pub(super) monitor_serial: u64,
     pub(super) defer_serial: u64,
+    pub(super) holds_revealed_recovery_key: bool,
 }
 
 /// Handle to the AccountActor background task.
@@ -696,10 +703,7 @@ impl AccountActorHandle {
     #[cfg(any(test, feature = "test-hooks"))]
     pub async fn configure_residency_install_gap(
         &self,
-        reached: oneshot::Sender<(
-            Option<Arc<MatrixClientSession>>,
-            Option<Arc<MatrixClientSession>>,
-        )>,
+        reached: oneshot::Sender<ResidencyInstallGapSessions>,
         release: oneshot::Receiver<()>,
     ) -> bool {
         let (configured, acknowledged) = oneshot::channel();
@@ -916,6 +920,9 @@ pub struct AccountActor {
     pub(super) session_check: super::session_check::SessionCheckCoordinator,
     pub(super) secure_backup_ready: bool,
     pub(super) recovery_key_delivery_pending: bool,
+    /// The recovery key currently revealed on screen (#927), held only until
+    /// the explicit saved confirmation, session teardown, or account switch.
+    pub(super) revealed_recovery_key: Option<super::recovery_backup::RevealedRecoveryKey>,
     pub(super) secure_backup_inspection_task: Option<crate::executor::JoinHandle<()>>,
     pub(super) secure_backup_monitor_task: Option<crate::executor::JoinHandle<()>>,
     /// One-shot deadline task owned while an inspection is deferred waiting
@@ -953,10 +960,7 @@ pub struct AccountActor {
     pub(super) lifecycle_probe: Option<mpsc::UnboundedSender<&'static str>>,
     #[cfg(any(test, feature = "test-hooks"))]
     pub(super) residency_install_gap: Option<(
-        oneshot::Sender<(
-            Option<Arc<MatrixClientSession>>,
-            Option<Arc<MatrixClientSession>>,
-        )>,
+        oneshot::Sender<ResidencyInstallGapSessions>,
         oneshot::Receiver<()>,
     )>,
     #[cfg(any(test, feature = "test-hooks"))]
@@ -1079,6 +1083,9 @@ pub struct AccountActor {
     pub(super) synthetic_verification: Option<(u64, VerificationTarget)>,
     /// SDK incoming verification request observer for the active session.
     pub(super) incoming_verification_observer: Option<IncomingVerificationObservation>,
+    /// Open contact's security-details observer (#1024).
+    pub(super) contact_security: Option<super::contact_security::ContactSecurityObservation>,
+    pub(super) contact_security_generation: u64,
     /// Epoch attached to incoming verification messages from the active SDK client.
     pub(super) incoming_verification_session_generation: u64,
     /// SDK session-change observer for auth invalidation / soft logout.
@@ -1173,6 +1180,10 @@ impl AccountActor {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor wiring: independent owned handles moved into one task"
+    )]
     pub(crate) fn spawn_with_diagnostics_and_native_artifacts(
         store_actor: StoreActor,
         action_tx: mpsc::Sender<Vec<AppAction>>,
@@ -1242,6 +1253,7 @@ impl AccountActor {
             session_check: super::session_check::SessionCheckCoordinator::default(),
             secure_backup_ready: false,
             recovery_key_delivery_pending: false,
+            revealed_recovery_key: None,
             secure_backup_inspection_task: None,
             secure_backup_monitor_task: None,
             secure_backup_defer_deadline_task: None,
@@ -1335,6 +1347,8 @@ impl AccountActor {
             #[cfg(test)]
             synthetic_verification: None,
             incoming_verification_observer: None,
+            contact_security: None,
+            contact_security_generation: 0,
             incoming_verification_session_generation: 0,
             session_change_observer: None,
             account_hydration_task: None,
@@ -1434,6 +1448,7 @@ impl AccountActor {
                 AccountMessage::ConfigureShutdownGate { entered, release } => {
                     shutdown_gate = Some((entered, release));
                 }
+                #[cfg(test)]
                 AccountMessage::Shutdown => break,
                 AccountMessage::ShutdownWithAck { acknowledged } => {
                     shutdown_ack = Some(acknowledged);
@@ -1444,7 +1459,6 @@ impl AccountActor {
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::QaSetLocalDeviceBlacklisted {
-                    request_id: _,
                     target,
                     room_id,
                     acknowledged,
@@ -1454,7 +1468,6 @@ impl AccountActor {
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::QaRefreshDeviceKeysAndAssertKnown {
-                    request_id: _,
                     target,
                     acknowledged,
                 } => {
@@ -1468,7 +1481,6 @@ impl AccountActor {
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::QaAssertInboundSessionsStartAtZero {
-                    request_id: _,
                     room_id,
                     acknowledged,
                 } => {
@@ -1840,12 +1852,8 @@ impl AccountActor {
                 }
                 #[cfg(test)]
                 AccountMessage::InspectSessionCheckTimer { response } => {
-                    let _ = response.send(
-                        self.session_check
-                            .timer
-                            .as_ref()
-                            .map(|(token, _)| *token),
-                    );
+                    let _ =
+                        response.send(self.session_check.timer.as_ref().map(|(token, _)| *token));
                 }
                 #[cfg(test)]
                 AccountMessage::ConfigureSessionCheckClock { base_epoch_ms } => {
@@ -1914,6 +1922,12 @@ impl AccountActor {
                     };
                     if let Some(trust) = trust {
                         self.handle_current_device_trust(generation, trust).await;
+                    }
+                    // A trust recheck follows own cross-signing changes
+                    // (import, bootstrap, own verification), which decide
+                    // whether Verify user can sign an open contact (#1024).
+                    if recheck_succeeded {
+                        self.refresh_any_open_contact_security().await;
                     }
                     // #1009: a failure on a promoted session keeps the demand
                     // pending behind the shared failure backoff.
@@ -2251,15 +2265,6 @@ impl AccountActor {
                         .expect("trust observation override lock") = Some(observation);
                 }
                 #[cfg(test)]
-                AccountMessage::InspectSecureBackupScheduling { response } => {
-                    let _ = response.send((
-                        self.sync_connectivity_proven,
-                        self.secure_backup_inspection_pending,
-                        self.secure_backup_inspection_task.is_some(),
-                        self.secure_backup_monitor_task.is_some(),
-                    ));
-                }
-                #[cfg(test)]
                 AccountMessage::InspectSessionRuntime { response } => {
                     let _ = response.send((
                         self.session.is_some(),
@@ -2277,17 +2282,19 @@ impl AccountActor {
                     let _ = response.send(SecureBackupOwnersSnapshot {
                         inspection_pending: self.secure_backup_inspection_pending,
                         has_inspection_task: self.secure_backup_inspection_task.is_some(),
-                        has_monitor_task: self.secure_backup_monitor_task.is_some(),
                         has_defer_deadline: self.secure_backup_defer_deadline_task.is_some(),
-                        proven: self.sync_connectivity_proven,
                         trust_generation: self.trust_generation,
-                        monitor_serial: self.secure_backup_monitor_serial,
                         defer_serial: self.secure_backup_defer_serial,
+                        holds_revealed_recovery_key: self.revealed_recovery_key.is_some(),
                     });
                 }
                 #[cfg(test)]
                 AccountMessage::ConfigureSecureBackupDeferWait { wait } => {
                     self.secure_backup_connectivity_wait = wait;
+                }
+                #[cfg(test)]
+                AccountMessage::SeedRevealedRecoveryKey { revealed } => {
+                    self.revealed_recovery_key = Some(revealed);
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::InspectSyncOwners { response } => {
@@ -2509,6 +2516,9 @@ impl AccountActor {
                 AccountMessage::SasVerificationTimedOut { flow_id } => {
                     self.handle_sas_verification_timeout(flow_id).await;
                 }
+                AccountMessage::ContactSecurityStoreChanged { generation } => {
+                    self.handle_contact_security_store_changed(generation).await;
+                }
                 AccountMessage::VerificationRequestObserverEnded { flow_id } => {
                     if self.active_verification_target(flow_id).is_some() {
                         record_sas_verification_event(
@@ -2682,6 +2692,12 @@ impl AccountActor {
             } => {
                 self.handle_account_notifications(request_id, request).await;
             }
+            AccountCommand::ContactSecurity {
+                request_id,
+                request,
+            } => {
+                self.handle_contact_security(request_id, request).await;
+            }
             AccountCommand::SoftLogoutReauth {
                 request_id,
                 password,
@@ -2760,6 +2776,20 @@ impl AccountActor {
                 request,
             } => {
                 self.handle_change_secure_backup_passphrase(request_id, request)
+                    .await;
+            }
+            AccountCommand::SaveSecureBackupRecoveryKey {
+                request_id,
+                reveal_request_id,
+            } => {
+                self.handle_save_secure_backup_recovery_key(request_id, reveal_request_id)
+                    .await;
+            }
+            AccountCommand::ConfirmSecureBackupRecoveryKeySaved {
+                request_id,
+                reveal_request_id,
+            } => {
+                self.handle_confirm_secure_backup_recovery_key_saved(request_id, reveal_request_id)
                     .await;
             }
             AccountCommand::ProbeLocalEncryptionHealth { request_id } => {

@@ -111,21 +111,16 @@ pub(crate) fn native_artifact_for_account_command(
         AccountCommand::ExportHistory { request_id, .. } => {
             Some((*request_id, NativeArtifactKind::HistoryExportDirectory))
         }
-        AccountCommand::BootstrapSecureBackup {
-            request_id,
-            request,
-        }
-        | AccountCommand::StartSessionBootstrap {
+        AccountCommand::StartSessionBootstrap {
             request_id,
             request,
             ..
         } if request.recovery_key_destination_requested => {
             Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
         }
-        AccountCommand::ChangeSecureBackupPassphrase {
-            request_id,
-            request,
-        } if request.recovery_key_destination_requested => {
+        // Secure Backup setup and passphrase change reveal the key on screen
+        // (#927); only the optional save command consumes a destination.
+        AccountCommand::SaveSecureBackupRecoveryKey { request_id, .. } => {
             Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
         }
         _ => None,
@@ -276,6 +271,11 @@ fn account_command_requires_ready_session(command: &AccountCommand) -> bool {
             | AccountCommand::DeactivateAccount { .. }
             | AccountCommand::SubmitAccountManagementUia { .. }
             | AccountCommand::AccountNotifications { .. }
+            | AccountCommand::ContactSecurity {
+                request: koushi_protocol::command::ContactSecurityRequest::Load { .. }
+                    | koushi_protocol::command::ContactSecurityRequest::RequestVerification { .. },
+                ..
+            }
             | AccountCommand::ExportRoomKeys { .. }
             | AccountCommand::ExportHistory { .. }
             | AccountCommand::StopHistoryExport { .. }
@@ -285,6 +285,8 @@ fn account_command_requires_ready_session(command: &AccountCommand) -> bool {
             | AccountCommand::RecoverSecureBackup { .. }
             | AccountCommand::RetrySecureBackupInspection { .. }
             | AccountCommand::ChangeSecureBackupPassphrase { .. }
+            | AccountCommand::SaveSecureBackupRecoveryKey { .. }
+            | AccountCommand::ConfirmSecureBackupRecoveryKeySaved { .. }
             | AccountCommand::SetPresence { .. }
             | AccountCommand::SetDisplayName { .. }
             | AccountCommand::SetLocalUserAlias { .. }
@@ -360,12 +362,24 @@ mod tests {
             CoreCommand::Account(AccountCommand::EraseDeviceCleanupLocalDataAnyway {
                 request_id: id,
             }),
+            // Closing User info only tears down; it must settle quietly after
+            // sign-out, lock, or account switch unmounts the panel (#1024).
+            CoreCommand::Account(AccountCommand::ContactSecurity {
+                request_id: id,
+                request: koushi_protocol::command::ContactSecurityRequest::Close,
+            }),
         ] {
             assert!(!command.requires_ready_session());
         }
 
         for command in [
             CoreCommand::Sync(SyncCommand::Start { request_id: id }),
+            CoreCommand::Account(AccountCommand::ContactSecurity {
+                request_id: id,
+                request: koushi_protocol::command::ContactSecurityRequest::Load {
+                    user_id: "@contact:example.invalid".to_owned(),
+                },
+            }),
             CoreCommand::App(AppCommand::OpenTimelineAtTimestamp {
                 request_id: id,
                 room_id: "!room:example.invalid".to_owned(),

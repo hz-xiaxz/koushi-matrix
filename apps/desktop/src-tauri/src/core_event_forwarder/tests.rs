@@ -91,15 +91,17 @@ fn session_state_delta_forwarding_is_one_state_update_without_generic_duplicate(
     use serde_json::json;
 
     let timeline_items_count = AtomicUsize::new(17);
-    let mut previous = AppState::default();
-    previous.session = SessionState::Provisional {
-        info: SessionInfo {
-            homeserver: "https://example.test".to_owned(),
-            user_id: "@u:example.test".to_owned(),
-            device_id: "DEV".to_owned(),
-            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    let previous = AppState {
+        session: SessionState::Provisional {
+            info: SessionInfo {
+                homeserver: "https://example.test".to_owned(),
+                user_id: "@u:example.test".to_owned(),
+                device_id: "DEV".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            },
+            phase: ProvisionalPhase::CheckingTrust,
         },
-        phase: ProvisionalPhase::CheckingTrust,
+        ..Default::default()
     };
     let mut next = previous.clone();
     next.session = SessionState::Provisional {

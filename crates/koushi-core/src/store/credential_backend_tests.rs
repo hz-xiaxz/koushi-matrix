@@ -2,10 +2,7 @@ use super::StoreActor;
 use super::test_support::{file_store_actor, make_key_id};
 use koushi_key::{LocalUnlockSecret, SessionKeyIdCredentialNames};
 use koushi_protocol::SessionKeyId;
-use koushi_store::{
-    CREDENTIAL_STORE_SERVICE_NAME, CredentialStoreBackend, CredentialVaultData,
-    CredentialVaultFile, OsCredentialStore,
-};
+use koushi_store::{CREDENTIAL_STORE_SERVICE_NAME, CredentialStoreBackend};
 use std::sync::Arc;
 use tempfile::tempdir;
 

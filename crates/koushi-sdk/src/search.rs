@@ -173,11 +173,13 @@ pub async fn search_message_candidates_scoped(
         .into_iter()
         .take(limit)
         .enumerate()
-        .map(|(index, (room_id, _score, event_id))| MatrixSearchCandidate {
-            room_id: room_id.to_string(),
-            event_id: event_id.to_string(),
-            score_millis: 1_000_u32.saturating_sub(index as u32),
-        })
+        .map(
+            |(index, (room_id, _score, event_id))| MatrixSearchCandidate {
+                room_id: room_id.to_string(),
+                event_id: event_id.to_string(),
+                score_millis: 1_000_u32.saturating_sub(index as u32),
+            },
+        )
         .collect::<Vec<_>>();
     if let MatrixSearchScope::RoomSet { room_ids } = scope {
         candidates.retain(|candidate| room_ids.iter().any(|room_id| room_id == &candidate.room_id));

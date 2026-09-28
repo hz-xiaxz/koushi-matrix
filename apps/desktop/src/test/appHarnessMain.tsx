@@ -133,6 +133,12 @@ interface AppHarnessControl {
 // the CoreEvent stream, so the reply target is seeded via pushCoreEvent.
 // ---------------------------------------------------------------------------
 
+// A later launch after Rust already recorded the one-shot legacy settings
+// import (#1035): `?legacySettingsImported=1` seeds that persisted flag.
+function harnessLegacySettingsAlreadyImported(): boolean {
+  return new URLSearchParams(window.location.search).get("legacySettingsImported") === "1";
+}
+
 function readySnapshot(
   overrides: {
     composerMode?: ComposerMode;
@@ -235,6 +241,7 @@ function readySnapshot(
     space_rooms: [sidebarRoom],
     not_joined_space_rooms: [],
     space_add_rooms: null,
+    create_room_defaults: { visibility: "private", encrypted: true, invited_only: false },
     global_dms: [],
     space_unread_count: 0,
     dm_unread_count: 0,
@@ -286,6 +293,7 @@ function readySnapshot(
             pending_email: null,
             operation: { kind: "idle" }
           },
+          contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
           account_management_capabilities: { change_password: { kind: "unknown" } },
           soft_logout_reauth: { kind: "idle" }, qr_login: { kind: "idle" },
           directory: {
@@ -351,7 +359,7 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
         code_block_wrap: true,
         hide_redacted: true,
         url_previews_enabled: true,
-        encrypted_url_previews_enabled: true
+        encrypted_url_previews_enabled: false
       },
       window: { close_to_tray: true },
           updates: { auto_check: true, include_prereleases: false },
@@ -381,7 +389,7 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
         category: "rooms",
         collapsed: { favourites: false, low_priority: false, not_joined: false }
       },
-      legacy_frontend_preferences_imported: false
+      legacy_frontend_preferences_imported: harnessLegacySettingsAlreadyImported()
     },
     persistence: { kind: "idle" }
   };
@@ -658,7 +666,8 @@ function e2eeTrustFixture(): E2eeTrustState {
       target: {
         user_id: "redacted-trust-target",
         device_id: "TRUSTDEVICE"
-      }
+      },
+      initiator: "them"
     },
     cross_signing: { kind: "missing" },
     key_backup: { kind: "disabled" },
@@ -2213,61 +2222,93 @@ mock.setCommandResponse("import_room_keys", () =>
     }
   })
 );
+// #927: synthetic, non-secret key shown by the reveal; setup and passphrase
+// change never take a destination.
+const HARNESS_RECOVERY_KEY = "synthetic-harness-recovery-key";
+function withKeyManagement(
+  update: (
+    keyManagement: DesktopSnapshot["state"]["domain"]["e2ee_trust"]["key_management"]
+  ) => DesktopSnapshot["state"]["domain"]["e2ee_trust"]["key_management"]
+) {
+  return setCurrentSnapshot({
+    ...currentSnapshot,
+    state: {
+      ...currentSnapshot.state,
+      domain: {
+        ...currentSnapshot.state.domain,
+        e2ee_trust: {
+          ...currentSnapshot.state.domain.e2ee_trust,
+          key_management: update(currentSnapshot.state.domain.e2ee_trust.key_management)
+        }
+      }
+    }
+  });
+}
 mock.setCommandResponse(
   "bootstrap_secure_backup",
-  ({ recoveryKeyDestinationPath, intent }: {
-    recoveryKeyDestinationPath?: string | null;
+  ({ intent }: {
     intent: { kind: "initialSetup" } | { kind: "reenable"; confirmed: boolean };
   }) => {
     void intent;
-    return setCurrentSnapshot({
-      ...currentSnapshot,
-      state: {
-        ...currentSnapshot.state,
-        domain: {
-          ...currentSnapshot.state.domain,
-        e2ee_trust: {
-          ...currentSnapshot.state.domain.e2ee_trust,
-          key_management: {
-            ...currentSnapshot.state.domain.e2ee_trust.key_management,
-            secure_backup_setup: {
-              kind: "recoveryKeyReady",
-              request_id: 9_202,
-              delivery: recoveryKeyDestinationPath?.trim()
-                ? { kind: "written" }
-                : { kind: "notWritten" }
-            }
-          }
-        }
-        },
+    return withKeyManagement((keyManagement) => ({
+      ...keyManagement,
+      secure_backup_setup: {
+        kind: "recoveryKeyReady",
+        request_id: 9_202,
+        recovery_key: HARNESS_RECOVERY_KEY,
+        delivery: { kind: "notWritten" },
+        confirmation_failed: false
       }
-    });
+    }));
   }
 );
+mock.setCommandResponse("change_secure_backup_passphrase", () =>
+  withKeyManagement((keyManagement) => ({
+    ...keyManagement,
+    passphrase_change: {
+      kind: "changed",
+      request_id: 9_203,
+      recovery_key: HARNESS_RECOVERY_KEY,
+      delivery: { kind: "notWritten" }
+    }
+  }))
+);
 mock.setCommandResponse(
-  "change_secure_backup_passphrase",
-  ({ recoveryKeyDestinationPath }: { recoveryKeyDestinationPath?: string | null }) =>
-    setCurrentSnapshot({
-      ...currentSnapshot,
-      state: {
-        ...currentSnapshot.state,
-        domain: {
-          ...currentSnapshot.state.domain,
-        e2ee_trust: {
-          ...currentSnapshot.state.domain.e2ee_trust,
-          key_management: {
-            ...currentSnapshot.state.domain.e2ee_trust.key_management,
-            passphrase_change: {
-              kind: "changed",
-              request_id: 9_203,
-              delivery: recoveryKeyDestinationPath?.trim()
-                ? { kind: "written" }
-                : { kind: "notWritten" }
-            }
-          }
-        }
-        },
-      }
+  "save_secure_backup_recovery_key",
+  ({ revealRequestId }: { revealRequestId: number }) =>
+    withKeyManagement((keyManagement) => {
+      const setup = keyManagement.secure_backup_setup;
+      const change = keyManagement.passphrase_change;
+      return {
+        ...keyManagement,
+        secure_backup_setup:
+          setup.kind === "recoveryKeyReady" && setup.request_id === revealRequestId
+            ? { ...setup, delivery: { kind: "written" } }
+            : setup,
+        passphrase_change:
+          change.kind === "changed" && change.request_id === revealRequestId
+            ? { ...change, delivery: { kind: "written" } }
+            : change
+      };
+    })
+);
+mock.setCommandResponse(
+  "confirm_secure_backup_recovery_key_saved",
+  ({ revealRequestId }: { revealRequestId: number }) =>
+    withKeyManagement((keyManagement) => {
+      const setup = keyManagement.secure_backup_setup;
+      const change = keyManagement.passphrase_change;
+      return {
+        ...keyManagement,
+        secure_backup_setup:
+          setup.kind === "recoveryKeyReady" && setup.request_id === revealRequestId
+            ? { kind: "enabled", request_id: revealRequestId }
+            : setup,
+        passphrase_change:
+          change.kind === "changed" && change.request_id === revealRequestId
+            ? { kind: "idle" }
+            : change
+      };
     })
 );
 mock.setCommandResponse("accept_verification", ({ flowId }: { flowId: number }) => {
@@ -2286,7 +2327,8 @@ mock.setCommandResponse("accept_verification", ({ flowId }: { flowId: number }) 
         verification: {
           kind: "accepted",
           request_id: flowId,
-          target: verification.target
+          target: verification.target,
+          initiator: "them"
         }
       }
       },

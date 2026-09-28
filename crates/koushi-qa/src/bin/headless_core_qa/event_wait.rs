@@ -777,10 +777,9 @@ pub(super) async fn wait_for_sync_stopped(
             request_id: ev_id,
             failure,
         } = event
+            && ev_id == request_id
         {
-            if ev_id == request_id {
-                return Err(format!("{label} failed: {failure:?}"));
-            }
+            return Err(format!("{label} failed: {failure:?}"));
         }
     }
 }
@@ -1167,10 +1166,10 @@ pub(super) async fn wait_for_operation_failed_and_signed_out<S: QaSnapshotEventS
     let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
     let mut operation_failure = None;
     loop {
-        if matches!(conn.snapshot().session, SessionState::SignedOut) {
-            if let Some(failure) = operation_failure.take() {
-                return Ok(failure);
-            }
+        if matches!(conn.snapshot().session, SessionState::SignedOut)
+            && let Some(failure) = operation_failure.take()
+        {
+            return Ok(failure);
         }
 
         let event = deadline

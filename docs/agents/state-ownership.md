@@ -616,7 +616,15 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   React keeps only whether the address was edited, and re-requests the preview
   for the current draft; an `aliasInUse` create failure is rendered with the
   attempted full address and server captured from that preview. A submitted
-  alias is never renamed or retried automatically.
+  alias is never renamed or retried automatically. The preview's
+  `without_address` (#1023) is Rust's verdict that an unnamed public room
+  may be created without an address (a named room never is);
+  React renders it and does not decide when an address is optional.
+- The create-room dialog's initial choices (#1023) are
+  `SidebarModel.create_room_defaults` (`create_room_defaults_for_state`): public
+  in a Space whose synced join rule is public, otherwise private. React seeds the
+  dialog from it when the dialog opens and keeps no default of its own beyond a
+  pre-snapshot fallback. The room name is optional; the Space name is not.
 - The advisory availability check (#1006) is Rust state
   (`ui.room_address_availability`): Core owns the lookup, its cancellation, the
   stale-result guard, the outcome, and the unchecked alternative. React only
@@ -980,8 +988,24 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
 - The Space Members panel may own only confirmation-dialog visibility and DOM
   focus. A select remains on the projected current role until a later Rust
   snapshot projects the requested role; failure/retry leaves the authoritative
-  role and options intact. Incomplete child-room sync is a notice, not a local
-  disablement of a directly authorized control.
+  role and options intact. Incomplete child-room completeness is Rust-owned
+  data only: the panel renders no syncing notice for it, and it never disables
+  a directly authorized control.
+- The Space Members header invite trigger renders the existing
+  `SpaceInviteAvailabilityReason` derived from Rust snapshot state
+  (`domain/spaceInviteAvailability.ts`). `permission_denied` hides it;
+  `settings_unavailable` and `operation_pending` keep it mounted but disabled
+  with an explanation, so a transient room-management settings gap does not
+  remove it. A disabled trigger opens no search and submits nothing; Rust
+  admission and account/Space fences stay authoritative. The explanation is
+  both the `title` and an `aria-describedby` description, and a missing
+  `can_invite` / `can_kick` capability never resolves to `available`.
+- The room-management settings slot is shared with room-scoped loads (room
+  invite dialog, post-invite refresh, room People, room setting updates).
+  While Space info or Space Members is showing the active Space and the slot
+  holds another room, App requests `load_room_settings` for that Space again
+  (deduplicated per pending request), so header and row invite/cancel
+  availability recover without user action.
 - Tauri and Browser Fake paths mirror the same command shape and admission
   guards. Browser-headless tests must exercise full projection replacement,
   failure/retry, confirmation cancellation, and role-option rederivation rather
@@ -1222,11 +1246,19 @@ normal QA-title mode and cannot change product title semantics.
   password), `EnableKeyBackup` (optional recovery passphrase), and
   `RestoreKeyBackup` (recovery secret). Their reducer actions, effects, events,
   snapshots, logs, and `Debug` output must remain secret-free.
-- Secure-backup setup/passphrase-change may produce a new recovery key through
-  the SDK. Do not project that key into reducer state, Tauri DTO snapshots, React
-  state, logs, QA tokens, screenshots, or issue comments. Desktop recovery-key
-  delivery writes through the Rust/Tauri native artifact path and reports only
-  `Written`/`NotWritten` style status.
+- Secure-backup setup/recovery-key reset/passphrase-change reveal the SDK-produced
+  recovery key on screen (#927). The reducer owns it only as
+  `RecoveryKeyMaterial` inside `SecureBackupSetupState::RecoveryKeyReady` /
+  `SecureBackupPassphraseChangeState::Changed`; AccountActor holds the one
+  copy used by `SaveSecureBackupRecoveryKey`. React renders the key from the
+  snapshot (TS mirror `recovery_key: string`) and never copies it into state,
+  refs, or storage. Copy and the optional save never leave the reveal; only
+  `ConfirmSecureBackupRecoveryKeySaved` does. If AccountActor cannot then
+  clear the persisted delivery marker it keeps its copy and
+  `SecureBackupRecoveryKeyConfirmFailed` restores the setup reveal with
+  `confirmation_failed: true` (TS mirror `confirmation_failed: boolean`). The privacy contract is
+  [engineering rule 11](../policies/engineering-rules.md); the gate
+  transitions are in the [state machines](../architecture/state-machine.md).
 - Secure-backup setup/re-enable confirmation policy is Rust-owned. The closed
   `SecureBackupSetupIntent` must ride both reducer projection and actor command;
   Core admits it against the projected gate before actor routing and preserves
@@ -1303,6 +1335,28 @@ normal QA-title mode and cannot change product title semantics.
   read-only load. Do not add React-local ON/OFF, target, or verification state,
   and never render ON from a requested or failed operation. The email address
   input uses `ImeTextField`; the UIA password uses `SecureImeTextField`.
+- Contact security details in User info (#1024) are Rust-owned
+  `AppState.contact_security` (mirrors: `koushi_state` → `koushi_protocol`
+  `state_update` changed slice → Tauri `dto.rs` domain slice → `types.ts`
+  `ContactSecurityState`). `ProfilePanel` dispatches only
+  `load_contact_security(userId)` on open/contact change and
+  `close_contact_security` on close; it renders "checking" unless
+  `contact_security.user_id` is the open contact. Device confirmation and your
+  verification stay two rows: never merge them into one badge, never color
+  routine unconfirmed devices or never-verified contacts red, and never infer
+  either from `e2ee_trust.devices` or per-message shields. The slice carries
+  no device ids; label devices by ordinal. **Verify user** availability is
+  the Rust `summary.verification` offer, withheld while the Rust-derived
+  `contact_security.verification_busy` is set; React owns only the confirmation
+  step's visibility and dispatches `request_contact_verification` from its
+  Send action, never from opening an explanation. The SAS dialog in the
+  "Your verification" row renders `e2ee_trust.verification` only when its
+  `target.user_id` is the open contact, and offers Accept only for
+  `initiator: "them"`. Focused checks: `cargo test -p
+  koushi-state --test contact_security_state`, `cargo test -p koushi-sdk --lib
+  contact_security`, `cargo test -p koushi-core --lib contact_security`, and
+  `npm --prefix apps/desktop test -- --run
+  src/components/ContactSecurityDetails.test.tsx`.
 - Verification and device DTOs include user/device ids for Rust correlation, but
   the GUI should not display those ids by default. Use ordinal/status labels
   (`Device 1`, `Verified`, etc.) unless a Rust-owned redacted display model is

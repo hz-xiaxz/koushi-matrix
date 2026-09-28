@@ -69,7 +69,6 @@ use super::thread_projection::{
 // END GENERATED SIBLING IMPORTS
 
 /// Bounded diff queue capacity per subscribed timeline (overview.md, Async rule 10).
-
 pub const TIMELINE_DIFF_QUEUE_CAPACITY: usize = 128;
 
 fn initial_thread_backfill_is_authoritative(end_reached: bool, item_count: usize) -> bool {
@@ -326,6 +325,10 @@ impl TimelineManagerHandle {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor wiring: independent owned handles moved into one task"
+    )]
     pub(crate) fn spawn_with_session(
         session: Arc<MatrixClientSession>,
         read_session_generation: u64,
@@ -604,6 +607,10 @@ impl TimelineManagerActor {
     }
     /// Spawn with a session and a search index mutation sender.
     /// Called by `AccountActor::spawn_sync_actor` (Phase 6 wiring).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor wiring: independent owned handles moved into one task"
+    )]
     pub(crate) fn spawn_with_session(
         session: Arc<MatrixClientSession>,
         read_session_generation: u64,
@@ -1164,10 +1171,10 @@ impl TimelineManagerActor {
                 // Release the actor-resource lease only when an actor was
                 // actually removed. Session residency is intentionally
                 // independent and is never removed by unsubscribe.
-                if removed_actor.is_some() {
-                    if let Ok(room_id) = key.room_id().parse::<OwnedRoomId>() {
-                        self.release_room_lease(&room_id);
-                    }
+                if removed_actor.is_some()
+                    && let Ok(room_id) = key.room_id().parse::<OwnedRoomId>()
+                {
+                    self.release_room_lease(&room_id);
                 }
             }
             TimelineCommand::Paginate {
@@ -1856,10 +1863,8 @@ impl TimelineManagerActor {
                 trace("subscribed_done");
             }
             Err(kind) => {
-                if lease_added {
-                    if let Some(room_id) = &lease_room_id {
-                        self.release_room_lease(room_id);
-                    }
+                if lease_added && let Some(room_id) = &lease_room_id {
+                    self.release_room_lease(room_id);
                 }
                 // Keep session residency after a failed actor build; only the
                 // actor-resource lease is rolled back.
@@ -2080,7 +2085,6 @@ pub(super) fn internal_timeline_request_id() -> RequestId {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_source::item_body;
 
     use futures_util::StreamExt;
 
@@ -2193,9 +2197,9 @@ mod tests {
         .expect("reply is projected");
         let requests = server.server().received_requests().await.unwrap();
         assert!(
-            !requests
-                .iter()
-                .any(|r| r.url.path().contains("/relations/") || r.url.path().ends_with("/messages"))
+            !requests.iter().any(
+                |r| r.url.path().contains("/relations/") || r.url.path().ends_with("/messages")
+            )
         );
     }
 
@@ -2206,8 +2210,10 @@ mod tests {
             rx.recv().await.map(|count| (count, rx))
         });
         let mut ready = Box::pin(super::await_initial_thread_projection(false, receiver));
-        assert!(futures_util::poll!(ready.as_mut()).is_pending(),
-            "successful pagination must not fail before its projection arrives");
+        assert!(
+            futures_util::poll!(ready.as_mut()).is_pending(),
+            "successful pagination must not fail before its projection arrives"
+        );
         sender.send(0).unwrap();
         assert!(futures_util::poll!(ready.as_mut()).is_pending());
         sender.send(2).unwrap();
@@ -2216,8 +2222,12 @@ mod tests {
 
     #[tokio::test]
     async fn initial_thread_projection_end_and_closed_stream() {
-        assert!(super::await_initial_thread_projection(true, futures_util::stream::pending()).await);
-        assert!(!super::await_initial_thread_projection(false, futures_util::stream::empty()).await);
+        assert!(
+            super::await_initial_thread_projection(true, futures_util::stream::pending()).await
+        );
+        assert!(
+            !super::await_initial_thread_projection(false, futures_util::stream::empty()).await
+        );
     }
 
     #[tokio::test(start_paused = true)]

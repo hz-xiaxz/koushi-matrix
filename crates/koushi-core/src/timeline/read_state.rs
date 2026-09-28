@@ -1373,20 +1373,20 @@ impl TimelineManagerActor {
             .state
             .complete(&read_key, operation.fence(), outcome);
         let disposition = completion.disposition();
-        if disposition == ReadCompletionDisposition::Succeeded {
-            if let Some(timeline_key) = self.read_timeline_key_for_operation(&operation) {
-                let actor_generation = self
-                    .read_workers
-                    .local_read_correlations
-                    .get(&timeline_key)
-                    .map_or(0, |correlation| correlation.actor_generation);
-                self.update_local_server_confirmation(
-                    &timeline_key,
-                    actor_generation,
-                    &read_key,
-                    Some(operation.target().event_id()),
-                );
-            }
+        if disposition == ReadCompletionDisposition::Succeeded
+            && let Some(timeline_key) = self.read_timeline_key_for_operation(&operation)
+        {
+            let actor_generation = self
+                .read_workers
+                .local_read_correlations
+                .get(&timeline_key)
+                .map_or(0, |correlation| correlation.actor_generation);
+            self.update_local_server_confirmation(
+                &timeline_key,
+                actor_generation,
+                &read_key,
+                Some(operation.target().event_id()),
+            );
         }
         record_read_completion(&read_key, completion.diagnostic());
         let settlements = completion.settlements().to_vec();
@@ -1876,13 +1876,11 @@ impl TimelineManagerActor {
                         if let Some(superseded) = admission.superseded_operation() {
                             self.read_workers.cancel(superseded);
                         }
-                        if matches!(admission.status(), ReadAdmissionStatus::Rejected(_)) {
-                            if let Some(correlation) =
+                        if matches!(admission.status(), ReadAdmissionStatus::Rejected(_))
+                            && let Some(correlation) =
                                 self.read_workers.local_read_correlations.get_mut(key)
-                            {
-                                correlation.admission_failure =
-                                    Some(ReadStateFailureKind::Capacity);
-                            }
+                        {
+                            correlation.admission_failure = Some(ReadStateFailureKind::Capacity);
                         }
                     }
                 }
@@ -1998,14 +1996,11 @@ impl TimelineActor {
             return None;
         };
         for visible_gap_id in &self.viewport_observation.visible_gap_ids {
-            let Some((gap_index, _)) = self
+            let (gap_index, _) = self
                 .gap_repair
                 .projected_gaps
                 .iter()
-                .find(|(_, gap)| gap.id == *visible_gap_id)
-            else {
-                return None;
-            };
+                .find(|(_, gap)| gap.id == *visible_gap_id)?;
             if *gap_index >= target_index {
                 return None;
             }
@@ -2213,9 +2208,7 @@ impl TimelineActor {
             super::receipt_endpoints::ReceiptEndpointChange,
         >,
     ) -> Option<(String, Vec<LiveEventReceipts>)> {
-        let Some(room_id) = timeline_room_id(&self.key) else {
-            return None;
-        };
+        let room_id = timeline_room_id(&self.key)?;
         let receipts_by_event =
             live_event_receipts_from_endpoint_changes(changes, &self.receipt_endpoints);
         if receipts_by_event.is_empty() {

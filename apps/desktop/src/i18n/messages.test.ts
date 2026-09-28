@@ -25,10 +25,20 @@ describe("i18n message catalog", () => {
       "gate.secureBackupSetupCopy",
       "gate.secureBackupPassphrase",
       "gate.secureBackupRecoveryKeyDestination",
-      "gate.secureBackupChooseDestination",
-      "gate.secureBackupDestinationSelected",
-      "gate.secureBackupDestinationNotSelected",
-      "gate.secureBackupDestinationSelectionFailed",
+      "gate.secureBackupRecoveryKeyTitle",
+      "gate.secureBackupRecoveryKeyCopy",
+      "gate.secureBackupCopyRecoveryKey",
+      "gate.secureBackupRecoveryKeyCopied",
+      "gate.secureBackupRecoveryKeyCopyFailed",
+      "gate.secureBackupSaveRecoveryKeyToFile",
+      "gate.secureBackupRecoveryKeySavedToFile",
+      "gate.secureBackupRecoveryKeySaveFailed",
+      "gate.secureBackupRecoveryKeyLost",
+      "gate.secureBackupResetRecoveryKey",
+      "gate.secureBackupResetRecoveryKeyTitle",
+      "gate.secureBackupResetRecoveryKeyWarning",
+      "gate.secureBackupResetRecoveryKeyConfirm",
+      "gate.secureBackupDeliveryTitle",
       "gate.secureBackupSetup",
       "gate.secureBackupExplicitDisabledTitle",
       "gate.secureBackupExplicitDisabledCopy",
@@ -295,7 +305,9 @@ describe("i18n message catalog", () => {
           ts.isJsxAttribute(node) &&
           ["aria-label", "placeholder", "title", "alt"].includes(node.name.getText(sourceFile)) &&
           node.initializer &&
-          ts.isStringLiteral(node.initializer)
+          ts.isStringLiteral(node.initializer) &&
+          // alt="" marks a decorative image; it is not user-visible text.
+          !(node.name.getText(sourceFile) === "alt" && node.initializer.text === "")
         ) {
           findings.push(
             `${file}:${lineNumberAt(sourceFile, node)}: literal ${node.name.getText(sourceFile)} "${node.initializer.text}"`

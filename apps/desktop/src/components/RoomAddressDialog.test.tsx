@@ -117,3 +117,71 @@ test("while the authoritative conflict is shown only the suggestion is added", (
   expect(screen.queryByText(t("dialog.roomAddressAvailable", { address: "#papers:example.invalid" }))).toBeNull();
   expect(screen.getByRole("alert")).toBeTruthy();
 });
+
+// #1023: the room display name is optional; an unnamed room uses the
+// SDK-calculated name. A Space still needs a name.
+test.each(["en", "ja"] as const)("an unnamed room can be created, an unnamed Space cannot, in %s", locale => {
+  setActiveLocaleProfile(locale, "none");
+  const onSubmit = vi.fn();
+  const view = render(<CreateEntityDialog kind="room" isBusy={false} value="  "
+    roomOptions={{ aliasLocalpart: "", topic: "", visibility: "private", encrypted: true, invitedOnly: false }}
+    onCancel={vi.fn()} onValueChange={vi.fn()} onSubmit={onSubmit} onRoomOptionsChange={vi.fn()} />);
+  expect(screen.getByLabelText(t("dialog.roomName")).getAttribute("placeholder")).toBe(t("dialog.roomNameOptional"));
+  expect(screen.getByText(t("dialog.roomNameOptionalHelp"))).toBeTruthy();
+  const submit = screen.getByRole("button", { name: t("dialog.submitCreateRoom") }) as HTMLButtonElement;
+  expect(submit.disabled).toBe(false);
+  fireEvent.click(submit);
+  expect(onSubmit).toHaveBeenCalledTimes(1);
+  view.unmount();
+  render(<CreateEntityDialog kind="space" isBusy={false} value=""
+    onCancel={vi.fn()} onValueChange={vi.fn()} onSubmit={vi.fn()} />);
+  expect((screen.getByRole("button", { name: t("dialog.submitCreateSpace") }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+// #1023: an unnamed public room offers no address suggestion, so Rust reports
+// that it will be created without one; that is not an error.
+test.each(["en", "ja"] as const)("an unnamed public room may be created without an address in %s", locale => {
+  setActiveLocaleProfile(locale, "none");
+  render(<CreateEntityDialog kind="room" isBusy={false} value=""
+    targetSpaceName="research-group"
+    roomOptions={{ aliasLocalpart: "", topic: "", visibility: "public", encrypted: true, invitedOnly: false }}
+    addressPreview={{ localpart: "", full_alias: null, error: null, server_name: "example.invalid", without_address: true }}
+    onCancel={vi.fn()} onValueChange={vi.fn()} onSubmit={vi.fn()} onRoomOptionsChange={vi.fn()} />);
+  expect(screen.getByRole("status").textContent).toBe(t("dialog.roomAddressNone"));
+  expect(screen.getByLabelText(t("dialog.roomAddress")).getAttribute("aria-invalid")).toBe("false");
+  expect((screen.getByRole("button", { name: t("dialog.submitCreateRoom") }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+// #1023: switching to public no longer discards the private option's
+// encryption choice; the request builder sends a public room unencrypted.
+test("switching visibility keeps the private encryption choice", () => {
+  const onChange = vi.fn();
+  render(<CreateEntityDialog kind="room" isBusy={false} value=""
+    roomOptions={{ aliasLocalpart: "", topic: "", visibility: "private", encrypted: true, invitedOnly: false }}
+    onCancel={vi.fn()} onValueChange={vi.fn()} onSubmit={vi.fn()} onRoomOptionsChange={onChange} />);
+  fireEvent.click(screen.getByRole("radio", { name: t("dialog.publicRoom") }));
+  expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ visibility: "public", encrypted: true }));
+});
+
+test.each(["en", "ja"] as const)("an unnamed room's conflict does not quote an empty name in %s", locale => {
+  setActiveLocaleProfile(locale, "none");
+  render(<CreateEntityDialog kind="room" isBusy={false} value=""
+    roomOptions={{ aliasLocalpart: "lobby", topic: "", visibility: "public", encrypted: true, invitedOnly: false }}
+    addressPreview={{ localpart: "lobby", full_alias: "#lobby:example.invalid", error: null, server_name: "example.invalid" }}
+    addressConflict={{ fullAddress: "#lobby:example.invalid", server: "example.invalid", roomName: "" }}
+    onCancel={vi.fn()} onValueChange={vi.fn()} onSubmit={vi.fn()} onRoomOptionsChange={vi.fn()} />);
+  expect(screen.getByRole("alert").textContent).toBe(t("dialog.roomAddressInUseUnnamed", {
+    fullAddress: "#lobby:example.invalid", server: "example.invalid"
+  }));
+});
+
+test("the unnamed conflict copy in English and Japanese", () => {
+  const values = { fullAddress: "#lobby:example.invalid", server: "example.invalid" };
+  expect(t("dialog.roomAddressInUseUnnamed", values)).toBe(
+    "The address #lobby:example.invalid is already in use. Addresses are shared across all Spaces on example.invalid. Change the room address, for example by adding a project name or number, or clear it to create the room without an address."
+  );
+  setActiveLocaleProfile("ja", "none");
+  expect(t("dialog.roomAddressInUseUnnamed", values)).toBe(
+    "アドレス #lobby:example.invalid はすでに使われています。アドレスは example.invalid 上のすべての Space で共通です。ルームアドレスにプロジェクト名や数字などを追加するか、空欄にしてアドレスなしでルームを作成してください。"
+  );
+});

@@ -147,6 +147,10 @@ pub struct ActivityRow {
 }
 
 impl ActivityRow {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+    )]
     pub fn event(
         room_id: String,
         event_id: String,

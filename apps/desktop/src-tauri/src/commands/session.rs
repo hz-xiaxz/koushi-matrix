@@ -4,11 +4,13 @@ use super::account::{
 };
 use super::*;
 use crate::dto::FrontendDesktopSnapshot;
+use crate::oidc_browser::OidcBrowserLaunchFailure;
 #[cfg(not(target_os = "linux"))]
 use crate::oidc_browser::launch_oidc_authorization_url;
-use crate::oidc_browser::{OidcBrowserLaunchFailure, launch_oidc_authorization_url_with_fallback};
 #[cfg(target_os = "linux")]
-use crate::oidc_browser::{launch_linux_default_browser, running_under_wsl};
+use crate::oidc_browser::{
+    launch_linux_default_browser, launch_oidc_authorization_url_with_fallback, running_under_wsl,
+};
 use tauri_plugin_opener::OpenerExt;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
@@ -204,11 +206,11 @@ fn launch_oidc_browser(
             }
             launch_linux_default_browser(url).map_err(|_| ())
         };
-        return if running_under_wsl() {
+        if running_under_wsl() {
             launch_oidc_authorization_url_with_fallback(authorization_url, linux, native)
         } else {
             launch_oidc_authorization_url_with_fallback(authorization_url, native, linux)
-        };
+        }
     }
 
     #[cfg(not(target_os = "linux"))]

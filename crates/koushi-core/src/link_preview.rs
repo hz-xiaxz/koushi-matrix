@@ -58,7 +58,8 @@ impl Default for LinkPreviewContext {
     fn default() -> Self {
         Self {
             unencrypted_global_enabled: true,
-            encrypted_global_enabled: true,
+            // Canon: encrypted-room previews are a privacy-conservative opt-in.
+            encrypted_global_enabled: false,
             room_enabled: None,
             hidden_event_ids: BTreeSet::new(),
             cache: HashMap::new(),
@@ -373,17 +374,13 @@ pub fn link_previews_for_message(
     Some(
         urls.into_iter()
             .map(|url| {
-                context
-                    .cache
-                    .get(&url)
-                    .cloned()
-                    .unwrap_or_else(|| LinkPreview {
-                        url,
-                        title: None,
-                        description: None,
-                        image: None,
-                        state: LinkPreviewState::Pending,
-                    })
+                context.cache.get(&url).cloned().unwrap_or(LinkPreview {
+                    url,
+                    title: None,
+                    description: None,
+                    image: None,
+                    state: LinkPreviewState::Pending,
+                })
             })
             .collect(),
     )

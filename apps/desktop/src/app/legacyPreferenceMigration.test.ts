@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 
-import { readLegacyPreferenceMigration } from "./legacyPreferenceMigration";
+import {
+  LEGACY_SETTINGS_KEYS_WITHOUT_RECENT_EMOJIS,
+  legacyRecentEmojiFollowUp,
+  readLegacyPreferenceMigration
+} from "./legacyPreferenceMigration";
 
 const currentSettings = {
   appearance: { theme: "dark" as const, density: "comfortable" as const },
@@ -110,5 +114,68 @@ describe("legacy frontend preference migration", () => {
       navigationImport: null,
       sourceKeys: ["koushi.displayDensity.v1", "koushi-recent-emojis"]
     });
+  });
+
+  test("an unavailable emoji vocabulary leaves only the recent-emoji list out (#1035)", () => {
+    const storage = memoryStorage({
+      "koushi.displayDensity.v1": "compact",
+      "koushi.homeSelection.v1": JSON.stringify({ kind: "activity" }),
+      "koushi-recent-emojis": JSON.stringify(["🚀"])
+    });
+
+    expect(readLegacyPreferenceMigration(storage, null, currentSettings)).toEqual({
+      settingsPatch: { appearance: { theme: "dark", density: "compact" } },
+      navigationImport: {
+        kind: "importLegacy",
+        home_selection: { kind: "activity" },
+        space_local_presentations: {}
+      },
+      sourceKeys: ["koushi.displayDensity.v1", "koushi.homeSelection.v1"]
+    });
+    expect(storage.getItem("koushi-recent-emojis")).toBe(JSON.stringify(["🚀"]));
+  });
+
+  test("an imported settings migration never lists the recent-emoji key for removal (#1035)", () => {
+    expect(LEGACY_SETTINGS_KEYS_WITHOUT_RECENT_EMOJIS).not.toContain("koushi-recent-emojis");
+    expect(LEGACY_SETTINGS_KEYS_WITHOUT_RECENT_EMOJIS).toHaveLength(4);
+  });
+
+  test("a deferred recent-emoji list is kept until it can be imported or validated (#1035)", () => {
+    const storage = memoryStorage({ "koushi-recent-emojis": JSON.stringify(["🚀", "😀"]) });
+    const composer = { math_mode: false, recent_emojis: ["😀"] };
+
+    // Vocabulary unavailable: keep the key for a later launch.
+    expect(
+      legacyRecentEmojiFollowUp(readLegacyPreferenceMigration(storage, null, currentSettings), null, composer)
+    ).toEqual({ kind: "keep" });
+
+    // Vocabulary ready: import after the current, newer emojis.
+    const valid = new Set(["😀", "🚀"]);
+    expect(
+      legacyRecentEmojiFollowUp(
+        readLegacyPreferenceMigration(storage, valid, currentSettings),
+        valid,
+        composer
+      )
+    ).toEqual({ kind: "import", composer: { math_mode: false, recent_emojis: ["😀", "🚀"] } });
+
+    // Already present: nothing to import, the key can go.
+    expect(
+      legacyRecentEmojiFollowUp(
+        readLegacyPreferenceMigration(storage, valid, currentSettings),
+        valid,
+        { math_mode: false, recent_emojis: ["🚀", "😀"] }
+      )
+    ).toEqual({ kind: "remove" });
+
+    // Corrupt stored value: validated as unusable, the key can go.
+    const corrupt = memoryStorage({ "koushi-recent-emojis": "{broken" });
+    expect(
+      legacyRecentEmojiFollowUp(
+        readLegacyPreferenceMigration(corrupt, valid, currentSettings),
+        valid,
+        composer
+      )
+    ).toEqual({ kind: "remove" });
   });
 });

@@ -5,16 +5,27 @@ import { join, relative, resolve } from "node:path";
 const targetDir = resolve(optionValue("--target-dir") ?? "target");
 const profile = optionValue("--profile") ?? "dev";
 const sdkCacheHit = optionValue("--sdk-cache-hit") ?? "";
+const rustCacheHit = optionValue("--rust-cache-hit") ?? "";
 const label = optionValue("--label") ?? "rust";
+// Registry (tokio, serde) and git (ruma) crates every Rust CI build links. A
+// rust-cache hit without them restored the wrong target directory, which was
+// Issue #947's original defect.
+const representativeDependencies = ["tokio", "serde", "ruma"];
 
 const profileDir = join(targetDir, profile === "dev" ? "debug" : profile === "release" ? "release" : profile);
 const sdkFingerprintCount = countMatchingEntries(join(profileDir, ".fingerprint"), (name) => name.startsWith("matrix-sdk-"));
 const sdkArtifactCount = countMatchingEntries(join(profileDir, "deps"), (name) =>
   /^libmatrix_sdk(?:_|\.)|^matrix_sdk.*\.d$/u.test(name)
 );
+const depsEntries = existsSync(join(profileDir, "deps")) ? readdirSync(join(profileDir, "deps")) : [];
+const missingDependencies = representativeDependencies.filter(
+  (name) => !depsEntries.some((entry) => entry.startsWith(`lib${name}-`) && entry.endsWith(".rlib"))
+);
 const targetBytes = directoryBytes(targetDir);
 
 console.log(`rust_cache_label=${label}`);
+console.log(`rust_cache_rust_cache_hit=${rustCacheHit || "false"}`);
+console.log(`rust_cache_dependency_artifacts_missing=${missingDependencies.join(",") || "none"}`);
 console.log(`rust_cache_target_present=${existsSync(targetDir)}`);
 console.log(`rust_cache_profile=${profile}`);
 console.log(`rust_cache_profile_present=${existsSync(profileDir)}`);
@@ -26,6 +37,11 @@ console.log(`rust_cache_target_bytes=${targetBytes}`);
 if (sdkCacheHit === "true" && (sdkFingerprintCount === 0 || sdkArtifactCount === 0)) {
   throw new Error(`vendored Matrix SDK cache reported a hit but no ${profile}-profile artifacts were restored`);
 }
+if (rustCacheHit === "true" && missingDependencies.length > 0) {
+  throw new Error(
+    `rust-cache reported a hit but representative ${profile}-profile dependency artifacts are missing: ${missingDependencies.join(",")}`
+  );
+}
 
 const summaryPath = process.env.GITHUB_STEP_SUMMARY;
 if (summaryPath) {
@@ -35,6 +51,8 @@ if (summaryPath) {
     "",
     `- target: \`${targetLabel}\``,
     `- profile: \`${profile}\``,
+    `- rust-cache hit: \`${rustCacheHit || "false"}\``,
+    `- representative dependency artifacts missing: ${missingDependencies.join(", ") || "none"}`,
     `- SDK cache hit: \`${sdkCacheHit || "false"}\``,
     `- SDK fingerprints: ${sdkFingerprintCount}`,
     `- SDK artifacts: ${sdkArtifactCount}`,

@@ -222,15 +222,16 @@ async fn password_login_names_an_unnamed_device_with_the_platform_default() {
     // The cosmetic device rename ran exactly once with the platform
     // default. Exact JSON equality proves the body is only the display
     // name — no username, device id, token, or other private identifier.
-    let bodies = rename_bodies.lock().expect("rename record");
-    assert_eq!(bodies.len(), 1, "device rename should run once");
-    let parsed: serde_json::Value =
-        serde_json::from_str(&bodies[0]).expect("rename body should be JSON");
-    assert_eq!(
-        parsed,
-        serde_json::json!({ "display_name": "Koushi on Linux" })
-    );
-    drop(bodies);
+    {
+        let bodies = rename_bodies.lock().expect("rename record");
+        assert_eq!(bodies.len(), 1, "device rename should run once");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&bodies[0]).expect("rename body should be JSON");
+        assert_eq!(
+            parsed,
+            serde_json::json!({ "display_name": "Koushi on Linux" })
+        );
+    }
     shutdown_and_ack(&handle).await;
     while let Ok(event) = event_rx.try_recv() {
         assert!(!matches!(
@@ -266,13 +267,14 @@ async fn password_login_preserves_a_customized_device_name() {
         [AppAction::LoginSucceeded { .. }]
     ) {}
 
-    let bodies = rename_bodies.lock().expect("rename record");
-    assert_eq!(
-        bodies.len(),
-        0,
-        "a customized device name must not be rewritten"
-    );
-    drop(bodies);
+    {
+        let bodies = rename_bodies.lock().expect("rename record");
+        assert_eq!(
+            bodies.len(),
+            0,
+            "a customized device name must not be rewritten"
+        );
+    }
     shutdown_and_ack(&handle).await;
     while let Ok(event) = event_rx.try_recv() {
         assert!(!matches!(
@@ -584,7 +586,7 @@ async fn change_homeserver_retires_a_pending_oidc_attempt() {
 
 #[tokio::test]
 async fn verified_warm_restore_skips_restricted_and_full_state_preparation() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
         .records
         .len();
@@ -1679,7 +1681,7 @@ async fn quarantine_password_server_outlives_the_legacy_request_budget() {
 #[tokio::test]
 async fn session_change_observer_records_exact_unknown_token_diagnostics_for_both_soft_logout_values()
  {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
 
     for soft_logout in [true, false] {
         let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
@@ -1720,7 +1722,7 @@ async fn session_change_observer_records_exact_unknown_token_diagnostics_for_bot
 
 #[tokio::test]
 async fn session_change_observer_forwards_token_rotation_and_keeps_observing() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
 
     let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
         .records
@@ -1765,7 +1767,7 @@ async fn session_change_observer_forwards_token_rotation_and_keeps_observing() {
 
 #[tokio::test]
 async fn admitted_unknown_token_records_exact_lock_diagnostics_for_both_soft_logout_values() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
 
     for soft_logout in [true, false] {
         let (handle, mut action_rx) = crate::account::test_support::login_gated_actor().await;
@@ -1816,7 +1818,7 @@ async fn admitted_unknown_token_records_exact_lock_diagnostics_for_both_soft_log
 
 #[tokio::test]
 async fn unknown_token_before_session_promotion_is_inert_and_not_diagnosed() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let (handle, mut action_rx) = crate::account::test_support::login_gated_actor().await;
     consume_initial_unknown_trust_projection(&mut action_rx).await;
 
@@ -1910,7 +1912,7 @@ async fn unknown_token_fences_an_in_flight_verified_trust_completion() {
 
 #[tokio::test]
 async fn post_teardown_unknown_token_message_is_inert_and_not_diagnosed() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let (handle, mut action_rx) = crate::account::test_support::login_gated_actor().await;
     consume_initial_unknown_trust_projection(&mut action_rx).await;
     handle

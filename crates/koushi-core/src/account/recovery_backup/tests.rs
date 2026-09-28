@@ -107,6 +107,7 @@ fn ready_secure_backup_inspection() -> koushi_sdk::MatrixSecureBackupInspection 
         upload: koushi_sdk::MatrixSecureBackupUploadState::Settled,
         trust: koushi_sdk::MatrixSecureBackupTrustState::Trusted,
         recovery_key_delivery_pending: false,
+        local_cross_signing_complete: true,
     }
 }
 
@@ -174,7 +175,7 @@ fn inconclusive_backup_probe_does_not_revoke_existing_send_admission() {
     inspection.trust = koushi_sdk::MatrixSecureBackupTrustState::Unknown;
 
     assert!(matches!(
-        secure_backup_inspection_completion_action(5, true, true, 5, Ok(inspection.clone())),
+        secure_backup_inspection_completion_action(5, true, true, 5, Ok(inspection)),
         Some(AppAction::SecureBackupGateChanged(
             koushi_state::SecureBackupGateState::DegradedRetrying {
                 failure: koushi_state::SecureBackupGateFailureKind::Network
@@ -440,7 +441,7 @@ async fn recovery_submission_pauses_and_failure_resumes_the_single_provisional_o
 
 #[tokio::test]
 async fn recovery_trust_settlement_timeout_returns_to_recovery_failure() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
         .records
         .len();
@@ -995,7 +996,7 @@ async fn repeated_defers_coalesce_onto_one_deadline() {
 /// inspection instead of failing the gate.
 #[tokio::test]
 async fn proven_connectivity_before_deadline_disarms_deadline_and_starts_inspection() {
-    let (handle, mut action_rx) = verified_actor_with_short_deadline(Duration::from_secs(30)).await;
+    let (handle, _action_rx) = verified_actor_with_short_deadline(Duration::from_secs(30)).await;
     handle.send(AccountMessage::InspectSecureBackup).await;
     let owners = inspect_secure_backup_owners(&handle).await;
     assert!(owners.has_defer_deadline);
@@ -1051,4 +1052,255 @@ async fn retry_when_unproven_requests_sync_status_reprojection() {
         &recv_gate_action_matching(&handle, &mut action_rx, is_blocked_failed_timeout).await
     ));
     shutdown_and_ack(&handle).await;
+}
+
+fn revealed_key(reveal_request_id: u64) -> super::RevealedRecoveryKey {
+    super::RevealedRecoveryKey {
+        reveal_request_id,
+        source: super::RecoveryKeyRevealSource::Setup,
+        key: koushi_state::RecoveryKeyMaterial::new("synthetic-actor-held-key"),
+        delivery: koushi_state::RecoveryKeyDeliveryState::NotWritten,
+    }
+}
+
+#[test]
+fn saving_a_revealed_key_writes_the_held_copy_and_keeps_it_revealed() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("koushi-recovery-key.txt");
+    let revealed = revealed_key(7);
+
+    assert_eq!(
+        super::save_revealed_recovery_key(Some(&revealed), 7, Some(path.clone())),
+        Some(true)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read saved key"),
+        "synthetic-actor-held-key"
+    );
+    // A second save to the same (now existing) path fails closed without
+    // overwriting, and without consuming the revealed key.
+    assert_eq!(
+        super::save_revealed_recovery_key(Some(&revealed), 7, Some(path)),
+        Some(false)
+    );
+    assert_eq!(
+        super::save_revealed_recovery_key(Some(&revealed), 7, None),
+        Some(false)
+    );
+    assert_eq!(revealed.key.expose_secret(), "synthetic-actor-held-key");
+}
+
+#[test]
+fn stale_save_is_rejected_without_writing() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("stale.txt");
+
+    assert_eq!(
+        super::save_revealed_recovery_key(Some(&revealed_key(7)), 8, Some(path.clone())),
+        None
+    );
+    assert_eq!(
+        super::save_revealed_recovery_key(None, 7, Some(path.clone())),
+        None
+    );
+    assert!(!path.exists());
+}
+
+#[tokio::test]
+async fn saved_confirmation_clears_the_marker_before_dropping_the_matching_key() {
+    let mut slot = Some(revealed_key(7));
+
+    assert!(matches!(
+        super::confirm_revealed_recovery_key(&mut slot, 8, async {
+            panic!("a stale confirmation must not touch the marker")
+        })
+        .await,
+        super::RecoveryKeyConfirmOutcome::Stale
+    ));
+    assert!(slot.is_some(), "a stale confirmation must keep the key");
+
+    let cleared = std::cell::Cell::new(false);
+    assert!(matches!(
+        super::confirm_revealed_recovery_key(&mut slot, 7, async {
+            cleared.set(true);
+            Ok(())
+        })
+        .await,
+        super::RecoveryKeyConfirmOutcome::MarkerCleared
+    ));
+    assert!(cleared.get(), "setup confirmation must clear the marker");
+    assert!(slot.is_none(), "confirmation must drop the held key");
+}
+
+#[tokio::test]
+async fn a_failed_marker_clear_keeps_the_key_and_restores_the_reveal() {
+    let mut held = revealed_key(7);
+    held.delivery = koushi_state::RecoveryKeyDeliveryState::Written;
+    let mut slot = Some(held);
+
+    let outcome = super::confirm_revealed_recovery_key(&mut slot, 7, async {
+        Err(koushi_sdk::E2eeTrustError::SecureBackupInspectionInconclusive)
+    })
+    .await;
+
+    let super::RecoveryKeyConfirmOutcome::MarkerClearFailed { restore, .. } = outcome else {
+        panic!("expected a restored reveal, got {outcome:?}");
+    };
+    let AppAction::SecureBackupRecoveryKeyConfirmFailed {
+        reveal_request_id,
+        recovery_key,
+        delivery,
+    } = *restore
+    else {
+        panic!("expected SecureBackupRecoveryKeyConfirmFailed");
+    };
+    assert_eq!(reveal_request_id, 7);
+    assert_eq!(recovery_key.expose_secret(), "synthetic-actor-held-key");
+    assert_eq!(delivery, koushi_state::RecoveryKeyDeliveryState::Written);
+    assert_eq!(
+        slot.as_ref().map(|held| held.key.expose_secret()),
+        Some("synthetic-actor-held-key"),
+        "the saved key must stay held so the user is not forced to reset it"
+    );
+}
+
+#[tokio::test]
+async fn passphrase_change_confirmation_drops_the_key_without_the_marker() {
+    let mut held = revealed_key(11);
+    held.source = super::RecoveryKeyRevealSource::PassphraseChange;
+    let mut slot = Some(held);
+
+    assert!(matches!(
+        super::confirm_revealed_recovery_key(&mut slot, 11, async {
+            panic!("passphrase change never owns the setup delivery marker")
+        })
+        .await,
+        super::RecoveryKeyConfirmOutcome::Dismissed
+    ));
+    assert!(slot.is_none());
+}
+
+#[test]
+fn setup_success_holds_the_key_and_keeps_the_delivery_marker_pending() {
+    let mut slot = None;
+    let mut delivery_pending = false;
+
+    let actions = super::hold_created_setup_recovery_key(
+        &mut slot,
+        &mut delivery_pending,
+        7,
+        "synthetic-actor-held-key",
+    );
+
+    assert!(delivery_pending, "the marker stays set until confirmation");
+    let held = slot.as_ref().expect("the created key is held");
+    assert_eq!(held.reveal_request_id, 7);
+    assert_eq!(held.source, super::RecoveryKeyRevealSource::Setup);
+    assert_eq!(held.key.expose_secret(), "synthetic-actor-held-key");
+    assert!(matches!(
+        actions.as_slice(),
+        [
+            AppAction::SecureBackupRecoveryKeyReady { request_id: 7, recovery_key },
+            AppAction::SecureBackupGateChanged(
+                koushi_state::SecureBackupGateState::RecoveryKeyDeliveryRequired
+            ),
+        ] if recovery_key.expose_secret() == "synthetic-actor-held-key"
+    ));
+}
+
+/// #927 audit: a failed setup/reset must not strand the gate in
+/// `CreatingBackup`, which renders no controls.
+#[tokio::test]
+async fn failed_setup_leaves_creating_backup_and_re_inspects() {
+    let (handle, mut action_rx) = verified_actor_with_short_deadline(Duration::from_secs(30)).await;
+    handle
+        .send(AccountMessage::Command(
+            AccountCommand::BootstrapSecureBackup {
+                request_id: test_request_id(),
+                request: koushi_protocol::command::SecureBackupSetupRequest {
+                    passphrase: None,
+                    recovery_key_destination_requested: false,
+                    intent: koushi_state::SecureBackupSetupIntent::InitialSetup,
+                },
+            },
+        ))
+        .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut failed = false;
+    let gate_after_failure = loop {
+        let remaining = deadline
+            .checked_duration_since(tokio::time::Instant::now())
+            .expect("setup failure projection timeout");
+        let actions = tokio::time::timeout(remaining, action_rx.recv())
+            .await
+            .expect("setup failure projection deadline")
+            .expect("account action channel");
+        crate::account::test_support::route_sliding_sync_effects(&handle, &actions).await;
+        let mut found = None;
+        for action in actions {
+            match action {
+                AppAction::SecureBackupSetupFailed { .. } => failed = true,
+                AppAction::SecureBackupGateChanged(gate) if failed => {
+                    found = Some(gate);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        if let Some(gate) = found {
+            break gate;
+        }
+    };
+    assert_eq!(
+        gate_after_failure,
+        koushi_state::SecureBackupGateState::Checking
+    );
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(
+        owners.inspection_pending || owners.has_inspection_task,
+        "a failed setup must re-inspect the gate"
+    );
+    shutdown_and_ack(&handle).await;
+}
+
+#[tokio::test]
+async fn session_teardown_drops_the_held_recovery_key() {
+    let (handle, _action_rx) = verified_actor_with_short_deadline(Duration::from_secs(30)).await;
+    assert!(
+        handle
+            .send(AccountMessage::SeedRevealedRecoveryKey {
+                revealed: revealed_key(7),
+            })
+            .await
+    );
+    assert!(
+        inspect_secure_backup_owners(&handle)
+            .await
+            .holds_revealed_recovery_key
+    );
+
+    handle
+        .send(AccountMessage::Command(AccountCommand::Logout {
+            request_id: test_request_id(),
+        }))
+        .await;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while inspect_secure_backup_owners(&handle)
+        .await
+        .holds_revealed_recovery_key
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "logout must drop the held recovery key"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    shutdown_and_ack(&handle).await;
+}
+
+#[test]
+fn revealed_key_debug_is_redacted() {
+    let debug = format!("{:?}", revealed_key(7));
+    assert!(!debug.contains("synthetic-actor-held-key"), "{debug}");
 }

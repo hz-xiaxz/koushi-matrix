@@ -161,7 +161,7 @@ pub(super) fn ruma_mentions_from_intent(intent: &MentionIntent) -> Option<Mentio
     let user_ids = intent
         .user_ids()
         .into_iter()
-        .filter_map(|user_id| UserId::parse(user_id).ok().map(Into::into))
+        .filter_map(|user_id| UserId::parse(user_id).ok())
         .collect::<Vec<_>>();
     let mentions_room = intent.mentions_room();
 

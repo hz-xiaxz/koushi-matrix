@@ -317,7 +317,7 @@ mod tests {
         });
         let resources = vec![crate::timeline::ReaderAvatarResource {
             user_id: "@reader:example.org".to_owned(),
-            mxc_uri: mxc_uri,
+            mxc_uri,
             lease: Err(crate::renderable_thumbnail::ThumbnailLeaseError::Capacity),
         }];
 

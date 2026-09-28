@@ -75,25 +75,27 @@ fn search_crawler_last_active_change_uses_a_scoped_slice() {
 
 #[test]
 fn activity_row_updates_use_scoped_deltas_when_stream_shape_is_stable() {
-    let mut previous = AppState::default();
-    previous.activity = ActivityState::Open {
-        active_tab: Default::default(),
-        recent: ActivityStream {
-            rows: vec![ActivityRow::event(
-                "!room:example.invalid".into(),
-                "$event:example.invalid".into(),
-                None,
-                "Room".into(),
-                None,
-                Some("old".into()),
-                1,
-                true,
-                false,
-            )],
-            ..Default::default()
+    let previous = AppState {
+        activity: ActivityState::Open {
+            active_tab: Default::default(),
+            recent: ActivityStream {
+                rows: vec![ActivityRow::event(
+                    "!room:example.invalid".into(),
+                    "$event:example.invalid".into(),
+                    None,
+                    "Room".into(),
+                    None,
+                    Some("old".into()),
+                    1,
+                    true,
+                    false,
+                )],
+                ..Default::default()
+            },
+            unread: ActivityStream::default(),
+            mark_read: Default::default(),
         },
-        unread: ActivityStream::default(),
-        mark_read: Default::default(),
+        ..Default::default()
     };
     let mut next = previous.clone();
     if let ActivityState::Open { recent, .. } = &mut next.activity {
@@ -118,25 +120,27 @@ fn activity_row_updates_use_scoped_deltas_when_stream_shape_is_stable() {
 
 #[test]
 fn activity_order_or_metadata_changes_keep_the_full_slice() {
-    let mut previous = AppState::default();
-    previous.activity = ActivityState::Open {
-        active_tab: Default::default(),
-        recent: ActivityStream {
-            rows: vec![ActivityRow::event(
-                "!room:example.invalid".into(),
-                "$event:example.invalid".into(),
-                None,
-                "Room".into(),
-                None,
-                None,
-                1,
-                true,
-                false,
-            )],
-            ..Default::default()
+    let previous = AppState {
+        activity: ActivityState::Open {
+            active_tab: Default::default(),
+            recent: ActivityStream {
+                rows: vec![ActivityRow::event(
+                    "!room:example.invalid".into(),
+                    "$event:example.invalid".into(),
+                    None,
+                    "Room".into(),
+                    None,
+                    None,
+                    1,
+                    true,
+                    false,
+                )],
+                ..Default::default()
+            },
+            unread: ActivityStream::default(),
+            mark_read: Default::default(),
         },
-        unread: ActivityStream::default(),
-        mark_read: Default::default(),
+        ..Default::default()
     };
     let mut next = previous.clone();
     if let ActivityState::Open { recent, .. } = &mut next.activity {
@@ -151,10 +155,12 @@ fn activity_order_or_metadata_changes_keep_the_full_slice() {
 
 #[test]
 fn account_management_url_clear_is_an_explicit_delta() {
-    let mut previous = AppState::default();
-    previous.account_management_url = Some(AccountManagementUrl::from_validated(
-        "https://account.example/devices".to_owned(),
-    ));
+    let previous = AppState {
+        account_management_url: Some(AccountManagementUrl::from_validated(
+            "https://account.example/devices".to_owned(),
+        )),
+        ..Default::default()
+    };
     let next = AppState::default();
 
     let delta = build_state_delta(2, &previous, &next).expect("URL clear changed state");
@@ -169,9 +175,12 @@ fn state_delta_omits_unchanged_state() {
 
 #[test]
 fn session_lock_reason_delta_preserves_nested_some_and_explicit_none() {
-    let mut locked = AppState::default();
-    locked.session_lock_reason =
-        Some(koushi_state::SessionLockReason::UnknownToken { soft_logout: true });
+    let locked = AppState {
+        session_lock_reason: Some(koushi_state::SessionLockReason::UnknownToken {
+            soft_logout: true,
+        }),
+        ..Default::default()
+    };
     let delta = build_state_delta(2, &AppState::default(), &locked).expect("reason changed");
     assert_eq!(
         delta.changed.session_lock_reason,
@@ -641,10 +650,12 @@ fn room_removal_uses_a_scoped_delta_when_surviving_order_is_stable() {
 
 #[test]
 fn hundred_room_update_publishes_one_room_replacement() {
-    let mut previous = AppState::default();
-    previous.rooms = (0..100)
-        .map(|index| room(&format!("!room-{index}:example.invalid")))
-        .collect();
+    let previous = AppState {
+        rooms: (0..100)
+            .map(|index| room(&format!("!room-{index}:example.invalid")))
+            .collect(),
+        ..Default::default()
+    };
     let mut next = previous.clone();
     next.rooms[42].unread_count = 1;
 

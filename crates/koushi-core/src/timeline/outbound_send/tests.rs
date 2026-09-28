@@ -1,12 +1,10 @@
-use super::super::test_source::item_body;
-
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use std::sync::{Arc, Mutex, atomic::Ordering};
 use std::task::Poll;
 use std::time::Duration;
 
-use futures_util::{FutureExt, StreamExt};
+use futures_util::StreamExt;
 
 use koushi_state::{AppAction, ComposerDocument, ComposerFormattingOptions};
 

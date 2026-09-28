@@ -1,5 +1,3 @@
-use super::super::test_source::item_body;
-
 use std::collections::{BTreeSet, HashSet};
 
 use koushi_state::{
@@ -451,7 +449,7 @@ fn membership_change_projection_is_a_supported_notice() {
 
     assert_eq!(projection.message_kind, TimelineMessageKind::Notice);
     assert_eq!(projection.body.as_deref(), Some("Alice joined the room"));
-    assert_eq!(projection.body_is_user_content, false);
+    assert!(!projection.body_is_user_content);
     assert!(
         !projection
             .body
@@ -513,7 +511,7 @@ fn supported_state_event_notices_carry_i18n_keys() {
             new_name: None,
         })
     );
-    assert_eq!(projection.body_is_user_content, false);
+    assert!(!projection.body_is_user_content);
 }
 
 fn original_room_name_change(

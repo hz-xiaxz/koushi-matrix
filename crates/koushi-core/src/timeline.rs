@@ -67,8 +67,6 @@ mod relay;
 mod residency;
 mod room_key_recovery;
 #[cfg(test)]
-mod test_source;
-#[cfg(test)]
 mod test_support;
 mod thread_projection;
 

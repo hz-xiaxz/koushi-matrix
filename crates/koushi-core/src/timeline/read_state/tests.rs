@@ -1,4 +1,3 @@
-use super::super::test_source::item_body;
 use futures_util::{FutureExt, StreamExt};
 
 use std::collections::{HashMap, HashSet};
@@ -2367,7 +2366,7 @@ fn live_receipt_observation_action_builder_is_pure_and_orders_profiles_first() {
 
 #[tokio::test]
 async fn local_receipt_observation_helper_builds_profile_then_receipt_actions() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     use koushi_state::{AppState, SessionInfo, SessionState, reduce};
     use matrix_sdk::assert_next_with_timeout;
     use matrix_sdk::ruma::{event_id, room_id, user_id};
@@ -2517,7 +2516,7 @@ async fn local_receipt_observation_helper_builds_profile_then_receipt_actions() 
 
 #[tokio::test]
 async fn production_receipt_diff_delivery_refreshes_unknown_with_room_profile() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     use koushi_state::{AppState, reduce};
     use matrix_sdk::ruma::{event_id, room_id, user_id};
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
@@ -2639,7 +2638,7 @@ async fn production_receipt_diff_delivery_refreshes_unknown_with_room_profile() 
 
 #[tokio::test]
 async fn production_receipt_diff_delivery_uses_global_cache_when_local_lookup_misses() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     use koushi_state::{AppState, reduce};
     use matrix_sdk::ruma::{event_id, room_id};
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
@@ -2720,7 +2719,7 @@ async fn production_receipt_diff_delivery_uses_global_cache_when_local_lookup_mi
 
 #[tokio::test]
 async fn scoped_receipt_window_prepares_only_its_selected_profiles() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
     let server = MatrixMockServer::new().await;
     let client = server.client_builder().build().await;
@@ -2813,7 +2812,7 @@ async fn scoped_receipt_window_prepares_only_its_selected_profiles() {
 
 #[tokio::test]
 async fn compact_receipt_profile_lookup_is_bounded_for_1500_readers() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     use koushi_state::{AppState, SessionAuthenticationMethod, SessionState, reduce};
     use matrix_sdk::ruma::room_id;
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
@@ -2897,7 +2896,7 @@ async fn compact_receipt_profile_lookup_is_bounded_for_1500_readers() {
 
 #[tokio::test]
 async fn production_receipt_diff_delivery_sends_receipts_when_local_lookup_fails() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     use koushi_state::SessionAuthenticationMethod;
     use matrix_sdk::ruma::event_id;
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
@@ -2970,7 +2969,7 @@ async fn production_receipt_diff_delivery_sends_receipts_when_local_lookup_fails
 
 #[tokio::test]
 async fn stale_production_receipt_diff_result_is_discarded_after_generation_replacement() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     use koushi_state::SessionAuthenticationMethod;
     use matrix_sdk::ruma::event_id;
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
@@ -3106,8 +3105,8 @@ fn thread_viewport_still_reads_its_own_displayed_replies() {
     assert_eq!(
         viewed_boundary_target(
             &thread_kind,
-            &[reply.clone()],
-            &[reply],
+            std::slice::from_ref(&reply),
+            std::slice::from_ref(&reply),
             "$r1:test",
             TimelineBottomArrival::ContentFits,
         )

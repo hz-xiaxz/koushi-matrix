@@ -19,14 +19,15 @@ fn request(sequence: u64) -> RequestId {
 }
 
 fn ready_state(user_id: &str) -> AppState {
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(SessionInfo {
-        homeserver: "https://example.invalid".to_owned(),
-        user_id: user_id.to_owned(),
-        device_id: "DEVICE".to_owned(),
-        authentication_method: Default::default(),
-    });
-    state
+    AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://example.invalid".to_owned(),
+            user_id: user_id.to_owned(),
+            device_id: "DEVICE".to_owned(),
+            authentication_method: Default::default(),
+        }),
+        ..Default::default()
+    }
 }
 
 fn versioned(
@@ -81,8 +82,10 @@ async fn signed_out_rejects_a_foreign_account_event() {
     let (mut connection, control) = CoreConnection::new_for_testing(4);
     let request_id = request(2);
     let expected = AccountKey("@alice:example.invalid".to_owned());
-    let mut state = AppState::default();
-    state.session = SessionState::SignedOut;
+    let state = AppState {
+        session: SessionState::SignedOut,
+        ..Default::default()
+    };
 
     let waiter = connection.wait_for_request_outcome(
         OutcomeCorrelation::Request(request_id),

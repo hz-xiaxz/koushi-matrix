@@ -154,26 +154,29 @@ export function CreateEntityDialog({
     } satisfies CreateRoomDialogOptions);
   const title = isSpace ? t("dialog.createSpaceTitle") : t("dialog.createRoomTitle");
   const inputLabel = isSpace ? t("dialog.spaceName") : t("dialog.roomName");
+  // #1023: a room's display name is optional (the SDK calculates one); a
+  // Space still needs a name.
+  const inputPlaceholder = isSpace ? inputLabel : t("dialog.roomNameOptional");
   const submitLabel = isSpace
     ? t("dialog.submitCreateSpace")
     : t("dialog.submitCreateRoom");
+  // A public room's address readiness is the Rust preview's verdict,
+  // including "no address" for an unnamed room (#1023).
   const canSubmit =
-    value.trim().length > 0 &&
-    (isSpace ||
-      effectiveRoomOptions.visibility === "private" ||
-      (addressPreview !== null && addressPreview.error === null)) &&
+    (isSpace
+      ? value.trim().length > 0
+      : effectiveRoomOptions.visibility === "private" ||
+        (addressPreview !== null && addressPreview.error === null)) &&
     !isBusy;
 
   function updateRoomOptions(patch: Partial<CreateRoomDialogOptions>) {
-    const next = {
+    // The private options stay as chosen while public is selected, so
+    // switching back restores them; a public room is always requested
+    // unencrypted and not invite-only (`createRoomRequestFromDraft`).
+    onRoomOptionsChange?.({
       ...effectiveRoomOptions,
       ...patch
-    };
-    if (next.visibility === "public") {
-      next.encrypted = false;
-      next.invitedOnly = false;
-    }
-    onRoomOptionsChange?.(next);
+    });
   }
 
   return (
@@ -198,11 +201,17 @@ export function CreateEntityDialog({
           type="text"
           autoFocus
           aria-label={inputLabel}
-          placeholder={inputLabel}
+          aria-describedby={isSpace ? undefined : "create-room-name-help"}
+          placeholder={inputPlaceholder}
           value={value}
           syncKey={`create-${kind}-name`}
           onChange={(event) => onValueChange(event.target.value)}
         />
+        {!isSpace ? (
+          <p id="create-room-name-help" className="create-room-space-note">
+            {t("dialog.roomNameOptionalHelp")}
+          </p>
+        ) : null}
         {!isSpace ? (
           <div className="create-room-options">
             <div className="create-room-visibility" role="radiogroup" aria-label={t("dialog.roomVisibility")}>
@@ -226,7 +235,6 @@ export function CreateEntityDialog({
                   checked={effectiveRoomOptions.visibility === "public"}
                   onChange={() =>
                     updateRoomOptions({
-                      encrypted: false,
                       visibility: "public"
                     })
                   }
@@ -335,16 +343,23 @@ export function CreateEntityDialog({
               />
               {addressConflict ? (
                 <p id="create-room-address-conflict" role="alert">
-                  {t("dialog.roomAddressInUse", {
-                    fullAddress: addressConflict.fullAddress,
-                    server: addressConflict.server,
-                    roomName: addressConflict.roomName
-                  })}
+                  {addressConflict.roomName.trim()
+                    ? t("dialog.roomAddressInUse", {
+                        fullAddress: addressConflict.fullAddress,
+                        server: addressConflict.server,
+                        roomName: addressConflict.roomName
+                      })
+                    : t("dialog.roomAddressInUseUnnamed", {
+                        fullAddress: addressConflict.fullAddress,
+                        server: addressConflict.server
+                      })}
                 </p>
               ) : null}
               <p id="create-room-address-preview" role="status">
                 {addressPreview?.full_alias
                   ? t("dialog.roomAddressPreview", { address: addressPreview.full_alias })
+                  : addressPreview?.without_address
+                  ? t("dialog.roomAddressNone")
                   : t(addressPreview?.error === "empty" ? "dialog.roomAddressEmpty" : addressPreview?.error === "invalid" ? "dialog.roomAddressInvalid" : "dialog.roomAddressPending")}
               </p>
               <RoomAddressAvailabilityNote

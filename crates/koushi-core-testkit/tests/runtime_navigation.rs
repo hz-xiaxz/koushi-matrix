@@ -223,7 +223,7 @@ fn room_in_space(room_id: &str, space_id: &str) -> RoomSummary {
 /// preference mutations must still persist immediately.
 #[tokio::test]
 async fn scroll_anchor_updates_coalesce_into_one_navigation_persist() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let data_dir = tempfile::tempdir().expect("data dir");
     let credential_dir = tempfile::tempdir().expect("credential dir");
     let runtime = CoreRuntime::start_with_data_dir_and_file_credentials(

@@ -56,10 +56,10 @@ impl Mailbox {
         {
             return Ok(());
         }
-        if !self
+        if self
             .in_flight
             .as_ref()
-            .is_some_and(|(issued, _)| *issued == revision)
+            .is_none_or(|(issued, _)| *issued != revision)
         {
             return Err(ScopeError::InvalidRevision);
         }

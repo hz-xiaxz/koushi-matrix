@@ -1,5 +1,3 @@
-use super::super::test_source::item_body;
-
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use std::sync::{Arc, Mutex};
@@ -105,8 +103,13 @@ fn event_cache_structured_fields_include_relation_presence_without_ids() {
     );
     let mut notifying_item = item.clone();
     notifying_item.set_push_actions(vec![matrix_sdk::ruma::push::Action::Notify]);
-    let notifying = event_cache_item_diagnostic_event("cache_initial", &key, "item", Some(4), &notifying_item);
-    assert!(notifying.fields.iter().any(|field| field.key == "push_notify" && field.value == DiagnosticValue::Boolean(true)));
+    let notifying =
+        event_cache_item_diagnostic_event("cache_initial", &key, "item", Some(4), &notifying_item);
+    assert!(
+        notifying.fields.iter().any(
+            |field| field.key == "push_notify" && field.value == DiagnosticValue::Boolean(true)
+        )
+    );
     let serialized = serde_json::to_string(&event).expect("diagnostic event serializes");
     for private_value in [
         "$private-cache-event:test",
@@ -533,7 +536,7 @@ fn thread_summary_diagnostic_is_closed_and_private_data_free() {
 
 #[tokio::test]
 async fn subscribe_replay_path_records_subscribed_done_stage() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let key = room_key();
     let (actor_tx, mut actor_rx) = mpsc::channel(1);
     let actor_task = executor::spawn(async move {
@@ -654,7 +657,7 @@ fn diagnostics_producer_paths_run_in_env_unset_child_process() {
 #[tokio::test]
 #[ignore]
 async fn diagnostics_producer_paths_run_without_trace_environment() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     for variable in [
         "KOUSHI_SUBSCRIBE_TRACE",
         "KOUSHI_TIMELINE_ITEM_TRACE",
@@ -1030,10 +1033,7 @@ async fn read_receipt_repair_uses_local_notification_count() {
         )
     })
     .await;
-    assert_eq!(
-        u64::from(room.unread_notification_counts().notification_count),
-        0
-    );
+    assert_eq!(room.unread_notification_counts().notification_count, 0);
     assert_eq!(room.num_unread_notifications(), 1);
     let context = super::room_latest_receipt_context(&room);
     assert_eq!(context.notification_count, 1);

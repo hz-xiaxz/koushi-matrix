@@ -9,6 +9,10 @@ use koushi_protocol::view::{ReaderWindow, ResolvedReaderAnchor, ViewModel, ViewR
 use koushi_state::SessionState;
 use tokio::sync::oneshot;
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "short-lived value moved once; boxing would add an allocation per message and churn every construction and match site"
+)]
 pub(super) enum ReaderInput {
     Fresh(RawReceiptWindow),
     Cached(Arc<ChargedRaw>),

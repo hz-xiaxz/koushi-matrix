@@ -3,6 +3,7 @@ use koushi_state::{NativeAttentionDispatchId, NativeAttentionSoundOutcome};
 
 pub(crate) mod notification;
 
+#[cfg(target_os = "macos")]
 const NATIVE_BADGE_APPLY_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(target_os = "macos")]
 const MACOS_ALERT_SOUND_DEFAULTS_KEY: &str = "com.apple.sound.beep.sound";
@@ -25,7 +26,11 @@ thread_local! {
 #[serde(rename_all = "camelCase")]
 pub(crate) enum NativeAttentionBadgeOutcome {
     Applied,
+    // Shared IPC contract (mirrored by `desktopAttention.ts`); only the macOS
+    // Dock backend can observe these outcomes today.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Unsupported,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Mismatch,
 }
 
@@ -168,6 +173,9 @@ async fn apply_native_attention_badge(
     Ok(NativeAttentionBadgeOutcome::Applied)
 }
 
+// Dock badge label conversion for the macOS backend, kept under test on every
+// platform.
+#[cfg(any(target_os = "macos", test))]
 fn native_attention_badge_label(count: Option<u64>) -> Option<String> {
     count
         .filter(|count| *count > 0)

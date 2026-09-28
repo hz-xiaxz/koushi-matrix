@@ -156,7 +156,7 @@ fn space_room_profile_label<'a>(
 
 fn local_homeserver_profile_label<'a>(state: &'a AppState, user_id: &str) -> Option<&'a str> {
     (session_user_id(state) == Some(user_id))
-        .then(|| state.profile.own.display_name.as_deref())
+        .then_some(state.profile.own.display_name.as_deref())
         .flatten()
         .filter(|label| has_profile_label(label))
 }

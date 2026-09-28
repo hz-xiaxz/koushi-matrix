@@ -187,10 +187,10 @@ fn extract_link_ranges_keeps_repeated_url_occurrences_distinct() {
 }
 
 #[test]
-fn default_context_enables_encrypted_room_previews() {
+fn default_context_keeps_encrypted_room_previews_opt_in() {
     let context = LinkPreviewContext::default();
     assert!(context.unencrypted_global_enabled);
-    assert!(context.encrypted_global_enabled);
+    assert!(!context.encrypted_global_enabled);
 }
 
 #[test]

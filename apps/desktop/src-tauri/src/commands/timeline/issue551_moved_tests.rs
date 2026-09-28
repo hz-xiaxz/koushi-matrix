@@ -1,7 +1,7 @@
 use super::*;
-use crate::commands::contracts::{fake_request_id, synthetic_session_key};
+use crate::commands::contracts::fake_request_id;
 use koushi_protocol::{AccountKey, CoreCommand, PaginationDirection, TimelineCommand};
-use koushi_state::{ComposerDocument, ComposerInline, MentionTarget};
+use koushi_state::ComposerDocument;
 
 #[test]
 fn build_subscribe_focused_timeline_command_routes_to_focused_timeline_kind() {

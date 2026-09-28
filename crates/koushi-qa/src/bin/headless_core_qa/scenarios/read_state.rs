@@ -447,10 +447,10 @@ async fn wait_for_navigation(
             .await
             .map_err(|_| "read-state convergence navigation timeout".to_owned())?
             .map_err(|_| "read-state convergence event stream closed".to_owned())?
+            && event_key == *key
+            && predicate(&snapshot)
         {
-            if event_key == *key && predicate(&snapshot) {
-                return Ok(snapshot);
-            }
+            return Ok(snapshot);
         }
     }
 }

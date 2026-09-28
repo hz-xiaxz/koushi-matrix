@@ -37,6 +37,27 @@ async function openEmojiPicker(page: import("@playwright/test").Page): Promise<v
   await expect(page.getByRole("dialog", { name: t("composer.emoji") })).toBeVisible();
 }
 
+test("a failed picker chunk closes the picker without unmounting the shell (#1035)", async ({
+  page
+}) => {
+  await page.route(/\/src\/components\/EmojiPicker\.tsx(\?.*)?$/, (route) => route.abort());
+  await gotoReadyShell(page);
+
+  const emojiButton = page.getByRole("button", { name: t("composer.emoji") });
+  await emojiButton.click();
+  // The rejected lazy import is contained: the picker closes instead of
+  // unmounting the shell, and the trigger is usable again.
+  await expect(emojiButton).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("main", { name: t("timeline.conversation") })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: t("composer.emoji") })).toHaveCount(0);
+
+  // Opening again fails the same way and closes again.
+  await emojiButton.click();
+  await expect(emojiButton).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("main", { name: t("timeline.conversation") })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: t("composer.emoji") })).toHaveCount(0);
+});
+
 async function openThreadPane(page: import("@playwright/test").Page): Promise<void> {
   await page.getByRole("button", { name: /2 replies/ }).click();
   await expect(page.getByText(t("panel.thread"), { exact: true })).toBeVisible();
@@ -172,6 +193,45 @@ test("composer and remote-message reaction pickers share Rust-owned recent emoji
         composer: { math_mode: true, recent_emojis: ["🙂", "😀"] }
       }
     });
+});
+
+test("lazily loaded reaction picker owns focus, Escape, and outside-click dismissal", async ({ page }) => {
+  await gotoReadyShell(page);
+  await seedTimelineItems(page, [
+    {
+      id: { Event: { event_id: "$lazy-reaction:example.invalid" } },
+      sender: "@remote-user:example.invalid",
+      sender_label: "Remote User",
+      body: "Lazy reaction target",
+      timestamp_ms: 1_800_000_000_000,
+      in_reply_to_event_id: null,
+      thread_root: null,
+      thread_summary: null,
+      can_react: true,
+      is_redacted: false,
+      is_hidden: false,
+      can_redact: false,
+      is_edited: false,
+      can_edit: false,
+      reactions: []
+    }
+  ]);
+  const row = page.locator('[data-event-id="$lazy-reaction:example.invalid"]');
+  const trigger = row.getByRole("button", { name: t("timeline.addReaction") });
+  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+
+  await row.hover();
+  await trigger.click();
+  await expect(picker.getByRole("searchbox")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(picker).not.toBeVisible();
+  await expect(trigger).toBeFocused();
+
+  await row.hover();
+  await trigger.click();
+  await expect(picker).toBeVisible();
+  await page.locator(".sidebar").click();
+  await expect(picker).not.toBeVisible();
 });
 
 test("typing a search term filters the emoji grid", async ({ page }) => {

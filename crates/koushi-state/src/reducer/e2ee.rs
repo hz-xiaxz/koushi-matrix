@@ -226,21 +226,16 @@ pub(crate) fn handle_verification_requested(
     state: &mut AppState,
     request_id: u64,
     target: VerificationTarget,
+    initiator: crate::state::VerificationInitiator,
 ) -> Vec<AppEffect> {
-    if !is_session_ready(state)
-        || !matches!(
-            state.e2ee_trust.verification,
-            VerificationFlowState::Idle
-                | VerificationFlowState::Done { .. }
-                | VerificationFlowState::Failed { .. }
-        )
-    {
+    if !is_session_ready(state) || state.e2ee_trust.verification.is_in_progress() {
         return Vec::new();
     }
 
     state.e2ee_trust.verification = VerificationFlowState::Requested {
         request_id,
         target: target.clone(),
+        initiator,
     };
     vec![
         AppEffect::RequestVerification { request_id, target },
@@ -252,16 +247,22 @@ pub(crate) fn handle_verification_accepted(
     state: &mut AppState,
     request_id: u64,
 ) -> Vec<AppEffect> {
-    let VerificationFlowState::Requested { target, .. } = &state.e2ee_trust.verification else {
+    let VerificationFlowState::Requested {
+        target, initiator, ..
+    } = &state.e2ee_trust.verification
+    else {
         return Vec::new();
     };
     if verification_request_id(&state.e2ee_trust.verification) != Some(request_id) {
         return Vec::new();
     }
 
+    // For our own request this is the other side's acceptance, projected by
+    // the account actor from the SDK request state.
     state.e2ee_trust.verification = VerificationFlowState::Accepted {
         request_id,
         target: target.clone(),
+        initiator: *initiator,
     };
     vec![
         AppEffect::AcceptVerification { request_id },
@@ -836,16 +837,28 @@ pub(crate) fn handle_room_key_import_failed(
     e2ee_key_management_events()
 }
 
+/// At most one recovery key flow runs at a time (#927): AccountActor holds a
+/// single revealed-key copy, so setup (including re-enable and key reset) and
+/// passphrase change exclude each other from admission until the revealed
+/// key is confirmed, and also while either is still in flight.
+fn recovery_key_flow_busy(state: &AppState) -> bool {
+    matches!(
+        state.e2ee_trust.key_management.secure_backup_setup,
+        SecureBackupSetupState::SettingUp { .. } | SecureBackupSetupState::RecoveryKeyReady { .. }
+    ) || matches!(
+        state.e2ee_trust.key_management.passphrase_change,
+        SecureBackupPassphraseChangeState::Changing { .. }
+            | SecureBackupPassphraseChangeState::Changed { .. }
+    )
+}
+
 pub(crate) fn handle_secure_backup_setup_requested(
     state: &mut AppState,
     request_id: u64,
     intent: crate::state::SecureBackupSetupIntent,
 ) -> Vec<AppEffect> {
     if !is_session_ready(state)
-        || matches!(
-            state.e2ee_trust.key_management.secure_backup_setup,
-            SecureBackupSetupState::SettingUp { .. }
-        )
+        || recovery_key_flow_busy(state)
         || !matches!(
             intent.admission(&state.secure_backup_gate),
             crate::state::SecureBackupSetupAdmission::Allowed
@@ -861,16 +874,12 @@ pub(crate) fn handle_secure_backup_setup_requested(
 pub(crate) fn handle_secure_backup_recovery_key_ready(
     state: &mut AppState,
     request_id: u64,
-    delivery: crate::state::RecoveryKeyDeliveryState,
+    recovery_key: crate::state::RecoveryKeyMaterial,
 ) -> Vec<AppEffect> {
     if !matches!(
         state.e2ee_trust.key_management.secure_backup_setup,
         SecureBackupSetupState::SettingUp {
             request_id: active
-        }
-        | SecureBackupSetupState::RecoveryKeyReady {
-            request_id: active,
-            ..
         } if active == request_id
     ) {
         return Vec::new();
@@ -878,29 +887,10 @@ pub(crate) fn handle_secure_backup_recovery_key_ready(
     state.e2ee_trust.key_management.secure_backup_setup =
         SecureBackupSetupState::RecoveryKeyReady {
             request_id,
-            delivery,
+            recovery_key,
+            delivery: crate::state::RecoveryKeyDeliveryState::NotWritten,
+            confirmation_failed: false,
         };
-    e2ee_key_management_events()
-}
-
-pub(crate) fn handle_secure_backup_setup_enabled(
-    state: &mut AppState,
-    request_id: u64,
-) -> Vec<AppEffect> {
-    if !matches!(
-        state.e2ee_trust.key_management.secure_backup_setup,
-        SecureBackupSetupState::SettingUp {
-            request_id: active
-        }
-        | SecureBackupSetupState::RecoveryKeyReady {
-            request_id: active,
-            ..
-        } if active == request_id
-    ) {
-        return Vec::new();
-    }
-    state.e2ee_trust.key_management.secure_backup_setup =
-        SecureBackupSetupState::Enabled { request_id };
     e2ee_key_management_events()
 }
 
@@ -913,10 +903,6 @@ pub(crate) fn handle_secure_backup_setup_failed(
         state.e2ee_trust.key_management.secure_backup_setup,
         SecureBackupSetupState::SettingUp {
             request_id: active
-        }
-        | SecureBackupSetupState::RecoveryKeyReady {
-            request_id: active,
-            ..
         } if active == request_id
     ) {
         return Vec::new();
@@ -930,12 +916,7 @@ pub(crate) fn handle_secure_backup_passphrase_change_requested(
     state: &mut AppState,
     request_id: u64,
 ) -> Vec<AppEffect> {
-    if !is_session_ready(state)
-        || matches!(
-            state.e2ee_trust.key_management.passphrase_change,
-            SecureBackupPassphraseChangeState::Changing { .. }
-        )
-    {
+    if !is_session_ready(state) || recovery_key_flow_busy(state) {
         return Vec::new();
     }
     state.e2ee_trust.key_management.passphrase_change =
@@ -946,7 +927,7 @@ pub(crate) fn handle_secure_backup_passphrase_change_requested(
 pub(crate) fn handle_secure_backup_passphrase_changed(
     state: &mut AppState,
     request_id: u64,
-    delivery: crate::state::RecoveryKeyDeliveryState,
+    recovery_key: crate::state::RecoveryKeyMaterial,
 ) -> Vec<AppEffect> {
     if !matches!(
         state.e2ee_trust.key_management.passphrase_change,
@@ -959,9 +940,122 @@ pub(crate) fn handle_secure_backup_passphrase_changed(
     state.e2ee_trust.key_management.passphrase_change =
         SecureBackupPassphraseChangeState::Changed {
             request_id,
-            delivery,
+            recovery_key,
+            delivery: crate::state::RecoveryKeyDeliveryState::NotWritten,
         };
     e2ee_key_management_events()
+}
+
+/// Records the optional "Save to file" outcome. Saving never leaves the
+/// reveal state and never changes the Secure Backup gate.
+pub(crate) fn handle_secure_backup_recovery_key_saved(
+    state: &mut AppState,
+    reveal_request_id: u64,
+    written: bool,
+) -> Vec<AppEffect> {
+    let outcome = if written {
+        crate::state::RecoveryKeyDeliveryState::Written
+    } else {
+        crate::state::RecoveryKeyDeliveryState::WriteFailed
+    };
+    let key_management = &mut state.e2ee_trust.key_management;
+    let delivery = match (
+        &mut key_management.secure_backup_setup,
+        &mut key_management.passphrase_change,
+    ) {
+        (
+            SecureBackupSetupState::RecoveryKeyReady {
+                request_id,
+                delivery,
+                ..
+            },
+            _,
+        ) if *request_id == reveal_request_id => delivery,
+        (
+            _,
+            SecureBackupPassphraseChangeState::Changed {
+                request_id,
+                delivery,
+                ..
+            },
+        ) if *request_id == reveal_request_id => delivery,
+        _ => return Vec::new(),
+    };
+    // A failed retry must not erase an earlier successful write.
+    if *delivery == outcome || *delivery == crate::state::RecoveryKeyDeliveryState::Written {
+        return Vec::new();
+    }
+    *delivery = outcome;
+    e2ee_key_management_events()
+}
+
+/// The explicit "I saved the recovery key" confirmation. It drops the key
+/// and, for setup, hands the gate back to authoritative inspection.
+pub(crate) fn handle_secure_backup_recovery_key_confirmed(
+    state: &mut AppState,
+    reveal_request_id: u64,
+) -> Vec<AppEffect> {
+    let key_management = &mut state.e2ee_trust.key_management;
+    if matches!(
+        key_management.secure_backup_setup,
+        SecureBackupSetupState::RecoveryKeyReady { request_id, .. }
+            if request_id == reveal_request_id
+    ) {
+        key_management.secure_backup_setup = SecureBackupSetupState::Enabled {
+            request_id: reveal_request_id,
+        };
+        let mut effects = e2ee_key_management_events();
+        if state.secure_backup_gate
+            == crate::state::SecureBackupGateState::RecoveryKeyDeliveryRequired
+        {
+            state.secure_backup_gate = crate::state::SecureBackupGateState::Checking;
+            effects.push(AppEffect::EmitUiEvent(UiEvent::SessionChanged));
+        }
+        return effects;
+    }
+    if matches!(
+        key_management.passphrase_change,
+        SecureBackupPassphraseChangeState::Changed { request_id, .. }
+            if request_id == reveal_request_id
+    ) {
+        key_management.passphrase_change = SecureBackupPassphraseChangeState::Idle;
+        return e2ee_key_management_events();
+    }
+    Vec::new()
+}
+
+/// Restores the setup reveal after AccountActor failed to clear the
+/// persisted delivery marker. Applies only while the matching confirmation
+/// is the latest setup transition and no other key flow has started.
+pub(crate) fn handle_secure_backup_recovery_key_confirm_failed(
+    state: &mut AppState,
+    reveal_request_id: u64,
+    recovery_key: crate::state::RecoveryKeyMaterial,
+    delivery: crate::state::RecoveryKeyDeliveryState,
+) -> Vec<AppEffect> {
+    if !is_session_ready(state)
+        || recovery_key_flow_busy(state)
+        || !matches!(
+            state.e2ee_trust.key_management.secure_backup_setup,
+            SecureBackupSetupState::Enabled { request_id } if request_id == reveal_request_id
+        )
+    {
+        return Vec::new();
+    }
+    state.e2ee_trust.key_management.secure_backup_setup =
+        SecureBackupSetupState::RecoveryKeyReady {
+            request_id: reveal_request_id,
+            recovery_key,
+            delivery,
+            confirmation_failed: true,
+        };
+    let mut effects = e2ee_key_management_events();
+    if state.secure_backup_gate != crate::state::SecureBackupGateState::RecoveryKeyDeliveryRequired
+    {
+        state.secure_backup_gate = crate::state::SecureBackupGateState::RecoveryKeyDeliveryRequired;
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SessionChanged));
+    }
+    effects
 }
 
 pub(crate) fn handle_secure_backup_passphrase_change_failed(

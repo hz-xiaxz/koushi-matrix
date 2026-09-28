@@ -18,8 +18,10 @@ mod account_notifications;
 mod activity;
 mod avatar;
 mod basic_operation;
+mod contact_security;
 mod directory;
 mod e2ee;
+mod history_export;
 mod invite_workflow;
 mod live_signals;
 mod local_encryption;
@@ -28,7 +30,6 @@ mod native_attention;
 mod navigation;
 mod profile;
 mod room;
-mod history_export;
 mod room_management;
 mod search;
 mod session;
@@ -86,6 +87,12 @@ pub(crate) fn clear_stale_verification_flow(state: &mut AppState) -> bool {
 }
 
 pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
+    let mut effects = reduce_action(state, action);
+    contact_security::sync_verification_busy(state, &mut effects);
+    effects
+}
+
+fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
     match action {
         AppAction::AppStarted => session::handle_app_started(state),
         AppAction::RestoreSessionRequested => session::handle_restore_session_requested(state),
@@ -225,7 +232,20 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             methods,
         } => e2ee::handle_e2ee_recovery_state_changed(state, recovery_state, methods),
         AppAction::VerificationRequested { request_id, target } => {
-            e2ee::handle_verification_requested(state, request_id, target)
+            e2ee::handle_verification_requested(
+                state,
+                request_id,
+                target,
+                crate::state::VerificationInitiator::Them,
+            )
+        }
+        AppAction::VerificationRequestSent { request_id, target } => {
+            e2ee::handle_verification_requested(
+                state,
+                request_id,
+                target,
+                crate::state::VerificationInitiator::Us,
+            )
         }
         AppAction::VerificationAccepted { request_id } => {
             e2ee::handle_verification_accepted(state, request_id)
@@ -373,11 +393,8 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         }
         AppAction::SecureBackupRecoveryKeyReady {
             request_id,
-            delivery,
-        } => e2ee::handle_secure_backup_recovery_key_ready(state, request_id, delivery),
-        AppAction::SecureBackupSetupEnabled { request_id } => {
-            e2ee::handle_secure_backup_setup_enabled(state, request_id)
-        }
+            recovery_key,
+        } => e2ee::handle_secure_backup_recovery_key_ready(state, request_id, recovery_key),
         AppAction::SecureBackupSetupFailed { request_id, kind } => {
             e2ee::handle_secure_backup_setup_failed(state, request_id, kind)
         }
@@ -386,8 +403,25 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         }
         AppAction::SecureBackupPassphraseChanged {
             request_id,
+            recovery_key,
+        } => e2ee::handle_secure_backup_passphrase_changed(state, request_id, recovery_key),
+        AppAction::SecureBackupRecoveryKeySaved {
+            reveal_request_id,
+            written,
+        } => e2ee::handle_secure_backup_recovery_key_saved(state, reveal_request_id, written),
+        AppAction::SecureBackupRecoveryKeyConfirmed { reveal_request_id } => {
+            e2ee::handle_secure_backup_recovery_key_confirmed(state, reveal_request_id)
+        }
+        AppAction::SecureBackupRecoveryKeyConfirmFailed {
+            reveal_request_id,
+            recovery_key,
             delivery,
-        } => e2ee::handle_secure_backup_passphrase_changed(state, request_id, delivery),
+        } => e2ee::handle_secure_backup_recovery_key_confirm_failed(
+            state,
+            reveal_request_id,
+            recovery_key,
+            delivery,
+        ),
         AppAction::SecureBackupPassphraseChangeFailed { request_id, kind } => {
             e2ee::handle_secure_backup_passphrase_change_failed(state, request_id, kind)
         }
@@ -506,6 +540,24 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::AccountManagementCapabilitiesLoadFailed => {
             account::handle_account_management_capabilities_load_failed(state)
         }
+        AppAction::ContactSecurityLoadRequested {
+            request_id,
+            user_id,
+        } => contact_security::handle_load_requested(state, request_id, user_id),
+        AppAction::ContactSecurityLoaded {
+            request_id,
+            user_id,
+            summary,
+        } => contact_security::handle_loaded(state, request_id, &user_id, summary),
+        AppAction::ContactSecurityLoadFailed {
+            request_id,
+            user_id,
+            failure_kind,
+        } => contact_security::handle_load_failed(state, request_id, &user_id, failure_kind),
+        AppAction::ContactSecurityRefreshed { user_id, summary } => {
+            contact_security::handle_refreshed(state, &user_id, summary)
+        }
+        AppAction::ContactSecurityClosed => contact_security::handle_closed(state),
         AppAction::AccountNotificationsLoadRequested { request_id } => {
             account_notifications::handle_load_requested(state, request_id)
         }
@@ -1498,7 +1550,9 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             transaction_id,
             target,
             draft_revision,
-        } => submission::handle_queued(state, submission_id, transaction_id, target, draft_revision),
+        } => {
+            submission::handle_queued(state, submission_id, transaction_id, target, draft_revision)
+        }
         AppAction::ComposerSubmissionSettled {
             submission_id,
             transaction_id,
@@ -1990,6 +2044,8 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
         state.account_management_capabilities != AccountManagementCapabilities::default();
     let had_account_notifications =
         state.account_notifications != crate::state::AccountNotificationsState::default();
+    let had_contact_security =
+        state.contact_security != crate::state::ContactSecurityState::default();
     let had_soft_logout_reauth = state.soft_logout_reauth != SoftLogoutReauthState::Idle;
     let had_qr_login = state.qr_login != QrLoginState::Idle;
     let had_live_signals = state.live_signals != Default::default();
@@ -2041,6 +2097,7 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     state.account_management = AccountManagementState::Idle;
     state.account_management_capabilities = AccountManagementCapabilities::default();
     state.account_notifications = Default::default();
+    state.contact_security = Default::default();
     state.soft_logout_reauth = SoftLogoutReauthState::Idle;
     state.qr_login = QrLoginState::Idle;
     state.live_signals = Default::default();
@@ -2089,6 +2146,9 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     }
     if had_account_notifications {
         effects.push(AppEffect::EmitUiEvent(UiEvent::AccountNotificationsChanged));
+    }
+    if had_contact_security {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::ContactSecurityChanged));
     }
     if had_soft_logout_reauth {
         effects.push(AppEffect::EmitUiEvent(UiEvent::SoftLogoutReauthChanged));

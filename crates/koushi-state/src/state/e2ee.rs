@@ -74,9 +74,18 @@ pub enum SecureBackupSetupState {
     SettingUp {
         request_id: u64,
     },
+    /// The generated recovery key is revealed on screen until the user
+    /// explicitly confirms it was saved (#927). Together with
+    /// `SecureBackupPassphraseChangeState::Changed`, this is the only state
+    /// that carries recovery-key material.
     RecoveryKeyReady {
         request_id: u64,
+        recovery_key: RecoveryKeyMaterial,
         delivery: RecoveryKeyDeliveryState,
+        /// The saved confirmation could not be persisted and the reveal was
+        /// restored; the user is asked to confirm again.
+        #[serde(default)]
+        confirmation_failed: bool,
     },
     Enabled {
         request_id: u64,
@@ -88,12 +97,51 @@ pub enum SecureBackupSetupState {
     },
 }
 
+/// Outcome of the optional "Save to file" action for a revealed key.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum RecoveryKeyDeliveryState {
     #[default]
     NotWritten,
     Written,
+    WriteFailed,
+}
+
+/// A recovery key generated (or reset) by the SDK for on-screen reveal.
+///
+/// Privacy contract (#927): the value may cross to the WebView only through
+/// the live `RecoveryKeyReady`/`Changed` snapshot projection so the user can
+/// read or copy it. `Debug` is redacted, the allocation is zeroized on drop,
+/// and it must never enter diagnostics, logs, QA tokens, or persisted state.
+#[derive(Clone, Eq, PartialEq)]
+pub struct RecoveryKeyMaterial(zeroize::Zeroizing<String>);
+
+impl RecoveryKeyMaterial {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(zeroize::Zeroizing::new(value.into()))
+    }
+
+    pub fn expose_secret(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl std::fmt::Debug for RecoveryKeyMaterial {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("RecoveryKeyMaterial(..)")
+    }
+}
+
+impl Serialize for RecoveryKeyMaterial {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.expose_secret())
+    }
+}
+
+impl<'de> Deserialize<'de> for RecoveryKeyMaterial {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self::new)
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -104,8 +152,10 @@ pub enum SecureBackupPassphraseChangeState {
     Changing {
         request_id: u64,
     },
+    /// The new recovery key is revealed until the user confirms it was saved.
     Changed {
         request_id: u64,
+        recovery_key: RecoveryKeyMaterial,
         delivery: RecoveryKeyDeliveryState,
     },
     Failed {
@@ -123,10 +173,16 @@ pub enum VerificationFlowState {
     Requested {
         request_id: u64,
         target: VerificationTarget,
+        /// Who sent the request. Only an incoming request (`Them`) can be
+        /// accepted; our own request waits for the other side (#1024).
+        #[serde(default)]
+        initiator: VerificationInitiator,
     },
     Accepted {
         request_id: u64,
         target: VerificationTarget,
+        #[serde(default)]
+        initiator: VerificationInitiator,
     },
     SasPresented {
         request_id: u64,
@@ -148,6 +204,31 @@ pub enum VerificationFlowState {
         #[serde(rename = "failureKind")]
         kind: TrustOperationFailureKind,
     },
+}
+
+impl VerificationFlowState {
+    /// A flow is in progress: another request cannot start until it settles
+    /// (`Done`/`Failed`) or is cancelled (`Idle`).
+    pub fn is_in_progress(&self) -> bool {
+        matches!(
+            self,
+            Self::Requested { .. }
+                | Self::Accepted { .. }
+                | Self::SasPresented { .. }
+                | Self::Confirming { .. }
+        )
+    }
+}
+
+/// Which side started a verification request.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum VerificationInitiator {
+    /// This device sent the request (for example **Verify user**).
+    Us,
+    /// Another device or user sent the request to us.
+    #[default]
+    Them,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

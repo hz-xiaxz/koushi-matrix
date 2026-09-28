@@ -21,14 +21,6 @@ pub(super) fn fake_request_id(sequence: u64) -> koushi_protocol::RequestId {
     }
 }
 
-pub(super) fn synthetic_session_key() -> koushi_protocol::SessionKeyId {
-    koushi_protocol::SessionKeyId {
-        homeserver: "https://example.org".to_owned(),
-        user_id: "@alice:example.org".to_owned(),
-        device_id: "DEVICE".to_owned(),
-    }
-}
-
 #[test]
 fn tauri_command_routes_build_expected_core_commands() {
     let active_account_key = AccountKey("@alice:example.org".to_owned());
@@ -158,7 +150,6 @@ fn tauri_command_routes_build_expected_core_commands() {
     match build_bootstrap_secure_backup_command(
         fake_request_id(35),
         Some(AuthSecret::new("backup-setup-phrase")),
-        true,
         koushi_state::SecureBackupSetupIntent::InitialSetup,
     ) {
         CoreCommand::Account(AccountCommand::BootstrapSecureBackup {
@@ -174,7 +165,8 @@ fn tauri_command_routes_build_expected_core_commands() {
                     .expose_secret(),
                 "backup-setup-phrase"
             );
-            assert!(request.recovery_key_destination_requested);
+            // #927: setup reveals the key on screen; no destination.
+            assert!(!request.recovery_key_destination_requested);
             assert_eq!(
                 request.intent,
                 koushi_state::SecureBackupSetupIntent::InitialSetup
@@ -187,7 +179,6 @@ fn tauri_command_routes_build_expected_core_commands() {
         fake_request_id(36),
         AuthSecret::new("old-backup-phrase"),
         AuthSecret::new("new-backup-phrase"),
-        true,
     ) {
         CoreCommand::Account(AccountCommand::ChangeSecureBackupPassphrase {
             request_id,
@@ -196,7 +187,28 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(request_id, fake_request_id(36));
             assert_eq!(request.old_secret.expose_secret(), "old-backup-phrase");
             assert_eq!(request.new_passphrase.expose_secret(), "new-backup-phrase");
-            assert!(request.recovery_key_destination_requested);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    match build_save_secure_backup_recovery_key_command(fake_request_id(37), 35) {
+        CoreCommand::Account(AccountCommand::SaveSecureBackupRecoveryKey {
+            request_id,
+            reveal_request_id,
+        }) => {
+            assert_eq!(request_id, fake_request_id(37));
+            assert_eq!(reveal_request_id, 35);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    match build_confirm_secure_backup_recovery_key_saved_command(fake_request_id(38), 35) {
+        CoreCommand::Account(AccountCommand::ConfirmSecureBackupRecoveryKeySaved {
+            request_id,
+            reveal_request_id,
+        }) => {
+            assert_eq!(request_id, fake_request_id(38));
+            assert_eq!(reveal_request_id, 35);
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -1914,14 +1926,12 @@ fn tauri_command_routes_redact_secret_bearing_values_from_debug() {
     let secure_backup_setup = build_bootstrap_secure_backup_command(
         fake_request_id(25),
         Some(AuthSecret::new("backup-setup-phrase")),
-        true,
         koushi_state::SecureBackupSetupIntent::InitialSetup,
     );
     let secure_backup_change = build_change_secure_backup_passphrase_command(
         fake_request_id(26),
         AuthSecret::new("old-backup-phrase"),
         AuthSecret::new("new-backup-phrase"),
-        true,
     );
 
     for (command, secret) in [

@@ -568,6 +568,10 @@ pub(super) fn emit_items_updated_for_generation(
 
 /// A fresh actor projection is already display-relative. Canonical navigation
 /// state remains actor-owned and is never sent through this event.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn emit_initial_items_for_generation(
     event_tx: &broadcast::Sender<CoreEvent>,
     timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
@@ -602,6 +606,10 @@ pub(super) struct RestoreSettlement {
     pub(super) terminal: Option<(RequestId, TimelineAnchorRestoreStatus)>,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn publish_restore_settlement_for_generation(
     restore_emit_buffer: &mut Vec<TimelineDiff>,
     force_items_updated: bool,
@@ -657,6 +665,10 @@ pub(super) struct PreparedInitialWindow {
     pub(super) emitted_items: Vec<TimelineItem>,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn commit_prepared_initial_window_for_generation(
     navigation_items: &mut Vec<TimelineItem>,
     display_projection: &mut DisplayProjectionState,
@@ -692,6 +704,10 @@ pub(super) fn commit_prepared_initial_window_for_generation(
     true
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn commit_prepared_initial_window_with_lease<F>(
     navigation_items: &mut Vec<TimelineItem>,
     display_projection: &mut DisplayProjectionState,
@@ -802,12 +818,12 @@ impl TimelineManagerActor {
         let actions = self
             .live_tail_refreshes
             .activate(key.clone(), self.room_subscription_service_epoch);
-        if let Some(previous) = previous_foreground {
-            if let Some(handle) = self.timelines.get(&previous) {
-                // Generation invalidation above makes late old-room work inert;
-                // cleanup is best-effort and must never hold the new room.
-                handle.end_gap_repair_demand();
-            }
+        if let Some(previous) = previous_foreground
+            && let Some(handle) = self.timelines.get(&previous)
+        {
+            // Generation invalidation above makes late old-room work inert;
+            // cleanup is best-effort and must never hold the new room.
+            handle.end_gap_repair_demand();
         }
         record_live_tail_state(
             from,
@@ -1102,6 +1118,10 @@ impl TimelineActor {
         self.emit_pagination_completion(request_id, direction, completion);
         completion.into_result()
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+    )]
     async fn paginate_once_for(
         request_id: RequestId,
         key: TimelineKey,
@@ -1910,6 +1930,10 @@ pub(super) fn derive_timeline_navigation_snapshot(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
     kind: &TimelineKind,
     items: &[TimelineItem],
@@ -1924,19 +1948,27 @@ pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
         .or(fully_read_event_id)
         .map(ToOwned::to_owned);
     let local_viewed_event_id = local_viewed_event_id.map(ToOwned::to_owned);
-    let local_position = local_viewed_event_id.as_deref()
+    let local_position = local_viewed_event_id
+        .as_deref()
         .and_then(|event_id| item_index_for_event_id(items, event_id));
-    let confirmed_position = server_confirmed_read_event_id.as_deref()
+    let confirmed_position = server_confirmed_read_event_id
+        .as_deref()
         .and_then(|event_id| item_index_for_event_id(items, event_id));
     let display_marker = match (local_position, confirmed_position) {
         (Some(local), Some(confirmed)) if confirmed > local => {
             // A stored local observation may predate a successful receipt from
             // this or another view. Never place the divider behind that receipt.
             // Hidden edits remain boundaries but are not rendered divider rows.
-            items[local..=confirmed].iter().rev()
-                .find(|item| !item.is_hidden && navigation_item_in_scope(kind, item)
-                    && timeline_item_event_id(item).is_some())
-                .and_then(timeline_item_event_id).map(ToOwned::to_owned)
+            items[local..=confirmed]
+                .iter()
+                .rev()
+                .find(|item| {
+                    !item.is_hidden
+                        && navigation_item_in_scope(kind, item)
+                        && timeline_item_event_id(item).is_some()
+                })
+                .and_then(timeline_item_event_id)
+                .map(ToOwned::to_owned)
         }
         (Some(_), _) => local_viewed_event_id.clone(),
         _ => None,
@@ -1991,10 +2023,9 @@ pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
             .iter()
             .enumerate()
             .skip(read_marker_index)
-            .filter(|(_, item)| {
+            .rfind(|(_, item)| {
                 navigation_item_in_scope(kind, item) && is_own_visible_event(item, own_user_id)
             })
-            .last()
             .and_then(|(_, item)| timeline_item_event_id(item).map(ToOwned::to_owned));
     }
     snapshot
@@ -2038,9 +2069,18 @@ fn timeline_unread_consistency_diagnostic_event(
         .read_marker_event_id
         .as_deref()
         .and_then(event_position);
-    let local_position = snapshot.local_viewed_event_id.as_deref().and_then(event_position);
-    let confirmed_position = snapshot.server_confirmed_read_event_id.as_deref().and_then(event_position);
-    let marker_display_position = snapshot.read_marker_display_event_id.as_deref().and_then(event_position);
+    let local_position = snapshot
+        .local_viewed_event_id
+        .as_deref()
+        .and_then(event_position);
+    let confirmed_position = snapshot
+        .server_confirmed_read_event_id
+        .as_deref()
+        .and_then(event_position);
+    let marker_display_position = snapshot
+        .read_marker_display_event_id
+        .as_deref()
+        .and_then(event_position);
     let first_unread_item = snapshot
         .first_unread_event_id
         .as_deref()
@@ -2220,7 +2260,7 @@ fn is_own_visible_event(item: &TimelineItem, own_user_id: Option<&str>) -> bool 
     if item.is_hidden || !has_user_visible_content(item) {
         return false;
     }
-    if !own_user_id.is_some_and(|own| item.sender.as_deref() == Some(own)) {
+    if own_user_id.is_none_or(|own| item.sender.as_deref() != Some(own)) {
         return false;
     }
     matches!(item.id, TimelineItemId::Event { .. })

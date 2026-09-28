@@ -183,6 +183,8 @@ impl AccountActor {
     pub(super) async fn stop_current_session_runtime(&mut self) -> bool {
         self.set_secure_backup_send_admitted(false);
         self.recovery_key_delivery_pending = false;
+        // Zeroize any revealed recovery key before the session is replaced.
+        self.revealed_recovery_key = None;
         // Retire the renderer before any account-owned child can be replaced.
         // Already-admitted command permits remain live until their exact
         // reducer settlement, but no producer from the retired generation can
@@ -199,6 +201,7 @@ impl AccountActor {
         self.stop_secure_backup_observer().await;
         self.stop_recovery_observer().await;
         self.stop_incoming_verification_observer().await;
+        self.stop_contact_security_observer().await;
         self.stop_session_change_observer().await;
         self.record_lifecycle_probe("shutdown_stop_timeline_actor");
         self.stop_timeline_actor().await;
@@ -488,6 +491,7 @@ impl AccountActor {
         self.stop_recovery_observer().await;
         self.record_lifecycle_probe("stop_incoming_verification_observer");
         self.stop_incoming_verification_observer().await;
+        self.stop_contact_security_observer().await;
         self.record_lifecycle_probe("stop_session_change_observer");
         self.stop_session_change_observer().await;
         self.stop_active_session_account_management_discovery()

@@ -4,6 +4,7 @@ import { createRef } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import koushiLogoUrl from "../assets/koushi-logo.svg";
 import { AuthScreen, RecoveryPanel } from "./auth";
 import type { DesktopSnapshot } from "../domain/types";
 import { setActiveLocaleProfile } from "../i18n/messages";
@@ -233,6 +234,50 @@ describe("AuthScreen", () => {
     expect(screen.getByRole("link", { name: "Create account" }).getAttribute("href")).toBe(
       "https://auth.example.test/register",
     );
+  });
+
+  it.each([
+    ["signed-out login", { kind: "signedOut" } as const],
+    [
+      "locked-session reauthentication",
+      {
+        kind: "locked",
+        homeserver: "https://matrix.example.test",
+        user_id: "@alice:example.test",
+        device_id: "DEVICE",
+      } as const,
+    ],
+  ])("renders the Koushi brand asset instead of a generic hash on %s", (_label, session) => {
+    const { container } = render(
+      <AuthScreen
+        deviceName="Koushi test"
+        homeserver="matrix.example.test"
+        isBusy={false}
+        passwordFilled={false}
+        passwordInputRef={createRef<HTMLInputElement>()}
+        snapshot={snapshot({ session })}
+        username=""
+        onDeviceNameChange={vi.fn()}
+        onDiscoverLoginMethods={vi.fn()}
+        onHomeserverChange={vi.fn()}
+        onPasswordPresenceChange={vi.fn()}
+        onStartOidcLogin={vi.fn()}
+        onSubmit={vi.fn()}
+        onUsernameChange={vi.fn()}
+      />,
+    );
+
+    const mark = container.querySelector(".auth-brand .auth-mark");
+    expect(mark).not.toBeNull();
+    expect(mark?.querySelector("svg.lucide-hash")).toBeNull();
+    const logo = mark?.querySelector("img.auth-logo");
+    expect(logo).not.toBeNull();
+    expect(logo?.getAttribute("src")).toBe(koushiLogoUrl);
+    // The adjacent "Koushi" heading already names the brand, so the logo is
+    // decorative and must not add a redundant screen-reader announcement.
+    expect(logo?.getAttribute("alt")).toBe("");
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Koushi" })).toBeTruthy();
   });
 });
 

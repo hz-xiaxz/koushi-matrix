@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ImeSafeForm, ImeTextField, SecureImeTextField } from "./ImeTextControl";
 import { ResetLocalDataConfirmationDialog } from "./dialogs";
+import { RecoveryKeyReveal, copyRecoveryKeyToClipboard } from "./RecoveryKeyReveal";
 import { t } from "../i18n/messages";
 import { api, startSessionVerificationWindowDrag } from "../backend/appRuntime";
 import type {
@@ -46,7 +47,13 @@ function provisionalPhaseFailure(
 }
 
 type GateOperationKind = "recovery" | "sas" | "cleanup";
-type SecureBackupOperationKind = "recovery" | "setup" | "reenable" | "retry";
+type SecureBackupOperationKind =
+  | "recovery"
+  | "setup"
+  | "reenable"
+  | "retry"
+  | "saveRecoveryKey"
+  | "confirmRecoveryKey";
 
 export interface SessionVerificationGateOperations {
   startOwnUserSas: () => Promise<CommandReceipt>;
@@ -58,10 +65,16 @@ export interface SessionVerificationGateOperations {
   recoverSecureBackup?: (secret: string) => Promise<CommandReceipt>;
   bootstrapSecureBackup?: (
     passphrase: string | null,
-    recoveryKeyDestinationPath: string | null,
     intent: SecureBackupSetupIntent
   ) => Promise<CommandReceipt>;
-  chooseSecureBackupDestination?: () => Promise<string | null>;
+  /** Copies the revealed recovery key; never advances the gate. */
+  copyRecoveryKey?: (recoveryKey: string) => Promise<void>;
+  /**
+   * Optional "Save to file…": chooses a native destination and asks Rust to
+   * write its held copy. Resolves `null` when the picker is cancelled.
+   */
+  saveSecureBackupRecoveryKey?: (revealRequestId: number) => Promise<CommandReceipt | null>;
+  confirmSecureBackupRecoveryKeySaved?: (revealRequestId: number) => Promise<CommandReceipt>;
   retrySecureBackupInspection?: () => Promise<CommandReceipt>;
   openSecureBackupDiagnostics?: () => Promise<void> | void;
 }
@@ -75,8 +88,10 @@ const defaultSessionVerificationGateOperations: SessionVerificationGateOperation
     api.submitDeviceCleanupUia(flowId, password),
   eraseLocalDataAnyway: () => api.eraseLocalDataAnyway(),
   recoverSecureBackup: api.recoverSecureBackup,
-  bootstrapSecureBackup: (passphrase, destination, intent) =>
-    api.bootstrapSecureBackup(passphrase, destination, intent),
+  bootstrapSecureBackup: (passphrase, intent) => api.bootstrapSecureBackup(passphrase, intent),
+  copyRecoveryKey: copyRecoveryKeyToClipboard,
+  confirmSecureBackupRecoveryKeySaved: (revealRequestId) =>
+    api.confirmSecureBackupRecoveryKeySaved(revealRequestId),
   retrySecureBackupInspection: api.retrySecureBackupInspection,
   openSecureBackupDiagnostics: () => api.getDiagnosticSnapshot().then(() => undefined)
 };
@@ -117,7 +132,7 @@ function secureBackupGateHeading(gate: SecureBackupGateState): string {
     case "creatingBackup":
       return t("gate.secureBackupCreating");
     case "recoveryKeyDeliveryRequired":
-      return t("gate.secureBackupDeliveryRequired");
+      return t("gate.secureBackupDeliveryTitle");
     case "uploadingExistingKeys":
       return t("gate.secureBackupUploading");
     case "degradedRetrying":
@@ -167,7 +182,6 @@ export function SessionVerificationGate({
   const recoveryRef = useRef<HTMLInputElement>(null);
   const secureBackupRecoveryRef = useRef<HTMLInputElement>(null);
   const secureBackupPassphraseRef = useRef<HTMLInputElement>(null);
-  const secureBackupDestinationPathRef = useRef<string | null>(null);
   const cleanupPasswordRef = useRef<HTMLInputElement>(null);
   const passphraseRef = useRef<HTMLInputElement>(null);
   const destinationRef = useRef<HTMLInputElement>(null);
@@ -192,27 +206,25 @@ export function SessionVerificationGate({
   const [secureBackupOperation, setSecureBackupOperation] =
     useState<SecureBackupOperationKind | null>(null);
   const [secureBackupOperationError, setSecureBackupOperationError] = useState(false);
-  const [secureBackupDestinationSelectionError, setSecureBackupDestinationSelectionError] =
-    useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [confirmDeviceVerification, setConfirmDeviceVerification] = useState(false);
   const [confirmDeviceCleanup, setConfirmDeviceCleanup] = useState(false);
   const [confirmEraseLocalAnyway, setConfirmEraseLocalAnyway] = useState(false);
   const [confirmSecureBackupReenable, setConfirmSecureBackupReenable] = useState(false);
-  const [secureBackupDestinationSelected, setSecureBackupDestinationSelected] = useState(false);
-  const [secureBackupDestinationChoosing, setSecureBackupDestinationChoosing] = useState(false);
+  const [confirmRecoveryKeyReset, setConfirmRecoveryKeyReset] = useState(false);
   const secureBackupConfirmationOwner =
     "user_id" in session
       ? `${session.homeserver}\u0000${session.user_id}\u0000${session.device_id}`
       : session.kind;
-  const secureBackupDestinationEpochRef = useRef(0);
   useEffect(() => {
-    secureBackupDestinationEpochRef.current += 1;
-    secureBackupDestinationPathRef.current = null;
-    setSecureBackupDestinationSelected(false);
-    setSecureBackupDestinationChoosing(false);
     setConfirmSecureBackupReenable(false);
+    setConfirmRecoveryKeyReset(false);
   }, [secureBackupConfirmationOwner, secureBackupGate.kind]);
+  // #927: the revealed key is read straight from the Rust snapshot and is
+  // never copied into component state.
+  const secureBackupSetupState = snapshot.state.domain.e2ee_trust.key_management.secure_backup_setup;
+  const revealedSetupKey =
+    secureBackupSetupState.kind === "recoveryKeyReady" ? secureBackupSetupState : null;
   const gateOperationsRef = useRef(new Set<GateOperationKind>());
   const secureBackupOperationRef = useRef<SecureBackupOperationKind | null>(null);
   const run = async (
@@ -265,37 +277,9 @@ export function SessionVerificationGate({
         : undefined
     );
   };
-  const chooseSecureBackupDestination = async () => {
-    const operation = operations.chooseSecureBackupDestination;
-    if (!operation || secureBackupDestinationChoosing) return;
-    const epoch = secureBackupDestinationEpochRef.current + 1;
-    secureBackupDestinationEpochRef.current = epoch;
-    setSecureBackupDestinationChoosing(true);
-    setSecureBackupOperationError(false);
-    setSecureBackupDestinationSelectionError(false);
-    try {
-      const selected = (await operation())?.trim() || null;
-      if (secureBackupDestinationEpochRef.current === epoch && selected) {
-        secureBackupDestinationPathRef.current = selected;
-        setSecureBackupDestinationSelected(true);
-      }
-    } catch {
-      if (secureBackupDestinationEpochRef.current === epoch) {
-        setSecureBackupDestinationSelectionError(true);
-      }
-    } finally {
-      if (secureBackupDestinationEpochRef.current === epoch) {
-        setSecureBackupDestinationChoosing(false);
-      }
-    }
-  };
   const submitSecureBackupSetup = (kind: "setup" | "reenable") => {
     const passphrase = secureBackupPassphraseRef.current?.value || null;
-    const destination = secureBackupDestinationPathRef.current;
-    if (!destination) return;
     if (secureBackupPassphraseRef.current) secureBackupPassphraseRef.current.value = "";
-    secureBackupDestinationPathRef.current = null;
-    setSecureBackupDestinationSelected(false);
     if (kind === "reenable") setConfirmSecureBackupReenable(false);
     const intent: SecureBackupSetupIntent =
       kind === "setup"
@@ -304,7 +288,41 @@ export function SessionVerificationGate({
     void runSecureBackup(
       kind,
       operations.bootstrapSecureBackup
-        ? () => operations.bootstrapSecureBackup!(passphrase, destination, intent)
+        ? () => operations.bootstrapSecureBackup!(passphrase, intent)
+        : undefined
+    );
+  };
+  // After an interrupted reveal the unconfirmed key is gone; the only way on
+  // is an explicitly confirmed reset that creates a NEW recovery key.
+  const resetSecureBackupRecoveryKey = () => {
+    setConfirmRecoveryKeyReset(false);
+    void runSecureBackup(
+      "setup",
+      operations.bootstrapSecureBackup
+        ? () =>
+            operations.bootstrapSecureBackup!(null, {
+              kind: "resetRecoveryKey",
+              confirmed: true
+            })
+        : undefined
+    );
+  };
+  const saveSecureBackupRecoveryKey = async (revealRequestId: number) => {
+    const operation = operations.saveSecureBackupRecoveryKey;
+    if (!operation) return;
+    setSecureBackupOperationError(false);
+    try {
+      const receipt = await operation(revealRequestId);
+      if (receipt) await onReceipt(receipt);
+    } catch {
+      setSecureBackupOperationError(true);
+    }
+  };
+  const confirmSecureBackupRecoveryKeySaved = async (revealRequestId: number) => {
+    await runSecureBackup(
+      "confirmRecoveryKey",
+      operations.confirmSecureBackupRecoveryKeySaved
+        ? () => operations.confirmSecureBackupRecoveryKeySaved!(revealRequestId)
         : undefined
     );
   };
@@ -321,25 +339,6 @@ export function SessionVerificationGate({
         aria-label={t("gate.secureBackupPassphrase")}
         autoComplete="new-password"
       />
-      <div className="secure-backup-destination-selector">
-        <button
-          className="dialog-button"
-          disabled={
-            !operations.chooseSecureBackupDestination ||
-            secureBackupDestinationChoosing ||
-            secureBackupOperation !== null
-          }
-          type="button"
-          onClick={() => void chooseSecureBackupDestination()}
-        >
-          {t("gate.secureBackupChooseDestination")}
-        </button>
-        <span role="status" aria-live="polite">
-          {secureBackupDestinationSelected
-            ? t("gate.secureBackupDestinationSelected")
-            : t("gate.secureBackupDestinationNotSelected")}
-        </span>
-      </div>
       <button
         className="dialog-button is-primary"
         disabled={secureBackupOperation === kind}
@@ -384,6 +383,8 @@ export function SessionVerificationGate({
   };
   const heading = authenticationInvalidated
     ? t("gate.sessionExpired")
+    : secureBackupGateRequired && revealedSetupKey !== null
+    ? t("gate.secureBackupDeliveryTitle")
     : secureBackupGateRequired
     ? secureBackupGateHeading(secureBackupGate)
     : checking
@@ -394,9 +395,10 @@ export function SessionVerificationGate({
           ? t("gate.verifying")
           : t("gate.title");
   const secureBackupFailureKind = secureBackupGateFailure(secureBackupGate);
-  const secureBackupNeedsSetup =
-    secureBackupGate.kind === "setupRequired" ||
-    secureBackupGate.kind === "recoveryKeyDeliveryRequired";
+  // The reveal follows the Rust-held key, not the gate: a transient gate
+  // projection (for example `checking` after a retry) must not hide a key
+  // that is still awaiting the saved confirmation.
+  const secureBackupRevealingKey = revealedSetupKey !== null;
   const secureBackupNeedsRecovery =
     secureBackupGate.kind === "existingBackupNeedsRecovery" ||
     secureBackupGate.kind === "secureStorageIncomplete";
@@ -424,9 +426,6 @@ export function SessionVerificationGate({
     {secureBackupGateRequired && secureBackupOperationError && (
       <p role="alert">{t("gate.secureBackupCommandFailed")}</p>
     )}
-    {secureBackupGateRequired && secureBackupDestinationSelectionError && (
-      <p role="alert">{t("gate.secureBackupDestinationSelectionFailed")}</p>
-    )}
     {secureBackupGateRequired && secureBackupNeedsRecovery && (
       <ImeSafeForm
         onSubmit={(event) => {
@@ -450,15 +449,75 @@ export function SessionVerificationGate({
         </button>
       </ImeSafeForm>
     )}
-    {secureBackupGateRequired && secureBackupNeedsSetup && (
+    {secureBackupGateRequired && secureBackupRevealingKey && revealedSetupKey && (
+      <p>{t("gate.secureBackupDeliveryRequired")}</p>
+    )}
+    {secureBackupGateRequired && secureBackupRevealingKey && revealedSetupKey && (
+      <RecoveryKeyReveal
+        key={revealedSetupKey.request_id}
+        recoveryKey={revealedSetupKey.recovery_key}
+        delivery={revealedSetupKey.delivery}
+        confirmationFailed={revealedSetupKey.confirmation_failed}
+        copyRecoveryKey={operations.copyRecoveryKey}
+        onSaveToFile={
+          operations.saveSecureBackupRecoveryKey
+            ? () => saveSecureBackupRecoveryKey(revealedSetupKey.request_id)
+            : undefined
+        }
+        onConfirmSaved={() => confirmSecureBackupRecoveryKeySaved(revealedSetupKey.request_id)}
+        disabled={secureBackupOperation !== null}
+      />
+    )}
+    {secureBackupGateRequired && secureBackupGate.kind === "setupRequired" && (
       <>
         <p>{t("gate.secureBackupSetupCopy")}</p>
-        {secureBackupGate.kind === "recoveryKeyDeliveryRequired" && (
-          <p>{t("gate.secureBackupDeliveryRequired")}</p>
-        )}
         {secureBackupSetupForm("setup")}
       </>
     )}
+    {secureBackupGateRequired &&
+      secureBackupGate.kind === "recoveryKeyDeliveryRequired" &&
+      !secureBackupRevealingKey && (
+        <>
+          <p>{t("gate.secureBackupRecoveryKeyLost")}</p>
+          <button
+            className="dialog-button is-primary"
+            disabled={secureBackupOperation !== null}
+            type="button"
+            onClick={() => setConfirmRecoveryKeyReset(true)}
+          >
+            {t("gate.secureBackupResetRecoveryKey")}
+          </button>
+          {confirmRecoveryKeyReset && (
+            <div
+              className="trust-verification-dialog"
+              role="region"
+              aria-labelledby="secure-backup-reset-title"
+            >
+              <h2 id="secure-backup-reset-title">
+                {t("gate.secureBackupResetRecoveryKeyTitle")}
+              </h2>
+              <p>{t("gate.secureBackupResetRecoveryKeyWarning")}</p>
+              <div className="dialog-actions">
+                <button
+                  className="dialog-button danger"
+                  disabled={secureBackupOperation !== null}
+                  type="button"
+                  onClick={resetSecureBackupRecoveryKey}
+                >
+                  {t("gate.secureBackupResetRecoveryKeyConfirm")}
+                </button>
+                <button
+                  className="dialog-button"
+                  type="button"
+                  onClick={() => setConfirmRecoveryKeyReset(false)}
+                >
+                  {t("action.cancel")}
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     {secureBackupGateRequired && secureBackupGate.kind === "explicitlyDisabledRequiresSetup" && (
       <>
         <h2>{t("gate.secureBackupExplicitDisabledTitle")}</h2>

@@ -25,6 +25,7 @@ use tokio::sync::Mutex as TokioMutex;
 
 use tauri::{Emitter, Manager};
 
+#[cfg(any(debug_assertions, test))]
 pub(crate) use crate::core_event_forwarder::CORE_EVENT_NAME;
 use crate::core_event_forwarder::{CoreEventForwarderTask, spawn_core_event_forwarder};
 use crate::desktop_menu::{MENU_EVENT_NAME, build_desktop_menu, desktop_menu_action_id};
@@ -108,6 +109,8 @@ pub struct CoreRuntimeState {
     /// ring that already exists for the drained connections, and it never
     /// applies backpressure to senders. The snapshot side is a `watch`
     /// receiver, which is latest-wins by construction.
+    /// Read only by the non-macOS close-to-tray gate; macOS hides on close.
+    #[cfg(not(target_os = "macos"))]
     pub(crate) window_lifecycle_connection: CoreConnection,
     /// Tauri-side timeline item count (updated by event loop; QA title only).
     pub(crate) timeline_items_count: Arc<AtomicUsize>,
@@ -390,12 +393,16 @@ fn qa_window_visibility_mode_enabled() -> bool {
     matches!(std::env::var("KOUSHI_QA_TITLE").ok().as_deref(), Some("1"))
 }
 
+// Pure decision for the macOS window-close path; compiled for its macOS caller
+// and for the cross-platform window-close tests.
+#[cfg(any(target_os = "macos", test))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum MacosCloseRequestedAction {
     Hide,
     ExitFullscreenAndHide,
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn macos_close_requested_action(is_fullscreen: Option<bool>) -> MacosCloseRequestedAction {
     if is_fullscreen == Some(true) {
         MacosCloseRequestedAction::ExitFullscreenAndHide
@@ -404,8 +411,8 @@ fn macos_close_requested_action(is_fullscreen: Option<bool>) -> MacosCloseReques
     }
 }
 
+#[cfg(target_os = "macos")]
 impl MacosCloseRequestedAction {
-    #[cfg(target_os = "macos")]
     fn diagnostic_token(self) -> &'static str {
         match self {
             Self::Hide => "hide",
@@ -529,6 +536,10 @@ impl<R: tauri::Runtime> ApplicationExit for tauri::AppHandle<R> {
     }
 }
 
+// Restart-after-shutdown barrier shared by every updater install backend. It
+// is compiled where a backend can request a relaunch and in the
+// platform-neutral restart-barrier tests (see app_updates.rs).
+#[cfg(any(koushi_updater_backend, test))]
 fn request_application_restart_with(
     quit_stage: &AtomicU8,
     restart_after_shutdown: &AtomicBool,
@@ -547,6 +558,7 @@ fn request_application_restart_with(
     }
 }
 
+#[cfg(koushi_updater_backend)]
 pub(crate) fn request_application_restart(app: &tauri::AppHandle) {
     let core_state = app.state::<CoreRuntimeState>();
     request_application_restart_with(
@@ -817,7 +829,7 @@ pub fn run() {
                 )
                 .field(DiagnosticField::token("action", "show_main_window")),
             );
-            ensure_main_window_visible_for_handle(&app);
+            ensure_main_window_visible_for_handle(app);
         }));
     }
 
@@ -869,11 +881,13 @@ pub fn run() {
                 Arc::clone(&timeline_items_count),
             );
             // synchronous snapshot connection for the window-close gate
+            #[cfg(not(target_os = "macos"))]
             let window_lifecycle_connection = runtime.attach();
             let update_settings_connection = runtime.attach();
             let core_state = CoreRuntimeState {
                 runtime,
                 connection: TokioMutex::new(command_conn),
+                #[cfg(not(target_os = "macos"))]
                 window_lifecycle_connection,
                 timeline_items_count,
                 _forwarder_task: Some(forwarder_task),
@@ -960,33 +974,29 @@ pub fn run() {
                 // Only Linux enables native drag/drop (tauri.linux.conf.json).
                 if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) =
                     event
-                {
-                    if let Some(ledger) =
+                    && let Some(ledger) =
                         window.try_state::<commands::dropped_files::DroppedFileLedger>()
-                    {
-                        ledger.record_drop(paths);
-                    }
+                {
+                    ledger.record_drop(paths);
                 }
-                if let Some(focused) = observed_native_window_focus(event) {
-                    if let Some(core_state) = window.try_state::<CoreRuntimeState>() {
-                        if let Some(observation_generation) = next_native_window_focus_generation(
-                            &core_state.native_window_focus_generation,
-                        ) {
-                            let app_handle = window.app_handle().clone();
-                            tauri::async_runtime::spawn(async move {
-                                let core_state = app_handle.state::<CoreRuntimeState>();
-                                let request_id =
-                                    core_state.connection.lock().await.next_request_id();
-                                let command = commands::native_attention::
-                                    build_observe_native_window_focus_command(
-                                        request_id,
-                                        focused,
-                                        observation_generation,
-                                    );
-                                let _ = commands::submit_core_command(&core_state, command).await;
-                            });
-                        }
-                    }
+                if let Some(focused) = observed_native_window_focus(event)
+                    && let Some(core_state) = window.try_state::<CoreRuntimeState>()
+                    && let Some(observation_generation) = next_native_window_focus_generation(
+                        &core_state.native_window_focus_generation,
+                    )
+                {
+                    let app_handle = window.app_handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        let core_state = app_handle.state::<CoreRuntimeState>();
+                        let request_id = core_state.connection.lock().await.next_request_id();
+                        let command =
+                            commands::native_attention::build_observe_native_window_focus_command(
+                                request_id,
+                                focused,
+                                observation_generation,
+                            );
+                        let _ = commands::submit_core_command(&core_state, command).await;
+                    });
                 }
                 let viewport_trigger = match event {
                     tauri::WindowEvent::Resized(_) => {
@@ -1144,6 +1154,9 @@ pub fn run() {
             commands::account::deactivate_account,
             commands::account::submit_account_management_uia,
             commands::account::load_account_notifications,
+            commands::account::load_contact_security,
+            commands::account::close_contact_security,
+            commands::account::request_contact_verification,
             commands::account::set_notification_category,
             commands::account::set_account_push_enabled,
             commands::account::request_notification_email_token,
@@ -1166,6 +1179,8 @@ pub fn run() {
             commands::e2ee::recover_secure_backup,
             commands::e2ee::retry_secure_backup_inspection,
             commands::e2ee::change_secure_backup_passphrase,
+            commands::e2ee::save_secure_backup_recovery_key,
+            commands::e2ee::confirm_secure_backup_recovery_key_saved,
             commands::e2ee::export_room_keys,
             commands::e2ee::import_room_keys,
             commands::history_export::history_export_time_zone,
@@ -1325,19 +1340,19 @@ pub fn run() {
             // window-destroy path, so `AppCommand::Shutdown` is submitted
             // exactly once whether the product window was hidden or destroyed,
             // and `ExitRequested` is treated the same for any exit code.
-            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
-                if let Some(core_state) = app.try_state::<CoreRuntimeState>() {
-                    let stage = QuitStage::from_repr(core_state.quit_stage.load(Ordering::Acquire));
-                    match quit_request_action(stage) {
-                        QuitRequestAction::BeginShutdown => {
-                            api.prevent_exit();
-                            if claim_core_shutdown(&core_state.quit_stage) {
-                                begin_graceful_shutdown(app.clone());
-                            }
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event
+                && let Some(core_state) = app.try_state::<CoreRuntimeState>()
+            {
+                let stage = QuitStage::from_repr(core_state.quit_stage.load(Ordering::Acquire));
+                match quit_request_action(stage) {
+                    QuitRequestAction::BeginShutdown => {
+                        api.prevent_exit();
+                        if claim_core_shutdown(&core_state.quit_stage) {
+                            begin_graceful_shutdown(app.clone());
                         }
-                        QuitRequestAction::AwaitShutdown => api.prevent_exit(),
-                        QuitRequestAction::Exit => {}
                     }
+                    QuitRequestAction::AwaitShutdown => api.prevent_exit(),
+                    QuitRequestAction::Exit => {}
                 }
             }
             #[cfg(target_os = "macos")]

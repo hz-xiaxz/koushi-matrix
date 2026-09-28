@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use koushi_protocol::failure::TimelineFailureKind;
 
 use super::super::item_projection::{
-    attachment_reply_for_key, reply_enforce_thread_for_key, timeline_sender_avatar_from_profile,
+    attachment_reply_for_key, timeline_sender_avatar_from_profile,
     timeline_sender_label_from_profile,
 };
 use super::super::navigation::TimelineActorGenerationGate;
@@ -300,14 +300,6 @@ fn composer_core_rejects_recognized_unavailable_commands_locally() {
             TimelineFailureKind::UnsupportedSlashCommand
         );
     }
-}
-
-#[test]
-fn thread_composer_sends_regular_thread_messages_for_element_compatibility() {
-    assert_eq!(
-        reply_enforce_thread_for_key(&thread_key()),
-        EnforceThread::Threaded(ReplyWithinThread::No)
-    );
 }
 
 #[test]

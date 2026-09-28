@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-09-12.
+Last amended: 2026-09-28.
 
 The evidence-based classification of remaining frontend-owned resources and
 semantic migration candidates is maintained in
@@ -1209,6 +1209,20 @@ action so in-progress composer work is not discarded. Public failure state is co
 bodies, release URLs, local paths, signatures, key material, or raw library
 errors.
 
+The updater separates a platform-neutral engine from install backends. The
+engine (`app_updates.rs`: projection, policy watermarks, lifecycle transitions,
+operation generations, the owner loop and 24-hour scheduling, shutdown and
+restart coordination) and the channel policy (feed selection and
+greatest-SemVer choice) compile on every desktop target and are tested on Linux
+CI with a fake backend. A backend supplies only capability, feed access and
+signature verification, artifact installation, and the native relaunch
+request, behind the `Backend` trait. The `koushi_updater_backend` cfg, set by
+the desktop `build.rs`, marks targets that ship a backend (macOS today). Other
+targets compile against an uninhabited placeholder, so they report
+`unsupported` and never start update work. A future Linux backend implements
+the same trait and enables that cfg. It reuses the engine unchanged and must
+first settle which distribution formats it owns.
+
 The update adapter owns one serialized lifecycle and one cancellable worker.
 Generation-fenced completions and candidate-specific download approval prevent
 overlapping triggers or channel changes from substituting an unapproved release.
@@ -1364,6 +1378,18 @@ decides ON/OFF, email target, or verification state. Server-side push rules
 cannot see mentions inside encrypted events, so the snapshot also carries the
 MSC4028 `encrypted_event_push` fact and the UI states the encrypted-room
 limitation of Group OFF (state-machine.md, "Account Notification Settings").
+Contact security details in User info (#1024) are Rust-owned
+`AppState.contact_security`: the AccountActor retrieves one contact's device
+keys and identity through `koushi-sdk::contact_security` (a fresh
+`/keys/query`, then SDK store reads refreshed from the device/identity
+streams) and projects two separate facts, owner confirmation of the
+contact's devices and your verification of the contact. Loading the details
+is read-only with respect to trust and send policy; the slice is fenced by
+contact and request id and never carries device ids or keys. React
+dispatches the load/close commands, plus `RequestVerification` from the
+Verify user confirmation step (which starts the shared SAS verification
+flow), and renders the snapshot (state-machine.md, "Contact Security
+Details").
 Message formatting is also projected before it reaches React:
 `TimelineItem.formatted` is sanitized in Rust from Matrix `formatted_body` and
 carries sanitized HTML plus plain-text/code-block metadata. Message type

@@ -81,7 +81,7 @@ async fn provisional_verification_hands_one_encryption_sync_owner_to_normal_runt
         .and(path("/_matrix/client/v3/login"))
         .respond_with(EchoRequestedLoginDevice)
         .expect(1)
-        .mount(&server.server())
+        .mount(server.server())
         .await;
     let (first_request_tx, first_request_rx) = tokio::sync::oneshot::channel();
     Mock::given(method("POST"))
@@ -92,7 +92,7 @@ async fn provisional_verification_hands_one_encryption_sync_owner_to_normal_runt
             first_request: Arc::new(Mutex::new(Some(first_request_tx))),
             request_count: Arc::new(AtomicUsize::new(0)),
         })
-        .mount(&server.server())
+        .mount(server.server())
         .await;
 
     let data_dir = tempfile::tempdir().expect("runtime data directory");

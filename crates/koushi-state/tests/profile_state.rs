@@ -835,13 +835,15 @@ fn local_user_aliases_project_receipt_original_display_labels() {
 
 #[test]
 fn local_user_aliases_debug_redacts_user_ids_and_aliases() {
-    let mut profile = koushi_state::ProfileState::default();
-    profile.own = OwnProfile {
-        display_name: Some("Visible Own Name".to_owned()),
-        avatar: Some(AvatarImage {
-            mxc_uri: "mxc://example.invalid/own-avatar".to_owned(),
-            thumbnail: AvatarThumbnailState::NotRequested,
-        }),
+    let mut profile = koushi_state::ProfileState {
+        own: OwnProfile {
+            display_name: Some("Visible Own Name".to_owned()),
+            avatar: Some(AvatarImage {
+                mxc_uri: "mxc://example.invalid/own-avatar".to_owned(),
+                thumbnail: AvatarThumbnailState::NotRequested,
+            }),
+        },
+        ..Default::default()
     };
     profile.users.insert(
         "@carol:localhost".to_owned(),

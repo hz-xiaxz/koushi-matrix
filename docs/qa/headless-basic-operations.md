@@ -60,7 +60,17 @@ different, unchecked alternative, report an unused address available, and
 clear back to idle. From a Space, the unedited suggestion must be `<space>-<room>`; reusing
 the room-only address taken outside the Space must fail as `AliasInUse`, and the
 Space-prefixed address must create a room with the same display name that is
-linked to the Space (#1006). The `live_signals` lane additionally
+linked to the Space (#1006). It also requires the #1023 tokens
+`room_public_space_default=ok`, `room_unnamed_public_space=ok`,
+`room_unnamed_alias_name=ok`, `room_unnamed_alias_conflict=ok`,
+`room_unnamed_rename=ok`, and `room_public_space_private_choice=ok`: in a Space
+made public, the Rust create-room default is public; an unnamed room with no
+entered address is created public without `m.room.name` or an alias, linked to
+the Space, and shown under the SDK-calculated name in the room list and the
+Space's rooms; an entered address becomes the canonical alias that names an
+unnamed room (the SDK shows its localpart); reusing it fails as `AliasInUse`;
+naming the room later replaces the calculated name; and explicitly choosing
+private creates a restricted Space room. The `live_signals` lane additionally
 requires `ignored_user_history_recovery=ok`: both ignore and unignore must show a
 Clear followed by the existing event's return, without a new message, restart or
 viewport request. Both additions are also mandatory for `all`. The shared Node

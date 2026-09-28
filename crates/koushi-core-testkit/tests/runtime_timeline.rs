@@ -1,6 +1,5 @@
 //! Runtime timeline / composer integration tests.
 
-use koushi_core::executor;
 use koushi_core::runtime::CoreRuntime;
 use koushi_protocol::SessionKeyId;
 use koushi_protocol::command::{AppCommand, CoreCommand, TimelineCommand};
@@ -30,12 +29,6 @@ fn classic_sync_or_legacy_checkpoint_tokens(source: &str) -> Result<(), Vec<&'st
         .filter(|token| source.contains(token))
         .collect::<Vec<_>>();
     if found.is_empty() { Ok(()) } else { Err(found) }
-}
-
-fn assert_no_classic_sync_or_legacy_checkpoint_path(source: &str) {
-    if let Err(found) = classic_sync_or_legacy_checkpoint_tokens(source) {
-        panic!("forbidden production timeline sync tokens: {found:?}");
-    }
 }
 
 #[test]
@@ -1121,7 +1114,7 @@ impl PreparedCorruptComposerLoadFixture {
 #[tokio::test]
 async fn corrupt_load_attempts_once_per_session() {
     let _serial = CORRUPT_COMPOSER_LOAD_TEST_LOCK.lock().await;
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let prepared = CorruptComposerLoadFixture::prepare().await;
     let mut fixture = prepared.start().await;
     let sentinel_room = "!sentinel:example.test";
@@ -1158,7 +1151,7 @@ async fn corrupt_load_attempts_once_per_session() {
 #[tokio::test]
 async fn concurrent_corrupt_runtime_evidence_is_owner_scoped() {
     let _serial = CORRUPT_COMPOSER_LOAD_TEST_LOCK.lock().await;
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let first_prepared = CorruptComposerLoadFixture::prepare().await;
     let second_prepared = CorruptComposerLoadFixture::prepare().await;
     let failed_before = composer_load_diagnostic_count("load_failed");
@@ -1166,12 +1159,12 @@ async fn concurrent_corrupt_runtime_evidence_is_owner_scoped() {
     let first_settled = {
         let state = first.connection.snapshot();
         matches!(state.session, SessionState::Ready(_))
-            && state.composer_drafts.rooms.get(first.room_id).is_none()
+            && !state.composer_drafts.rooms.contains_key(first.room_id)
     };
     let second_settled = {
         let state = second.connection.snapshot();
         matches!(state.session, SessionState::Ready(_))
-            && state.composer_drafts.rooms.get(second.room_id).is_none()
+            && !state.composer_drafts.rooms.contains_key(second.room_id)
     };
     assert!(
         first_settled && second_settled,
@@ -1196,7 +1189,7 @@ async fn concurrent_corrupt_runtime_evidence_is_owner_scoped() {
 #[tokio::test]
 async fn revision_commands_fail_while_composer_load_failed() {
     let _serial = CORRUPT_COMPOSER_LOAD_TEST_LOCK.lock().await;
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let mut fixture = CorruptComposerLoadFixture::prepare().await.start().await;
     let before = fixture.connection.snapshot();
     let set_request_id = fixture.connection.next_request_id();
@@ -1248,7 +1241,7 @@ async fn revision_commands_fail_while_composer_load_failed() {
 #[tokio::test]
 async fn verification_gate_reentry_retries_repaired_composer_payload() {
     let _serial = CORRUPT_COMPOSER_LOAD_TEST_LOCK.lock().await;
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let mut fixture = CorruptComposerLoadFixture::prepare().await.start().await;
     std::fs::write(&fixture.payload_path, &fixture.valid_payload)
         .expect("install repaired valid encrypted composer payload");
@@ -1637,7 +1630,7 @@ async fn permit_drop_notification_reconciles_collector_without_followup_action()
     })
     .await;
     assert!(
-        collected.composer_drafts.rooms.get(held_room).is_none(),
+        !collected.composer_drafts.rooms.contains_key(held_room),
         "permit-drop notification alone must reconcile and collect the oldest eligible tombstone"
     );
 }

@@ -984,9 +984,7 @@ impl SearchActor {
         filter: AttachmentFilter,
         sort: AttachmentSort,
     ) {
-        let results = self
-            .document_store
-            .attachments(&scope, &filter, sort.clone());
+        let results = self.document_store.attachments(&scope, &filter, sort);
 
         let _ = self
             .action_tx
@@ -1607,6 +1605,10 @@ fn matrix_sdk_search_scope(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "actor wiring: independent owned handles moved into one task"
+)]
 async fn run_sdk_query(
     session: Arc<MatrixClientSession>,
     generation: u64,

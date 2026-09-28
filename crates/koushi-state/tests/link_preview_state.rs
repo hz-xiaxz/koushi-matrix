@@ -39,10 +39,11 @@ fn ready_state_with_room(room_id: &str) -> AppState {
 }
 
 #[test]
-fn display_settings_default_enables_url_previews() {
+fn display_settings_default_enables_unencrypted_but_not_encrypted_url_previews() {
     let values = SettingsValues::default();
     assert!(values.display.url_previews_enabled);
-    assert!(values.display.encrypted_url_previews_enabled);
+    // Canon: encrypted-room previews are a privacy-conservative explicit opt-in.
+    assert!(!values.display.encrypted_url_previews_enabled);
     assert!(
         AppState::default()
             .link_preview_settings

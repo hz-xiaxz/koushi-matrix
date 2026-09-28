@@ -4,13 +4,15 @@ use koushi_state::{
 };
 
 fn ready_state() -> AppState {
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(SessionInfo {
-        homeserver: "https://matrix.example.invalid".to_owned(),
-        user_id: "@attention:example.invalid".to_owned(),
-        device_id: "ATTENTION".to_owned(),
-        authentication_method: SessionAuthenticationMethod::Unknown,
-    });
+    let mut state = AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://matrix.example.invalid".to_owned(),
+            user_id: "@attention:example.invalid".to_owned(),
+            device_id: "ATTENTION".to_owned(),
+            authentication_method: SessionAuthenticationMethod::Unknown,
+        }),
+        ..Default::default()
+    };
     state.settings.values = SettingsValues::default();
     state
 }
@@ -33,7 +35,10 @@ fn pending_notification_requires_a_ready_session() {
     state.native_attention.notification = Some(payload());
     state.session = SessionState::SignedOut;
 
-    assert_eq!(pending_notification(&state).err(), Some("session_unavailable"));
+    assert_eq!(
+        pending_notification(&state).err(),
+        Some("session_unavailable")
+    );
 }
 
 #[test]
@@ -100,13 +105,9 @@ fn activation_event_carries_the_target_without_preview_text() {
 
 #[test]
 fn outcome_tokens_stay_stable_for_diagnostics() {
+    assert_eq!(NativeNotificationOutcome::Delivered.token(), "delivered");
     assert_eq!(
-        NativeNotificationOutcome::Delivered.token(),
-        "delivered"
-    );
-    assert_eq!(
-        serde_json::to_value(NativeNotificationOutcome::DisplayOnly)
-            .expect("outcome serializes"),
+        serde_json::to_value(NativeNotificationOutcome::DisplayOnly).expect("outcome serializes"),
         serde_json::json!("displayOnly")
     );
 }

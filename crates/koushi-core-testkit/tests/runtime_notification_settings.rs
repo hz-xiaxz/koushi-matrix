@@ -134,10 +134,9 @@ async fn privacy_settings_patch_gates_read_receipt_dispatch() {
         loop {
             if let CoreEvent::OperationFailed { request_id, .. } =
                 conn.recv_event().await.expect("event")
+                && request_id == subscribe_id
             {
-                if request_id == subscribe_id {
-                    return true;
-                }
+                return true;
             }
         }
     })
@@ -191,10 +190,9 @@ async fn privacy_settings_patch_gates_read_receipt_dispatch() {
         loop {
             if let CoreEvent::OperationFailed { request_id, .. } =
                 conn.recv_event().await.expect("event")
+                && request_id == second
             {
-                if request_id == second {
-                    return false;
-                }
+                return false;
             }
         }
     })
@@ -230,10 +228,9 @@ async fn privacy_settings_patch_gates_typing_dispatch() {
         loop {
             if let CoreEvent::OperationFailed { request_id, .. } =
                 conn.recv_event().await.expect("event")
+                && request_id == subscribe_id
             {
-                if request_id == subscribe_id {
-                    return true;
-                }
+                return true;
             }
         }
     })
@@ -290,10 +287,9 @@ async fn privacy_settings_patch_gates_typing_dispatch() {
         loop {
             if let CoreEvent::OperationFailed { request_id, .. } =
                 conn.recv_event().await.expect("event")
+                && request_id == typed
             {
-                if request_id == typed {
-                    return false;
-                }
+                return false;
             }
         }
     })
@@ -313,8 +309,7 @@ async fn account_notification_commands_project_and_settle_through_the_runtime() 
     use koushi_protocol::command::AccountNotificationsRequest;
     use koushi_state::{
         AccountNotificationsFailureKind, AccountNotificationsLoadState,
-        AccountNotificationsOperation, AccountNotificationsOperationState,
-        NotificationCategory,
+        AccountNotificationsOperation, AccountNotificationsOperationState, NotificationCategory,
     };
 
     let runtime = CoreRuntime::start();

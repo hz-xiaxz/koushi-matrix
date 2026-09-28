@@ -296,6 +296,10 @@ pub struct SyncActor {
 }
 
 impl SyncActor {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor wiring: independent owned handles moved into one task"
+    )]
     pub(crate) fn spawn(
         session: Arc<MatrixClientSession>,
         action_tx: mpsc::Sender<Vec<AppAction>>,
@@ -594,14 +598,13 @@ impl SyncActor {
         // Join the observer before the final SDK stop. If a recoverable
         // Terminated observation was already in its backoff/start path, this
         // barrier lets that path finish first and the final stop still wins.
-        if let Some(mut task) = self.sync_task.take() {
-            if executor::timeout(SYNC_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut task)
+        if let Some(mut task) = self.sync_task.take()
+            && executor::timeout(SYNC_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut task)
                 .await
                 .is_err()
-            {
-                task.abort();
-                let _ = task.await;
-            }
+        {
+            task.abort();
+            let _ = task.await;
         }
         if let Some(service) = service {
             let _ = executor::timeout(SYNC_SERVICE_STOP_TIMEOUT, service.stop()).await;
@@ -1031,6 +1034,10 @@ use observer::{
     PendingRoomReconciliation, SyncObserverSignal as Signal, next_sync_observer_signal,
 };
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "actor wiring: independent owned handles moved into one task"
+)]
 async fn observe_sync_service(
     sync_service: Arc<matrix_sdk_ui::sync_service::SyncService>,
     observer_stop: Arc<SyncObserverStop>,

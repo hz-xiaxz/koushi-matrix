@@ -232,11 +232,13 @@ fn login_submitted_emits_no_login_effect_in_active_or_gated_states() {
 #[test]
 fn oidc_pending_flow_homeserver_wins_over_mutated_discovery_state() {
     let attempt_id = LoginAttemptId::new(4, 12);
-    let mut state = AppState::default();
-    state.auth = AuthDiscoveryState::Ready {
-        homeserver: "https://flow-b.invalid".to_owned(),
-        flows: vec![],
-        delegated: DelegatedAuthLinks::default(),
+    let mut state = AppState {
+        auth: AuthDiscoveryState::Ready {
+            homeserver: "https://flow-b.invalid".to_owned(),
+            flows: vec![],
+            delegated: DelegatedAuthLinks::default(),
+        },
+        ..Default::default()
     };
 
     reduce(

@@ -46,9 +46,7 @@ fn mention_failure_kind(error: &MatrixRoomOperationError) -> MentionCandidatesFa
         RoomFailureKind::AliasInUse
         | RoomFailureKind::InvalidInvite
         | RoomFailureKind::NotFound
-        | RoomFailureKind::Sdk => {
-            MentionCandidatesFailureKind::Sdk
-        }
+        | RoomFailureKind::Sdk => MentionCandidatesFailureKind::Sdk,
     }
 }
 

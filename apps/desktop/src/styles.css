@@ -430,6 +430,18 @@ button:disabled {
   background: var(--rail);
 }
 
+/* The Koushi logo carries its own dark tile, so it stays legible on light and
+   dark surfaces without borrowing a contrast token meant for another fill. */
+.auth-logo-mark {
+  background: transparent;
+}
+
+.auth-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .auth-brand h1 {
   margin: 0;
   font-size: 23px;
@@ -6624,6 +6636,11 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   margin-inline-start: auto;
 }
 
+.space-members-invite-trigger:disabled {
+  opacity: 0.5;
+  background: transparent;
+}
+
 .space-members-invite {
   display: flex;
   align-items: center;
@@ -6699,15 +6716,6 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   border-radius: var(--r-md);
   background: var(--surface);
   color: var(--text);
-}
-
-.space-members-sync-notice {
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: var(--r-md);
-  color: var(--text-muted);
-  background: var(--surface-raised);
-  font-size: 13px;
 }
 
 .space-members-sections {
@@ -6955,6 +6963,116 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   color: var(--brand);
   background: transparent;
   font-weight: 600;
+}
+
+/* Contact security details (#1024). Routine states stay neutral; only an
+   identity change after your verification uses the attention color. */
+.profile-security {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-security h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.profile-security-row {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.profile-security-row.is-attention {
+  border-color: var(--warning);
+}
+
+.profile-security-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.profile-security-label {
+  flex: 1 1 100%;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.profile-security-status {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+  color: var(--text);
+}
+
+.profile-security-row.is-attention .profile-security-status svg {
+  color: var(--warning);
+}
+
+.profile-security-status svg {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.profile-security-explanation {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.profile-security-explanation p,
+.profile-security-scope {
+  margin: 0;
+}
+
+.profile-security-scope {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.profile-security-devices {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.profile-security-verify {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.profile-security-verify p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.profile-security-verify-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.profile-security-devices li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .profile-member-actions {
@@ -7345,6 +7463,21 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   border-bottom: 0;
 }
 
+.settings-email-group {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-disclosure summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.settings-disclosure[open] summary {
+  margin-bottom: 4px;
+}
+
 .settings-muted-note {
   margin: 0;
   color: var(--text-muted);
@@ -7571,14 +7704,29 @@ kbd {
   padding: 32px;
 }
 
-.secure-backup-destination-selector {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+.recovery-key-reveal {
+  display: grid;
+  gap: 10px;
 }
 
-.secure-backup-destination-selector [role="status"] {
+.recovery-key-reveal h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.recovery-key-value {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-hover);
+  font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.recovery-key-reveal [role="status"] {
   color: var(--text-muted);
   font-size: 12px;
 }

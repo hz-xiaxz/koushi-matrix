@@ -120,6 +120,8 @@ mod scenario_search_catchup;
 mod scenario_thread_late_joiner;
 #[path = "headless_core_qa/scenarios/timeline.rs"]
 mod scenario_timeline;
+#[path = "headless_core_qa/scenarios/user_verification.rs"]
+mod scenario_user_verification;
 
 use orchestrator::run_async;
 use registry::{

@@ -604,18 +604,13 @@ enum QaMessagesProxyExpectation {
     BackwardFrom { token: String },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 enum QaMessagesProxyPhase {
+    #[default]
     Open,
     Armed,
     Served,
     Rejected,
-}
-
-impl Default for QaMessagesProxyPhase {
-    fn default() -> Self {
-        Self::Open
-    }
 }
 
 struct QaMessagesProxyState {
@@ -1003,6 +998,10 @@ impl QaTcpProxy {
         self.room_send_responses_completed.load(Ordering::SeqCst)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+    )]
     pub(super) fn arm_first_live_tail_messages_page(
         &self,
         newest_known_event_id: String,
@@ -1157,6 +1156,10 @@ fn parse_http_homeserver_addr(homeserver: &str) -> Result<SocketAddr, String> {
         .ok_or_else(|| format!("send_queue proxy could not resolve {authority}"))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 fn spawn_proxy_pair(
     mut client: TcpStream,
     target: SocketAddr,
@@ -1182,6 +1185,10 @@ fn spawn_proxy_pair(
     });
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 fn proxy_single_http_request(
     client: &mut TcpStream,
     target: SocketAddr,

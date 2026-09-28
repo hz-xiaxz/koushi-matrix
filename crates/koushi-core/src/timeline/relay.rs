@@ -360,14 +360,12 @@ impl TimelineActor {
         }
         let decrypt_retry_resolution = self.decrypt_retry.pending.as_ref().and_then(|pending| {
             diffs.iter().find_map(|diff| {
-                decrypt_retry_diff_settlement(diff, &pending.event_id).and_then(|result| {
-                    decrypt_retry_settlement_operation(
-                        &self.decrypt_retry,
-                        self.actor_generation,
-                        &pending.event_id,
-                    )
-                    .map(|operation| (operation, result))
-                })
+                decrypt_retry_settlement_operation(
+                    &self.decrypt_retry,
+                    self.actor_generation,
+                    &pending.event_id,
+                )
+                .zip(decrypt_retry_diff_settlement(diff, &pending.event_id))
             })
         });
         // Issue #460: settle BEFORE the conversion below so the emitted batch
@@ -1207,13 +1205,11 @@ impl TimelineActor {
                 if let Some(batch_id) = ready_gap_projection_batch {
                     self.finish_pending_gap_projection(batch_id).await;
                 }
-                if live_tail_projection_ready {
-                    if self.finish_pending_live_tail_projection().await {
-                        self.request_timeline_gap_inspection(
-                            TimelineGapRepairTrigger::LiveTailSnapshot,
-                        )
-                        .await;
-                    }
+                if live_tail_projection_ready && self.finish_pending_live_tail_projection().await {
+                    self.request_timeline_gap_inspection(
+                        TimelineGapRepairTrigger::LiveTailSnapshot,
+                    )
+                    .await;
                 }
             }
         }
@@ -1374,6 +1370,10 @@ pub(super) fn accepted_relay_batch<T>(
     accept_relay_generation(current_generation, incoming_generation).then_some(batch)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn commit_authoritative_recovery_window<F>(
     navigation_items: &mut Vec<TimelineItem>,
     display_projection: &mut DisplayProjectionState,

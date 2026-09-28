@@ -1,4 +1,8 @@
 #[path = "navigation_state/support.rs"]
+#[allow(
+    dead_code,
+    reason = "fixture module shared with navigation_state; this binary uses a subset"
+)]
 mod support;
 
 use koushi_state::{
@@ -118,10 +122,12 @@ fn current_missing_target_uses_rust_owned_source_policy_and_new_intent_clears_fa
 
 #[test]
 fn event_navigation_is_transient_when_navigation_is_persisted() {
-    let mut navigation = koushi_state::NavigationState::default();
-    navigation.event_navigation = EventNavigationState::Opening {
-        generation: 7,
-        source: EventNavigationSource::Search,
+    let navigation = koushi_state::NavigationState {
+        event_navigation: EventNavigationState::Opening {
+            generation: 7,
+            source: EventNavigationSource::Search,
+        },
+        ..Default::default()
     };
 
     let persisted = navigation.persistence_view();
@@ -301,7 +307,7 @@ fn dismissing_a_navigation_failure_clears_it_without_cancelling_a_live_navigatio
             source: EventNavigationSource::Pinned,
         },
     );
-    let opening = state.navigation.event_navigation.clone();
+    let opening = state.navigation.event_navigation;
     reduce(&mut state, AppAction::EventNavigationFailureDismissed);
     assert_eq!(&state.navigation.event_navigation, &opening);
 

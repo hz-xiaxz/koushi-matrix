@@ -239,6 +239,7 @@ export type MessageId =
   | "room.shareLinkCopied"
   | "room.shareLinkCopyFailed"
   | "dialog.roomAddressInUse"
+  | "dialog.roomAddressInUseUnnamed"
   | "dialog.roomAddressChecking"
   | "dialog.roomAddressAvailable"
   | "dialog.roomAddressTaken"
@@ -251,6 +252,7 @@ export type MessageId =
   | "dialog.roomAddressHelp"
   | "dialog.roomAddressPreview"
   | "dialog.roomAddressEmpty"
+  | "dialog.roomAddressNone"
   | "dialog.roomAddressInvalid"
   | "dialog.roomAddressPending"
   | "dialog.roomTopic"
@@ -258,6 +260,8 @@ export type MessageId =
   | "dialog.sendInvite"
   | "dialog.removeInviteTarget"
   | "dialog.roomName"
+  | "dialog.roomNameOptional"
+  | "dialog.roomNameOptionalHelp"
   | "dialog.spaceName"
   | "dialog.standardRoomInSpace"
   | "dialog.privateRoomDescription"
@@ -407,6 +411,65 @@ export type MessageId =
   | "people.sendMessage"
   | "people.setAlias"
   | "people.unknownUser"
+  | "people.security.title"
+  | "people.security.scope"
+  | "people.security.details"
+  | "people.security.detailsFor"
+  | "people.security.retry"
+  | "people.security.devicesLabel"
+  | "people.security.devicesChecking"
+  | "people.security.devicesUnavailable"
+  | "people.security.devicesAllConfirmed"
+  | "people.security.devicesSomeUnconfirmed"
+  | "people.security.devicesNone"
+  | "people.security.devicesNoIdentity"
+  | "people.security.devicesAllConfirmedExplain"
+  | "people.security.devicesSomeUnconfirmedExplain"
+  | "people.security.devicesNoneExplain"
+  | "people.security.devicesNoIdentityExplain"
+  | "people.security.devicesUnavailableExplain"
+  | "people.security.devicesHowItWorks"
+  | "people.security.devicesCount"
+  | "people.security.devicesInvalidCount"
+  | "people.security.devicesDehydratedCount"
+  | "people.security.deviceOrdinal"
+  | "people.security.deviceOwnerSigned"
+  | "people.security.deviceNotOwnerSigned"
+  | "people.security.deviceSignatureInvalid"
+  | "people.security.deviceNoIdentity"
+  | "people.security.identityLabel"
+  | "people.security.identityVerified"
+  | "people.security.identityNotVerified"
+  | "people.security.identityChanged"
+  | "people.security.identityUnknown"
+  | "people.security.identityVerifiedExplain"
+  | "people.security.identityNotVerifiedExplain"
+  | "people.security.identityChangedExplain"
+  | "people.security.identityUnknownExplain"
+  | "people.security.verifyUser"
+  | "people.security.verifyAgain"
+  | "people.security.verifyConfirmTitle"
+  | "people.security.verifyChatExistingEncrypted"
+  | "people.security.verifyChatExistingUnencrypted"
+  | "people.security.verifyChatNew"
+  | "people.security.verifyHow"
+  | "people.security.verifySend"
+  | "people.security.verifyRequiresCrossSigning"
+  | "people.security.verifyBusy"
+  | "people.security.verifyWaiting"
+  | "people.security.verifyIncoming"
+  | "people.security.verifyAccept"
+  | "people.security.verifyStarting"
+  | "people.security.verifyCompare"
+  | "people.security.verifyEmojiList"
+  | "people.security.verifyMatch"
+  | "people.security.verifyNoMatch"
+  | "people.security.verifyConfirming"
+  | "people.security.verifyDone"
+  | "people.security.verifyFailedCancelled"
+  | "people.security.verifyFailedMismatch"
+  | "people.security.verifyFailedTimeout"
+  | "people.security.verifyFailedOther"
   | "room.members"
   | "room.ban"
   | "room.banMember"
@@ -566,6 +629,8 @@ export type MessageId =
   | "spaceAddRooms.createdLinkFailedTitle"
   | "spaceAddRooms.createdLinkFailed"
   | "spaceAddRooms.createdLinkFailedForbidden"
+  | "spaceAddRooms.createdLinkFailedUnnamed"
+  | "spaceAddRooms.createdLinkFailedForbiddenUnnamed"
   | "roomList.sectionUnreadAccessible"
   | "roomList.loading"
   | "roomList.failed"
@@ -716,14 +781,21 @@ export type MessageId =
   | "settings.emailNotificationsTarget"
   | "settings.emailVerified"
   | "settings.emailVerifiedActive"
+  | "settings.emailNotificationsNeedsRegisteredEmail"
+  | "settings.emailRegisteredHeading"
+  | "settings.emailRegisteredDescription"
+  | "settings.emailRegisteredNone"
+  | "settings.emailWhyShown"
+  | "settings.emailWhyShownDetail"
   | "settings.emailManagedByAccount"
   | "settings.emailUnsupported"
+  | "settings.emailUnsupportedExisting"
   | "settings.emailPending"
   | "settings.emailResent"
   | "settings.emailResend"
   | "settings.emailConfirm"
   | "settings.emailAdd"
-  | "settings.emailChange"
+  | "settings.emailAddAnother"
   | "settings.emailAddressLabel"
   | "settings.emailAddHint"
   | "settings.emailSendVerification"
@@ -925,6 +997,7 @@ export type MessageId =
   | "trust.statusUnknown"
   | "trust.statusVerificationAccepted"
   | "trust.statusVerificationRequested"
+  | "trust.statusVerificationWaiting"
   | "trust.statusVerified"
   | "trust.userIdentityReset"
   | "trust.userUnverified"
@@ -987,17 +1060,28 @@ export type MessageId =
   | "gate.secureBackupSetupCopy"
   | "gate.secureBackupPassphrase"
   | "gate.secureBackupRecoveryKeyDestination"
-  | "gate.secureBackupChooseDestination"
-  | "gate.secureBackupDestinationSelected"
-  | "gate.secureBackupDestinationNotSelected"
-  | "gate.secureBackupDestinationSelectionFailed"
+  | "gate.secureBackupRecoveryKeyTitle"
+  | "gate.secureBackupRecoveryKeyCopy"
+  | "gate.secureBackupCopyRecoveryKey"
+  | "gate.secureBackupRecoveryKeyCopied"
+  | "gate.secureBackupRecoveryKeyCopyFailed"
+  | "gate.secureBackupSaveRecoveryKeyToFile"
+  | "gate.secureBackupRecoveryKeySavedToFile"
+  | "gate.secureBackupRecoveryKeySaveFailed"
+  | "gate.secureBackupRecoveryKeyLost"
+  | "gate.secureBackupResetRecoveryKey"
+  | "gate.secureBackupResetRecoveryKeyTitle"
+  | "gate.secureBackupResetRecoveryKeyWarning"
+  | "gate.secureBackupResetRecoveryKeyConfirm"
   | "gate.secureBackupSetup"
   | "gate.secureBackupExplicitDisabledTitle"
   | "gate.secureBackupExplicitDisabledCopy"
   | "gate.secureBackupReenable"
   | "gate.secureBackupReenableConfirm"
   | "gate.secureBackupCreating"
+  | "gate.secureBackupDeliveryTitle"
   | "gate.secureBackupDeliveryRequired"
+  | "gate.secureBackupRecoveryKeyConfirmFailed"
   | "gate.secureBackupUploading"
   | "gate.secureBackupPendingZero"
   | "gate.secureBackupPendingOne"
@@ -1385,7 +1469,8 @@ export type MessageId =
   | "spaceMembers.cancelInvitePending"
   | "spaceMembers.cancelInviteFailed"
   | "spaceMembers.loadFailed"
-  | "spaceMembers.syncIncomplete"
+  | "spaceMembers.inviteSettingsUnavailable"
+  | "spaceMembers.inviteOperationPending"
   | "spaceMembers.noResults"
   | "spaceMembers.roleSelect"
   | "spaceMembers.roleUpdateFailed"
@@ -1875,6 +1960,7 @@ const en: Catalog = {
   "room.shareLinkCopyFailed": "Could not copy the link. Select and copy the URL instead.",
   "dialog.roomAddress": "Room address",
   "dialog.roomAddressInUse": "The address {fullAddress} is already in use. Addresses are shared across all Spaces on {server}. You can keep the room name ‘{roomName}’; change only the room address, for example by adding a project name or number.",
+  "dialog.roomAddressInUseUnnamed": "The address {fullAddress} is already in use. Addresses are shared across all Spaces on {server}. Change the room address, for example by adding a project name or number, or clear it to create the room without an address.",
   "dialog.roomAddressChecking": "Checking whether {address} is in use…",
   "dialog.roomAddressAvailable": "{address} was not in use when checked. This does not reserve it; the server confirms the address when you create the room.",
   "dialog.roomAddressTaken": "{address} is already in use on {server}. Keep the room name and change only the address.",
@@ -1887,6 +1973,7 @@ const en: Catalog = {
   "dialog.roomAddressHelp": "This address lets people find and share this room. Enter only the room-specific name, without # or a server name. Availability is confirmed when you create the room.",
   "dialog.roomAddressPreview": "Full address: {address}",
   "dialog.roomAddressEmpty": "Enter an address for this public room.",
+  "dialog.roomAddressNone": "This room will be created without an address. People can still find it in the room directory and join it.",
   "dialog.roomAddressInvalid": "Use a room-specific name without spaces, # at the start, or a server suffix. Shorten it if needed.",
   "dialog.roomAddressPending": "Waiting for the address preview.",
   "dialog.roomTopic": "Topic",
@@ -1894,6 +1981,8 @@ const en: Catalog = {
   "dialog.sendInvite": "Send invite",
   "dialog.removeInviteTarget": "Remove invite target",
   "dialog.roomName": "Room name",
+  "dialog.roomNameOptional": "Room name (optional)",
+  "dialog.roomNameOptionalHelp": "Leave the name empty to show a name based on the room's address or members. You can set a name later.",
   "dialog.spaceName": "Space name",
   "dialog.standardRoomInSpace": "Standard room in {spaceName}: space members can join without approval.",
   "dialog.privateRoomDescription": "Only explicitly invited people can join.",
@@ -2048,6 +2137,65 @@ const en: Catalog = {
   "people.sendMessage": "Send message",
   "people.setAlias": "Set alias",
   "people.unknownUser": "Unknown user",
+  "people.security.title": "Security",
+  "people.security.scope": "These details are about this person's keys. They don't show whether a conversation is encrypted.",
+  "people.security.details": "Details",
+  "people.security.detailsFor": "Details: {topic}",
+  "people.security.retry": "Retry",
+  "people.security.devicesLabel": "Their devices",
+  "people.security.devicesChecking": "Checking…",
+  "people.security.devicesUnavailable": "Status unavailable",
+  "people.security.devicesAllConfirmed": "All confirmed by their owner",
+  "people.security.devicesSomeUnconfirmed": "Some not yet confirmed",
+  "people.security.devicesNone": "No devices found",
+  "people.security.devicesNoIdentity": "Can't be confirmed yet",
+  "people.security.devicesAllConfirmedExplain": "Every device Koushi retrieved for this person has been confirmed by them in their own app.",
+  "people.security.devicesSomeUnconfirmedExplain": "Some of this person's devices have not been confirmed yet. If you are concerned, ask them to confirm their devices in their app.",
+  "people.security.devicesNoneExplain": "No encryption devices were found for this person, so there is nothing to confirm.",
+  "people.security.devicesNoIdentityExplain": "This person hasn't set up cross-signing, so they can't confirm their devices yet.",
+  "people.security.devicesUnavailableExplain": "Koushi couldn't retrieve this person's devices. This is not a confirmation.",
+  "people.security.devicesHowItWorks": "A person confirms a device by signing it with their own identity in their app. This is about whose keys these are; it doesn't change how messages are encrypted.",
+  "people.security.devicesCount": "{confirmed} of {total} devices confirmed by their owner",
+  "people.security.devicesInvalidCount": "Device signatures that don't match this person's current identity: {count}",
+  "people.security.devicesDehydratedCount": "Offline recovery devices not counted: {count}",
+  "people.security.deviceOrdinal": "Device {index}",
+  "people.security.deviceOwnerSigned": "Confirmed by owner",
+  "people.security.deviceNotOwnerSigned": "Not yet confirmed",
+  "people.security.deviceSignatureInvalid": "Signature doesn't match",
+  "people.security.deviceNoIdentity": "Can't be confirmed",
+  "people.security.identityLabel": "Your verification",
+  "people.security.identityVerified": "Verified by you",
+  "people.security.identityNotVerified": "Not verified by you",
+  "people.security.identityChanged": "Your verification no longer applies",
+  "people.security.identityUnknown": "Unknown",
+  "people.security.identityVerifiedExplain": "You verified that this account belongs to the person you know. This doesn't confirm devices they haven't confirmed themselves.",
+  "people.security.identityNotVerifiedExplain": "You have not checked that this account belongs to the person you know. You can compare emoji with them in person or over another trusted channel. Verifying a person is optional.",
+  "people.security.identityChangedExplain": "You verified this person before, but their identity or yours has been reset since then, so that verification no longer applies. Choose Verify again to compare emoji with them.",
+  "people.security.identityUnknownExplain": "This person hasn't set up cross-signing, so there is no identity to verify yet.",
+  "people.security.verifyUser": "Verify user",
+  "people.security.verifyAgain": "Verify again",
+  "people.security.verifyConfirmTitle": "Verify this person",
+  "people.security.verifyChatExistingEncrypted": "Koushi sends the verification request in your encrypted direct chat with this person. If they have left that chat, Koushi invites them back to it.",
+  "people.security.verifyChatExistingUnencrypted": "Koushi sends the verification request in your existing direct chat with this person. If they have left that chat, Koushi invites them back to it. That chat is not encrypted; the emoji comparison does not depend on it.",
+  "people.security.verifyChatNew": "You don't have a direct chat with this person yet. Koushi creates a new encrypted direct chat with them and sends the request there. If they don't see the request, try again after they have joined the chat.",
+  "people.security.verifyHow": "They accept the request in their app. Then you both compare emoji, in person or over another trusted channel. Verifying them doesn't confirm devices they haven't confirmed themselves.",
+  "people.security.verifySend": "Send request",
+  "people.security.verifyRequiresCrossSigning": "To verify other people, this session needs your own cross-signing keys. Verify this session or set up cross-signing in User settings → Encryption first.",
+  "people.security.verifyBusy": "Another verification is in progress. You can verify this person after it finishes.",
+  "people.security.verifyWaiting": "Waiting for them to accept the request in their app…",
+  "people.security.verifyIncoming": "This person asked to verify you.",
+  "people.security.verifyAccept": "Accept",
+  "people.security.verifyStarting": "Starting emoji comparison…",
+  "people.security.verifyCompare": "Compare these emoji with the ones on their screen. Do they match, in the same order?",
+  "people.security.verifyEmojiList": "Emoji to compare",
+  "people.security.verifyMatch": "They match",
+  "people.security.verifyNoMatch": "They don't match",
+  "people.security.verifyConfirming": "Waiting for them to confirm…",
+  "people.security.verifyDone": "Verification complete.",
+  "people.security.verifyFailedCancelled": "Verification was cancelled. Nothing was verified.",
+  "people.security.verifyFailedMismatch": "The emoji didn't match. Nothing was verified.",
+  "people.security.verifyFailedTimeout": "Verification timed out. Nothing was verified.",
+  "people.security.verifyFailedOther": "Verification didn't complete. Nothing was verified.",
   "room.avatarUrl": "Room avatar URL",
   "room.avatar": "Avatar",
   "room.editAvatar": "Edit avatar",
@@ -2208,6 +2356,8 @@ const en: Catalog = {
   "spaceAddRooms.createdLinkFailedTitle": "Room created",
   "spaceAddRooms.createdLinkFailed": "“{roomName}” was created, but it couldn't be added to {spaceName} ({reason}). You can add it again from Add existing room.",
   "spaceAddRooms.createdLinkFailedForbidden": "“{roomName}” was created, but you don't have permission to add rooms to {spaceName}.",
+  "spaceAddRooms.createdLinkFailedUnnamed": "The new room was created, but it couldn't be added to {spaceName} ({reason}). You can add it again from Add existing room.",
+  "spaceAddRooms.createdLinkFailedForbiddenUnnamed": "The new room was created, but you don't have permission to add rooms to {spaceName}.",
   "roomList.sectionUnreadAccessible": "{section} unread: {count}",
   "roomList.loading": "Loading rooms…",
   "roomList.failed": "Rooms could not be loaded",
@@ -2368,30 +2518,37 @@ const en: Catalog = {
   "settings.emailNotificationsDescription": "Your homeserver emails a summary of unread notifications after a delay. It is not instant, and it follows the rules below.",
   "settings.emailNotificationsToggle": "Email notifications",
   "settings.emailNotificationsSendingTo": "Sending to {address}",
-  "settings.emailNotificationsUnverifiedTarget": "Sending to an address that is not verified on this account",
+  "settings.emailNotificationsUnverifiedTarget": "Sending to an address that is not registered with this account",
   "settings.emailNotificationsOff": "Off",
-  "settings.emailNotificationsNeedsEmail": "Add and verify an email address first",
-  "settings.emailNotificationsUnverifiedPushers": "{count} email targets use addresses that are not verified on this account. Turning email notifications off removes them.",
+  "settings.emailNotificationsNeedsEmail": "Add and confirm an email address first",
+  "settings.emailNotificationsUnverifiedPushers": "{count} email targets use addresses that are not registered with this account. Turning email notifications off removes them.",
   "settings.emailNotificationsTarget": "Send to",
-  "settings.emailVerified": "Verified",
-  "settings.emailVerifiedActive": "Verified · receiving notifications",
+  "settings.emailVerified": "Email confirmed",
+  "settings.emailVerifiedActive": "Email confirmed · Notification target",
+  "settings.emailNotificationsNeedsRegisteredEmail": "Needs a registered email address",
+  "settings.emailRegisteredHeading": "Registered email addresses",
+  "settings.emailRegisteredDescription": "Your homeserver lists these addresses as registered with your Matrix account. Having an address here does not by itself turn on email notifications.",
+  "settings.emailRegisteredNone": "No email addresses are registered with this account.",
+  "settings.emailWhyShown": "Why is this address shown?",
+  "settings.emailWhyShownDetail": "Koushi does not create these addresses; it shows the list your homeserver keeps for this account. \"Email confirmed\" means the homeserver records that ownership of the address was confirmed by email. It is not related to device or contact verification, and it does not mean that mail to it is delivered today.",
   "settings.emailManagedByAccount": "Email addresses for this account are managed on your account page.",
-  "settings.emailUnsupported": "This server does not support adding an email address.",
-  "settings.emailPending": "We sent a verification email to {address}. Open the link in it, then press Continue.",
-  "settings.emailResent": "Verification email sent again.",
+  "settings.emailUnsupported": "This server does not allow adding email addresses here.",
+  "settings.emailUnsupportedExisting": "The addresses listed above are already registered with your account, and you can still turn email notifications on or off for them.",
+  "settings.emailPending": "We sent a confirmation email to {address}. Open the link in it, then press Continue.",
+  "settings.emailResent": "Confirmation email sent again.",
   "settings.emailResend": "Resend",
   "settings.emailConfirm": "Continue",
   "settings.emailAdd": "Add email address",
-  "settings.emailChange": "Change",
+  "settings.emailAddAnother": "Add another email address",
   "settings.emailAddressLabel": "Email address",
-  "settings.emailAddHint": "Email notifications start only after you confirm you own this address.",
-  "settings.emailSendVerification": "Send verification email",
+  "settings.emailAddHint": "The address is registered with your account after you confirm you own it. If email notifications are on, they then go to the new address instead of the current one.",
+  "settings.emailSendVerification": "Send confirmation email",
   "settings.notificationFailureUnsupported": "This server does not support this.",
   "settings.notificationFailureEmailInUse": "This email address is already in use.",
   "settings.notificationFailureEmailDenied": "This server does not allow this email address.",
   "settings.notificationFailureInvalidEmail": "Enter a valid email address.",
-  "settings.notificationFailureEmailNotVerified": "The address is not verified yet. Open the link in the email, then try again.",
-  "settings.notificationFailureEmailNotRegistered": "This address is not verified on your account.",
+  "settings.notificationFailureEmailNotVerified": "The address is not confirmed yet. Open the link in the email, then try again.",
+  "settings.notificationFailureEmailNotRegistered": "This address is not registered with your account.",
   "settings.notificationFailureAuthRejected": "Your password was not accepted.",
   "settings.notificationFailureRateLimited": "Too many attempts. Wait a moment and try again.",
   "settings.notificationFailureNetwork": "Could not reach your homeserver.",
@@ -2583,6 +2740,7 @@ const en: Catalog = {
   "trust.statusUnknown": "Unknown",
   "trust.statusVerificationAccepted": "Accepted",
   "trust.statusVerificationRequested": "Request pending",
+  "trust.statusVerificationWaiting": "Waiting for the other side to accept",
   "trust.statusVerified": "Verified",
   "trust.userIdentityReset": "Identity reset",
   "trust.userUnverified": "Unverified",
@@ -2645,20 +2803,31 @@ const en: Catalog = {
   "gate.secureBackupRecoveryKey": "Secure backup recovery key",
   "gate.secureBackupRecover": "Recover secure backup",
   "gate.secureBackupSetupTitle": "Set up secure backup",
-  "gate.secureBackupSetupCopy": "Create and protect a Secure Backup before encrypted messaging is available. Save the recovery key to a secure destination.",
+  "gate.secureBackupSetupCopy": "Create and protect a Secure Backup before encrypted messaging is available. Your recovery key will be shown on screen so you can copy it or save it to a file.",
   "gate.secureBackupPassphrase": "Secure backup passphrase",
   "gate.secureBackupRecoveryKeyDestination": "Recovery key destination",
-  "gate.secureBackupChooseDestination": "Choose recovery key destination",
-  "gate.secureBackupDestinationSelected": "Recovery key destination selected.",
-  "gate.secureBackupDestinationNotSelected": "No recovery key destination selected.",
-  "gate.secureBackupDestinationSelectionFailed": "Could not open the recovery key destination picker. Try again.",
+  "gate.secureBackupRecoveryKeyTitle": "Your recovery key",
+  "gate.secureBackupRecoveryKeyCopy": "Store this recovery key somewhere safe, such as a password manager. You need it to read encrypted messages on a new device or after signing out.",
+  "gate.secureBackupCopyRecoveryKey": "Copy",
+  "gate.secureBackupRecoveryKeyCopied": "Copied",
+  "gate.secureBackupRecoveryKeyCopyFailed": "Could not copy the recovery key. Select it and copy it manually.",
+  "gate.secureBackupSaveRecoveryKeyToFile": "Save to file…",
+  "gate.secureBackupRecoveryKeySavedToFile": "Recovery key saved to file.",
+  "gate.secureBackupRecoveryKeySaveFailed": "Could not save the recovery key to a file. Choose a new file name and try again.",
+  "gate.secureBackupRecoveryKeyLost": "Your recovery key was not confirmed as saved, and for security it cannot be shown again. Create a new recovery key to continue.",
+  "gate.secureBackupResetRecoveryKey": "Create new recovery key",
+  "gate.secureBackupResetRecoveryKeyTitle": "Create a new recovery key?",
+  "gate.secureBackupResetRecoveryKeyWarning": "This creates a NEW recovery key for your account. Your previous recovery key and security phrase will stop working, including in other Matrix clients. Save the new key when it is shown.",
+  "gate.secureBackupResetRecoveryKeyConfirm": "Yes, create a new recovery key",
   "gate.secureBackupSetup": "Set up secure backup",
   "gate.secureBackupExplicitDisabledTitle": "Secure backup was disabled",
   "gate.secureBackupExplicitDisabledCopy": "Re-enabling Secure Backup changes this account-wide setting and affects other Matrix clients signed in to this account. Confirm only if you want those clients to use the updated backup.",
   "gate.secureBackupReenable": "Re-enable secure backup",
   "gate.secureBackupReenableConfirm": "Confirm re-enable",
   "gate.secureBackupCreating": "Creating secure backup…",
-  "gate.secureBackupDeliveryRequired": "Save the recovery key before continuing.",
+  "gate.secureBackupDeliveryTitle": "Save your recovery key",
+  "gate.secureBackupDeliveryRequired": "Save the recovery key — copy it or save it to a file — before continuing.",
+  "gate.secureBackupRecoveryKeyConfirmFailed": "Your confirmation could not be saved. The key is still valid; choose \"I saved the recovery key\" again.",
   "gate.secureBackupUploading": "Uploading existing encrypted keys…",
   "gate.secureBackupPendingZero": "No encrypted keys remain to upload.",
   "gate.secureBackupPendingOne": "Uploading existing encrypted keys: 1 remaining.",
@@ -3047,7 +3216,8 @@ const en: Catalog = {
   "spaceMembers.cancelInvitePending": "Cancelling…",
   "spaceMembers.cancelInviteFailed": "Could not cancel the invitation. Try again.",
   "spaceMembers.loadFailed": "Member load failed. Try again.",
-  "spaceMembers.syncIncomplete": "Some child rooms are still syncing",
+  "spaceMembers.inviteSettingsUnavailable": "Invitations are unavailable until space settings load",
+  "spaceMembers.inviteOperationPending": "Wait for the current member update to finish",
   "spaceMembers.noResults": "No space members found",
   "spaceMembers.roleSelect": "Role for {name}",
   "spaceMembers.roleUpdateFailed": "Could not update this member's role. Try again.",
@@ -3421,6 +3591,7 @@ const ja: Catalog = {
   "room.shareLinkCopyFailed": "リンクをコピーできませんでした。URLを選択してコピーしてください。",
   "dialog.roomAddress": "ルームアドレス",
   "dialog.roomAddressInUse": "アドレス {fullAddress} はすでに使われています。アドレスは {server} 上のすべての Space で共通です。ルーム名『{roomName}』はそのままで、ルームアドレスにプロジェクト名や数字などを追加してください。",
+  "dialog.roomAddressInUseUnnamed": "アドレス {fullAddress} はすでに使われています。アドレスは {server} 上のすべての Space で共通です。ルームアドレスにプロジェクト名や数字などを追加するか、空欄にしてアドレスなしでルームを作成してください。",
   "dialog.roomAddressChecking": "{address} が使われているか確認しています…",
   "dialog.roomAddressAvailable": "{address} は確認時点では使われていません。予約ではありません。アドレスはルーム作成時にサーバーで確定します。",
   "dialog.roomAddressTaken": "{address} は {server} ですでに使われています。ルーム名はそのままで、アドレスだけを変更してください。",
@@ -3433,6 +3604,7 @@ const ja: Catalog = {
   "dialog.roomAddressHelp": "このアドレスでルームを見つけたり共有したりできます。# やサーバー名を付けず、ルーム固有の名前だけ入力してください。使用可能かどうかは作成時に確認されます。",
   "dialog.roomAddressPreview": "完全なアドレス: {address}",
   "dialog.roomAddressEmpty": "公開ルームのアドレスを入力してください。",
+  "dialog.roomAddressNone": "このルームはアドレスなしで作成されます。ルームディレクトリから見つけて参加することはできます。",
   "dialog.roomAddressInvalid": "空白、先頭の #、サーバー名を除いたルーム固有の名前を入力してください。長すぎる場合は短くしてください。",
   "dialog.roomAddressPending": "アドレスのプレビューを待っています。",
   "dialog.roomTopic": "トピック",
@@ -3440,6 +3612,8 @@ const ja: Catalog = {
   "dialog.sendInvite": "招待を送信",
   "dialog.removeInviteTarget": "招待先を削除",
   "dialog.roomName": "ルーム名",
+  "dialog.roomNameOptional": "ルーム名（任意）",
+  "dialog.roomNameOptionalHelp": "名前を空欄にすると、ルームのアドレスやメンバーに基づく名前が表示されます。名前は後から設定できます。",
   "dialog.spaceName": "スペース名",
   "dialog.standardRoomInSpace": "{spaceName}内の標準ルーム：スペースメンバーは承認なしで参加できます",
   "dialog.privateRoomDescription": "明示的に招待された人だけが参加できます",
@@ -3594,6 +3768,65 @@ const ja: Catalog = {
   "people.sendMessage": "メッセージを送信",
   "people.setAlias": "エイリアスを設定",
   "people.unknownUser": "不明なユーザー",
+  "people.security.title": "セキュリティ",
+  "people.security.scope": "ここに表示されるのはこの人の鍵に関する情報です。会話が暗号化されているかどうかは示しません。",
+  "people.security.details": "詳細",
+  "people.security.detailsFor": "詳細: {topic}",
+  "people.security.retry": "再試行",
+  "people.security.devicesLabel": "相手のデバイス",
+  "people.security.devicesChecking": "確認中…",
+  "people.security.devicesUnavailable": "状態を取得できません",
+  "people.security.devicesAllConfirmed": "すべて本人が確認済み",
+  "people.security.devicesSomeUnconfirmed": "一部は未確認",
+  "people.security.devicesNone": "デバイスが見つかりません",
+  "people.security.devicesNoIdentity": "まだ確認できません",
+  "people.security.devicesAllConfirmedExplain": "Koushiが取得したこの人のデバイスは、すべて本人が自分のアプリで確認しています。",
+  "people.security.devicesSomeUnconfirmedExplain": "この人のデバイスの一部はまだ確認されていません。気になる場合は、本人のアプリでデバイスを確認するよう依頼してください。",
+  "people.security.devicesNoneExplain": "この人の暗号化デバイスが見つからないため、確認できるものがありません。",
+  "people.security.devicesNoIdentityExplain": "この人はクロス署名を設定していないため、まだ自分のデバイスを確認できません。",
+  "people.security.devicesUnavailableExplain": "Koushiはこの人のデバイスを取得できませんでした。確認済みという意味ではありません。",
+  "people.security.devicesHowItWorks": "デバイスの確認は、本人が自分のアプリで自分のIDを使って署名することで行われます。これは鍵が誰のものかに関する情報で、メッセージの暗号化方式は変わりません。",
+  "people.security.devicesCount": "{total}台中{confirmed}台のデバイスを本人が確認済み",
+  "people.security.devicesInvalidCount": "この人の現在のIDと一致しないデバイス署名: {count}件",
+  "people.security.devicesDehydratedCount": "集計に含めていないオフライン復旧用デバイス: {count}台",
+  "people.security.deviceOrdinal": "デバイス{index}",
+  "people.security.deviceOwnerSigned": "本人が確認済み",
+  "people.security.deviceNotOwnerSigned": "未確認",
+  "people.security.deviceSignatureInvalid": "署名が一致しません",
+  "people.security.deviceNoIdentity": "確認できません",
+  "people.security.identityLabel": "あなたによる検証",
+  "people.security.identityVerified": "あなたが検証済み",
+  "people.security.identityNotVerified": "あなたは未検証",
+  "people.security.identityChanged": "以前の検証は無効になりました",
+  "people.security.identityUnknown": "不明",
+  "people.security.identityVerifiedExplain": "このアカウントが知っている本人のものであることを、あなたは検証済みです。本人が確認していないデバイスまで確認されるわけではありません。",
+  "people.security.identityNotVerifiedExplain": "このアカウントが知っている本人のものかどうかを、あなたはまだ確認していません。対面または別の信頼できる経路で、相手と絵文字を比較できます。検証は任意です。",
+  "people.security.identityChangedExplain": "以前この人を検証しましたが、その後この人またはあなたのIDがリセットされたため、その検証はもう有効ではありません。「もう一度検証」を選んで、相手と絵文字を比較してください。",
+  "people.security.identityUnknownExplain": "この人はクロス署名を設定していないため、まだ検証できるIDがありません。",
+  "people.security.verifyUser": "ユーザーを検証",
+  "people.security.verifyAgain": "もう一度検証",
+  "people.security.verifyConfirmTitle": "この人を検証",
+  "people.security.verifyChatExistingEncrypted": "Koushiは、この人との暗号化されたダイレクトチャットで検証リクエストを送信します。相手がそのチャットから退出している場合は、もう一度招待します。",
+  "people.security.verifyChatExistingUnencrypted": "Koushiは、この人との既存のダイレクトチャットで検証リクエストを送信します。相手がそのチャットから退出している場合は、もう一度招待します。このチャットは暗号化されていませんが、絵文字の比較はチャットの暗号化に依存しません。",
+  "people.security.verifyChatNew": "この人とのダイレクトチャットはまだありません。Koushiが新しい暗号化ダイレクトチャットを作成し、そこでリクエストを送信します。相手にリクエストが表示されない場合は、相手がチャットに参加した後にもう一度お試しください。",
+  "people.security.verifyHow": "相手が自分のアプリでリクエストを承認した後、対面または別の信頼できる経路で、お互いに絵文字を比較します。検証しても、相手が確認していないデバイスが確認されるわけではありません。",
+  "people.security.verifySend": "リクエストを送信",
+  "people.security.verifyRequiresCrossSigning": "他の人を検証するには、このセッションにあなた自身のクロス署名鍵が必要です。先にこのセッションを検証するか、ユーザー設定 → 暗号化でクロス署名を設定してください。",
+  "people.security.verifyBusy": "別の検証が進行中です。完了した後にこの人を検証できます。",
+  "people.security.verifyWaiting": "相手が自分のアプリでリクエストを承認するのを待っています…",
+  "people.security.verifyIncoming": "この人があなたの検証を求めています。",
+  "people.security.verifyAccept": "承認",
+  "people.security.verifyStarting": "絵文字の比較を開始しています…",
+  "people.security.verifyCompare": "相手の画面に表示された絵文字と比べてください。同じ順番で一致していますか？",
+  "people.security.verifyEmojiList": "比較する絵文字",
+  "people.security.verifyMatch": "一致する",
+  "people.security.verifyNoMatch": "一致しない",
+  "people.security.verifyConfirming": "相手の確認を待っています…",
+  "people.security.verifyDone": "検証が完了しました。",
+  "people.security.verifyFailedCancelled": "検証はキャンセルされました。何も検証されていません。",
+  "people.security.verifyFailedMismatch": "絵文字が一致しませんでした。何も検証されていません。",
+  "people.security.verifyFailedTimeout": "検証がタイムアウトしました。何も検証されていません。",
+  "people.security.verifyFailedOther": "検証は完了しませんでした。何も検証されていません。",
   "room.avatarUrl": "ルームアバターURL",
   "room.avatar": "アバター",
   "room.editAvatar": "アバターを編集",
@@ -3754,6 +3987,8 @@ const ja: Catalog = {
   "spaceAddRooms.createdLinkFailedTitle": "ルームを作成しました",
   "spaceAddRooms.createdLinkFailed": "「{roomName}」は作成されましたが、{spaceName}に追加できませんでした（{reason}）。「既存のルームを追加」からもう一度追加できます。",
   "spaceAddRooms.createdLinkFailedForbidden": "「{roomName}」は作成されましたが、{spaceName}にルームを追加する権限がありません。",
+  "spaceAddRooms.createdLinkFailedUnnamed": "新しいルームは作成されましたが、{spaceName}に追加できませんでした（{reason}）。「既存のルームを追加」からもう一度追加できます。",
+  "spaceAddRooms.createdLinkFailedForbiddenUnnamed": "新しいルームは作成されましたが、{spaceName}にルームを追加する権限がありません。",
   "roomList.sectionUnreadAccessible": "{section}の未読 {count} 件",
   "roomList.loading": "ルームを読み込み中…",
   "roomList.failed": "ルームを読み込めませんでした",
@@ -3913,30 +4148,37 @@ const ja: Catalog = {
   "settings.emailNotificationsDescription": "未読の通知をホームサーバーが時間をおいてメールでまとめて送ります。即時には届きません。下の通知ルールに従います。",
   "settings.emailNotificationsToggle": "メール通知",
   "settings.emailNotificationsSendingTo": "{address} に送信",
-  "settings.emailNotificationsUnverifiedTarget": "このアカウントで確認されていないアドレスに送信しています",
+  "settings.emailNotificationsUnverifiedTarget": "このアカウントに登録されていないアドレスに送信しています",
   "settings.emailNotificationsOff": "オフ",
-  "settings.emailNotificationsNeedsEmail": "先にメールアドレスを追加して確認してください",
-  "settings.emailNotificationsUnverifiedPushers": "このアカウントで確認されていないアドレス宛ての送信先が{count}件あります。メール通知をオフにすると削除されます。",
+  "settings.emailNotificationsNeedsEmail": "先にメールアドレスを追加して所有を確認してください",
+  "settings.emailNotificationsUnverifiedPushers": "このアカウントに登録されていないアドレス宛ての送信先が{count}件あります。メール通知をオフにすると削除されます。",
   "settings.emailNotificationsTarget": "送信先",
-  "settings.emailVerified": "確認済み",
-  "settings.emailVerifiedActive": "確認済み・通知を受信中",
+  "settings.emailVerified": "メールアドレス確認済み",
+  "settings.emailVerifiedActive": "メールアドレス確認済み・通知の送信先",
+  "settings.emailNotificationsNeedsRegisteredEmail": "登録済みのメールアドレスが必要です",
+  "settings.emailRegisteredHeading": "登録済みのメールアドレス",
+  "settings.emailRegisteredDescription": "ホームサーバーがこの Matrix アカウントに登録済みとして返しているアドレスです。ここにアドレスがあるだけではメール通知はオンになりません。",
+  "settings.emailRegisteredNone": "このアカウントに登録済みのメールアドレスはありません。",
+  "settings.emailWhyShown": "このアドレスが表示される理由",
+  "settings.emailWhyShownDetail": "Koushi はこれらのアドレスを作成しません。ホームサーバーがこのアカウントについて保持している一覧を表示しています。「メールアドレス確認済み」は、メールによる所有確認が済んでいるとホームサーバーが記録していることを表します。デバイスや相手の検証とは関係なく、現在メールが届くことを保証するものでもありません。",
   "settings.emailManagedByAccount": "このアカウントのメールアドレスはアカウントページで管理します。",
-  "settings.emailUnsupported": "このサーバーはメールアドレスの追加に対応していません。",
+  "settings.emailUnsupported": "このサーバーでは、ここからメールアドレスを追加できません。",
+  "settings.emailUnsupportedExisting": "上に表示されているアドレスはすでにアカウントに登録済みです。これらのアドレスへのメール通知は引き続きオン/オフできます。",
   "settings.emailPending": "{address} に確認メールを送りました。メール内のリンクを開いてから「続行」を押してください。",
   "settings.emailResent": "確認メールを再送しました。",
   "settings.emailResend": "再送",
   "settings.emailConfirm": "続行",
   "settings.emailAdd": "メールアドレスを追加",
-  "settings.emailChange": "変更",
+  "settings.emailAddAnother": "別のメールアドレスを追加",
   "settings.emailAddressLabel": "メールアドレス",
-  "settings.emailAddHint": "メールアドレスの所有を確認するまでメール通知は始まりません。",
+  "settings.emailAddHint": "所有を確認すると、このアドレスがアカウントに登録されます。メール通知がオンの場合は、送信先が新しいアドレスに切り替わります。",
   "settings.emailSendVerification": "確認メールを送信",
   "settings.notificationFailureUnsupported": "このサーバーは対応していません。",
   "settings.notificationFailureEmailInUse": "このメールアドレスは既に使われています。",
   "settings.notificationFailureEmailDenied": "このサーバーではこのメールアドレスを使えません。",
   "settings.notificationFailureInvalidEmail": "正しいメールアドレスを入力してください。",
   "settings.notificationFailureEmailNotVerified": "まだ確認されていません。メール内のリンクを開いてから、もう一度お試しください。",
-  "settings.notificationFailureEmailNotRegistered": "このアドレスはアカウントで確認されていません。",
+  "settings.notificationFailureEmailNotRegistered": "このアドレスはアカウントに登録されていません。",
   "settings.notificationFailureAuthRejected": "パスワードが受け付けられませんでした。",
   "settings.notificationFailureRateLimited": "試行回数が多すぎます。少し待ってからお試しください。",
   "settings.notificationFailureNetwork": "ホームサーバーに接続できませんでした。",
@@ -4131,6 +4373,7 @@ const ja: Catalog = {
   "trust.statusUnknown": "不明",
   "trust.statusVerificationAccepted": "承認済み",
   "trust.statusVerificationRequested": "リクエスト待ち",
+  "trust.statusVerificationWaiting": "相手の承認を待っています",
   "trust.statusVerified": "検証済み",
   "trust.userIdentityReset": "IDリセット",
   "trust.userUnverified": "未検証",
@@ -4191,20 +4434,31 @@ const ja: Catalog = {
   "gate.secureBackupRecoveryKey": "安全なバックアップのリカバリーキー",
   "gate.secureBackupRecover": "安全なバックアップを復旧",
   "gate.secureBackupSetupTitle": "安全なバックアップを設定",
-  "gate.secureBackupSetupCopy": "暗号化メッセージを利用する前に、安全なバックアップを作成して保護してください。リカバリーキーを安全な保存先に保存します。",
+  "gate.secureBackupSetupCopy": "暗号化メッセージを利用する前に、安全なバックアップを作成して保護してください。リカバリーキーは画面に表示されるので、コピーするかファイルに保存できます。",
   "gate.secureBackupPassphrase": "安全なバックアップのパスフレーズ",
   "gate.secureBackupRecoveryKeyDestination": "リカバリーキーの保存先",
-  "gate.secureBackupChooseDestination": "リカバリーキーの保存先を選択",
-  "gate.secureBackupDestinationSelected": "リカバリーキーの保存先を選択しました。",
-  "gate.secureBackupDestinationNotSelected": "リカバリーキーの保存先が選択されていません。",
-  "gate.secureBackupDestinationSelectionFailed": "リカバリーキーの保存先を開けませんでした。もう一度お試しください。",
+  "gate.secureBackupRecoveryKeyTitle": "リカバリーキー",
+  "gate.secureBackupRecoveryKeyCopy": "このリカバリーキーはパスワードマネージャーなどの安全な場所に保管してください。新しいデバイスやサインアウト後に暗号化メッセージを読むために必要です。",
+  "gate.secureBackupCopyRecoveryKey": "コピー",
+  "gate.secureBackupRecoveryKeyCopied": "コピーしました",
+  "gate.secureBackupRecoveryKeyCopyFailed": "リカバリーキーをコピーできませんでした。選択して手動でコピーしてください。",
+  "gate.secureBackupSaveRecoveryKeyToFile": "ファイルに保存…",
+  "gate.secureBackupRecoveryKeySavedToFile": "リカバリーキーをファイルに保存しました。",
+  "gate.secureBackupRecoveryKeySaveFailed": "リカバリーキーをファイルに保存できませんでした。新しいファイル名を選んで、もう一度お試しください。",
+  "gate.secureBackupRecoveryKeyLost": "リカバリーキーの保存が確認されていません。安全のため、同じキーを再表示することはできません。続行するには新しいリカバリーキーを作成してください。",
+  "gate.secureBackupResetRecoveryKey": "新しいリカバリーキーを作成",
+  "gate.secureBackupResetRecoveryKeyTitle": "新しいリカバリーキーを作成しますか？",
+  "gate.secureBackupResetRecoveryKeyWarning": "アカウントの新しいリカバリーキーを作成します。以前のリカバリーキーとセキュリティフレーズは、他の Matrix クライアントも含めて使えなくなります。新しいキーが表示されたら保存してください。",
+  "gate.secureBackupResetRecoveryKeyConfirm": "新しいリカバリーキーを作成する",
   "gate.secureBackupSetup": "安全なバックアップを設定",
   "gate.secureBackupExplicitDisabledTitle": "安全なバックアップが無効になっています",
   "gate.secureBackupExplicitDisabledCopy": "安全なバックアップを再有効化すると、このアカウント全体の設定が変わり、このアカウントでサインインしている他の Matrix クライアントにも影響します。これらのクライアントで更新後のバックアップを使う場合のみ確認してください。",
   "gate.secureBackupReenable": "安全なバックアップを再有効化",
   "gate.secureBackupReenableConfirm": "再有効化を確認",
   "gate.secureBackupCreating": "安全なバックアップを作成中…",
-  "gate.secureBackupDeliveryRequired": "続行する前にリカバリーキーを保存してください。",
+  "gate.secureBackupDeliveryTitle": "リカバリーキーを保存してください",
+  "gate.secureBackupDeliveryRequired": "続行する前に、リカバリーキーをコピーするかファイルに保存してください。",
+  "gate.secureBackupRecoveryKeyConfirmFailed": "保存の確認を記録できませんでした。このキーは引き続き有効です。もう一度「リカバリーキーを保存しました」を選んでください。",
   "gate.secureBackupUploading": "既存の暗号化キーをアップロード中…",
   "gate.secureBackupPendingZero": "アップロードする暗号化キーは残っていません。",
   "gate.secureBackupPendingOne": "既存の暗号化キーをアップロード中: 残り 1 件。",
@@ -4592,7 +4846,8 @@ const ja: Catalog = {
   "spaceMembers.cancelInvitePending": "取消中…",
   "spaceMembers.cancelInviteFailed": "招待を取り消せませんでした。もう一度お試しください。",
   "spaceMembers.loadFailed": "メンバーの読み込みに失敗しました。もう一度お試しください。",
-  "spaceMembers.syncIncomplete": "一部の子ルームを同期中です",
+  "spaceMembers.inviteSettingsUnavailable": "スペースの設定を読み込むまで招待できません",
+  "spaceMembers.inviteOperationPending": "現在のメンバー操作が完了するまでお待ちください",
   "spaceMembers.noResults": "スペースのメンバーが見つかりません",
   "spaceMembers.roleSelect": "{name}のロール",
   "spaceMembers.roleUpdateFailed": "このメンバーのロールを変更できませんでした。もう一度お試しください。",

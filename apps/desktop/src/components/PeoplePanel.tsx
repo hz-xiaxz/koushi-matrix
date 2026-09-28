@@ -3,16 +3,19 @@ import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { t } from "../i18n/messages";
 import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
 import type {
+  ContactSecurityState,
   RoomManagementState,
   RoomMemberRole,
   RoomMemberSummary,
   RoomModerationAction,
   RoomSummary,
   SpaceSummary,
-  UserProfile
+  UserProfile,
+  VerificationFlowState
 } from "../domain/types";
 
 import { EntityAvatar } from "./Shell";
+import { ContactSecurityDetails, type ContactSecurityActions } from "./ContactSecurityDetails";
 import { ICON_SIZE, initials } from "../app/uiShared";
 
 const PEOPLE_MEMBER_ROW_HEIGHT_PX = 58;
@@ -40,6 +43,11 @@ interface ProfilePanelProps {
   roomOrSpace: RoomOrSpace | null;
   roomManagement: RoomManagementState;
   profileUsers: Record<string, UserProfile>;
+  /** Security details of the open contact (#1024); omitted for yourself. */
+  contactSecurity?: ContactSecurityState;
+  /** The shared Rust verification flow, for Verify user (#1024). */
+  verification?: VerificationFlowState;
+  contactSecurityActions?: ContactSecurityActions;
   onBack: () => void;
   onClose?: () => void;
   onIgnoreUser?: (userId: string) => void;
@@ -261,6 +269,9 @@ export function ProfilePanel({
   roomOrSpace,
   roomManagement,
   profileUsers,
+  contactSecurity,
+  verification = { kind: "idle" },
+  contactSecurityActions,
   onBack,
   onClose = () => undefined,
   onIgnoreUser,
@@ -341,6 +352,14 @@ export function ProfilePanel({
           </button>
         ) : null}
       </div>
+      {!isCurrentUser && contactSecurity && contactSecurityActions ? (
+        <ContactSecurityDetails
+          userId={userId}
+          state={contactSecurity}
+          verification={verification}
+          actions={contactSecurityActions}
+        />
+      ) : null}
       {member ? (
         <div className="profile-room-details">
           <div className="profile-detail-row">

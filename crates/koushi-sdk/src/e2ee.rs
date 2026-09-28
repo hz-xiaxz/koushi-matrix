@@ -258,9 +258,32 @@ pub struct MatrixSecureBackupInspection {
     pub upload: MatrixSecureBackupUploadState,
     pub trust: MatrixSecureBackupTrustState,
     pub recovery_key_delivery_pending: bool,
+    /// All three cross-signing private keys are held locally, so a new
+    /// secret store created by `reset_key()` carries them.
+    #[serde(default)]
+    pub local_cross_signing_complete: bool,
 }
 
 impl MatrixSecureBackupInspection {
+    /// `recovery().reset_key()` can re-upload every secret only for an
+    /// authoritative, locally enabled, trusted backup (so the backup key is
+    /// local) whose other secrets are held locally too: either secret storage
+    /// is fully enabled, or it was never created (for example `enable()`
+    /// created the backup but was interrupted before `create_secret_store`)
+    /// and all cross-signing private keys are local. An `Incomplete` secret
+    /// store is refused: its missing secrets would be lost.
+    pub fn recovery_key_reset_is_possible(&self) -> bool {
+        use MatrixSecureBackupRecoveryState as Recovery;
+        self.server == MatrixSecureBackupServerState::Present
+            && self.local == MatrixSecureBackupLocalState::Enabled
+            && self.trust == MatrixSecureBackupTrustState::Trusted
+            && match self.recovery {
+                Recovery::Enabled => true,
+                Recovery::Unknown | Recovery::Disabled => self.local_cross_signing_complete,
+                Recovery::Incomplete => false,
+            }
+    }
+
     pub fn recommended_gate_state(&self) -> SecureBackupGateState {
         use MatrixSecureBackupLocalState as Local;
         use MatrixSecureBackupRecoveryState as Recovery;
@@ -284,9 +307,6 @@ impl MatrixSecureBackupInspection {
 
         match self.server {
             Server::Present => {
-                if self.recovery_key_delivery_pending {
-                    return SecureBackupGateState::RecoveryKeyDeliveryRequired;
-                }
                 match self.local {
                     Local::Unknown
                     | Local::Creating
@@ -300,6 +320,19 @@ impl MatrixSecureBackupInspection {
                         };
                     }
                     Local::Enabled => {}
+                }
+
+                // An unconfirmed reveal offers the lost-key reset only once
+                // `reset_key()` can succeed; until secret storage and trust
+                // settle (for example right after a restart) keep checking.
+                if self.recovery_key_delivery_pending {
+                    return if self.recovery_key_reset_is_possible() {
+                        SecureBackupGateState::RecoveryKeyDeliveryRequired
+                    } else if self.recovery == Recovery::Disabled {
+                        SecureBackupGateState::ExistingBackupNeedsRecovery { failure: None }
+                    } else {
+                        SecureBackupGateState::Checking
+                    };
                 }
 
                 if matches!(self.recovery, Recovery::Unknown | Recovery::Disabled) {
@@ -909,6 +942,10 @@ impl MatrixIdentityResetHandle {
     }
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "short-lived value moved once; boxing would add an allocation per message and churn every construction and match site"
+)]
 pub enum IdentityResetOutcome {
     Completed,
     AuthRequired(MatrixIdentityResetHandle),
@@ -941,6 +978,12 @@ impl fmt::Debug for MatrixVerificationRequestHandle {
 }
 
 impl MatrixVerificationRequestHandle {
+    pub(crate) fn from_sdk(
+        inner: matrix_sdk::encryption::verification::VerificationRequest,
+    ) -> Self {
+        Self { inner }
+    }
+
     pub fn flow_id(&self) -> &str {
         self.inner.flow_id()
     }
@@ -1202,9 +1245,21 @@ pub struct RoomKeyImportSummary {
     pub total_count: u64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Result of secure-backup setup, key reset, or passphrase change: the
+/// recovery key for on-screen reveal (#927). Zeroized on drop; `Debug` is
+/// redacted.
+#[derive(Clone, Eq, PartialEq)]
 pub struct SecureBackupSetupSummary {
-    pub recovery_key_written: bool,
+    pub recovery_key: Zeroizing<String>,
+}
+
+impl fmt::Debug for SecureBackupSetupSummary {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SecureBackupSetupSummary")
+            .field("recovery_key", &"RecoveryKey(..)")
+            .finish()
+    }
 }
 
 #[derive(Clone, Eq, Error, PartialEq)]
@@ -1282,6 +1337,10 @@ impl From<matrix_sdk::Error> for E2eeTrustError {
             other => Self::Sdk(other.to_string()),
         }
     }
+}
+
+pub(crate) fn trust_failure_kind(error: &matrix_sdk::Error) -> E2eeTrustFailureKind {
+    e2ee_trust_failure_kind(error)
 }
 
 fn e2ee_trust_failure_kind(error: &matrix_sdk::Error) -> E2eeTrustFailureKind {
@@ -1528,7 +1587,7 @@ pub async fn download_joined_room_keys_from_backup(
     }
 
     let backup_status = map_backup_state_to_desktop(encryption.backups().state());
-    let backup_version = version.map(str::to_owned).or_else(|| match backup_status {
+    let backup_version = version.map(str::to_owned).or(match backup_status {
         KeyBackupStatus::Enabled { version } => Some(version),
         KeyBackupStatus::Restoring { version, .. } => version,
         _ => None,
@@ -1727,10 +1786,12 @@ pub async fn import_room_keys_from_file(
     })
 }
 
+/// Creates the account-wide Secure Backup and returns the generated recovery
+/// key for on-screen reveal. Saving the key to a file is a separate, optional
+/// step ([`write_recovery_key_material`]).
 pub async fn bootstrap_secure_backup(
     session: &MatrixClientSession,
     passphrase: Option<&AuthSecret>,
-    recovery_key_destination_path: Option<PathBuf>,
 ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
     let recovery = session.client().encryption().recovery();
     let recovery_key = match passphrase {
@@ -1743,10 +1804,53 @@ pub async fn bootstrap_secure_backup(
         }
         None => recovery.enable().wait_for_backups_to_upload().await?,
     };
-    let recovery_key_written =
-        write_recovery_key_if_requested(recovery_key, recovery_key_destination_path)?;
     Ok(SecureBackupSetupSummary {
-        recovery_key_written,
+        recovery_key: Zeroizing::new(recovery_key),
+    })
+}
+
+/// Hands a freshly created recovery key to the reveal (#927). Once
+/// `recovery().enable()` returns, `summary` holds the only copy of a valid
+/// key, so an upload steady-state failure is recorded but never drops it;
+/// Secure Backup inspection and monitoring settle the upload state.
+async fn reveal_created_recovery_key(
+    summary: SecureBackupSetupSummary,
+    upload_settled: impl std::future::Future<Output = Result<(), E2eeTrustError>>,
+) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
+    if upload_settled.await.is_err() {
+        record(
+            DiagnosticEvent::new(
+                DiagnosticLevel::Info,
+                "sdk.secure_backup",
+                "setup_upload_unsettled",
+            )
+            .field(DiagnosticField::token("outcome", "key_revealed")),
+        );
+    }
+    Ok(summary)
+}
+
+/// Creates a NEW secret-storage recovery key with upstream
+/// `recovery().reset_key()` (the Element X approach) and returns it for
+/// on-screen reveal. The previous recovery key and security phrase stop
+/// working. Never substitute `backups().local_recovery_key()`: that exports
+/// the backup decryption key, which `recovery().recover()` rejects.
+pub async fn reset_recovery_key(
+    session: &MatrixClientSession,
+    passphrase: Option<&AuthSecret>,
+) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
+    let recovery = session.client().encryption().recovery();
+    let recovery_key = match passphrase {
+        Some(passphrase) => {
+            recovery
+                .reset_key()
+                .with_passphrase(passphrase.expose_secret())
+                .await?
+        }
+        None => recovery.reset_key().await?,
+    };
+    Ok(SecureBackupSetupSummary {
+        recovery_key: Zeroizing::new(recovery_key),
     })
 }
 
@@ -1754,7 +1858,6 @@ pub async fn change_secure_backup_passphrase(
     session: &MatrixClientSession,
     old_secret: &AuthSecret,
     new_passphrase: &AuthSecret,
-    recovery_key_destination_path: Option<PathBuf>,
 ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
     let recovery_key = session
         .client()
@@ -1763,30 +1866,18 @@ pub async fn change_secure_backup_passphrase(
         .recover_and_reset(old_secret.expose_secret())
         .with_passphrase(new_passphrase.expose_secret())
         .await?;
-    let recovery_key_written =
-        write_recovery_key_if_requested(recovery_key, recovery_key_destination_path)?;
     Ok(SecureBackupSetupSummary {
-        recovery_key_written,
+        recovery_key: Zeroizing::new(recovery_key),
     })
 }
 
-fn write_recovery_key_if_requested(
-    recovery_key: String,
-    destination_path: Option<PathBuf>,
-) -> Result<bool, E2eeTrustError> {
-    let recovery_key = Zeroizing::new(recovery_key);
-    write_recovery_key_material(&recovery_key, destination_path)
-}
-
-fn write_recovery_key_material(
+/// Writes recovery-key material to a user-selected native destination as a
+/// new 0600 file. Refuses to follow or overwrite an existing path.
+pub fn write_recovery_key_material(
     recovery_key: &str,
-    destination_path: Option<PathBuf>,
-) -> Result<bool, E2eeTrustError> {
+    destination_path: PathBuf,
+) -> Result<(), E2eeTrustError> {
     use std::io::Write as _;
-
-    let Some(destination_path) = destination_path else {
-        return Ok(false);
-    };
 
     let mut options = std::fs::OpenOptions::new();
     // The native save dialog is expected to return a new artifact path. Refuse
@@ -1811,7 +1902,7 @@ fn write_recovery_key_material(
         let _ = std::fs::remove_file(&destination_path);
         return Err(E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed);
     }
-    Ok(true)
+    Ok(())
 }
 
 pub async fn reset_identity(
@@ -2466,6 +2557,9 @@ mod secure_backup_inspection_tests;
 #[cfg(test)]
 mod e2ee_trust_tests;
 
+#[cfg(test)]
+mod recovery_key_reveal_tests;
+
 pub(super) const DESKTOP_SQLITE_STORE_POOL_MAX_SIZE: usize = 4;
 
 impl MatrixClientSession {
@@ -2721,6 +2815,9 @@ impl MatrixClientSession {
             upload,
             trust,
             recovery_key_delivery_pending: self.recovery_key_delivery_pending().await?,
+            local_cross_signing_complete: encryption.cross_signing_status().await.is_some_and(
+                |status| status.has_master && status.has_self_signing && status.has_user_signing,
+            ),
         })
     }
     pub async fn recover_secure_backup(
@@ -2737,23 +2834,24 @@ impl MatrixClientSession {
     pub async fn setup_secure_backup(
         &self,
         passphrase: Option<&AuthSecret>,
-        recovery_key_destination_path: Option<PathBuf>,
     ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
-        self.setup_secure_backup_with_confirmation(passphrase, recovery_key_destination_path, false)
+        self.setup_secure_backup_with_confirmation(passphrase, false)
             .await
     }
     pub async fn reenable_secure_backup(
         &self,
         passphrase: Option<&AuthSecret>,
-        recovery_key_destination_path: Option<PathBuf>,
     ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
-        self.setup_secure_backup_with_confirmation(passphrase, recovery_key_destination_path, true)
+        self.setup_secure_backup_with_confirmation(passphrase, true)
             .await
     }
+    /// Creates the recovery key for on-screen reveal. The persisted
+    /// delivery-pending marker stays set until the user explicitly confirms
+    /// the key was saved ([`Self::confirm_recovery_key_delivered`]), so an
+    /// interrupted reveal re-enters `RecoveryKeyDeliveryRequired`.
     async fn setup_secure_backup_with_confirmation(
         &self,
         passphrase: Option<&AuthSecret>,
-        recovery_key_destination_path: Option<PathBuf>,
         explicit_reenable_confirmed: bool,
     ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
         let inspection = self.inspect_secure_backup().await?;
@@ -2765,26 +2863,10 @@ impl MatrixClientSession {
         }
         match inspection.server {
             MatrixSecureBackupServerState::Absent => {}
+            // An existing backup is never re-exported: the only locally
+            // stored key is the backup decryption key, which is not a
+            // recovery key. A lost reveal uses `reset_secure_backup_recovery_key`.
             MatrixSecureBackupServerState::Present => {
-                if inspection.local == MatrixSecureBackupLocalState::Enabled
-                    && inspection.trust == MatrixSecureBackupTrustState::Trusted
-                {
-                    let recovery_key = self
-                        .client()
-                        .encryption()
-                        .backups()
-                        .local_recovery_key()
-                        .await?
-                        .ok_or(E2eeTrustError::SecureBackupInspectionInconclusive)?;
-                    let summary = SecureBackupSetupSummary {
-                        recovery_key_written: write_recovery_key_material(
-                            &recovery_key,
-                            recovery_key_destination_path,
-                        )?,
-                    };
-                    self.set_recovery_key_delivery_pending(false).await?;
-                    return Ok(summary);
-                }
                 return Err(E2eeTrustError::SecureBackupAlreadyExists);
             }
             MatrixSecureBackupServerState::Unknown => {
@@ -2793,11 +2875,31 @@ impl MatrixClientSession {
         }
 
         self.set_recovery_key_delivery_pending(true).await?;
-        let summary =
-            bootstrap_secure_backup(self, passphrase, recovery_key_destination_path).await?;
-        self.set_recovery_key_delivery_pending(false).await?;
-        self.wait_for_secure_backup_steady_state().await?;
-        Ok(summary)
+        let summary = bootstrap_secure_backup(self, passphrase).await?;
+        reveal_created_recovery_key(summary, self.wait_for_secure_backup_steady_state()).await
+    }
+    /// Replaces the recovery key of the existing, trusted, locally enabled
+    /// backup with a NEW one via upstream `recovery().reset_key()` and returns
+    /// it for on-screen reveal. The previous recovery key stops working. The
+    /// delivery-pending marker stays set until the saved confirmation.
+    pub async fn reset_secure_backup_recovery_key(
+        &self,
+        passphrase: Option<&AuthSecret>,
+    ) -> Result<SecureBackupSetupSummary, E2eeTrustError> {
+        let inspection = self.inspect_secure_backup().await?;
+        // Without an authoritative, locally enabled, trusted backup whose
+        // secrets are all held locally (recovery `Enabled`), the new secret
+        // store could not carry every secret.
+        if !inspection.recovery_key_reset_is_possible() {
+            return Err(E2eeTrustError::SecureBackupInspectionInconclusive);
+        }
+        self.set_recovery_key_delivery_pending(true).await?;
+        reset_recovery_key(self, passphrase).await
+    }
+    /// Clears the persisted delivery-pending marker after the user's explicit
+    /// "I saved the recovery key" confirmation.
+    pub async fn confirm_recovery_key_delivered(&self) -> Result<(), E2eeTrustError> {
+        self.set_recovery_key_delivery_pending(false).await
     }
     async fn recovery_key_delivery_pending(&self) -> Result<bool, E2eeTrustError> {
         const KEY: &[u8] = b"koushi.secure_backup.recovery_key_delivery_pending.v1";
@@ -2845,7 +2947,7 @@ mod current_device_trust_recheck_tests {
 
     #[tokio::test]
     async fn recheck_current_device_trust_queries_own_identity() {
-        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
         let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .len();
@@ -3108,8 +3210,8 @@ fn record_initial_share_diagnostic(
         }
     };
     counters.increment(counter);
-    match event.stage {
-        Stage::Eligible => match event.device_class {
+    if event.stage == Stage::Eligible {
+        match event.device_class {
             Class::VerifiedOwn | Class::UnverifiedOwn => {
                 counters.increment("initial_share_eligible_own")
             }
@@ -3117,8 +3219,7 @@ fn record_initial_share_diagnostic(
                 counters.increment("initial_share_eligible_peer")
             }
             Class::Dehydrated | Class::Unknown => {}
-        },
-        _ => {}
+        }
     }
 
     let mut diagnostic = DiagnosticEvent::new(DiagnosticLevel::Info, "core.initial_share", "stage")
@@ -3602,7 +3703,7 @@ mod megolm_send_parity_tests {
             .mount(server.server())
             .await;
 
-        let room = alice.get_room(&room_id).unwrap();
+        let room = alice.get_room(room_id).unwrap();
         room.send(RoomMessageEventContent::text_plain("first"))
             .await
             .unwrap();
@@ -3894,7 +3995,11 @@ pub struct MatrixRoomKeyReceiveDiagnostics {
 pub async fn incoming_verification_request_protection_counters(
     session: &MatrixClientSession,
 ) -> IncomingVerificationRequestProtectionCounters {
-    session.client().encryption().incoming_verification_request_protection_counters().await
+    session
+        .client()
+        .encryption()
+        .incoming_verification_request_protection_counters()
+        .await
 }
 
 /// Snapshot the privacy-safe receive-side room-key diagnostics for a session.
@@ -4279,7 +4384,7 @@ mod current_device_trust_recheck_classifier_tests {
 
     #[tokio::test]
     async fn unknown_token_keys_query_is_authentication() {
-        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
         let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .len();
@@ -4329,7 +4434,7 @@ mod current_device_trust_recheck_classifier_tests {
 
     #[tokio::test]
     async fn server_keys_query_failure_is_server() {
-        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
         let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .len();

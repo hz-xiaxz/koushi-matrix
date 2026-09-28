@@ -1,6 +1,6 @@
 //! Runtime settings integration tests.
 
-use koushi_core::settings::{SettingsStore, SettingsStoreErrorKind};
+use koushi_core::settings::{SETTINGS_SCHEMA_VERSION, SettingsStore, SettingsStoreErrorKind};
 use koushi_core::{CoreCommand, CoreRuntime};
 use koushi_protocol::command::AppCommand;
 use koushi_state::{
@@ -312,4 +312,134 @@ fn settings_store_loads_legacy_json_without_notification_settings() {
     assert_eq!(values.notifications, NotificationSettings::default());
     assert_eq!(values.display, DisplaySettings::default());
     assert_eq!(values.media, MediaSettings::default());
+}
+
+fn write_settings_file(data_dir: &std::path::Path, json: &str) -> std::path::PathBuf {
+    let settings_dir = data_dir.join("settings");
+    std::fs::create_dir_all(&settings_dir).expect("settings dir");
+    let path = settings_dir.join("settings.json");
+    std::fs::write(&path, json).expect("write settings");
+    path
+}
+
+fn persisted_settings_json(path: &std::path::Path) -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(path).expect("read settings"))
+        .expect("persisted settings are JSON")
+}
+
+const LEGACY_OPTED_IN_ENCRYPTED_PREVIEWS: &str = r#"{
+  "locale": { "language_tag": null, "text_direction": "auto" },
+  "appearance": { "theme": "dark" },
+  "typography": { "font": "system", "emoji": "system" },
+  "keyboard": { "composer_send_shortcut": "enter" },
+  "display": {
+    "code_block_wrap": true,
+    "hide_redacted": true,
+    "url_previews_enabled": true,
+    "encrypted_url_previews_enabled": true
+  }
+}
+"#;
+
+#[test]
+fn settings_store_resets_unversioned_encrypted_url_preview_opt_in() {
+    // #1034: files written before the settings schema version existed may
+    // carry `encrypted_url_previews_enabled: true` from the retired default
+    // without any explicit user opt-in.
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let path = write_settings_file(data_dir.path(), LEGACY_OPTED_IN_ENCRYPTED_PREVIEWS);
+
+    let values = SettingsStore::new(data_dir.path())
+        .load()
+        .expect("legacy settings load");
+
+    assert!(!values.display.encrypted_url_previews_enabled);
+    assert!(values.display.url_previews_enabled);
+    assert_eq!(values.appearance.theme, ThemePreference::Dark);
+
+    let persisted = persisted_settings_json(&path);
+    assert_eq!(
+        persisted["schema_version"],
+        serde_json::json!(SETTINGS_SCHEMA_VERSION)
+    );
+    assert_eq!(
+        persisted["display"]["encrypted_url_previews_enabled"],
+        serde_json::json!(false)
+    );
+}
+
+#[test]
+fn settings_store_keeps_versioned_encrypted_url_preview_opt_in() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let store = SettingsStore::new(data_dir.path());
+    let mut values = store.load().expect("default settings");
+    values.display.encrypted_url_previews_enabled = true;
+    store.save(&values).expect("save explicit opt-in");
+
+    let path = data_dir.path().join("settings/settings.json");
+    assert_eq!(
+        persisted_settings_json(&path)["schema_version"],
+        serde_json::json!(SETTINGS_SCHEMA_VERSION)
+    );
+
+    let reloaded = store.load().expect("reload versioned settings");
+    assert!(reloaded.display.encrypted_url_previews_enabled);
+    assert_eq!(reloaded, values);
+    // A second load must not re-run the migration.
+    assert!(
+        store
+            .load()
+            .expect("load again")
+            .display
+            .encrypted_url_previews_enabled
+    );
+}
+
+#[test]
+fn settings_store_round_trips_versioned_values() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let store = SettingsStore::new(data_dir.path());
+    let mut values = store.load().expect("default settings");
+    values.appearance.theme = ThemePreference::Dark;
+    values.display.url_previews_enabled = false;
+    values.legacy_frontend_preferences_imported = true;
+    store.save(&values).expect("save");
+
+    assert_eq!(store.load().expect("reload"), values);
+}
+
+#[test]
+fn settings_store_rejects_non_integer_schema_version_as_corrupt() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    write_settings_file(
+        data_dir.path(),
+        r#"{ "schema_version": "one", "locale": { "language_tag": null, "text_direction": "auto" }, "appearance": { "theme": "dark" }, "typography": { "font": "system", "emoji": "system" }, "keyboard": { "composer_send_shortcut": "enter" } }"#,
+    );
+
+    let err = SettingsStore::new(data_dir.path())
+        .load()
+        .expect_err("malformed schema version fails safely");
+    assert_eq!(err.kind(), SettingsStoreErrorKind::Corrupt);
+}
+
+#[tokio::test]
+async fn runtime_start_migrates_unversioned_encrypted_url_preview_opt_in() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let path = write_settings_file(data_dir.path(), LEGACY_OPTED_IN_ENCRYPTED_PREVIEWS);
+
+    let runtime = CoreRuntime::start_with_data_dir(data_dir.path().to_path_buf());
+    let connection = runtime.attach();
+
+    assert!(
+        !connection
+            .snapshot()
+            .settings
+            .values
+            .display
+            .encrypted_url_previews_enabled
+    );
+    assert_eq!(
+        persisted_settings_json(&path)["schema_version"],
+        serde_json::json!(SETTINGS_SCHEMA_VERSION)
+    );
 }

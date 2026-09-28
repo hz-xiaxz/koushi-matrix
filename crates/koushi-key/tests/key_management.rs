@@ -273,7 +273,7 @@ fn credential_store_last_session_pointer_round_trip() {
     let _ = store.delete_last_session();
     let result = (|| -> Result<_, LocalSecretError> {
         store.save_last_session(&id)?;
-        Ok(store.load_last_session()?)
+        store.load_last_session()
     })();
     store.delete_last_session().unwrap();
 
@@ -297,7 +297,7 @@ fn credential_store_matrix_session_round_trip() {
     let _ = store.delete_matrix_session(&id);
     let result = (|| -> Result<_, LocalSecretError> {
         store.save_matrix_session(&id, &session)?;
-        Ok(store.load_matrix_session(&id)?)
+        store.load_matrix_session(&id)
     })();
     store.delete_matrix_session(&id).unwrap();
 

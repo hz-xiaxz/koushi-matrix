@@ -730,6 +730,10 @@ impl TimelineActor {
             previous.abort();
         }
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor message handler: parameters are the destructured message fields"
+    )]
     pub(super) async fn handle_link_previews_fetched(
         &mut self,
         request_id: RequestId,
@@ -1785,18 +1789,6 @@ pub(super) fn timeline_item_should_be_hidden_for_key(
     timeline_item_should_be_hidden(has_renderable_content, is_redacted)
 }
 
-/// Koushi threads are linear, so a thread-keyed reply command is always an
-/// ordinary thread message: the relation is threaded and the target event is
-/// never promoted to a rich reply. The product UI offers no thread-pane reply
-/// action, and this projection keeps a thread rich reply unreachable even if a
-/// caller passes a non-root target.
-pub(super) fn reply_enforce_thread_for_key(key: &TimelineKey) -> EnforceThread {
-    match key.kind {
-        TimelineKind::Thread { .. } => EnforceThread::Threaded(ReplyWithinThread::No),
-        TimelineKind::Room { .. } | TimelineKind::Focused { .. } => EnforceThread::MaybeThreaded,
-    }
-}
-
 pub(super) fn attachment_reply_for_key(key: &TimelineKey) -> Option<Reply> {
     let TimelineKind::Thread { root_event_id, .. } = &key.kind else {
         return None;
@@ -2110,6 +2102,10 @@ async fn receipt_profiles_for_users(
     profiles
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) async fn emit_receipt_observation_actions(
     session: &MatrixClientSession,
     action_tx: &mpsc::Sender<Vec<AppAction>>,
@@ -2712,7 +2708,7 @@ fn reply_quote_from_embedded_event(
         .content
         .as_message()
         .map(|msg| message_projection_from_msgtype(msg.msgtype(), msg.body()));
-    reply_quote_from_message_projection(&details.event_id.to_string(), sender, projection)
+    reply_quote_from_message_projection(details.event_id.as_ref(), sender, projection)
 }
 
 fn reply_quote_from_message_projection(
@@ -2767,7 +2763,7 @@ fn reply_quote_preview_from_message_projection(projection: &MessageProjection) -
             .as_ref()
             .map(|media| media.filename.as_str())
     })?;
-    collapsed_preview(&source, REPLY_QUOTE_PREVIEW_MAX_CHARS)
+    collapsed_preview(source, REPLY_QUOTE_PREVIEW_MAX_CHARS)
 }
 
 fn message_projection_from_timeline_content(content: &TimelineItemContent) -> MessageProjection {
@@ -2831,7 +2827,10 @@ fn hidden_content_projection() -> MessageProjection {
     projection
 }
 
-pub(super) fn localized_notice_projection(key: TimelineNoticeI18nKey, body: &str) -> MessageProjection {
+pub(super) fn localized_notice_projection(
+    key: TimelineNoticeI18nKey,
+    body: &str,
+) -> MessageProjection {
     let mut projection = non_user_content_projection(body);
     projection.message_kind = TimelineMessageKind::Notice;
     projection.notice_i18n = Some(TimelineNoticeI18n {
@@ -2857,10 +2856,11 @@ fn other_state_projection(state: &AnyOtherStateEventContentChange) -> MessagePro
                     TimelineNoticeI18nKey::RoomTopicRemoved,
                     "removed the room topic".to_owned(),
                 )
-            } else if prev_content
-                .as_ref()
-                .is_some_and(|old| old.topic.as_deref().is_some_and(|topic| !topic.trim().is_empty()))
-            {
+            } else if prev_content.as_ref().is_some_and(|old| {
+                old.topic
+                    .as_deref()
+                    .is_some_and(|topic| !topic.trim().is_empty())
+            }) {
                 (
                     TimelineNoticeI18nKey::RoomTopicChanged,
                     format!("changed the room topic to {}", content.topic),

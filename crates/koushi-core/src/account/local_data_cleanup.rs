@@ -102,12 +102,12 @@ impl AccountActor {
     }
 
     pub(super) async fn handle_start_device_cleanup(&mut self, request_id: RequestId) {
-        if let Some(mut pending) = self.pending_device_cleanup.take() {
-            if matches!(&pending.stage, PendingDeviceCleanupStage::Local { .. }) {
-                pending.original_request_id = request_id;
-                self.finish_device_cleanup_local(pending).await;
-                return;
-            }
+        if let Some(mut pending) = self.pending_device_cleanup.take()
+            && matches!(&pending.stage, PendingDeviceCleanupStage::Local { .. })
+        {
+            pending.original_request_id = request_id;
+            self.finish_device_cleanup_local(pending).await;
+            return;
         }
         self.run_device_cleanup_remote(request_id, None, None).await;
     }

@@ -1,5 +1,3 @@
-use super::super::test_source::item_body;
-
 use std::collections::{HashMap, HashSet};
 
 use std::sync::{Arc, Mutex};
@@ -24,8 +22,6 @@ use crate::threads_list::{
     ThreadRootProjectionService,
 };
 use koushi_protocol::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
-
-use std::future::poll_fn;
 
 use matrix_sdk::ruma::{OwnedUserId, uint};
 
@@ -717,12 +713,13 @@ async fn aggregate_start_preserves_fetch_finished_worker_and_failed_hydration_te
         crate::threads_list::ThreadRootProjectionCompletion::Updated(record)
             if record.failure_kind() == Some(OperationFailureKind::Network)
     ));
-    let service = manager
-        .thread_root_projection_service
-        .lock()
-        .expect("service lock");
-    assert!(!service.has_pending_attempt(&activity));
-    drop(service);
+    assert!(
+        !manager
+            .thread_root_projection_service
+            .lock()
+            .expect("service lock")
+            .has_pending_attempt(&activity)
+    );
     manager
         .handle_aggregate_refresh_start(key, actor_generation, None, vec![refresh])
         .await;

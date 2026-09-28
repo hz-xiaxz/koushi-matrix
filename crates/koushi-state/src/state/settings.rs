@@ -21,8 +21,10 @@ fn default_url_previews_enabled() -> bool {
     true
 }
 
+/// Encrypted-room link previews reveal URLs to the homeserver and destination
+/// site, so they stay off until the user explicitly opts in.
 fn default_encrypted_url_previews_enabled() -> bool {
-    true
+    false
 }
 
 fn default_thread_list_order() -> ThreadListOrder {
@@ -85,18 +87,10 @@ impl RoomPreference {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Default)]
 pub struct LinkPreviewSettingsState {
     #[serde(default)]
     pub room_overrides: RoomUrlPreviews,
-}
-
-impl Default for LinkPreviewSettingsState {
-    fn default() -> Self {
-        Self {
-            room_overrides: RoomUrlPreviews::new(),
-        }
-    }
 }
 
 impl std::fmt::Debug for LinkPreviewSettingsState {
@@ -123,7 +117,7 @@ impl Default for SettingsState {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 pub struct SettingsValues {
     pub locale: LocaleSettings,
     pub appearance: AppearanceSettings,
@@ -210,29 +204,6 @@ impl SettingsValues {
     }
 }
 
-impl Default for SettingsValues {
-    fn default() -> Self {
-        Self {
-            locale: LocaleSettings::default(),
-            appearance: AppearanceSettings::default(),
-            typography: TypographySettings::default(),
-            keyboard: KeyboardSettings::default(),
-            composer: ComposerSettings::default(),
-            notifications: NotificationSettings::default(),
-            display: DisplaySettings::default(),
-            media: MediaSettings::default(),
-            timeline: TimelineSettings::default(),
-            thread_list_order: ThreadListOrder::default(),
-            room_list_sort: RoomListSort::default(),
-            search_crawler: SearchCrawlerSettings::default(),
-            sidebar: SidebarSettings::default(),
-            window: WindowSettings::default(),
-            updates: UpdatesSettings::default(),
-            legacy_frontend_preferences_imported: false,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LocaleSettings {
     pub language_tag: Option<String>,
@@ -289,7 +260,7 @@ pub enum ThemePreference {
     Dark,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 pub struct SidebarSettings {
     #[serde(default)]
     pub category: SidebarCategory,
@@ -299,31 +270,12 @@ pub struct SidebarSettings {
     pub scope_preferences: BTreeMap<String, SidebarScopeSettings>,
 }
 
-impl Default for SidebarSettings {
-    fn default() -> Self {
-        Self {
-            category: SidebarCategory::default(),
-            collapsed: SidebarCollapsedSections::default(),
-            scope_preferences: BTreeMap::new(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 pub struct SidebarSectionSettings {
     #[serde(default)]
     pub collapsed: bool,
     #[serde(default)]
     pub sort: RoomListSort,
-}
-
-impl Default for SidebarSectionSettings {
-    fn default() -> Self {
-        Self {
-            collapsed: false,
-            sort: RoomListSort::default(),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -546,16 +498,12 @@ impl Default for NotificationSettings {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+#[derive(Default)]
 pub enum RoomNotificationMode {
+    #[default]
     All,
     Mentions,
     Mute,
-}
-
-impl Default for RoomNotificationMode {
-    fn default() -> Self {
-        Self::All
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
@@ -566,7 +514,9 @@ pub struct RoomNotificationSettings {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+#[derive(Default)]
 pub enum RoomNotificationModeOperation {
+    #[default]
     Idle,
     Pending {
         request_id: u64,
@@ -576,12 +526,6 @@ pub enum RoomNotificationModeOperation {
         #[serde(rename = "failureKind")]
         failure_kind: super::errors::OperationFailureKind,
     },
-}
-
-impl Default for RoomNotificationModeOperation {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -602,7 +546,7 @@ impl Default for DisplaySettings {
             code_block_wrap: true,
             hide_redacted: true,
             url_previews_enabled: true,
-            encrypted_url_previews_enabled: true,
+            encrypted_url_previews_enabled: default_encrypted_url_previews_enabled(),
         }
     }
 }
@@ -661,17 +605,10 @@ impl Default for UpdatesSettings {
 /// and starts at the untouched output, so there is no preference left to store.
 /// The policy remains because the encoder still reads its quality value and the
 /// direct upload path still reads its thresholds.
+#[derive(Default)]
 pub struct MediaSettings {
     #[serde(default)]
     pub image_upload_compression_policy: ImageUploadCompressionPolicy,
-}
-
-impl Default for MediaSettings {
-    fn default() -> Self {
-        Self {
-            image_upload_compression_policy: ImageUploadCompressionPolicy::default(),
-        }
-    }
 }
 
 /// Per-item compression choice payload.
@@ -735,29 +672,21 @@ pub enum TimelineThreadRootOrder {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+#[derive(Default)]
 pub enum ThreadListOrder {
+    #[default]
     LatestReply,
     RootChronology,
 }
 
-impl Default for ThreadListOrder {
-    fn default() -> Self {
-        Self::LatestReply
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+#[derive(Default)]
 pub enum RoomListSort {
+    #[default]
     Activity,
     RecentFirst,
     NormalLocale,
-}
-
-impl Default for RoomListSort {
-    fn default() -> Self {
-        Self::Activity
-    }
 }
 
 // SearchCrawlerSettings and SearchCrawlerSpeed live in state/search_crawler.rs

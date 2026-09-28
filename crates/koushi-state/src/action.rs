@@ -18,13 +18,12 @@ use crate::state::{
     MentionCandidatesCompleteness, MentionCandidatesFailureKind, MentionSurface,
     NativeAttentionDispatchId, NativeAttentionSoundOutcome, NativeAttentionState,
     NavigationPreferenceUpdate, NavigationState, OperationFailureKind, OwnProfile, PinnedEvent,
-    PresenceKind, ProfileUpdateRequest, RecoveryKeyDeliveryState, RecoveryMethod,
-    RoomListFailureKind, RoomListFilter, RoomListProjection, RoomListSource, RoomMentionPermission,
-    RoomModerationAction, RoomPreferencesState, RoomSettingChange, RoomSettingsSnapshot,
-    RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability,
-    ScheduledSendHandle, ScheduledSendItem, SearchResult, SearchScope, SessionInfo,
-    SessionStatusRefreshTrigger, SettingsPatch, SettingsValues, SpaceChildLinkOutcome,
-    SpaceChildSummary,
+    PresenceKind, ProfileUpdateRequest, RecoveryMethod, RoomListFailureKind, RoomListFilter,
+    RoomListProjection, RoomListSource, RoomMentionPermission, RoomModerationAction,
+    RoomPreferencesState, RoomSettingChange, RoomSettingsSnapshot, RoomSummary, RoomTagInfo,
+    RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability, ScheduledSendHandle,
+    ScheduledSendItem, SearchResult, SearchScope, SessionInfo, SessionStatusRefreshTrigger,
+    SettingsPatch, SettingsValues, SpaceChildLinkOutcome, SpaceChildSummary,
     SpaceMemberInviteOutcome, SpaceMemberRoleUpdateOutcome, SpaceMembersProjection, SpaceSummary,
     StagedUploadCompressionChoice, StagedUploadItem, StagedUploadOutputSelection,
     SyncLifecycleStatus, TimelineContinuityInspection, TimelineGapRepairFailureKind,
@@ -166,6 +165,30 @@ pub enum AppAction {
     /// change so the reducer never shows a pending address the actor no
     /// longer holds.
     AccountNotificationsPendingEmailVerified,
+    /// Contact security details (#1024): a fresh read-only retrieval for the
+    /// contact whose User info opened. Replaces any previous contact.
+    ContactSecurityLoadRequested {
+        request_id: u64,
+        user_id: String,
+    },
+    ContactSecurityLoaded {
+        request_id: u64,
+        user_id: String,
+        summary: crate::state::ContactSecuritySummary,
+    },
+    ContactSecurityLoadFailed {
+        request_id: u64,
+        user_id: String,
+        failure_kind: crate::state::ContactSecurityFailureKind,
+    },
+    /// The SDK's local key store changed (device added/removed/re-signed, or
+    /// an identity or its verification changed); re-read without network.
+    ContactSecurityRefreshed {
+        user_id: String,
+        summary: crate::state::ContactSecuritySummary,
+    },
+    /// User info closed; stop showing and refreshing the contact's details.
+    ContactSecurityClosed,
     AccountManagementCapabilitiesLoaded {
         change_password: bool,
     },
@@ -541,6 +564,12 @@ pub enum AppAction {
         request_id: u64,
         target: VerificationTarget,
     },
+    /// We sent a verification request (device request or **Verify user**,
+    /// #1024); it waits for the other side instead of offering Accept.
+    VerificationRequestSent {
+        request_id: u64,
+        target: VerificationTarget,
+    },
     VerificationAccepted {
         request_id: u64,
     },
@@ -690,10 +719,7 @@ pub enum AppAction {
     },
     SecureBackupRecoveryKeyReady {
         request_id: u64,
-        delivery: RecoveryKeyDeliveryState,
-    },
-    SecureBackupSetupEnabled {
-        request_id: u64,
+        recovery_key: crate::state::RecoveryKeyMaterial,
     },
     SecureBackupSetupFailed {
         request_id: u64,
@@ -704,7 +730,26 @@ pub enum AppAction {
     },
     SecureBackupPassphraseChanged {
         request_id: u64,
-        delivery: RecoveryKeyDeliveryState,
+        recovery_key: crate::state::RecoveryKeyMaterial,
+    },
+    /// Settles the optional "Save to file" action for the revealed key whose
+    /// setup/passphrase-change request id is `reveal_request_id`.
+    SecureBackupRecoveryKeySaved {
+        reveal_request_id: u64,
+        written: bool,
+    },
+    /// The explicit "I saved the recovery key" confirmation. It is the only
+    /// transition that leaves the reveal state and drops the key.
+    SecureBackupRecoveryKeyConfirmed {
+        reveal_request_id: u64,
+    },
+    /// AccountActor could not clear the persisted delivery marker after the
+    /// confirmation, so it kept its copy and restores the setup reveal (and
+    /// the blocking gate) instead of forcing a reset of the saved key.
+    SecureBackupRecoveryKeyConfirmFailed {
+        reveal_request_id: u64,
+        recovery_key: crate::state::RecoveryKeyMaterial,
+        delivery: crate::state::RecoveryKeyDeliveryState,
     },
     SecureBackupPassphraseChangeFailed {
         request_id: u64,

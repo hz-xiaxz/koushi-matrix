@@ -64,9 +64,15 @@ type CurrentLegacySettings = {
   sidebar: SidebarSettings;
 };
 
+/**
+ * `validEmojis` is `null` when the emoji vocabulary is unavailable (#1035):
+ * the legacy recent-emoji list is then left out of the migration entirely,
+ * because it cannot be validated, while every other preference migrates. Its
+ * key is not in `sourceKeys`, so callers keep it in storage.
+ */
 export function readLegacyPreferenceMigration(
   storage: Storage,
-  validEmojis: ReadonlySet<string>,
+  validEmojis: ReadonlySet<string> | null,
   current: CurrentLegacySettings
 ): LegacyPreferenceMigration {
   const sourceKeys: string[] = [];
@@ -108,8 +114,10 @@ export function readLegacyPreferenceMigration(
     sourceKeys.push(LEGACY_PREFERENCE_KEYS.collapsedSections);
   }
 
-  const recent = parseArray(storage.getItem(LEGACY_PREFERENCE_KEYS.recentEmojis));
-  if (recent && recent.every((value) => typeof value === "string")) {
+  const recent = validEmojis
+    ? parseArray(storage.getItem(LEGACY_PREFERENCE_KEYS.recentEmojis))
+    : null;
+  if (validEmojis && recent && recent.every((value) => typeof value === "string")) {
     const canonical = distinct(
       recent.filter((value): value is string => validEmojis.has(value))
     ).slice(0, MAX_RECENT_EMOJIS);
@@ -141,13 +149,84 @@ export function readLegacyPreferenceMigration(
   return { settingsPatch, navigationImport, sourceKeys };
 }
 
+/** Whether this browser profile still carries the legacy recent-emoji list. */
+export function browserHasLegacyRecentEmojis(): boolean {
+  try {
+    return (
+      typeof window !== "undefined" &&
+      window.localStorage.getItem(LEGACY_PREFERENCE_KEYS.recentEmojis) !== null
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Loads the emoji vocabulary that validates legacy recent emojis. It lives in
+ * the on-demand emoji chunk (#1035), so startup fetches it only for a profile
+ * that still has a legacy list to migrate.
+ */
+export function loadLegacyEmojiVocabulary(): Promise<ReadonlySet<string>> {
+  return import("../components/emojiData").then(
+    ({ EMOJI_BY_CATEGORY, EMOJI_CATEGORIES }) =>
+      new Set(
+        EMOJI_CATEGORIES.flatMap((category) =>
+          EMOJI_BY_CATEGORY[category].map((entry) => entry.emoji)
+        )
+      )
+  );
+}
+
 export function readBrowserLegacyPreferenceMigration(
-  validEmojis: ReadonlySet<string>,
+  validEmojis: ReadonlySet<string> | null,
   current: CurrentLegacySettings
 ): LegacyPreferenceMigration | null {
   return typeof window === "undefined"
     ? null
     : readLegacyPreferenceMigration(window.localStorage, validEmojis, current);
+}
+
+/** Legacy settings keys other than the recent-emoji list. */
+export const LEGACY_SETTINGS_KEYS_WITHOUT_RECENT_EMOJIS = LEGACY_SETTINGS_KEYS.filter(
+  (key) => key !== LEGACY_PREFERENCE_KEYS.recentEmojis
+);
+
+export type LegacyRecentEmojiFollowUp =
+  | { kind: "keep" }
+  | { kind: "remove" }
+  | { kind: "import"; composer: ComposerSettings };
+
+/**
+ * What to do with a legacy recent-emoji list that is still in browser storage
+ * after Rust already recorded the one-shot legacy settings import (#1035).
+ *
+ * That happens when the import ran while the emoji vocabulary was unavailable:
+ * the list was left out because it could not be validated, and its key was
+ * kept. The key is removed only once the list was imported or validated:
+ * - vocabulary not ready (`validEmojis === null`): keep it for a later launch;
+ * - the stored value is corrupt (not in `migration.sourceKeys`), or every
+ *   valid legacy emoji is already present (or the current list is full):
+ *   nothing to import, remove it;
+ * - otherwise import it with an ordinary settings update, appending the
+ *   legacy emojis after the current, newer ones.
+ */
+export function legacyRecentEmojiFollowUp(
+  migration: LegacyPreferenceMigration,
+  validEmojis: ReadonlySet<string> | null,
+  current: ComposerSettings
+): LegacyRecentEmojiFollowUp {
+  if (!validEmojis) return { kind: "keep" };
+  const legacy = migration.sourceKeys.includes(LEGACY_PREFERENCE_KEYS.recentEmojis)
+    ? migration.settingsPatch.composer?.recent_emojis ?? []
+    : [];
+  const merged = distinct([...current.recent_emojis, ...legacy]).slice(0, MAX_RECENT_EMOJIS);
+  if (
+    merged.length === current.recent_emojis.length &&
+    merged.every((emoji, index) => emoji === current.recent_emojis[index])
+  ) {
+    return { kind: "remove" };
+  }
+  return { kind: "import", composer: { ...current, recent_emojis: merged } };
 }
 
 export function removeBrowserLegacyPreferenceKeys(keys: readonly string[]): string[] {

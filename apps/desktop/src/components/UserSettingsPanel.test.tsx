@@ -1111,11 +1111,14 @@ describe("UserSettingsPanel", () => {
             secure_backup_setup: {
               kind: "recoveryKeyReady",
               request_id: 12,
-              delivery: { kind: "written" }
+              recovery_key: "synthetic-settings-setup-key",
+              delivery: { kind: "written" },
+              confirmation_failed: false
             },
             passphrase_change: {
               kind: "changed",
               request_id: 13,
+              recovery_key: "synthetic-settings-changed-key",
               delivery: { kind: "notWritten" }
             }
           }
@@ -1139,8 +1142,12 @@ describe("UserSettingsPanel", () => {
     expect(markup).toContain("Choose import file");
     expect(markup).toContain("Export room keys");
     expect(markup).toContain("Import room keys");
-    expect(markup).toContain("Set up secure backup");
+    // #927: a revealed key replaces the setup / change forms until confirmed.
+    expect(markup).not.toContain("Set up secure backup");
     expect(markup).toContain("Recovery key saved");
+    expect(markup).toContain("synthetic-settings-setup-key");
+    expect(markup).toContain("synthetic-settings-changed-key");
+    expect(markup).toContain("I saved the recovery key");
     expect(markup).toContain("1 of 1 imported");
     expect(markup).not.toContain("Key export destination");
     expect(markup).not.toContain("Key import source");
@@ -1148,6 +1155,81 @@ describe("UserSettingsPanel", () => {
     expect(markup).not.toContain("private-room-key-passphrase");
     expect(markup).not.toContain("private-secure-backup-passphrase");
     expect(markup).not.toContain("/tmp/");
+  });
+
+  test("secure backup setup and passphrase change need no file destination; only confirmation dismisses the revealed key", async () => {
+    const onBootstrapSecureBackup = vi.fn();
+    const onChangeSecureBackupPassphrase = vi.fn();
+    const onSaveSecureBackupRecoveryKey = vi.fn(async () => undefined);
+    const onConfirmSecureBackupRecoveryKeySaved = vi.fn();
+    const renderPanel = (keyManagement: E2eeTrustState["key_management"]) => (
+      <UserSettingsPanel
+        currentSession={{
+          homeserver: "https://matrix.org",
+          user_id: "@demo-user:example.invalid",
+          device_id: "FAKEDEVICE"
+        }}
+        e2eeTrust={{ ...idleE2eeTrust, key_management: keyManagement }}
+        localEncryption={{ kind: "healthy" }}
+        platform="linux"
+        accountManagement={idleAccountManagement}
+        accountManagementCapabilities={idleAccountManagementCapabilities}
+        savedSessions={[]}
+        profile={profile}
+        settings={settings}
+        {...handlers}
+        onBootstrapSecureBackup={onBootstrapSecureBackup}
+        onChangeSecureBackupPassphrase={onChangeSecureBackupPassphrase}
+        onSaveSecureBackupRecoveryKey={onSaveSecureBackupRecoveryKey}
+        onConfirmSecureBackupRecoveryKeySaved={onConfirmSecureBackupRecoveryKeySaved}
+      />
+    );
+    const { rerender } = render(renderPanel(idleE2eeTrust.key_management));
+    fireEvent.click(screen.getByRole("tab", { name: "Encryption" }));
+
+    const setupForm = screen.getByRole("form", { name: "Secure backup" });
+    const [setupPassphrase] = setupForm.querySelectorAll("input");
+    fireEvent.change(setupPassphrase!, { target: { value: "synthetic-setup-passphrase" } });
+    fireEvent.submit(setupForm);
+    await vi.waitFor(() =>
+      expect(onBootstrapSecureBackup).toHaveBeenCalledWith("synthetic-setup-passphrase", {
+        kind: "initialSetup"
+      })
+    );
+
+    const changeForm = screen.getByRole("form", { name: "Change secure backup passphrase" });
+    const [oldSecret, newPassphrase] = changeForm.querySelectorAll("input");
+    fireEvent.change(oldSecret!, { target: { value: "synthetic-old-secret" } });
+    fireEvent.change(newPassphrase!, { target: { value: "synthetic-new-passphrase" } });
+    fireEvent.submit(changeForm);
+    await vi.waitFor(() =>
+      expect(onChangeSecureBackupPassphrase).toHaveBeenCalledWith(
+        "synthetic-old-secret",
+        "synthetic-new-passphrase"
+      )
+    );
+
+    rerender(
+      renderPanel({
+        ...idleE2eeTrust.key_management,
+        passphrase_change: {
+          kind: "changed",
+          request_id: 13,
+          recovery_key: "synthetic-settings-changed-key",
+          delivery: { kind: "notWritten" }
+        }
+      })
+    );
+    const reveal = screen.getByRole("region", { name: "Your recovery key" });
+    expect(within(reveal).getByText("synthetic-settings-changed-key").tagName).toBe("CODE");
+    fireEvent.click(within(reveal).getByRole("button", { name: "Save to file…" }));
+    await vi.waitFor(() => expect(onSaveSecureBackupRecoveryKey).toHaveBeenCalledWith(13));
+    expect(onConfirmSecureBackupRecoveryKeySaved).not.toHaveBeenCalled();
+    fireEvent.click(within(reveal).getByRole("button", { name: "I saved the recovery key" }));
+    await vi.waitFor(() => expect(onConfirmSecureBackupRecoveryKeySaved).toHaveBeenCalledWith(13));
+
+    rerender(renderPanel(idleE2eeTrust.key_management));
+    expect(screen.queryByText("synthetic-settings-changed-key")).toBeNull();
   });
 
   test("does not render Koushi-owned remote device management", () => {

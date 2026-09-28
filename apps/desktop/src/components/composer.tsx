@@ -40,7 +40,7 @@ import {
   shouldLetNativeImeHandleComposerKeyEvent,
   shouldResolveComposerKeyEvent
 } from "../domain/composerKeyEvents";
-import { EmojiPicker } from "./EmojiPicker";
+import { LazyEmojiPicker } from "./LazyEmojiPicker";
 import {
   ImeInlineMentionEditor,
   type ImeInlineMentionEditorHandle,
@@ -720,7 +720,7 @@ export const Composer = memo(function Composer({
         <Smile size={ICON_SIZE.control} />
       </button>
       {emojiPickerOpen ? (
-        <EmojiPicker
+        <LazyEmojiPicker
           anchorRef={emojiButtonRef}
           recentEmojis={recentEmojis}
           onRecentEmojisChange={(emojis) => void onRecentEmojisChange(emojis)}

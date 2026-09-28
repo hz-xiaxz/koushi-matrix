@@ -8,7 +8,7 @@ import { clearAppStoreSnapshot, getAppStoreSnapshot, setAppStoreSnapshot } from 
 import { COMPOSER_DRAFT_REVISION_ZERO } from "../domain/composerDraftRevision";
 import type { DesktopSnapshot } from "../domain/types";
 import { applyTimelineEvent, createTimelineStore } from "../domain/timelineStore";
-import { roomTimelineKey } from "../domain/coreEvents";
+import { focusedTimelineKey, roomTimelineKey, type TimelineKey } from "../domain/coreEvents";
 import { TimelineStoreContext } from "./timelineStoreContext";
 import { message } from "./timelineViewTestSupport";
 import { TimelinePane } from "./panes";
@@ -16,7 +16,8 @@ import type { TimelineTransport } from "./TimelineView";
 
 const renderCounts = vi.hoisted(() => ({
   composer: 0,
-  timelineView: 0
+  timelineView: 0,
+  lastTimelineKey: null as unknown
 }));
 
 vi.mock("./composer", async () => {
@@ -41,6 +42,7 @@ vi.mock("./TimelineView", async () => {
   const TimelineViewProbe = memo(
     function TimelineViewProbe(props: Parameters<typeof actual.TimelineView>[0]) {
       renderCounts.timelineView += 1;
+      renderCounts.lastTimelineKey = props.timelineKey;
       return createElement(actual.TimelineView, props);
     }
   );
@@ -131,10 +133,116 @@ describe("TimelinePane render isolation", () => {
     expect(container.querySelector(".message .avatar img")?.getAttribute("src")).toBe("https://example.invalid/own.png");
   });
 
+  test("#1037: accepted send leaving anchored history renders the live Room key with the pending echo", () => {
+    const userId = "@user:example.invalid";
+    const roomId = "!room-alpha:example.invalid";
+    const anchorEventId = "$historical:example.invalid";
+    const roomKey = roomTimelineKey(userId, roomId);
+    const focusedKey = focusedTimelineKey(userId, roomId, anchorEventId);
+    const pendingEcho = {
+      ...message("$unused:example.invalid", "Pending hello"),
+      id: { Transaction: { transaction_id: "txn-pending" } },
+      sender: userId,
+      send_state: { kind: "sending" as const }
+    };
+    let store = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key: focusedKey,
+        generation: 1,
+        items: [message(anchorEventId, "Historical context")]
+      }
+    });
+    store = applyTimelineEvent(store, {
+      InitialItems: {
+        request_id: null,
+        key: roomKey,
+        generation: 1,
+        items: [message("$live:example.invalid", "Live message"), pendingEcho]
+      }
+    });
+    const anchored = makeSnapshot();
+    anchored.state.ui.navigation.main_timeline_anchor = { event_id: anchorEventId };
+    anchored.state.ui.navigation.event_navigation = {
+      kind: "anchored",
+      generation: 1,
+      source: "search"
+    };
+    // Rust reducer output after local acceptance of the main-composer send:
+    // the anchor is cleared and event navigation returns to Idle.
+    const live = structuredClone(anchored);
+    live.state.ui.navigation.main_timeline_anchor = null;
+    live.state.ui.navigation.event_navigation = { kind: "idle" };
+    const noop = () => undefined;
+    const timelineTransport = noopTimelineTransport();
+    const renderPane = (currentSnapshot: DesktopSnapshot) => createElement(
+      TimelineStoreContext.Provider,
+      { value: { store, setStore: vi.fn() } },
+      createElement(TimelinePane, {
+        activeRoomName: "Alpha Room",
+        composerDocument: currentSnapshot.state.ui.timeline.composer.document,
+        composerMode: { kind: "plain" },
+        resolveComposerKeyAction: async (): Promise<"noop"> => "noop",
+        searchQuery: "",
+        searchResults: [],
+        showSearchResults: false,
+        snapshot: currentSnapshot,
+        timelineTransport,
+        onReturnToLive: noop,
+        onCancelReply: noop,
+        onCancelScheduledSend: noop,
+        onAttachFiles: noop,
+        onClearUploadStaging: noop,
+        onComposerMathModeChange: noop,
+        onUpdateStagedUploadCaption: noop,
+        onSelectStagedUploadOutput: noop,
+        onSendStagedAttachments: noop,
+        onLoadStagedUploadPreview: async () => [],
+        onComposerDocumentChange: noop,
+        onEditMessage: noop,
+        onOpenContextMenu: noop,
+        onOpenThread: noop,
+        onRedactMessage: noop,
+        onReply: noop,
+        onRescheduleScheduledSend: noop,
+        onResultSelect: noop,
+        onScheduleSend: noop,
+        onSendText: noop,
+        onSetLocalUserAlias: noop,
+        onUnpinPinnedEvent: noop,
+        onOpenPeople: noop,
+        onOpenThreads: noop,
+        onToggleRoomInfo: noop
+      })
+    );
+    // jsdom omits scrollIntoView, which the anchored view uses to reveal its target.
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = () => undefined;
+    try {
+      setAppStoreSnapshot(anchored);
+
+      const { rerender } = render(renderPane(anchored));
+      expect(renderCounts.lastTimelineKey as TimelineKey).toEqual(focusedKey);
+      expect(screen.getByText("Historical context")).toBeTruthy();
+      expect(screen.queryByText("Pending hello")).toBeNull();
+
+      setAppStoreSnapshot(live);
+      rerender(renderPane(live));
+
+      expect(renderCounts.lastTimelineKey as TimelineKey).toEqual(roomKey);
+      expect(screen.getByText("Pending hello")).toBeTruthy();
+      expect(screen.queryByText("Historical context")).toBeNull();
+      expect(screen.queryByText("Jump to latest message")).toBeNull();
+    } finally {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
   beforeEach(() => {
     clearAppStoreSnapshot();
     renderCounts.composer = 0;
     renderCounts.timelineView = 0;
+    renderCounts.lastTimelineKey = null;
   });
 
   afterEach(() => {
@@ -511,6 +619,7 @@ function makeSnapshot(): DesktopSnapshot {
           pending_email: null,
           operation: { kind: "idle" }
         },
+        contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
         account_management_capabilities: { change_password: { kind: "unknown" } },
         soft_logout_reauth: { kind: "idle" },
         qr_login: { kind: "idle" },

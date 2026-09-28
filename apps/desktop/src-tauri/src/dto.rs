@@ -27,8 +27,8 @@ use koushi_state::{
     RoomPreferencesState, RoomSummary, SearchCrawlerLastActive, SearchCrawlerRoomState,
     SearchCrawlerState, SearchMatchField, SearchMatchKind, SearchResult, SearchScope, SearchState,
     SecureBackupGateState, SessionLockReason, SessionState, SettingsState, SidebarModel,
-    SoftLogoutReauthState, SpaceChildrenState, SpaceMembersState, SpaceSummary, StagedUploadItem, SyncState,
-    ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
+    SoftLogoutReauthState, SpaceChildrenState, SpaceMembersState, SpaceSummary, StagedUploadItem,
+    SyncState, ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
     TypographyDisplayProfile, UserProfile, VerificationGateRejectReason, VerificationGateState,
     VerificationMethod, native_attention_capabilities_for_platform, resolve_locale_display_profile,
     resolve_typography_display_profile,
@@ -95,19 +95,6 @@ impl FrontendCommandAdmission {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FrontendCommandResult<T> {
-    pub result: T,
-    pub settlement: FrontendCommandSettlement,
-}
-
-impl<T> FrontendCommandResult<T> {
-    pub(crate) fn new(result: T, settlement: FrontendCommandSettlement) -> Self {
-        Self { result, settlement }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrontendCommandSettlement {
@@ -138,9 +125,19 @@ pub struct FrontendCreateRoomSettlement {
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StateUpdateSnapshotReason {
+    // Protocol v1 wire vocabulary, mirrored by `StateUpdateSnapshotReason` in
+    // coreEvents.ts and emitted by the browser harness fakes. The Rust
+    // forwarder produces only `Lag` today; retiring the others is a two-sided
+    // protocol change, not dead-code cleanup (#1035 audit).
+    #[expect(dead_code, reason = "v1 wire vocabulary; no Rust producer yet")]
     Initial,
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "v1 wire vocabulary; no Rust producer yet")
+    )]
     Gap,
     Lag,
+    #[expect(dead_code, reason = "v1 wire vocabulary; no Rust producer yet")]
     Settlement,
 }
 
@@ -150,12 +147,12 @@ pub enum FrontendStateUpdateEnvelope {
     Delta {
         protocol_version: u8,
         generation: u64,
-        changed: FrontendDesktopSnapshotChangedSlices,
+        changed: Box<FrontendDesktopSnapshotChangedSlices>,
     },
     Snapshot {
         protocol_version: u8,
         generation: u64,
-        snapshot: FrontendDesktopSnapshot,
+        snapshot: Box<FrontendDesktopSnapshot>,
         reason: StateUpdateSnapshotReason,
     },
 }
@@ -165,7 +162,7 @@ impl FrontendStateUpdateEnvelope {
         Self::Delta {
             protocol_version: STATE_UPDATE_PROTOCOL_VERSION,
             generation: delta.generation,
-            changed: delta.changed,
+            changed: Box::new(delta.changed),
         }
     }
 
@@ -176,7 +173,10 @@ impl FrontendStateUpdateEnvelope {
         Self::Snapshot {
             protocol_version: STATE_UPDATE_PROTOCOL_VERSION,
             generation: snapshot.generation,
-            snapshot: FrontendDesktopSnapshot::from_versioned(snapshot.state, snapshot.generation),
+            snapshot: Box::new(FrontendDesktopSnapshot::from_versioned(
+                snapshot.state,
+                snapshot.generation,
+            )),
             reason,
         }
     }
@@ -233,6 +233,8 @@ pub struct FrontendDomainStateChangedSlices {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_notifications: Option<koushi_state::AccountNotificationsState>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub contact_security: Option<koushi_state::ContactSecurityState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub soft_logout_reauth: Option<SoftLogoutReauthState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qr_login: Option<QrLoginState>,
@@ -264,7 +266,7 @@ pub struct FrontendDomainStateChangedSlices {
     pub profile_update: Option<ProfileUpdateState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_room_users_by_room:
-        Option<BTreeMap<String, Option<BTreeMap<String, Option<UserProfile>>>>>,
+        Option<koushi_protocol::state_update::RoomProfileReplacementsDelta>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub space_children: Option<SpaceChildrenState>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -346,6 +348,7 @@ impl FrontendDomainStateChangedSlices {
             && self.account_management.is_none()
             && self.account_management_capabilities.is_none()
             && self.account_notifications.is_none()
+            && self.contact_security.is_none()
             && self.soft_logout_reauth.is_none()
             && self.qr_login.is_none()
             && self.settings.is_none()
@@ -456,6 +459,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         domain.account_management = changed.account_management;
         domain.account_management_capabilities = changed.account_management_capabilities;
         domain.account_notifications = changed.account_notifications;
+        domain.contact_security = changed.contact_security;
         domain.soft_logout_reauth = changed.soft_logout_reauth;
         domain.qr_login = changed.qr_login;
         if let Some(settings) = changed.settings {
@@ -577,6 +581,8 @@ pub struct FrontendDomainState {
     pub account_management: AccountManagementState,
     pub account_management_capabilities: AccountManagementCapabilities,
     pub account_notifications: koushi_state::AccountNotificationsState,
+    /// Security details of the contact whose User info is open (#1024).
+    pub contact_security: koushi_state::ContactSecurityState,
     pub soft_logout_reauth: SoftLogoutReauthState,
     pub qr_login: QrLoginState,
     pub settings: SettingsState,
@@ -653,6 +659,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
             account_management: state.account_management,
             account_management_capabilities: state.account_management_capabilities,
             account_notifications: state.account_notifications,
+            contact_security: state.contact_security,
             soft_logout_reauth: state.soft_logout_reauth,
             qr_login: state.qr_login,
             settings: state.settings,
@@ -902,6 +909,10 @@ impl From<SyncState> for FrontendSyncState {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "pane state is held once and cloned rarely; a few hundred bytes does not justify boxing"
+)]
 pub enum FrontendThreadPaneState {
     Closed,
     Opening {

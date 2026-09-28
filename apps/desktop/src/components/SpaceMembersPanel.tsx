@@ -1,6 +1,6 @@
 import { UserPlus, X } from "lucide-react";
 import { NativeModal } from "./ModalDialog";
-import { useEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type MutableRefObject, type RefObject } from "react";
 
 import type {
   InviteTargetCandidate,
@@ -127,7 +127,7 @@ function inviteAvailabilityReasonForEntry(
   availabilityReason: SpaceInviteAvailabilityReason | undefined
 ): SpaceInviteAvailabilityReason {
   if (!canInvite) {
-    return availabilityReason ?? "permission_denied";
+    return deniedInviteAvailabilityReason(availabilityReason);
   }
   if (entry.invite_pending) {
     return "invite_pending";
@@ -136,6 +136,35 @@ function inviteAvailabilityReasonForEntry(
     return "operation_pending";
   }
   return availabilityReason ?? "available";
+}
+
+// #1033: without the capability flag the resolved reason can never be
+// "available"; an unknown or inconsistent reason is a permission denial.
+function deniedInviteAvailabilityReason(
+  availabilityReason: SpaceInviteAvailabilityReason | undefined
+): SpaceInviteAvailabilityReason {
+  return availabilityReason === undefined || availabilityReason === "available"
+    ? "permission_denied"
+    : availabilityReason;
+}
+
+function deniedCancelAvailabilityReason(
+  availabilityReason: SpaceInviteCancellationAvailabilityReason | undefined
+): SpaceInviteCancellationAvailabilityReason {
+  return availabilityReason === undefined || availabilityReason === "available"
+    ? "permission_denied"
+    : availabilityReason;
+}
+
+function headerInviteTitle(reason: SpaceInviteAvailabilityReason): string {
+  switch (reason) {
+    case "settings_unavailable":
+      return t("spaceMembers.inviteSettingsUnavailable");
+    case "operation_pending":
+      return t("spaceMembers.inviteOperationPending");
+    default:
+      return t("room.invitePeople");
+  }
 }
 
 function cancelIsDisabled(state: SpaceMembersState, canCancelInvite: boolean): boolean {
@@ -148,7 +177,7 @@ function cancelAvailabilityReasonForEntry(
   availabilityReason: SpaceInviteCancellationAvailabilityReason | undefined
 ): SpaceInviteCancellationAvailabilityReason {
   if (!canCancelInvite) {
-    return availabilityReason ?? "permission_denied";
+    return deniedCancelAvailabilityReason(availabilityReason);
   }
   if (hasPendingOperation(state)) {
     return "operation_pending";
@@ -267,10 +296,15 @@ export function SpaceMembersPanel({
   const resultCount = filteredSections.reduce((count, section) => count + section.entries.length, 0);
   const hasResults = filteredSections.some((section) => section.entries.length > 0);
   const panelAvailabilityReason: SpaceInviteAvailabilityReason = !canInvite
-    ? inviteAvailabilityReason ?? "permission_denied"
+    ? deniedInviteAvailabilityReason(inviteAvailabilityReason)
     : hasPendingOperation(state)
       ? "operation_pending"
       : inviteAvailabilityReason ?? "available";
+  // #1033: only a real permission denial hides the header trigger; temporary
+  // settings unavailability and pending operations keep it mounted, disabled.
+  const headerInviteVisible = panelAvailabilityReason !== "permission_denied";
+  const headerInviteDisabled = panelAvailabilityReason !== "available";
+  const headerInviteReasonId = useId();
   const failedOperation = state.operation.kind === "failed" ? state.operation : null;
   const roleUpdateFailed =
     state.operation.kind === "roleUpdateFailed" ? state.operation : null;
@@ -305,7 +339,7 @@ export function SpaceMembersPanel({
         `search_active=${Boolean(query.trim())}`,
         `result_count=${resultCount}`,
         `availability_reason=${panelAvailabilityReason}`,
-        `incomplete_notice=${state.incomplete_child_room_count > 0}`
+        `incomplete_child_rooms=${state.incomplete_child_room_count > 0}`
       ].join(" ")
     );
   }, [
@@ -377,16 +411,26 @@ export function SpaceMembersPanel({
         })}>
           {state.space_joined.length}
         </span>}
-        {canInvite && !inviteMode ? (
+        {headerInviteVisible && !inviteMode ? (
           <button
             className="icon-button space-members-invite-trigger"
             type="button"
             aria-label={t("room.invitePeople")}
-            title={t("room.invitePeople")}
-            onClick={() => setInviteMode(true)}
+            title={headerInviteTitle(panelAvailabilityReason)}
+            aria-describedby={headerInviteDisabled ? headerInviteReasonId : undefined}
+            data-invite-availability={panelAvailabilityReason}
+            disabled={headerInviteDisabled}
+            onClick={() => {
+              if (!headerInviteDisabled) setInviteMode(true);
+            }}
           >
             <UserPlus size={ICON_SIZE.control} />
           </button>
+        ) : null}
+        {headerInviteVisible && !inviteMode && headerInviteDisabled ? (
+          <span id={headerInviteReasonId} className="sr-only">
+            {headerInviteTitle(panelAvailabilityReason)}
+          </span>
         ) : null}
         <button
           className="icon-button space-members-close"
@@ -524,12 +568,6 @@ export function SpaceMembersPanel({
         <button className="dialog-button" type="button" onClick={onReloadRoles}>
           {t("spaceMembers.roleReload")}
         </button>
-      ) : null}
-
-      {!inviteMode && state.incomplete_child_room_count > 0 ? (
-        <p className="space-members-sync-notice" role="status">
-          {t("spaceMembers.syncIncomplete")}
-        </p>
       ) : null}
 
       {!inviteMode ? (

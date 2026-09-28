@@ -165,6 +165,10 @@ fn flush_pending_canonical_push_fronts(
 /// `Vec<TimelineItem>` still pays its normal Vec costs for prefix/interior
 /// Insert/Remove and scans a Reset payload once; none of those costs is hidden
 /// in the projection counter or repeated as a projection scan per diff.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "cells already live in boxed treap nodes over a window capped at 120 items; boxing Slot would add a second allocation per visible item"
+)]
 enum DisplayMembershipCell {
     Gap(usize),
     Slot(TimelineItem),
@@ -822,6 +826,10 @@ pub(super) struct DisplayProjectionBatch {
     structural_node_visits: usize,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) fn commit_sdk_batch_for_generation<R>(
     timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
     key: &TimelineKey,
@@ -1226,16 +1234,16 @@ fn root_display_item(
     display_timestamp_ms: Option<u64>,
 ) -> TimelineItem {
     let mut item = root.item.clone().unwrap_or_else(|| fallback.clone());
-    let summary =
-        item.thread_summary
-            .get_or_insert_with(|| koushi_protocol::event::ThreadSummaryDto {
-                reply_count: 0,
-                latest_event_id: None,
-                latest_sender: None,
-                latest_sender_label: None,
-                latest_body_preview: None,
-                latest_timestamp_ms: None,
-            });
+    let summary = item
+        .thread_summary
+        .get_or_insert(koushi_protocol::event::ThreadSummaryDto {
+            reply_count: 0,
+            latest_event_id: None,
+            latest_sender: None,
+            latest_sender_label: None,
+            latest_body_preview: None,
+            latest_timestamp_ms: None,
+        });
     summary.reply_count = root.aggregate.reply_count;
     summary.latest_event_id = root.aggregate.latest_event_id.clone();
     summary.latest_sender = root.aggregate.latest_sender.clone();

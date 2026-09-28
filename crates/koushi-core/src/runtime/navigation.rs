@@ -1088,6 +1088,84 @@ impl AppActor {
         }
     }
 
+    /// #1037/#1046: release a `TimelineKind::Focused` actor (and its room
+    /// lease) whose focused context the reducer closed or replaced. A pending
+    /// main-pane navigation for the same key can no longer commit, so it is
+    /// dropped too; one without an event-navigation owner (date jump,
+    /// `OpenAnchoredTimeline`) settles `Superseded` here, while an owned one
+    /// is settled by its event-navigation owner. Unsubscribe is idempotent in
+    /// the timeline manager.
+    pub(super) async fn release_focused_timeline(&mut self, key: TimelineKey) {
+        if let Some(pending) = self
+            .pending_focused_navigation
+            .take_if(|pending| pending.key == key)
+            && pending.generation.is_none()
+        {
+            self.emit(CoreEvent::IntentLifecycle {
+                request_id: pending.projection_request_id,
+                outcome: IntentOutcome::BenignNoOp(IntentNoOpReason::Superseded),
+                published_generation: self.state_generation,
+            });
+        }
+        let request_id = self.next_internal_request_id();
+        self.send_timeline_command_or_fail(
+            request_id,
+            TimelineCommand::Unsubscribe { request_id, key },
+        )
+        .await;
+    }
+
+    /// #1037: an accepted main-composer send for `room_id` returns the main
+    /// pane to live. Cancel every main-pane navigation Core still owns for it
+    /// that the reducer cannot observe, so a late completion cannot re-anchor
+    /// the pane over the pending echo:
+    /// - a focused navigation awaiting its projection ACK (date jump with a
+    ///   cached target, `OpenAnchoredTimeline`, or a located event
+    ///   navigation): close its focused context and release the timeline;
+    /// - an event navigation owner for this room (still selecting/locating);
+    /// - a date jump still awaiting the server: fence its late
+    ///   `OpenFocusedContext` + `EnterAnchoredTimeline` reply.
+    pub(super) async fn cancel_pending_main_timeline_navigation(&mut self, room_id: &str) {
+        if let Some(pending) = self
+            .pending_focused_navigation
+            .take_if(|pending| pending.room_id == room_id)
+        {
+            if self.current_focused_context_timeline_key().as_ref() == Some(&pending.key) {
+                let before_state = self.snapshot_tx.borrow().state.clone();
+                let (effects, deferred) =
+                    self.reduce_app_action_state(AppAction::CloseFocusedContext);
+                self.publish_state_delta(&before_state);
+                // The focused-context transition releases `pending.key`.
+                self.apply_deferred_reducer_side_effects(deferred).await;
+                self.handle_ui_event_effects(&effects).await;
+            } else {
+                self.release_focused_timeline(pending.key.clone()).await;
+            }
+            if pending.generation.is_none() {
+                self.emit(CoreEvent::IntentLifecycle {
+                    request_id: pending.projection_request_id,
+                    outcome: IntentOutcome::BenignNoOp(IntentNoOpReason::Superseded),
+                    published_generation: self.state_generation,
+                });
+            }
+        }
+        if self
+            .pending_event_navigation
+            .as_ref()
+            .is_some_and(|pending| pending.room_id == room_id)
+        {
+            self.cancel_event_navigation_owner().await;
+        }
+        if let Some(request_id) = self.pending_date_navigation_request_id.take() {
+            self.cancelled_date_navigation_request_id = Some(request_id);
+            self.emit(CoreEvent::IntentLifecycle {
+                request_id,
+                outcome: IntentOutcome::BenignNoOp(IntentNoOpReason::Superseded),
+                published_generation: self.state_generation,
+            });
+        }
+    }
+
     pub(super) fn unsubscribe_replaced_focused_context_timeline(
         &self,
         room_id: &str,
@@ -1142,7 +1220,7 @@ pub(super) fn cancel_replaced_room_timeline_pagination_key(
 ) -> Option<TimelineKey> {
     current_key.filter(|current_key| match &current_key.kind {
         TimelineKind::Room { room_id } => {
-            replacement_room_id.map_or(true, |replacement| room_id != replacement)
+            replacement_room_id.is_none_or(|replacement| room_id != replacement)
         }
         TimelineKind::Thread { .. } | TimelineKind::Focused { .. } => false,
     })
@@ -1154,7 +1232,7 @@ pub(super) fn cancel_replaced_room_timeline_link_previews_key(
 ) -> Option<TimelineKey> {
     current_key.filter(|current_key| match &current_key.kind {
         TimelineKind::Room { room_id } => {
-            replacement_room_id.map_or(true, |replacement| room_id != replacement)
+            replacement_room_id.is_none_or(|replacement| room_id != replacement)
         }
         TimelineKind::Thread { .. } | TimelineKind::Focused { .. } => false,
     })

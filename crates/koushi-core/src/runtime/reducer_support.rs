@@ -105,6 +105,11 @@ pub(super) struct DeferredReducerSideEffects {
     composer_drafts: Option<(koushi_protocol::SessionKeyId, ComposerDraftStore)>,
     composer_drafts_discarded: bool,
     scheduled_sends: Option<DeferredScheduledSendPersist>,
+    /// #1037/#1046: the reducer closed or replaced the focused context (an
+    /// accepted send leaving anchored history, a room switch, ...). Core owns
+    /// that `TimelineKind::Focused` actor and its room lease, so it releases
+    /// them for every reducer transition, not only the explicit close command.
+    release_focused_timeline: Option<koushi_protocol::ids::TimelineKey>,
 }
 
 impl DeferredReducerSideEffects {
@@ -180,7 +185,14 @@ impl super::AppActor {
             AppAction::AvatarThumbnailUpdated { mxc_uri, .. } => Some(mxc_uri.clone()),
             _ => None,
         };
+        let focused_timeline_before = self.current_focused_context_timeline_key();
         let effects = reduce_with_unread_diagnostics(&mut self.state, action);
+        // Account teardown (logout, switch) drops the whole timeline manager;
+        // only release a focused timeline within the same account.
+        let release_focused_timeline = focused_timeline_before.filter(|before| {
+            self.current_account_key().as_ref() == Some(&before.account_key)
+                && self.current_focused_context_timeline_key().as_ref() != Some(before)
+        });
         crate::session_check_diagnostics::observe_schedule(&self.state);
         // A scoped reader can be the only consumer of this resource. Its
         // completion must not depend on a legacy/global projection changing.
@@ -297,6 +309,7 @@ impl super::AppActor {
                     &self.state.navigation.event_navigation,
                 ),
             composer_drafts_discarded: destructive_state_changed,
+            release_focused_timeline,
             ..DeferredReducerSideEffects::default()
         };
         let previous_persisted_navigation = previous_navigation.persistence_view();
@@ -369,6 +382,11 @@ impl super::AppActor {
         &mut self,
         deferred: DeferredReducerSideEffects,
     ) {
+        // Release before the event-navigation owner cleanup so a matching
+        // pending focused navigation is unsubscribed exactly once here.
+        if let Some(key) = deferred.release_focused_timeline {
+            self.release_focused_timeline(key).await;
+        }
         if deferred.cancel_event_navigation_owner {
             self.cancel_event_navigation_owner().await;
         }

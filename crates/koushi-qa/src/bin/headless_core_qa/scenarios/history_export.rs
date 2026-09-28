@@ -806,7 +806,7 @@ fn modified(path: &Path) -> Option<std::time::SystemTime> {
 /// Space export, attachments, and resume.
 #[allow(clippy::too_many_arguments)]
 async fn run_space_export(
-    config: &QaConfig,
+    _config: &QaConfig,
     conn_a: &mut CoreConnection,
     account_key_a: &AccountKey,
     user_c: &str,

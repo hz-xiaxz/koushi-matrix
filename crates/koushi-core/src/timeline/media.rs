@@ -397,25 +397,26 @@ impl TimelineActor {
         let file_name = format!("{}.bin", sanitize_matrix_id_for_path(&event_id));
         let dir = data_dir.join("media_downloads").join(dir_name);
         let path = dir.join(file_name);
-        if let Ok(metadata) = tokio::fs::metadata(&path).await {
-            if metadata.is_file() && metadata.len() > 0 {
-                let byte_count = metadata.len();
-                let source_url = path.to_string_lossy().into_owned();
-                trace_media_download_worker("cache_hit", &request, Some(byte_count), None, None);
-                return MediaDownloadOutcome::Ready(MediaDownloadReady {
-                    download_state: TimelineMediaDownloadState::Ready {
-                        source_url: source_url.clone(),
-                        width: entry.width,
-                        height: entry.height,
-                        mime_type: entry.mimetype.clone(),
-                    },
-                    source_url,
-                    byte_count,
-                    mimetype: entry.mimetype,
+        if let Ok(metadata) = tokio::fs::metadata(&path).await
+            && metadata.is_file()
+            && metadata.len() > 0
+        {
+            let byte_count = metadata.len();
+            let source_url = path.to_string_lossy().into_owned();
+            trace_media_download_worker("cache_hit", &request, Some(byte_count), None, None);
+            return MediaDownloadOutcome::Ready(MediaDownloadReady {
+                download_state: TimelineMediaDownloadState::Ready {
+                    source_url: source_url.clone(),
                     width: entry.width,
                     height: entry.height,
-                });
-            }
+                    mime_type: entry.mimetype.clone(),
+                },
+                source_url,
+                byte_count,
+                mimetype: entry.mimetype,
+                width: entry.width,
+                height: entry.height,
+            });
         }
 
         trace_media_download_worker("sdk_fetch_started", &request, None, None, None);
@@ -586,10 +587,10 @@ impl TimelineActor {
         if items == self.media_gallery_items {
             return;
         }
-        if let Some(action) = media_gallery_updated_action(&self.key, items) {
-            if !self.emit_action_reliable(action).await {
-                return;
-            }
+        if let Some(action) = media_gallery_updated_action(&self.key, items)
+            && !self.emit_action_reliable(action).await
+        {
+            return;
         }
         self.media_gallery_items =
             media_gallery_items_from_timeline_items(&self.key, &self.navigation_items);

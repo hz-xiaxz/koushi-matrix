@@ -162,6 +162,10 @@ pub(super) fn build_update_navigation_scroll_anchor_command(
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the Tauri command IPC arguments one-to-one"
+)]
 pub(super) fn build_observe_timeline_viewport_command(
     request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
@@ -215,6 +219,10 @@ pub(super) fn build_send_text_command(
     }))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the Tauri command IPC arguments one-to-one"
+)]
 pub(super) fn build_submit_text_command(
     request_id: RequestId,
     expected_account: koushi_protocol::SessionKeyId,
@@ -624,52 +632,6 @@ fn composer_draft_revision(
     }
 }
 
-fn composer_draft_last_accepted_clear_revision(
-    state: &koushi_state::AppState,
-    target: &koushi_state::ComposerTarget,
-) -> koushi_state::ComposerDraftRevision {
-    match target {
-        koushi_state::ComposerTarget::Main { room_id } => state
-            .composer_drafts
-            .room_last_accepted_clear_revisions
-            .get(room_id)
-            .copied()
-            .unwrap_or_default(),
-        koushi_state::ComposerTarget::Thread {
-            room_id,
-            root_event_id,
-        } => state
-            .composer_drafts
-            .thread_last_accepted_clear_revisions
-            .get(room_id)
-            .and_then(|threads| threads.get(root_event_id))
-            .copied()
-            .unwrap_or_default(),
-    }
-}
-
-fn composer_draft_has_content(
-    state: &koushi_state::AppState,
-    target: &koushi_state::ComposerTarget,
-) -> bool {
-    match target {
-        koushi_state::ComposerTarget::Main { room_id } => state
-            .composer_drafts
-            .rooms
-            .get(room_id)
-            .is_some_and(|draft| !draft.is_empty()),
-        koushi_state::ComposerTarget::Thread {
-            room_id,
-            root_event_id,
-        } => state
-            .composer_drafts
-            .threads
-            .get(room_id)
-            .and_then(|threads| threads.get(root_event_id))
-            .is_some_and(|draft| !draft.is_empty()),
-    }
-}
-
 fn parse_composer_wire_tokens(
     renderer_generation: &str,
     lease_id: &str,
@@ -993,6 +955,10 @@ pub async fn paginate_thread_timeline_backwards(
 }
 
 #[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tauri command: each parameter is a named IPC argument of the renderer contract"
+)]
 pub async fn send_text(
     account_homeserver: String,
     account_user_id: String,
@@ -1063,6 +1029,10 @@ pub async fn send_text(
 }
 
 #[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tauri command: each parameter is a named IPC argument of the renderer contract"
+)]
 pub async fn schedule_send(
     account_homeserver: String,
     account_user_id: String,
@@ -1220,6 +1190,10 @@ pub async fn prepared_upload_preview(
 }
 
 #[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tauri command: each parameter is a named IPC argument of the renderer contract"
+)]
 pub async fn send_prepared_uploads(
     account_homeserver: String,
     account_user_id: String,
@@ -1738,6 +1712,10 @@ pub async fn cancel_composer_reply(
 }
 
 #[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tauri command: each parameter is a named IPC argument of the renderer contract"
+)]
 pub async fn set_composer_draft(
     account_homeserver: String,
     account_user_id: String,
@@ -1787,6 +1765,10 @@ pub async fn set_composer_draft(
 }
 
 #[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tauri command: each parameter is a named IPC argument of the renderer contract"
+)]
 pub async fn set_thread_composer_draft(
     account_homeserver: String,
     account_user_id: String,
@@ -1839,6 +1821,10 @@ pub async fn set_thread_composer_draft(
 }
 
 #[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tauri command: each parameter is a named IPC argument of the renderer contract"
+)]
 pub async fn send_reply(
     account_homeserver: String,
     account_user_id: String,
@@ -1911,6 +1897,10 @@ pub async fn send_reply(
 }
 
 #[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tauri command: each parameter is a named IPC argument of the renderer contract"
+)]
 pub async fn send_thread_reply(
     account_homeserver: String,
     account_user_id: String,
@@ -2100,6 +2090,10 @@ pub(super) fn build_set_thread_composer_draft_command(
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the Tauri command IPC arguments one-to-one"
+)]
 pub(super) fn build_submit_reply_command(
     request_id: RequestId,
     expected_account: koushi_protocol::SessionKeyId,
@@ -2126,6 +2120,10 @@ pub(super) fn build_submit_reply_command(
     }))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the Tauri command IPC arguments one-to-one"
+)]
 pub(super) fn build_submit_thread_reply_command(
     request_id: RequestId,
     expected_account: koushi_protocol::SessionKeyId,

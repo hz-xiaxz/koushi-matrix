@@ -284,10 +284,9 @@ async fn sync_started_reconciles_the_full_session_residency_set_once() {
     manager.lease_room(room_b.clone());
 
     manager.handle_sync_started(room_list.clone(), 1).await;
-    manager
-        .room_subscription_checkpoint_task
-        .take()
-        .map(|task| task.abort());
+    if let Some(task) = manager.room_subscription_checkpoint_task.take() {
+        task.abort()
+    }
 
     // The full deduplicated session-resident set is reconciled once.
     assert_eq!(

@@ -21,9 +21,12 @@ verification to finish rather than repeatedly starting new requests.
 ## Complete secure backup setup
 
 If **Secure backup required** appears, follow the offered recovery or setup
-flow. An existing backup may ask for its recovery key. A new backup asks you
-to protect it and choose a destination for the recovery key. Save that key
-securely and complete the app's acknowledgement before proceeding.
+flow. An existing backup may ask for its recovery key. A new backup shows its
+recovery key on screen. Record it somewhere safe: use **Copy**, or optionally
+**Save to file…**, then choose **I saved the recovery key** to continue. The
+key is not shown again after that confirmation. If the app closes before you
+confirm, the unsaved key cannot be recovered; choose **Create new recovery
+key** to replace it (the previous key stops working).
 
 Do not give recovery keys, backup passphrases, or exported keys to an AI
 assistant or include them in an issue. These are credentials for encrypted

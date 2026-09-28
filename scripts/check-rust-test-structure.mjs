@@ -1326,6 +1326,7 @@ const sdkLibrarySourcePaths = [
   "src/account_notifications.rs",
   "src/auth.rs",
   "src/client_session.rs",
+  "src/contact_security.rs",
   "src/e2ee.rs",
   "src/lib.rs",
   "src/login_store.rs",
@@ -2847,6 +2848,12 @@ export function checkCoreAccountE2eeTypedFailureClassification() {
   for (const marker of ["async fn handle_export_room_keys", "async fn handle_import_room_keys", "async fn handle_bootstrap_secure_backup", "async fn handle_change_secure_backup_passphrase"]) {
     const body = accountItemBody("recovery_backup.rs", marker);
     if (!body?.includes("classify_e2ee_trust_error(&error)")) failures.push(sourceContractFailure(rule, `${marker} does not preserve typed SDK failure classification`));
+  }
+  // #927: Secure Backup setup and passphrase change reveal the key on screen
+  // and no longer write a file; the optional save is its own command. Every
+  // handler that still writes user-chosen files must use the native port.
+  for (const marker of ["async fn handle_export_room_keys", "async fn handle_import_room_keys", "async fn handle_save_secure_backup_recovery_key"]) {
+    const body = accountItemBody("recovery_backup.rs", marker);
     if (!body?.includes("native_artifacts")) failures.push(sourceContractFailure(rule, `${marker} bypasses the native artifact port`));
   }
   if (!recovery.includes("InvalidPassphrase")) failures.push(sourceContractFailure(rule, "recovery source lacks InvalidPassphrase classification"));

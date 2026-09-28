@@ -201,7 +201,7 @@ impl LiveRoomListReconciliation {
         self.pending.is_some()
     }
 
-    #[cfg(any(test, feature = "test-hooks"))]
+    #[cfg(test)]
     fn is_authoritative(&self, current_entries: usize) -> bool {
         self.authoritative && self.is_complete(current_entries)
     }
@@ -385,6 +385,10 @@ fn projected_direct_room_count(
 
 /// Normalize a snapshot and project it as a generation-fenced room-list action +
 /// `RoomEvent::RoomListUpdated`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 async fn project_room_list_snapshot(
     snapshot: &koushi_sdk::MatrixRoomListSnapshot,
     known_room_ids: &Arc<RwLock<BTreeSet<String>>>,
@@ -577,6 +581,10 @@ fn record_direct_event_stream_closed(state: &DirectClassificationState) {
 /// entries snapshot from that same service without creating another service or
 /// sync loop. Exits on the oneshot stop
 /// signal or when the stream ends.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "actor wiring: independent owned handles moved into one task"
+)]
 async fn run_live_room_list_observation(
     session: Arc<MatrixClientSession>,
     service: Arc<matrix_sdk_ui::room_list_service::RoomListService>,
@@ -1473,6 +1481,10 @@ fn room_list_identity_counts<'a>(
 }
 
 /// Normalize the live service's current entries and project the result.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 async fn normalize_and_project_entries(
     _session: &MatrixClientSession,
     current: &eyeball_im::Vector<matrix_sdk_ui::room_list_service::RoomListItem>,
@@ -1868,7 +1880,8 @@ impl RoomActor {
             // same live-service projection authoritative by retrying a few
             // bounded wakes; this never creates another service or network
             // sync loop.
-            let _ = executor::spawn(async move {
+            // Detached task: dropping the JoinHandle does not cancel it.
+            drop(executor::spawn(async move {
                 for delay in [
                     Duration::from_millis(100),
                     Duration::from_millis(300),
@@ -1885,7 +1898,7 @@ impl RoomActor {
                         break;
                     }
                 }
-            });
+            }));
         }
     }
 }

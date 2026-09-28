@@ -10,6 +10,11 @@ pub struct RoomAddressPreview {
     /// (shared by every Space on it). `None` until a Ready session exists.
     #[serde(default)]
     pub server_name: Option<String>,
+    /// The room will be created without an address (#1023). True only for
+    /// an unnamed room (empty or blank name) with no entered address; `error`
+    /// is then `None`. A named room keeps the #1006 requirement.
+    #[serde(default)]
+    pub without_address: bool,
 }
 
 impl std::fmt::Debug for RoomAddressPreview {
@@ -20,6 +25,7 @@ impl std::fmt::Debug for RoomAddressPreview {
             .field("has_full_alias", &self.full_alias.is_some())
             .field("error", &self.error)
             .field("has_server_name", &self.server_name.is_some())
+            .field("without_address", &self.without_address)
             .finish()
     }
 }
@@ -34,7 +40,9 @@ pub enum RoomAddressError {
 
 /// Suggest an editable room-alias local part, without claiming availability.
 /// Preserve Unicode letters/numbers (including Japanese); separate name segments
-/// with hyphens. An unsuitable name returns empty and requires a manual address.
+/// with hyphens. A name without letters or digits returns empty; a public room
+/// with such a name still requires a manually entered address (see
+/// [`public_room_address_required`]).
 /// The SDK still validates the complete alias and the server owns availability.
 pub fn suggest_room_alias_localpart(name: &str) -> String {
     name.split(|character: char| !character.is_alphanumeric())
@@ -44,13 +52,76 @@ pub fn suggest_room_alias_localpart(name: &str) -> String {
         .join("-")
 }
 
+/// Whether a public room with this name must be created with an address.
+/// Only an unnamed room (empty or blank name) may be public without one
+/// (#1023); every named room keeps the #1006 rule, so a name that offers no
+/// suggestion (for example "🎉") needs a manually entered address. The join
+/// rule and directory listing do not depend on this: an address only makes
+/// the room reachable by alias.
+pub fn public_room_address_required(name: &str) -> bool {
+    !name.trim().is_empty()
+}
+
+/// Access choice of the create-room dialog. Wire values match
+/// `koushi_protocol::CreateRoomVisibility`, which re-exports this type.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CreateRoomVisibility {
+    #[default]
+    Private,
+    Public,
+}
+
+/// Initial choices of the create-room dialog (#1023), projected on
+/// `SidebarModel.create_room_defaults`. React seeds the dialog from it and
+/// never derives a default itself.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CreateRoomDefaults {
+    pub visibility: CreateRoomVisibility,
+    /// The encryption choice of the private option; a public room is never
+    /// created encrypted.
+    pub encrypted: bool,
+    pub invited_only: bool,
+}
+
+impl Default for CreateRoomDefaults {
+    fn default() -> Self {
+        Self {
+            visibility: CreateRoomVisibility::Private,
+            encrypted: true,
+            invited_only: false,
+        }
+    }
+}
+
+/// A room created from a Space whose join rule is public starts as a public
+/// room; a private Space, a Space whose rule is not yet known, and Home keep
+/// the private default. This is a Koushi product choice (#1023).
+pub fn create_room_defaults_for_state(state: &crate::AppState) -> CreateRoomDefaults {
+    let public_space = state
+        .navigation
+        .active_space_id
+        .as_deref()
+        .and_then(|space_id| state.spaces.iter().find(|space| space.space_id == space_id))
+        .is_some_and(|space| space.join_rule == Some(crate::RoomJoinRule::Public));
+    CreateRoomDefaults {
+        visibility: if public_space {
+            CreateRoomVisibility::Public
+        } else {
+            CreateRoomVisibility::Private
+        },
+        ..CreateRoomDefaults::default()
+    }
+}
+
 /// Suggest an address for a room created from a Space (#1006):
 /// `<space>-<room>`, both normalized as by [`suggest_room_alias_localpart`].
 ///
 /// A Space has no alias namespace of its own; the prefix only makes a
 /// collision with an unrelated room on the same server less likely. A Space
-/// name with no usable characters falls back to the room-only suggestion, and
-/// a room name with none still requires a manual address (empty). The caller
+/// name without letters or digits falls back to the room-only suggestion. A
+/// room name without any yields no suggestion (empty): a named room then
+/// requires a manual address, and only an unnamed room may skip it. The caller
 /// falls back to the room-only suggestion when the prefixed alias would
 /// exceed Matrix's 255-byte limit.
 pub fn suggest_space_room_alias_localpart(space_name: Option<&str>, room_name: &str) -> String {

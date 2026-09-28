@@ -1017,8 +1017,18 @@ export interface SasEmoji {
 
 export type VerificationFlowState =
   | { kind: "idle" }
-  | { kind: "requested"; request_id: number; target: VerificationTarget }
-  | { kind: "accepted"; request_id: number; target: VerificationTarget }
+  | {
+      kind: "requested";
+      request_id: number;
+      target: VerificationTarget;
+      initiator: "us" | "them";
+    }
+  | {
+      kind: "accepted";
+      request_id: number;
+      target: VerificationTarget;
+      initiator: "us" | "them";
+    }
   | {
       kind: "sasPresented";
       request_id: number;
@@ -1343,6 +1353,7 @@ export type CoreFailure =
   | { ReportOperationFailed: { kind: ReportFailureKind } }
   | { SearchFailed: { kind: string } }
   | "LocalEncryptionUnavailable"
+  | "VerificationInProgress"
   | "PreferenceRejected"
   | "StoreUnavailable"
   | "ShutdownFailed";

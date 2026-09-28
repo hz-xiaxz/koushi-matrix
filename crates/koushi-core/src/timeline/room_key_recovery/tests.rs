@@ -1,10 +1,8 @@
 use std::time::Duration;
 
 use crate::executor;
-use koushi_protocol::command::TimelineCommand;
 use koushi_protocol::event::{
     CoreEvent, RoomKeyRequestStage, RoomKeyRequestStateDto, RoomKeyRequestWithheldCode,
-    TimelineEvent,
 };
 
 use koushi_protocol::ids::TimelineKey;

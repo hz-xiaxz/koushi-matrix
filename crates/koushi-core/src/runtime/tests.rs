@@ -322,7 +322,7 @@ async fn run_closed_space_member_forwarding_case(
     membership: SpaceMemberMembership,
     command: impl FnOnce(RequestId) -> koushi_protocol::command::RoomCommand,
 ) -> (AppState, CoreFailure, u64) {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let runtime = CoreRuntime::start_with_event_capacity(64);
     let mut connection = runtime.attach();
     let space_id = "!closed-forward-space:example.invalid";
@@ -1315,6 +1315,7 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         pending_focused_navigation: None,
         latest_focused_projection_generation: HashMap::new(),
         pending_date_navigation_request_id: None,
+        cancelled_date_navigation_request_id: None,
     };
     let actor_task = executor::spawn(actor.run());
 
@@ -1329,9 +1330,10 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         let published = event_rx.recv().await.expect("event stream remains open");
         assert!(matches!(&published, CoreEvent::StateDelta(delta) if delta.generation == 1));
         loop {
-            match event_rx.recv().await.expect("event stream remains open") {
-                event @ CoreEvent::IntentLifecycle { .. } => break event,
-                _ => {}
+            if let event @ CoreEvent::IntentLifecycle { .. } =
+                event_rx.recv().await.expect("event stream remains open")
+            {
+                break event;
             }
         }
     })
@@ -1493,6 +1495,7 @@ async fn same_batch_select_room_settles_only_final_selection() {
         pending_focused_navigation: None,
         latest_focused_projection_generation: HashMap::new(),
         pending_date_navigation_request_id: None,
+        cancelled_date_navigation_request_id: None,
     };
     let actor_task = executor::spawn(actor.run());
 
@@ -1591,6 +1594,96 @@ fn bootstrap_cross_signing_command_projects_pending_state_before_account_route()
             auth: None,
         }),
         Some(AppAction::BootstrapCrossSigningRequested { request_id: 6 })
+    );
+}
+
+#[test]
+fn contact_security_commands_project_checking_and_close_before_account_route() {
+    let request_id = RequestId {
+        connection_id: RuntimeConnectionId(1),
+        sequence: 12,
+    };
+    let load = AccountCommand::ContactSecurity {
+        request_id,
+        request: koushi_protocol::command::ContactSecurityRequest::Load {
+            user_id: "@bob:example.test".to_owned(),
+        },
+    };
+    assert_eq!(
+        account_command_projected_action(&load),
+        Some(AppAction::ContactSecurityLoadRequested {
+            request_id: 12,
+            user_id: "@bob:example.test".to_owned(),
+        })
+    );
+    let debug = format!("{load:?}");
+    assert!(!debug.contains("bob"), "{debug}");
+    let verify = AccountCommand::ContactSecurity {
+        request_id,
+        request: koushi_protocol::command::ContactSecurityRequest::RequestVerification {
+            user_id: "@bob:example.test".to_owned(),
+        },
+    };
+    assert_eq!(
+        account_command_projected_action(&verify),
+        Some(AppAction::VerificationRequestSent {
+            request_id: 12,
+            target: koushi_state::VerificationTarget {
+                user_id: "@bob:example.test".to_owned(),
+                device_id: String::new(),
+            },
+        })
+    );
+    let debug = format!("{verify:?}");
+    assert!(!debug.contains("bob"), "{debug}");
+    assert_eq!(
+        account_command_projected_action(&AccountCommand::ContactSecurity {
+            request_id,
+            request: koushi_protocol::command::ContactSecurityRequest::Close,
+        }),
+        Some(AppAction::ContactSecurityClosed)
+    );
+}
+
+#[test]
+fn refused_verify_user_reports_the_active_verification_not_a_missing_session() {
+    let request_id = RequestId {
+        connection_id: RuntimeConnectionId(1),
+        sequence: 13,
+    };
+    let verify = AccountCommand::ContactSecurity {
+        request_id,
+        request: koushi_protocol::command::ContactSecurityRequest::RequestVerification {
+            user_id: "@bob:example.test".to_owned(),
+        },
+    };
+    let mut state = AppState {
+        session: SessionState::Ready(koushi_state::SessionInfo {
+            homeserver: "https://example.test".to_owned(),
+            user_id: "@me:example.test".to_owned(),
+            device_id: "DEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        }),
+        ..AppState::default()
+    };
+    koushi_state::reduce(
+        &mut state,
+        AppAction::VerificationRequested {
+            request_id: 70,
+            target: koushi_state::VerificationTarget {
+                user_id: "@alice:example.test".to_owned(),
+                device_id: "ALICEDEVICE".to_owned(),
+            },
+        },
+    );
+    assert_eq!(
+        contact_security_projection_failure(&state, &verify),
+        Some(CoreFailure::VerificationInProgress)
+    );
+    // Without a ready session the refusal stays SessionRequired.
+    assert_eq!(
+        contact_security_projection_failure(&AppState::default(), &verify),
+        None
     );
 }
 
@@ -2091,8 +2184,12 @@ async fn authoritative_trust_runs_through_app_actor_ack_and_restarts_real_childr
                 let mut request = Vec::new();
                 let mut buffer = [0_u8; 4096];
                 loop {
-                    let Ok(count) = stream.read(&mut buffer) else { return; };
-                    if count == 0 { return; }
+                    let Ok(count) = stream.read(&mut buffer) else {
+                        return;
+                    };
+                    if count == 0 {
+                        return;
+                    }
                     request.extend_from_slice(&buffer[..count]);
                     let text = String::from_utf8_lossy(&request);
                     let Some(end) = text.find("\r\n\r\n") else {
@@ -2951,10 +3048,7 @@ async fn receipt_resolution_borrows_current_alias_without_publishing_global_stat
     ));
 }
 
-fn app_actor_event_navigation_fixture(
-    data_dir: &std::path::Path,
-    state: AppState,
-) -> (
+type EventNavigationFixture = (
     AppActor,
     mpsc::Sender<CoreCommandEnvelope>,
     mpsc::Sender<Vec<AppAction>>,
@@ -2964,7 +3058,12 @@ fn app_actor_event_navigation_fixture(
     watch::Receiver<Option<crate::timeline::NavigationProjectionIntent>>,
     mpsc::UnboundedSender<EventNavigationPrepared>,
     mpsc::UnboundedSender<FocusedProjectionCommitted>,
-) {
+);
+
+fn app_actor_event_navigation_fixture(
+    data_dir: &std::path::Path,
+    state: AppState,
+) -> EventNavigationFixture {
     let (account_tx, account_rx) = mpsc::channel(8);
     let (navigation_projection, navigation_projection_rx) =
         crate::timeline::NavigationProjectionIngress::channel();
@@ -3030,6 +3129,7 @@ fn app_actor_event_navigation_fixture(
         pending_focused_navigation: None,
         latest_focused_projection_generation: HashMap::new(),
         pending_date_navigation_request_id: None,
+        cancelled_date_navigation_request_id: None,
     };
     (
         actor,
@@ -3099,7 +3199,7 @@ async fn run_app_actor_cross_room_missing_navigation(
         })
         .await
         .expect("event navigation command");
-    let _ = tokio::time::timeout(Duration::from_secs(1), async {
+    tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if matches!(
                 account_rx.recv().await.expect("internal select message"),
@@ -3120,7 +3220,7 @@ async fn run_app_actor_cross_room_missing_navigation(
         }])
         .await
         .expect("internal room projection action");
-    let _ = tokio::time::timeout(Duration::from_secs(1), async {
+    tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let snapshot = snapshot_rx.borrow().state.clone();
             if snapshot.navigation.active_room_id.as_deref() == Some(room_b)
@@ -3159,18 +3259,16 @@ async fn run_app_actor_cross_room_missing_navigation(
     ));
 
     loop {
-        match tokio::time::timeout(Duration::from_secs(1), account_rx.recv())
-            .await
-            .expect("lookup should be routed")
-            .expect("lookup message")
+        if let AccountMessage::EnsureRoomEventCached { response_tx, .. } =
+            tokio::time::timeout(Duration::from_secs(1), account_rx.recv())
+                .await
+                .expect("lookup should be routed")
+                .expect("lookup message")
         {
-            AccountMessage::EnsureRoomEventCached { response_tx, .. } => {
-                response_tx
-                    .send(crate::account::RoomEventLookupResult::Missing)
-                    .expect("missing lookup response");
-                break;
-            }
-            _ => {}
+            response_tx
+                .send(crate::account::RoomEventLookupResult::Missing)
+                .expect("missing lookup response");
+            break;
         }
     }
     let terminal = tokio::time::timeout(Duration::from_secs(1), async {
@@ -3335,14 +3433,14 @@ async fn event_navigation_preserves_opening_through_internal_room_selection() {
 
     let internal_select = tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            match account_rx.recv().await.expect("internal select message") {
-                AccountMessage::RoomCommand(
-                    koushi_protocol::command::RoomCommand::SelectRoom {
-                        request_id: select_request_id,
-                        room_id,
-                    },
-                ) => break (select_request_id, room_id),
-                _ => {}
+            if let AccountMessage::RoomCommand(
+                koushi_protocol::command::RoomCommand::SelectRoom {
+                    request_id: select_request_id,
+                    room_id,
+                },
+            ) = account_rx.recv().await.expect("internal select message")
+            {
+                break (select_request_id, room_id);
             }
         }
     })
@@ -3419,30 +3517,27 @@ async fn event_navigation_preserves_opening_through_internal_room_selection() {
     ));
 
     loop {
-        match tokio::time::timeout(Duration::from_secs(1), account_rx.recv())
-            .await
-            .expect("lookup should be routed")
-            .expect("lookup message")
+        if let AccountMessage::EnsureRoomEventCached { response_tx, .. } =
+            tokio::time::timeout(Duration::from_secs(1), account_rx.recv())
+                .await
+                .expect("lookup should be routed")
+                .expect("lookup message")
         {
-            AccountMessage::EnsureRoomEventCached { response_tx, .. } => {
-                response_tx
-                    .send(crate::account::RoomEventLookupResult::Located)
-                    .expect("lookup response");
-                break;
-            }
-            _ => {}
+            response_tx
+                .send(crate::account::RoomEventLookupResult::Located)
+                .expect("lookup response");
+            break;
         }
     }
     let focused_key = loop {
-        match tokio::time::timeout(Duration::from_secs(1), account_rx.recv())
+        if let AccountMessage::TimelineCommand(
+            koushi_protocol::command::TimelineCommand::Subscribe { key, .. },
+        ) = tokio::time::timeout(Duration::from_secs(1), account_rx.recv())
             .await
             .expect("focused subscription should be routed")
             .expect("focused subscription message")
         {
-            AccountMessage::TimelineCommand(
-                koushi_protocol::command::TimelineCommand::Subscribe { key, .. },
-            ) => break key,
-            _ => {}
+            break key;
         }
     };
     focused_projection_tx
@@ -3535,7 +3630,7 @@ async fn event_navigation_external_room_selection_fences_stale_work() {
         })
         .await
         .expect("event navigation command");
-    let _ = tokio::time::timeout(Duration::from_secs(1), async {
+    tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if matches!(
                 account_rx.recv().await.expect("internal select message"),
@@ -3566,7 +3661,7 @@ async fn event_navigation_external_room_selection_fences_stale_work() {
         })
         .await
         .expect("external room selection command");
-    let _ = tokio::time::timeout(Duration::from_secs(1), async {
+    tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if matches!(
                 account_rx.recv().await.expect("external select message"),
@@ -3750,7 +3845,7 @@ async fn run_event_navigation_latest_source_case(
             .await
             .expect("event navigation command");
         if request_id == first_request_id {
-            let _ = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::time::timeout(Duration::from_secs(1), async {
                 loop {
                     if matches!(
                         account_rx.recv().await.expect("first internal select"),
@@ -3767,7 +3862,7 @@ async fn run_event_navigation_latest_source_case(
             .expect("first internal select should be routed");
         }
     }
-    let _ = tokio::time::timeout(Duration::from_secs(1), async {
+    tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if matches!(
                 account_rx.recv().await.expect("second internal select"),
@@ -3782,7 +3877,7 @@ async fn run_event_navigation_latest_source_case(
     })
     .await
     .expect("second internal select should be routed");
-    let _ = tokio::time::timeout(Duration::from_secs(1), async {
+    tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if let CoreEvent::IntentLifecycle {
                 request_id,
@@ -3804,7 +3899,7 @@ async fn run_event_navigation_latest_source_case(
         }])
         .await
         .expect("second internal room projection action");
-    let _ = tokio::time::timeout(Duration::from_secs(1), async {
+    tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let snapshot = snapshot_rx.borrow().state.clone();
             if snapshot.navigation.active_room_id.as_deref() == Some(room_b)
@@ -3871,18 +3966,16 @@ async fn run_event_navigation_latest_source_case(
     );
 
     loop {
-        match tokio::time::timeout(Duration::from_secs(1), account_rx.recv())
-            .await
-            .expect("latest lookup should be routed")
-            .expect("latest lookup message")
+        if let AccountMessage::EnsureRoomEventCached { response_tx, .. } =
+            tokio::time::timeout(Duration::from_secs(1), account_rx.recv())
+                .await
+                .expect("latest lookup should be routed")
+                .expect("latest lookup message")
         {
-            AccountMessage::EnsureRoomEventCached { response_tx, .. } => {
-                response_tx
-                    .send(crate::account::RoomEventLookupResult::Missing)
-                    .expect("latest missing response");
-                break;
-            }
-            _ => {}
+            response_tx
+                .send(crate::account::RoomEventLookupResult::Missing)
+                .expect("latest missing response");
+            break;
         }
     }
     let final_state = tokio::time::timeout(Duration::from_secs(1), async {
@@ -4017,7 +4110,7 @@ async fn run_event_navigation_external_supersession_case(command: CoreCommand) {
         })
         .await
         .expect("event navigation command");
-    let _ = tokio::time::timeout(Duration::from_secs(1), async {
+    tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if matches!(
                 account_rx.recv().await.expect("internal select message"),
@@ -4041,7 +4134,7 @@ async fn run_event_navigation_external_supersession_case(command: CoreCommand) {
         })
         .await
         .expect("external navigation command");
-    let _ = tokio::time::timeout(Duration::from_secs(1), async {
+    tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if let CoreEvent::IntentLifecycle {
                 request_id,
@@ -4400,3 +4493,5 @@ async fn wait_for_runtime_sync_running(runtime: &CoreRuntime, stage: &'static st
         )
     });
 }
+
+mod anchored_send;

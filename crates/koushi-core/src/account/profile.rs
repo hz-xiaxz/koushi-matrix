@@ -141,7 +141,7 @@ fn avatar_thumbnail_for_request(
     match thumbnail {
         AvatarThumbnailState::Failed { kind, .. } => AvatarThumbnailState::Failed {
             request_id: request_id.sequence,
-            kind: kind.clone(),
+            kind: *kind,
         },
         other => other.clone(),
     }
@@ -581,10 +581,10 @@ impl AccountActor {
             != self
                 .avatar_session_generation
                 .load(std::sync::atomic::Ordering::Acquire)
-            || !self
+            || self
                 .avatar_fetch_abort_handles
                 .get(&mxc_uri)
-                .is_some_and(|handle| handle.id() == fetch_id)
+                .is_none_or(|handle| handle.id() != fetch_id)
         {
             return;
         }
@@ -1011,7 +1011,7 @@ mod tests {
 
     #[tokio::test]
     async fn avatar_download_survives_restart_and_offline_via_keyed_sdk_media_store() {
-        let _cache_guard = crate::renderable_thumbnail::test_cache_lock();
+        let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
         let server = MatrixMockServer::new().await;
         server.mock_versions().ok().mount().await;
         server

@@ -3,7 +3,6 @@ use koushi_state::{
     ActivityState, ActivityStream, ActivityTab, AppAction, AppEffect, AppState,
     OperationFailureKind, SessionInfo, SessionState, UiEvent, reduce,
 };
-use serde_json;
 
 fn session_info() -> SessionInfo {
     SessionInfo {

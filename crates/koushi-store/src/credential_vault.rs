@@ -163,10 +163,9 @@ impl CredentialVaultData {
             .entries
             .iter_mut()
             .find(|entry| &entry.key_id == key_id)
+            && let Some(mut session) = entry.matrix_session.take()
         {
-            if let Some(mut session) = entry.matrix_session.take() {
-                session.zeroize();
-            }
+            session.zeroize();
         }
     }
 
@@ -186,10 +185,9 @@ impl CredentialVaultData {
             .entries
             .iter_mut()
             .find(|entry| &entry.key_id == key_id)
+            && let Some(mut secret) = entry.local_unlock_secret.take()
         {
-            if let Some(mut secret) = entry.local_unlock_secret.take() {
-                secret.zeroize();
-            }
+            secret.zeroize();
         }
     }
 

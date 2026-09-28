@@ -409,7 +409,8 @@ impl StoreActor {
     ) -> Result<ComposerDraftStore, CoreFailure> {
         #[cfg(any(test, feature = "test-hooks"))]
         self.notify_composer_draft_load_started_for_testing();
-        let result = (|| {
+
+        (|| {
             let path = self.account_composer_drafts_file(key_id);
             let bytes = match std::fs::read(&path) {
                 Ok(bytes) => bytes,
@@ -419,8 +420,7 @@ impl StoreActor {
                 Err(_) => return Err(CoreFailure::StoreUnavailable),
             };
             decrypt_composer_drafts_payload(&self.load_unlock_secret(key_id)?, &bytes)
-        })();
-        result
+        })()
     }
 
     pub(crate) fn save_composer_drafts(

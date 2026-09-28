@@ -12,8 +12,8 @@ use koushi_state::{
     RoomNotificationSettings, RoomPreferencesState, RoomSummary, SearchCrawlerLastActive,
     SearchCrawlerRoomState, SearchCrawlerState, SearchState, SecureBackupGateState, SessionState,
     SettingsState, SidebarModel, SoftLogoutReauthState, SpaceChildrenState, SpaceMembersState,
-    SpaceSummary, SyncState,
-    ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState, UserProfile,
+    SpaceSummary, SyncState, ThreadAttentionState, ThreadPaneState, ThreadsListState,
+    TimelinePaneState, UserProfile,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -45,6 +45,11 @@ pub struct StateDelta {
     pub changed: StateDeltaChangedSlices,
 }
 
+/// Room-local profile replacement delta: room id -> (user id -> replacement),
+/// where `None` removes the entry at that level.
+pub type RoomProfileReplacementsDelta =
+    BTreeMap<String, Option<BTreeMap<String, Option<UserProfile>>>>;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StateDeltaChangedSlices {
     pub session: Option<SessionState>,
@@ -57,6 +62,7 @@ pub struct StateDeltaChangedSlices {
     pub account_management: Option<AccountManagementState>,
     pub account_management_capabilities: Option<AccountManagementCapabilities>,
     pub account_notifications: Option<koushi_state::AccountNotificationsState>,
+    pub contact_security: Option<koushi_state::ContactSecurityState>,
     pub soft_logout_reauth: Option<SoftLogoutReauthState>,
     pub qr_login: Option<QrLoginState>,
     pub settings: Option<SettingsState>,
@@ -68,8 +74,7 @@ pub struct StateDeltaChangedSlices {
     /// Global profile-user replacements; room-local observations remain scoped separately.
     pub profile_users_by_id: Option<BTreeMap<String, Option<UserProfile>>>,
     /// Room-local profile replacements, nested by room and user.
-    pub profile_room_users_by_room:
-        Option<BTreeMap<String, Option<BTreeMap<String, Option<UserProfile>>>>>,
+    pub profile_room_users_by_room: Option<RoomProfileReplacementsDelta>,
     pub profile_local_aliases_by_id: Option<BTreeMap<String, Option<String>>>,
     /// `true` adds the user to the ignored set; `false` removes it.
     pub profile_ignored_user_ids_by_id: Option<BTreeMap<String, bool>>,

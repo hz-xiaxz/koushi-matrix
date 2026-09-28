@@ -194,14 +194,14 @@ fn crawl_failed_carries_only_coarse_kind_and_emits_event() {
             &mut s,
             AppAction::HistoryCrawlFailed {
                 room_id: "room-a".to_owned(),
-                kind: kind.clone(),
+                kind,
                 timestamp_ms: 4_000,
             },
         );
 
         assert_eq!(
             s.search_crawler.rooms.get("room-a"),
-            Some(&SearchCrawlerRoomState::Failed { kind: kind.clone() })
+            Some(&SearchCrawlerRoomState::Failed { kind })
         );
         // Failed state carries ONLY the coarse kind — no raw SDK errors, room IDs,
         // event IDs, or message bodies are stored.

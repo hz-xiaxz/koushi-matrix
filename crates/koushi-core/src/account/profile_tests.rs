@@ -31,7 +31,7 @@ async fn test_session(server: &MatrixMockServer) -> MatrixClientSession {
 
 #[tokio::test]
 async fn cached_avatar_download_dispatches_authoritative_update() {
-    let _cache_guard = crate::renderable_thumbnail::test_cache_lock();
+    let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
     let server = MatrixMockServer::new().await;
     server
         .mock_authed_media_download()
@@ -114,7 +114,7 @@ async fn cached_avatar_download_dispatches_authoritative_update() {
 
 #[tokio::test]
 async fn avatar_actor_bounds_distinct_demand_and_rejects_capacity() {
-    let _cache_guard = crate::renderable_thumbnail::test_cache_lock();
+    let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
     let server = MatrixMockServer::new().await;
     server
         .mock_authed_media_download()
@@ -213,7 +213,7 @@ async fn avatar_actor_bounds_distinct_demand_and_rejects_capacity() {
 
 #[tokio::test]
 async fn canceling_last_avatar_waiter_aborts_active_fetch_and_admits_pending_work() {
-    let _cache_guard = crate::renderable_thumbnail::test_cache_lock();
+    let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
     let server = MatrixMockServer::new().await;
     server
         .mock_authed_media_download()
@@ -360,7 +360,7 @@ async fn canceling_last_avatar_waiter_aborts_active_fetch_and_admits_pending_wor
 
 #[tokio::test]
 async fn scoped_avatar_capacity_defers_without_losing_demand_and_reuses_terminal_failure_cache() {
-    let _cache_guard = crate::renderable_thumbnail::test_cache_lock();
+    let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
     let server = MatrixMockServer::new().await;
     // Non-retryable HTTP response; the avatar owner's two-attempt budget still
     // applies before its coarse Network failure becomes terminal and cached.
@@ -398,17 +398,17 @@ async fn scoped_avatar_capacity_defers_without_losing_demand_and_reuses_terminal
         timeout(Duration::from_secs(15), async {
             while settled.len() < 264 {
                 for action in actions.recv().await.expect("actor action stream") {
-                    if let AppAction::AvatarThumbnailUpdated { mxc_uri, thumbnail } = action {
-                        if mxc_uri.starts_with("mxc://localhost/capacity-") {
-                            assert!(matches!(
-                                thumbnail,
-                                AvatarThumbnailState::Failed {
-                                    kind: AvatarThumbnailFailureKind::Network,
-                                    ..
-                                }
-                            ));
-                            settled.insert(mxc_uri);
-                        }
+                    if let AppAction::AvatarThumbnailUpdated { mxc_uri, thumbnail } = action
+                        && mxc_uri.starts_with("mxc://localhost/capacity-")
+                    {
+                        assert!(matches!(
+                            thumbnail,
+                            AvatarThumbnailState::Failed {
+                                kind: AvatarThumbnailFailureKind::Network,
+                                ..
+                            }
+                        ));
+                        settled.insert(mxc_uri);
                     }
                 }
             }
@@ -441,7 +441,7 @@ async fn scoped_avatar_rehydrates_evicted_ready_bytes_from_sdk_cache() {
         MAX_RENDERABLE_THUMBNAIL_ENTRIES, RenderableThumbnailKind, lookup_renderable_thumbnail,
         store_renderable_thumbnail,
     };
-    let _cache_guard = crate::renderable_thumbnail::test_cache_lock();
+    let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
     let server = MatrixMockServer::new().await;
     server
         .mock_authed_media_download()
@@ -475,10 +475,9 @@ async fn scoped_avatar_rehydrates_evicted_ready_bytes_from_sdk_cache() {
                         mxc_uri,
                         thumbnail: AvatarThumbnailState::Ready { source_ref, .. },
                     } = action
+                        && mxc_uri == uri
                     {
-                        if mxc_uri == uri {
-                            break 'ready source_ref;
-                        }
+                        break 'ready source_ref;
                     }
                 }
             }
@@ -507,7 +506,7 @@ async fn scoped_avatar_rehydrates_evicted_ready_bytes_from_sdk_cache() {
 
 #[tokio::test]
 async fn stale_scoped_demand_does_not_cancel_the_current_accounts_fetch() {
-    let _cache_guard = crate::renderable_thumbnail::test_cache_lock();
+    let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
     let server = MatrixMockServer::new().await;
     server
         .mock_authed_media_download()
@@ -579,7 +578,7 @@ async fn stale_scoped_demand_does_not_cancel_the_current_accounts_fetch() {
 
 #[tokio::test]
 async fn unchanged_scoped_resources_do_not_echo_cached_updates_on_new_observation_revisions() {
-    let _cache_guard = crate::renderable_thumbnail::test_cache_lock();
+    let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
     let server = MatrixMockServer::new().await;
     server
         .mock_authed_media_download()
@@ -625,7 +624,7 @@ async fn unchanged_scoped_resources_do_not_echo_cached_updates_on_new_observatio
 
 #[tokio::test]
 async fn scoped_avatar_watch_cancels_active_and_queued_demand() {
-    let _cache_guard = crate::renderable_thumbnail::test_cache_lock();
+    let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
     let server = MatrixMockServer::new().await;
     server
         .mock_authed_media_download()
@@ -685,7 +684,7 @@ async fn scoped_avatar_watch_cancels_active_and_queued_demand() {
 
 #[tokio::test]
 async fn canceled_avatar_completion_cannot_settle_a_replacement_in_the_same_session() {
-    let _cache_guard = crate::renderable_thumbnail::test_cache_lock();
+    let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
     let server = MatrixMockServer::new().await;
     server
         .mock_authed_media_download()
@@ -761,10 +760,9 @@ async fn canceled_avatar_completion_cannot_settle_a_replacement_in_the_same_sess
                 thumbnail,
                 ..
             }) = event_rx.recv().await.unwrap()
+                && request_id == replacement
             {
-                if request_id == replacement {
-                    break thumbnail;
-                }
+                break thumbnail;
             }
         }
     })
@@ -800,7 +798,7 @@ async fn avatar_actor_drops_a_late_completion_from_a_retired_session() {
             .expect("fetch remains active")
     }
 
-    let _cache_guard = crate::renderable_thumbnail::test_cache_lock();
+    let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
     let server = MatrixMockServer::new().await;
     // Keep real network completions outside this bounded fault-injection test.
     // We do not sleep for this delay; actor shutdown aborts the owned tasks.
@@ -900,10 +898,9 @@ async fn avatar_actor_drops_a_late_completion_from_a_retired_session() {
                 thumbnail,
                 ..
             }) = event_rx.recv().await.expect("avatar event")
+                && request_id == current_request
             {
-                if request_id == current_request {
-                    break thumbnail;
-                }
+                break thumbnail;
             }
         }
     })
