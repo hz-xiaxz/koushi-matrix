@@ -230,7 +230,10 @@ jobs:
           cargo test --profile ci --workspace --exclude sidebar-composition --exclude key-management 2>&1 | tee "$RUNNER_TEMP/rust-metrics/workspace-tests.log"
       - name: Record workspace cargo metrics
         if: ${{ !cancelled() }}
-        run: test -f "$RUNNER_TEMP/rust-metrics/workspace-tests.log" && node scripts/ci-rust-cache-metrics.mjs --log "$RUNNER_TEMP/rust-metrics/workspace-tests.log" --target-dir "$CARGO_TARGET_DIR" --mode rust-workspace --cache-hit "${{ steps.sdk-cache.outputs.cache-hit == 'true' }}"
+        # Skip quietly when an earlier step failed before the suite wrote a log.
+        run: |
+          [ -f "$RUNNER_TEMP/rust-metrics/workspace-tests.log" ] || exit 0
+          node scripts/ci-rust-cache-metrics.mjs --log "$RUNNER_TEMP/rust-metrics/workspace-tests.log" --target-dir "$CARGO_TARGET_DIR" --mode rust-workspace --cache-hit "${{ steps.sdk-cache.outputs.cache-hit == 'true' }}"
       - name: wasm build check (state + search + protocol)
         run: cargo check --profile ci --target wasm32-unknown-unknown -p koushi-state -p koushi-search -p koushi-protocol
       # --- Dependency hygiene (#87 Phase 0) ---
