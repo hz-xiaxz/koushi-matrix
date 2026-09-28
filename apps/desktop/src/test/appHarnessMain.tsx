@@ -133,6 +133,12 @@ interface AppHarnessControl {
 // the CoreEvent stream, so the reply target is seeded via pushCoreEvent.
 // ---------------------------------------------------------------------------
 
+// A later launch after Rust already recorded the one-shot legacy settings
+// import (#1035): `?legacySettingsImported=1` seeds that persisted flag.
+function harnessLegacySettingsAlreadyImported(): boolean {
+  return new URLSearchParams(window.location.search).get("legacySettingsImported") === "1";
+}
+
 function readySnapshot(
   overrides: {
     composerMode?: ComposerMode;
@@ -383,7 +389,7 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
         category: "rooms",
         collapsed: { favourites: false, low_priority: false, not_joined: false }
       },
-      legacy_frontend_preferences_imported: false
+      legacy_frontend_preferences_imported: harnessLegacySettingsAlreadyImported()
     },
     persistence: { kind: "idle" }
   };

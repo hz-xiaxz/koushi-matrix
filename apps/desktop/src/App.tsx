@@ -213,8 +213,12 @@ import { createViewportSyncReporter } from "./app/viewportSyncReporter";
 import { useLegacyEmojiVocabulary } from "./app/useLegacyEmojiVocabulary";
 import {
   LEGACY_NAVIGATION_KEYS,
+  LEGACY_PREFERENCE_KEYS,
   LEGACY_SETTINGS_KEYS,
+  LEGACY_SETTINGS_KEYS_WITHOUT_RECENT_EMOJIS,
+  browserHasLegacyRecentEmojis,
   keysPresentInMigration,
+  legacyRecentEmojiFollowUp,
   legacyNavigationImportMatches,
   legacySettingsPatchMatches,
   readBrowserLegacyPreferenceMigration,
@@ -1244,12 +1248,12 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     const values = snapshot.state.domain.settings.values;
     const navigation = snapshot.state.ui.navigation;
     // #1035: only the settings import (which carries the legacy recent-emoji
-    // list) waits for the emoji vocabulary; navigation never does, and an
-    // unavailable vocabulary leaves just the emoji list out.
-    const migration = readBrowserLegacyPreferenceMigration(
-      legacyEmojiVocabulary.kind === "ready" ? legacyEmojiVocabulary.emojis : null,
-      values
-    );
+    // list) waits for the emoji vocabulary; navigation never does. An
+    // unavailable vocabulary imports the other settings without the emoji
+    // list and keeps its storage key, so a later launch can still import it.
+    const validEmojis =
+      legacyEmojiVocabulary.kind === "ready" ? legacyEmojiVocabulary.emojis : null;
+    const migration = readBrowserLegacyPreferenceMigration(validEmojis, values);
     if (!migration) return;
 
     if (legacyEmojiVocabulary.kind === "loading") {
@@ -1258,7 +1262,29 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
       values.legacy_frontend_preferences_imported &&
       !settingsMigrationInFlightRef.current
     ) {
-      removeBrowserLegacyPreferenceKeys(LEGACY_SETTINGS_KEYS);
+      removeBrowserLegacyPreferenceKeys(LEGACY_SETTINGS_KEYS_WITHOUT_RECENT_EMOJIS);
+      if (browserHasLegacyRecentEmojis()) {
+        const followUp = legacyRecentEmojiFollowUp(migration, validEmojis, values.composer);
+        if (followUp.kind === "remove") {
+          removeBrowserLegacyPreferenceKeys([LEGACY_PREFERENCE_KEYS.recentEmojis]);
+        } else if (followUp.kind === "import") {
+          // Rust's legacy import is one-shot and already recorded, so the
+          // deferred list goes through an ordinary settings update.
+          settingsMigrationInFlightRef.current = true;
+          void settleCommandSnapshot(api.updateSettings({ composer: followUp.composer }))
+            .then((next) => {
+              const confirmed = next.state.domain.settings.values.composer.recent_emojis;
+              if (
+                JSON.stringify(confirmed) === JSON.stringify(followUp.composer.recent_emojis)
+              ) {
+                removeBrowserLegacyPreferenceKeys([LEGACY_PREFERENCE_KEYS.recentEmojis]);
+              }
+            })
+            .finally(() => {
+              settingsMigrationInFlightRef.current = false;
+            });
+        }
+      }
     } else {
       const keys = keysPresentInMigration(migration, LEGACY_SETTINGS_KEYS);
       if (keys.length > 0 && !settingsMigrationInFlightRef.current) {
