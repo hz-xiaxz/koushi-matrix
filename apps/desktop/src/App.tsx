@@ -2709,7 +2709,13 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
   // Contact security details in User info (#1024): read-only load and close.
   const contactSecurityActions = useMemo<ContactSecurityActions>(() => ({
     load: (userId) => runInBackground(settleCommand(api.loadContactSecurity(userId))),
-    close: () => runInBackground(settleCommand(api.closeContactSecurity()))
+    close: () => runInBackground(settleCommand(api.closeContactSecurity())),
+    requestVerification: (userId) =>
+      runInBackground(settleCommand(api.requestContactVerification(userId))),
+    acceptVerification: (flowId) => runInBackground(settleCommand(api.acceptVerification(flowId))),
+    confirmSas: (flowId) => runInBackground(settleCommand(api.confirmSasVerification(flowId))),
+    mismatchSas: (flowId) => runInBackground(settleCommand(api.mismatchSasVerification(flowId))),
+    cancelVerification: (flowId) => runInBackground(settleCommand(api.cancelVerification(flowId)))
   }), []);
 
   // The platform half of the Rust-owned history export. Memoized so an open

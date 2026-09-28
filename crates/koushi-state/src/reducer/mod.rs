@@ -226,7 +226,20 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             methods,
         } => e2ee::handle_e2ee_recovery_state_changed(state, recovery_state, methods),
         AppAction::VerificationRequested { request_id, target } => {
-            e2ee::handle_verification_requested(state, request_id, target)
+            e2ee::handle_verification_requested(
+                state,
+                request_id,
+                target,
+                crate::state::VerificationInitiator::Them,
+            )
+        }
+        AppAction::VerificationRequestSent { request_id, target } => {
+            e2ee::handle_verification_requested(
+                state,
+                request_id,
+                target,
+                crate::state::VerificationInitiator::Us,
+            )
         }
         AppAction::VerificationAccepted { request_id } => {
             e2ee::handle_verification_accepted(state, request_id)

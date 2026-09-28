@@ -54,6 +54,7 @@ fn summary(
         },
         device_signatures: signatures,
         identity,
+        verification: koushi_state::ContactVerificationOffer::NotOffered,
     }
 }
 
@@ -315,4 +316,208 @@ fn contact_security_debug_omits_the_contact_user_id() {
     request(&mut state, 1, ALICE);
     let debug = format!("{:?}", state.contact_security);
     assert!(!debug.contains("alice"), "{debug}");
+}
+
+// ── Verify user: initiator in the shared verification state ────────────────
+
+fn contact_target() -> koushi_state::VerificationTarget {
+    koushi_state::VerificationTarget {
+        user_id: BOB.to_owned(),
+        device_id: String::new(),
+    }
+}
+
+#[test]
+fn our_verify_user_request_waits_for_them_instead_of_offering_accept() {
+    use koushi_state::{SasEmoji, VerificationFlowState, VerificationInitiator};
+    let mut state = ready_state();
+    assert!(
+        !reduce(
+            &mut state,
+            AppAction::VerificationRequestSent {
+                request_id: 21,
+                target: contact_target(),
+            },
+        )
+        .is_empty()
+    );
+    assert_eq!(
+        state.e2ee_trust.verification,
+        VerificationFlowState::Requested {
+            request_id: 21,
+            target: contact_target(),
+            initiator: VerificationInitiator::Us,
+        }
+    );
+    // A second request while one is active is refused, so the runtime does
+    // not start another SDK flow.
+    assert!(
+        reduce(
+            &mut state,
+            AppAction::VerificationRequestSent {
+                request_id: 22,
+                target: contact_target(),
+            },
+        )
+        .is_empty()
+    );
+    // The contact accepted (projected by the actor from the SDK request).
+    reduce(
+        &mut state,
+        AppAction::VerificationAccepted { request_id: 21 },
+    );
+    assert_eq!(
+        state.e2ee_trust.verification,
+        VerificationFlowState::Accepted {
+            request_id: 21,
+            target: contact_target(),
+            initiator: VerificationInitiator::Us,
+        }
+    );
+    let emojis = vec![SasEmoji {
+        symbol: "🐶".to_owned(),
+        description: "Dog".to_owned(),
+    }];
+    reduce(
+        &mut state,
+        AppAction::VerificationSasPresented {
+            request_id: 21,
+            emojis,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::VerificationConfirmed { request_id: 21 },
+    );
+    reduce(
+        &mut state,
+        AppAction::VerificationCompleted { request_id: 21 },
+    );
+    assert_eq!(
+        state.e2ee_trust.verification,
+        VerificationFlowState::Done {
+            request_id: 21,
+            target: contact_target(),
+        }
+    );
+}
+
+#[test]
+fn incoming_requests_stay_acceptable_from_them() {
+    use koushi_state::{VerificationFlowState, VerificationInitiator};
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::VerificationRequested {
+            request_id: 31,
+            target: contact_target(),
+        },
+    );
+    assert!(matches!(
+        state.e2ee_trust.verification,
+        VerificationFlowState::Requested {
+            initiator: VerificationInitiator::Them,
+            ..
+        }
+    ));
+    reduce(
+        &mut state,
+        AppAction::VerificationAccepted { request_id: 31 },
+    );
+    assert!(matches!(
+        state.e2ee_trust.verification,
+        VerificationFlowState::Accepted {
+            initiator: VerificationInitiator::Them,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn verify_user_failure_and_cancel_settle_the_shared_flow() {
+    use koushi_state::{
+        TrustOperationFailureKind, VerificationCancelReason, VerificationFlowState,
+    };
+    let mut state = ready_state();
+    let send = |state: &mut AppState, request_id| {
+        reduce(
+            state,
+            AppAction::VerificationRequestSent {
+                request_id,
+                target: contact_target(),
+            },
+        )
+    };
+    send(&mut state, 41);
+    reduce(
+        &mut state,
+        AppAction::VerificationFailed {
+            request_id: 41,
+            kind: TrustOperationFailureKind::Network,
+        },
+    );
+    assert!(matches!(
+        state.e2ee_trust.verification,
+        VerificationFlowState::Failed {
+            request_id: 41,
+            kind: TrustOperationFailureKind::Network,
+            ..
+        }
+    ));
+    // Retrying after a failure is allowed; cancelling returns to idle.
+    assert!(!send(&mut state, 42).is_empty());
+    reduce(
+        &mut state,
+        AppAction::VerificationCancelled {
+            request_id: 42,
+            reason: VerificationCancelReason::User,
+        },
+    );
+    assert_eq!(state.e2ee_trust.verification, VerificationFlowState::Idle);
+}
+
+#[test]
+fn session_verification_gate_is_not_affected_by_verify_user() {
+    use koushi_state::{
+        ProvisionalPhase, VerificationAccountKind, VerificationFlowState, VerificationGateState,
+        VerificationMethod, VerificationMethodCapability,
+    };
+    let mut state = AppState {
+        session: SessionState::Verifying {
+            info: session_info("@me:example.test"),
+            gate: VerificationGateState {
+                methods: vec![VerificationMethodCapability::ExistingDeviceSas],
+                account_kind: VerificationAccountKind::ExistingIdentity,
+                failure: None,
+            },
+            method: VerificationMethod::ExistingDeviceSas,
+            flow_id: 51,
+            sas_emojis: vec![],
+        },
+        ..AppState::default()
+    };
+    // Verify user is refused while this session is still being verified.
+    assert!(
+        reduce(
+            &mut state,
+            AppAction::VerificationRequestSent {
+                request_id: 52,
+                target: contact_target(),
+            },
+        )
+        .is_empty()
+    );
+    assert_eq!(state.e2ee_trust.verification, VerificationFlowState::Idle);
+    // The own-device SAS gate still completes as before.
+    reduce(
+        &mut state,
+        AppAction::VerificationCompleted { request_id: 51 },
+    );
+    assert!(matches!(
+        state.session,
+        SessionState::Provisional {
+            phase: ProvisionalPhase::RecheckingTrust { .. },
+            ..
+        }
+    ));
 }

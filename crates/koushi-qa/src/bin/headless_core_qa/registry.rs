@@ -127,6 +127,7 @@ pub(super) const CACHE_RESTORE_SHALLOW_DEPTH: usize = 30;
 pub(super) enum QaScenario {
     AvatarDemand,
     AccountNotifications,
+    UserVerification,
     All,
     Safety,
     LoginSync,
@@ -171,6 +172,7 @@ pub(super) enum QaScenario {
 pub(super) enum QaStage {
     AvatarDemand,
     AccountNotifications,
+    UserVerification,
     Safety,
     LoginSync,
     SessionStatus,
@@ -290,8 +292,9 @@ impl QaScenario {
             "thread_late_joiner" => Ok(Self::ThreadLateJoiner),
             "avatar_demand" => Ok(Self::AvatarDemand),
             "account_notifications" => Ok(Self::AccountNotifications),
+            "user_verification" => Ok(Self::UserVerification),
             other => Err(format!(
-                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, search_crawler_catchup, room_history_export, scheduled_send, restore_cleanup, link_preview, cache_restore, read_state_convergence, thread_late_joiner, avatar_demand, account_notifications; got {other}"
+                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, search_crawler_catchup, room_history_export, scheduled_send, restore_cleanup, link_preview, cache_restore, read_state_convergence, thread_late_joiner, avatar_demand, account_notifications, user_verification; got {other}"
             )),
         }
     }
@@ -308,8 +311,13 @@ impl QaScenario {
                     | QaStage::ThreadLateJoiner
                     | QaStage::AvatarDemand
                     | QaStage::AccountNotifications
+                    | QaStage::UserVerification
             ),
             Self::Safety => matches!(stage, QaStage::Safety),
+            Self::UserVerification => matches!(
+                stage,
+                QaStage::Safety | QaStage::LoginSync | QaStage::UserVerification
+            ),
             Self::AccountNotifications => matches!(
                 stage,
                 QaStage::Safety | QaStage::LoginSync | QaStage::AccountNotifications
@@ -596,6 +604,15 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "gate_no_proof_rejected=ok",
             "gate_no_proof_restart_signed_out=ok",
         ],
+        QaStage::UserVerification => &[
+            "user_verification_offered=ok",
+            "user_verification_request_waiting=ok",
+            "user_verification_accepted=ok",
+            "user_verification_sas_match=ok",
+            "user_verification_done=ok",
+            "user_verification_identity_verified=ok",
+            "user_verification=ok",
+        ],
         QaStage::InvitesDm => &[
             "invite_recv=ok",
             "invite_accept=ok",
@@ -879,6 +896,13 @@ pub(super) fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
             vec![QaStage::Safety, QaStage::LoginSync, QaStage::GateNegative]
         }
         QaScenario::GateNoProof => vec![QaStage::Safety, QaStage::GateNoProof],
+        QaScenario::UserVerification => {
+            vec![
+                QaStage::Safety,
+                QaStage::LoginSync,
+                QaStage::UserVerification,
+            ]
+        }
         QaScenario::InvitesDm => {
             vec![QaStage::Safety, QaStage::LoginSync, QaStage::InvitesDm]
         }
@@ -1069,6 +1093,7 @@ pub(super) fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static st
         | QaScenario::RoomPeopleProjection
         | QaScenario::SessionStatus
         | QaScenario::AccountNotifications
+        | QaScenario::UserVerification
         | QaScenario::CredentialHealth
         | QaScenario::NativeAttention
         | QaScenario::E2eeTrust
@@ -1123,6 +1148,7 @@ pub(super) fn scenario_report(server_kind: &str, scenario: QaScenario) -> String
 
 pub(super) fn should_run_normal_secondary_participant(scenario: QaScenario) -> bool {
     scenario.should_run_stage(QaStage::InvitesDm)
+        || scenario.should_run_stage(QaStage::UserVerification)
         || scenario.should_run_stage(QaStage::Directory)
         || scenario.should_run_stage(QaStage::RoomSpace)
 }

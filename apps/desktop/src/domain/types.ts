@@ -648,11 +648,19 @@ export interface ContactDeviceCounts {
   excluded_dehydrated: number;
 }
 
+export type ContactVerificationDirectChat = "existingEncrypted" | "existingUnencrypted" | "new";
+
+export type ContactVerificationOffer =
+  | { kind: "notOffered" }
+  | { kind: "requiresYourCrossSigning" }
+  | { kind: "offered"; direct_chat: ContactVerificationDirectChat };
+
 export interface ContactSecuritySummary {
   devices: ContactDevicesStatus;
   device_counts: ContactDeviceCounts;
   device_signatures: ContactDeviceSignature[];
   identity: ContactIdentityVerification;
+  verification: ContactVerificationOffer;
 }
 
 export interface ContactSecurityState {
@@ -2116,10 +2124,23 @@ export type SecureBackupPassphraseChangeState =
   | { kind: "changed"; request_id: number; delivery: RecoveryKeyDeliveryState }
   | { kind: "failed"; request_id: number; failureKind: TrustOperationFailureKind };
 
+/** Who sent a verification request (#1024). Only `them` can be accepted. */
+export type VerificationInitiator = "us" | "them";
+
 export type VerificationFlowState =
   | { kind: "idle" }
-  | { kind: "requested"; request_id: number; target: VerificationTarget }
-  | { kind: "accepted"; request_id: number; target: VerificationTarget }
+  | {
+      kind: "requested";
+      request_id: number;
+      target: VerificationTarget;
+      initiator: VerificationInitiator;
+    }
+  | {
+      kind: "accepted";
+      request_id: number;
+      target: VerificationTarget;
+      initiator: VerificationInitiator;
+    }
   | {
       kind: "sasPresented";
       request_id: number;

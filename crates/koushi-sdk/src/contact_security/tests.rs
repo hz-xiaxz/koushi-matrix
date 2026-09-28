@@ -10,7 +10,8 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use koushi_state::{
     ContactDeviceSignature, ContactDevicesStatus, ContactIdentityVerification,
-    ContactSecurityFailureKind, ContactSecuritySummary,
+    ContactSecurityFailureKind, ContactSecuritySummary, ContactVerificationDirectChat,
+    ContactVerificationOffer,
 };
 use matrix_sdk::{
     Client,
@@ -29,8 +30,8 @@ use wiremock::{
 };
 
 use super::{
-    ContactDeviceFacts, ContactIdentityFacts, classify_contact_security, load_contact_security,
-    observe_contact_security_changes, read_contact_security,
+    ContactDeviceFacts, ContactIdentityFacts, ContactVerificationFacts, classify_contact_security,
+    load_contact_security, observe_contact_security_changes, read_contact_security,
 };
 use crate::MatrixClientSession;
 
@@ -119,6 +120,13 @@ async fn owner_signed_devices_and_your_verification_are_independent() {
         summary.identity,
         ContactIdentityVerification::NotVerifiedByYou
     );
+    // Verify user is offered; no DM exists yet, so one would be created.
+    assert_eq!(
+        summary.verification,
+        ContactVerificationOffer::Offered {
+            direct_chat: ContactVerificationDirectChat::New
+        }
+    );
 
     // 2. All devices owner-signed, contact verified by you.
     verify_contact(&alice, bob_id).await;
@@ -130,6 +138,8 @@ async fn owner_signed_devices_and_your_verification_are_independent() {
         (ContactDevicesStatus::AllOwnerSigned, 1, 0)
     );
     assert_eq!(summary.identity, ContactIdentityVerification::VerifiedByYou);
+    // Not offered again for an already verified contact.
+    assert_eq!(summary.verification, ContactVerificationOffer::NotOffered);
 
     // 3. The contact adds a device they have not confirmed: your verification
     // of them is preserved, and does not confirm the new device.
@@ -222,6 +232,11 @@ async fn identity_change_is_attention_only_after_you_verified_it() {
         verified_after.identity,
         ContactIdentityVerification::ChangedAfterVerification
     );
+    // Re-verification is offered after an identity change.
+    assert!(matches!(
+        verified_after.verification,
+        ContactVerificationOffer::Offered { .. }
+    ));
     // The contact re-signed their device with the new identity, so the device
     // is confirmed again: identity change and device confirmation stay apart.
     assert_eq!(verified_after.devices, ContactDevicesStatus::AllOwnerSigned);
@@ -366,6 +381,12 @@ async fn invalid_owner_signatures_are_distinct_and_never_confirmation() {
         summary.identity,
         ContactIdentityVerification::NotVerifiedByYou
     );
+    // This viewer has no cross-signing keys of its own, so it cannot sign
+    // the contact's identity: explained instead of offered.
+    assert_eq!(
+        summary.verification,
+        ContactVerificationOffer::RequiresYourCrossSigning
+    );
 }
 
 #[tokio::test]
@@ -484,10 +505,15 @@ fn fold_never_reports_confirmation_without_an_owner_identity() {
         has_owner_cross_signature: false,
         dehydrated: false,
     };
-    let summary = classify_contact_security(None, [unsigned, unsigned]);
+    let can_sign = ContactVerificationFacts {
+        can_sign_identities: true,
+        direct_chat: ContactVerificationDirectChat::ExistingEncrypted,
+    };
+    let summary = classify_contact_security(None, [unsigned, unsigned], can_sign);
     assert_eq!(summary.devices, ContactDevicesStatus::OwnerIdentityMissing);
     assert_eq!(summary.device_counts.owner_signed, 0);
     assert_eq!(summary.identity, ContactIdentityVerification::Unknown);
+    assert_eq!(summary.verification, ContactVerificationOffer::NotOffered);
 
     // A violation wins over a stale verified flag.
     let summary = classify_contact_security(
@@ -496,10 +522,17 @@ fn fold_never_reports_confirmation_without_an_owner_identity() {
             verification_violation: true,
         }),
         [],
+        can_sign,
     );
     assert_eq!(summary.devices, ContactDevicesStatus::NoDevices);
     assert_eq!(
         summary.identity,
         ContactIdentityVerification::ChangedAfterVerification
+    );
+    assert_eq!(
+        summary.verification,
+        ContactVerificationOffer::Offered {
+            direct_chat: ContactVerificationDirectChat::ExistingEncrypted
+        }
     );
 }

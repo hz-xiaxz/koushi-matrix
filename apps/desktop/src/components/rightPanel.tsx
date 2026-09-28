@@ -690,6 +690,7 @@ export function ContextualRightPanel({
             roomManagement={snapshot.state.domain.room_management}
             profileUsers={snapshot.state.domain.profile.users}
             contactSecurity={snapshot.state.domain.contact_security}
+            verification={snapshot.state.domain.e2ee_trust.verification}
             contactSecurityActions={contactSecurityActions}
             onBack={onBackToPeople ?? onClosePanel}
             onClose={onClosePanel}

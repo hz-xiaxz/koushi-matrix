@@ -2186,6 +2186,12 @@ impl AppActor {
                         | AccountCommand::StartOwnUserSas { .. }
                         | AccountCommand::ExportHistory { .. }
                         | AccountCommand::RetryHistoryExport { .. }
+                        // Verify user must not start an SDK flow the reducer
+                        // refused (another verification is active) (#1024).
+                        | AccountCommand::ContactSecurity {
+                            request: koushi_protocol::command::ContactSecurityRequest::RequestVerification { .. },
+                            ..
+                        }
                 );
                 let should_route = !requires_projection_acceptance || projected_state_changed;
                 if !should_route {
@@ -4915,7 +4921,7 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
             })
         }
         AccountCommand::RequestVerification { request_id, target } => {
-            Some(AppAction::VerificationRequested {
+            Some(AppAction::VerificationRequestSent {
                 request_id: request_id.sequence,
                 target: target.clone(),
             })
@@ -5098,6 +5104,17 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
                 AppAction::ContactSecurityLoadRequested {
                     request_id: request_id.sequence,
                     user_id: user_id.clone(),
+                }
+            }
+            koushi_protocol::command::ContactSecurityRequest::RequestVerification { user_id } => {
+                AppAction::VerificationRequestSent {
+                    request_id: request_id.sequence,
+                    target: koushi_state::VerificationTarget {
+                        user_id: user_id.clone(),
+                        // In-room requests target the user; the answering
+                        // device is only known once they accept.
+                        device_id: String::new(),
+                    },
                 }
             }
             koushi_protocol::command::ContactSecurityRequest::Close => {

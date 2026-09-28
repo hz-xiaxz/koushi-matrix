@@ -49,6 +49,7 @@ use super::scenario_timeline::{
     wait_for_room_timeline_thread_summary, wait_for_thread_panel_and_room_summary,
     wait_for_thread_reply_item, wait_for_timeline_navigation,
 };
+use super::scenario_user_verification::run_user_verification_stage;
 use super::{
     AccountCommand, AppCommand, AppState, AuthSecret, ComposerDocument, CoreCommand,
     CoreConnection, CoreFailure, CoreRuntime, PaginationDirection, ReplyQuoteState, RoomCommand,
@@ -340,10 +341,17 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
         run_invites_dm_stage(&config, &mut conn_a, &mut participant_b.conn).await?;
     }
 
-    if scenario == QaScenario::InvitesDm {
+    if scenario.should_run_stage(QaStage::UserVerification) {
+        let participant_b = normal_secondary.as_mut().ok_or_else(|| {
+            "UserVerification requires the normal secondary participant".to_owned()
+        })?;
+        run_user_verification_stage(&config, &mut conn_a, &mut participant_b.conn).await?;
+    }
+
+    if scenario == QaScenario::InvitesDm || scenario == QaScenario::UserVerification {
         cleanup_normal_secondary_participant_for_qa(
             &mut normal_secondary,
-            "InvitesDm normal secondary cleanup",
+            "InvitesDm/UserVerification normal secondary cleanup",
         )
         .await?;
         cleanup_after_login_sync(conn_a, runtime_a, data_dir_a, account_key_a).await?;

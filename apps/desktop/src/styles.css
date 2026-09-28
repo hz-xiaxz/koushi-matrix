@@ -7040,6 +7040,27 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   list-style: none;
 }
 
+.profile-security-verify {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.profile-security-verify p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.profile-security-verify-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .profile-security-devices li {
   display: flex;
   justify-content: space-between;

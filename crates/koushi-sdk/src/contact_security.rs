@@ -21,7 +21,8 @@ use std::pin::Pin;
 use futures_util::{Stream, StreamExt, stream};
 use koushi_state::{
     ContactDeviceCounts, ContactDeviceSignature, ContactDevicesStatus, ContactIdentityVerification,
-    ContactSecurityFailureKind, ContactSecuritySummary,
+    ContactSecurityFailureKind, ContactSecuritySummary, ContactVerificationDirectChat,
+    ContactVerificationOffer,
 };
 use matrix_sdk::ruma::UserId;
 
@@ -47,11 +48,22 @@ pub struct ContactIdentityFacts {
     pub verification_violation: bool,
 }
 
+/// Facts deciding whether **Verify user** can be offered.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ContactVerificationFacts {
+    /// This session holds your private user-signing key, which signs the
+    /// contact's identity when verification completes.
+    pub can_sign_identities: bool,
+    /// The direct chat the SDK would send the request in.
+    pub direct_chat: ContactVerificationDirectChat,
+}
+
 /// Pure fold of SDK facts into the reducer summary. `devices` must already be
 /// in a stable order.
 pub fn classify_contact_security(
     identity: Option<ContactIdentityFacts>,
     devices: impl IntoIterator<Item = ContactDeviceFacts>,
+    verification: ContactVerificationFacts,
 ) -> ContactSecuritySummary {
     let mut counts = ContactDeviceCounts::default();
     let mut device_signatures = Vec::new();
@@ -99,11 +111,44 @@ pub fn classify_contact_security(
         Some(facts) if facts.verified => ContactIdentityVerification::VerifiedByYou,
         Some(_) => ContactIdentityVerification::NotVerifiedByYou,
     };
+    let verification = match identity {
+        ContactIdentityVerification::VerifiedByYou | ContactIdentityVerification::Unknown => {
+            ContactVerificationOffer::NotOffered
+        }
+        ContactIdentityVerification::NotVerifiedByYou
+        | ContactIdentityVerification::ChangedAfterVerification
+            if !verification.can_sign_identities =>
+        {
+            ContactVerificationOffer::RequiresYourCrossSigning
+        }
+        ContactIdentityVerification::NotVerifiedByYou
+        | ContactIdentityVerification::ChangedAfterVerification => {
+            ContactVerificationOffer::Offered {
+                direct_chat: verification.direct_chat,
+            }
+        }
+    };
     ContactSecuritySummary {
         devices,
         device_counts: counts,
         device_signatures,
         identity,
+        verification,
+    }
+}
+
+/// The direct chat `UserIdentity::request_verification*` uses: the SDK's
+/// first DM with the user, or a new encrypted DM when there is none.
+fn verification_direct_chat(
+    client: &matrix_sdk::Client,
+    user_id: &UserId,
+) -> ContactVerificationDirectChat {
+    match client.get_dm_room(user_id) {
+        None => ContactVerificationDirectChat::New,
+        Some(room) if room.encryption_state().is_encrypted() => {
+            ContactVerificationDirectChat::ExistingEncrypted
+        }
+        Some(_) => ContactVerificationDirectChat::ExistingUnencrypted,
     }
 }
 
@@ -172,7 +217,55 @@ async fn read_contact_security_from_store(
         }),
         dehydrated: device.is_dehydrated(),
     });
-    Ok(classify_contact_security(identity, facts))
+    let can_sign_identities = encryption
+        .cross_signing_status()
+        .await
+        .is_some_and(|status| status.has_user_signing);
+    let verification = ContactVerificationFacts {
+        can_sign_identities,
+        direct_chat: verification_direct_chat(client, user_id),
+    };
+    Ok(classify_contact_security(identity, facts, verification))
+}
+
+/// **Verify user** (#1024): send an interactive SAS verification request
+/// to the contact. As in Element and the SDK, the request is sent in the
+/// direct chat with them; a new encrypted DM is created when none exists.
+/// Refuses a contact without an identity, and one already verified by you.
+pub async fn request_user_verification(
+    session: &MatrixClientSession,
+    user_id: &str,
+) -> Result<crate::MatrixVerificationRequestHandle, crate::E2eeTrustError> {
+    let user_id = <&UserId>::try_from(user_id)
+        .map_err(|_| crate::E2eeTrustError::Sdk("invalid verification user id".to_owned()))?;
+    let identity = session
+        .client
+        .encryption()
+        .request_user_identity(user_id)
+        .await
+        .map_err(|error| {
+            crate::E2eeTrustError::Classified(crate::e2ee::trust_failure_kind(&error))
+        })?
+        .ok_or_else(|| crate::E2eeTrustError::Sdk("contact has no identity".to_owned()))?;
+    if identity.is_verified() {
+        return Err(crate::E2eeTrustError::Sdk(
+            "contact is already verified".to_owned(),
+        ));
+    }
+    let request = identity
+        .request_verification_with_methods(vec![
+            matrix_sdk::ruma::events::key::verification::VerificationMethod::SasV1,
+        ])
+        .await
+        .map_err(|error| match error {
+            matrix_sdk::encryption::identities::RequestVerificationError::Sdk(error) => {
+                crate::E2eeTrustError::Classified(crate::e2ee::trust_failure_kind(&error))
+            }
+            matrix_sdk::encryption::identities::RequestVerificationError::RoomCreation(_) => {
+                crate::E2eeTrustError::Classified(crate::E2eeTrustFailureKind::Network)
+            }
+        })?;
+    Ok(crate::MatrixVerificationRequestHandle::from_sdk(request))
 }
 
 /// A unit item whenever the SDK's device or identity store changes. Items

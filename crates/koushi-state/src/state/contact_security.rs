@@ -78,6 +78,38 @@ pub struct ContactSecuritySummary {
     /// One entry per counted device, in a stable order, for the expanded view.
     pub device_signatures: Vec<ContactDeviceSignature>,
     pub identity: ContactIdentityVerification,
+    /// Whether **Verify user** is offered, decided in Rust from the identity
+    /// state and this session's own cross-signing keys.
+    pub verification: ContactVerificationOffer,
+}
+
+/// Availability of the optional **Verify user** action.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ContactVerificationOffer {
+    /// Already verified by you, or the contact has no identity to verify.
+    NotOffered,
+    /// The contact can be verified, but this session cannot sign their
+    /// identity because your own cross-signing keys are not available here.
+    RequiresYourCrossSigning,
+    /// Offered (also to re-verify after an identity change). The request is
+    /// sent in a direct chat with the contact, as Element/the SDK do.
+    Offered {
+        direct_chat: ContactVerificationDirectChat,
+    },
+}
+
+/// The direct chat the verification request will use.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ContactVerificationDirectChat {
+    /// Your existing encrypted direct chat with the contact.
+    ExistingEncrypted,
+    /// Your existing direct chat, which is not encrypted. Emoji comparison
+    /// does not rely on room encryption.
+    ExistingUnencrypted,
+    /// No direct chat yet: a new encrypted one is created for the request.
+    New,
 }
 
 /// Aggregate owner-confirmation status of the latest retrieved device list.

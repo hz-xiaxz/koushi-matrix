@@ -5,7 +5,11 @@ import type {
   ContactDeviceSignature,
   ContactIdentityVerification,
   ContactSecurityState,
-  ContactSecuritySummary
+  ContactSecuritySummary,
+  ContactVerificationDirectChat,
+  ContactVerificationOffer,
+  TrustOperationFailureKind,
+  VerificationFlowState
 } from "../domain/types";
 import { ICON_SIZE } from "../app/uiShared";
 
@@ -13,7 +17,19 @@ import { ICON_SIZE } from "../app/uiShared";
 export interface ContactSecurityActions {
   load: (userId: string) => void;
   close: () => void;
+  /** Verify user: send the SAS request (only after the confirmation step). */
+  requestVerification: (userId: string) => void;
+  acceptVerification: (flowId: number) => void;
+  confirmSas: (flowId: number) => void;
+  mismatchSas: (flowId: number) => void;
+  cancelVerification: (flowId: number) => void;
 }
+
+const DIRECT_CHAT_EXPLANATION: Record<ContactVerificationDirectChat, MessageId> = {
+  existingEncrypted: "people.security.verifyChatExistingEncrypted",
+  existingUnencrypted: "people.security.verifyChatExistingUnencrypted",
+  new: "people.security.verifyChatNew"
+};
 
 type DevicesView =
   | "checking"
@@ -75,10 +91,13 @@ const DEVICE_SIGNATURE: Record<ContactDeviceSignature, MessageId> = {
 export function ContactSecurityDetails({
   userId,
   state,
+  verification,
   actions
 }: {
   userId: string;
   state: ContactSecurityState;
+  /** The shared Rust verification flow; shown here only for this contact. */
+  verification: VerificationFlowState;
   actions: ContactSecurityActions;
 }) {
   const actionsRef = useRef(actions);
@@ -140,6 +159,14 @@ export function ContactSecurityDetails({
           <p>{t(IDENTITY_EXPLANATION[identityView]!)}</p>
         ) : null}
       </SecurityRow>
+      <VerifyUserPanel
+        key={`verify:${userId}`}
+        userId={userId}
+        offer={summary?.verification ?? null}
+        identity={summary?.identity ?? null}
+        verification={verification}
+        actionsRef={actionsRef}
+      />
       <p className="profile-security-scope">{t("people.security.scope")}</p>
     </section>
   );
@@ -245,5 +272,188 @@ function DevicesExplanation({
         </p>
       ) : null}
     </>
+  );
+}
+
+function flowForContact(
+  verification: VerificationFlowState,
+  userId: string
+): Exclude<VerificationFlowState, { kind: "idle" }> | null {
+  if (verification.kind === "idle") return null;
+  return verification.target.user_id === userId ? verification : null;
+}
+
+function failureMessage(kind: TrustOperationFailureKind): MessageId {
+  switch (kind) {
+    case "cancelled":
+      return "people.security.verifyFailedCancelled";
+    case "mismatch":
+      return "people.security.verifyFailedMismatch";
+    case "timeout":
+      return "people.security.verifyFailedTimeout";
+    default:
+      return "people.security.verifyFailedOther";
+  }
+}
+
+/**
+ * Verify user (#1024), kept with "Your verification". Rust decides whether
+ * it is offered; React owns only the confirmation step's visibility. The
+ * request is dispatched only from the confirmation step's Send button.
+ */
+function VerifyUserPanel({
+  userId,
+  offer,
+  identity,
+  verification,
+  actionsRef
+}: {
+  userId: string;
+  offer: ContactVerificationOffer | null;
+  identity: ContactIdentityVerification | null;
+  verification: VerificationFlowState;
+  actionsRef: { current: ContactSecurityActions };
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const titleId = useId();
+  const flow = flowForContact(verification, userId);
+  const active =
+    flow !== null &&
+    (flow.kind === "requested" ||
+      flow.kind === "accepted" ||
+      flow.kind === "sasPresented" ||
+      flow.kind === "confirming");
+
+  useEffect(() => {
+    if (active) setConfirming(false);
+  }, [active]);
+
+  if (active && flow) {
+    const flowId = flow.request_id;
+    return (
+      <div className="profile-security-verify" role="group" aria-labelledby={titleId}>
+        <strong id={titleId}>{t("people.security.verifyConfirmTitle")}</strong>
+        {flow.kind === "requested" && flow.initiator === "us" ? (
+          <p role="status">{t("people.security.verifyWaiting")}</p>
+        ) : null}
+        {flow.kind === "requested" && flow.initiator === "them" ? (
+          <p role="status">{t("people.security.verifyIncoming")}</p>
+        ) : null}
+        {flow.kind === "accepted" ? (
+          <p role="status">{t("people.security.verifyStarting")}</p>
+        ) : null}
+        {flow.kind === "sasPresented" || flow.kind === "confirming" ? (
+          <>
+            <p>{t("people.security.verifyCompare")}</p>
+            <ol className="trust-sas-list" aria-label={t("people.security.verifyEmojiList")}>
+              {flow.emojis.map((emoji, index) => (
+                <li className="trust-sas-item" key={`${emoji.symbol}-${index}`}>
+                  {emoji.symbol}
+                </li>
+              ))}
+            </ol>
+          </>
+        ) : null}
+        {flow.kind === "confirming" ? (
+          <p role="status">{t("people.security.verifyConfirming")}</p>
+        ) : null}
+        <div className="profile-security-verify-actions">
+          {flow.kind === "requested" && flow.initiator === "them" ? (
+            <button
+              className="dialog-button is-primary"
+              type="button"
+              onClick={() => actionsRef.current.acceptVerification(flowId)}
+            >
+              {t("people.security.verifyAccept")}
+            </button>
+          ) : null}
+          {flow.kind === "sasPresented" ? (
+            <>
+              <button
+                className="dialog-button is-primary"
+                type="button"
+                onClick={() => actionsRef.current.confirmSas(flowId)}
+              >
+                {t("people.security.verifyMatch")}
+              </button>
+              <button
+                className="dialog-button"
+                type="button"
+                onClick={() => actionsRef.current.mismatchSas(flowId)}
+              >
+                {t("people.security.verifyNoMatch")}
+              </button>
+            </>
+          ) : null}
+          <button
+            className="dialog-button"
+            type="button"
+            onClick={() => actionsRef.current.cancelVerification(flowId)}
+          >
+            {t("action.cancel")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const settled =
+    flow?.kind === "done" ? (
+      <p role="status">{t("people.security.verifyDone")}</p>
+    ) : flow?.kind === "failed" ? (
+      <p role="status">{t(failureMessage(flow.failureKind))}</p>
+    ) : null;
+
+  if (!offer || offer.kind === "notOffered") {
+    return settled ? <div className="profile-security-verify">{settled}</div> : null;
+  }
+  if (offer.kind === "requiresYourCrossSigning") {
+    return (
+      <div className="profile-security-verify">
+        {settled}
+        <p>{t("people.security.verifyRequiresCrossSigning")}</p>
+      </div>
+    );
+  }
+  const label =
+    identity === "changedAfterVerification"
+      ? t("people.security.verifyAgain")
+      : t("people.security.verifyUser");
+  if (!confirming) {
+    return (
+      <div className="profile-security-verify">
+        {settled}
+        <button className="profile-text-button" type="button" onClick={() => setConfirming(true)}>
+          {label}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="profile-security-verify" role="group" aria-labelledby={titleId}>
+      {settled}
+      <strong id={titleId}>{t("people.security.verifyConfirmTitle")}</strong>
+      <p>{t(DIRECT_CHAT_EXPLANATION[offer.direct_chat])}</p>
+      <p>{t("people.security.verifyHow")}</p>
+      <div className="profile-security-verify-actions">
+        <button
+          className="dialog-button is-primary"
+          type="button"
+          onClick={() => {
+            setConfirming(false);
+            actionsRef.current.requestVerification(userId);
+          }}
+        >
+          {t("people.security.verifySend")}
+        </button>
+        <button
+          className="dialog-button"
+          type="button"
+          onClick={() => setConfirming(false)}
+        >
+          {t("action.cancel")}
+        </button>
+      </div>
+    </div>
   );
 }

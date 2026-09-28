@@ -10,7 +10,8 @@ import type {
   RoomModerationAction,
   RoomSummary,
   SpaceSummary,
-  UserProfile
+  UserProfile,
+  VerificationFlowState
 } from "../domain/types";
 
 import { EntityAvatar } from "./Shell";
@@ -44,6 +45,8 @@ interface ProfilePanelProps {
   profileUsers: Record<string, UserProfile>;
   /** Security details of the open contact (#1024); omitted for yourself. */
   contactSecurity?: ContactSecurityState;
+  /** The shared Rust verification flow, for Verify user (#1024). */
+  verification?: VerificationFlowState;
   contactSecurityActions?: ContactSecurityActions;
   onBack: () => void;
   onClose?: () => void;
@@ -267,6 +270,7 @@ export function ProfilePanel({
   roomManagement,
   profileUsers,
   contactSecurity,
+  verification = { kind: "idle" },
   contactSecurityActions,
   onBack,
   onClose = () => undefined,
@@ -352,6 +356,7 @@ export function ProfilePanel({
         <ContactSecurityDetails
           userId={userId}
           state={contactSecurity}
+          verification={verification}
           actions={contactSecurityActions}
         />
       ) : null}

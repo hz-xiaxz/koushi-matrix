@@ -442,6 +442,29 @@ export type MessageId =
   | "people.security.identityNotVerifiedExplain"
   | "people.security.identityChangedExplain"
   | "people.security.identityUnknownExplain"
+  | "people.security.verifyUser"
+  | "people.security.verifyAgain"
+  | "people.security.verifyConfirmTitle"
+  | "people.security.verifyChatExistingEncrypted"
+  | "people.security.verifyChatExistingUnencrypted"
+  | "people.security.verifyChatNew"
+  | "people.security.verifyHow"
+  | "people.security.verifySend"
+  | "people.security.verifyRequiresCrossSigning"
+  | "people.security.verifyWaiting"
+  | "people.security.verifyIncoming"
+  | "people.security.verifyAccept"
+  | "people.security.verifyStarting"
+  | "people.security.verifyCompare"
+  | "people.security.verifyEmojiList"
+  | "people.security.verifyMatch"
+  | "people.security.verifyNoMatch"
+  | "people.security.verifyConfirming"
+  | "people.security.verifyDone"
+  | "people.security.verifyFailedCancelled"
+  | "people.security.verifyFailedMismatch"
+  | "people.security.verifyFailedTimeout"
+  | "people.security.verifyFailedOther"
   | "room.members"
   | "room.ban"
   | "room.banMember"
@@ -960,6 +983,7 @@ export type MessageId =
   | "trust.statusUnknown"
   | "trust.statusVerificationAccepted"
   | "trust.statusVerificationRequested"
+  | "trust.statusVerificationWaiting"
   | "trust.statusVerified"
   | "trust.userIdentityReset"
   | "trust.userUnverified"
@@ -2115,9 +2139,32 @@ const en: Catalog = {
   "people.security.identityChanged": "Identity changed after you verified it",
   "people.security.identityUnknown": "Unknown",
   "people.security.identityVerifiedExplain": "You verified that this account belongs to the person you know. This doesn't confirm devices they haven't confirmed themselves.",
-  "people.security.identityNotVerifiedExplain": "You have not checked that this account belongs to the person you know. Verifying a person is optional.",
-  "people.security.identityChangedExplain": "This person's identity changed after you verified it. Your earlier verification no longer applies, so it needs to be repeated.",
+  "people.security.identityNotVerifiedExplain": "You have not checked that this account belongs to the person you know. You can compare emoji with them in person or over another trusted channel. Verifying a person is optional.",
+  "people.security.identityChangedExplain": "This person's identity changed after you verified it. Your earlier verification no longer applies, so it needs to be repeated. Choose Verify again to compare emoji with them.",
   "people.security.identityUnknownExplain": "This person hasn't set up cross-signing, so there is no identity to verify yet.",
+  "people.security.verifyUser": "Verify user",
+  "people.security.verifyAgain": "Verify again",
+  "people.security.verifyConfirmTitle": "Verify this person",
+  "people.security.verifyChatExistingEncrypted": "Koushi sends the verification request in your encrypted direct chat with this person.",
+  "people.security.verifyChatExistingUnencrypted": "Koushi sends the verification request in your existing direct chat with this person. That chat is not encrypted; the emoji comparison does not depend on it.",
+  "people.security.verifyChatNew": "You don't have a direct chat with this person yet. Koushi creates a new encrypted direct chat with them and sends the request there. They need to accept the chat to see the request.",
+  "people.security.verifyHow": "They accept the request in their app. Then you both compare emoji, in person or over another trusted channel. Verifying them doesn't confirm devices they haven't confirmed themselves.",
+  "people.security.verifySend": "Send request",
+  "people.security.verifyRequiresCrossSigning": "To verify other people, this session needs your own cross-signing keys. Verify this session or set up cross-signing in User settings → Encryption first.",
+  "people.security.verifyWaiting": "Waiting for them to accept the request in their app…",
+  "people.security.verifyIncoming": "This person asked to verify you.",
+  "people.security.verifyAccept": "Accept",
+  "people.security.verifyStarting": "Starting emoji comparison…",
+  "people.security.verifyCompare": "Compare these emoji with the ones on their screen. Do they match, in the same order?",
+  "people.security.verifyEmojiList": "Emoji to compare",
+  "people.security.verifyMatch": "They match",
+  "people.security.verifyNoMatch": "They don't match",
+  "people.security.verifyConfirming": "Waiting for them to confirm…",
+  "people.security.verifyDone": "Verification complete.",
+  "people.security.verifyFailedCancelled": "Verification was cancelled. Nothing was verified.",
+  "people.security.verifyFailedMismatch": "The emoji didn't match. Nothing was verified.",
+  "people.security.verifyFailedTimeout": "Verification timed out. Nothing was verified.",
+  "people.security.verifyFailedOther": "Verification didn't complete. Nothing was verified.",
   "room.avatarUrl": "Room avatar URL",
   "room.avatar": "Avatar",
   "room.editAvatar": "Edit avatar",
@@ -2653,6 +2700,7 @@ const en: Catalog = {
   "trust.statusUnknown": "Unknown",
   "trust.statusVerificationAccepted": "Accepted",
   "trust.statusVerificationRequested": "Request pending",
+  "trust.statusVerificationWaiting": "Waiting for the other side to accept",
   "trust.statusVerified": "Verified",
   "trust.userIdentityReset": "Identity reset",
   "trust.userUnverified": "Unverified",
@@ -3696,9 +3744,32 @@ const ja: Catalog = {
   "people.security.identityChanged": "検証後にIDが変わりました",
   "people.security.identityUnknown": "不明",
   "people.security.identityVerifiedExplain": "このアカウントが知っている本人のものであることを、あなたは検証済みです。本人が確認していないデバイスまで確認されるわけではありません。",
-  "people.security.identityNotVerifiedExplain": "このアカウントが知っている本人のものかどうかを、あなたはまだ確認していません。検証は任意です。",
-  "people.security.identityChangedExplain": "あなたが検証した後に、この人のIDが変わりました。以前の検証はもう有効ではないため、検証をやり直す必要があります。",
+  "people.security.identityNotVerifiedExplain": "このアカウントが知っている本人のものかどうかを、あなたはまだ確認していません。対面または別の信頼できる経路で、相手と絵文字を比較できます。検証は任意です。",
+  "people.security.identityChangedExplain": "あなたが検証した後に、この人のIDが変わりました。以前の検証はもう有効ではないため、検証をやり直す必要があります。「もう一度検証」を選んで、相手と絵文字を比較してください。",
   "people.security.identityUnknownExplain": "この人はクロス署名を設定していないため、まだ検証できるIDがありません。",
+  "people.security.verifyUser": "ユーザーを検証",
+  "people.security.verifyAgain": "もう一度検証",
+  "people.security.verifyConfirmTitle": "この人を検証",
+  "people.security.verifyChatExistingEncrypted": "Koushiは、この人との暗号化されたダイレクトチャットで検証リクエストを送信します。",
+  "people.security.verifyChatExistingUnencrypted": "Koushiは、この人との既存のダイレクトチャットで検証リクエストを送信します。このチャットは暗号化されていませんが、絵文字の比較はチャットの暗号化に依存しません。",
+  "people.security.verifyChatNew": "この人とのダイレクトチャットはまだありません。Koushiが新しい暗号化ダイレクトチャットを作成し、そこでリクエストを送信します。相手がチャットを承認するとリクエストが届きます。",
+  "people.security.verifyHow": "相手が自分のアプリでリクエストを承認した後、対面または別の信頼できる経路で、お互いに絵文字を比較します。検証しても、相手が確認していないデバイスが確認されるわけではありません。",
+  "people.security.verifySend": "リクエストを送信",
+  "people.security.verifyRequiresCrossSigning": "他の人を検証するには、このセッションにあなた自身のクロス署名鍵が必要です。先にこのセッションを検証するか、ユーザー設定 → 暗号化でクロス署名を設定してください。",
+  "people.security.verifyWaiting": "相手が自分のアプリでリクエストを承認するのを待っています…",
+  "people.security.verifyIncoming": "この人があなたの検証を求めています。",
+  "people.security.verifyAccept": "承認",
+  "people.security.verifyStarting": "絵文字の比較を開始しています…",
+  "people.security.verifyCompare": "相手の画面に表示された絵文字と比べてください。同じ順番で一致していますか？",
+  "people.security.verifyEmojiList": "比較する絵文字",
+  "people.security.verifyMatch": "一致する",
+  "people.security.verifyNoMatch": "一致しない",
+  "people.security.verifyConfirming": "相手の確認を待っています…",
+  "people.security.verifyDone": "検証が完了しました。",
+  "people.security.verifyFailedCancelled": "検証はキャンセルされました。何も検証されていません。",
+  "people.security.verifyFailedMismatch": "絵文字が一致しませんでした。何も検証されていません。",
+  "people.security.verifyFailedTimeout": "検証がタイムアウトしました。何も検証されていません。",
+  "people.security.verifyFailedOther": "検証は完了しませんでした。何も検証されていません。",
   "room.avatarUrl": "ルームアバターURL",
   "room.avatar": "アバター",
   "room.editAvatar": "アバターを編集",
@@ -4236,6 +4307,7 @@ const ja: Catalog = {
   "trust.statusUnknown": "不明",
   "trust.statusVerificationAccepted": "承認済み",
   "trust.statusVerificationRequested": "リクエスト待ち",
+  "trust.statusVerificationWaiting": "相手の承認を待っています",
   "trust.statusVerified": "検証済み",
   "trust.userIdentityReset": "IDリセット",
   "trust.userUnverified": "未検証",

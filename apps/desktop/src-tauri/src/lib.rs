@@ -1146,6 +1146,7 @@ pub fn run() {
             commands::account::load_account_notifications,
             commands::account::load_contact_security,
             commands::account::close_contact_security,
+            commands::account::request_contact_verification,
             commands::account::set_notification_category,
             commands::account::set_account_push_enabled,
             commands::account::request_notification_email_token,

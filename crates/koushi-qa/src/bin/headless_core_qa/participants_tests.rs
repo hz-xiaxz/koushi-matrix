@@ -48,6 +48,7 @@ fn incoming_waiter_ignores_the_previous_terminal_flow() {
     let fresh = VerificationFlowState::Requested {
         request_id: 42,
         target: target.clone(),
+        initiator: koushi_state::VerificationInitiator::Them,
     };
 
     assert_eq!(

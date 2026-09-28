@@ -58,7 +58,7 @@ pub use errors::{AppError, OperationFailureKind};
 pub use contact_security::{
     ContactDeviceCounts, ContactDeviceSignature, ContactDevicesStatus, ContactIdentityVerification,
     ContactSecurityFailureKind, ContactSecurityLoadState, ContactSecurityState,
-    ContactSecuritySummary,
+    ContactSecuritySummary, ContactVerificationDirectChat, ContactVerificationOffer,
 };
 
 // ── Re-exports: account notifications ───────────────────────────────────────
@@ -204,7 +204,7 @@ pub use e2ee::{
     E2eeRecoveryState, E2eeTrustState, IdentityResetAuthType, IdentityResetState, KeyBackupStatus,
     RecoveryKeyDeliveryState, RoomKeyExportState, RoomKeyImportState, SasEmoji,
     SecureBackupPassphraseChangeState, SecureBackupSetupState, TrustOperationFailureKind,
-    VerificationCancelReason, VerificationFlowState, VerificationTarget,
+    VerificationCancelReason, VerificationFlowState, VerificationInitiator, VerificationTarget,
 };
 
 // ── Re-exports: local_encryption ────────────────────────────────────────────
