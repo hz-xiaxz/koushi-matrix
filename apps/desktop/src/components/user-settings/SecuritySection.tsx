@@ -123,12 +123,14 @@ export function SecuritySection({
     request_id: number;
     recovery_key: string;
     delivery: RecoveryKeyDeliveryState;
+    confirmation_failed?: boolean;
   }) {
     return (
       <RecoveryKeyReveal
         key={reveal.request_id}
         recoveryKey={reveal.recovery_key}
         delivery={reveal.delivery}
+        confirmationFailed={reveal.confirmation_failed ?? false}
         onSaveToFile={
           onSaveSecureBackupRecoveryKey
             ? () => onSaveSecureBackupRecoveryKey(reveal.request_id)

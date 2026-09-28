@@ -811,14 +811,16 @@ describe("SessionVerificationGate interactions", () => {
 
   function revealSnapshot(
     snapshot: DesktopSnapshot,
-    delivery: RecoveryKeyDeliveryState = { kind: "notWritten" }
+    delivery: RecoveryKeyDeliveryState = { kind: "notWritten" },
+    confirmationFailed = false
   ): DesktopSnapshot {
     const revealed = secureBackupSnapshot(snapshot, { kind: "recoveryKeyDeliveryRequired" });
     revealed.state.domain.e2ee_trust.key_management.secure_backup_setup = {
       kind: "recoveryKeyReady",
       request_id: 41,
       recovery_key: SYNTHETIC_RECOVERY_KEY,
-      delivery
+      delivery,
+      confirmation_failed: confirmationFailed
     };
     return revealed;
   }
@@ -880,6 +882,30 @@ describe("SessionVerificationGate interactions", () => {
     rerender(renderGate(confirmed));
     expect(screen.queryByText(SYNTHETIC_RECOVERY_KEY)).toBeNull();
     expect(screen.queryByRole("region", { name: "Your recovery key" })).toBeNull();
+  });
+
+  test("explains a failed saved confirmation when Rust restores the reveal", async () => {
+    const base = await createDesktopApiFixture().getSnapshot();
+    const renderGate = (nextSnapshot: DesktopSnapshot) => (
+      <SessionVerificationGate
+        snapshot={nextSnapshot}
+        onReceipt={async () => undefined}
+        onSignOut={() => undefined}
+        operations={secureBackupOperations(nextSnapshot, {})}
+      />
+    );
+    const { rerender } = render(renderGate(revealSnapshot(structuredClone(base))));
+    expect(screen.queryByText(/confirmation could not be saved/)).toBeNull();
+
+    rerender(
+      renderGate(revealSnapshot(structuredClone(base), { kind: "written" }, true))
+    );
+    const reveal = screen.getByRole("region", { name: "Your recovery key" });
+    expect(within(reveal).getByRole("alert").textContent).toContain(
+      "Your confirmation could not be saved"
+    );
+    expect(within(reveal).getByText(SYNTHETIC_RECOVERY_KEY)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "I saved the recovery key" })).toBeTruthy();
   });
 
   test("keeps the reveal while the gate briefly leaves delivery-required", async () => {

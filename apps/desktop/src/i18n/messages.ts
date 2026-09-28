@@ -1081,6 +1081,7 @@ export type MessageId =
   | "gate.secureBackupCreating"
   | "gate.secureBackupDeliveryTitle"
   | "gate.secureBackupDeliveryRequired"
+  | "gate.secureBackupRecoveryKeyConfirmFailed"
   | "gate.secureBackupUploading"
   | "gate.secureBackupPendingZero"
   | "gate.secureBackupPendingOne"
@@ -2826,6 +2827,7 @@ const en: Catalog = {
   "gate.secureBackupCreating": "Creating secure backup…",
   "gate.secureBackupDeliveryTitle": "Save your recovery key",
   "gate.secureBackupDeliveryRequired": "Save the recovery key — copy it or save it to a file — before continuing.",
+  "gate.secureBackupRecoveryKeyConfirmFailed": "Your confirmation could not be saved. The key is still valid; choose \"I saved the recovery key\" again.",
   "gate.secureBackupUploading": "Uploading existing encrypted keys…",
   "gate.secureBackupPendingZero": "No encrypted keys remain to upload.",
   "gate.secureBackupPendingOne": "Uploading existing encrypted keys: 1 remaining.",
@@ -4456,6 +4458,7 @@ const ja: Catalog = {
   "gate.secureBackupCreating": "安全なバックアップを作成中…",
   "gate.secureBackupDeliveryTitle": "リカバリーキーを保存してください",
   "gate.secureBackupDeliveryRequired": "続行する前に、リカバリーキーをコピーするかファイルに保存してください。",
+  "gate.secureBackupRecoveryKeyConfirmFailed": "保存の確認を記録できませんでした。このキーは引き続き有効です。もう一度「リカバリーキーを保存しました」を選んでください。",
   "gate.secureBackupUploading": "既存の暗号化キーをアップロード中…",
   "gate.secureBackupPendingZero": "アップロードする暗号化キーは残っていません。",
   "gate.secureBackupPendingOne": "既存の暗号化キーをアップロード中: 残り 1 件。",

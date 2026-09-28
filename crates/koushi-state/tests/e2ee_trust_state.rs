@@ -166,6 +166,7 @@ fn secure_backup_setup_recovery_key_ready_redacts_key_material_in_debug() {
             request_id: 33,
             recovery_key: RecoveryKeyMaterial::new("synthetic-setup-key"),
             delivery: RecoveryKeyDeliveryState::NotWritten,
+            confirmation_failed: false,
         }
     );
     let debug = format!("{:?}", state.e2ee_trust.key_management.secure_backup_setup);

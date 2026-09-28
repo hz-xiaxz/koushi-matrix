@@ -29,6 +29,7 @@ export function RecoveryKeyReveal({
   copyRecoveryKey = copyRecoveryKeyToClipboard,
   onSaveToFile,
   onConfirmSaved,
+  confirmationFailed = false,
   disabled = false
 }: {
   recoveryKey: string;
@@ -36,6 +37,7 @@ export function RecoveryKeyReveal({
   copyRecoveryKey?: (recoveryKey: string) => Promise<void>;
   onSaveToFile?: () => Promise<void>;
   onConfirmSaved: () => Promise<void>;
+  confirmationFailed?: boolean;
   disabled?: boolean;
 }) {
   const titleId = useId();
@@ -99,6 +101,9 @@ export function RecoveryKeyReveal({
       )}
       {delivery.kind === "writeFailed" && (
         <p role="alert">{t("gate.secureBackupRecoveryKeySaveFailed")}</p>
+      )}
+      {confirmationFailed && (
+        <p role="alert">{t("gate.secureBackupRecoveryKeyConfirmFailed")}</p>
       )}
       <button
         className="dialog-button is-primary"

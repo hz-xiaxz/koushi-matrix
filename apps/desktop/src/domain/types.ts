@@ -2129,6 +2129,9 @@ export type SecureBackupSetupState =
       request_id: number;
       recovery_key: string;
       delivery: RecoveryKeyDeliveryState;
+      // Rust restored the reveal because the saved confirmation could not
+      // be persisted; ask the user to confirm again.
+      confirmation_failed: boolean;
     }
   | { kind: "enabled"; request_id: number }
   | { kind: "failed"; request_id: number; failureKind: TrustOperationFailureKind };

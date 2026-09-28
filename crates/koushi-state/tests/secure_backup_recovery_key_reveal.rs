@@ -80,6 +80,7 @@ fn setup_success_reveals_the_key_without_a_file_and_keeps_the_gate_blocking() {
             request_id: 7,
             recovery_key: key(),
             delivery: RecoveryKeyDeliveryState::NotWritten,
+            confirmation_failed: false,
         }
     );
     assert_eq!(revealed_key(&state), Some(SYNTHETIC_KEY));
@@ -344,6 +345,7 @@ fn recovery_key_material_serializes_as_the_plain_key_for_the_live_snapshot_only(
             "request_id": 7,
             "recovery_key": SYNTHETIC_KEY,
             "delivery": { "kind": "notWritten" },
+            "confirmation_failed": false,
         })
     );
 }
@@ -445,6 +447,7 @@ fn a_failed_marker_clear_restores_the_reveal_and_the_blocking_gate() {
             request_id: 7,
             recovery_key: key(),
             delivery: RecoveryKeyDeliveryState::Written,
+            confirmation_failed: true,
         }
     );
     assert_eq!(

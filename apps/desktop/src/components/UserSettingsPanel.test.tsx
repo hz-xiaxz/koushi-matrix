@@ -1112,7 +1112,8 @@ describe("UserSettingsPanel", () => {
               kind: "recoveryKeyReady",
               request_id: 12,
               recovery_key: "synthetic-settings-setup-key",
-              delivery: { kind: "written" }
+              delivery: { kind: "written" },
+              confirmation_failed: false
             },
             passphrase_change: {
               kind: "changed",

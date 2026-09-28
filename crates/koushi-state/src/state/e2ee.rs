@@ -82,6 +82,10 @@ pub enum SecureBackupSetupState {
         request_id: u64,
         recovery_key: RecoveryKeyMaterial,
         delivery: RecoveryKeyDeliveryState,
+        /// The saved confirmation could not be persisted and the reveal was
+        /// restored; the user is asked to confirm again.
+        #[serde(default)]
+        confirmation_failed: bool,
     },
     Enabled {
         request_id: u64,

@@ -457,6 +457,7 @@ export function SessionVerificationGate({
         key={revealedSetupKey.request_id}
         recoveryKey={revealedSetupKey.recovery_key}
         delivery={revealedSetupKey.delivery}
+        confirmationFailed={revealedSetupKey.confirmation_failed}
         copyRecoveryKey={operations.copyRecoveryKey}
         onSaveToFile={
           operations.saveSecureBackupRecoveryKey
