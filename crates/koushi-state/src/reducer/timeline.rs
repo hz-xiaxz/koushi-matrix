@@ -715,6 +715,7 @@ pub(crate) fn handle_send_text_submitted(
     else {
         return Vec::new();
     };
+    return_anchored_main_pane_to_live_for_accepted_send(state, &room_id);
     let accepted_composer = state.composer_drafts.composer_for_room(&room_id);
     state.timeline.composer.draft = accepted_composer.draft;
     state.timeline.composer.document = accepted_composer.document;
@@ -785,6 +786,7 @@ pub(crate) fn handle_composer_submission_accepted(
         .timeline
         .composer
         .remember_accepted_submission(submission_id.clone());
+    return_anchored_main_pane_to_live_for_accepted_send(state, &room_id);
     state.timeline.composer.pending_submission_id = Some(submission_id);
     state.timeline.composer.pending_transaction_id = Some(transaction_id.clone());
     state.timeline.composer.pending_send_kind = Some(match &state.timeline.composer.mode {
@@ -916,6 +918,26 @@ pub(crate) fn handle_composer_reply_cancelled(state: &mut AppState) -> Vec<AppEf
 }
 
 // --- Private helpers ---
+
+/// #1037: pending outbound messages are projected into the live Room timeline,
+/// so a main-composer send accepted for the selected room while the main pane
+/// is anchored to historical context returns the pane to live immediately on
+/// local acceptance (no server acknowledgement or remote echo is awaited).
+/// Callers invoke this only after every acceptance, revision, target-room, and
+/// duplicate guard has passed. It reuses the focused-context close transition
+/// (clears the main anchor and the room's stale scroll anchor) and the
+/// return-to-live transition (event navigation -> Idle, which lets the runtime
+/// release any in-flight navigation owner so a late completion cannot
+/// re-anchor). A live main pane keeps any independent right-panel context.
+fn return_anchored_main_pane_to_live_for_accepted_send(state: &mut AppState, room_id: &str) {
+    if state.navigation.main_timeline_anchor.is_none()
+        || state.navigation.active_room_id.as_deref() != Some(room_id)
+    {
+        return;
+    }
+    super::thread::handle_close_focused_context(state);
+    super::navigation::handle_return_main_timeline_to_live(state, room_id.to_owned());
+}
 
 fn composer_target_is_active(state: &AppState, target: &crate::ComposerTarget) -> bool {
     match target {
