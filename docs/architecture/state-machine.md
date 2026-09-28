@@ -5095,7 +5095,8 @@ stateDiagram-v2
   request was sent receives the request only if their server delivers that
   event through sync (Tuwunel does); Synapse returns it through gap repair,
   which the SDK does not feed to its verification machine. The confirmation
-  step therefore tells the user that the contact must accept the chat.
+  step therefore says only that the request is sent in that chat and to try
+  again once the contact has joined if they do not see it.
 
 ## Desktop Application Updates
 

@@ -62,7 +62,7 @@ separate rows:
 To verify the person yourself, choose **Verify user** (or **Verify again**
 after their identity changed) under **Your verification**. Koushi first shows
 which direct chat it will use for the request — your existing chat with them,
-or a new encrypted chat that they need to accept — and sends nothing until you
+or a new encrypted chat — and sends nothing until you
 choose **Send request**. When they accept in their app, compare the emoji
 with them in person or over another trusted channel and choose **They match**
 or **They don't match**. Verifying them does not confirm devices they have

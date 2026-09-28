@@ -304,7 +304,7 @@ describe("Verify user", () => {
     fireEvent.click(verify);
     expect(
       screen.getByText(
-        "You don't have a direct chat with this person yet. Koushi creates a new encrypted direct chat with them and sends the request there. They need to accept the chat to see the request."
+        "You don't have a direct chat with this person yet. Koushi creates a new encrypted direct chat with them and sends the request there. If they don't see the request, try again after they have joined the chat."
       )
     ).toBeTruthy();
     expect(actions.requestVerification).not.toHaveBeenCalled();
