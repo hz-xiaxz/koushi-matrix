@@ -313,7 +313,8 @@ test("Space member roles use authoritative success, failure retry, confirmation,
   await expect(membersButton).toBeVisible();
   await membersButton.click();
   await expect(page.getByRole("heading", { name: "Space members", level: 2 })).toBeVisible();
-  await expect(page.getByText("Some child rooms are still syncing")).toBeVisible();
+  // #1033: incomplete child-room completeness is Rust-owned data, not a notice.
+  await expect(page.getByText("Some child rooms are still syncing")).toHaveCount(0);
 
   await page.evaluate(() => {
     let attempts = 0;

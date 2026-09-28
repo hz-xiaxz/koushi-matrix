@@ -6624,6 +6624,11 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   margin-inline-start: auto;
 }
 
+.space-members-invite-trigger:disabled {
+  opacity: 0.5;
+  background: transparent;
+}
+
 .space-members-invite {
   display: flex;
   align-items: center;
@@ -6699,15 +6704,6 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   border-radius: var(--r-md);
   background: var(--surface);
   color: var(--text);
-}
-
-.space-members-sync-notice {
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: var(--r-md);
-  color: var(--text-muted);
-  background: var(--surface-raised);
-  font-size: 13px;
 }
 
 .space-members-sections {

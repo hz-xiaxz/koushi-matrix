@@ -3385,8 +3385,9 @@ stateDiagram-v2
   do not admit a role command.
 - `role_options` and `can_edit_roles` are derived from direct Space power-level
   state in Rust. Child-room completion is not an authorization input: an
-  incomplete child projection may show a sync notice while an authorized role
-  control remains enabled. Child-only and invited entries never receive role
+  incomplete child projection is reported only as Rust-owned completeness
+  counts (no UI syncing notice) while an authorized role control remains
+  enabled. Child-only and invited entries never receive role
   options.
 - A matching authoritative success installs the full fresh Space Members
   projection before settling `Idle`; React must not patch the target role.
