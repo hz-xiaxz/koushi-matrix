@@ -273,6 +273,11 @@ import type {
   SpaceInviteAvailabilityReason,
   SpaceInviteCancellationAvailabilityReason
 } from "./components/SpaceMembersPanel";
+import {
+  exactRoomSettingsForRoom,
+  spaceInviteAvailabilityReasonForSnapshot,
+  spaceInviteCancellationAvailabilityReasonForSnapshot
+} from "./domain/spaceInviteAvailability";
 
 type ActivityOpenTrigger = "home_rail" | "activity_sidebar" | "initial_home" | "other";
 type SpaceMembersOpenTrigger = "sidebar" | "space_info";
@@ -287,20 +292,6 @@ type SpaceMembersLoadDemand = {
   key: string;
   promise: Promise<DesktopSnapshot | null> | null;
 };
-
-function exactRoomSettingsForRoom(
-  snapshot: Pick<DesktopSnapshot, "state"> | null,
-  roomId: string
-) {
-  if (!snapshot) {
-    return null;
-  }
-  const roomManagement = snapshot.state.domain.room_management;
-  return roomManagement.selected_room_id === roomId &&
-    roomManagement.settings?.room_id === roomId
-    ? roomManagement.settings
-    : null;
-}
 
 function spaceMembersFenceForSnapshot(snapshot: DesktopSnapshot | null): SpaceMemberFence | null {
   const account = readyComposerDraftAccountOwner(snapshot);
@@ -332,52 +323,6 @@ function spaceMembersSnapshotMatches(
 
 function spaceMembersLoadDemandKey(fence: SpaceMemberFence): string {
   return `${fence.accountOwnerKey}\u0000${fence.spaceId}\u0000${fence.generation}`;
-}
-
-function spaceInviteAvailabilityReasonForSnapshot(
-  snapshot: Pick<DesktopSnapshot, "state"> | null,
-  spaceId: string
-): SpaceInviteAvailabilityReason {
-  if (
-    snapshot?.state.ui.navigation.active_space_id !== spaceId ||
-    snapshot.state.domain.space_members.selected_space_id !== spaceId
-  ) {
-    return "settings_unavailable";
-  }
-  const settings = exactRoomSettingsForRoom(snapshot, spaceId);
-  if (!settings) {
-    return "settings_unavailable";
-  }
-  if (!settings.permissions.can_invite) {
-    return "permission_denied";
-  }
-  const operation = snapshot.state.domain.space_members.operation.kind;
-  return operation === "loading" || operation === "inviting" || operation === "cancellingInvite"
-    ? "operation_pending"
-    : "available";
-}
-
-function spaceInviteCancellationAvailabilityReasonForSnapshot(
-  snapshot: Pick<DesktopSnapshot, "state"> | null,
-  spaceId: string
-): SpaceInviteCancellationAvailabilityReason {
-  if (
-    snapshot?.state.ui.navigation.active_space_id !== spaceId ||
-    snapshot.state.domain.space_members.selected_space_id !== spaceId
-  ) {
-    return "settings_unavailable";
-  }
-  const settings = exactRoomSettingsForRoom(snapshot, spaceId);
-  if (!settings) {
-    return "settings_unavailable";
-  }
-  if (!settings.permissions.can_kick) {
-    return "permission_denied";
-  }
-  const operation = snapshot.state.domain.space_members.operation.kind;
-  return operation === "loading" || operation === "inviting" || operation === "cancellingInvite"
-    ? "operation_pending"
-    : "available";
 }
 
 const DEFAULT_HOMESERVER = "https://matrix.org";

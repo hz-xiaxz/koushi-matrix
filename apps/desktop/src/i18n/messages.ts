@@ -1385,7 +1385,8 @@ export type MessageId =
   | "spaceMembers.cancelInvitePending"
   | "spaceMembers.cancelInviteFailed"
   | "spaceMembers.loadFailed"
-  | "spaceMembers.syncIncomplete"
+  | "spaceMembers.inviteSettingsUnavailable"
+  | "spaceMembers.inviteOperationPending"
   | "spaceMembers.noResults"
   | "spaceMembers.roleSelect"
   | "spaceMembers.roleUpdateFailed"
@@ -3047,7 +3048,8 @@ const en: Catalog = {
   "spaceMembers.cancelInvitePending": "Cancelling…",
   "spaceMembers.cancelInviteFailed": "Could not cancel the invitation. Try again.",
   "spaceMembers.loadFailed": "Member load failed. Try again.",
-  "spaceMembers.syncIncomplete": "Some child rooms are still syncing",
+  "spaceMembers.inviteSettingsUnavailable": "Invitations are unavailable until space settings load",
+  "spaceMembers.inviteOperationPending": "Wait for the current member update to finish",
   "spaceMembers.noResults": "No space members found",
   "spaceMembers.roleSelect": "Role for {name}",
   "spaceMembers.roleUpdateFailed": "Could not update this member's role. Try again.",
@@ -4592,7 +4594,8 @@ const ja: Catalog = {
   "spaceMembers.cancelInvitePending": "取消中…",
   "spaceMembers.cancelInviteFailed": "招待を取り消せませんでした。もう一度お試しください。",
   "spaceMembers.loadFailed": "メンバーの読み込みに失敗しました。もう一度お試しください。",
-  "spaceMembers.syncIncomplete": "一部の子ルームを同期中です",
+  "spaceMembers.inviteSettingsUnavailable": "スペースの設定を読み込むまで招待できません",
+  "spaceMembers.inviteOperationPending": "現在のメンバー操作が完了するまでお待ちください",
   "spaceMembers.noResults": "スペースのメンバーが見つかりません",
   "spaceMembers.roleSelect": "{name}のロール",
   "spaceMembers.roleUpdateFailed": "このメンバーのロールを変更できませんでした。もう一度お試しください。",

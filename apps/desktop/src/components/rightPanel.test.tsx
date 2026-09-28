@@ -16,6 +16,10 @@ import type {
   UserProfile
 } from "../domain/types";
 import { documentFromText } from "../domain/composerDocument";
+import {
+  exactRoomSettingsForRoom,
+  spaceInviteAvailabilityReasonForSnapshot
+} from "../domain/spaceInviteAvailability";
 import { threadTimelineKey } from "../domain/coreEvents";
 import { applyTimelineEvent, createTimelineStore } from "../domain/timelineStore";
 import { t } from "../i18n/messages";
@@ -484,6 +488,49 @@ describe("ContextualRightPanel people composition", () => {
     expect(onRequestMemberAvatarThumbnail).toHaveBeenCalledWith(
       "mxc://example.invalid/space-member-avatar"
     );
+  });
+
+  test("keeps the Space header invite control mounted across a synthetic settings-slot transition (#1033)", () => {
+    const spaceSettings = structuredClone(roomManagement.settings!);
+    spaceSettings.room_id = space.space_id;
+    const spaceSnapshot = (management: RoomManagementState): DesktopSnapshot =>
+      ({
+        ...snapshot,
+        state: {
+          ...snapshot.state,
+          domain: { ...snapshot.state.domain, room_management: management },
+          ui: { ...snapshot.state.ui, navigation: { active_space_id: space.space_id } }
+        }
+      }) as unknown as DesktopSnapshot;
+    // Mirrors App's derivation: both inputs come from Rust-owned snapshot state.
+    const propsFor = (next: DesktopSnapshot): Partial<RightPanelProps> => ({
+      snapshot: next,
+      peoplePanelScope: { kind: "space", spaceId: space.space_id },
+      canInviteToSpace: Boolean(
+        exactRoomSettingsForRoom(next, space.space_id)?.permissions.can_invite
+      ),
+      spaceInviteAvailabilityReason: spaceInviteAvailabilityReasonForSnapshot(next, space.space_id)
+    });
+    const authorized = spaceSnapshot({
+      selected_room_id: space.space_id,
+      settings: spaceSettings,
+      operation: { kind: "idle" }
+    });
+    // A room-scoped settings load replaces the single room-management slot.
+    const slotReplaced = spaceSnapshot(roomManagement);
+
+    const { rerender } = renderPanel(propsFor(authorized));
+    const trigger = screen.getByRole("button", { name: "Invite people" });
+    expect(trigger).toHaveProperty("disabled", false);
+
+    rerender(<ContextualRightPanel {...defaultProps} {...propsFor(slotReplaced)} />);
+    expect(screen.getByRole("button", { name: "Invite people" })).toBe(trigger);
+    expect(trigger).toHaveProperty("disabled", true);
+    expect(trigger.getAttribute("data-invite-availability")).toBe("settings_unavailable");
+
+    rerender(<ContextualRightPanel {...defaultProps} {...propsFor(authorized)} />);
+    expect(screen.getByRole("button", { name: "Invite people" })).toBe(trigger);
+    expect(trigger).toHaveProperty("disabled", false);
   });
 
   test("renders SpaceMembersPanel for a Space scope and forwards Space callbacks", () => {

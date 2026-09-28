@@ -238,6 +238,7 @@ describe("SpaceMembersPanel space invite search (#508)", () => {
       <SpaceMembersPanel
         state={state()}
         canInvite={false}
+        inviteAvailabilityReason="permission_denied"
         onInviteUser={onInviteUser}
         onInviteSearchCandidate={onInviteSearchCandidate}
         onSearchInviteTargets={onSearchInviteTargets}
@@ -984,17 +985,90 @@ describe("SpaceMembersPanel", () => {
     );
   });
 
-  it("announces incomplete child-room synchronization from Rust state", () => {
+  it("does not show a persistent syncing notice when child rooms are incomplete (#1033)", () => {
     render(
       <SpaceMembersPanel
-        state={state({ incomplete_child_room_count: 1 })}
+        state={state({
+          child_room_count: 3,
+          complete_child_room_count: 1,
+          incomplete_child_room_count: 2
+        })}
         canInvite={true}
         onInviteUser={vi.fn()}
         onOpenProfile={vi.fn()}
       />
     );
 
-    expect(screen.getByRole("status").textContent).toContain("Some child rooms are still syncing");
+    expect(screen.queryByText(/still syncing/i)).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText("Alice")).toBeTruthy();
+    expect(screen.getByText("Bob")).toBeTruthy();
+    expect(screen.getByText("Carol")).toBeTruthy();
+  });
+
+  it("keeps the header invite control mounted while settings are temporarily unavailable (#1033)", () => {
+    const onInviteSearchCandidate = vi.fn();
+    const renderPanel = (
+      canInvite: boolean,
+      reason: "available" | "settings_unavailable"
+    ) => (
+      <SpaceMembersPanel
+        state={state()}
+        canInvite={canInvite}
+        inviteAvailabilityReason={reason}
+        onInviteUser={vi.fn()}
+        onInviteSearchCandidate={onInviteSearchCandidate}
+        onOpenProfile={vi.fn()}
+      />
+    );
+    const { rerender } = render(renderPanel(true, "available"));
+    const panel = screen.getByRole("heading", { name: "Space members", level: 2 }).closest("section");
+    const trigger = screen.getByRole("button", { name: "Invite people" });
+    expect(trigger).toHaveProperty("disabled", false);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search space members" }), {
+      target: { value: "Ali" }
+    });
+
+    rerender(renderPanel(false, "settings_unavailable"));
+    const unavailableTrigger = screen.getByRole("button", { name: "Invite people" });
+    expect(unavailableTrigger).toBe(trigger);
+    expect(unavailableTrigger).toHaveProperty("disabled", true);
+    expect(unavailableTrigger.getAttribute("data-invite-availability")).toBe("settings_unavailable");
+    expect(unavailableTrigger.getAttribute("title")).toBe(
+      "Invitations are unavailable until space settings load"
+    );
+    fireEvent.click(unavailableTrigger);
+    expect(screen.queryByRole("searchbox", { name: "Name, alias, or Matrix ID" })).toBeNull();
+    expect(onInviteSearchCandidate).not.toHaveBeenCalled();
+
+    rerender(renderPanel(true, "available"));
+    const recoveredTrigger = screen.getByRole("button", { name: "Invite people" });
+    expect(recoveredTrigger).toBe(trigger);
+    expect(recoveredTrigger).toHaveProperty("disabled", false);
+    expect(screen.getByRole("heading", { name: "Space members", level: 2 }).closest("section")).toBe(panel);
+    expect(
+      (screen.getByRole("searchbox", { name: "Search space members" }) as HTMLInputElement).value
+    ).toBe("Ali");
+    fireEvent.click(recoveredTrigger);
+    expect(screen.getByRole("searchbox", { name: "Name, alias, or Matrix ID" })).toBeTruthy();
+  });
+
+  it("keeps the header invite control mounted but disabled while an operation is pending (#1033)", () => {
+    render(
+      <SpaceMembersPanel
+        state={state({ operation: { kind: "loading", request_id: null, space_id: "!space:example.invalid", generation: 4 } })}
+        canInvite={true}
+        inviteAvailabilityReason="available"
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+      />
+    );
+
+    const trigger = screen.getByRole("button", { name: "Invite people" });
+    expect(trigger).toHaveProperty("disabled", true);
+    expect(trigger.getAttribute("data-invite-availability")).toBe("operation_pending");
+    fireEvent.click(trigger);
+    expect(screen.queryByRole("searchbox", { name: "Name, alias, or Matrix ID" })).toBeNull();
   });
 
   it("renders a useful empty state when search matches no section", () => {
@@ -1140,7 +1214,8 @@ describe("SpaceMembersPanel", () => {
     expect(joined).toContain("rendered");
     expect(joined).toContain("search");
     expect(joined).toContain("availability");
-    expect(joined).toContain("incomplete_notice=true");
+    expect(joined).toContain("incomplete_child_rooms=true");
+    expect(joined).not.toContain("incomplete_notice");
     for (const privateValue of [
       "@private-user:example.invalid",
       "@private-child:example.invalid",
@@ -1252,7 +1327,7 @@ describe("SpaceMembersPanel", () => {
     expect(screen.queryByRole("combobox")).toBeNull();
   });
 
-  it("keeps authorized role controls enabled while child rooms are syncing", () => {
+  it("keeps authorized role controls enabled while child rooms are incomplete", () => {
     render(
       <SpaceMembersPanel
         state={state({
@@ -1272,7 +1347,7 @@ describe("SpaceMembersPanel", () => {
       />
     );
 
-    expect(screen.getByRole("status").textContent).toContain("Some child rooms are still syncing");
+    expect(screen.queryByText(/still syncing/i)).toBeNull();
     expect(screen.getByRole("combobox", { name: "Role for Alice" })).toHaveProperty(
       "disabled",
       false

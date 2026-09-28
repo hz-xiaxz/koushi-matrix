@@ -980,8 +980,16 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
 - The Space Members panel may own only confirmation-dialog visibility and DOM
   focus. A select remains on the projected current role until a later Rust
   snapshot projects the requested role; failure/retry leaves the authoritative
-  role and options intact. Incomplete child-room sync is a notice, not a local
-  disablement of a directly authorized control.
+  role and options intact. Incomplete child-room completeness is Rust-owned
+  data only: the panel renders no syncing notice for it, and it never disables
+  a directly authorized control.
+- The Space Members header invite trigger renders the existing
+  `SpaceInviteAvailabilityReason` derived from Rust snapshot state
+  (`domain/spaceInviteAvailability.ts`). `permission_denied` hides it;
+  `settings_unavailable` and `operation_pending` keep it mounted but disabled
+  with an explanation, so a transient room-management settings gap does not
+  remove it. A disabled trigger opens no search and submits nothing; Rust
+  admission and account/Space fences stay authoritative.
 - Tauri and Browser Fake paths mirror the same command shape and admission
   guards. Browser-headless tests must exercise full projection replacement,
   failure/retry, confirmation cancellation, and role-option rederivation rather

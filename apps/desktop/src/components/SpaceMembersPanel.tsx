@@ -138,6 +138,17 @@ function inviteAvailabilityReasonForEntry(
   return availabilityReason ?? "available";
 }
 
+function headerInviteTitle(reason: SpaceInviteAvailabilityReason): string {
+  switch (reason) {
+    case "settings_unavailable":
+      return t("spaceMembers.inviteSettingsUnavailable");
+    case "operation_pending":
+      return t("spaceMembers.inviteOperationPending");
+    default:
+      return t("room.invitePeople");
+  }
+}
+
 function cancelIsDisabled(state: SpaceMembersState, canCancelInvite: boolean): boolean {
   return !canCancelInvite || hasPendingOperation(state);
 }
@@ -271,6 +282,10 @@ export function SpaceMembersPanel({
     : hasPendingOperation(state)
       ? "operation_pending"
       : inviteAvailabilityReason ?? "available";
+  // #1033: only a real permission denial hides the header trigger; temporary
+  // settings unavailability and pending operations keep it mounted, disabled.
+  const headerInviteVisible = panelAvailabilityReason !== "permission_denied";
+  const headerInviteDisabled = panelAvailabilityReason !== "available";
   const failedOperation = state.operation.kind === "failed" ? state.operation : null;
   const roleUpdateFailed =
     state.operation.kind === "roleUpdateFailed" ? state.operation : null;
@@ -305,7 +320,7 @@ export function SpaceMembersPanel({
         `search_active=${Boolean(query.trim())}`,
         `result_count=${resultCount}`,
         `availability_reason=${panelAvailabilityReason}`,
-        `incomplete_notice=${state.incomplete_child_room_count > 0}`
+        `incomplete_child_rooms=${state.incomplete_child_room_count > 0}`
       ].join(" ")
     );
   }, [
@@ -377,13 +392,17 @@ export function SpaceMembersPanel({
         })}>
           {state.space_joined.length}
         </span>}
-        {canInvite && !inviteMode ? (
+        {headerInviteVisible && !inviteMode ? (
           <button
             className="icon-button space-members-invite-trigger"
             type="button"
             aria-label={t("room.invitePeople")}
-            title={t("room.invitePeople")}
-            onClick={() => setInviteMode(true)}
+            title={headerInviteTitle(panelAvailabilityReason)}
+            data-invite-availability={panelAvailabilityReason}
+            disabled={headerInviteDisabled}
+            onClick={() => {
+              if (!headerInviteDisabled) setInviteMode(true);
+            }}
           >
             <UserPlus size={ICON_SIZE.control} />
           </button>
@@ -524,12 +543,6 @@ export function SpaceMembersPanel({
         <button className="dialog-button" type="button" onClick={onReloadRoles}>
           {t("spaceMembers.roleReload")}
         </button>
-      ) : null}
-
-      {!inviteMode && state.incomplete_child_room_count > 0 ? (
-        <p className="space-members-sync-notice" role="status">
-          {t("spaceMembers.syncIncomplete")}
-        </p>
       ) : null}
 
       {!inviteMode ? (
