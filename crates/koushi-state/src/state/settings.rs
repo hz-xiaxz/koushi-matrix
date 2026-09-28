@@ -21,8 +21,10 @@ fn default_url_previews_enabled() -> bool {
     true
 }
 
+/// Encrypted-room link previews reveal URLs to the homeserver and destination
+/// site, so they stay off until the user explicitly opts in.
 fn default_encrypted_url_previews_enabled() -> bool {
-    true
+    false
 }
 
 fn default_thread_list_order() -> ThreadListOrder {
@@ -602,7 +604,7 @@ impl Default for DisplaySettings {
             code_block_wrap: true,
             hide_redacted: true,
             url_previews_enabled: true,
-            encrypted_url_previews_enabled: true,
+            encrypted_url_previews_enabled: default_encrypted_url_previews_enabled(),
         }
     }
 }
