@@ -16,10 +16,30 @@ import {
 } from "./appStore";
 import type { DesktopSnapshot } from "./types";
 import { COMPOSER_DRAFT_REVISION_ZERO } from "./composerDraftRevision";
+import generatedCoreEvents from "./coreEvents.generated.json";
 
 describe("appStore projection cache", () => {
   beforeEach(() => {
     clearAppStoreSnapshot();
+  });
+
+  test("an unrelated Rust delta keeps the open contact security details (#1024)", () => {
+    const previous = makeSnapshot();
+    const contactSecurity = {
+      user_id: "@contact:example.invalid",
+      load: { kind: "loaded" as const, request_id: 7 },
+      summary: null
+    };
+    previous.state.domain.contact_security = contactSecurity;
+    // The Rust-generated wire shape of a delta that changes only another slice.
+    const delta = generatedCoreEvents.stateDeltaSearchCrawlerQueued as unknown as Parameters<
+      typeof applyDeltaToState
+    >[1];
+
+    const projected = applyDeltaToState(previous, delta);
+
+    expect(projected).not.toBeNull();
+    expect(projected?.state.domain.contact_security).toEqual(contactSecurity);
   });
 
   test("keeps identical-by-value snapshot references stable", () => {
