@@ -12,6 +12,7 @@ mod activity;
 mod basic_operation;
 mod cjk;
 mod composer_draft;
+mod contact_security;
 mod directory;
 mod e2ee;
 mod errors;
@@ -52,6 +53,13 @@ pub use composer_draft::{
     ComposerDraftProtection, MAX_LIVE_COMPOSER_ROOM_TOMBSTONES, MAX_LIVE_COMPOSER_THREAD_TOMBSTONES,
 };
 pub use errors::{AppError, OperationFailureKind};
+
+// ── Re-exports: contact security details (#1024) ───────────────────────────
+pub use contact_security::{
+    ContactDeviceCounts, ContactDeviceSignature, ContactDevicesStatus, ContactIdentityVerification,
+    ContactSecurityFailureKind, ContactSecurityLoadState, ContactSecurityState,
+    ContactSecuritySummary,
+};
 
 // ── Re-exports: account notifications ───────────────────────────────────────
 pub use account_notifications::{
@@ -317,6 +325,9 @@ pub struct AppState {
     /// Server-owned account notification settings (#981).
     #[serde(default)]
     pub account_notifications: AccountNotificationsState,
+    /// Security details of the contact whose User info is open (#1024).
+    #[serde(default)]
+    pub contact_security: ContactSecurityState,
     #[serde(default)]
     pub soft_logout_reauth: SoftLogoutReauthState,
     #[serde(default)]
@@ -407,6 +418,7 @@ impl Default for AppState {
             account_management: AccountManagementState::Idle,
             account_management_capabilities: AccountManagementCapabilities::default(),
             account_notifications: AccountNotificationsState::default(),
+            contact_security: ContactSecurityState::default(),
             soft_logout_reauth: SoftLogoutReauthState::Idle,
             qr_login: QrLoginState::Idle,
             settings: SettingsState::default(),

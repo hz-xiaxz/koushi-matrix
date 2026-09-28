@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-09-12.
+Last amended: 2026-09-28.
 
 The evidence-based classification of remaining frontend-owned resources and
 semantic migration candidates is maintained in
@@ -1364,6 +1364,16 @@ decides ON/OFF, email target, or verification state. Server-side push rules
 cannot see mentions inside encrypted events, so the snapshot also carries the
 MSC4028 `encrypted_event_push` fact and the UI states the encrypted-room
 limitation of Group OFF (state-machine.md, "Account Notification Settings").
+Contact security details in User info (#1024) are Rust-owned
+`AppState.contact_security`: the AccountActor retrieves one contact's device
+keys and identity through `koushi-sdk::contact_security` (a fresh
+`/keys/query`, then SDK store reads refreshed from the device/identity
+streams) and projects two separate facts, owner confirmation of the
+contact's devices and your verification of the contact. The slice is
+read-only with respect to trust and send policy, fenced by contact and
+request id, and never carries device ids or keys. React dispatches only the
+load/close commands and renders the snapshot (state-machine.md, "Contact
+Security Details").
 Message formatting is also projected before it reaches React:
 `TimelineItem.formatted` is sanitized in Rust from Matrix `formatted_body` and
 carries sanitized HTML plus plain-text/code-block metadata. Message type

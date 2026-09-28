@@ -83,6 +83,7 @@ export interface AppDomainState {
   account_management: AccountManagementState;
   account_management_capabilities: AccountManagementCapabilities;
   account_notifications: AccountNotificationsState;
+  contact_security: ContactSecurityState;
   soft_logout_reauth: SoftLogoutReauthState;
   qr_login: QrLoginState;
   settings: SettingsState;
@@ -619,6 +620,56 @@ export interface AccountNotificationsState {
   snapshot: AccountNotificationsSnapshot | null;
   pending_email: PendingNotificationEmail | null;
   operation: AccountNotificationsOperationState;
+}
+
+// Mirrors koushi_state::state::contact_security (#1024). Two independent
+// facts: the contact's devices confirmed (signed) by their owner, and your
+// verification of the contact's identity. No device ids or key material.
+export type ContactSecurityFailureKind = "sessionRequired" | "network" | "sdk";
+
+export type ContactSecurityLoadState =
+  | { kind: "idle" }
+  | { kind: "loading"; request_id: number }
+  | { kind: "loaded"; request_id: number }
+  | { kind: "failed"; request_id: number; failureKind: ContactSecurityFailureKind };
+
+export type ContactDevicesStatus =
+  | "allOwnerSigned"
+  | "someNotOwnerSigned"
+  | "noDevices"
+  | "ownerIdentityMissing";
+
+export type ContactDeviceSignature =
+  | "ownerSigned"
+  | "notOwnerSigned"
+  | "ownerSignatureInvalid"
+  | "ownerIdentityMissing";
+
+export type ContactIdentityVerification =
+  | "verifiedByYou"
+  | "notVerifiedByYou"
+  | "changedAfterVerification"
+  | "unknown";
+
+export interface ContactDeviceCounts {
+  total: number;
+  owner_signed: number;
+  not_owner_signed: number;
+  owner_signature_invalid: number;
+  excluded_dehydrated: number;
+}
+
+export interface ContactSecuritySummary {
+  devices: ContactDevicesStatus;
+  device_counts: ContactDeviceCounts;
+  device_signatures: ContactDeviceSignature[];
+  identity: ContactIdentityVerification;
+}
+
+export interface ContactSecurityState {
+  user_id: string | null;
+  load: ContactSecurityLoadState;
+  summary: ContactSecuritySummary | null;
 }
 
 export type CapabilityState =

@@ -268,6 +268,7 @@ import {
 } from "./components/Shell";
 import { ContextualRightPanel } from "./components/rightPanel";
 import type { AccountNotificationActions } from "./components/user-settings/AccountNotificationsSections";
+import type { ContactSecurityActions } from "./components/ContactSecurityDetails";
 import type { HistoryExportControls } from "./components/HistoryExportDialog";
 import { historyExportLabels } from "./domain/historyExportLabels";
 import type {
@@ -2657,6 +2658,12 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
         settleCommand(api.enableEmailNotifications(address, notificationLangRef.current))
       ),
     disableEmail: () => runInBackground(settleCommand(api.disableEmailNotifications()))
+  }), []);
+
+  // Contact security details in User info (#1024): read-only load and close.
+  const contactSecurityActions = useMemo<ContactSecurityActions>(() => ({
+    load: (userId) => runInBackground(settleCommand(api.loadContactSecurity(userId))),
+    close: () => runInBackground(settleCommand(api.closeContactSecurity()))
   }), []);
 
   // The platform half of the Rust-owned history export. Memoized so an open
@@ -6783,6 +6790,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
             runInBackground(submitAccountManagementUia(flowId, password));
           }}
           accountNotificationActions={accountNotificationActions}
+          contactSecurityActions={contactSecurityActions}
           onUpdateRoomSetting={(roomId, change) => {
             runInBackground(updateRoomSetting(roomId, change));
           }}

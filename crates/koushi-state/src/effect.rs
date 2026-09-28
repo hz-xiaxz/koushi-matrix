@@ -229,6 +229,7 @@ pub enum UiEvent {
     AccountManagementChanged,
     AccountManagementCapabilitiesChanged,
     AccountNotificationsChanged,
+    ContactSecurityChanged,
     SoftLogoutReauthChanged,
     QrLoginChanged,
     RoomInteractionsChanged,

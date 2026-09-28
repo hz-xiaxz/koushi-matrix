@@ -18,6 +18,7 @@ mod account_notifications;
 mod activity;
 mod avatar;
 mod basic_operation;
+mod contact_security;
 mod directory;
 mod e2ee;
 mod invite_workflow;
@@ -506,6 +507,24 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::AccountManagementCapabilitiesLoadFailed => {
             account::handle_account_management_capabilities_load_failed(state)
         }
+        AppAction::ContactSecurityLoadRequested {
+            request_id,
+            user_id,
+        } => contact_security::handle_load_requested(state, request_id, user_id),
+        AppAction::ContactSecurityLoaded {
+            request_id,
+            user_id,
+            summary,
+        } => contact_security::handle_loaded(state, request_id, &user_id, summary),
+        AppAction::ContactSecurityLoadFailed {
+            request_id,
+            user_id,
+            failure_kind,
+        } => contact_security::handle_load_failed(state, request_id, &user_id, failure_kind),
+        AppAction::ContactSecurityRefreshed { user_id, summary } => {
+            contact_security::handle_refreshed(state, &user_id, summary)
+        }
+        AppAction::ContactSecurityClosed => contact_security::handle_closed(state),
         AppAction::AccountNotificationsLoadRequested { request_id } => {
             account_notifications::handle_load_requested(state, request_id)
         }
@@ -1990,6 +2009,8 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
         state.account_management_capabilities != AccountManagementCapabilities::default();
     let had_account_notifications =
         state.account_notifications != crate::state::AccountNotificationsState::default();
+    let had_contact_security =
+        state.contact_security != crate::state::ContactSecurityState::default();
     let had_soft_logout_reauth = state.soft_logout_reauth != SoftLogoutReauthState::Idle;
     let had_qr_login = state.qr_login != QrLoginState::Idle;
     let had_live_signals = state.live_signals != Default::default();
@@ -2041,6 +2062,7 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     state.account_management = AccountManagementState::Idle;
     state.account_management_capabilities = AccountManagementCapabilities::default();
     state.account_notifications = Default::default();
+    state.contact_security = Default::default();
     state.soft_logout_reauth = SoftLogoutReauthState::Idle;
     state.qr_login = QrLoginState::Idle;
     state.live_signals = Default::default();
@@ -2089,6 +2111,9 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     }
     if had_account_notifications {
         effects.push(AppEffect::EmitUiEvent(UiEvent::AccountNotificationsChanged));
+    }
+    if had_contact_security {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::ContactSecurityChanged));
     }
     if had_soft_logout_reauth {
         effects.push(AppEffect::EmitUiEvent(UiEvent::SoftLogoutReauthChanged));

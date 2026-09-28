@@ -67,6 +67,8 @@ describe("DesktopApi command contract", () => {
         "retryHistoryExport",
         "openNotificationEvent",
         "loadAccountNotifications",
+        "loadContactSecurity",
+        "closeContactSecurity",
         "setNotificationCategory",
         "setAccountPushEnabled",
         "requestNotificationEmailToken",

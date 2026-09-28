@@ -1,0 +1,176 @@
+//! `contact_security` ownership for AccountActor (#1024).
+//!
+//! User info asks for one contact's security details. The actor performs a
+//! fresh `/keys/query` for that contact, then keeps the details current from
+//! the SDK's device/identity store notifications until User info closes,
+//! another contact opens, or the session ends. Everything here is read-only:
+//! no pinning, verification, or trust change.
+
+use futures_util::{FutureExt, StreamExt};
+use koushi_protocol::command::ContactSecurityRequest;
+use koushi_protocol::failure::CoreFailure;
+use koushi_protocol::ids::RequestId;
+use koushi_state::{AppAction, ContactSecurityFailureKind, ContactSecuritySummary};
+use tokio::sync::oneshot;
+
+use super::actor::{AccountActor, AccountMessage};
+use super::verification::send_observer_output_until_stopped;
+
+/// The open contact and its store-change observer task.
+pub(super) struct ContactSecurityObservation {
+    user_id: String,
+    generation: u64,
+    /// Last summary projected to the reducer, to suppress unchanged re-reads.
+    last: ContactSecuritySummary,
+    stop_tx: oneshot::Sender<()>,
+    task: crate::executor::JoinHandle<()>,
+}
+
+impl std::fmt::Debug for ContactSecurityObservation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ContactSecurityObservation")
+            .field("generation", &self.generation)
+            .finish_non_exhaustive()
+    }
+}
+
+impl AccountActor {
+    pub(super) async fn handle_contact_security(
+        &mut self,
+        request_id: RequestId,
+        request: ContactSecurityRequest,
+    ) {
+        match request {
+            ContactSecurityRequest::Load { user_id } => {
+                self.load_contact_security(request_id, user_id).await;
+            }
+            ContactSecurityRequest::Close => self.stop_contact_security_observer().await,
+        }
+    }
+
+    async fn load_contact_security(&mut self, request_id: RequestId, user_id: String) {
+        self.stop_contact_security_observer().await;
+        let Some(session) = self.session.clone() else {
+            self.send_actions(vec![AppAction::ContactSecurityLoadFailed {
+                request_id: request_id.sequence,
+                user_id,
+                failure_kind: ContactSecurityFailureKind::SessionRequired,
+            }])
+            .await;
+            self.emit_failure(request_id, CoreFailure::SessionRequired);
+            return;
+        };
+        // Subscribe before the retrieval so a store change that lands while
+        // it is in flight is re-read afterwards rather than missed.
+        let changes = koushi_sdk::observe_contact_security_changes(&session).await;
+        match koushi_sdk::load_contact_security(&session, &user_id).await {
+            Ok(summary) => {
+                self.send_actions(vec![AppAction::ContactSecurityLoaded {
+                    request_id: request_id.sequence,
+                    user_id: user_id.clone(),
+                    summary: summary.clone(),
+                }])
+                .await;
+                if let Ok(changes) = changes {
+                    self.start_contact_security_observer(user_id, summary, changes);
+                }
+            }
+            Err(failure_kind) => {
+                self.send_actions(vec![AppAction::ContactSecurityLoadFailed {
+                    request_id: request_id.sequence,
+                    user_id,
+                    failure_kind,
+                }])
+                .await;
+            }
+        }
+    }
+
+    fn start_contact_security_observer(
+        &mut self,
+        user_id: String,
+        summary: ContactSecuritySummary,
+        mut changes: koushi_sdk::ContactSecurityChanges,
+    ) {
+        self.contact_security_generation = self.contact_security_generation.wrapping_add(1);
+        let generation = self.contact_security_generation;
+        let (stop_tx, mut stop_rx) = oneshot::channel();
+        let tx = self.self_tx.clone();
+        let task = crate::executor::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = &mut stop_rx => break,
+                    change = changes.next() => {
+                        if change.is_none() {
+                            break;
+                        }
+                        // Coalesce a burst of store writes into one re-read.
+                        while let Some(Some(())) = changes.next().now_or_never() {}
+                        if !send_observer_output_until_stopped(
+                            &tx,
+                            AccountMessage::ContactSecurityStoreChanged { generation },
+                            &mut stop_rx,
+                        )
+                        .await
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        self.contact_security = Some(ContactSecurityObservation {
+            user_id,
+            generation,
+            last: summary,
+            stop_tx,
+            task,
+        });
+    }
+
+    pub(super) async fn handle_contact_security_store_changed(&mut self, generation: u64) {
+        let Some(session) = self.session.clone() else {
+            return;
+        };
+        let Some(user_id) = self
+            .contact_security
+            .as_ref()
+            .filter(|observation| observation.generation == generation)
+            .map(|observation| observation.user_id.clone())
+        else {
+            return;
+        };
+        // A failed store read keeps the last projected answer; it is never
+        // turned into a confirmation.
+        let Ok(summary) = koushi_sdk::read_contact_security(&session, &user_id).await else {
+            return;
+        };
+        let Some(observation) = self
+            .contact_security
+            .as_mut()
+            .filter(|observation| observation.generation == generation)
+        else {
+            return;
+        };
+        if observation.last == summary {
+            return;
+        }
+        observation.last = summary.clone();
+        self.send_actions(vec![AppAction::ContactSecurityRefreshed {
+            user_id,
+            summary,
+        }])
+        .await;
+    }
+
+    pub(super) async fn stop_contact_security_observer(&mut self) {
+        self.contact_security_generation = self.contact_security_generation.wrapping_add(1);
+        if let Some(observation) = self.contact_security.take() {
+            let ContactSecurityObservation { stop_tx, task, .. } = observation;
+            let _ = stop_tx.send(());
+            task.abort();
+            let _ = task.await;
+        }
+    }
+}

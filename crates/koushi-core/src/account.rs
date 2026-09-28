@@ -13,6 +13,9 @@ mod account_notifications;
 mod account_notifications_tests;
 mod actor;
 mod avatar_demand;
+mod contact_security;
+#[cfg(test)]
+mod contact_security_tests;
 mod history_export;
 mod local_data_cleanup;
 mod profile;

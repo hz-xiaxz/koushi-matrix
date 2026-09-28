@@ -232,6 +232,7 @@ pub struct FrontendDomainStateChangedSlices {
     pub account_management_capabilities: Option<AccountManagementCapabilities>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_notifications: Option<koushi_state::AccountNotificationsState>,
+    pub contact_security: Option<koushi_state::ContactSecurityState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub soft_logout_reauth: Option<SoftLogoutReauthState>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -346,6 +347,7 @@ impl FrontendDomainStateChangedSlices {
             && self.account_management.is_none()
             && self.account_management_capabilities.is_none()
             && self.account_notifications.is_none()
+            && self.contact_security.is_none()
             && self.soft_logout_reauth.is_none()
             && self.qr_login.is_none()
             && self.settings.is_none()
@@ -456,6 +458,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         domain.account_management = changed.account_management;
         domain.account_management_capabilities = changed.account_management_capabilities;
         domain.account_notifications = changed.account_notifications;
+        domain.contact_security = changed.contact_security;
         domain.soft_logout_reauth = changed.soft_logout_reauth;
         domain.qr_login = changed.qr_login;
         if let Some(settings) = changed.settings {
@@ -577,6 +580,8 @@ pub struct FrontendDomainState {
     pub account_management: AccountManagementState,
     pub account_management_capabilities: AccountManagementCapabilities,
     pub account_notifications: koushi_state::AccountNotificationsState,
+    /// Security details of the contact whose User info is open (#1024).
+    pub contact_security: koushi_state::ContactSecurityState,
     pub soft_logout_reauth: SoftLogoutReauthState,
     pub qr_login: QrLoginState,
     pub settings: SettingsState,
@@ -653,6 +658,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
             account_management: state.account_management,
             account_management_capabilities: state.account_management_capabilities,
             account_notifications: state.account_notifications,
+            contact_security: state.contact_security,
             soft_logout_reauth: state.soft_logout_reauth,
             qr_login: state.qr_login,
             settings: state.settings,

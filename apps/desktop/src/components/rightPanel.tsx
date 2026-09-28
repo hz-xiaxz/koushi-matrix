@@ -63,6 +63,7 @@ import { ThreadsListView } from "./ThreadsListView";
 import { UserSettingsPanel } from "./UserSettingsPanel";
 import type { AccountNotificationActions } from "./user-settings/AccountNotificationsSections";
 import { PeoplePanel, ProfilePanel } from "./PeoplePanel";
+import type { ContactSecurityActions } from "./ContactSecurityDetails";
 import {
   SpaceMembersPanel,
   type SpaceInviteAvailabilityReason,
@@ -195,6 +196,7 @@ export function ContextualRightPanel({
   onLoadAccountManagementCapabilities = () => undefined,
   onChangePassword = () => undefined,
   accountNotificationActions,
+  contactSecurityActions,
   onDeactivateAccount = () => undefined,
   onSubmitAccountManagementUia = () => undefined,
   onStartCrawlRoom = () => undefined,
@@ -341,6 +343,7 @@ export function ContextualRightPanel({
   onLoadAccountManagementCapabilities?: () => void;
   onChangePassword?: (newPassword: string) => void;
   accountNotificationActions?: AccountNotificationActions;
+  contactSecurityActions?: ContactSecurityActions;
   onDeactivateAccount?: (eraseData: boolean) => void;
   onSubmitAccountManagementUia?: (flowId: number, password: string) => void;
   onStartCrawlRoom?: (roomId: string) => void;
@@ -686,6 +689,8 @@ export function ContextualRightPanel({
             roomOrSpace={roomOrSpace}
             roomManagement={snapshot.state.domain.room_management}
             profileUsers={snapshot.state.domain.profile.users}
+            contactSecurity={snapshot.state.domain.contact_security}
+            contactSecurityActions={contactSecurityActions}
             onBack={onBackToPeople ?? onClosePanel}
             onClose={onClosePanel}
             onIgnoreUser={onIgnoreUser}

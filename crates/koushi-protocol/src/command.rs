@@ -90,6 +90,7 @@ impl CoreCommand {
                 | AccountCommand::DeactivateAccount { request_id, .. }
                 | AccountCommand::SubmitAccountManagementUia { request_id, .. }
                 | AccountCommand::AccountNotifications { request_id, .. }
+                | AccountCommand::ContactSecurity { request_id, .. }
                 | AccountCommand::SoftLogoutReauth { request_id, .. }
                 | AccountCommand::ExportRoomKeys { request_id, .. }
                 | AccountCommand::ExportHistory { request_id, .. }
@@ -245,7 +246,8 @@ mod test_support;
 mod timeline;
 
 pub use account::{
-    AccountCommand, AccountNotificationsRequest, HistoryExportLabels, HistoryExportRequest, RoomKeyExportRequest, RoomKeyImportRequest,
+    AccountCommand, AccountNotificationsRequest, ContactSecurityRequest, HistoryExportLabels,
+    HistoryExportRequest, RoomKeyExportRequest, RoomKeyImportRequest,
     SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
 };
 pub use app::{AppCommand, EventNavigationMissingTargetPolicy};

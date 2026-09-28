@@ -1480,6 +1480,7 @@ function makeSnapshot(): DesktopSnapshot {
           pending_email: null,
           operation: { kind: "idle" }
         },
+        contact_security: { user_id: null, load: { kind: "idle" }, summary: null },
         account_management_capabilities: { change_password: { kind: "unknown" } },
         soft_logout_reauth: { kind: "idle" },
         qr_login: { kind: "idle" },

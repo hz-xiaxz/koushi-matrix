@@ -1494,6 +1494,29 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         },
     };
 
+    // contact_security (#1024) — a verified contact who added an unconfirmed
+    // device and has one device signature that does not validate.
+    state.contact_security = koushi_state::ContactSecurityState {
+        user_id: Some("@contact:example.invalid".to_owned()),
+        load: koushi_state::ContactSecurityLoadState::Loaded { request_id: 91 },
+        summary: Some(koushi_state::ContactSecuritySummary {
+            devices: koushi_state::ContactDevicesStatus::SomeNotOwnerSigned,
+            device_counts: koushi_state::ContactDeviceCounts {
+                total: 3,
+                owner_signed: 1,
+                not_owner_signed: 2,
+                owner_signature_invalid: 1,
+                excluded_dehydrated: 1,
+            },
+            device_signatures: vec![
+                koushi_state::ContactDeviceSignature::OwnerSigned,
+                koushi_state::ContactDeviceSignature::NotOwnerSigned,
+                koushi_state::ContactDeviceSignature::OwnerSignatureInvalid,
+            ],
+            identity: koushi_state::ContactIdentityVerification::VerifiedByYou,
+        }),
+    };
+
     // room_management — with settings snapshot
     state.room_management = RoomManagementState {
         selected_room_id: Some("!room:example.invalid".to_owned()),

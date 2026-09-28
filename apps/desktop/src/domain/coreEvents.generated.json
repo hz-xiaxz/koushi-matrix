@@ -709,6 +709,7 @@
     "changed": {
       "state": {
         "domain": {
+          "contact_security": null,
           "current_session_status": {
             "details": {
               "authentication_method": "oauth",

@@ -1144,6 +1144,8 @@ pub fn run() {
             commands::account::deactivate_account,
             commands::account::submit_account_management_uia,
             commands::account::load_account_notifications,
+            commands::account::load_contact_security,
+            commands::account::close_contact_security,
             commands::account::set_notification_category,
             commands::account::set_account_push_enabled,
             commands::account::request_notification_email_token,

@@ -166,6 +166,30 @@ pub enum AppAction {
     /// change so the reducer never shows a pending address the actor no
     /// longer holds.
     AccountNotificationsPendingEmailVerified,
+    /// Contact security details (#1024): a fresh read-only retrieval for the
+    /// contact whose User info opened. Replaces any previous contact.
+    ContactSecurityLoadRequested {
+        request_id: u64,
+        user_id: String,
+    },
+    ContactSecurityLoaded {
+        request_id: u64,
+        user_id: String,
+        summary: crate::state::ContactSecuritySummary,
+    },
+    ContactSecurityLoadFailed {
+        request_id: u64,
+        user_id: String,
+        failure_kind: crate::state::ContactSecurityFailureKind,
+    },
+    /// The SDK's local key store changed (device added/removed/re-signed, or
+    /// an identity or its verification changed); re-read without network.
+    ContactSecurityRefreshed {
+        user_id: String,
+        summary: crate::state::ContactSecuritySummary,
+    },
+    /// User info closed; stop showing and refreshing the contact's details.
+    ContactSecurityClosed,
     AccountManagementCapabilitiesLoaded {
         change_password: bool,
     },

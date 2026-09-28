@@ -199,6 +199,7 @@ impl AccountActor {
         self.stop_secure_backup_observer().await;
         self.stop_recovery_observer().await;
         self.stop_incoming_verification_observer().await;
+        self.stop_contact_security_observer().await;
         self.stop_session_change_observer().await;
         self.record_lifecycle_probe("shutdown_stop_timeline_actor");
         self.stop_timeline_actor().await;
@@ -488,6 +489,7 @@ impl AccountActor {
         self.stop_recovery_observer().await;
         self.record_lifecycle_probe("stop_incoming_verification_observer");
         self.stop_incoming_verification_observer().await;
+        self.stop_contact_security_observer().await;
         self.record_lifecycle_probe("stop_session_change_observer");
         self.stop_session_change_observer().await;
         self.stop_active_session_account_management_discovery()
