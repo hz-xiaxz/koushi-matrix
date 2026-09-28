@@ -867,7 +867,7 @@ stateDiagram-v2
     Opening --> Anchored: exact generation + request + target + projection identity
     Opening --> LiveFallback: exact owner + authoritative Missing + Activity/Search policy
     Opening --> Failed: exact owner + current timeout or coarse current failure
-    Opening --> Idle: room/thread/date-jump/return-live/logout/account/session/room cleanup
+    Opening --> Idle: room/thread/date-jump/return-live/anchored-send/logout/account/session/room cleanup
     Anchored --> Opening: newer intent
     LiveFallback --> Opening: newer intent
     Failed --> Opening: newer intent
@@ -1833,6 +1833,7 @@ stateDiagram-v2
     Projecting --> Live: CloseFocusedContext / replacement / room change
     Anchored --> Projecting: OpenAnchoredTimeline [other event, active room]
     Anchored --> Live: CloseFocusedContext (live-edge return)
+    Anchored --> Live: accepted main-composer send [active room]
     Anchored --> Live: SelectRoom / room change
     Anchored --> Live: LogoutRequested/SessionCleared
 ```
@@ -1859,6 +1860,18 @@ stateDiagram-v2
   room's persisted `room_scroll_anchors` entry so the live timeline pins to the
   live edge rather than a stale pre-jump position. `ReturnMainTimelineToLive`
   clears the anchor for the active room without touching focused-context state.
+- An accepted main-composer send for the active room (`ComposerSubmissionAccepted`,
+  its `AtRevision` form, and legacy `SendTextSubmitted`, plain or reply) returns
+  an anchored main pane to `Live` on local acceptance, because pending outbound
+  echoes are projected only into the live Room timeline (#1037). The reducer
+  applies the `CloseFocusedContext` transition and then the
+  `ReturnMainTimelineToLive` transition after every acceptance, revision,
+  target-room, and duplicate guard; it does not wait for server acknowledgement
+  or a remote echo, and captured reply metadata and the payload are unchanged.
+  Event navigation becomes `Idle`, so Core releases any in-flight navigation
+  owner and a late completion cannot re-anchor. Rejected, duplicate,
+  other-room, and thread-composer sends leave navigation unchanged; a send from
+  a live main pane leaves an independent right-panel focused context open.
 - Any room change (`SelectRoom`, `SelectSpace`) and account clear/logout reset
   the anchor to `Live` through `select_active_room_for_navigation` /
   `clear_active_room_for_navigation`.
