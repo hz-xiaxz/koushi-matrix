@@ -411,7 +411,7 @@ impl SearchDocumentStore {
                     sender: event.sender.clone(),
                     sender_label: None,
                     timestamp_ms: event.timestamp_ms,
-                    kind: attachment.kind.clone(),
+                    kind: attachment.kind,
                     filename: attachment.filename.as_str().to_owned(),
                     mimetype: attachment.mimetype.clone(),
                     size: attachment.size,
@@ -429,10 +429,10 @@ impl SearchDocumentStore {
 
         match sort {
             AttachmentSort::NewestFirst => {
-                results.sort_by(|left, right| right.timestamp_ms.cmp(&left.timestamp_ms));
+                results.sort_by_key(|result| std::cmp::Reverse(result.timestamp_ms));
             }
             AttachmentSort::OldestFirst => {
-                results.sort_by(|left, right| left.timestamp_ms.cmp(&right.timestamp_ms));
+                results.sort_by_key(|left| left.timestamp_ms);
             }
             AttachmentSort::Sender => {
                 results.sort_by(|left, right| left.sender.cmp(&right.sender));

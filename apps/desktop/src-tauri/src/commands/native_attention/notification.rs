@@ -17,9 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_protocol::AccountKey;
-use koushi_state::{
-    AppState, NativeNotificationPayload, NativeNotificationTarget, SessionState,
-};
+use koushi_state::{AppState, NativeNotificationPayload, NativeNotificationTarget, SessionState};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 

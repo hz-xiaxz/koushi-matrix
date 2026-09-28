@@ -35,7 +35,8 @@ export function findDiagnosticTestIsolationViolations(source, fileName) {
     const body = stripRustStringsAndComments(source.slice(signatureEnd + 1, bodyEnd));
     if (
       body.includes("koushi_diagnostics::snapshot()") &&
-      !body.includes("koushi_diagnostics::test_support::lock()")
+      !body.includes("koushi_diagnostics::test_support::lock()") &&
+      !body.includes("koushi_diagnostics::test_support::lock_async().await")
     ) {
       const line = source.slice(0, attributeMatch.index).split("\n").length;
       violations.push(`${fileName}:${line}:${functionName}`);

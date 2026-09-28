@@ -51,6 +51,10 @@ impl ThreadsListScope {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "pane state is held once and cloned rarely; a few hundred bytes does not justify boxing"
+)]
 pub enum ThreadPaneState {
     Closed,
     Opening {
@@ -235,7 +239,7 @@ impl ThreadRootProjectionState {
                     ThreadRootProjectionStatus::Failed {
                         activity_event_id,
                         activity_timestamp_ms,
-                        failure_kind: failure_kind.clone(),
+                        failure_kind: *failure_kind,
                     }
                 }
             };

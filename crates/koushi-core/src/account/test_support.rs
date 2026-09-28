@@ -418,12 +418,18 @@ pub(super) fn spawn_named_quarantine_password_server_with_controls(
                     .backup_probe_count
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let body = r#"{"errcode":"M_NOT_FOUND","error":"No current backup version"}"#;
-                if control.backup_hold.load(std::sync::atomic::Ordering::SeqCst) {
+                if control
+                    .backup_hold
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                {
                     // Answer from a side thread so other requests keep flowing
                     // while this probe is held.
                     let control = std::sync::Arc::clone(control);
                     std::thread::spawn(move || {
-                        while control.backup_hold.load(std::sync::atomic::Ordering::SeqCst) {
+                        while control
+                            .backup_hold
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                        {
                             std::thread::sleep(Duration::from_millis(5));
                         }
                         let response = format!(

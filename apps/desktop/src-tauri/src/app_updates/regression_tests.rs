@@ -158,7 +158,7 @@ fn both_channel_directions_fence_late_success_empty_and_failure() {
                 if auto_check {
                     let (new, work) = lifecycle.claim_work().unwrap();
                     assert_ne!(old.generation, new.generation);
-                    assert!(matches!(work, Work::Check(channel) if channel == !initial));
+                    assert!(matches!(work, Work::Check(channel) if channel != initial));
                 } else {
                     assert_eq!(lifecycle.state, DesktopUpdateState::Idle);
                     assert!(lifecycle.claim_work().is_none());
@@ -231,7 +231,7 @@ fn policy_toggle_invalidates_unapproved_but_freezes_all_consented_phases() {
         );
         assert!(lifecycle.begin_check());
         assert!(
-            matches!(lifecycle.claim_work().unwrap().1, Work::Check(value) if value == !channel)
+            matches!(lifecycle.claim_work().unwrap().1, Work::Check(value) if value != channel)
         );
     }
 }
@@ -407,13 +407,49 @@ fn wire_state_includes_only_available_candidate_generation() {
     );
 }
 
-#[cfg(target_os = "macos")]
 #[test]
 fn semver_candidate_selection_handles_prerelease_ordering() {
+    use channel_policy::candidate_version_is_newer;
     assert!(candidate_version_is_newer("1.2.0-beta.2", "1.2.0-beta.10"));
     assert!(candidate_version_is_newer("1.2.0-beta.10", "1.2.0"));
     assert!(!candidate_version_is_newer("1.2.0", "1.2.0+build.1"));
     assert!(!candidate_version_is_newer("1.3.0", "1.2.0-rc.1"));
+}
+
+#[test]
+fn channel_policy_selects_feeds_and_greatest_candidate_on_every_platform() {
+    use channel_policy::{
+        BETA_UPDATE_ENDPOINT, STABLE_UPDATE_ENDPOINT, select_newer_candidate, update_endpoints,
+    };
+    assert_eq!(update_endpoints(false), &[STABLE_UPDATE_ENDPOINT]);
+    assert_eq!(
+        update_endpoints(true),
+        &[STABLE_UPDATE_ENDPOINT, BETA_UPDATE_ENDPOINT]
+    );
+    fn version(candidate: &PendingUpdate<String>) -> &str {
+        &candidate.version
+    }
+    let stable = select_newer_candidate(None, candidate("1.2.0"), version);
+    let chosen = select_newer_candidate(Some(stable), candidate("1.3.0-beta.1"), version);
+    assert_eq!(chosen.version, "1.3.0-beta.1");
+    let kept = select_newer_candidate(Some(chosen), candidate("1.2.9"), version);
+    assert_eq!(kept.version, "1.3.0-beta.1");
+}
+
+#[cfg(not(koushi_updater_backend))]
+#[test]
+fn installations_without_an_install_backend_stay_unsupported_and_idle() {
+    // No backend means no owner: commands observe policy but never admit work.
+    assert_eq!(initial_state(), DesktopUpdateState::Unsupported);
+    let mut lifecycle = Lifecycle::<Candidate>::new(initial_state());
+    assert!(!lifecycle.request_check(policy(1, true, true)));
+    assert_eq!(
+        lifecycle.request_download(policy(2, true, true), 0),
+        Err(())
+    );
+    assert_eq!(lifecycle.begin_install(), Err(()));
+    assert!(lifecycle.claim_work().is_none());
+    assert_eq!(lifecycle.state, DesktopUpdateState::Unsupported);
 }
 
 struct DropSignal(Option<oneshot::Sender<()>>);

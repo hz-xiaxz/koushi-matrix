@@ -1288,6 +1288,10 @@ impl TimelineActor {
     }
 
     /// Spawn the actor, emit InitialItems, and return the handle.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor wiring: independent owned handles moved into one task"
+    )]
     pub(super) async fn spawn(
         key: TimelineKey,
         timeline: Arc<Timeline>,
@@ -1316,42 +1320,40 @@ impl TimelineActor {
         // load's provenance (store=cache vs network) is observed. The helper
         // decides whether to mirror the observation to stderr.
         {
-            if let Ok(parsed_room_id) = matrix_sdk::ruma::RoomId::parse(key.room_id()) {
-                if let Some(observer_room) = session.client().get_room(&parsed_room_id) {
-                    if let Ok((cache, drop_guards)) = observer_room.event_cache().await {
-                        if let Ok((initial, mut updates)) = cache.subscribe().await {
-                            if !initial.is_empty() {
-                                // Cache already had events at restore: warm initial state.
-                                startup_trace::trace_origin("cache");
+            if let Ok(parsed_room_id) = matrix_sdk::ruma::RoomId::parse(key.room_id())
+                && let Some(observer_room) = session.client().get_room(&parsed_room_id)
+                && let Ok((cache, drop_guards)) = observer_room.event_cache().await
+                && let Ok((initial, mut updates)) = cache.subscribe().await
+            {
+                if !initial.is_empty() {
+                    // Cache already had events at restore: warm initial state.
+                    startup_trace::trace_origin("cache");
+                }
+                trace_event_cache_items("cache_initial", &key, &initial);
+                super::diagnostics::trace_room_receipt_cache(&key, &observer_room, &initial);
+                let trace_key = key.clone();
+                auxiliary_tasks.push(executor::spawn(async move {
+                    let _event_cache_drop_guards = drop_guards;
+                    use matrix_sdk::event_cache::RoomEventCacheUpdate;
+                    loop {
+                        match updates.recv().await {
+                            Ok(RoomEventCacheUpdate::UpdateTimelineEvents(diffs)) => {
+                                startup_trace::trace_origin(event_cache_origin_trace_token(
+                                    &diffs.origin,
+                                ));
+                                trace_event_cache_diffs(
+                                    "cache_update",
+                                    &trace_key,
+                                    &diffs.origin,
+                                    &diffs.diffs,
+                                );
                             }
-                            trace_event_cache_items("cache_initial", &key, &initial);
-                            super::diagnostics::trace_room_receipt_cache(&key, &observer_room, &initial);
-                            let trace_key = key.clone();
-                            auxiliary_tasks.push(executor::spawn(async move {
-                                let _event_cache_drop_guards = drop_guards;
-                                use matrix_sdk::event_cache::RoomEventCacheUpdate;
-                                loop {
-                                    match updates.recv().await {
-                                        Ok(RoomEventCacheUpdate::UpdateTimelineEvents(diffs)) => {
-                                            startup_trace::trace_origin(
-                                                event_cache_origin_trace_token(&diffs.origin),
-                                            );
-                                            trace_event_cache_diffs(
-                                                "cache_update",
-                                                &trace_key,
-                                                &diffs.origin,
-                                                &diffs.diffs,
-                                            );
-                                        }
-                                        Ok(_) => {}
-                                        // Broadcast lagged or channel closed — stop the observer.
-                                        Err(_) => break,
-                                    }
-                                }
-                            }));
+                            Ok(_) => {}
+                            // Broadcast lagged or channel closed — stop the observer.
+                            Err(_) => break,
                         }
                     }
-                }
+                }));
             }
         }
 
@@ -1652,10 +1654,9 @@ impl TimelineActor {
         );
         if initial_emitted
             && let Some(activity_permit) = reserve_canonical_activity_action(&action_tx, &key).await
+            && let Some(action) = canonical_activity_window_action(&key, &navigation_items)
         {
-            if let Some(action) = canonical_activity_window_action(&key, &navigation_items) {
-                activity_permit.send(vec![action]);
-            }
+            activity_permit.send(vec![action]);
         }
         if initial_emitted
             && let Some(action) = thread_activity_observed_action(&key, &navigation_items)
@@ -1692,50 +1693,50 @@ impl TimelineActor {
             | TimelineKind::Focused { room_id, .. } => room_id.clone(),
         };
         let mut initial_fully_read_event_id = None;
-        if let Ok(room_id) = matrix_sdk::ruma::RoomId::parse(&room_id_str) {
-            if let Some(room) = session.client().get_room(&room_id) {
-                let sq_tx = actor_tx.clone();
-                if let Ok((local_echoes, update_rx)) = room.send_queue().subscribe().await {
-                    for echo in &local_echoes {
-                        remember_local_echo(&mut send_statuses, &mut send_handles, echo);
-                    }
-                    auxiliary_tasks.push(executor::spawn(run_send_queue_monitor(sq_tx, update_rx)));
+        if let Ok(room_id) = matrix_sdk::ruma::RoomId::parse(&room_id_str)
+            && let Some(room) = session.client().get_room(&room_id)
+        {
+            let sq_tx = actor_tx.clone();
+            if let Ok((local_echoes, update_rx)) = room.send_queue().subscribe().await {
+                for echo in &local_echoes {
+                    remember_local_echo(&mut send_statuses, &mut send_handles, echo);
                 }
-
-                let (typing_guard, typing_rx) = room.subscribe_to_typing_notifications();
-                let typing_tx = actor_tx.clone();
-                auxiliary_tasks.push(executor::spawn(run_typing_notifications(
-                    typing_tx,
-                    typing_guard,
-                    typing_rx,
-                )));
-
-                let room_id = room_id_str.clone();
-                if initial_emitted && !initial_receipts.is_empty() {
-                    let _ = emit_receipt_observation_actions(
-                        session.as_ref(),
-                        &action_tx,
-                        &timeline_actor_generations,
-                        &key,
-                        actor_generation,
-                        &room_id,
-                        initial_receipts,
-                        ReceiptObservationTarget::Live,
-                    )
-                    .await;
-                }
-                let _ = action_tx
-                    .send(vec![AppAction::FullyReadMarkerUpdated {
-                        room_id,
-                        event_id: {
-                            initial_fully_read_event_id = room
-                                .fully_read_event_id()
-                                .map(|event_id| event_id.to_string());
-                            initial_fully_read_event_id.clone()
-                        },
-                    }])
-                    .await;
+                auxiliary_tasks.push(executor::spawn(run_send_queue_monitor(sq_tx, update_rx)));
             }
+
+            let (typing_guard, typing_rx) = room.subscribe_to_typing_notifications();
+            let typing_tx = actor_tx.clone();
+            auxiliary_tasks.push(executor::spawn(run_typing_notifications(
+                typing_tx,
+                typing_guard,
+                typing_rx,
+            )));
+
+            let room_id = room_id_str.clone();
+            if initial_emitted && !initial_receipts.is_empty() {
+                let _ = emit_receipt_observation_actions(
+                    session.as_ref(),
+                    &action_tx,
+                    &timeline_actor_generations,
+                    &key,
+                    actor_generation,
+                    &room_id,
+                    initial_receipts,
+                    ReceiptObservationTarget::Live,
+                )
+                .await;
+            }
+            let _ = action_tx
+                .send(vec![AppAction::FullyReadMarkerUpdated {
+                    room_id,
+                    event_id: {
+                        initial_fully_read_event_id = room
+                            .fully_read_event_id()
+                            .map(|event_id| event_id.to_string());
+                        initial_fully_read_event_id.clone()
+                    },
+                }])
+                .await;
         }
 
         let initial_server_confirmed_read_event_id = match &key.kind {
@@ -1750,10 +1751,10 @@ impl TimelineActor {
             own_user_id.as_ref().map(|user_id| user_id.as_str()),
             initial_read_receipt_event_id,
         );
-        if thread_attention.counts != ThreadAttentionCounters::default() {
-            if let Some(action) = thread_attention_action(thread_attention.counts, &key) {
-                let _ = action_tx.send(vec![action]).await;
-            }
+        if thread_attention.counts != ThreadAttentionCounters::default()
+            && let Some(action) = thread_attention_action(thread_attention.counts, &key)
+        {
+            let _ = action_tx.send(vec![action]).await;
         }
         let mut gap_repair = TimelineGapRepairTracker::default();
         if matches!(key.kind, TimelineKind::Room { .. }) {
@@ -1965,8 +1966,8 @@ impl TimelineActor {
                         diffs,
                         thread_attention_provenance,
                         gap_repair_projections,
-                    }) = batch {
-                        if let Some(diffs) = accepted_relay_batch(self.generation, generation, diffs) {
+                    }) = batch
+                        && let Some(diffs) = accepted_relay_batch(self.generation, generation, diffs) {
                             self.relay_restart_backoff.reset_after_live_batch();
                             self.handle_diff_batch(
                                 diffs,
@@ -1974,7 +1975,6 @@ impl TimelineActor {
                                 gap_repair_projections,
                             ).await;
                         }
-                    }
                 }
                 msg = self.msg_rx.recv() => {
                     let Some(msg) = msg else { break };
@@ -1991,11 +1991,10 @@ impl TimelineActor {
         }
         if self.pending_live_tail_projection.is_some()
             && !self.live_tail_projection_correlation.is_pending()
+            && self.finish_pending_live_tail_projection().await
         {
-            if self.finish_pending_live_tail_projection().await {
-                self.request_timeline_gap_inspection(TimelineGapRepairTrigger::LiveTailSnapshot)
-                    .await;
-            }
+            self.request_timeline_gap_inspection(TimelineGapRepairTrigger::LiveTailSnapshot)
+                .await;
         }
     }
     fn handle_cleanup(&mut self, cleanup: TimelineActorCleanupState) {

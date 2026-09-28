@@ -54,7 +54,7 @@ use super::recovery_backup::{
     PendingRecoveryCompletion, PendingRecoveryTask, SECURE_BACKUP_CONNECTIVITY_WAIT_TIMEOUT,
     secure_backup_monitor_wakeup_is_current,
 };
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 use super::session_lifecycle::PendingOidcFlow;
 use super::session_lifecycle::{
     LockedSessionRecord, PendingOidcAttempt, PendingSessionTeardown, SessionChangeObservation,
@@ -118,6 +118,13 @@ pub(super) fn trace_account_request(
     );
 }
 
+/// Sessions observed at the residency install gap test hook: (old, new).
+#[cfg(any(test, feature = "test-hooks"))]
+pub(crate) type ResidencyInstallGapSessions = (
+    Option<Arc<MatrixClientSession>>,
+    Option<Arc<MatrixClientSession>>,
+);
+
 /// Messages routed to the AccountActor task.
 pub(crate) enum AccountMessage {
     ReadReceiptWindow {
@@ -138,20 +145,17 @@ pub(crate) enum AccountMessage {
     },
     #[cfg(any(test, feature = "test-hooks"))]
     QaSetLocalDeviceBlacklisted {
-        request_id: RequestId,
         target: VerificationTarget,
         room_id: String,
         acknowledged: oneshot::Sender<Result<(), ()>>,
     },
     #[cfg(any(test, feature = "test-hooks"))]
     QaRefreshDeviceKeysAndAssertKnown {
-        request_id: RequestId,
         target: VerificationTarget,
         acknowledged: oneshot::Sender<Result<(), ()>>,
     },
     #[cfg(any(test, feature = "test-hooks"))]
     QaAssertInboundSessionsStartAtZero {
-        request_id: RequestId,
         room_id: String,
         acknowledged: oneshot::Sender<Result<usize, ()>>,
     },
@@ -412,10 +416,6 @@ pub(crate) enum AccountMessage {
         observation: koushi_sdk::CurrentDeviceTrustObservation,
     },
     #[cfg(test)]
-    InspectSecureBackupScheduling {
-        response: oneshot::Sender<(bool, bool, bool, bool)>,
-    },
-    #[cfg(test)]
     InspectSessionRuntime {
         response: oneshot::Sender<(bool, bool, bool, bool)>,
     },
@@ -433,10 +433,7 @@ pub(crate) enum AccountMessage {
     },
     #[cfg(any(test, feature = "test-hooks"))]
     ResidencyTestConfigureInstallGap {
-        reached: oneshot::Sender<(
-            Option<Arc<MatrixClientSession>>,
-            Option<Arc<MatrixClientSession>>,
-        )>,
+        reached: oneshot::Sender<ResidencyInstallGapSessions>,
         release: oneshot::Receiver<()>,
         configured: oneshot::Sender<()>,
     },
@@ -604,19 +601,19 @@ pub(crate) enum AccountMessage {
         actions: Vec<AppAction>,
         ignored_user_ids: Option<BTreeSet<String>>,
     },
+    /// Fire-and-forget stop used only by actor unit tests; production
+    /// shutdown always sends `ShutdownWithAck` from the runtime.
+    #[cfg(test)]
     Shutdown,
 }
 
 /// cfg(test)-only snapshot of the secure-backup inspection owner state.
 #[cfg(test)]
-pub(super) struct SecureBackupOwnersSnapshot {
+pub(crate) struct SecureBackupOwnersSnapshot {
     pub(super) inspection_pending: bool,
     pub(super) has_inspection_task: bool,
-    pub(super) has_monitor_task: bool,
     pub(super) has_defer_deadline: bool,
-    pub(super) proven: bool,
     pub(super) trust_generation: u64,
-    pub(super) monitor_serial: u64,
     pub(super) defer_serial: u64,
 }
 
@@ -701,10 +698,7 @@ impl AccountActorHandle {
     #[cfg(any(test, feature = "test-hooks"))]
     pub async fn configure_residency_install_gap(
         &self,
-        reached: oneshot::Sender<(
-            Option<Arc<MatrixClientSession>>,
-            Option<Arc<MatrixClientSession>>,
-        )>,
+        reached: oneshot::Sender<ResidencyInstallGapSessions>,
         release: oneshot::Receiver<()>,
     ) -> bool {
         let (configured, acknowledged) = oneshot::channel();
@@ -961,10 +955,7 @@ pub struct AccountActor {
     pub(super) lifecycle_probe: Option<mpsc::UnboundedSender<&'static str>>,
     #[cfg(any(test, feature = "test-hooks"))]
     pub(super) residency_install_gap: Option<(
-        oneshot::Sender<(
-            Option<Arc<MatrixClientSession>>,
-            Option<Arc<MatrixClientSession>>,
-        )>,
+        oneshot::Sender<ResidencyInstallGapSessions>,
         oneshot::Receiver<()>,
     )>,
     #[cfg(any(test, feature = "test-hooks"))]
@@ -1184,6 +1175,10 @@ impl AccountActor {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor wiring: independent owned handles moved into one task"
+    )]
     pub(crate) fn spawn_with_diagnostics_and_native_artifacts(
         store_actor: StoreActor,
         action_tx: mpsc::Sender<Vec<AppAction>>,
@@ -1448,6 +1443,7 @@ impl AccountActor {
                 AccountMessage::ConfigureShutdownGate { entered, release } => {
                     shutdown_gate = Some((entered, release));
                 }
+                #[cfg(test)]
                 AccountMessage::Shutdown => break,
                 AccountMessage::ShutdownWithAck { acknowledged } => {
                     shutdown_ack = Some(acknowledged);
@@ -1458,7 +1454,6 @@ impl AccountActor {
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::QaSetLocalDeviceBlacklisted {
-                    request_id: _,
                     target,
                     room_id,
                     acknowledged,
@@ -1468,7 +1463,6 @@ impl AccountActor {
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::QaRefreshDeviceKeysAndAssertKnown {
-                    request_id: _,
                     target,
                     acknowledged,
                 } => {
@@ -1482,7 +1476,6 @@ impl AccountActor {
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::QaAssertInboundSessionsStartAtZero {
-                    request_id: _,
                     room_id,
                     acknowledged,
                 } => {
@@ -2261,15 +2254,6 @@ impl AccountActor {
                         .expect("trust observation override lock") = Some(observation);
                 }
                 #[cfg(test)]
-                AccountMessage::InspectSecureBackupScheduling { response } => {
-                    let _ = response.send((
-                        self.sync_connectivity_proven,
-                        self.secure_backup_inspection_pending,
-                        self.secure_backup_inspection_task.is_some(),
-                        self.secure_backup_monitor_task.is_some(),
-                    ));
-                }
-                #[cfg(test)]
                 AccountMessage::InspectSessionRuntime { response } => {
                     let _ = response.send((
                         self.session.is_some(),
@@ -2287,11 +2271,8 @@ impl AccountActor {
                     let _ = response.send(SecureBackupOwnersSnapshot {
                         inspection_pending: self.secure_backup_inspection_pending,
                         has_inspection_task: self.secure_backup_inspection_task.is_some(),
-                        has_monitor_task: self.secure_backup_monitor_task.is_some(),
                         has_defer_deadline: self.secure_backup_defer_deadline_task.is_some(),
-                        proven: self.sync_connectivity_proven,
                         trust_generation: self.trust_generation,
-                        monitor_serial: self.secure_backup_monitor_serial,
                         defer_serial: self.secure_backup_defer_serial,
                     });
                 }

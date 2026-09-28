@@ -549,9 +549,11 @@ fn crawler_respects_include_media_captions_setting() {
                 "info": { "mimetype": "image/png" }
             }
         }"#;
-    let mut settings = SearchCrawlerSettings::default();
-    settings.include_media_captions = false;
-    settings.include_filenames = true;
+    let settings = SearchCrawlerSettings {
+        include_media_captions: false,
+        include_filenames: true,
+        ..Default::default()
+    };
     let mut pending = HashSet::new();
     let message = event_json_to_index_message("!r:test", json, &settings, &mut pending).unwrap();
     match message {
@@ -581,9 +583,11 @@ fn crawler_respects_include_filenames_setting() {
                 "info": { "mimetype": "image/png" }
             }
         }"#;
-    let mut settings = SearchCrawlerSettings::default();
-    settings.include_media_captions = true;
-    settings.include_filenames = false;
+    let settings = SearchCrawlerSettings {
+        include_media_captions: true,
+        include_filenames: false,
+        ..Default::default()
+    };
     let mut pending = HashSet::new();
     let message = event_json_to_index_message("!r:test", json, &settings, &mut pending).unwrap();
     match message {

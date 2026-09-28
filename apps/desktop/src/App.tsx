@@ -210,7 +210,7 @@ import { createCommandReceiptReconciler } from "./domain/commandWatermark";
 import { SNAPSHOT_SCHEMA_VERSION } from "./domain/types";
 import { selectJoinedRoomIfPresent } from "./domain/joinedRoomNavigation";
 import { createViewportSyncReporter } from "./app/viewportSyncReporter";
-import { EMOJI_BY_CATEGORY, EMOJI_CATEGORIES } from "./components/emojiData";
+import { useLegacyEmojiVocabulary } from "./app/useLegacyEmojiVocabulary";
 import {
   LEGACY_NAVIGATION_KEYS,
   LEGACY_SETTINGS_KEYS,
@@ -391,11 +391,6 @@ const WIDE_RAIL_WIDTH = 72;
 const OVERLAY_TIMELINE_MIN_WIDTH = 360;
 const INLINE_TIMELINE_MIN_WIDTH = 420;
 const DEFAULT_HOME_SELECTION: HomeSelection = { kind: "activity" };
-const VALID_EMOJIS = new Set(
-  EMOJI_CATEGORIES.flatMap((category) =>
-    EMOJI_BY_CATEGORY[category].map((entry) => entry.emoji)
-  )
-);
 
 /** Seed the dialog from the Rust-projected defaults for the active scope
  * (#1023); the constant only covers a snapshot that has not arrived yet. */
@@ -1242,12 +1237,13 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
   );
   const settingsMigrationInFlightRef = useRef(false);
   const navigationMigrationInFlightRef = useRef<Set<string>>(new Set());
+  const legacyEmojiVocabulary = useLegacyEmojiVocabulary();
 
   useEffect(() => {
-    if (!snapshot) return;
+    if (!snapshot || !legacyEmojiVocabulary) return;
     const values = snapshot.state.domain.settings.values;
     const navigation = snapshot.state.ui.navigation;
-    const migration = readBrowserLegacyPreferenceMigration(VALID_EMOJIS, values);
+    const migration = readBrowserLegacyPreferenceMigration(legacyEmojiVocabulary, values);
     if (!migration) return;
 
     if (
@@ -1304,7 +1300,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           navigationMigrationInFlightRef.current.delete(accountKey);
         });
     }
-  }, [snapshot]);
+  }, [snapshot, legacyEmojiVocabulary]);
 
   function setDisplayDensity(density: DisplayDensity) {
     const appearance = snapshotRef.current?.state.domain.settings.values.appearance;

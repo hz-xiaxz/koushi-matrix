@@ -1,6 +1,5 @@
 //! Redaction tests for Core events.
 
-#[allow(dead_code)]
 mod support;
 
 use support::fake_request_id;

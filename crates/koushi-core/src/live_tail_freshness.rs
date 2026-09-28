@@ -128,16 +128,16 @@ where
                 .running
                 .as_ref()
                 .is_some_and(|running| running.key != key || running.epoch != epoch)
+            && let Some(cancel) = self.preempt_running()
         {
-            if let Some(cancel) = self.preempt_running() {
-                actions.push(cancel);
-            }
+            actions.push(cancel);
         }
 
-        if let Some(old_active) = old_active {
-            if old_active != key && !self.is_running(&old_active) {
-                self.defer_if_pending(old_active);
-            }
+        if let Some(old_active) = old_active
+            && old_active != key
+            && !self.is_running(&old_active)
+        {
+            self.defer_if_pending(old_active);
         }
 
         actions.extend(self.schedule_next(None));
@@ -192,10 +192,9 @@ where
             .running
             .as_ref()
             .is_some_and(|running| running.key != key || running.epoch != epoch)
+            && let Some(cancel) = self.preempt_running()
         {
-            if let Some(cancel) = self.preempt_running() {
-                actions.push(cancel);
-            }
+            actions.push(cancel);
         }
         actions.extend(self.schedule_next(None));
         actions
@@ -304,10 +303,10 @@ where
         );
 
         if is_active {
-            if self.running.is_some() {
-                if let Some(cancel) = self.preempt_running() {
-                    actions.push(cancel);
-                }
+            if self.running.is_some()
+                && let Some(cancel) = self.preempt_running()
+            {
+                actions.push(cancel);
             }
             self.remove_delayed(&key);
             actions.extend(self.schedule_next(None));
@@ -415,12 +414,12 @@ where
             return Vec::new();
         }
 
-        if let Some(active) = self.active.clone() {
-            if skip != Some(&active) && self.cancelled_active.as_ref() != Some(&active) {
-                if let Some(epoch) = self.unproven_epoch(&active) {
-                    return self.start(active, epoch).into_iter().collect();
-                }
-            }
+        if let Some(active) = self.active.clone()
+            && skip != Some(&active)
+            && self.cancelled_active.as_ref() != Some(&active)
+            && let Some(epoch) = self.unproven_epoch(&active)
+        {
+            return self.start(active, epoch).into_iter().collect();
         }
 
         let delayed_count = self.delayed.len();

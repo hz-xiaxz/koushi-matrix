@@ -1614,7 +1614,8 @@ impl ComposerDraftStore {
         let retained_rooms = self
             .rooms
             .iter()
-            .filter_map(|(room_id, content)| (!content.is_empty()).then(|| room_id.clone()))
+            .filter(|&(_room_id, content)| !content.is_empty())
+            .map(|(room_id, _content)| room_id.clone())
             .chain(quiescent_room_order.iter().cloned())
             .chain(protected_empty_rooms.iter().cloned())
             .collect::<BTreeSet<_>>();

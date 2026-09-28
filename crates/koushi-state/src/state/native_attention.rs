@@ -320,11 +320,11 @@ pub fn native_attention_projection_from_rooms(
     let mut candidate = candidate_entry.map(|entry| entry.candidate.clone());
     let mut dispatch = NativeAttentionDispatchState::Idle;
 
-    if let Some(entry) = candidate_entry {
-        if let Some(reason) = native_attention_suppression_reason(input, entry) {
-            candidate = None;
-            dispatch = NativeAttentionDispatchState::Suppressed { reason };
-        }
+    if let Some(entry) = candidate_entry
+        && let Some(reason) = native_attention_suppression_reason(input, entry)
+    {
+        candidate = None;
+        dispatch = NativeAttentionDispatchState::Suppressed { reason };
     }
 
     // A suppressed candidate must not produce OS notification text either, so

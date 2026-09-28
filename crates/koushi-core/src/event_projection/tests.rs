@@ -944,7 +944,7 @@ fn derive_display_label_updates_resolves_from_profile_state() {
     let updates = derive_display_label_updates_for_user_ids(
         &state.profile,
         own_user_id,
-        ["@unknown:example.invalid"].into_iter(),
+        ["@unknown:example.invalid"],
     );
     assert_eq!(
         updates.len(),

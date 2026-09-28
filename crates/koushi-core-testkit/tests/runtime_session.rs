@@ -46,7 +46,7 @@ async fn mount_echo_login(server: &MatrixMockServer, token: &'static str, user_i
         .and(path("/_matrix/client/v3/login"))
         .respond_with(EchoLoginDevice { token, user_id })
         .expect(1)
-        .mount(&server.server())
+        .mount(server.server())
         .await;
 }
 

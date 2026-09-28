@@ -785,7 +785,7 @@ impl RoomActor {
             .fetch_add(1, Ordering::SeqCst);
         #[cfg(any(test, feature = "test-hooks"))]
         let control = take_matching_room_operation_test_control(
-            &mut *self
+            &mut self
                 .room_operation_test_control
                 .lock()
                 .expect("room operation test control lock"),

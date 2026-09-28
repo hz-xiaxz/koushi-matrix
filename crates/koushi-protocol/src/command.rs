@@ -4,6 +4,10 @@
 use crate::ids::{RequestId, RuntimeConnectionId};
 
 #[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "public protocol enum: boxing its largest variant changes every producer and consumer across crates (follow-up)"
+)]
 pub enum CoreCommand {
     App(AppCommand),
     Account(AccountCommand),

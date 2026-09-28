@@ -290,6 +290,22 @@ fn record_recovery_stage(session_alias: u64, stage: RecoveryStage, attempts: u32
     );
 }
 
+/// Record a settled (terminal) recovery outcome for the diagnostic export.
+pub fn record_recovery_settled(stage: RecoveryStage) {
+    record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_recovery", "settled")
+            .field(DiagnosticField::token("stage", stage_token(stage))),
+    );
+}
+
+/// Closed token for terminal guidance (issue #478), rendered by React.
+pub fn guidance_token(guidance: RecoveryGuidance) -> &'static str {
+    match guidance {
+        RecoveryGuidance::AnotherOwnDevice => "another_own_device",
+        RecoveryGuidance::AskSenderToRepost => "ask_sender_to_repost",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -478,21 +494,5 @@ mod tests {
         for private in ["@", "!", "example", "http", "PRIVATE", "s3cr3t"] {
             assert!(!text.contains(private), "{private} leaked: {text}");
         }
-    }
-}
-
-/// Record a settled (terminal) recovery outcome for the diagnostic export.
-pub fn record_recovery_settled(stage: RecoveryStage) {
-    record(
-        DiagnosticEvent::new(DiagnosticLevel::Info, "core.room_key_recovery", "settled")
-            .field(DiagnosticField::token("stage", stage_token(stage))),
-    );
-}
-
-/// Closed token for terminal guidance (issue #478), rendered by React.
-pub fn guidance_token(guidance: RecoveryGuidance) -> &'static str {
-    match guidance {
-        RecoveryGuidance::AnotherOwnDevice => "another_own_device",
-        RecoveryGuidance::AskSenderToRepost => "ask_sender_to_repost",
     }
 }

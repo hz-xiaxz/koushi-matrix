@@ -13,12 +13,9 @@ mod operations;
 mod pins;
 mod space_children;
 mod space_members;
-#[cfg(test)]
-mod test_source;
 
-pub use actor::{
-    MissingSpaceChildLink, RoomActor, RoomActorHandle, RoomListReconcileAck, RoomMessage,
-};
+pub(crate) use actor::RoomMessage;
+pub use actor::{MissingSpaceChildLink, RoomActor, RoomActorHandle, RoomListReconcileAck};
 pub use normalization::assign_dm_space_ids;
 
 #[cfg(any(test, feature = "test-hooks"))]

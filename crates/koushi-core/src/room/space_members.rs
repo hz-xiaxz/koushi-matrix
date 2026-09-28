@@ -374,7 +374,7 @@ fn space_members_update_affects_demand(
     child_room_ids: &BTreeSet<String>,
     updated_room_ids: Option<&BTreeSet<String>>,
 ) -> bool {
-    updated_room_ids.map_or(true, |updated| {
+    updated_room_ids.is_none_or(|updated| {
         updated.contains(space_id)
             || updated
                 .iter()
@@ -399,6 +399,10 @@ fn space_members_refresh_is_current(
     result_space_id == demanded_space_id && result_generation == demanded_generation
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 fn space_member_refresh_fence_is_current(
     active_fence: Option<SpaceMemberRefreshFence>,
     expected_fence: SpaceMemberRefreshFence,
@@ -754,7 +758,8 @@ impl RoomActor {
         let space_id = demand.space_id.clone();
         let generation = demand.generation;
         let demand_generation = demand.demand_generation;
-        let _ = executor::spawn(async move {
+        // Detached task: dropping the JoinHandle does not cancel it.
+        drop(executor::spawn(async move {
             let result = koushi_sdk::matrix_space_members_projection(&session, &space_id).await;
             let _ = room_tx
                 .send(RoomMessage::SpaceMembersProjectionRefreshed {
@@ -767,9 +772,13 @@ impl RoomActor {
                     result,
                 })
                 .await;
-        });
+        }));
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor message handler: parameters are the destructured message fields"
+    )]
     pub(super) async fn handle_space_members_projection_refreshed(
         &mut self,
         request_id: RequestId,
@@ -840,10 +849,8 @@ impl RoomActor {
             }
         }
 
-        if should_refresh_again {
-            if let Some(demand) = self.space_member_demand.clone() {
-                self.start_space_member_refresh(demand);
-            }
+        if should_refresh_again && let Some(demand) = self.space_member_demand.clone() {
+            self.start_space_member_refresh(demand);
         }
     }
 
@@ -925,6 +932,10 @@ impl RoomActor {
         }));
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor message handler: parameters are the destructured message fields"
+    )]
     pub(super) async fn handle_update_space_member_role(
         &self,
         request_id: RequestId,
@@ -981,7 +992,7 @@ impl RoomActor {
             space_id: space_id.clone(),
             user_id: user_id.clone(),
             generation,
-            outcome: outcome.clone(),
+            outcome,
             sent_revision,
             projection,
         }])

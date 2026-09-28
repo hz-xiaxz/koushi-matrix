@@ -909,6 +909,10 @@ impl MatrixIdentityResetHandle {
     }
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "short-lived value moved once; boxing would add an allocation per message and churn every construction and match site"
+)]
 pub enum IdentityResetOutcome {
     Completed,
     AuthRequired(MatrixIdentityResetHandle),
@@ -1550,7 +1554,7 @@ pub async fn download_joined_room_keys_from_backup(
     }
 
     let backup_status = map_backup_state_to_desktop(encryption.backups().state());
-    let backup_version = version.map(str::to_owned).or_else(|| match backup_status {
+    let backup_version = version.map(str::to_owned).or(match backup_status {
         KeyBackupStatus::Enabled { version } => Some(version),
         KeyBackupStatus::Restoring { version, .. } => version,
         _ => None,
@@ -2889,7 +2893,7 @@ mod current_device_trust_recheck_tests {
 
     #[tokio::test]
     async fn recheck_current_device_trust_queries_own_identity() {
-        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
         let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .len();
@@ -3152,8 +3156,8 @@ fn record_initial_share_diagnostic(
         }
     };
     counters.increment(counter);
-    match event.stage {
-        Stage::Eligible => match event.device_class {
+    if event.stage == Stage::Eligible {
+        match event.device_class {
             Class::VerifiedOwn | Class::UnverifiedOwn => {
                 counters.increment("initial_share_eligible_own")
             }
@@ -3161,8 +3165,7 @@ fn record_initial_share_diagnostic(
                 counters.increment("initial_share_eligible_peer")
             }
             Class::Dehydrated | Class::Unknown => {}
-        },
-        _ => {}
+        }
     }
 
     let mut diagnostic = DiagnosticEvent::new(DiagnosticLevel::Info, "core.initial_share", "stage")
@@ -3646,7 +3649,7 @@ mod megolm_send_parity_tests {
             .mount(server.server())
             .await;
 
-        let room = alice.get_room(&room_id).unwrap();
+        let room = alice.get_room(room_id).unwrap();
         room.send(RoomMessageEventContent::text_plain("first"))
             .await
             .unwrap();
@@ -4327,7 +4330,7 @@ mod current_device_trust_recheck_classifier_tests {
 
     #[tokio::test]
     async fn unknown_token_keys_query_is_authentication() {
-        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
         let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .len();
@@ -4377,7 +4380,7 @@ mod current_device_trust_recheck_classifier_tests {
 
     #[tokio::test]
     async fn server_keys_query_failure_is_server() {
-        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
         let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .len();

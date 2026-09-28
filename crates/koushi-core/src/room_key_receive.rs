@@ -213,13 +213,17 @@ mod tests {
     };
 
     fn sample_diagnostics() -> MatrixRoomKeyReceiveDiagnostics {
-        let mut crypto = RoomKeyReceiveCounters::default();
-        crypto.ingress_direct = 2;
-        crypto.merge_accepted_new = 1;
-        crypto.to_device_olm_wedged = 1;
-        let mut late = RoomKeyLateDecryptionCounters::default();
-        late.redecryption_succeeded = 3;
-        late.room_key_stream_lagged = 1;
+        let crypto = RoomKeyReceiveCounters {
+            ingress_direct: 2,
+            merge_accepted_new: 1,
+            to_device_olm_wedged: 1,
+            ..Default::default()
+        };
+        let late = RoomKeyLateDecryptionCounters {
+            redecryption_succeeded: 3,
+            room_key_stream_lagged: 1,
+            ..Default::default()
+        };
         MatrixRoomKeyReceiveDiagnostics {
             crypto,
             late_decryption: RoomKeyLateDecryptionDiagnostics {
@@ -265,7 +269,8 @@ mod tests {
         // No SDK items in this unit test; verify the empty and privacy contract.
         let sessions = collect_visible_utd_sessions(&[]);
         assert!(sessions.is_empty());
-        assert!(LATE_DECRYPTION_RETRY_SESSION_LIMIT > 0);
+        // The bound is a compile-time invariant, so prove it at compile time.
+        const { assert!(LATE_DECRYPTION_RETRY_SESSION_LIMIT > 0) };
     }
 
     #[test]

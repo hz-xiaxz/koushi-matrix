@@ -157,8 +157,10 @@ pub enum SpaceMemberInviteOutcome {
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+#[derive(Default)]
 pub enum SpaceMembersOperationState {
     #[serde(rename = "idle")]
+    #[default]
     Idle,
     Loading {
         request_id: Option<u64>,
@@ -210,12 +212,6 @@ pub enum SpaceMembersOperationState {
         #[serde(rename = "failureKind")]
         kind: SpaceMemberRoleFailureKind,
     },
-}
-
-impl Default for SpaceMembersOperationState {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 impl fmt::Debug for SpaceMembersOperationState {
@@ -568,6 +564,10 @@ pub fn admit_space_member_cancellation(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub fn admit_space_member_role(
     state: &AppState,
     space_id: &str,

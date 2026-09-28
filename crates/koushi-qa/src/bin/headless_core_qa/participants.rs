@@ -649,6 +649,10 @@ impl From<QaParticipantLoginOutcome> for QaOwnedRuntimeParticipant {
     }
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "QA recipient selector built once per scenario step; boxing adds churn without a measurable benefit"
+)]
 pub(super) enum QaE2eeRecipient<'a> {
     Borrowed {
         conn: &'a mut CoreConnection,
@@ -742,6 +746,10 @@ where
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) async fn login_synced_participant_for_qa(
     homeserver: &str,
     data_dir: std::path::PathBuf,
@@ -858,15 +866,11 @@ pub(super) async fn wait_for_verification_requested_event_only(
             .await
             .map_err(|_| format!("{label}: timed out waiting for incoming verification request"))?
             .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
-        match event {
-            CoreEvent::E2eeTrust(E2eeTrustEvent::VerificationProgress { state, .. }) => {
-                if let Some(flow_id) =
-                    requested_verification_flow_id(&state, expected_target, excluded_flow_id)?
-                {
-                    return Ok(flow_id);
-                }
-            }
-            _ => {}
+        if let CoreEvent::E2eeTrust(E2eeTrustEvent::VerificationProgress { state, .. }) = event
+            && let Some(flow_id) =
+                requested_verification_flow_id(&state, expected_target, excluded_flow_id)?
+        {
+            return Ok(flow_id);
         }
     }
 }

@@ -190,6 +190,10 @@ pub fn compose_sidebar_for_state(state: &AppState) -> SidebarModel {
     sidebar
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 fn compose_sidebar_with_preferences(
     active_space_id: Option<&str>,
     spaces: &[SpaceSummary],
@@ -528,6 +532,49 @@ fn room_list_item(
     }
 }
 
+fn unread_count(
+    rooms: &[RoomListItem],
+    room_notification_settings: &HashMap<String, RoomNotificationSettings>,
+) -> u64 {
+    rooms
+        .iter()
+        .filter(|room| !room_is_muted(&room.room_id, room_notification_settings))
+        .map(|room| room.unread_count)
+        .sum()
+}
+
+fn highlight_count(
+    rooms: &[RoomListItem],
+    room_notification_settings: &HashMap<String, RoomNotificationSettings>,
+) -> u64 {
+    rooms
+        .iter()
+        .filter(|room| !room_is_muted(&room.room_id, room_notification_settings))
+        .map(|room| room.highlight_count)
+        .sum()
+}
+
+/// Whether a room feeds the Home/Space/Rooms/DMs attention aggregates.
+///
+/// Muted and low-priority conversations keep their own raw counts but never
+/// contribute to an aggregate badge (state-machine.md, "Sidebar Sections And
+/// Low Priority").
+fn contributes_attention(
+    room: &RoomSummary,
+    room_notification_settings: &HashMap<String, RoomNotificationSettings>,
+) -> bool {
+    room.tags.low_priority.is_none() && !room_is_muted(&room.room_id, room_notification_settings)
+}
+
+fn room_is_muted(
+    room_id: &str,
+    room_notification_settings: &HashMap<String, RoomNotificationSettings>,
+) -> bool {
+    room_notification_settings
+        .get(room_id)
+        .is_some_and(|settings| settings.mode == RoomNotificationMode::Mute)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -578,47 +625,4 @@ mod tests {
             &no_invites
         ));
     }
-}
-
-fn unread_count(
-    rooms: &[RoomListItem],
-    room_notification_settings: &HashMap<String, RoomNotificationSettings>,
-) -> u64 {
-    rooms
-        .iter()
-        .filter(|room| !room_is_muted(&room.room_id, room_notification_settings))
-        .map(|room| room.unread_count)
-        .sum()
-}
-
-fn highlight_count(
-    rooms: &[RoomListItem],
-    room_notification_settings: &HashMap<String, RoomNotificationSettings>,
-) -> u64 {
-    rooms
-        .iter()
-        .filter(|room| !room_is_muted(&room.room_id, room_notification_settings))
-        .map(|room| room.highlight_count)
-        .sum()
-}
-
-/// Whether a room feeds the Home/Space/Rooms/DMs attention aggregates.
-///
-/// Muted and low-priority conversations keep their own raw counts but never
-/// contribute to an aggregate badge (state-machine.md, "Sidebar Sections And
-/// Low Priority").
-fn contributes_attention(
-    room: &RoomSummary,
-    room_notification_settings: &HashMap<String, RoomNotificationSettings>,
-) -> bool {
-    room.tags.low_priority.is_none() && !room_is_muted(&room.room_id, room_notification_settings)
-}
-
-fn room_is_muted(
-    room_id: &str,
-    room_notification_settings: &HashMap<String, RoomNotificationSettings>,
-) -> bool {
-    room_notification_settings
-        .get(room_id)
-        .is_some_and(|settings| settings.mode == RoomNotificationMode::Mute)
 }

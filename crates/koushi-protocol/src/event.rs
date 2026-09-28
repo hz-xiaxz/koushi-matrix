@@ -61,6 +61,10 @@ pub enum IntentOutcome {
 }
 
 #[derive(Clone, Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "public protocol enum: boxing its largest variant changes every producer and consumer across crates (follow-up)"
+)]
 pub enum CoreEvent {
     StateDelta(StateDelta),
     Account(AccountEvent),

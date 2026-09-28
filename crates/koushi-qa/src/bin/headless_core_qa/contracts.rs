@@ -6,14 +6,14 @@ use super::participants::{
     ensure_incoming_verification_receiver_sync_not_stopped,
 };
 use super::registry::{
-    QaScenario, QaStage, SEND_QUEUE_EVENT_TIMEOUT, TIMELINE_RECONNECT_EXPECTED_BODY_COUNT,
-    should_run_focused_send_queue_route, tokens_for_stage,
+    QaScenario, QaStage, TIMELINE_RECONNECT_EXPECTED_BODY_COUNT,
+    should_run_focused_send_queue_route,
 };
 use super::scenario_timeline::assert_zero_display_projection_reset_fallback_delta;
 use super::{
-    AccountEvent, AccountKey, AppState, Arc, CoreEvent, CoreFailure, Duration, EventStreamLag,
-    Mutex, RequestId, SessionState, SyncEvent, TimelineDiff, TimelineEvent, TimelineItem,
-    TimelineItemId, TimelineKey, TimelineMessageActions,
+    AccountEvent, AccountKey, AppState, Arc, CoreEvent, CoreFailure, EventStreamLag, Mutex,
+    RequestId, SessionState, SyncEvent, TimelineDiff, TimelineEvent, TimelineItem, TimelineItemId,
+    TimelineKey, TimelineMessageActions,
 };
 use koushi_protocol::event::ThreadSummaryDto;
 
@@ -421,65 +421,6 @@ pub(super) fn qa_state_delta_event() -> CoreEvent {
         generation: 1,
         changed: koushi_core::StateDeltaChangedSlices::default(),
     })
-}
-
-pub(super) fn strict_e2ee_waiter_inventory() -> &'static [(&'static str, &'static str)] {
-    &[
-        (
-            "wait_for_existing_identity_gate",
-            "\nasync fn wait_for_recovery_gate",
-        ),
-        (
-            "wait_for_room_in_room_list",
-            "\nasync fn wait_for_space_in_space_list",
-        ),
-        (
-            "wait_for_sync_started_and_running",
-            "\nasync fn wait_for_sync_started",
-        ),
-        ("wait_for_ready_snapshot", "\nasync fn wait_for_logged_in"),
-        ("wait_for_logged_in", "\nasync fn wait_for_session_restored"),
-        (
-            "subscribe_active_timeline_projection_for_qa",
-            "\nfn thread_initial_items_need_paginate_backfill",
-        ),
-        (
-            "wait_for_verification_requested_event_only",
-            "\nfn requested_verification_flow_id",
-        ),
-        (
-            "wait_for_verification_accepted",
-            "\nfn verification_state_is_at_least_accepted",
-        ),
-        (
-            "wait_for_initial_items_from_source",
-            "\n#[derive(Default)]\nstruct InitialItemsWaitDiagnostics",
-        ),
-        (
-            "wait_for_send_flow_completion_with_timeout",
-            "\nasync fn send_text_expect_local_echo",
-        ),
-        (
-            "wait_for_item_with_body_or_decryption_failure",
-            "\nasync fn wait_for_withheld_event_projection_from_source",
-        ),
-        (
-            "wait_for_withheld_event_projection_from_source",
-            "\n/// Wait until all `expected_bodies` are found",
-        ),
-    ]
-}
-
-pub(super) fn strict_e2ee_waiter_body(source: &str, waiter: &str, end_declaration: &str) -> String {
-    let source = source.replace("pub(super) ", "");
-    source
-        .split(&format!("async fn {waiter}"))
-        .nth(1)
-        .unwrap_or_else(|| panic!("missing strict E2EE waiter {waiter}"))
-        .split(end_declaration)
-        .next()
-        .unwrap_or_else(|| panic!("missing end declaration for strict E2EE waiter {waiter}"))
-        .to_owned()
 }
 
 #[test]

@@ -1123,11 +1123,10 @@ async fn wait_for_room_management_forbidden_operation(
                 ));
             }
             CoreEvent::StateDelta(_)
-                if room_management_forbidden_recorded(&conn.snapshot(), request_id, operation) =>
+                if room_management_forbidden_recorded(&conn.snapshot(), request_id, operation)
+                    && saw_forbidden_failure =>
             {
-                if saw_forbidden_failure {
-                    return Ok(());
-                }
+                return Ok(());
             }
             _ => {}
         }

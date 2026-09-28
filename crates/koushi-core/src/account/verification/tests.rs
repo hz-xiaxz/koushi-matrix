@@ -18,17 +18,16 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use super::{
     INCOMING_VERIFICATION_FLOW_ID_BASE, IncomingVerificationActivity,
     IncomingVerificationObservation, IncomingVerificationRequestDecision, SasAdoptionDecision,
-    SasVerificationWaitState, SyntheticVerificationTerminal, VerificationTerminal,
+    SasVerificationWaitState, SyntheticVerificationTerminal,
+    VERIFICATION_PROTECTION_SUMMARY_TRIGGER_RESTORE, VerificationTerminal,
     classify_incoming_verification_request, classify_sas_adoption,
     incoming_verification_request_id, incoming_verification_request_is_current,
-    record_sas_verification_event, recovery_failure_token, resolve_sas_adoption,
-    run_own_user_sas_start, sas_projection_action, sas_settled_event, sas_state_changed_event,
-    sas_state_token, sas_timeout_fired_event, sas_verification_event, sas_waiting_for_token,
-    send_observer_output_until_stopped, stop_incoming_verification_observation_with_timeout,
-    trust_failure_token, verification_cancel_kind_token, verification_request_state_token,
-    verification_terminal_token,
-    record_incoming_verification_protection_summary,
-    VERIFICATION_PROTECTION_SUMMARY_TRIGGER_RESTORE,
+    record_incoming_verification_protection_summary, record_sas_verification_event,
+    recovery_failure_token, resolve_sas_adoption, run_own_user_sas_start, sas_projection_action,
+    sas_settled_event, sas_state_changed_event, sas_state_token, sas_timeout_fired_event,
+    sas_verification_event, sas_waiting_for_token, send_observer_output_until_stopped,
+    stop_incoming_verification_observation_with_timeout, trust_failure_token,
+    verification_cancel_kind_token, verification_request_state_token, verification_terminal_token,
 };
 use crate::account::actor::{AccountActor, AccountMessage};
 use crate::account::recovery_backup::recovery_verification_event;
@@ -296,7 +295,7 @@ async fn incoming_verification_observer_join_has_a_bounded_abort_fallback() {
 
 #[tokio::test]
 async fn actor_sas_settlement_emits_exactly_one_terminal_and_clears_runtime() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
         .records
         .len();
@@ -597,7 +596,7 @@ fn sas_cancel_diagnostic_contains_only_closed_private_safe_fields() {
 
 #[tokio::test]
 async fn own_user_sas_start_helper_traces_started_pending_and_failed_results() {
-    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
     let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
         .records
         .len();
@@ -828,7 +827,10 @@ fn verification_protection_summary_is_private_data_free() {
         "session_id",
         "http",
     ] {
-        assert!(!text.contains(private), "{private} leaked into summary: {text}");
+        assert!(
+            !text.contains(private),
+            "{private} leaked into summary: {text}"
+        );
     }
     assert!(text.contains("unknown_sender_deferred"));
     assert!(text.contains("suppressed_sas_start_replays"));

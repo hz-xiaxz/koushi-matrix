@@ -157,10 +157,10 @@ impl RawReceiptWindow {
                             }
                             _ => Err(ThumbnailLeaseError::Unavailable),
                         };
-                        if matches!(avatar.thumbnail, AvatarThumbnailState::NotRequested) {
-                            if let Ok(lease) = &lease {
-                                avatar.thumbnail = lease.thumbnail_state();
-                            }
+                        if matches!(avatar.thumbnail, AvatarThumbnailState::NotRequested)
+                            && let Ok(lease) = &lease
+                        {
+                            avatar.thumbnail = lease.thumbnail_state();
                         }
                         if lease.is_err()
                             && matches!(avatar.thumbnail, AvatarThumbnailState::Ready { .. })

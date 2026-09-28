@@ -9,8 +9,8 @@ use std::path::Path;
 
 fn read_json(file: &str) -> serde_json::Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(file);
-    let contents =
-        fs::read_to_string(&path).unwrap_or_else(|error| panic!("{file} must be readable: {error}"));
+    let contents = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{file} must be readable: {error}"));
     serde_json::from_str(&contents)
         .unwrap_or_else(|error| panic!("{file} must be valid JSON: {error}"))
 }

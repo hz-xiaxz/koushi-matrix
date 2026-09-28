@@ -64,7 +64,6 @@ use super::thread_projection::{ThreadAttentionBatchProvenance, ThreadAttentionCo
 /// One absolute deadline for the complete set of manager-owned enqueue workers.
 /// This is deliberately not a per-worker timeout, so shutdown latency cannot
 /// grow with the number of outstanding sends.
-
 const SEND_ENQUEUE_WORKER_SHUTDOWN_DEADLINE: Duration = Duration::from_secs(5);
 
 pub(super) struct TimelineSendCompletionDelivery {
@@ -326,6 +325,10 @@ async fn encrypted_send_diagnostic_snapshot(
     }
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "short-lived value moved once; boxing would add an allocation per message and churn every construction and match site"
+)]
 pub(super) enum TimelineSendEnqueuePayload {
     Text {
         document: ComposerDocument,
@@ -344,7 +347,7 @@ pub(super) enum TimelineSendEnqueuePayload {
 }
 
 #[cfg(test)]
-struct SyntheticSendEnqueueRequest {
+pub(super) struct SyntheticSendEnqueueRequest {
     payload: TimelineSendEnqueuePayload,
     response: oneshot::Sender<Result<SendEnqueueSuccess, TimelineFailureKind>>,
 }
@@ -355,7 +358,7 @@ struct MediaSendQueuedDelivery {
     transaction_id: String,
 }
 
-struct SendEnqueueSuccess {
+pub(super) struct SendEnqueueSuccess {
     sdk_transaction_id: String,
     handle: Option<matrix_sdk::send_queue::SendHandle>,
     media_queued: Option<MediaSendQueuedDelivery>,
@@ -1112,6 +1115,10 @@ impl TimelineManagerActor {
         }
     }
     async fn drain_send_enqueue_workers_until(&mut self, deadline: executor::Instant) -> bool {
+        #[expect(
+            clippy::large_enum_variant,
+            reason = "short-lived value moved once; boxing would add an allocation per message and churn every construction and match site"
+        )]
         enum DrainProgress {
             Worker(Option<SendEnqueueWorkerCompletion>),
             ObserverFinished,
@@ -1293,16 +1300,15 @@ impl TimelineManagerActor {
         let client_txn_id = transaction_id.clone();
         if let Some(action) =
             send_submitted_action(key, projection, transaction_id.clone(), body.clone())
+            && self.action_tx.send(vec![action]).await.is_err()
         {
-            if self.action_tx.send(vec![action]).await.is_err() {
-                self.emit_failure(
-                    request_id,
-                    CoreFailure::TimelineOperationFailed {
-                        kind: TimelineFailureKind::QueueOverflow,
-                    },
-                );
-                return;
-            }
+            self.emit_failure(
+                request_id,
+                CoreFailure::TimelineOperationFailed {
+                    kind: TimelineFailureKind::QueueOverflow,
+                },
+            );
+            return;
         }
         let mut registration = SendCompletionRegistration::begin_with_projection(
             Arc::clone(&self.send_completion),
@@ -1398,6 +1404,10 @@ impl TimelineManagerActor {
         self.drive_send_enqueue_until_preflight_started(preflight_started)
             .await;
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+    )]
     pub(super) async fn route_submission_to_worker(
         &mut self,
         request_id: RequestId,
@@ -1790,10 +1800,10 @@ pub(super) fn matching_remote_thread_reply_event_id<'a>(
         return None;
     }
     let event_id = matching_thread_reply_event_id(item, root_event_id)?;
-    if let (Some(sender), Some(own_user_id)) = (item.sender.as_deref(), own_user_id) {
-        if sender == own_user_id {
-            return None;
-        }
+    if let (Some(sender), Some(own_user_id)) = (item.sender.as_deref(), own_user_id)
+        && sender == own_user_id
+    {
+        return None;
     }
     Some(event_id)
 }
@@ -1868,18 +1878,17 @@ pub(super) fn newest_provable_receipt_event_id(
         })
         .collect::<HashMap<_, _>>();
     let mut candidates = vec![requested_event_id.to_owned()];
-    if let Some(queried_event_id) = queried_event_id {
-        if !candidates.contains(&queried_event_id) {
-            candidates.push(queried_event_id);
-        }
+    if let Some(queried_event_id) = queried_event_id
+        && !candidates.contains(&queried_event_id)
+    {
+        candidates.push(queried_event_id);
     }
-    if let Some(current_event_id) = current_event_id {
-        if !candidates
+    if let Some(current_event_id) = current_event_id
+        && !candidates
             .iter()
             .any(|candidate| candidate == current_event_id)
-        {
-            candidates.push(current_event_id.to_owned());
-        }
+    {
+        candidates.push(current_event_id.to_owned());
     }
 
     let newest_visible = candidates
@@ -2071,7 +2080,7 @@ impl TimelineActor {
                 self.send_handles.remove(&sdk_txn_str);
             }
             RoomSendQueueUpdate::ReplacedLocalEvent { transaction_id, .. } => {
-                self.update_send_status(&transaction_id.to_string(), TimelineSendState::Sending);
+                self.update_send_status(transaction_id.as_ref(), TimelineSendState::Sending);
             }
             RoomSendQueueUpdate::SendError {
                 transaction_id,
@@ -2708,6 +2717,10 @@ impl SendCompletionRegistration {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+    )]
     pub(super) fn begin_with_projection(
         coordinator: SharedSendCompletionCoordinator,
         terminal_ingress: TimelineSendTerminalIngress,
@@ -2794,9 +2807,7 @@ impl SendCompletionRegistration {
         sdk_transaction_id: String,
         handle: Option<matrix_sdk::send_queue::SendHandle>,
     ) -> Option<TimelineKey> {
-        let Some(registration_id) = self.registration_id.take() else {
-            return None;
-        };
+        let registration_id = self.registration_id.take()?;
         self.lifecycle_trace
             .as_mut()
             .expect("active send registration must own lifecycle trace")
@@ -3054,9 +3065,7 @@ impl SendCompletionCoordinator {
                         .then(|| (correlation.clone(), projection.key.clone()))
                     })
             });
-        let Some((correlation, key)) = key else {
-            return None;
-        };
+        let (correlation, key) = key?;
         self.pending_sends.remove(&correlation);
         if let Some(mut retained) = self.retained_projections.remove(&correlation) {
             retained.lifecycle_trace.stage_once("remote_echo_converged");
@@ -3465,17 +3474,17 @@ impl SendCompletionCoordinator {
                 let retain_projection =
                     pending.submission_id.is_some() || !pending.local_echo_observed;
                 let mut projection = pending.projection.take();
-                if let Some(projection) = projection.as_mut() {
-                    if retain_projection {
-                        pending.lifecycle_trace.stage_once("sdk_local_echo_missing");
-                        projection.terminal_event_id = Some(event_id.clone());
-                        projection.phase = PendingSendPhase::SentAwaitingRemote;
-                        projection.item.id = TimelineItemId::Event {
-                            event_id: event_id.clone(),
-                        };
-                        projection.item.send_state = Some(TimelineSendState::Sent);
-                        projection.handle = None;
-                    }
+                if let Some(projection) = projection.as_mut()
+                    && retain_projection
+                {
+                    pending.lifecycle_trace.stage_once("sdk_local_echo_missing");
+                    projection.terminal_event_id = Some(event_id.clone());
+                    projection.phase = PendingSendPhase::SentAwaitingRemote;
+                    projection.item.id = TimelineItemId::Event {
+                        event_id: event_id.clone(),
+                    };
+                    projection.item.send_state = Some(TimelineSendState::Sent);
+                    projection.handle = None;
                 }
                 if !retain_projection {
                     projection = None;

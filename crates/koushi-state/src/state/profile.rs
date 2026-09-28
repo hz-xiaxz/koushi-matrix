@@ -496,12 +496,11 @@ fn projected_room_summary_display_labels(
         );
     }
 
-    let display_label = room
-        .display_name
-        .trim()
-        .is_empty()
-        .then(|| room.room_id.clone())
-        .unwrap_or_else(|| room.display_name.trim().to_owned());
+    let display_label = if room.display_name.trim().is_empty() {
+        room.room_id.clone()
+    } else {
+        room.display_name.trim().to_owned()
+    };
     (display_label.clone(), display_label)
 }
 
@@ -540,7 +539,7 @@ pub(crate) fn resolve_user_display_name_from_parts(
         .or_else(|| {
             own_user_id
                 .filter(|own| *own == user_id)
-                .and_then(|_| own_display_name)
+                .and(own_display_name)
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(str::to_owned)
@@ -561,7 +560,7 @@ pub(crate) fn original_user_display_name_from_parts(
         .or_else(|| {
             own_user_id
                 .filter(|own| *own == user_id)
-                .and_then(|_| own_display_name)
+                .and(own_display_name)
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(str::to_owned)

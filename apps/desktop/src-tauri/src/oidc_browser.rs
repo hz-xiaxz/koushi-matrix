@@ -35,6 +35,7 @@ pub(crate) fn launch_oidc_authorization_url<E>(
 /// first: the generic opener delegates to `powershell.exe` there, whose
 /// detached process can report success even when no Windows browser is
 /// configured for the WSL session.
+#[cfg(any(target_os = "linux", test))]
 pub(crate) fn launch_oidc_authorization_url_with_fallback<E>(
     authorization_url: &str,
     primary: impl FnOnce(&str) -> Result<(), E>,

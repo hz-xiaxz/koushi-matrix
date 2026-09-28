@@ -86,10 +86,10 @@ fn activity_latest_display_event(room: &RoomSummary) -> Option<&RoomLatestEventS
     {
         return None;
     }
-    if let Some(conversation_activity) = room.conversation_activity {
-        if conversation_activity.timestamp_ms != latest.timestamp_ms {
-            return None;
-        }
+    if let Some(conversation_activity) = room.conversation_activity
+        && conversation_activity.timestamp_ms != latest.timestamp_ms
+    {
+        return None;
     }
     // Older room-list injectors only provide the already-filtered latest event
     // and omit the separate conversation-activity projection. Production

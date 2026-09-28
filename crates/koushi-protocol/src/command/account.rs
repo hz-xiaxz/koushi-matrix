@@ -284,6 +284,10 @@ impl fmt::Debug for ContactSecurityRequest {
 
 // LoginRequest and RecoveryRequest redact their own Debug in
 // koushi-state (username, password, device name, recovery secret).
+#[expect(
+    clippy::large_enum_variant,
+    reason = "public protocol enum: boxing its largest variant changes every producer and consumer across crates (follow-up)"
+)]
 pub enum AccountCommand {
     DiscoverLogin {
         request_id: RequestId,

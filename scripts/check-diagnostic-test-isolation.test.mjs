@@ -19,9 +19,20 @@ test("detects a diagnostic snapshot test without the shared lock", () => {
 
 test("accepts diagnostic snapshots under the shared lock", () => {
   const source = `
+    #[test]
+    fn reads_diagnostics() {
+      let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+      assert!(!koushi_diagnostics::snapshot().records.is_empty());
+    }
+  `;
+  assert.deepEqual(findDiagnosticTestIsolationViolations(source, "fixture.rs"), []);
+});
+
+test("accepts async diagnostic snapshots under the awaited shared lock", () => {
+  const source = `
     #[tokio::test]
     async fn reads_diagnostics() {
-      let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+      let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
       assert!(!koushi_diagnostics::snapshot().records.is_empty());
     }
   `;

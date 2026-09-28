@@ -478,11 +478,6 @@ export interface CreateRoomSettlement extends CommandSettlement {
   spaceLinkFailure: OperationFailureKind | null;
 }
 
-export interface CommandResult<T> {
-  result: T;
-  settlement: CommandSettlement;
-}
-
 export type CommandReceipt = CommandAdmission | CommandSettlement;
 
 export interface OidcBrowserLaunchResponse {

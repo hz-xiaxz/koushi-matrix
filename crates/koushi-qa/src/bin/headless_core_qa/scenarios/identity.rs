@@ -781,25 +781,19 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
 
     // A stopped recipient still owns a saved device. Reopen it before cleanup so
     // the same ordered logout guard can remove every owned session.
-    if owner_b.is_none() {
-        if let Some(stopped) = stopped_b.clone() {
-            if let Ok(participant) =
-                restart_stopped_qa_participant(stopped, "e2ee login-store cleanup B").await
-            {
-                owner_b = Some(participant);
-                stopped_b = None;
-            }
-        }
+    if owner_b.is_none()
+        && let Some(stopped) = stopped_b.clone()
+        && let Ok(participant) =
+            restart_stopped_qa_participant(stopped, "e2ee login-store cleanup B").await
+    {
+        owner_b = Some(participant);
     }
-    if owner_a.is_none() {
-        if let Some(stopped) = stopped_a.clone() {
-            if let Ok(participant) =
-                restart_stopped_qa_participant(stopped, "e2ee login-store cleanup A").await
-            {
-                owner_a = Some(participant);
-                stopped_a = None;
-            }
-        }
+    if owner_a.is_none()
+        && let Some(stopped) = stopped_a.clone()
+        && let Ok(participant) =
+            restart_stopped_qa_participant(stopped, "e2ee login-store cleanup A").await
+    {
+        owner_a = Some(participant);
     }
 
     let mut cleanup_failures = Vec::new();
@@ -837,13 +831,12 @@ pub(super) async fn run_e2ee_login_store_scenario(config: &QaConfig) -> Result<(
         (&mut owner_b, "e2ee login-store cleanup B"),
         (&mut owner_a, "e2ee login-store cleanup A"),
     ] {
-        if let Some(participant) = participant.take() {
-            if cleanup_owned_e2ee_participant_best_effort(participant, label)
+        if let Some(participant) = participant.take()
+            && cleanup_owned_e2ee_participant_best_effort(participant, label)
                 .await
                 .is_err()
-            {
-                cleanup_failures.push(label);
-            }
+        {
+            cleanup_failures.push(label);
         }
     }
     if let Err(error) = stage_result {
@@ -2537,10 +2530,10 @@ async fn wait_for_identity_reset_auth_or_done(
             }
             CoreEvent::StateDelta(_) => {
                 let state = conn.snapshot().e2ee_trust.identity_reset;
-                if !matches!(state, IdentityResetState::Idle) {
-                    if let Some(result) = identity_reset_observation(&state, flow_id, label)? {
-                        return Ok(result);
-                    }
+                if !matches!(state, IdentityResetState::Idle)
+                    && let Some(result) = identity_reset_observation(&state, flow_id, label)?
+                {
+                    return Ok(result);
                 }
                 if matches!(
                     state,

@@ -1357,14 +1357,16 @@ fn spawn_password_login_server_with_options(
                 return;
             }
 
-            if request.starts_with("GET /_matrix/client/") && request.contains("/sync") {
-                if let Some(sync_seen) = &sync_seen {
-                    let sync_count = sync_seen.fetch_add(1, Ordering::SeqCst) + 1;
-                    write_json(
-                        &mut stream,
-                        200,
-                        &format!(
-                            r#"{{
+            if request.starts_with("GET /_matrix/client/")
+                && request.contains("/sync")
+                && let Some(sync_seen) = &sync_seen
+            {
+                let sync_count = sync_seen.fetch_add(1, Ordering::SeqCst) + 1;
+                write_json(
+                    &mut stream,
+                    200,
+                    &format!(
+                        r#"{{
                                 "device_one_time_keys_count": {{}},
                                 "next_batch": "sync-batch-{sync_count}",
                                 "device_lists": {{"changed": [], "left": []}},
@@ -1373,10 +1375,9 @@ fn spawn_password_login_server_with_options(
                                 "presence": {{"events": []}},
                                 "account_data": {{"events": []}}
                             }}"#
-                        ),
-                    );
-                    continue;
-                }
+                    ),
+                );
+                continue;
             }
 
             if request.starts_with("POST /_matrix/client/")

@@ -46,7 +46,7 @@ fn event_cache_sqlite_store_is_not_plaintext_and_rejects_wrong_key() {
             .expect("event should be persisted");
 
         let cached_event = store
-            .find_event(&room_id, &event.event_id().expect("event id"))
+            .find_event(&room_id, event.event_id().expect("event id"))
             .await
             .expect("lookup should succeed")
             .expect("saved event should be found");
@@ -275,11 +275,12 @@ fn spawn_password_login_server_with_options(sync_response: Option<String>) -> St
                 continue;
             }
 
-            if request.starts_with("GET /_matrix/client/") && request.contains("/sync") {
-                if let Some(sync_response) = &sync_response {
-                    write_json(&mut stream, 200, sync_response);
-                    continue;
-                }
+            if request.starts_with("GET /_matrix/client/")
+                && request.contains("/sync")
+                && let Some(sync_response) = &sync_response
+            {
+                write_json(&mut stream, 200, sync_response);
+                continue;
             }
 
             if request.starts_with("POST /_matrix/client/")
@@ -332,54 +333,52 @@ fn write_common_sdk_bootstrap_response(stream: &mut std::net::TcpStream, request
 }
 
 fn sync_response() -> String {
-    format!(
-        r#"{{
-            "device_one_time_keys_count": {{}},
+    r#"{
+            "device_one_time_keys_count": {},
             "next_batch": "sync-batch-event-cache-1",
-            "device_lists": {{"changed": [], "left": []}},
-            "rooms": {{
-                "invite": {{}},
-                "join": {{
-                    "!persisted-room:example.invalid": {{
-                        "summary": {{}},
-                        "state": {{
+            "device_lists": {"changed": [], "left": []},
+            "rooms": {
+                "invite": {},
+                "join": {
+                    "!persisted-room:example.invalid": {
+                        "summary": {},
+                        "state": {
                             "events": [
-                                {{
-                                    "content": {{"room_version": "10"}},
+                                {
+                                    "content": {"room_version": "10"},
                                     "event_id": "$persisted-room-create",
                                     "origin_server_ts": 1,
                                     "sender": "@fixture-user:example.invalid",
                                     "state_key": "",
                                     "type": "m.room.create"
-                                }}
+                                }
                             ]
-                        }},
-                        "timeline": {{
+                        },
+                        "timeline": {
                             "events": [
-                                {{
-                                    "content": {{"body": "persistent cache payload", "msgtype": "m.text"}},
+                                {
+                                    "content": {"body": "persistent cache payload", "msgtype": "m.text"},
                                     "event_id": "$cache-event:example.invalid",
                                     "origin_server_ts": 2,
                                     "sender": "@fixture-user:example.invalid",
                                     "type": "m.room.message"
-                                }}
+                                }
                             ],
                             "limited": false,
                             "prev_batch": "cache-prev"
-                        }},
-                        "ephemeral": {{"events": []}},
-                        "account_data": {{"events": []}},
-                        "unread_notifications": {{"highlight_count": 0, "notification_count": 0}}
-                    }}
-                }},
-                "leave": {{}},
-                "knock": {{}}
-            }},
-            "to_device": {{"events": []}},
-            "presence": {{"events": []}},
-            "account_data": {{"events": []}}
-        }}"#
-    )
+                        },
+                        "ephemeral": {"events": []},
+                        "account_data": {"events": []},
+                        "unread_notifications": {"highlight_count": 0, "notification_count": 0}
+                    }
+                },
+                "leave": {},
+                "knock": {}
+            },
+            "to_device": {"events": []},
+            "presence": {"events": []},
+            "account_data": {"events": []}
+        }"#.to_string()
 }
 
 fn read_http_request(stream: &mut std::net::TcpStream) -> String {

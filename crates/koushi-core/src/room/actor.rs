@@ -44,7 +44,7 @@ pub struct MissingSpaceChildLink {
 }
 
 /// Messages sent to the RoomActor from AccountActor / SyncActor.
-pub enum RoomMessage {
+pub(crate) enum RoomMessage {
     /// Route a `RoomCommand` to the actor.
     Command(RoomCommand),
     #[cfg(any(test, feature = "test-hooks"))]
@@ -158,11 +158,6 @@ pub enum RoomMessage {
         transitions: Vec<RoomMembershipTransition>,
         forwarded: oneshot::Sender<bool>,
     },
-    #[cfg(any(test, feature = "test-hooks"))]
-    TestKnownRooms {
-        room_ids: BTreeSet<String>,
-        forwarded: oneshot::Sender<()>,
-    },
     #[cfg(test)]
     InspectObservationGeneration {
         response: oneshot::Sender<Option<u64>>,
@@ -240,21 +235,6 @@ impl RoomActorHandle {
         }
         *slot = Some(control);
         true
-    }
-
-    #[cfg(any(test, feature = "test-hooks"))]
-    pub(crate) async fn install_known_rooms_for_test(&self, room_ids: BTreeSet<String>) -> bool {
-        let (forwarded_tx, forwarded_rx) = oneshot::channel();
-        if !self
-            .send(RoomMessage::TestKnownRooms {
-                room_ids,
-                forwarded: forwarded_tx,
-            })
-            .await
-        {
-            return false;
-        }
-        forwarded_rx.await.is_ok()
     }
 
     #[cfg(any(test, feature = "test-hooks"))]
@@ -338,7 +318,7 @@ impl RoomActorHandle {
             .take();
     }
 
-    pub async fn send(&self, msg: RoomMessage) -> bool {
+    pub(crate) async fn send(&self, msg: RoomMessage) -> bool {
         self.tx.send(msg).await.is_ok()
     }
 
@@ -783,14 +763,6 @@ impl RoomActor {
                 } => {
                     self.handle_test_membership_observed(core_generation, transitions, forwarded)
                         .await;
-                }
-                #[cfg(any(test, feature = "test-hooks"))]
-                RoomMessage::TestKnownRooms {
-                    room_ids,
-                    forwarded,
-                } => {
-                    *self.known_room_ids.write().expect("known room ids lock") = room_ids;
-                    let _ = forwarded.send(());
                 }
                 #[cfg(test)]
                 RoomMessage::InspectObservationGeneration { response } => {

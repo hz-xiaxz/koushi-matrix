@@ -8,14 +8,15 @@ use koushi_state::{
 use serde_json::json;
 
 fn ready_state() -> AppState {
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(SessionInfo {
-        homeserver: "https://server.example.invalid".to_owned(),
-        user_id: "@alice:example.invalid".to_owned(),
-        device_id: "ALICEDEVICE".to_owned(),
-        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
-    });
-    state
+    AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://server.example.invalid".to_owned(),
+            user_id: "@alice:example.invalid".to_owned(),
+            device_id: "ALICEDEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        }),
+        ..Default::default()
+    }
 }
 
 fn target() -> VerificationTarget {

@@ -172,7 +172,7 @@ fn record(id: LocalStoreId, slot: u8, state: PendingLoginState) -> PendingLoginR
 }
 
 fn run_pending(case: PendingLoginCase) -> PendingLoginReport {
-    let (data_dir, actor, _backend) = actor();
+    let (_data_dir, actor, _backend) = actor();
     let owner = actor.pending_login_owner();
     match case {
         PendingLoginCase::CapAndOccupiedSlot => {
@@ -454,7 +454,7 @@ async fn run_login_store_async(case: LoginStoreCase) -> LoginStoreReport {
         | LoginStoreCase::OAuthSoftLogout
         | LoginStoreCase::SsoSoftLogout => {
             let _config = actor.account_store_config(&key_id).expect("retained store");
-            let outcome = koushi_sdk::preflight_saved_crypto_store(
+            let _outcome = koushi_sdk::preflight_saved_crypto_store(
                 &actor
                     .existing_account_store_config(&key_id)
                     .expect("existing account")

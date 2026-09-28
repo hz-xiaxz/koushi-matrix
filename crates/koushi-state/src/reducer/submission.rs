@@ -142,19 +142,16 @@ pub(crate) fn handle_settled(
             let pending_kind = state.timeline.composer.pending_send_kind.take();
             state.timeline.composer.pending_submission_id = None;
             state.timeline.composer.pending_transaction_id = None;
-            if matches!(outcome, ComposerSubmissionTerminalOutcome::Succeeded) {
-                if let Some(PendingComposerSendKind::Reply {
+            if matches!(outcome, ComposerSubmissionTerminalOutcome::Succeeded)
+                && let Some(PendingComposerSendKind::Reply {
                     in_reply_to_event_id,
                 }) = pending_kind
-                {
-                    if state.timeline.composer.mode
-                        == (ComposerMode::Reply {
-                            in_reply_to_event_id,
-                        })
-                    {
-                        state.timeline.composer.mode = ComposerMode::Plain;
-                    }
-                }
+                && state.timeline.composer.mode
+                    == (ComposerMode::Reply {
+                        in_reply_to_event_id,
+                    })
+            {
+                state.timeline.composer.mode = ComposerMode::Plain;
             }
             UiEvent::TimelineChanged { room_id }
         }

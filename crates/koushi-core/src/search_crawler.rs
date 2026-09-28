@@ -459,7 +459,7 @@ fn project_message_content(
                 body.to_owned()
             };
             let text_body = settings.include_media_captions.then(|| body.to_owned());
-            let attachment_filename = settings.include_filenames.then(|| filename);
+            let attachment_filename = settings.include_filenames.then_some(filename);
             let attachment = settings
                 .include_filenames
                 .then(|| build_attachment_document(msgtype, content))

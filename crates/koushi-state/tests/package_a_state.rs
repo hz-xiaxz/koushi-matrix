@@ -324,8 +324,10 @@ fn soft_logout_reauth_requested_sets_authenticating_and_emits_ui_event() {
         SoftLogoutReauthState::Authenticating { request_id: 1 }
     );
 
-    let mut locked = AppState::default();
-    locked.session = SessionState::Locked(session_info());
+    let mut locked = AppState {
+        session: SessionState::Locked(session_info()),
+        ..Default::default()
+    };
     let effects = reduce(
         &mut locked,
         AppAction::SoftLogoutReauthRequested { request_id: 10 },
@@ -352,8 +354,10 @@ fn soft_logout_reauth_requested_sets_authenticating_and_emits_ui_event() {
 
 #[test]
 fn soft_logout_reauth_succeeds_and_fails_are_request_correlated() {
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(session_info());
+    let mut state = AppState {
+        session: SessionState::Ready(session_info()),
+        ..Default::default()
+    };
     reduce(
         &mut state,
         AppAction::SoftLogoutReauthRequested { request_id: 1 },
@@ -412,8 +416,10 @@ fn soft_logout_reauth_succeeds_and_fails_are_request_correlated() {
     assert!(matches!(state.session, SessionState::Provisional { .. }));
     assert!(effects.contains(&AppEffect::CheckCurrentDeviceTrust));
 
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(session_info());
+    let mut state = AppState {
+        session: SessionState::Ready(session_info()),
+        ..Default::default()
+    };
     reduce(
         &mut state,
         AppAction::SoftLogoutReauthRequested { request_id: 5 },
@@ -440,9 +446,11 @@ fn soft_logout_reauth_succeeds_and_fails_are_request_correlated() {
 
 #[test]
 fn soft_logout_reauth_is_cleared_on_logout() {
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(session_info());
-    state.soft_logout_reauth = SoftLogoutReauthState::Authenticating { request_id: 7 };
+    let mut state = AppState {
+        session: SessionState::Ready(session_info()),
+        soft_logout_reauth: SoftLogoutReauthState::Authenticating { request_id: 7 },
+        ..Default::default()
+    };
 
     let effects = reduce(&mut state, AppAction::LogoutRequested);
 
@@ -456,8 +464,10 @@ fn soft_logout_reauth_is_cleared_on_logout() {
 
 #[test]
 fn account_management_auth_submitted_transitions_awaiting_uia_to_working() {
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(session_info());
+    let mut state = AppState {
+        session: SessionState::Ready(session_info()),
+        ..Default::default()
+    };
     let operation = AccountManagementOperation::DeactivateAccount;
 
     reduce(

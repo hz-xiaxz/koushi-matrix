@@ -199,12 +199,12 @@ fn window_work_area_is_usable(area: &WindowWorkArea) -> bool {
     let maximum = max_logical_size_for_work_area(area);
     maximum.width >= MIN_RESTORABLE_WINDOW_WIDTH && maximum.height >= MIN_RESTORABLE_WINDOW_HEIGHT
 }
-fn selected_work_area<'a>(
+fn selected_work_area(
     x: i32,
     y: i32,
     size: tauri::PhysicalSize<u32>,
-    work_areas: &'a [WindowWorkArea],
-) -> Option<&'a WindowWorkArea> {
+    work_areas: &[WindowWorkArea],
+) -> Option<&WindowWorkArea> {
     work_areas
         .iter()
         .filter(|area| window_work_area_is_usable(area))

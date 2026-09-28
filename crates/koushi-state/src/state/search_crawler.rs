@@ -83,7 +83,9 @@ pub enum SearchCrawlerLastActiveStatus {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+#[derive(Default)]
 pub enum SearchCrawlerRoomState {
+    #[default]
     Idle,
     Queued,
     Running {
@@ -99,12 +101,6 @@ pub enum SearchCrawlerRoomState {
         #[serde(rename = "failureKind")]
         kind: SearchCrawlerFailureKind,
     },
-}
-
-impl Default for SearchCrawlerRoomState {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -713,7 +713,7 @@ impl MediaStagingService {
         }
         let staged_ids = active_items(&initial, &target)
             .filter(|items| !items.is_empty() && koushi_state::staged_uploads_are_sendable(items))
-            .map(|items| ids(items))
+            .map(ids)
             .ok_or(PreparedUploadSendError::NotSendable)?;
         let expected_revision = next_acceptance_revision(&initial, &target, draft_revision)
             .ok_or(PreparedUploadSendError::DraftRevision)?;
@@ -990,6 +990,10 @@ impl MediaStagingService {
         self.preparation.transition().await.merge_prepared(prepared);
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+    )]
     async fn wait(
         &self,
         connection: &mut CoreConnection,

@@ -850,14 +850,12 @@ pub(crate) fn handle_send_text_finished(
     if let Some(PendingComposerSendKind::Reply {
         in_reply_to_event_id,
     }) = pending_send_kind
-    {
-        if state.timeline.composer.mode
+        && state.timeline.composer.mode
             == (ComposerMode::Reply {
                 in_reply_to_event_id,
             })
-        {
-            state.timeline.composer.mode = ComposerMode::Plain;
-        }
+    {
+        state.timeline.composer.mode = ComposerMode::Plain;
     }
     vec![AppEffect::EmitUiEvent(UiEvent::TimelineChanged { room_id })]
 }

@@ -26,9 +26,11 @@ fn plain_url(source: &MediaSource) -> String {
     }
 }
 
+type FetchAnswers = HashMap<String, VecDeque<Result<Vec<u8>, FetchError>>>;
+
 #[derive(Default)]
 struct FakeFetcher {
-    answers: Mutex<HashMap<String, VecDeque<Result<Vec<u8>, FetchError>>>>,
+    answers: Mutex<FetchAnswers>,
     calls: Mutex<Vec<String>>,
 }
 

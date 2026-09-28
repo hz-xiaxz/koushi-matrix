@@ -1084,7 +1084,9 @@ Operational setup and failure diagnosis are documented in
    changes.
 2. Local Tuwunel toolchain caveats are tracked in
    [environment](../agents/environment.md) and the QA scripts, not hand-run.
-3. Required local gates before merging product changes: crate tests
+3. Required local gates before merging product changes: the Rust lint gate
+   (`cargo fmt --check` and the clippy commands in
+   [verification](../agents/verification.md#rust-lint-gate)), crate tests
    (`koushi-state`, `koushi-sdk`, `koushi-core`), frontend tests + typecheck, and
    `qa:headless-local -- --server=both`. During iteration, use focused checks
    first; this does not waive merge gates. Documentation-only changes that do

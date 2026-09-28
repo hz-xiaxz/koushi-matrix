@@ -1,5 +1,3 @@
-use super::super::test_source::item_body;
-
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use std::sync::{
@@ -8,8 +6,6 @@ use std::sync::{
 };
 
 use std::time::Duration;
-
-use futures_util::StreamExt;
 
 use koushi_state::AppAction;
 
@@ -214,7 +210,7 @@ async fn relay_stream_end_emits_one_recovery_control_without_consuming_commands(
             generation: TimelineGeneration(9)
         })
     ));
-    assert!(matches!(data_rx.recv().await, None));
+    assert!(data_rx.recv().await.is_none());
     assert!(matches!(
         command_rx.try_recv(),
         Ok(TimelineActorMessage::ReplayInitialItems { .. })

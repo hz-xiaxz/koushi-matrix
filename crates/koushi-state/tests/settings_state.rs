@@ -738,46 +738,48 @@ fn test_room(room_id: &str, display_name: &str, activity_timestamp_ms: u64) -> R
 
 #[test]
 fn settings_loaded_recomputes_room_list_projection_and_sorts_open_threads() {
-    let mut state = AppState::default();
-    state.rooms = vec![
-        test_room("!alpha:example.invalid", "Alpha", 100),
-        test_room("!beta:example.invalid", "Beta", 200),
-    ];
-    state.threads_list = koushi_state::ThreadsListState::Open {
-        room_id: "!alpha:example.invalid".to_owned(),
-        request_id: 1,
-        items: vec![
-            koushi_state::ThreadsListItem {
-                room_id: "room-a".to_owned(),
-                root_event_id: "$latest:example.invalid".to_owned(),
-                root_sender: "@bob:example.invalid".to_owned(),
-                root_sender_label: None,
-                root_body_preview: None,
-                root_timestamp_ms: Some(200),
-                latest_event_id: Some("$latest:example.invalid".to_owned()),
-                latest_sender: Some("@bob:example.invalid".to_owned()),
-                latest_sender_label: None,
-                latest_body_preview: None,
-                latest_timestamp_ms: Some(200),
-                reply_count: 0,
-            },
-            koushi_state::ThreadsListItem {
-                room_id: "room-a".to_owned(),
-                root_event_id: "$older:example.invalid".to_owned(),
-                root_sender: "@bob:example.invalid".to_owned(),
-                root_sender_label: None,
-                root_body_preview: None,
-                root_timestamp_ms: Some(100),
-                latest_event_id: Some("$older:example.invalid".to_owned()),
-                latest_sender: Some("@bob:example.invalid".to_owned()),
-                latest_sender_label: None,
-                latest_body_preview: None,
-                latest_timestamp_ms: Some(100),
-                reply_count: 0,
-            },
+    let mut state = AppState {
+        rooms: vec![
+            test_room("!alpha:example.invalid", "Alpha", 100),
+            test_room("!beta:example.invalid", "Beta", 200),
         ],
-        is_paginating: false,
-        end_reached: true,
+        threads_list: koushi_state::ThreadsListState::Open {
+            room_id: "!alpha:example.invalid".to_owned(),
+            request_id: 1,
+            items: vec![
+                koushi_state::ThreadsListItem {
+                    room_id: "room-a".to_owned(),
+                    root_event_id: "$latest:example.invalid".to_owned(),
+                    root_sender: "@bob:example.invalid".to_owned(),
+                    root_sender_label: None,
+                    root_body_preview: None,
+                    root_timestamp_ms: Some(200),
+                    latest_event_id: Some("$latest:example.invalid".to_owned()),
+                    latest_sender: Some("@bob:example.invalid".to_owned()),
+                    latest_sender_label: None,
+                    latest_body_preview: None,
+                    latest_timestamp_ms: Some(200),
+                    reply_count: 0,
+                },
+                koushi_state::ThreadsListItem {
+                    room_id: "room-a".to_owned(),
+                    root_event_id: "$older:example.invalid".to_owned(),
+                    root_sender: "@bob:example.invalid".to_owned(),
+                    root_sender_label: None,
+                    root_body_preview: None,
+                    root_timestamp_ms: Some(100),
+                    latest_event_id: Some("$older:example.invalid".to_owned()),
+                    latest_sender: Some("@bob:example.invalid".to_owned()),
+                    latest_sender_label: None,
+                    latest_body_preview: None,
+                    latest_timestamp_ms: Some(100),
+                    reply_count: 0,
+                },
+            ],
+            is_paginating: false,
+            end_reached: true,
+        },
+        ..Default::default()
     };
 
     let values = SettingsValues {
@@ -823,46 +825,48 @@ fn settings_loaded_recomputes_room_list_projection_and_sorts_open_threads() {
 
 #[test]
 fn settings_update_recomputes_room_list_projection_and_resorts_open_threads() {
-    let mut state = AppState::default();
-    state.rooms = vec![
-        test_room("!alpha:example.invalid", "Alpha", 100),
-        test_room("!beta:example.invalid", "Beta", 200),
-    ];
-    state.threads_list = koushi_state::ThreadsListState::Open {
-        room_id: "!alpha:example.invalid".to_owned(),
-        request_id: 1,
-        items: vec![
-            koushi_state::ThreadsListItem {
-                room_id: "room-a".to_owned(),
-                root_event_id: "$latest:example.invalid".to_owned(),
-                root_sender: "@bob:example.invalid".to_owned(),
-                root_sender_label: None,
-                root_body_preview: None,
-                root_timestamp_ms: Some(200),
-                latest_event_id: Some("$latest:example.invalid".to_owned()),
-                latest_sender: Some("@bob:example.invalid".to_owned()),
-                latest_sender_label: None,
-                latest_body_preview: None,
-                latest_timestamp_ms: Some(200),
-                reply_count: 0,
-            },
-            koushi_state::ThreadsListItem {
-                room_id: "room-a".to_owned(),
-                root_event_id: "$older:example.invalid".to_owned(),
-                root_sender: "@bob:example.invalid".to_owned(),
-                root_sender_label: None,
-                root_body_preview: None,
-                root_timestamp_ms: Some(100),
-                latest_event_id: Some("$older:example.invalid".to_owned()),
-                latest_sender: Some("@bob:example.invalid".to_owned()),
-                latest_sender_label: None,
-                latest_body_preview: None,
-                latest_timestamp_ms: Some(100),
-                reply_count: 0,
-            },
+    let mut state = AppState {
+        rooms: vec![
+            test_room("!alpha:example.invalid", "Alpha", 100),
+            test_room("!beta:example.invalid", "Beta", 200),
         ],
-        is_paginating: false,
-        end_reached: true,
+        threads_list: koushi_state::ThreadsListState::Open {
+            room_id: "!alpha:example.invalid".to_owned(),
+            request_id: 1,
+            items: vec![
+                koushi_state::ThreadsListItem {
+                    room_id: "room-a".to_owned(),
+                    root_event_id: "$latest:example.invalid".to_owned(),
+                    root_sender: "@bob:example.invalid".to_owned(),
+                    root_sender_label: None,
+                    root_body_preview: None,
+                    root_timestamp_ms: Some(200),
+                    latest_event_id: Some("$latest:example.invalid".to_owned()),
+                    latest_sender: Some("@bob:example.invalid".to_owned()),
+                    latest_sender_label: None,
+                    latest_body_preview: None,
+                    latest_timestamp_ms: Some(200),
+                    reply_count: 0,
+                },
+                koushi_state::ThreadsListItem {
+                    room_id: "room-a".to_owned(),
+                    root_event_id: "$older:example.invalid".to_owned(),
+                    root_sender: "@bob:example.invalid".to_owned(),
+                    root_sender_label: None,
+                    root_body_preview: None,
+                    root_timestamp_ms: Some(100),
+                    latest_event_id: Some("$older:example.invalid".to_owned()),
+                    latest_sender: Some("@bob:example.invalid".to_owned()),
+                    latest_sender_label: None,
+                    latest_body_preview: None,
+                    latest_timestamp_ms: Some(100),
+                    reply_count: 0,
+                },
+            ],
+            is_paginating: false,
+            end_reached: true,
+        },
+        ..Default::default()
     };
 
     reduce(
@@ -923,11 +927,13 @@ fn settings_update_recomputes_room_list_projection_and_resorts_open_threads() {
 
 #[test]
 fn settings_update_without_sort_changes_does_not_emit_room_or_threads_list_events() {
-    let mut state = AppState::default();
-    state.rooms = vec![
-        test_room("!alpha:example.invalid", "Alpha", 100),
-        test_room("!beta:example.invalid", "Beta", 200),
-    ];
+    let mut state = AppState {
+        rooms: vec![
+            test_room("!alpha:example.invalid", "Alpha", 100),
+            test_room("!beta:example.invalid", "Beta", 200),
+        ],
+        ..Default::default()
+    };
 
     reduce(
         &mut state,

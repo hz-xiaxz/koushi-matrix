@@ -17,14 +17,15 @@ fn request(connection_id: u64, sequence: u64) -> RequestId {
 }
 
 fn account_state(user_id: &str) -> AppState {
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(SessionInfo {
-        homeserver: "https://example.invalid".to_owned(),
-        user_id: user_id.to_owned(),
-        device_id: "device".to_owned(),
-        authentication_method: Default::default(),
-    });
-    state
+    AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://example.invalid".to_owned(),
+            user_id: user_id.to_owned(),
+            device_id: "device".to_owned(),
+            authentication_method: Default::default(),
+        }),
+        ..Default::default()
+    }
 }
 
 fn room_summary(room_id: &str) -> koushi_state::RoomSummary {
@@ -85,7 +86,7 @@ async fn event_before_projection_waits_for_authoritative_snapshot_and_returns_ge
         request_id,
         room_id: room_id.to_owned(),
     }));
-    assert!(matches!(waiter.as_mut().now_or_never(), None));
+    assert!(waiter.as_mut().now_or_never().is_none());
     control.send_snapshot(published.clone());
     assert_eq!(
         waiter.await.expect("room creation outcome"),

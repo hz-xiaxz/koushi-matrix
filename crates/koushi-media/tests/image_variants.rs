@@ -192,12 +192,11 @@ fn png_offers_original_resized_png_and_alpha_preserving_webp() {
     assert_eq!(variants[1].dimensions, (48, 32));
     assert!(variants[1].metadata_stripped);
     assert_eq!(variants[2].mime_type, "image/webp");
-    assert_eq!(
+    assert!(
         image::load_from_memory(&variants[2].bytes)
             .unwrap()
             .color()
-            .has_alpha(),
-        true
+            .has_alpha()
     );
 }
 

@@ -138,17 +138,17 @@ async fn run_window(
                 .recv_event()
                 .await
                 .map_err(|_| "avatar timeline stream lagged".to_owned())?
+                && cause == subscribe
+                && actual_key == key
             {
-                if cause == subscribe && actual_key == key {
-                    return Ok::<_, String>(ReceiptSourceRef {
-                        timeline: TimelineViewSource {
-                            key: actual_key,
-                            projection_request_id,
-                            generation,
-                        },
-                        event_id: event.to_owned(),
-                    });
-                }
+                return Ok::<_, String>(ReceiptSourceRef {
+                    timeline: TimelineViewSource {
+                        key: actual_key,
+                        projection_request_id,
+                        generation,
+                    },
+                    event_id: event.to_owned(),
+                });
             }
         }
     })

@@ -118,7 +118,7 @@ fn scheduled_send_acceptance_fences_delayed_draft_persistence() {
 
     assert!(state.timeline.composer.draft.is_empty());
     assert_eq!(state.timeline.composer.draft_revision, 5.into());
-    assert!(state.composer_drafts.rooms.get("room-a").is_none());
+    assert!(!state.composer_drafts.rooms.contains_key("room-a"));
     assert_eq!(state.composer_drafts.room_revision("room-a"), 5.into());
 }
 

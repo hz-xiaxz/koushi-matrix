@@ -374,17 +374,13 @@ pub fn link_previews_for_message(
     Some(
         urls.into_iter()
             .map(|url| {
-                context
-                    .cache
-                    .get(&url)
-                    .cloned()
-                    .unwrap_or_else(|| LinkPreview {
-                        url,
-                        title: None,
-                        description: None,
-                        image: None,
-                        state: LinkPreviewState::Pending,
-                    })
+                context.cache.get(&url).cloned().unwrap_or(LinkPreview {
+                    url,
+                    title: None,
+                    description: None,
+                    image: None,
+                    state: LinkPreviewState::Pending,
+                })
             })
             .collect(),
     )

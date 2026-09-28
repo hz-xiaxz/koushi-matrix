@@ -1,13 +1,16 @@
 use super::*;
+use koushi_protocol::TimelineEvent;
 
 fn ready_state(room_id: &str) -> koushi_state::AppState {
-    let mut state = koushi_state::AppState::default();
-    state.session = koushi_state::SessionState::Ready(koushi_state::SessionInfo {
-        homeserver: "https://example.invalid".to_owned(),
-        user_id: "@alice:example.invalid".to_owned(),
-        device_id: "DEVICE".to_owned(),
-        authentication_method: Default::default(),
-    });
+    let mut state = koushi_state::AppState {
+        session: koushi_state::SessionState::Ready(koushi_state::SessionInfo {
+            homeserver: "https://example.invalid".to_owned(),
+            user_id: "@alice:example.invalid".to_owned(),
+            device_id: "DEVICE".to_owned(),
+            authentication_method: Default::default(),
+        }),
+        ..Default::default()
+    };
     state.timeline.room_id = Some(room_id.to_owned());
     state
 }

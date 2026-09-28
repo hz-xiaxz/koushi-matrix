@@ -485,7 +485,7 @@ impl RoomSubscriptionResidencyHarness {
     }
 
     pub async fn lost_leave_acknowledgement(&mut self) -> RoomSubscriptionResidencyAckLossProbe {
-        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
         let ack_diagnostic_before = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .into_iter()
@@ -1423,7 +1423,7 @@ impl RoomSubscriptionResidencyHarness {
     }
 
     pub async fn pre_sync_mismatch_probe(&mut self) -> RoomSubscriptionResidencyBindingProbe {
-        let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+        let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
         let mismatch_diagnostic_before = koushi_diagnostics::test_support::detail_snapshot()
             .records
             .into_iter()

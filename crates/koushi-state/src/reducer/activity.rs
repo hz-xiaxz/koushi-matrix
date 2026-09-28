@@ -204,7 +204,7 @@ pub(crate) fn handle_activity_mark_read_succeeded(
     unread.rows.retain(|row| {
         row.event_id
             .as_ref()
-            .map_or(true, |id| !cleared_event_ids.contains(id))
+            .is_none_or(|id| !cleared_event_ids.contains(id))
     });
     *mark_read = ActivityMarkReadState::Idle;
     vec![AppEffect::EmitUiEvent(UiEvent::ActivityChanged)]

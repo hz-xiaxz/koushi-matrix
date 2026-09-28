@@ -90,8 +90,8 @@ pub(crate) async fn load_saved_crypto_store_identity(
             return Err(SavedCryptoStorePreflight::OpenFailed);
         }
     };
-    if !expected_user_id.is_none_or(|expected| account.user_id().as_str() == expected)
-        || !expected_device_id.is_none_or(|expected| account.device_id().as_str() == expected)
+    if expected_user_id.is_some_and(|expected| account.user_id().as_str() != expected)
+        || expected_device_id.is_some_and(|expected| account.device_id().as_str() != expected)
     {
         let _ = close_store(&store).await;
         return Err(SavedCryptoStorePreflight::IdentityMismatch);

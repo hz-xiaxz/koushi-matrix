@@ -39,13 +39,12 @@ pub(super) async fn verify_live_reader_scope(
                 .recv_event()
                 .await
                 .map_err(|_| "reader scope: timeline stream lagged".to_owned())?;
-            if let CoreEvent::Timeline(TimelineEvent::InitialItems { request_id: projection, cause_request_id: cause, key: observed_key, .. }) = &event {
-                if observed_key == key {
+            if let CoreEvent::Timeline(TimelineEvent::InitialItems { request_id: projection, cause_request_id: cause, key: observed_key, .. }) = &event
+                && observed_key == key {
                     initial_count += 1;
                     matching_cause_count += usize::from(*cause == Some(request_id));
                     projection_count += usize::from(projection.is_some());
                 }
-            }
             if let CoreEvent::Timeline(TimelineEvent::InitialItems {
                 request_id: Some(projection_request_id),
                 cause_request_id: Some(cause),
@@ -53,15 +52,13 @@ pub(super) async fn verify_live_reader_scope(
                 generation,
                 ..
             }) = event
-            {
-                if cause == request_id && &observed_key == key {
+                && cause == request_id && &observed_key == key {
                     return Ok::<_, String>(TimelineViewSource {
                         key: observed_key,
                         projection_request_id,
                         generation,
                     });
                 }
-            }
         }
     })
     .await
@@ -91,22 +88,21 @@ pub(super) async fn verify_live_reader_scope(
                         reader
                             .ack_model(revision)
                             .map_err(|_| "reader scope: ACK failed".to_owned())?;
-                        if let ViewModel::ReaderReady(window) = model {
-                            if let Some(row) = window
+                        if let ViewModel::ReaderReady(window) = model
+                            && let Some(row) = window
                                 .rows
                                 .iter()
                                 .find(|row| row.user_id == expected_reader)
+                        {
+                            if let Some(koushi_state::AvatarThumbnailState::Ready {
+                                source_ref,
+                                ..
+                            }) = &row.avatar
                             {
-                                if let Some(koushi_state::AvatarThumbnailState::Ready {
-                                    source_ref,
-                                    ..
-                                }) = &row.avatar
-                                {
-                                    verify_png(&reader, revision, source_ref)?;
-                                    ready_resource = Some((revision, source_ref.clone()));
-                                }
-                                return Ok::<_, String>(revision);
+                                verify_png(&reader, revision, source_ref)?;
+                                ready_resource = Some((revision, source_ref.clone()));
                             }
+                            return Ok::<_, String>(revision);
                         }
                     }
                     _ => return Err("reader scope: retired before matching model".to_owned()),

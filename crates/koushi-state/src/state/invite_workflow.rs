@@ -393,11 +393,11 @@ pub fn build_invite_target_query_state(
                     candidate_from_parts(
                         &member.user_id,
                         alias.unwrap_or(&member.display_label),
-                        member
-                            .original_display_label
-                            .is_empty()
-                            .then_some(member.display_label.as_str())
-                            .unwrap_or(member.original_display_label.as_str()),
+                        if member.original_display_label.is_empty() {
+                            member.display_label.as_str()
+                        } else {
+                            member.original_display_label.as_str()
+                        },
                         None,
                         InviteTargetCandidateSource::RoomMember,
                         &selected_user_ids,
@@ -500,13 +500,12 @@ pub fn build_invite_scope_plan(state: &AppState, room_id: String) -> InviteScope
         .map(|room| room.parent_space_ids.clone())
         .unwrap_or_default();
     let mut ordered_parent_space_ids = Vec::new();
-    if let Some(active_space_id) = &state.navigation.active_space_id {
-        if parent_space_ids
+    if let Some(active_space_id) = &state.navigation.active_space_id
+        && parent_space_ids
             .iter()
             .any(|space_id| space_id == active_space_id)
-        {
-            ordered_parent_space_ids.push(active_space_id.clone());
-        }
+    {
+        ordered_parent_space_ids.push(active_space_id.clone());
     }
     for space_id in parent_space_ids {
         if !ordered_parent_space_ids

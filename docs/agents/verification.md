@@ -108,11 +108,40 @@ A subagent's "gates passed" claim is not evidence — re-run the gate yourself.
 | --- | --- |
 | `Frontend (typecheck / vitest / build / secret-scan)` | typecheck, vitest, build, secret scan, ESLint import boundaries, Tauri adapter boundary, domain-crate platform deps |
 | `Browser headless (Playwright DOM tier)` | `npx playwright test` — a red spec is a blocked merge |
+| `Rust lint (rustfmt / clippy)` | `cargo fmt --check`, then workspace, QA-binary, and release-configuration clippy with `-D warnings` (see [Rust lint gate](#rust-lint-gate)) |
 | `Rust (workspace / src-tauri / wasm)` | submodule guard, diagnostic-isolation guard, one feature-unified workspace suite (including the `koushi-core-testkit` integration targets and the `koushi-desktop` DTO/IPC contract tests), wasm build, `cargo-deny`, `cargo-machete`, the CI-cache report, and workspace cargo metrics |
-| `macOS Tauri cargo check` | `cargo check --profile ci -p koushi-desktop` on macOS, including `#[cfg(target_os = "macos")]` paths excluded by Linux CI |
+| `macOS Tauri cargo check` | `cargo check --profile ci -p koushi-desktop` plus `cargo clippy ... -- -D warnings` on macOS, including `#[cfg(target_os = "macos")]` paths excluded by Linux CI |
 | `Core invitations (tuwunel)` / `Core invitations (synapse)` | real homeserver `--core --scenario=invites_dm` per server |
 | `Core QA binary tests` | `cargo test -p koushi-qa --features qa-bin --bin headless-core-qa` |
-| `Windows overlay ACL IPC` | `cargo test -p koushi-windows-overlay-acl windows_overlay_ipc_is_authorized` |
+| `Windows overlay ACL IPC` | `cargo test -p koushi-windows-overlay-acl windows_overlay_ipc_is_authorized`, OIDC launch tests, and desktop clippy with `-D warnings` for Windows-only cfg paths |
+
+### Rust lint gate
+
+Run from the repository root with the pinned toolchain (`rust-toolchain.toml`
+lists the `clippy` and `rustfmt` components):
+
+```bash
+cargo fmt --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy -p koushi-qa --features qa-bin --all-targets --locked -- -D warnings
+cargo clippy --release --workspace --locked -- -D warnings
+```
+
+The release run matters because `cfg(debug_assertions)` QA paths disappear
+there, so imports that only those paths use are unused only in release builds.
+
+`cargo fmt` formats workspace members only; do not use `cargo fmt --all`,
+which also rewrites path dependencies such as `vendor/matrix-rust-sdk`. The
+vendored SDK is excluded from the workspace and is not linted.
+
+Fix findings rather than silencing them. Crate- or module-wide `allow`
+attributes are not accepted. A per-item `#[expect(lint, reason = "...")]` is
+acceptable only when the lint is a false positive or the fix would harm
+clarity (for example, a Tauri command whose parameters are named IPC
+arguments). Use `#[cfg(target_os = ...)]`, or `cfg(any(<platform>, test))`
+for pure helpers that are tested everywhere, for genuinely platform-specific
+code. Shared contract variants produced only on one platform keep a narrowly
+scoped `cfg_attr(not(<platform>), allow(dead_code))`.
 
 `cargo test --profile ci --workspace` does not compile the QA binaries: both bin targets set
 `required-features = ["qa-bin"]`. Only the `Core QA binary tests` job compiles

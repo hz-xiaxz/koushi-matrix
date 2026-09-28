@@ -392,7 +392,7 @@ pub fn lookup_renderable_thumbnail(source_ref: &str) -> Option<RenderableThumbna
     let mut cache = renderable_thumbnail_cache()
         .lock()
         .expect("renderable thumbnail cache should not be poisoned");
-    cache.get(&cache_key)
+    cache.get(cache_key)
 }
 
 pub fn clear_renderable_thumbnail_cache() {
@@ -402,12 +402,21 @@ pub fn clear_renderable_thumbnail_cache() {
     cache.clear();
 }
 
+/// Serializes tests that share the process-global thumbnail cache. The mutex
+/// is async-aware because asynchronous tests hold it across await points.
 #[cfg(test)]
-pub(crate) fn test_cache_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .expect("renderable thumbnail cache test lock should not be poisoned")
+static TEST_CACHE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Synchronous tests only; panics inside an async runtime.
+#[cfg(test)]
+pub(crate) fn test_cache_lock() -> tokio::sync::MutexGuard<'static, ()> {
+    TEST_CACHE_LOCK.blocking_lock()
+}
+
+/// Asynchronous tests: waiting yields instead of blocking a runtime worker.
+#[cfg(test)]
+pub(crate) async fn test_cache_lock_async() -> tokio::sync::MutexGuard<'static, ()> {
+    TEST_CACHE_LOCK.lock().await
 }
 
 pub fn renderable_thumbnail_cache_stats() -> RenderableThumbnailCacheStats {

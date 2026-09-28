@@ -368,7 +368,7 @@ pub async fn set_room_tag(
     let settlement = submit_room_operation(
         state.inner(),
         request_id,
-        build_set_room_tag_command(request_id, room_id.clone(), tag.clone(), order),
+        build_set_room_tag_command(request_id, room_id.clone(), tag, order),
         room_id,
         RoomOperationKind::RoomTagSet { tag },
         "room tag update",
@@ -389,7 +389,7 @@ pub async fn remove_room_tag(
     let settlement = submit_room_operation(
         state.inner(),
         request_id,
-        build_remove_room_tag_command(request_id, room_id.clone(), tag.clone()),
+        build_remove_room_tag_command(request_id, room_id.clone(), tag),
         room_id,
         RoomOperationKind::RoomTagRemoved { tag },
         "room tag removal",
@@ -1089,6 +1089,10 @@ pub async fn invite_user_to_space(
 }
 
 #[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tauri command: each parameter is a named IPC argument of the renderer contract"
+)]
 pub async fn update_space_member_role(
     space_id: String,
     user_id: String,
@@ -1210,6 +1214,10 @@ pub async fn invite_targets(
     Ok(command_settlement(generation))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
+)]
 pub(super) async fn wait_for_room_operation(
     event_conn: &mut CoreConnection,
     operation_request_id: RequestId,
@@ -1240,6 +1248,10 @@ pub(super) async fn wait_for_room_operation(
     Ok(generation)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the Tauri command IPC arguments one-to-one"
+)]
 pub(super) fn build_update_space_member_role_command(
     request_id: koushi_protocol::RequestId,
     space_id: String,

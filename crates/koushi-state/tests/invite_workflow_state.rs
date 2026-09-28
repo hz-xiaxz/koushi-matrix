@@ -93,9 +93,10 @@ fn session_info() -> SessionInfo {
 }
 
 fn ready_state() -> AppState {
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(session_info());
-    state
+    AppState {
+        session: SessionState::Ready(session_info()),
+        ..Default::default()
+    }
 }
 
 fn ready_with_room(room_id: &str) -> AppState {
