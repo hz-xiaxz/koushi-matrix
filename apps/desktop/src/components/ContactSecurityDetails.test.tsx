@@ -50,8 +50,17 @@ const unsignedDeviceVerified = summary({
   identity: "verifiedByYou"
 });
 
-function loaded(value: ContactSecuritySummary, userId = CONTACT): ContactSecurityState {
-  return { user_id: userId, load: { kind: "loaded", request_id: 4 }, summary: value };
+function loaded(
+  value: ContactSecuritySummary,
+  userId = CONTACT,
+  verificationBusy = false
+): ContactSecurityState {
+  return {
+    user_id: userId,
+    load: { kind: "loaded", request_id: 4 },
+    summary: value,
+    verification_busy: verificationBusy
+  };
 }
 
 function mockActions() {
@@ -101,7 +110,8 @@ describe("ContactSecurityDetails", () => {
     const { actions, rerender, unmount } = renderProfile({
       user_id: null,
       load: { kind: "idle" },
-      summary: null
+      summary: null,
+      verification_busy: false
     });
     expect(actions.load).toHaveBeenCalledTimes(1);
     expect(actions.load).toHaveBeenCalledWith(CONTACT);
@@ -167,11 +177,18 @@ describe("ContactSecurityDetails", () => {
     expect(screen.queryByText(/Verify this person/)).toBeNull();
   });
 
-  test("an identity change after your verification is a distinct attention state", () => {
+  test("a lapsed verification is a distinct attention state that blames neither side", () => {
     renderProfile(loaded(summary({ identity: "changedAfterVerification" })));
     const identity = row("Your verification");
     expect(identity.classList.contains("is-attention")).toBe(true);
-    expect(within(identity).getByText("Identity changed after you verified it")).toBeTruthy();
+    expect(within(identity).getByText("Your verification no longer applies")).toBeTruthy();
+    fireEvent.click(within(identity).getByRole("button", { name: /Details/ }));
+    // The SDK reports this when either identity was reset after you verified.
+    expect(
+      within(identity).getByText(
+        "You verified this person before, but their identity or yours has been reset since then, so that verification no longer applies. Choose Verify again to compare emoji with them."
+      )
+    ).toBeTruthy();
     expect(row("Their devices").classList.contains("is-attention")).toBe(false);
   });
 
@@ -216,7 +233,8 @@ describe("ContactSecurityDetails", () => {
     const { actions } = renderProfile({
       user_id: CONTACT,
       load: { kind: "failed", request_id: 2, failureKind: "network" },
-      summary: null
+      summary: null,
+      verification_busy: false
     });
     expect(within(row("Their devices")).getByText("Status unavailable")).toBeTruthy();
     expect(within(row("Your verification")).getByText("Status unavailable")).toBeTruthy();
@@ -323,7 +341,7 @@ describe("Verify user", () => {
     fireEvent.click(screen.getByRole("button", { name: "Verify user" }));
     expect(
       screen.getByText(
-        "Koushi sends the verification request in your encrypted direct chat with this person."
+        "Koushi sends the verification request in your encrypted direct chat with this person. If they have left that chat, Koushi invites them back to it."
       )
     ).toBeTruthy();
   });
@@ -406,14 +424,19 @@ describe("Verify user", () => {
     expect(within(row("Your verification")).getByText("Verified by you")).toBeTruthy();
   });
 
-  test("a verification with someone else is not shown here", () => {
-    renderProfile(loaded(summary({ verification: offered("new") })), CONTACT, {
+  test("a verification with someone else is not shown here, and Rust marks Verify user busy", () => {
+    renderProfile(loaded(summary({ verification: offered("new") }), CONTACT, true), CONTACT, {
       kind: "sasPresented",
       request_id: 22,
       target: { user_id: OTHER, device_id: "" },
       emojis
     });
     expect(screen.queryByRole("list", { name: "Emoji to compare" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Verify user" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Verify user" })).toBeNull();
+    expect(
+      screen.getByText(
+        "Another verification is in progress. You can verify this person after it finishes."
+      )
+    ).toBeTruthy();
   });
 });

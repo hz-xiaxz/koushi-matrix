@@ -34,6 +34,9 @@ pub enum CoreFailure {
     },
     SecureBackupSetupConfirmationRequired,
     SecureBackupSetupFailedNoOp,
+    /// A verification request was refused because another verification flow
+    /// is still in progress (#1024).
+    VerificationInProgress,
     SearchFailed {
         kind: SearchFailureKind,
     },

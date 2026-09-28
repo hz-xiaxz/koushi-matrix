@@ -87,6 +87,12 @@ pub(crate) fn clear_stale_verification_flow(state: &mut AppState) -> bool {
 }
 
 pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
+    let mut effects = reduce_action(state, action);
+    contact_security::sync_verification_busy(state, &mut effects);
+    effects
+}
+
+fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
     match action {
         AppAction::AppStarted => session::handle_app_started(state),
         AppAction::RestoreSessionRequested => session::handle_restore_session_requested(state),

@@ -5133,7 +5133,10 @@ User info shows two independent facts about another person (#1024), held in
   `OwnerIdentityMissing`.
 - **Your verification:** `UserIdentity::has_verification_violation()` →
   `ChangedAfterVerification`, else `is_verified()` → `VerifiedByYou`, else
-  `NotVerifiedByYou`; no identity → `Unknown`.
+  `NotVerifiedByYou`; no identity → `Unknown`. The SDK's violation is
+  "previously verified, not verified now", which also follows a reset of
+  *your* identity, so the GUI says the earlier verification no longer
+  applies without attributing the change to the contact.
 
 ```mermaid
 stateDiagram-v2
@@ -5161,7 +5164,12 @@ stateDiagram-v2
   previous summary; the actor performs a `/keys/query` for the contact
   (`Encryption::request_user_identity`) and then reads the SDK store. A failed
   retrieval is `Failed` with no summary ("status unavailable"), never a
-  confirmation. An empty device list is `NoDevices`, and a contact without
+  confirmation. `/keys/query` answers HTTP 200 even when the contact's
+  homeserver was unreachable, listing it under `failures` while the SDK keeps
+  its cached keys; the SDK call does not surface that, so the actor issues the
+  same typed query and treats the contact's server under `failures` as
+  `Failed { Network }` (Verify user likewise refuses with `Network`) rather
+  than showing the cached answer. An empty device list is `NoDevices`, and a contact without
   cross-signing is `OwnerIdentityMissing`/`Unknown`; neither is confirmation.
 - **Fences.** Results whose `user_id` or `request_id` do not match the
   in-flight load are dropped, so a late answer for a previous contact or a
@@ -5172,7 +5180,11 @@ stateDiagram-v2
   SDK's `devices_stream()` and `user_identities_stream()`, re-reads the
   contact from the store without network on any change (device additions,
   removals, re-signing, identity changes, and changes to your own identity),
-  and projects `Refreshed` only when the summary changed. The observer is
+  and projects `Refreshed` only when the summary changed. It also re-reads on
+  `m.direct` account-data changes (the direct chat Verify user would use, for
+  example one created by a failed first attempt), after a Verify user request
+  is sent or fails, and after a successful own-trust recheck (this session
+  gaining or losing your cross-signing keys changes the offer). The observer is
   generation-fenced and stopped on close, contact switch, and session teardown.
 - **SDK protections are unchanged.** Devices whose own self-signature is
   invalid are rejected by the SDK during `/keys/query` and never counted.
@@ -5203,6 +5215,15 @@ stateDiagram-v2
   paths; on completion it re-reads the open contact so the row shows
   `VerifiedByYou`. Failure and cancellation settle the shared flow as
   `Failed`/`Idle`, after which the offer is shown again.
+- **Busy.** `ContactSecurityState.verification_busy` is derived by the reducer
+  after every action: `true` while a contact is open and the shared
+  `E2eeTrustState.verification` flow is in progress (`Requested`, `Accepted`,
+  `SasPresented`, `Confirming`, with anyone or for this session), else
+  `false`; a flip emits `ContactSecurityChanged`. While busy and the flow is
+  not with this contact, the GUI explains that another verification is in
+  progress instead of offering Verify user. A `RequestVerification` the
+  reducer refuses for that reason fails with `VerificationInProgress`, not
+  `SessionRequired`.
 - A recipient on Simplified Sliding Sync who joins a brand-new DM after the
   request was sent receives the request only if their server delivers that
   event through sync (Tuwunel does); Synapse returns it through gap repair,

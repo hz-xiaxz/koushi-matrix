@@ -383,7 +383,8 @@
             "kind": "offered"
           }
         },
-        "user_id": "@contact:example.invalid"
+        "user_id": "@contact:example.invalid",
+        "verification_busy": true
       },
       "current_session_status": {
         "details": {

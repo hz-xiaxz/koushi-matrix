@@ -232,6 +232,7 @@ pub struct FrontendDomainStateChangedSlices {
     pub account_management_capabilities: Option<AccountManagementCapabilities>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_notifications: Option<koushi_state::AccountNotificationsState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub contact_security: Option<koushi_state::ContactSecurityState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub soft_logout_reauth: Option<SoftLogoutReauthState>,

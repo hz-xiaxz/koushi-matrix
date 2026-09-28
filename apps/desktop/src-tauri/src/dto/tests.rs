@@ -357,6 +357,74 @@ fn session_lock_reason_state_delta_crosses_the_frontend_boundary_and_clears_expl
 }
 
 #[test]
+fn unrelated_delta_omits_the_open_contact_security_slice() {
+    // #1024: a `null` slice overwrites the frontend's copy on merge, which
+    // closed the open User info security details on any unrelated delta.
+    let mut previous = booted_app_state();
+    previous.contact_security.user_id = Some("@contact:example.invalid".to_owned());
+    previous.contact_security.load =
+        koushi_state::ContactSecurityLoadState::Loaded { request_id: 3 };
+    let mut next = previous.clone();
+    next.live_signals.rooms.insert(
+        "!room:example.invalid".to_owned(),
+        koushi_state::RoomLiveSignals::default(),
+    );
+    let delta = koushi_core::build_state_delta(11, &previous, &next)
+        .expect("room live-signal changes should produce a state delta");
+    let value = serde_json::to_value(FrontendDesktopSnapshotDelta::from(delta))
+        .expect("delta should serialize");
+    let domain = value["changed"]["state"]["domain"]
+        .as_object()
+        .expect("domain slices");
+    assert!(domain.contains_key("live_signals_rooms"));
+    assert!(!domain.contains_key("contact_security"), "{domain:?}");
+
+    let mut closed = previous.clone();
+    closed.contact_security = koushi_state::ContactSecurityState::default();
+    let delta = koushi_core::build_state_delta(12, &previous, &closed)
+        .expect("contact security changes should produce a state delta");
+    let value = serde_json::to_value(FrontendDesktopSnapshotDelta::from(delta))
+        .expect("delta should serialize");
+    assert_eq!(
+        value["changed"]["state"]["domain"]["contact_security"]["user_id"],
+        json!(null)
+    );
+}
+
+/// Structural guard for every delta slice: an unchanged (`None`) slice is
+/// omitted from the wire. The frontend merges slices with object spread, so a
+/// serialized `null` would replace its copy. `Option<Option<_>>` slices still
+/// serialize `Some(None)` as an explicit `null` clear.
+#[test]
+fn every_unchanged_delta_slice_is_omitted_from_the_wire() {
+    use super::{
+        FrontendAppStateChangedSlices, FrontendDesktopSnapshotChangedSlices,
+        FrontendDomainStateChangedSlices, FrontendUiStateChangedSlices,
+    };
+    assert_eq!(
+        serde_json::to_value(FrontendDomainStateChangedSlices::default()).unwrap(),
+        json!({})
+    );
+    assert_eq!(
+        serde_json::to_value(FrontendUiStateChangedSlices::default()).unwrap(),
+        json!({})
+    );
+    assert_eq!(
+        serde_json::to_value(FrontendDesktopSnapshotChangedSlices::default()).unwrap(),
+        json!({})
+    );
+    assert_eq!(
+        serde_json::to_value(FrontendAppStateChangedSlices {
+            schema_version: None,
+            domain: None,
+            ui: None,
+        })
+        .unwrap(),
+        json!({})
+    );
+}
+
+#[test]
 fn room_live_signal_delta_crosses_the_frontend_boundary() {
     let previous = booted_app_state();
     let mut next = previous.clone();
@@ -1519,6 +1587,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
                 direct_chat: koushi_state::ContactVerificationDirectChat::New,
             },
         }),
+        verification_busy: true,
     };
 
     // room_management — with settings snapshot

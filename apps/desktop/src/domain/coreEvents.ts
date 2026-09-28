@@ -1353,6 +1353,7 @@ export type CoreFailure =
   | { ReportOperationFailed: { kind: ReportFailureKind } }
   | { SearchFailed: { kind: string } }
   | "LocalEncryptionUnavailable"
+  | "VerificationInProgress"
   | "PreferenceRejected"
   | "StoreUnavailable"
   | "ShutdownFailed";

@@ -10,6 +10,9 @@
 //!   key signed the contact's master key) and
 //!   `has_verification_violation()` (verified before, not any more).
 //!
+//! A retrieval counts as fresh only when the contact's homeserver answered
+//! `/keys/query`; otherwise the cached store answer is not projected.
+//!
 //! Nothing here pins identities, verifies, withdraws verification, or sets
 //! local trust. Devices whose own self-signature is invalid are rejected by
 //! the SDK during `/keys/query` and never reach this projection; deleted
@@ -166,7 +169,32 @@ fn classify_retrieval_error(error: &matrix_sdk::Error) -> ContactSecurityFailure
     }
 }
 
-/// Fresh retrieval: `/keys/query` for the contact, then the store read.
+/// Whether the homeserver answered `/keys/query` for the contact's server.
+///
+/// `/keys/query` succeeds with HTTP 200 even when the contact's homeserver
+/// could not be reached: that server is listed under `failures` and the SDK
+/// keeps serving its cached keys, which may be arbitrarily stale (for
+/// example a verification from before an identity reset). The SDK's
+/// `request_user_identity` does not surface `failures`, so the same typed
+/// query is issued here and a listed server means the retrieval was not
+/// fresh.
+async fn contact_server_answered(
+    client: &matrix_sdk::Client,
+    user_id: &UserId,
+) -> Result<bool, matrix_sdk::HttpError> {
+    use matrix_sdk::ruma::api::client::keys::get_keys;
+
+    let mut request = get_keys::v3::Request::new();
+    request.device_keys.insert(user_id.to_owned(), Vec::new());
+    let response = client.send(request).await?;
+    Ok(!response
+        .failures
+        .contains_key(user_id.server_name().as_str()))
+}
+
+/// Fresh retrieval: `/keys/query` for the contact, then the store read. A
+/// query the contact's homeserver did not answer is a failed retrieval,
+/// never the cached answer.
 pub async fn load_contact_security(
     session: &MatrixClientSession,
     user_id: &str,
@@ -178,6 +206,12 @@ pub async fn load_contact_security(
         .request_user_identity(user_id)
         .await
         .map_err(|error| classify_retrieval_error(&error))?;
+    if !contact_server_answered(&session.client, user_id)
+        .await
+        .map_err(|_| ContactSecurityFailureKind::Network)?
+    {
+        return Err(ContactSecurityFailureKind::Network);
+    }
     read_contact_security_from_store(&session.client, user_id).await
 }
 
@@ -245,8 +279,19 @@ pub async fn request_user_verification(
         .await
         .map_err(|error| {
             crate::E2eeTrustError::Classified(crate::e2ee::trust_failure_kind(&error))
-        })?
-        .ok_or_else(|| crate::E2eeTrustError::Sdk("contact has no identity".to_owned()))?;
+        })?;
+    // Never act on a cached identity (or its absence) the contact's server
+    // did not confirm just now.
+    if !contact_server_answered(&session.client, user_id)
+        .await
+        .map_err(|_| crate::E2eeTrustError::Classified(crate::E2eeTrustFailureKind::Network))?
+    {
+        return Err(crate::E2eeTrustError::Classified(
+            crate::E2eeTrustFailureKind::Network,
+        ));
+    }
+    let identity =
+        identity.ok_or_else(|| crate::E2eeTrustError::Sdk("contact has no identity".to_owned()))?;
     if identity.is_verified() {
         return Err(crate::E2eeTrustError::Sdk(
             "contact is already verified".to_owned(),
@@ -268,7 +313,8 @@ pub async fn request_user_verification(
     Ok(crate::MatrixVerificationRequestHandle::from_sdk(request))
 }
 
-/// A unit item whenever the SDK's device or identity store changes. Items
+/// A unit item whenever the SDK's device or identity store changes, or the
+/// `m.direct` account data (which direct chat Verify user uses) does. Items
 /// are not filtered by user: a device removal is delivered without device
 /// maps, and a change to the viewing user's own identity changes whether a
 /// contact is verified, so the caller re-reads and de-duplicates.
@@ -288,7 +334,19 @@ pub async fn observe_contact_security_changes(
         .await
         .map_err(|_| ContactSecurityFailureKind::Sdk)?
         .map(|_| ());
-    Ok(Box::pin(stream::select(devices, identities)))
+    // `m.direct` changes decide which direct chat Verify user would use (for
+    // example one a failed first attempt created). The observer must outlive
+    // its subscriber, so the stream owns it.
+    let direct_chats = session
+        .client
+        .observe_events::<matrix_sdk::ruma::events::direct::DirectEvent, ()>();
+    let direct_chat_changes = direct_chats.subscribe().map(move |_| {
+        let _observer = &direct_chats;
+    });
+    Ok(Box::pin(stream::select(
+        stream::select(devices, identities),
+        direct_chat_changes,
+    )))
 }
 
 #[cfg(test)]

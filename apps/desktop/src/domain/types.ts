@@ -673,6 +673,9 @@ export interface ContactSecurityState {
   user_id: string | null;
   load: ContactSecurityLoadState;
   summary: ContactSecuritySummary | null;
+  /** Rust-derived: another verification flow is in progress, so Verify user
+   * cannot start one until it settles. */
+  verification_busy: boolean;
 }
 
 export type CapabilityState =

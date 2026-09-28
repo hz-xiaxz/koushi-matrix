@@ -521,3 +521,58 @@ fn session_verification_gate_is_not_affected_by_verify_user() {
         }
     ));
 }
+
+#[test]
+fn verify_user_is_busy_while_another_verification_is_in_progress() {
+    use koushi_state::{AppEffect, TrustOperationFailureKind, UiEvent, VerificationTarget};
+    let contact_changed = |effects: &[AppEffect]| {
+        effects.contains(&AppEffect::EmitUiEvent(UiEvent::ContactSecurityChanged))
+    };
+    let mut state = ready_state();
+    request(&mut state, 1, BOB);
+    load(&mut state, 1, BOB, all_signed_not_verified());
+    assert!(!state.contact_security.verification_busy);
+
+    // Another person's request arrives while Bob's User info is open.
+    let effects = reduce(
+        &mut state,
+        AppAction::VerificationRequested {
+            request_id: 61,
+            target: VerificationTarget {
+                user_id: ALICE.to_owned(),
+                device_id: "ALICEDEVICE".to_owned(),
+            },
+        },
+    );
+    assert!(state.contact_security.verification_busy);
+    assert!(contact_changed(&effects));
+    // A store refresh keeps the projection.
+    refresh(&mut state, BOB, all_signed_verified());
+    assert!(state.contact_security.verification_busy);
+
+    let effects = reduce(
+        &mut state,
+        AppAction::VerificationFailed {
+            request_id: 61,
+            kind: TrustOperationFailureKind::Cancelled,
+        },
+    );
+    assert!(!state.contact_security.verification_busy);
+    assert!(contact_changed(&effects));
+
+    // Opening User info while a flow is active starts busy; closing clears.
+    reduce(
+        &mut state,
+        AppAction::VerificationRequested {
+            request_id: 62,
+            target: contact_target(),
+        },
+    );
+    request(&mut state, 2, ALICE);
+    assert!(state.contact_security.verification_busy);
+    reduce(&mut state, AppAction::ContactSecurityClosed);
+    assert_eq!(
+        state.contact_security,
+        koushi_state::ContactSecurityState::default()
+    );
+}

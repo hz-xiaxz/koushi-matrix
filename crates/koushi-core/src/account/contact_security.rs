@@ -99,6 +99,23 @@ impl AccountActor {
                 .await;
             }
         }
+        // Sending may have created the direct chat (also when it then
+        // failed); re-read so the offer names it. A chat that becomes known
+        // only with the next sync arrives through the `m.direct` observer.
+        self.refresh_open_contact_security(&user_id).await;
+    }
+
+    /// Re-read whichever contact is open, for changes outside the contact's
+    /// keys, such as this session gaining or losing your cross-signing keys.
+    pub(super) async fn refresh_any_open_contact_security(&mut self) {
+        let Some(generation) = self
+            .contact_security
+            .as_ref()
+            .map(|observation| observation.generation)
+        else {
+            return;
+        };
+        self.handle_contact_security_store_changed(generation).await;
     }
 
     /// As the requester of a user verification, start SAS once the contact
