@@ -58,7 +58,8 @@ impl Default for LinkPreviewContext {
     fn default() -> Self {
         Self {
             unencrypted_global_enabled: true,
-            encrypted_global_enabled: true,
+            // Canon: encrypted-room previews are a privacy-conservative opt-in.
+            encrypted_global_enabled: false,
             room_enabled: None,
             hidden_event_ids: BTreeSet::new(),
             cache: HashMap::new(),

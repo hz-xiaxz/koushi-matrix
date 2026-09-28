@@ -51,7 +51,7 @@ fn app_state_carries_default_non_secret_settings() {
             code_block_wrap: true,
             hide_redacted: true,
             url_previews_enabled: true,
-            encrypted_url_previews_enabled: true,
+            encrypted_url_previews_enabled: false,
         }
     );
     assert_eq!(
@@ -176,7 +176,7 @@ fn settings_values_deserialize_legacy_display_without_hide_redacted_as_default_o
             code_block_wrap: false,
             hide_redacted: true,
             url_previews_enabled: true,
-            encrypted_url_previews_enabled: true,
+            encrypted_url_previews_enabled: false,
         }
     );
 }
@@ -189,6 +189,16 @@ fn display_settings_deserialize_legacy_without_url_previews_as_defaults() {
     .expect("legacy display object should deserialize");
 
     assert!(display.url_previews_enabled);
+    assert!(!display.encrypted_url_previews_enabled);
+}
+
+#[test]
+fn display_settings_deserialize_preserves_explicit_encrypted_url_preview_opt_in() {
+    let display = serde_json::from_str::<DisplaySettings>(
+        r#"{ "code_block_wrap": true, "hide_redacted": true, "url_previews_enabled": true, "encrypted_url_previews_enabled": true }"#,
+    )
+    .expect("display object with explicit opt-in should deserialize");
+
     assert!(display.encrypted_url_previews_enabled);
 }
 
