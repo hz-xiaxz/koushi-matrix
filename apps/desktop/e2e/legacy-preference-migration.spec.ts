@@ -60,3 +60,46 @@ test("legacy Space presentation migrates through Rust-shaped navigation and clea
     )
     .toEqual([null, null, null, null, null, null, null]);
 });
+
+test("a failed emoji vocabulary chunk gates only the legacy emoji list (#1035)", async ({ page }) => {
+  await page.route(/\/src\/components\/emojiData\.ts(\?.*)?$/, (route) => route.abort());
+  await page.addInitScript(() => {
+    localStorage.setItem("koushi.homeSelection.v1", JSON.stringify({ kind: "activity" }));
+    localStorage.setItem("koushi.displayDensity.v1", "compact");
+    localStorage.setItem("koushi-recent-emojis", JSON.stringify(["😀"]));
+    localStorage.setItem(
+      "koushi.spaceLocalOverrides.v1",
+      JSON.stringify({
+        "!harness-space:example.invalid": { name: "Migrated Space", icon: "M" }
+      })
+    );
+  });
+
+  await page.goto("/appHarness.html");
+
+  await expect(
+    page
+      .getByRole("navigation", { name: "Workspaces" })
+      .getByRole("button", { name: "Migrated Space" })
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const values = window.__harness.currentSnapshot().state.domain.settings.values;
+        return {
+          density: values.appearance.density,
+          imported: values.legacy_frontend_preferences_imported
+        };
+      })
+    )
+    .toEqual({ density: "compact", imported: true });
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        ["koushi.homeSelection.v1", "koushi.spaceLocalOverrides.v1", "koushi.displayDensity.v1"].map(
+          (key) => localStorage.getItem(key)
+        )
+      )
+    )
+    .toEqual([null, null, null]);
+});

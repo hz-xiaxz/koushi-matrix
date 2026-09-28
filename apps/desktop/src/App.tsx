@@ -1240,13 +1240,21 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
   const legacyEmojiVocabulary = useLegacyEmojiVocabulary();
 
   useEffect(() => {
-    if (!snapshot || !legacyEmojiVocabulary) return;
+    if (!snapshot) return;
     const values = snapshot.state.domain.settings.values;
     const navigation = snapshot.state.ui.navigation;
-    const migration = readBrowserLegacyPreferenceMigration(legacyEmojiVocabulary, values);
+    // #1035: only the settings import (which carries the legacy recent-emoji
+    // list) waits for the emoji vocabulary; navigation never does, and an
+    // unavailable vocabulary leaves just the emoji list out.
+    const migration = readBrowserLegacyPreferenceMigration(
+      legacyEmojiVocabulary.kind === "ready" ? legacyEmojiVocabulary.emojis : null,
+      values
+    );
     if (!migration) return;
 
-    if (
+    if (legacyEmojiVocabulary.kind === "loading") {
+      // Settings import waits; the navigation import below does not.
+    } else if (
       values.legacy_frontend_preferences_imported &&
       !settingsMigrationInFlightRef.current
     ) {
