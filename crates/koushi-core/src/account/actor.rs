@@ -1918,6 +1918,12 @@ impl AccountActor {
                     if let Some(trust) = trust {
                         self.handle_current_device_trust(generation, trust).await;
                     }
+                    // A trust recheck follows own cross-signing changes
+                    // (import, bootstrap, own verification), which decide
+                    // whether Verify user can sign an open contact (#1024).
+                    if recheck_succeeded {
+                        self.refresh_any_open_contact_security().await;
+                    }
                     // #1009: a failure on a promoted session keeps the demand
                     // pending behind the shared failure backoff.
                     self.record_trust_recheck_settlement(recheck_succeeded);

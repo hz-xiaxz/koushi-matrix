@@ -5129,7 +5129,11 @@ stateDiagram-v2
   SDK's `devices_stream()` and `user_identities_stream()`, re-reads the
   contact from the store without network on any change (device additions,
   removals, re-signing, identity changes, and changes to your own identity),
-  and projects `Refreshed` only when the summary changed. The observer is
+  and projects `Refreshed` only when the summary changed. It also re-reads on
+  `m.direct` account-data changes (the direct chat Verify user would use, for
+  example one created by a failed first attempt), after a Verify user request
+  is sent or fails, and after a successful own-trust recheck (this session
+  gaining or losing your cross-signing keys changes the offer). The observer is
   generation-fenced and stopped on close, contact switch, and session teardown.
 - **SDK protections are unchanged.** Devices whose own self-signature is
   invalid are rejected by the SDK during `/keys/query` and never counted.

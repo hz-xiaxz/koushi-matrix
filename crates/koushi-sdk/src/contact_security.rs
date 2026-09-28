@@ -312,7 +312,8 @@ pub async fn request_user_verification(
     Ok(crate::MatrixVerificationRequestHandle::from_sdk(request))
 }
 
-/// A unit item whenever the SDK's device or identity store changes. Items
+/// A unit item whenever the SDK's device or identity store changes, or the
+/// `m.direct` account data (which direct chat Verify user uses) does. Items
 /// are not filtered by user: a device removal is delivered without device
 /// maps, and a change to the viewing user's own identity changes whether a
 /// contact is verified, so the caller re-reads and de-duplicates.
@@ -332,7 +333,19 @@ pub async fn observe_contact_security_changes(
         .await
         .map_err(|_| ContactSecurityFailureKind::Sdk)?
         .map(|_| ());
-    Ok(Box::pin(stream::select(devices, identities)))
+    // `m.direct` changes decide which direct chat Verify user would use (for
+    // example one a failed first attempt created). The observer must outlive
+    // its subscriber, so the stream owns it.
+    let direct_chats = session
+        .client
+        .observe_events::<matrix_sdk::ruma::events::direct::DirectEvent, ()>();
+    let direct_chat_changes = direct_chats.subscribe().map(move |_| {
+        let _observer = &direct_chats;
+    });
+    Ok(Box::pin(stream::select(
+        stream::select(devices, identities),
+        direct_chat_changes,
+    )))
 }
 
 #[cfg(test)]

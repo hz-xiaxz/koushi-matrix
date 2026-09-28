@@ -354,6 +354,62 @@ async fn key_store_changes_are_observed_and_reread_without_network() {
     assert_eq!(summary.devices, ContactDevicesStatus::SomeNotOwnerSigned);
 }
 
+/// A direct chat that appears after User info opened (for example the one a
+/// failed first Verify user attempt created) is observed through `m.direct`,
+/// so the confirmation step stops saying there is no direct chat.
+#[tokio::test]
+async fn a_new_direct_chat_is_observed_and_reread() {
+    let server = MatrixMockServer::new().await;
+    server.mock_crypto_endpoints_preset().await;
+    let alice = cross_signed_client(
+        &server,
+        user_id!("@alice:example.test"),
+        device_id!("ALICE1"),
+    )
+    .await;
+    let alice_session = session(&alice, server.uri());
+    let bob_id = user_id!("@bob:example.test");
+    let _bob = cross_signed_client(&server, bob_id, device_id!("BOB1")).await;
+    let before = load_contact_security(&alice_session, bob_id.as_str())
+        .await
+        .expect("load");
+    assert_eq!(
+        before.verification,
+        ContactVerificationOffer::Offered {
+            direct_chat: ContactVerificationDirectChat::New
+        }
+    );
+
+    let mut changes = observe_contact_security_changes(&alice_session)
+        .await
+        .expect("observe");
+    let dm = matrix_sdk::ruma::room_id!("!dm:example.test");
+    server
+        .mock_sync()
+        .ok_and_run(&alice, |builder| {
+            builder
+                .add_joined_room(matrix_sdk_test::JoinedRoomBuilder::new(dm))
+                .add_custom_global_account_data(json!({
+                    "type": "m.direct",
+                    "content": { bob_id.as_str(): [dm.as_str()] },
+                }));
+        })
+        .await;
+    tokio::time::timeout(Duration::from_secs(5), changes.next())
+        .await
+        .expect("a direct chat change notification")
+        .expect("stream open");
+    let after = read_contact_security(&alice_session, bob_id.as_str())
+        .await
+        .expect("store read");
+    assert_eq!(
+        after.verification,
+        ContactVerificationOffer::Offered {
+            direct_chat: ContactVerificationDirectChat::ExistingUnencrypted
+        }
+    );
+}
+
 // ── Crafted /keys/query responses ───────────────────────────────────────────
 
 const CONTACT: &str = "@carol:example.test";
