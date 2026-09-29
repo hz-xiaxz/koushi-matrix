@@ -173,7 +173,7 @@ pub struct NativeAttentionProjectionInput<'a> {
     pub window_focused: bool,
     pub observation: NativeAttentionObservationKind,
     pub previous_candidate: Option<&'a NativeAttentionCandidate>,
-    /// `SettingsValues.notifications.message_previews`. Device-local and ON
+    /// `SettingsValues.notifications.message_previews`. Device-local and OFF
     /// by default; when OFF the notification body carries counts only.
     pub message_previews: bool,
     pub capabilities: NativeAttentionCapabilities,

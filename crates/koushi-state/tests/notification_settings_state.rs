@@ -461,9 +461,11 @@ fn privacy_settings_persist_defaults() {
 }
 
 #[test]
-fn message_previews_default_to_on() {
-    assert!(NotificationSettings::default().message_previews);
-    assert!(SettingsValues::default().notifications.message_previews);
+fn message_previews_default_to_off() {
+    // #994 / #1054 and engineering rule 9: OS notifications carry counts only
+    // until the user opts in to message previews.
+    assert!(!NotificationSettings::default().message_previews);
+    assert!(!SettingsValues::default().notifications.message_previews);
 }
 
 #[test]
@@ -480,9 +482,9 @@ fn old_persisted_notification_json_defaults_privacy_to_true() {
     let values: SettingsValues = serde_json::from_str(json).unwrap();
     assert!(values.notifications.send_read_receipts);
     assert!(values.notifications.send_typing_notifications);
-    // Settings files written before message previews existed take the current
-    // default instead of failing the whole load.
-    assert!(values.notifications.message_previews);
+    // Settings files written before message previews existed take the
+    // privacy-conservative OFF default instead of failing the whole load.
+    assert!(!values.notifications.message_previews);
 }
 
 #[test]
