@@ -1,0 +1,235 @@
+{
+  "newUnreadDmResolved": {
+    "active_tab": "unread",
+    "kind": "open",
+    "mark_read": {
+      "kind": "idle"
+    },
+    "recent": {
+      "next_batch": null,
+      "resolution": {
+        "kind": "idle"
+      },
+      "rows": [
+        {
+          "context_label": "DM",
+          "event_id": "$activity-renderer-resolved:example.invalid",
+          "highlight": false,
+          "kind": "event",
+          "preview": "Resolved message",
+          "room_id": "!activity-renderer-dm:example.invalid",
+          "room_label": "Synthetic DM",
+          "sender_avatar": null,
+          "sender_id": "@peer:example.invalid",
+          "sender_label": "Synthetic peer",
+          "thread_root_event_id": null,
+          "timestamp_ms": 200,
+          "unread": true
+        }
+      ]
+    },
+    "unread": {
+      "next_batch": null,
+      "resolution": {
+        "kind": "idle"
+      },
+      "rows": [
+        {
+          "context_label": "DM",
+          "event_id": "$activity-renderer-resolved:example.invalid",
+          "highlight": false,
+          "kind": "event",
+          "preview": "Resolved message",
+          "room_id": "!activity-renderer-dm:example.invalid",
+          "room_label": "Synthetic DM",
+          "sender_avatar": null,
+          "sender_id": "@peer:example.invalid",
+          "sender_label": "Synthetic peer",
+          "thread_root_event_id": null,
+          "timestamp_ms": 200,
+          "unread": true
+        }
+      ]
+    }
+  },
+  "newUnreadDmResolving": {
+    "active_tab": "unread",
+    "kind": "open",
+    "mark_read": {
+      "kind": "idle"
+    },
+    "recent": {
+      "next_batch": null,
+      "resolution": {
+        "kind": "idle"
+      },
+      "rows": []
+    },
+    "unread": {
+      "next_batch": null,
+      "resolution": {
+        "generation": 1,
+        "kind": "resolving",
+        "unresolved_room_count": 1
+      },
+      "rows": [
+        {
+          "context_label": "DM",
+          "event_id": null,
+          "highlight": false,
+          "kind": "roomUnread",
+          "preview": null,
+          "room_id": "!activity-renderer-dm:example.invalid",
+          "room_label": "Synthetic DM",
+          "sender_avatar": null,
+          "sender_id": null,
+          "sender_label": null,
+          "thread_root_event_id": null,
+          "timestamp_ms": 200,
+          "unread": true
+        }
+      ]
+    }
+  },
+  "staleRowWithNewerActivityFailed": {
+    "active_tab": "unread",
+    "kind": "open",
+    "mark_read": {
+      "kind": "idle"
+    },
+    "recent": {
+      "next_batch": null,
+      "resolution": {
+        "kind": "idle"
+      },
+      "rows": [
+        {
+          "context_label": "DM",
+          "event_id": "$activity-renderer-old:example.invalid",
+          "highlight": false,
+          "kind": "event",
+          "preview": "Older message",
+          "room_id": "!activity-renderer-dm:example.invalid",
+          "room_label": "Synthetic DM",
+          "sender_avatar": null,
+          "sender_id": "@peer:example.invalid",
+          "sender_label": "Synthetic peer",
+          "thread_root_event_id": null,
+          "timestamp_ms": 100,
+          "unread": true
+        }
+      ]
+    },
+    "unread": {
+      "next_batch": null,
+      "resolution": {
+        "failure_kind": "network",
+        "generation": 1,
+        "kind": "failed",
+        "unresolved_room_count": 1
+      },
+      "rows": [
+        {
+          "context_label": "DM",
+          "event_id": null,
+          "highlight": false,
+          "kind": "roomUnread",
+          "preview": null,
+          "room_id": "!activity-renderer-dm:example.invalid",
+          "room_label": "Synthetic DM",
+          "sender_avatar": null,
+          "sender_id": null,
+          "sender_label": null,
+          "thread_root_event_id": null,
+          "timestamp_ms": 200,
+          "unread": true
+        },
+        {
+          "context_label": "DM",
+          "event_id": "$activity-renderer-old:example.invalid",
+          "highlight": false,
+          "kind": "event",
+          "preview": "Older message",
+          "room_id": "!activity-renderer-dm:example.invalid",
+          "room_label": "Synthetic DM",
+          "sender_avatar": null,
+          "sender_id": "@peer:example.invalid",
+          "sender_label": "Synthetic peer",
+          "thread_root_event_id": null,
+          "timestamp_ms": 100,
+          "unread": true
+        }
+      ]
+    }
+  },
+  "staleRowWithNewerActivityResolving": {
+    "active_tab": "unread",
+    "kind": "open",
+    "mark_read": {
+      "kind": "idle"
+    },
+    "recent": {
+      "next_batch": null,
+      "resolution": {
+        "kind": "idle"
+      },
+      "rows": [
+        {
+          "context_label": "DM",
+          "event_id": "$activity-renderer-old:example.invalid",
+          "highlight": false,
+          "kind": "event",
+          "preview": "Older message",
+          "room_id": "!activity-renderer-dm:example.invalid",
+          "room_label": "Synthetic DM",
+          "sender_avatar": null,
+          "sender_id": "@peer:example.invalid",
+          "sender_label": "Synthetic peer",
+          "thread_root_event_id": null,
+          "timestamp_ms": 100,
+          "unread": true
+        }
+      ]
+    },
+    "unread": {
+      "next_batch": null,
+      "resolution": {
+        "generation": 1,
+        "kind": "resolving",
+        "unresolved_room_count": 1
+      },
+      "rows": [
+        {
+          "context_label": "DM",
+          "event_id": null,
+          "highlight": false,
+          "kind": "roomUnread",
+          "preview": null,
+          "room_id": "!activity-renderer-dm:example.invalid",
+          "room_label": "Synthetic DM",
+          "sender_avatar": null,
+          "sender_id": null,
+          "sender_label": null,
+          "thread_root_event_id": null,
+          "timestamp_ms": 200,
+          "unread": true
+        },
+        {
+          "context_label": "DM",
+          "event_id": "$activity-renderer-old:example.invalid",
+          "highlight": false,
+          "kind": "event",
+          "preview": "Older message",
+          "room_id": "!activity-renderer-dm:example.invalid",
+          "room_label": "Synthetic DM",
+          "sender_avatar": null,
+          "sender_id": "@peer:example.invalid",
+          "sender_label": "Synthetic peer",
+          "thread_root_event_id": null,
+          "timestamp_ms": 100,
+          "unread": true
+        }
+      ]
+    }
+  }
+}
