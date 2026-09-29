@@ -15,6 +15,8 @@ const ROOM_C: &str = "!navigation-network-c:example.invalid";
 const DM: &str = "!navigation-network-dm:example.invalid";
 const SPACE: &str = "!navigation-network-space:example.invalid";
 const SPACE_ROOM: &str = "!navigation-network-space-room:example.invalid";
+const EMPTY_SPACE: &str = "!navigation-network-empty-space:example.invalid";
+const EVENT: &str = "$navigation-network-event:example.invalid";
 const DEADLINE: Duration = Duration::from_millis(250);
 
 fn request(sequence: u64) -> RequestId {
@@ -51,14 +53,24 @@ fn navigation_state() -> AppState {
             dm_room(DM),
             space_room,
         ],
-        spaces: vec![koushi_state::SpaceSummary {
-            space_id: SPACE.to_owned(),
-            raw_name: None,
-            display_name: "Synthetic space".to_owned(),
-            avatar: None,
-            join_rule: None,
-            child_room_ids: vec![SPACE_ROOM.to_owned()],
-        }],
+        spaces: vec![
+            koushi_state::SpaceSummary {
+                space_id: SPACE.to_owned(),
+                raw_name: None,
+                display_name: "Synthetic space".to_owned(),
+                avatar: None,
+                join_rule: None,
+                child_room_ids: vec![SPACE_ROOM.to_owned()],
+            },
+            koushi_state::SpaceSummary {
+                space_id: EMPTY_SPACE.to_owned(),
+                raw_name: None,
+                display_name: "Synthetic empty space".to_owned(),
+                avatar: None,
+                join_rule: None,
+                child_room_ids: Vec::new(),
+            },
+        ],
         ..AppState::default()
     };
     reduce(
@@ -90,6 +102,12 @@ impl BlockedMailbox {
     /// Start an AppActor whose one-slot AccountActor mailbox is already full
     /// and is never drained by the test until [`Self::finish`].
     async fn start(state: AppState) -> Self {
+        Self::start_with(state, |_| {}).await
+    }
+
+    /// Like [`Self::start`], with white-box AppActor ownership installed
+    /// before the actor runs (for an event navigation still in flight).
+    async fn start_with(state: AppState, prepare: impl FnOnce(&mut AppActor)) -> Self {
         let data_dir = tempfile::tempdir().expect("runtime data directory");
         let (
             actor,
@@ -102,6 +120,8 @@ impl BlockedMailbox {
             event_navigation_prepared_tx,
             focused_projection_tx,
         ) = app_actor_fixture_with_account_capacity(data_dir.path(), state.clone(), 1);
+        let mut actor = actor;
+        prepare(&mut actor);
         assert!(
             actor
                 .account_actor
@@ -487,5 +507,126 @@ async fn navigation_network_already_active_and_unknown_rooms_keep_their_outcomes
         harness.enrichment(),
         Some((1, Some(ROOM_A.to_owned()), None))
     );
+    harness.finish();
+}
+
+fn focused_key(room_id: &str) -> TimelineKey {
+    TimelineKey {
+        account_key: AccountKey(USER.to_owned()),
+        kind: TimelineKind::Focused {
+            room_id: room_id.to_owned(),
+            event_id: EVENT.to_owned(),
+        },
+    }
+}
+
+/// `ROOM_A` anchored at `EVENT`: the focused timeline is already open.
+fn anchored_state() -> AppState {
+    let mut state = navigation_state();
+    reduce(
+        &mut state,
+        AppAction::OpenFocusedContext {
+            room_id: ROOM_A.to_owned(),
+            event_id: EVENT.to_owned(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::EnterAnchoredTimeline {
+            room_id: ROOM_A.to_owned(),
+            event_id: EVENT.to_owned(),
+        },
+    );
+    assert!(state.navigation.main_timeline_anchor.is_some());
+    state
+}
+
+/// Two selections in a row: the second proves no post-commit focused cleanup
+/// left the AppActor loop waiting on the full AccountActor mailbox.
+async fn assert_two_selections_commit(harness: &mut BlockedMailbox) {
+    harness.select_room(request(11), ROOM_B).await;
+    harness.select_room(request(12), ROOM_C).await;
+    let terminals = harness.terminals(&[request(11), request(12)]).await;
+    assert_eq!(terminals[1].0, IntentOutcome::Committed);
+    assert_eq!(
+        terminals[1].1.navigation.active_room_id.as_deref(),
+        Some(ROOM_C)
+    );
+    assert_eq!(terminals[1].1.timeline.room_id.as_deref(), Some(ROOM_C));
+}
+
+#[tokio::test]
+async fn navigation_network_selection_from_opening_focused_context_commits() {
+    let generation = 7;
+    let mut state = navigation_state();
+    state.focused_context = koushi_state::FocusedContextState::Open {
+        room_id: ROOM_A.to_owned(),
+        event_id: EVENT.to_owned(),
+        is_subscribed: true,
+    };
+    state.navigation.event_navigation = koushi_state::EventNavigationState::Opening {
+        generation,
+        source: koushi_state::EventNavigationSource::Activity,
+    };
+    let mut harness = BlockedMailbox::start_with(state, |actor| {
+        actor.pending_event_navigation = Some(PendingEventNavigation {
+            request_id: request(1),
+            select_request_id: request(2),
+            room_id: ROOM_A.to_owned(),
+            event_id: EVENT.to_owned(),
+            source: koushi_state::EventNavigationSource::Activity,
+            generation,
+        });
+        actor.pending_focused_navigation = Some(PendingFocusedNavigation {
+            projection_request_id: request(1),
+            key: focused_key(ROOM_A),
+            room_id: ROOM_A.to_owned(),
+            event_id: EVENT.to_owned(),
+            allow_live_fallback: true,
+            generation: Some(TimelineGeneration(generation)),
+        });
+    })
+    .await;
+
+    assert_two_selections_commit(&mut harness).await;
+    harness.finish();
+}
+
+#[tokio::test]
+async fn navigation_network_selection_from_anchored_focused_context_commits() {
+    let mut harness = BlockedMailbox::start(anchored_state()).await;
+    assert_two_selections_commit(&mut harness).await;
+    harness.finish();
+}
+
+#[tokio::test]
+async fn navigation_network_home_from_anchored_focused_context_commits() {
+    let mut harness = BlockedMailbox::start(anchored_state()).await;
+    let _ = harness
+        .submit(CoreCommand::Room(RoomCommand::SelectSpace {
+            request_id: request(10),
+            space_id: None,
+        }))
+        .await;
+    assert_two_selections_commit(&mut harness).await;
+    harness.finish();
+}
+
+#[tokio::test]
+async fn navigation_network_empty_space_from_anchored_focused_context_commits() {
+    let mut harness = BlockedMailbox::start(anchored_state()).await;
+    let _ = harness
+        .submit(CoreCommand::Room(RoomCommand::SelectSpace {
+            request_id: request(10),
+            space_id: Some(EMPTY_SPACE.to_owned()),
+        }))
+        .await;
+    harness
+        .wait_for_snapshot(|state| {
+            state.navigation.active_space_id.as_deref() == Some(EMPTY_SPACE)
+                && state.navigation.active_room_id.is_none()
+        })
+        .await;
+    assert_two_selections_commit(&mut harness).await;
     harness.finish();
 }

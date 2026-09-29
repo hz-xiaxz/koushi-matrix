@@ -3525,7 +3525,9 @@ export function checkCoreIntegrationSelectRoomRouting() {
   const runtime = coreSource("runtime.rs");
   const room = protocolSource("command/room.rs");
   const failures = [];
-  for (const marker of ["User-intent lane: for SelectRoom, record the request_id→room_id", "terminal IntentLifecycle outcome", "AccountMessage::RoomCommand(room_command)", ".await;"]) if (!runtime.includes(marker)) failures.push(sourceContractFailure(rule, `SelectRoom route lacks ${marker}`));
+  // #1060: selection is admitted and reduced in AppActor itself; only other
+  // room commands are forwarded to the AccountActor.
+  for (const marker of ["User-intent lane: record the request_id→room_id", "terminal IntentLifecycle outcome", "self.commit_local_navigation(AppAction::SelectRoom { room_id })", "AccountMessage::RoomCommand(room_command)"]) if (!runtime.includes(marker)) failures.push(sourceContractFailure(rule, `SelectRoom route lacks ${marker}`));
   if (runtime.includes("try_send(crate::account::AccountMessage::RoomCommand")) failures.push(sourceContractFailure(rule, "SelectRoom uses lossy routing"));
   if (!room.includes("User-intent lane: room selection is request-id correlated")) failures.push(sourceContractFailure(rule, "RoomCommand SelectRoom lacks its correlation comment"));
   return failures;
