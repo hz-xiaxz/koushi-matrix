@@ -8,9 +8,9 @@ surfaces a change must mirror are in
 ## Verify first, no human eyes
 
 Correctness is guaranteed by reproducible headless verification, never by manual
-or visual GUI inspection. Build the verification (体制) BEFORE the fix and let
-the same check turn green as the proof of the fix: 体制 → 修正, strictly, never
-the reverse.
+or visual GUI inspection. Build the verification setup BEFORE the fix and let
+the same check turn green as the proof of the fix: verification first, then the
+fix, strictly, never the reverse.
 
 - For any bug / regression / perf / behavior change, FIRST add or extend a
   headless check that REPRODUCES the problem (RED): a `headless-core-qa`
@@ -52,8 +52,7 @@ routing failures.
 Read the gate's own exit status, never a pipeline's. `cargo test … | grep …`
 reports grep's status, and appending anything (`; echo done`, `; true`) reports
 that instead, so a failing suite looks green. Run `<gate> > /tmp/x.log 2>&1;
-echo "EXIT=$?"` and report that number. A 2026-07-25 change claimed a green
-`cargo test --workspace` this way and pushed a red DTO golden to CI.
+echo "EXIT=$?"` and report that number.
 
 A subagent's "gates passed" claim is not evidence — re-run the gate yourself.
 
@@ -117,6 +116,24 @@ for merging into `main`:
 | `Core QA binary tests` | `cargo test -p koushi-qa --features qa-bin --bin headless-core-qa` |
 | `Windows overlay ACL IPC` | `cargo test -p koushi-windows-overlay-acl windows_overlay_ipc_is_authorized`, OIDC launch tests, and desktop clippy with `-D warnings` for Windows-only cfg paths |
 
+Do not assume a green PR means a homeserver job passed — check the job
+explicitly, and confirm whether it is a required check before treating it as a
+merge gate.
+
+Do not explain an unusually long CI step as normal repository variance without
+comparing it to recent successful runs. Inspect the same job step's duration in
+a recent green run; once the current step exceeds twice that baseline, stop
+passive waiting and reproduce the exact workflow command locally (including
+integration tests and exclusions), or inspect the completed job log if
+available.
+
+`cargo test --profile ci --workspace` does not compile the QA binaries: both bin targets set
+`required-features = ["qa-bin"]`. Only the `Core QA binary tests` job compiles
+them.
+
+CI profile, cache-key, and toolchain-bump maintenance notes are in
+[environment.md](environment.md#ci-maintenance).
+
 ### Rust lint gate
 
 Run from the repository root with the pinned toolchain (`rust-toolchain.toml`
@@ -145,73 +162,6 @@ for pure helpers that are tested everywhere, for genuinely platform-specific
 code. Shared contract variants produced only on one platform keep a narrowly
 scoped `cfg_attr(not(<platform>), allow(dead_code))`.
 
-`cargo test --profile ci --workspace` does not compile the QA binaries: both bin targets set
-`required-features = ["qa-bin"]`. Only the `Core QA binary tests` job compiles
-them.
-
-The required Rust jobs use the repository's `[profile.ci]` profile. It inherits
-the test profile, keeps debug assertions and overflow checks enabled, and sets
-`debug = 0`, `incremental = false`, and symbol stripping for reproducible
-hosted builds. Local `dev` and production `release` behavior is unchanged.
-
-Every job that sets `CARGO_TARGET_DIR` gives the rust-cache action the matching
-workspace mapping (`. -> target-ci`, `. -> target-macos-check`, or
-`. -> target-windows-overlay`). The scheduled Issue #738 probe uses the same
-explicit mapping. The primary Rust job's cache report fails closed when
-rust-cache claims an exact hit but representative registry and git dependency
-artifacts (`tokio`, `serde`, `ruma`) are absent from `target-ci/ci/deps`, or
-when the SDK cache claims a hit without SDK fingerprints and artifacts. The
-workspace metrics step records total and vendored-SDK `Compiling` lines and test
-totals, so a restored archive that Cargo does not reuse is visible.
-
-rust-cache prunes path dependencies under the repository root, so the vendored
-Matrix SDK has its own exact-keyed artifact cache. Cargo judges path
-dependencies by source mtime and checkout stamps every file with the current
-time, so the job first normalizes the SDK's tracked sources to a fixed old
-mtime. This is safe only because the key pins the SDK gitlink, the lockfile,
-every workspace manifest, `ci.yml`, the profile, and the rustc release; a
-different feature set still selects a different fingerprint hash. The CI key
-reads that release from `rustc -vV` in the job, where rustup resolves it from
-`rust-toolchain.toml`, so a toolchain bump rekeys it automatically. A
-toolchain bump still edits, together with `rust-toolchain.toml`, every
-`dtolnay/rust-toolchain@<version>` reference and step name in `ci.yml` and
-`release-desktop.yml`, and the literal `rust-<version>` in the release
-workflow's SDK cache keys. Keep every
-key complete when changing any of those inputs, because an exact hit is never
-re-saved.
-rust-cache has the same property, and its key hashes only manifests, the
-lockfile and the toolchain. When a change to the cargo command set changes the
-resolved dependency feature graph, bump the Rust job's `shared-key` suffix, or
-the newly required dependency builds recompile on every run.
-
-The Rust job runs `cargo test --profile ci --workspace --exclude
-sidebar-composition --exclude key-management` once. `koushi-core-testkit` and
-`koushi-desktop` are workspace members, so this runs every test the former
-standalone `-p` steps ran. Those steps added no test: each resolved its own
-package's dependency graph and feature set (for example `koushi-core/test-hooks`
-from their dev-dependencies), which only recompiled the vendored SDK and Koushi
-stack (20 and 11 crates, about 2m10s each on warm main runs). No test is
-gated on `not(feature = "test-hooks")`, and the `koushi-core` lib suite lists
-the same tests with and without `test-hooks`. Production feature sets
-(without dev-dependency features) are compiled by `macOS Tauri cargo check`
-and the release workflow. QA binaries, wasm, macOS, Windows, and homeserver
-jobs stay separate because they provide distinct feature, platform, target, or
-runtime coverage.
-
-Do not assume a green PR means a homeserver job passed — check the job
-explicitly, and confirm whether it is a required check before treating it as a
-merge gate.
-
-Do not explain an unusually long CI step as normal repository variance without
-comparing it to recent successful runs. Inspect the same job step's duration in
-a recent green run; once the current step exceeds twice that baseline, stop
-passive waiting and reproduce the exact workflow command locally (including
-integration tests and exclusions), or inspect the completed job log if
-available. A 2026-07-31 PR waited about 40 minutes on a Rust workspace step
-whose recent green baseline was about 5 minutes; the exact local CI command
-exposed seven integration-test expectation failures that an earlier
-`--lib`-only gate had missed.
-
 ## Diff self-review
 
 Before opening a PR or requesting a review, read the branch's own finished
@@ -227,15 +177,10 @@ git diff origin/main...HEAD
 git status --short   # untracked files are absent from git diff entirely
 ```
 
-Priorities, in order:
-
-1. Repository-rule consistency — `REPOSITORY_RULES.md`,
-   `docs/architecture/overview.md`, `docs/architecture/state-machine.md` when
-   reducers change, `docs/policies/engineering-rules.md`, `AGENTS.md`, and the
-   relevant dated plan.
-2. Rust/Tauri best practices and consistency with the surrounding code.
-3. Security and privacy — secret leakage, private data in Debug/logs/QA output.
-4. Contract correctness — state machine, command/event, and DTO shapes.
+Review priorities are in
+[Review And Audit](../../REPOSITORY_RULES.md#review-and-audit); for the first
+one, check `REPOSITORY_RULES.md`, the overview, `state-machine.md` when reducers
+change, the engineering rules, `AGENTS.md`, and the relevant dated plan.
 
 User-guide consistency is part of this pre-PR check. Use the
 [PR checklist](../../.github/pull_request_template.md) and compare affected
@@ -248,11 +193,8 @@ A passing link check alone does not establish that instructions are correct.
 
 For UI changes, check the changed surfaces against
 [Property Display And Editing](../../REPOSITORY_RULES.md#property-display-and-editing)
-in both self-review and independent audit: no property with its display and
-its editing in separate places, no duplicate display/edit locations, no
-unrelated actions between them, and no setting-like entry without a matching
-destination. Report findings with the property, both locations, and the
-effect.
+in both self-review and independent audit, and report findings with the
+property, both locations, and the effect.
 
 Scope notes that repeatedly matter:
 
@@ -263,60 +205,26 @@ Scope notes that repeatedly matter:
   so a review that only reads it can miss an entire new module.
 - When a finding is caused by a canon gap rather than this change, amend the
   canon too — see the rule-update requirement in `REPOSITORY_RULES.md`.
+- Check new guards and fallbacks against engineering rules "Design Simplicity".
 
-Self-review is load-bearing, not a formality: reading the finished #328 diff
-surfaced a second real bug (an `identifier()` comparison that missed a sent
-local echo) that the passing tests did not cover.
+## Flake probe
 
-## Design simplicity
-
-Follow the normative design-simplicity rules in
-`docs/policies/engineering-rules.md`: do not add defensive machinery without a
-reproduced failure or named invariant.
-
-Put the smallest necessary guard at the authoritative boundary. This never
-weakens security, privacy, trust-boundary validation, data-loss prevention,
-accessibility, or explicitly approved requirements.
-
-## Issue #738 flake measurement
-
-The required CI workflow remains retry-free. The separate
 `.github/workflows/issue-738-flake-probe.yml` is a scheduled/manual,
-non-required measurement job; a failed probe is reported as a failed probe and
-cannot turn a required check green. It checks out one SHA and runs these named
-probes repeatedly: the Rust
-`committed_room_cleanup_bypasses_a_saturated_account_mailbox` test in
-single-thread and default mode, plus the named stale-live-edge and
-first-unread-pill Vitest tests. Rust test binaries are compiled in an explicit
-warm-up step outside measured attempts, so cold compilation is not mislabeled
-as a test flake. Each individual attempt is bounded to 120 seconds. The closed
-probe command list does not accept arbitrary shell commands and
-child output is not recorded; failures use fixed signatures only.
-
-Run locally with a bounded attempt count:
+non-required measurement job; the required CI workflow remains retry-free, and a
+failed probe cannot turn a required check green. It runs a closed list of named
+probes at one SHA with a 120-second bound per attempt and records only fixed
+failure signatures. A workflow rerun must not replace or hide failed attempt
+records. Run locally with a bounded attempt count:
 
 ```bash
 node scripts/flake-probe.mjs --attempts 10 --output-dir artifacts/issue-738-flake-probe
 node scripts/summarize-flake-probe.mjs --sha <40-hex-sha> artifacts/issue-738-flake-probe/flake-probe-results.json
 ```
 
-The probe artifact contains one JSON record per executed attempt, JUnit XML,
-and a Markdown summary. `attempt` is an execution of one named test and its
-number restarts in each workflow run; `recorded_at` keeps rows from separate
-artifacts distinct. A GitHub workflow rerun is a separate run and must not
-replace or hide failed attempt records. The summarizer accepts one or more JSON
-result artifacts, reports
-attempt total, failures, failure rate, and the observed date window, and can
-validate one unchanged SHA with `--sha <40-hex-sha>` or
-`--require-unchanged-sha`. Use `--max-failure-rate 0.01` when a nonzero exit at
-or above the strict 1% threshold is wanted.
-
-A seven-day result is eligible for interpretation only when the observed
-attempt timestamps span at least seven days; a shorter window remains pending.
-The `<1%` value is computed from all attempts, not workflow reruns. Issue #738
-also requires ten consecutive full CI runs for one unchanged SHA with no rerun;
-the flake probe does not measure that criterion. Acceptance remains pending
-until both the ten-CI-run and seven-day attempt-level evidence actually exists.
+The summarizer accepts one or more result artifacts, reports attempt totals and
+failure rate over the observed date window, validates one unchanged SHA with
+`--sha <40-hex-sha>` or `--require-unchanged-sha`, and exits nonzero at or above
+the `--max-failure-rate` threshold (for example `0.01`).
 
 ## IME-safe text input checks
 
@@ -342,14 +250,10 @@ primitive. Do not add a per-file exception or local composition workaround.
   docs consistency checks, and narrow diff reviews. Prompts must name the issue,
   allowed files, forbidden shared files, expected verification command, and the
   exact output format.
-- Main agents own cross-boundary design, state-machine boundary decisions,
-  shared enums/DTOs, Tauri/TypeScript wire contracts, `App.tsx`,
-  `TimelineView.tsx`, `styles.css`, canon docs, commits, issue comments, and
-  close decisions. Cheap-agent output is a draft to verify, not accepted
-  evidence by itself.
-- Do not let two agents edit shared hot files concurrently. Use the canonical
-  [shared-surface list](../../REPOSITORY_RULES.md#shared-hot-files) rather than
-  duplicating it here; coordinate ownership before granting a narrow patch.
+- Ownership and hot-file limits follow
+  [Parallel Implementation Protocol](../../REPOSITORY_RULES.md#parallel-implementation-protocol)
+  and [Shared Hot Files](../../REPOSITORY_RULES.md#shared-hot-files); canon docs,
+  commits, issue comments, and close decisions also stay with the main agent.
 - Review prompts name the applicable canon sections and follow
   [Review And Audit](../../REPOSITORY_RULES.md#review-and-audit). A silent,
   timed-out, or budget-exceeded run is not review evidence. Higher-priority

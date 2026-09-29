@@ -18,6 +18,9 @@ policy those owners do not state.
    not synchronize parallel booleans.
 3. When an artificial failure mechanism creates a boundary problem, remove it
    instead of adding boundary handling around it.
+4. Put the smallest necessary guard at the authoritative boundary. This never
+   weakens security, privacy, trust-boundary validation, data-loss prevention,
+   accessibility, or explicitly approved requirements.
 
 ## Secrets and Private Data
 

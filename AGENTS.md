@@ -1,7 +1,8 @@
 # Agent Notes
 
-Operational entry point. Durable rules live in [REPOSITORY_RULES.md](REPOSITORY_RULES.md);
-this file routes to the relevant contracts and operational instructions.
+Operational entry point and router. Read
+[REPOSITORY_RULES.md](REPOSITORY_RULES.md) on every task; read other documents
+only through the task table below.
 
 ## Essential contracts
 
@@ -28,16 +29,16 @@ this file routes to the relevant contracts and operational instructions.
 
 ## Read by task
 
-Before changing behavior, read the root rules and the applicable sections below.
-Read relevant sections, not every linked document in full. Resolve conflicting
-contracts before changing affected behavior; plans never override the canon.
+Read only the rows that match the task, and only their relevant sections.
+Resolve conflicting contracts before changing affected behavior; plans never
+override the canon.
 
 | Task | Read |
 | --- | --- |
 | Architecture or layer ownership | [overview](docs/architecture/overview.md) |
 | State transitions or guards | [state machines](docs/architecture/state-machine.md) |
 | Locale, product text, or layout | [i18n](docs/architecture/i18n.md) |
-| Security, runtime, or gate policy | [engineering rules](docs/policies/engineering-rules.md) |
+| Detailed policy: security, runtime, UI, tests, concurrency, gates | [engineering rules](docs/policies/engineering-rules.md) |
 | Setup, SDK checkout, builds, or cleanup | [environment](docs/agents/environment.md) |
 | Fixing behavior, testing, or reviewing | [verification](docs/agents/verification.md) |
 | Running QA | [QA lanes](docs/agents/qa-lanes.md) |
