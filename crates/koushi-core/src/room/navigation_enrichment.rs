@@ -18,7 +18,8 @@ use crate::executor;
 /// Reducer-accepted navigation after a committed selection. `generation` is
 /// assigned at admission and strictly increasing, so re-selecting the active
 /// room still wakes RoomActor for a pinned refresh.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Deliberately not `Debug`: it carries account and room identifiers.
+#[derive(Clone, Eq, PartialEq)]
 pub(crate) struct NavigationEnrichmentDemand {
     pub(crate) generation: u64,
     pub(crate) session_key: SessionKeyId,

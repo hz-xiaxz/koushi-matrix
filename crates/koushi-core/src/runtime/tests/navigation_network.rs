@@ -572,6 +572,13 @@ async fn assert_two_selections_commit(harness: &mut BlockedMailbox) {
 
 #[tokio::test]
 async fn navigation_network_selection_from_opening_focused_context_commits() {
+    let mut harness = start_opening_focused().await;
+    assert_two_selections_commit(&mut harness).await;
+    harness.finish();
+}
+
+/// An event navigation into `ROOM_A` whose focused timeline is still opening.
+async fn start_opening_focused() -> BlockedMailbox {
     let generation = 7;
     let mut state = navigation_state();
     state.focused_context = koushi_state::FocusedContextState::Open {
@@ -583,7 +590,7 @@ async fn navigation_network_selection_from_opening_focused_context_commits() {
         generation,
         source: koushi_state::EventNavigationSource::Activity,
     };
-    let mut harness = start_focused(state, |actor| {
+    start_focused(state, |actor| {
         actor.pending_event_navigation = Some(PendingEventNavigation {
             request_id: request(1),
             select_request_id: request(2),
@@ -601,10 +608,28 @@ async fn navigation_network_selection_from_opening_focused_context_commits() {
             generation: Some(TimelineGeneration(generation)),
         });
     })
-    .await;
+    .await
+}
 
-    assert_two_selections_commit(&mut harness).await;
-    harness.finish();
+#[tokio::test]
+async fn navigation_network_home_and_empty_space_from_opening_focused_context_commit() {
+    for space_id in [None, Some(EMPTY_SPACE.to_owned())] {
+        let mut harness = start_opening_focused().await;
+        let _admitted = harness
+            .submit(CoreCommand::Room(RoomCommand::SelectSpace {
+                request_id: request(10),
+                space_id: space_id.clone(),
+            }))
+            .await;
+        harness
+            .wait_for_snapshot(|state| {
+                state.navigation.active_space_id == space_id
+                    && state.navigation.active_room_id.is_none()
+            })
+            .await;
+        assert_two_selections_commit(&mut harness).await;
+        harness.finish();
+    }
 }
 
 #[tokio::test]
