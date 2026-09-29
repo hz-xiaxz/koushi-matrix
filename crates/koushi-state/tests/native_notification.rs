@@ -26,6 +26,8 @@ fn capabilities() -> NativeAttentionCapabilities {
 
 fn room(room_id: &str, is_dm: bool, unread: u64, highlight: u64) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: "Room".to_owned(),
         display_label: "Room".to_owned(),

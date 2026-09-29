@@ -270,6 +270,8 @@ fn ready_avatar_thumbnail(label: &str) -> AvatarThumbnailState {
 
 fn test_room(room_id: &str, avatar: Option<AvatarImage>) -> crate::state::RoomSummary {
     crate::state::RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: room_id.to_owned(),
         display_label: room_id.to_owned(),

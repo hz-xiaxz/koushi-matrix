@@ -54,6 +54,7 @@ import {
   type PrimaryView,
   avatarInitial,
   elementAvatarColorIndex,
+  roomListItemLabel,
   EMPTY_ROOM_TAGS
 } from "../app/uiShared";
 const HOME_SCOPE_KEY = "__home__";
@@ -72,7 +73,7 @@ function filterSidebarRooms(rooms: RoomListItem[], query: string): RoomListItem[
   const normalized = query.trim().toLocaleLowerCase();
   return normalized.length === 0
     ? rooms
-    : rooms.filter((room) => room.display_name.toLocaleLowerCase().includes(normalized));
+    : rooms.filter((room) => roomListItemLabel(room).toLocaleLowerCase().includes(normalized));
 }
 
 /**
@@ -1488,7 +1489,7 @@ function RoomButton({
   return (
     <button
       className={`room-item ${room.room_id === activeRoomId ? "is-active" : ""}`}
-      aria-label={room.display_name}
+      aria-label={roomListItemLabel(room)}
       data-mention-count={mentionCount || undefined}
       data-room-kind={kind}
       data-testid="room-item"
@@ -1537,12 +1538,12 @@ function RoomButton({
           avatar={room.avatar}
           className={`room-avatar ${kind === "dm" ? "is-user" : "is-room"}`}
           colorSeed={room.room_id}
-          fallback={avatarInitial(room.display_name)}
+          fallback={avatarInitial(roomListItemLabel(room))}
           onRequestAvatarThumbnail={onRequestAvatarThumbnail}
         />
         {isOnlineDm ? <span className="room-presence-dot" aria-hidden="true" /> : null}
       </span>
-      <span className="room-name" dir="auto">{room.display_name}</span>
+      <span className="room-name" dir="auto">{roomListItemLabel(room)}</span>
       <span className="room-trailing">
         {/*
           Issue #961: a room outside the account's joined rooms says which

@@ -48,6 +48,7 @@ import {
   datetimeLocalValueFromTimestamp,
   scheduledSendTimestampFromInput,
   avatarInitial,
+  roomDisplayLabel,
   peopleFacingLabel,
   type OpenContextMenu
 } from "../app/uiShared";
@@ -528,7 +529,7 @@ function SearchResults({
               >
                 <span dir="auto">{highlight(result.snippet, result.highlights)}</span>
                 <span className="result-meta">
-                  <span dir="auto">{result.context_label ?? room?.display_label ?? result.room_id}</span> ·{" "}
+                  <span dir="auto">{result.context_label ?? (room ? roomDisplayLabel(room) : null) ?? result.room_id}</span> ·{" "}
                   <time dateTime={new Date(result.timestamp_ms).toISOString()}>
                     {formatScheduledSendTime(result.timestamp_ms)}
                   </time>{" "}

@@ -763,6 +763,8 @@ fn frontend_snapshot_serializes_profile_and_summary_avatars() {
         child_room_ids: vec![],
     });
     state.rooms.push(RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: "!room:matrix.org".to_owned(),
         display_name: "Room".to_owned(),
         display_label: "Room".to_owned(),
@@ -889,6 +891,8 @@ fn frontend_snapshot_sidebar_respects_muted_rooms_like_the_delta_path() {
     // transport delivered it.
     let mut state = booted_app_state();
     state.rooms.push(RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: "!muted:matrix.org".to_owned(),
         display_name: "Muted".to_owned(),
         display_label: "Muted".to_owned(),
@@ -1349,6 +1353,8 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         load: koushi_state::SpaceChildrenLoadState::Idle,
     };
     state.rooms.push(RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: "!room:example.invalid".to_owned(),
         display_name: "Fixture Room".to_owned(),
         display_label: "Fixture Room".to_owned(),
@@ -1383,6 +1389,8 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
     // A low-priority conversation populates `sections.low_priority` so the
     // golden proves the #955 section split, not just the field's presence.
     state.rooms.push(RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: "!low-priority-room:example.invalid".to_owned(),
         display_name: "Fixture Low Priority Room".to_owned(),
         display_label: "Fixture Low Priority Room".to_owned(),
@@ -1408,11 +1416,18 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         is_encrypted: false,
         joined_members: 3,
     });
+    // #1050: an unnamed room whose members left carries the SDK's structured
+    // empty-room placeholder beside its English caller-data labels.
+    let former_members = koushi_state::RoomNamePlaceholder::EmptyWas {
+        previous_names: "Former Fixture".to_owned(),
+    };
     state.rooms.push(RoomSummary {
+        display_name_placeholder: Some(former_members.clone()),
+        display_label_placeholder: Some(former_members),
         room_id: "!redacted-room:example.invalid".to_owned(),
-        display_name: "Redacted Fixture Room".to_owned(),
-        display_label: "Redacted Fixture Room".to_owned(),
-        original_display_label: "Redacted Fixture Room".to_owned(),
+        display_name: "Empty Room (was Former Fixture)".to_owned(),
+        display_label: "Empty Room (was Former Fixture)".to_owned(),
+        original_display_label: "Empty Room (was Former Fixture)".to_owned(),
         avatar: None,
         is_dm: false,
         dm_user_ids: Vec::new(),

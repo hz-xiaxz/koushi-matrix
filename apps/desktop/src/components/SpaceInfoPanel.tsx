@@ -2,6 +2,7 @@ import { ChevronRight, FileText, MailPlus, Settings, Users } from "lucide-react"
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { t } from "../i18n/messages";
+import { roomDisplayLabel } from "../domain/roomDisplayLabel";
 import type {
   HistoryExportState,
   RoomJoinRule,
@@ -266,7 +267,7 @@ export function SpaceInfoPanel({
         <div className="settings-detail-list">
           {childRooms.map((room) => (
             <div className="settings-detail-row" key={room.room_id}>
-              <span dir="auto">{room.display_label}</span>
+              <span dir="auto">{roomDisplayLabel(room)}</span>
               <small dir="auto">{room.unread_count ? t("room.unreadCount", { count: room.unread_count }) : room.room_id}</small>
             </div>
           ))}

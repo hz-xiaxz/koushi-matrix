@@ -10,6 +10,8 @@ use koushi_state::{
 
 fn room(id: &str, label: &str, is_dm: bool, tags: RoomTags, timestamp_ms: u64) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: id.to_owned(),
         display_name: label.to_owned(),
         display_label: label.to_owned(),

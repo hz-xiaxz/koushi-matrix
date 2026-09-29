@@ -533,6 +533,8 @@ export type MessageId =
   | "room.noMembers"
   | "room.noTopic"
   | "room.noRoomSelected"
+  | "room.namePlaceholderEmpty"
+  | "room.namePlaceholderEmptyWas"
   | "room.noSpaces"
   | "room.notifications"
   | "room.notifyModeAll"
@@ -2255,6 +2257,8 @@ const en: Catalog = {
   "room.noMembers": "No members loaded",
   "room.noTopic": "No topic",
   "room.noRoomSelected": "No room selected",
+  "room.namePlaceholderEmpty": "Empty room",
+  "room.namePlaceholderEmptyWas": "Empty room (was {previousNames})",
   "room.noSpaces": "No Spaces",
   "room.notifications": "Notifications",
   "room.notifyModeAll": "All messages",
@@ -3894,6 +3898,8 @@ const ja: Catalog = {
   "room.noMembers": "読み込まれたメンバーはありません",
   "room.noTopic": "トピックなし",
   "room.noRoomSelected": "ルームが選択されていません",
+  "room.namePlaceholderEmpty": "空のルーム",
+  "room.namePlaceholderEmptyWas": "空のルーム（以前: {previousNames}）",
   "room.noSpaces": "スペースがありません",
   "room.notifications": "通知",
   "room.notifyModeAll": "すべてのメッセージ",

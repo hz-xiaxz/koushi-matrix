@@ -124,6 +124,8 @@ fn activity_resolution_request_batch_has_an_account_wide_cap() {
 fn activity_projection_ignores_plain_unread_count_for_activity_unread() {
     let state = AppState {
         rooms: vec![RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "!room:example.invalid".to_owned(),
             display_name: "Room".to_owned(),
             display_label: "Room".to_owned(),
@@ -435,6 +437,8 @@ fn activity_projection_keeps_old_unread_rows_outside_recent_window() {
 fn activity_projection_ignores_plain_unread_count_for_ingested_event_rows() {
     let state = AppState {
         rooms: vec![RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "!room:example.invalid".to_owned(),
             display_name: "Room".to_owned(),
             display_label: "Room".to_owned(),
@@ -484,6 +488,8 @@ fn activity_projection_ignores_plain_unread_count_for_ingested_event_rows() {
 fn activity_projection_skips_recent_rows_for_mentions_mode_without_highlight() {
     let mut state = AppState {
         rooms: vec![RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "!room:example.invalid".to_owned(),
             display_name: "Room".to_owned(),
             display_label: "Room".to_owned(),
@@ -558,6 +564,8 @@ fn activity_projection_context_label_uses_space_and_room_names() {
             child_room_ids: vec!["!room:example.invalid".to_owned()],
         }],
         rooms: vec![RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "!room:example.invalid".to_owned(),
             display_name: "Room".to_owned(),
             display_label: "Papers".to_owned(),
@@ -660,6 +668,8 @@ fn activity_projection_reconciles_replacement_latest_with_original_timeline_row(
         },
     );
     state.rooms = vec![RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: "Room".to_owned(),
         display_label: "Room".to_owned(),
@@ -784,6 +794,8 @@ fn room_unread_placeholder_guards_latest_identity_and_timestamp() {
 fn activity_projection_does_not_append_annotation_latest_event() {
     let state = AppState {
         rooms: vec![RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "!room:example.invalid".to_owned(),
             display_name: "Room".to_owned(),
             display_label: "Room".to_owned(),

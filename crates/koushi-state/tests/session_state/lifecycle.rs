@@ -33,6 +33,8 @@ fn account_switch_request_enters_switching_state_and_clears_views() {
             child_room_ids: vec!["room-a".to_owned()],
         }],
         rooms: vec![RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "room-a".to_owned(),
             display_name: "Room A".to_owned(),
             display_label: "Room A".to_owned(),
@@ -164,6 +166,8 @@ fn logout_clears_session_views_and_notifies_ui() {
             child_room_ids: vec!["room-a".to_owned()],
         }],
         rooms: vec![RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "room-a".to_owned(),
             display_name: "Room A".to_owned(),
             display_label: "Room A".to_owned(),

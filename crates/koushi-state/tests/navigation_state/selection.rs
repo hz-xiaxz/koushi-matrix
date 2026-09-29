@@ -239,6 +239,8 @@ fn room_list_update_keeps_empty_selected_space_empty() {
 fn selecting_space_restores_last_non_dm_room_for_that_space() {
     let mut all_rooms = rooms();
     all_rooms.push(RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: "room-b".to_owned(),
         display_name: "Room B".to_owned(),
         display_label: "Room B".to_owned(),

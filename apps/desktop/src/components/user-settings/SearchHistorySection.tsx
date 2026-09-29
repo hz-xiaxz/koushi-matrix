@@ -1,5 +1,6 @@
 import { useNowMs } from "../../app/useNowMs";
 import { t } from "../../i18n/messages";
+import { roomDisplayLabel } from "../../domain/roomDisplayLabel";
 import type {
   RoomSummary,
   SearchCrawlerFailureKind,
@@ -238,7 +239,7 @@ function crawlerRoomEntries(
   roomStates: Record<string, SearchCrawlerRoomState>,
   rooms?: RoomSummary[]
 ): CrawlerRoomEntry[] {
-  const labels = new Map((rooms ?? []).map((room) => [room.room_id, room.display_label]));
+  const labels = new Map((rooms ?? []).map((room) => [room.room_id, roomDisplayLabel(room)]));
   return Object.entries(roomStates)
     .map(([roomId, roomState]) => ({
       roomId,
@@ -289,7 +290,7 @@ function crawlerLastActiveEntry(
   const room = rooms?.find((candidate) => candidate.room_id === lastActive.room_id);
   return {
     roomId: lastActive.room_id,
-    displayLabel: room?.display_label ?? t("settings.searchHistoryRoomUnknown"),
+    displayLabel: room ? roomDisplayLabel(room) : t("settings.searchHistoryRoomUnknown"),
     updatedAtMs: lastActive.updated_at_ms
   };
 }

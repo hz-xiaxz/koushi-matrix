@@ -570,6 +570,8 @@ async fn closed_account_forwarding_rolls_back_space_member_role_once() {
 
 pub(super) fn unread_diagnostic_room(room_id: &str) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: "Synthetic room".to_owned(),
         display_label: "Synthetic room".to_owned(),

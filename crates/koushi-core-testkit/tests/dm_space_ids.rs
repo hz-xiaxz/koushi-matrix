@@ -6,6 +6,8 @@ use koushi_state::{RoomSummary, RoomTags};
 
 fn dm_summary(room_id: &str, dm_user_ids: Vec<&str>) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: room_id.to_owned(),
         display_label: room_id.to_owned(),
@@ -30,6 +32,8 @@ fn dm_summary(room_id: &str, dm_user_ids: Vec<&str>) -> RoomSummary {
 
 fn non_dm_summary(room_id: &str) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: room_id.to_owned(),
         display_label: room_id.to_owned(),

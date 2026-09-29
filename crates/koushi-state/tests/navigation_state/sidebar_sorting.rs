@@ -16,6 +16,8 @@ fn active_sort_room(
     activity_timestamp_ms: Option<u64>,
 ) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: room_id.to_owned(),
         display_label: room_id.to_owned(),
@@ -53,6 +55,8 @@ fn dm_room_for_activity(
     conversation_activity: Option<ConversationActivity>,
 ) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: display_label.to_owned(),
         display_label: display_label.to_owned(),
@@ -215,6 +219,8 @@ fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
     }];
     let rooms = vec![
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "plain".to_owned(),
             display_name: "Plain".to_owned(),
             display_label: "Plain".to_owned(),
@@ -236,6 +242,8 @@ fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
             joined_members: 0,
         },
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "notified".to_owned(),
             display_name: "Notified".to_owned(),
             display_label: "Notified".to_owned(),
@@ -257,6 +265,8 @@ fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
             joined_members: 0,
         },
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "marked-dm".to_owned(),
             display_name: "Marked DM".to_owned(),
             display_label: "Marked DM".to_owned(),
@@ -356,6 +366,8 @@ fn home_lists_all_dms() {
 fn active_space_lists_only_dms_belonging_to_that_space() {
     let mut rooms_with_outside = rooms();
     rooms_with_outside.push(RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: "dm-outside".to_owned(),
         display_name: "Outside DM".to_owned(),
         display_label: "Outside DM".to_owned(),
@@ -412,6 +424,8 @@ fn dm_in_multiple_spaces_appears_under_each() {
     ];
     let multi_rooms = vec![
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "room-a".to_owned(),
             display_name: "Room A".to_owned(),
             display_label: "Room A".to_owned(),
@@ -433,6 +447,8 @@ fn dm_in_multiple_spaces_appears_under_each() {
             joined_members: 0,
         },
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "dm-multi".to_owned(),
             display_name: "Multi DM".to_owned(),
             display_label: "Multi DM".to_owned(),
@@ -507,6 +523,8 @@ fn sidebar_items_carry_rust_owned_room_and_space_avatars() {
     }];
     let rooms = vec![
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "room-a".to_owned(),
             display_name: "Room A".to_owned(),
             display_label: "Room A".to_owned(),
@@ -528,6 +546,8 @@ fn sidebar_items_carry_rust_owned_room_and_space_avatars() {
             joined_members: 0,
         },
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "dm-a".to_owned(),
             display_name: "Alice".to_owned(),
             display_label: "Alice".to_owned(),
@@ -581,6 +601,8 @@ fn room_list_sort_supports_recent_and_locale_modes() {
         session: SessionState::Ready(session_info()),
         rooms: vec![
             RoomSummary {
+                display_name_placeholder: None,
+                display_label_placeholder: None,
                 room_id: "room-b".to_owned(),
                 display_name: "Beta".to_owned(),
                 display_label: "Beta".to_owned(),
@@ -605,6 +627,8 @@ fn room_list_sort_supports_recent_and_locale_modes() {
                 joined_members: 0,
             },
             RoomSummary {
+                display_name_placeholder: None,
+                display_label_placeholder: None,
                 room_id: "room-a".to_owned(),
                 display_name: "Alpha".to_owned(),
                 display_label: "Alpha".to_owned(),
@@ -726,6 +750,8 @@ fn room_list_sort_supports_recent_and_locale_modes() {
 fn room_list_activity_sort_uses_latest_message_timestamp_before_status_activity() {
     let rooms = vec![
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "status-newer".to_owned(),
             display_name: "Status Newer".to_owned(),
             display_label: "Status Newer".to_owned(),
@@ -750,6 +776,8 @@ fn room_list_activity_sort_uses_latest_message_timestamp_before_status_activity(
             joined_members: 0,
         },
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "message-newer".to_owned(),
             display_name: "Message Newer".to_owned(),
             display_label: "Message Newer".to_owned(),
@@ -798,6 +826,8 @@ fn room_list_activity_sort_uses_latest_message_timestamp_before_status_activity(
 fn room_list_activity_sort_keeps_a_messaged_dm_ahead_of_a_newer_join_only_dm() {
     let rooms = vec![
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "join-only".to_owned(),
             display_name: "New Contact".to_owned(),
             display_label: "New Contact".to_owned(),
@@ -819,6 +849,8 @@ fn room_list_activity_sort_keeps_a_messaged_dm_ahead_of_a_newer_join_only_dm() {
             joined_members: 0,
         },
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "messaged".to_owned(),
             display_name: "Existing Contact".to_owned(),
             display_label: "Existing Contact".to_owned(),

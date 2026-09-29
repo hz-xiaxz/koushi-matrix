@@ -18,7 +18,10 @@ import type {
   TimelineMessage
 } from "../domain/types";
 import type { ContextMenuItem } from "../domain/contextMenus";
-import { t } from "../i18n/messages";
+import { getActiveLocale, t } from "../i18n/messages";
+import { roomDisplayLabel } from "../domain/roomDisplayLabel";
+
+export { roomDisplayLabel, roomListItemLabel } from "../domain/roomDisplayLabel";
 
 export type { MentionCandidate } from "../domain/projectionTypes";
 
@@ -380,7 +383,11 @@ const NO_PINNED_EVENT_IDS: string[] = [];
 const pinnedEventIdsByEvents = new WeakMap<PinnedEvents, string[]>();
 const forwardDestinationsByRooms = new WeakMap<
   import("../domain/types").DesktopSnapshot["state"]["domain"]["rooms"],
-  import("../domain/projectionTypes").TimelineForwardDestination[]
+  {
+    // Labels include catalog text (#1050), so a locale change invalidates them.
+    locale: ReturnType<typeof getActiveLocale>;
+    destinations: import("../domain/projectionTypes").TimelineForwardDestination[];
+  }
 >();
 
 export function pinnedEventsForRoom(
@@ -415,13 +422,15 @@ export function forwardDestinationsFromSnapshot(
   snapshot: import("../domain/types").DesktopSnapshot
 ): import("../domain/projectionTypes").TimelineForwardDestination[] {
   const rooms = snapshot.state.domain.rooms;
-  let destinations = forwardDestinationsByRooms.get(rooms);
+  const locale = getActiveLocale();
+  const cached = forwardDestinationsByRooms.get(rooms);
+  let destinations = cached?.locale === locale ? cached.destinations : undefined;
   if (!destinations) {
     destinations = rooms.map((room) => ({
       room_id: room.room_id,
-      display_name: room.display_label
+      display_name: roomDisplayLabel(room)
     }));
-    forwardDestinationsByRooms.set(rooms, destinations);
+    forwardDestinationsByRooms.set(rooms, { locale, destinations });
   }
   return destinations;
 }

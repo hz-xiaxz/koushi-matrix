@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 fn normalize_rooms_preserves_typed_conversation_activity_and_opaque_recency() {
     let snapshot = MatrixRoomListSnapshot {
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "!dm:example.test".to_owned(),
             display_name: "Synthetic DM".to_owned(),
             avatar_mxc_uri: None,
@@ -56,6 +57,7 @@ fn normalize_rooms_preserves_typed_conversation_activity_and_opaque_recency() {
 fn normalize_rooms_preserves_latest_redaction_fact() {
     let snapshot = MatrixRoomListSnapshot {
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "!room:example.test".to_owned(),
             display_name: "Room".to_owned(),
             avatar_mxc_uri: None,
@@ -153,6 +155,7 @@ fn normalize_spaces_with_child_rooms() {
         }],
         rooms: vec![
             MatrixRoomListRoom {
+                display_name_placeholder: None,
                 room_id: "!room1:example.test".to_owned(),
                 display_name: "Room 1".to_owned(),
                 avatar_mxc_uri: None,
@@ -171,6 +174,7 @@ fn normalize_spaces_with_child_rooms() {
                 joined_members: 0,
             },
             MatrixRoomListRoom {
+                display_name_placeholder: None,
                 room_id: "!room2:example.test".to_owned(),
                 display_name: "Room 2".to_owned(),
                 avatar_mxc_uri: None,
@@ -210,6 +214,7 @@ fn normalize_spaces_uses_direct_space_child_state() {
             member_user_ids: Vec::new(),
         }],
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "!room1:example.test".to_owned(),
             display_name: "Room 1".to_owned(),
             avatar_mxc_uri: None,
@@ -282,6 +287,7 @@ fn normalize_rooms_preserves_dm_and_unread() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: vec![],
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "!dm:example.test".to_owned(),
             display_name: "Alice".to_owned(),
             avatar_mxc_uri: None,
@@ -315,6 +321,7 @@ fn normalize_rooms_non_dm() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: vec![],
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "!room:example.test".to_owned(),
             display_name: "General".to_owned(),
             avatar_mxc_uri: None,
@@ -355,6 +362,7 @@ fn normalize_rooms_uses_direct_space_child_state_as_parent() {
             member_user_ids: Vec::new(),
         }],
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "!room:example.test".to_owned(),
             display_name: "General".to_owned(),
             avatar_mxc_uri: None,
@@ -398,6 +406,7 @@ fn partial_space_membership_preserves_known_dm_association_until_complete() {
             .into_iter()
             .collect(),
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "dm-alice".to_owned(),
             display_name: "Alice".to_owned(),
             avatar_mxc_uri: None,
@@ -440,6 +449,7 @@ fn normalize_rooms_assigns_dm_space_ids_by_counterpart_membership() {
         }],
         rooms: vec![
             MatrixRoomListRoom {
+                display_name_placeholder: None,
                 room_id: "dm-alice".to_owned(),
                 display_name: "Alice".to_owned(),
                 avatar_mxc_uri: None,
@@ -458,6 +468,7 @@ fn normalize_rooms_assigns_dm_space_ids_by_counterpart_membership() {
                 joined_members: 0,
             },
             MatrixRoomListRoom {
+                display_name_placeholder: None,
                 room_id: "dm-bob".to_owned(),
                 display_name: "Bob".to_owned(),
                 avatar_mxc_uri: None,
@@ -489,6 +500,7 @@ fn normalize_rooms_assigns_dm_space_ids_by_counterpart_membership() {
 fn normalize_rooms_preserves_avatar_mxc_as_unrequested_thumbnail() {
     let snapshot = MatrixRoomListSnapshot {
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "!room:example.test".to_owned(),
             display_name: "General".to_owned(),
             avatar_mxc_uri: Some("mxc://example.test/room-avatar".to_owned()),
@@ -599,6 +611,7 @@ fn normalize_rooms_carries_sdk_room_tags() {
         complete_space_member_ids: BTreeSet::new(),
         room_notification_modes: Default::default(),
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "!room1:example.test".to_owned(),
             display_name: "Room 1".to_owned(),
             avatar_mxc_uri: None,
@@ -641,4 +654,45 @@ fn normalize_empty_snapshot() {
     let snapshot = MatrixRoomListSnapshot::default();
     assert!(normalize_spaces(&snapshot).is_empty());
     assert!(normalize_rooms(&snapshot).is_empty());
+}
+
+#[test]
+fn normalize_rooms_carries_the_sdk_empty_room_placeholder() {
+    // #1050: the SDK's English "Empty Room" stays caller data in the labels;
+    // the structured placeholder lets the GUI render catalog text.
+    let snapshot = MatrixRoomListSnapshot {
+        rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: Some(koushi_state::RoomNamePlaceholder::Empty),
+            room_id: "!empty:example.test".to_owned(),
+            display_name: "Empty Room".to_owned(),
+            avatar_mxc_uri: None,
+            is_dm: false,
+            dm_user_ids: Vec::new(),
+            tags: MatrixRoomTags::default(),
+            unread_count: 0,
+            notification_count: 0,
+            highlight_count: 0,
+            marked_unread: false,
+            recency_stamp: None,
+            conversation_activity: None,
+            latest_event: None,
+            parent_space_ids: Vec::new(),
+            is_encrypted: false,
+            joined_members: 1,
+        }],
+        ..MatrixRoomListSnapshot::default()
+    };
+
+    let rooms = normalize_rooms(&snapshot);
+    let room = rooms.first().expect("normalized room");
+
+    assert_eq!(room.display_label, "Empty Room");
+    assert_eq!(
+        room.display_name_placeholder,
+        Some(koushi_state::RoomNamePlaceholder::Empty)
+    );
+    assert_eq!(
+        room.display_label_placeholder,
+        Some(koushi_state::RoomNamePlaceholder::Empty)
+    );
 }

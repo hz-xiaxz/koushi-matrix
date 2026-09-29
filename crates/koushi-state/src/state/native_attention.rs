@@ -652,6 +652,8 @@ mod tests {
 
     fn unread_room() -> RoomSummary {
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "!room:example.invalid".to_owned(),
             display_name: "Room".to_owned(),
             display_label: "Room".to_owned(),

@@ -80,6 +80,8 @@ fn background_flood_batch(batch_index: usize, kept_room_ids: &[&str]) -> Vec<App
     let mut rooms = kept_room_ids
         .iter()
         .map(|room_id| RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: (*room_id).to_owned(),
             display_name: (*room_id).to_owned(),
             display_label: (*room_id).to_owned(),
@@ -102,6 +104,8 @@ fn background_flood_batch(batch_index: usize, kept_room_ids: &[&str]) -> Vec<App
         })
         .collect::<Vec<_>>();
     rooms.push(RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.clone(),
         display_name: format!("Background Room {batch_index}"),
         display_label: format!("Background Room {batch_index}"),

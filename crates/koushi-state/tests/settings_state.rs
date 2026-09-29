@@ -711,6 +711,8 @@ fn settings_load_and_persist_failures_are_private_data_free() {
 
 fn test_room(room_id: &str, display_name: &str, activity_timestamp_ms: u64) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: display_name.to_owned(),
         display_label: display_name.to_owned(),

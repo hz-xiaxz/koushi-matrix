@@ -67,6 +67,8 @@ pub(super) fn normalize_rooms_with_previous(
                 room.display_name.trim().to_owned()
             };
             RoomSummary {
+                display_name_placeholder: room.display_name_placeholder.clone(),
+                display_label_placeholder: room.display_name_placeholder.clone(),
                 room_id: room.room_id.clone(),
                 display_name: room.display_name.clone(),
                 display_label: display_label.clone(),

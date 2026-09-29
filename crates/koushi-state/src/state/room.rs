@@ -28,9 +28,19 @@ pub struct SpaceSummary {
 pub struct RoomSummary {
     pub room_id: String,
     pub display_name: String,
+    /// Set when `display_name` is the SDK's calculated empty-room name
+    /// (#1050); `display_name` keeps the SDK's English text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name_placeholder: Option<RoomNamePlaceholder>,
     pub display_label: String,
     #[serde(default)]
     pub original_display_label: String,
+    /// Set when `display_label` is that placeholder (#1050). `display_label`
+    /// then still carries the SDK's English text as caller data, and the GUI
+    /// renders this structured value through the message catalog instead. A
+    /// single-member DM never uses it: its label resolves to the member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_label_placeholder: Option<RoomNamePlaceholder>,
     #[serde(default)]
     pub avatar: Option<AvatarImage>,
     pub is_dm: bool,
@@ -64,8 +74,10 @@ impl fmt::Debug for RoomSummary {
             .debug_struct("RoomSummary")
             .field("room_id", &"RoomId(..)")
             .field("display_name", &"RoomName(..)")
+            .field("display_name_placeholder", &self.display_name_placeholder)
             .field("display_label", &"DisplayLabel(..)")
             .field("original_display_label", &"OriginalDisplayLabel(..)")
+            .field("display_label_placeholder", &self.display_label_placeholder)
             .field("avatar", &self.avatar.as_ref().map(|_| "AvatarImage(..)"))
             .field("is_dm", &self.is_dm)
             .field("dm_user_ids", &self.dm_user_ids.len())
@@ -85,6 +97,31 @@ impl fmt::Debug for RoomSummary {
             .field("is_encrypted", &self.is_encrypted)
             .field("joined_members", &self.joined_members)
             .finish()
+    }
+}
+
+/// The SDK's calculated room name when no name, alias, or other member exists
+/// (the Matrix "Empty Room" rule, `matrix_sdk_base::RoomDisplayName::Empty` and
+/// `EmptyWas`). Product text for it is owned by the GUI message catalog.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RoomNamePlaceholder {
+    /// No useful name could ever be calculated.
+    Empty,
+    /// The room is empty now; `previous_names` is the SDK's former member
+    /// name list, caller-owned data rendered with `dir="auto"`.
+    EmptyWas { previous_names: String },
+}
+
+impl fmt::Debug for RoomNamePlaceholder {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => formatter.write_str("Empty"),
+            Self::EmptyWas { .. } => formatter
+                .debug_struct("EmptyWas")
+                .field("previous_names", &"DisplayNames(..)")
+                .finish(),
+        }
     }
 }
 

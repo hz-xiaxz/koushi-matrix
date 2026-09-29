@@ -20,6 +20,8 @@ fn ready_state() -> AppState {
         ..Default::default()
     };
     state.rooms.push(RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: "!known:example.invalid".to_owned(),
         display_name: "Known Room".to_owned(),
         display_label: "Known Room".to_owned(),
@@ -256,6 +258,8 @@ fn loaded_notification_preferences_recompute_activity_projection_with_effective_
     let mut state = ready_state();
     state.navigation.active_room_id = Some("selected".to_owned());
     let room = |room_id: &str, timestamp_ms: u64| RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: room_id.to_owned(),
         display_label: room_id.to_owned(),

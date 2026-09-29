@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EntityAvatar, Sidebar, WorkspaceRail } from "./Shell";
 import { readyDesktopSnapshotFixture } from "../test/desktopApiFixture";
 import type { RoomListItem } from "../domain/types";
-import { t } from "../i18n/messages";
+import { setActiveLocaleProfile, t } from "../i18n/messages";
 
 function room(room_id: string, display_name: string): RoomListItem {
   return {
@@ -195,6 +195,33 @@ describe("Rust-projected workspace shell", () => {
     // No create action and no aggregate unread badge on this heading.
     expect(within(lowPriority).queryByRole("button", { name: /create room/i })).toBeNull();
     expect(lowPriority.querySelector(".section-unread-count")).toBeNull();
+  });
+
+  it("renders the Rust-marked empty-room placeholder in the active locale", () => {
+    // #1050: the SDK's calculated "Empty Room" is English-only caller data.
+    setActiveLocaleProfile("ja", "none");
+    try {
+      const snapshot = readyDesktopSnapshotFixture();
+      snapshot.sidebar.sections.rooms = [
+        {
+          ...room("!empty:example.invalid", "Empty Room"),
+          display_name_placeholder: { kind: "empty" }
+        },
+        room("!named:example.invalid", "Named")
+      ];
+      snapshot.sidebar.space_rooms = [...snapshot.sidebar.sections.rooms];
+
+      render(<Sidebar snapshot={snapshot} {...sidebarProps()} />);
+
+      expect(screen.getByRole("button", { name: /空のルーム/ })).toBeTruthy();
+      expect(screen.queryByText("Empty Room")).toBeNull();
+
+      fireEvent.change(screen.getByRole("searchbox"), { target: { value: "空の" } });
+      expect(screen.getByText("空のルーム")).toBeTruthy();
+      expect(screen.queryByText("Named")).toBeNull();
+    } finally {
+      setActiveLocaleProfile("en", "none");
+    }
   });
 
   it("hides Low priority when the Rust section is empty", () => {
