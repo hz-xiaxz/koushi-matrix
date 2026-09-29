@@ -3064,7 +3064,17 @@ fn app_actor_event_navigation_fixture(
     data_dir: &std::path::Path,
     state: AppState,
 ) -> EventNavigationFixture {
-    let (account_tx, account_rx) = mpsc::channel(8);
+    app_actor_fixture_with_account_capacity(data_dir, state, 8)
+}
+
+/// AppActor fixture whose AccountActor mailbox has a caller-chosen capacity,
+/// so a test can hold it full while exercising local-only navigation (#1060).
+fn app_actor_fixture_with_account_capacity(
+    data_dir: &std::path::Path,
+    state: AppState,
+    account_capacity: usize,
+) -> EventNavigationFixture {
+    let (account_tx, account_rx) = mpsc::channel(account_capacity);
     let (navigation_projection, navigation_projection_rx) =
         crate::timeline::NavigationProjectionIngress::channel();
     let account_actor = AccountActorHandle::for_app_actor_test(account_tx, navigation_projection);
@@ -4495,3 +4505,4 @@ async fn wait_for_runtime_sync_running(runtime: &CoreRuntime, stage: &'static st
 }
 
 mod anchored_send;
+mod navigation_network;
