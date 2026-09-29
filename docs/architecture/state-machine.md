@@ -3098,10 +3098,15 @@ stateDiagram-v2
 ## Outbound Send Queue
 
 Outbound timeline send presentation and retry/cancel handles are Rust-owned.
-Before composer acceptance clears a draft, the session-scoped
-`TimelineManager` installs a bounded display projection keyed by the client
-transaction ID and waits for the current generation-fenced `TimelineActor` to
-acknowledge publication. SDK enqueue then binds the SDK transaction ID and
+Before composer acceptance, the session-scoped `TimelineManager` installs a
+bounded display projection keyed by the client transaction ID in its send
+coordinator and asks the current generation-fenced `TimelineActor` to publish
+it. Publication is presentation only and never gates admission: the manager
+does not wait for the actor's acknowledgement, and a busy, full-mailbox, or
+replaced actor reconciles the coordinator-owned projection when it next
+processes a refresh or starts from the coordinator snapshot (#1064). A slow
+actor handler therefore delays only the pending row, never SDK enqueue. SDK
+enqueue then binds the SDK transaction ID and
 `SendHandle`; terminal success binds the event ID. The actor combines these
 pending projections with canonical SDK slots without changing canonical SDK
 indexes. A session-scoped `TimelineManager` also owns supervised
@@ -3115,7 +3120,7 @@ missing local-echo diff no longer creates a visibility gap.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PendingProjection: accepted payload / actor publication ack
+    [*] --> PendingProjection: accepted payload / coordinator projection registered
     PendingProjection --> Sending: SDK transaction + SendHandle bound
     PendingProjection --> SentAwaitingRemote: SentEvent before local echo
     Sending --> NotSent: SendError
@@ -3130,7 +3135,7 @@ stateDiagram-v2
 
 | Command / update | Accepted states | Rejected states | Notes |
 | --- | --- | --- | --- |
-| accepted text/reply | below the bounded pending cap and current actor publication acknowledged | cap full, actor replaced without successful reroute, publication unavailable | Publishes one client-transaction `sending` row, retaining the persisted draft until SDK enqueue succeeds. Replies construct their relation from known event IDs, and plain thread sends use the known root as fallback, without a network fetch before enqueue. `ComposerSubmissionQueued` then clears the submitted draft revision and releases only that composer while the submission registry retains its remote terminal. A failed pre-enqueue attempt leaves the draft intact. |
+| accepted text/reply | below the bounded pending cap with a subscribed timeline enqueue context | cap full, not subscribed, registration activation or reducer acceptance delivery failed | Actor publication is best-effort and never waited on; the row appears when the actor catches up. Publishes one client-transaction `sending` row, retaining the persisted draft until SDK enqueue succeeds. Replies construct their relation from known event IDs, and plain thread sends use the known root as fallback, without a network fetch before enqueue. `ComposerSubmissionQueued` then clears the submitted draft revision and releases only that composer while the submission registry retains its remote terminal. A failed pre-enqueue attempt leaves the draft intact. |
 | `NewLocalEvent` | any | none | Exact SDK binding merges the canonical local echo into the pending row and stores the SDK `SendHandle`; it never inserts a duplicate. Restored local echoes from `RoomSendQueue::subscribe()` initialize the same actor table before commands. |
 | `SendError` | `sending` | none | Records `not_sent { reason }` using only the SDK recoverable flag. Release diagnostics may record a closed app-owned failure class plus that recoverable flag, but raw SDK errors stay out of DTOs, logs, QA tokens, and React state. The matching composer pending state is failed once if enqueue never succeeded. A recoverable SDK failure after enqueue schedules room-queue re-enablement with bounded backoff and server Retry-After; later success can still emit `SendCompleted`. |
 | `RetrySend { room_id, transaction_id }` | `not_sent` with a stored `SendHandle` | `sending`, `sent`, `cancelled`, unknown transaction | Re-enables the SDK room queue with `room.send_queue().set_enabled(true)`, then calls `SendHandle::unwedge()`. FIFO order remains the SDK send queue's responsibility; React never reorders or manually marks successors sent. |
@@ -4275,10 +4280,10 @@ stateDiagram-v2
     Opening --> Closed: CloseActivity
     Open --> Open: SetActivityTab
     Open --> Open: ActivityRowsUpdated
-    Open --> Resolving: unresolved RoomUnread rows
+    Open --> Resolving: unattempted RoomUnread rows (open, live update, or settlement)
     Resolving --> Open: ActivityResolutionSucceeded [matching generation]
     Resolving --> ResolutionFailed: ActivityResolutionFailed [matching generation]
-    ResolutionFailed --> Resolving: RetryActivityResolution [new generation]
+    ResolutionFailed --> Resolving: RetryActivityResolution or newer unattempted RoomUnread [new generation]
     Resolving --> Closed: close/session clear cancels task
     Open --> Open: PaginateActivity/ActivitySnapshotLoaded
     Open --> MarkReadPending: MarkActivityRead(room|all)
@@ -4299,7 +4304,11 @@ stateDiagram-v2
   highlight state but no observed unread event row survives the fully-read
   marker / cleared-event filter, `ActivityProjection` synthesizes a private-data-
   minimized room-level placeholder row (`kind = RoomUnread`, `event_id = None`).
-  Observed event rows remain preferred for the same room. The placeholder is a
+  Observed event rows remain preferred for the same room, but only when the
+  newest surviving unread row reaches the room's known
+  `conversation_activity` timestamp: an older cached unread row is not proof
+  that newer activity was resolved, so such a room keeps its event rows and
+  also gets a placeholder (#1061). The placeholder is a
   transient resolver input, never completed message content: `AccountActor`
   consumes decrypted cache/live timeline items and bounded 50-event backward
   pages (maximum 32 per room and 16 rooms per generation) through the shared
@@ -4307,6 +4316,13 @@ stateDiagram-v2
   observation. Per-room successes are retained when another room fails; capped
   batches rotate across retry generations to avoid starvation.
 - `ActivityStream.resolution` is Rust-owned `Idle | Resolving | Failed` state.
+  `OpenActivity` and `RetryActivityResolution` start a generation over every
+  current placeholder. After each action batch, `AppActor` also starts one
+  when open Activity has a placeholder whose room/activity timestamp no
+  generation attempted yet and no generation is `Resolving`; live updates never
+  preempt an in-flight generation, and a no-progress settlement stays `Failed`
+  (retryable) until newer activity or an explicit retry. Row refreshes,
+  including `PaginateActivity`, preserve the current resolution state.
   Generation guards reject late completion after retry, close, logout, lock, or
   account replacement. Failure exposes only a coarse `OperationFailureKind` and
   unresolved count. React hides `RoomUnread` rows, renders resolving/failure
