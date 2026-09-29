@@ -25,6 +25,7 @@ async fn room_actor_shutdown_aborts_when_its_mailbox_cannot_accept_shutdown() {
     let mut handle = RoomActorHandle {
         tx,
         timeline_residency,
+        navigation_enrichment: crate::room::NavigationEnrichmentIngress::channel().0,
         session,
         #[cfg(any(test, feature = "test-hooks"))]
         room_operation_test_control: Arc::new(Mutex::new(None)),
@@ -42,7 +43,9 @@ async fn room_actor_shutdown_aborts_when_its_mailbox_cannot_accept_shutdown() {
 }
 
 #[tokio::test]
-async fn select_space_projects_action() {
+async fn routed_selection_is_never_projected_by_room_actor() {
+    // #1060: AppActor owns room/Space selection. A selection command that
+    // still reached this actor must not become a late, second selection.
     let (action_tx, mut action_rx) = mpsc::channel(16);
     let (event_tx, _event_rx) = broadcast::channel(16);
     let handle = RoomActor::spawn(
@@ -57,21 +60,131 @@ async fn select_space_projects_action() {
             space_id: Some("!space:example.test".to_owned()),
         }))
         .await;
+    handle
+        .send(RoomMessage::Command(RoomCommand::SelectRoom {
+            request_id: make_request_id(2),
+            room_id: "!room:example.test".to_owned(),
+        }))
+        .await;
+    handle
+        .send(RoomMessage::Command(RoomCommand::ReorderSpaces {
+            request_id: make_request_id(3),
+            space_ids: vec!["!space:example.test".to_owned()],
+        }))
+        .await;
 
     let actions = action_rx.recv().await.expect("actions");
     assert!(
-        matches!(
-            actions.as_slice(),
-            [AppAction::SelectSpace {
-                space_id: Some(id)
-            }] if id == "!space:example.test"
-        ),
-        "expected SelectSpace action, got {actions:?}"
+        matches!(actions.as_slice(), [AppAction::ReorderSpaces { .. }]),
+        "expected only the later ReorderSpaces projection, got {actions:?}"
     );
 }
 
+fn synthetic_session(
+    server: &matrix_sdk::test_utils::mocks::MatrixMockServer,
+    client: matrix_sdk::Client,
+) -> Arc<MatrixClientSession> {
+    Arc::new(MatrixClientSession::from_client_for_testing(
+        client,
+        SessionInfo {
+            homeserver: server.uri(),
+            user_id: "@alice:example.test".to_owned(),
+            device_id: "ALICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        },
+    ))
+}
+
+async fn pinned_request_count(server: &matrix_sdk::test_utils::mocks::MatrixMockServer) -> usize {
+    server.received_requests().await.map_or(0, |requests| {
+        requests
+            .iter()
+            .filter(|request| request.url.path().contains("/state/m.room.pinned_events/"))
+            .count()
+    })
+}
+
 #[tokio::test]
-async fn pinned_event_network_delay_does_not_block_space_selection() {
+async fn navigation_enrichment_refreshes_pins_for_the_current_session_only() {
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use wiremock::{
+        Mock, ResponseTemplate,
+        matchers::{method, path_regex},
+    };
+
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let room_id = matrix_sdk::ruma::room_id!("!pinned:example.test");
+    server.sync_joined_room(&client, room_id).await;
+    Mock::given(method("GET"))
+        .and(path_regex(
+            r"^/_matrix/client/v3/rooms/.*/state/m.room.pinned_events/?$",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "pinned": [] })))
+        .mount(&server)
+        .await;
+    let session = synthetic_session(&server, client);
+    let session_key = crate::store::session_key_id_from_info(&session.info);
+    let (action_tx, mut action_rx) = mpsc::channel(16);
+    let (event_tx, _event_rx) = broadcast::channel(16);
+    let handle = RoomActor::spawn(
+        action_tx,
+        event_tx,
+        crate::SlidingSyncDiagnostics::default(),
+    );
+    let enrichment = handle.navigation_enrichment();
+
+    // Demand retained before the session exists is replayed once it does.
+    enrichment.admit(session_key.clone(), Some(room_id.to_string()), None, false);
+    assert!(
+        handle
+            .send(RoomMessage::SessionEstablished { session })
+            .await
+    );
+    let actions = tokio::time::timeout(Duration::from_secs(5), action_rx.recv())
+        .await
+        .expect("replayed pinned refresh projects")
+        .expect("pinned projection");
+    assert!(
+        matches!(
+            actions.as_slice(),
+            [AppAction::RoomPinnedEventsUpdated { room_id: projected, .. }]
+                if projected == room_id.as_str()
+        ),
+        "expected pinned projection, got {actions:?}"
+    );
+    assert_eq!(pinned_request_count(&server).await, 1);
+
+    // Another account's demand never fetches under this session.
+    enrichment.admit(
+        koushi_protocol::SessionKeyId {
+            user_id: "@mallory:example.test".to_owned(),
+            ..session_key.clone()
+        },
+        Some(room_id.to_string()),
+        None,
+        false,
+    );
+    // Re-selecting the same room for this session refreshes again.
+    enrichment.admit(session_key, Some(room_id.to_string()), None, false);
+    let actions = tokio::time::timeout(Duration::from_secs(5), action_rx.recv())
+        .await
+        .expect("re-selection refreshes pins")
+        .expect("pinned projection");
+    assert!(matches!(
+        actions.as_slice(),
+        [AppAction::RoomPinnedEventsUpdated { .. }]
+    ));
+    assert_eq!(pinned_request_count(&server).await, 2);
+
+    assert!(handle.send(RoomMessage::Shutdown).await);
+    tokio::time::timeout(Duration::from_secs(1), handle.join())
+        .await
+        .expect("shutdown");
+}
+
+#[tokio::test]
+async fn pinned_event_network_delay_does_not_block_later_room_work() {
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
     use wiremock::{
         Mock, ResponseTemplate,
@@ -144,19 +257,19 @@ async fn pinned_event_network_delay_does_not_block_space_selection() {
 
     assert!(
         handle
-            .send(RoomMessage::Command(RoomCommand::SelectSpace {
+            .send(RoomMessage::Command(RoomCommand::ReorderSpaces {
                 request_id: make_request_id(82),
-                space_id: Some("!space:example.test".to_owned()),
+                space_ids: vec!["!space:example.test".to_owned()],
             }))
             .await
     );
     let actions = tokio::time::timeout(Duration::from_secs(1), action_rx.recv())
         .await
-        .expect("space selection must not wait for pin fetch")
-        .expect("selection action");
+        .expect("later room work must not wait for pin fetch")
+        .expect("reorder action");
     assert!(matches!(
         actions.as_slice(),
-        [AppAction::SelectSpace { .. }]
+        [AppAction::ReorderSpaces { .. }]
     ));
     assert!(handle.send(RoomMessage::Shutdown).await);
     tokio::time::timeout(Duration::from_secs(1), handle.join())
@@ -196,33 +309,6 @@ async fn reorder_spaces_projects_action() {
                 ]
         ),
         "expected ReorderSpaces action, got {actions:?}"
-    );
-}
-
-#[tokio::test]
-async fn select_room_projects_action() {
-    let (action_tx, mut action_rx) = mpsc::channel(16);
-    let (event_tx, _event_rx) = broadcast::channel(16);
-    let handle = RoomActor::spawn(
-        action_tx,
-        event_tx,
-        crate::SlidingSyncDiagnostics::default(),
-    );
-
-    handle
-        .send(RoomMessage::Command(RoomCommand::SelectRoom {
-            request_id: make_request_id(2),
-            room_id: "!room:example.test".to_owned(),
-        }))
-        .await;
-
-    let actions = action_rx.recv().await.expect("actions");
-    assert!(
-        matches!(
-            actions.as_slice(),
-            [AppAction::SelectRoom { room_id }] if room_id == "!room:example.test"
-        ),
-        "expected SelectRoom action, got {actions:?}"
     );
 }
 

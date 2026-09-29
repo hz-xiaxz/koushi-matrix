@@ -35,6 +35,8 @@ fn versioned(
 
 fn room_summary(room_id: &str) -> koushi_state::RoomSummary {
     koushi_state::RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: "Room".to_owned(),
         display_label: "Room".to_owned(),

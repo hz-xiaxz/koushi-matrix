@@ -64,6 +64,8 @@ pub(super) fn initial_attention_diagnostic(
 pub(super) fn rooms() -> Vec<RoomSummary> {
     vec![
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "room-a".to_owned(),
             display_name: "Room A".to_owned(),
             display_label: "Room A".to_owned(),
@@ -85,6 +87,8 @@ pub(super) fn rooms() -> Vec<RoomSummary> {
             joined_members: 0,
         },
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "dm-a".to_owned(),
             display_name: "Alice".to_owned(),
             display_label: "Alice".to_owned(),
@@ -106,6 +110,8 @@ pub(super) fn rooms() -> Vec<RoomSummary> {
             joined_members: 0,
         },
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "global-room".to_owned(),
             display_name: "Global Room".to_owned(),
             display_label: "Global Room".to_owned(),

@@ -194,6 +194,7 @@ fn missing_space_child_links_detects_parent_only_relationship() {
             member_user_ids: Vec::new(),
         }],
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "!room:example.test".to_owned(),
             display_name: "Room".to_owned(),
             avatar_mxc_uri: None,
@@ -236,6 +237,7 @@ fn missing_space_child_links_skips_reciprocal_relationship() {
             member_user_ids: Vec::new(),
         }],
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "!room:example.test".to_owned(),
             display_name: "Room".to_owned(),
             avatar_mxc_uri: None,
@@ -1075,6 +1077,7 @@ async fn project_room_list_snapshot_updates_known_rooms_before_action_delivery()
     let known_room_ids = Arc::new(RwLock::new(BTreeSet::new()));
     let snapshot = MatrixRoomListSnapshot {
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "!room:example.test".to_owned(),
             display_name: "Private room".to_owned(),
             avatar_mxc_uri: None,
@@ -1183,6 +1186,7 @@ fn missing_space_child_links_includes_domainless_room_ids() {
             member_user_ids: Vec::new(),
         }],
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: child_room_id.to_owned(),
             display_name: "Room".to_owned(),
             avatar_mxc_uri: None,

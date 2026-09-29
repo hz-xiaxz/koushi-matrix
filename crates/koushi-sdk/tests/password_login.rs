@@ -70,6 +70,7 @@ fn room_list_smoke_report_counts_without_private_names() {
         }],
         rooms: vec![
             MatrixRoomListRoom {
+                display_name_placeholder: None,
                 room_id: "!room-a:example.invalid".into(),
                 display_name: "Private Room Name".into(),
                 avatar_mxc_uri: None,
@@ -88,6 +89,7 @@ fn room_list_smoke_report_counts_without_private_names() {
                 joined_members: 0,
             },
             MatrixRoomListRoom {
+                display_name_placeholder: None,
                 room_id: "!room-b:example.invalid".into(),
                 display_name: "Private DM Name".into(),
                 avatar_mxc_uri: None,
@@ -132,6 +134,7 @@ fn real_account_qa_report_counts_without_private_timeline_data() {
             member_user_ids: Vec::new(),
         }],
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "!room:example.invalid".into(),
             display_name: "Private Room Name".into(),
             avatar_mxc_uri: None,
@@ -179,6 +182,7 @@ fn restored_real_account_qa_report_records_restore_without_private_data() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: Vec::new(),
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "!room:example.invalid".into(),
             display_name: "Private Room Name".into(),
             avatar_mxc_uri: None,
@@ -224,6 +228,7 @@ fn real_account_qa_report_records_search_without_private_candidate_ids() {
     let snapshot = MatrixRoomListSnapshot {
         spaces: Vec::new(),
         rooms: vec![MatrixRoomListRoom {
+            display_name_placeholder: None,
             room_id: "!room:example.invalid".into(),
             display_name: "Private Room Name".into(),
             avatar_mxc_uri: None,

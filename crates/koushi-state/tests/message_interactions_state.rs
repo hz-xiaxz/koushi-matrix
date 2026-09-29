@@ -13,6 +13,8 @@ fn ready_state() -> AppState {
             authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }),
         rooms: vec![RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "!room:example.invalid".to_owned(),
             display_name: "Room".to_owned(),
             display_label: "Room".to_owned(),

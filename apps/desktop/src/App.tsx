@@ -240,6 +240,7 @@ import {
   ICON_SIZE,
   composerModeProp,
   operationFailureLabel,
+  roomDisplayLabel,
   syncStatePresentation,
   type ActiveContextMenu,
   type ContextMenuTarget,
@@ -2941,8 +2942,9 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
 
   /** Rust-projected display label for the room in the leave confirmation. */
   function roomLeaveDisplayName(roomId: string): string {
+    const leaveRoom = snapshot?.state.domain.rooms.find((room) => room.room_id === roomId);
     return (
-      snapshot?.state.domain.rooms.find((room) => room.room_id === roomId)?.display_label ??
+      (leaveRoom ? roomDisplayLabel(leaveRoom) : null) ??
       roomId
     );
   }
@@ -4691,9 +4693,35 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
       current.state.ui.thread.room_id === roomId &&
       current.state.ui.thread.root_event_id === rootEventId;
     if (!opened) {
+      appendDiagnosticLog({
+        timestampMs: Date.now(),
+        source: "thread.open",
+        message: `stage=not_opened thread_kind=${current?.state.ui.thread.kind ?? "none"} timeline_room_matches=${current?.state.ui.timeline.room_id === roomId}`
+      });
       return false;
     }
     setRightPanelMode("thread");
+    return true;
+  }
+
+  // Rust admits OpenThread only for the active timeline room (#1056). Every
+  // entry point that may name a thread in another room (Activity rows, the
+  // scoped Threads list, pinned events, notifications) navigates through here.
+  async function openThreadInRoom(
+    roomId: string,
+    rootEventId: string,
+    intent: ThreadOpenIntent
+  ): Promise<boolean> {
+    if (
+      getAppStoreSnapshot()?.state.ui.navigation.active_room_id !== roomId &&
+      !(await selectRoom(roomId))
+    ) {
+      return false;
+    }
+    if (!(await openThread(roomId, rootEventId, intent))) {
+      return false;
+    }
+    setPrimaryView("timeline");
     return true;
   }
 
@@ -4724,10 +4752,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     threadRootEventId: string | null
   ) {
     if (threadRootEventId) {
-      if (snapshot?.state.ui.navigation.active_room_id !== roomId && !(await selectRoom(roomId))) {
-        return;
-      }
-      await openThread(roomId, threadRootEventId, {
+      await openThreadInRoom(roomId, threadRootEventId, {
         pinnedReply: { event_id: eventId }
       });
       return;
@@ -4745,13 +4770,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     setPrimaryView("timeline");
     const plan = desktopNotificationTargetPlan(target);
     if (plan.kind === "thread") {
-      if (
-        snapshot?.state.ui.navigation.active_room_id !== plan.roomId &&
-        !(await selectRoom(plan.roomId))
-      ) {
-        return;
-      }
-      await openThread(plan.roomId, plan.rootEventId, {
+      await openThreadInRoom(plan.roomId, plan.rootEventId, {
         pinnedReply: { event_id: plan.eventId }
       });
       return;
@@ -5727,9 +5746,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
       (async () => {
         if (threadRootEventId) {
           if (!(await drainActiveComposerScopesForNavigation(true, true))) return;
-          if (!(await selectRoom(roomId))) return;
-          if (!(await openThread(roomId, threadRootEventId, "existingThread"))) return;
-          setPrimaryView("timeline");
+          await openThreadInRoom(roomId, threadRootEventId, "existingThread");
           return;
         }
         await settleCommand(api.openActivityEvent(roomId, eventId));
@@ -6229,7 +6246,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
       >
         <TopBar
           accountManagementUrl={snapshot.state.domain.account_management_url ?? undefined}
-          activeRoomName={activeRoom?.display_label ?? null}
+          activeRoomName={activeRoom ? roomDisplayLabel(activeRoom) : null}
           activeSpaceName={activeSpaceName}
           currentSessionStatus={snapshot.state.domain.current_session_status}
           deviceId={snapshot.state.domain.session.device_id ?? null}
@@ -6417,7 +6434,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           />
         ) : (
           <TimelinePane
-            activeRoomName={activeRoom?.display_label ?? t("room.noRoomSelected")}
+            activeRoomName={activeRoom ? roomDisplayLabel(activeRoom) : t("room.noRoomSelected")}
             composerDocument={composerDocument}
             composerNotice={
               composerNotice &&
@@ -6597,7 +6614,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
             runInBackground(closeFocusedContextPanel());
           }}
           onOpenThread={(roomId, rootEventId, intent) => {
-            runInBackground(openThread(roomId, rootEventId, intent));
+            runInBackground(openThreadInRoom(roomId, rootEventId, intent));
           }}
           onOpenFiles={(scope) => {
             runInBackground(openFilesView(scope));

@@ -242,7 +242,7 @@ impl RoomActor {
         }
     }
 
-    fn start_pinned_refresh(&mut self, room_id: String, request_id: Option<RequestId>) {
+    pub(super) fn start_pinned_refresh(&mut self, room_id: String, request_id: Option<RequestId>) {
         let Some(session) = self.session.clone() else {
             return;
         };

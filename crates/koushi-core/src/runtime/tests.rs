@@ -570,6 +570,8 @@ async fn closed_account_forwarding_rolls_back_space_member_role_once() {
 
 pub(super) fn unread_diagnostic_room(room_id: &str) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: "Synthetic room".to_owned(),
         display_label: "Synthetic room".to_owned(),
@@ -1364,6 +1366,7 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
     let retained = retained_rx
         .borrow_and_update()
         .clone()
+        .room
         .expect("cleanup and replacement projection remain latest-wins");
     assert_eq!(
         retained.cleanup.cancel_pagination,
@@ -2956,7 +2959,7 @@ async fn receipt_resolution_borrows_current_alias_without_publishing_global_stat
         "a captured SDK hint must not resurrect a removed avatar"
     );
     assert_eq!(window.rows[0].original_display_label, "Current global");
-    assert_eq!(window.rows[0].initials, "CU");
+    assert_eq!(window.rows[0].initials, "C");
     assert_eq!(window.rows[0].timestamp.unwrap().unix_ms.get(), 42);
     assert_eq!(
         window.rows[0].timestamp.unwrap().locale,
@@ -3048,6 +3051,34 @@ async fn receipt_resolution_borrows_current_alias_without_publishing_global_stat
     ));
 }
 
+/// #1060: user and internal event-navigation room selection commit in
+/// AppActor; neither is routed through the AccountActor mailbox.
+async fn wait_for_local_room_selection(
+    snapshot_rx: &mut watch::Receiver<VersionedAppStateSnapshot>,
+    room_id: &str,
+) {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if snapshot_rx
+                .borrow_and_update()
+                .state
+                .navigation
+                .active_room_id
+                .as_deref()
+                == Some(room_id)
+            {
+                break;
+            }
+            snapshot_rx
+                .changed()
+                .await
+                .expect("room selection snapshot");
+        }
+    })
+    .await
+    .expect("room selection should commit locally");
+}
+
 type EventNavigationFixture = (
     AppActor,
     mpsc::Sender<CoreCommandEnvelope>,
@@ -3055,7 +3086,7 @@ type EventNavigationFixture = (
     mpsc::Receiver<AccountMessage>,
     broadcast::Receiver<CoreEvent>,
     watch::Receiver<VersionedAppStateSnapshot>,
-    watch::Receiver<Option<crate::timeline::NavigationProjectionIntent>>,
+    watch::Receiver<crate::timeline::NavigationProjectionDemand>,
     mpsc::UnboundedSender<EventNavigationPrepared>,
     mpsc::UnboundedSender<FocusedProjectionCommitted>,
 );
@@ -3064,7 +3095,17 @@ fn app_actor_event_navigation_fixture(
     data_dir: &std::path::Path,
     state: AppState,
 ) -> EventNavigationFixture {
-    let (account_tx, account_rx) = mpsc::channel(8);
+    app_actor_fixture_with_account_capacity(data_dir, state, 8)
+}
+
+/// AppActor fixture whose AccountActor mailbox has a caller-chosen capacity,
+/// so a test can hold it full while exercising local-only navigation (#1060).
+fn app_actor_fixture_with_account_capacity(
+    data_dir: &std::path::Path,
+    state: AppState,
+    account_capacity: usize,
+) -> EventNavigationFixture {
+    let (account_tx, account_rx) = mpsc::channel(account_capacity);
     let (navigation_projection, navigation_projection_rx) =
         crate::timeline::NavigationProjectionIngress::channel();
     let account_actor = AccountActorHandle::for_app_actor_test(account_tx, navigation_projection);
@@ -3199,27 +3240,13 @@ async fn run_app_actor_cross_room_missing_navigation(
         })
         .await
         .expect("event navigation command");
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if matches!(
-                account_rx.recv().await.expect("internal select message"),
-                AccountMessage::RoomCommand(koushi_protocol::command::RoomCommand::SelectRoom {
-                    room_id,
-                    ..
-                }) if room_id == room_b
-            ) {
-                break;
-            }
-        }
-    })
-    .await
-    .expect("internal select should be routed");
+    wait_for_local_room_selection(&mut snapshot_rx, room_b).await;
     action_tx
         .send(vec![AppAction::SelectRoom {
             room_id: room_b.to_owned(),
         }])
         .await
-        .expect("internal room projection action");
+        .expect("late actor echo of the local selection is fenced");
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let snapshot = snapshot_rx.borrow().state.clone();
@@ -3246,7 +3273,7 @@ async fn run_app_actor_cross_room_missing_navigation(
                 .changed()
                 .await
                 .expect("room projection channel");
-            if let Some(projection) = navigation_projection_rx.borrow_and_update().clone() {
+            if let Some(projection) = navigation_projection_rx.borrow_and_update().room.clone() {
                 break projection;
             }
         }
@@ -3376,6 +3403,198 @@ async fn app_actor_cross_room_missing_activity_search_fallback_and_pinned_failur
     ));
 }
 
+fn live_unresolved_activity_room(room_id: &str, activity_timestamp_ms: u64) -> RoomSummary {
+    let mut room = unread_diagnostic_room(room_id);
+    room.is_dm = true;
+    room.unread_count = 1;
+    room.notification_count = 1;
+    room.highlight_count = 0;
+    room.marked_unread = false;
+    room.latest_event = None;
+    room.conversation_activity = Some(koushi_state::ConversationActivity {
+        timestamp_ms: activity_timestamp_ms,
+        source: koushi_state::ConversationActivitySource::Message,
+    });
+    room
+}
+
+async fn next_activity_resolution_request(
+    account_rx: &mut mpsc::Receiver<AccountMessage>,
+    within: Duration,
+) -> Option<(u64, BTreeSet<String>)> {
+    tokio::time::timeout(within, async {
+        loop {
+            if let AccountMessage::ResolveActivity {
+                generation,
+                requests,
+            } = account_rx.recv().await?
+            {
+                return Some((
+                    generation,
+                    requests
+                        .into_iter()
+                        .map(|request| request.room_id)
+                        .collect::<BTreeSet<_>>(),
+                ));
+            }
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+async fn wait_for_unread_resolution(
+    snapshot_rx: &mut watch::Receiver<VersionedAppStateSnapshot>,
+    expected: koushi_state::ActivityResolutionState,
+) {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if matches!(
+                &snapshot_rx.borrow().state.activity,
+                ActivityState::Open { unread, .. } if unread.resolution == expected
+            ) {
+                return;
+            }
+            snapshot_rx.changed().await.expect("activity snapshot");
+        }
+    })
+    .await
+    .expect("activity unread resolution reaches the expected state");
+}
+
+#[tokio::test]
+async fn live_unresolved_activity_starts_bounded_resolution_while_open() {
+    // #1061 gap 1: Activity is already open when a notified DM arrives
+    // without resolvable latest-event content.
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let first_room = "!live-unresolved-a:example.invalid";
+    let second_room = "!live-unresolved-b:example.invalid";
+    let state = AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://example.invalid".to_owned(),
+            user_id: "@synthetic:example.invalid".to_owned(),
+            device_id: "SYNTHETIC".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        }),
+        activity: ActivityState::Open {
+            active_tab: koushi_state::ActivityTab::Unread,
+            recent: koushi_state::ActivityStream::default(),
+            unread: koushi_state::ActivityStream::default(),
+            mark_read: Default::default(),
+        },
+        ..AppState::default()
+    };
+    let (
+        actor,
+        _command_tx,
+        action_tx,
+        mut account_rx,
+        _event_rx,
+        mut snapshot_rx,
+        _navigation_projection_rx,
+        _event_navigation_prepared_tx,
+        _focused_projection_tx,
+    ) = app_actor_event_navigation_fixture(data_dir.path(), state);
+    let actor_task = tokio::spawn(actor.run());
+    let room_list = |rooms: Vec<RoomSummary>| AppAction::RoomListUpdated {
+        spaces: Vec::new(),
+        rooms,
+    };
+
+    action_tx
+        .send(vec![room_list(vec![live_unresolved_activity_room(
+            first_room, 200,
+        )])])
+        .await
+        .expect("live room-list update");
+    let (first_generation, first_rooms) =
+        next_activity_resolution_request(&mut account_rx, Duration::from_secs(1))
+            .await
+            .expect("live unresolved attention starts Activity resolution");
+    assert_eq!(first_rooms, BTreeSet::from([first_room.to_owned()]));
+    wait_for_unread_resolution(
+        &mut snapshot_rx,
+        koushi_state::ActivityResolutionState::Resolving {
+            generation: first_generation,
+            unresolved_room_count: 1,
+        },
+    )
+    .await;
+
+    // Repeated live updates while resolving coalesce into the running
+    // generation instead of aborting it.
+    action_tx
+        .send(vec![room_list(vec![
+            live_unresolved_activity_room(first_room, 200),
+            live_unresolved_activity_room(second_room, 300),
+        ])])
+        .await
+        .expect("second live room-list update");
+    assert!(
+        next_activity_resolution_request(&mut account_rx, Duration::from_millis(200))
+            .await
+            .is_none(),
+        "an in-flight resolution is not restarted by live updates"
+    );
+
+    // The settled generation leaves the newly arrived room unattempted, so
+    // exactly one follow-up resolution covers it.
+    action_tx
+        .send(vec![AppAction::ActivityResolutionSucceeded {
+            generation: first_generation,
+        }])
+        .await
+        .expect("first resolution settles");
+    let (second_generation, second_rooms) =
+        next_activity_resolution_request(&mut account_rx, Duration::from_secs(1))
+            .await
+            .expect("unattempted live candidate starts a follow-up resolution");
+    assert!(second_generation > first_generation);
+    assert!(second_rooms.contains(second_room));
+
+    // Once every current candidate was attempted, a no-progress settlement
+    // stays retryable instead of looping.
+    action_tx
+        .send(vec![AppAction::ActivityResolutionSucceeded {
+            generation: second_generation,
+        }])
+        .await
+        .expect("second resolution settles");
+    wait_for_unread_resolution(
+        &mut snapshot_rx,
+        koushi_state::ActivityResolutionState::Failed {
+            generation: second_generation,
+            unresolved_room_count: 2,
+            failure_kind: OperationFailureKind::Timeout,
+        },
+    )
+    .await;
+    assert!(
+        next_activity_resolution_request(&mut account_rx, Duration::from_millis(200))
+            .await
+            .is_none(),
+        "attempted candidates wait for an explicit retry or newer activity"
+    );
+
+    // Newer activity in an attempted room is a new candidate.
+    action_tx
+        .send(vec![room_list(vec![
+            live_unresolved_activity_room(first_room, 400),
+            live_unresolved_activity_room(second_room, 300),
+        ])])
+        .await
+        .expect("newer activity update");
+    let (_, third_rooms) =
+        next_activity_resolution_request(&mut account_rx, Duration::from_secs(1))
+            .await
+            .expect("newer activity restarts resolution");
+    assert!(third_rooms.contains(first_room));
+
+    actor_task.abort();
+    let _ = actor_task.await;
+}
+
 #[tokio::test]
 async fn event_navigation_preserves_opening_through_internal_room_selection() {
     let data_dir = tempfile::tempdir().expect("runtime data directory");
@@ -3431,22 +3650,7 @@ async fn event_navigation_preserves_opening_through_internal_room_selection() {
         .await
         .expect("event navigation command");
 
-    let internal_select = tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if let AccountMessage::RoomCommand(
-                koushi_protocol::command::RoomCommand::SelectRoom {
-                    request_id: select_request_id,
-                    room_id,
-                },
-            ) = account_rx.recv().await.expect("internal select message")
-            {
-                break (select_request_id, room_id);
-            }
-        }
-    })
-    .await
-    .expect("internal room selection should be routed");
-    assert_eq!(internal_select.1, room_b);
+    wait_for_local_room_selection(&mut snapshot_rx, room_b).await;
 
     let opening_after_command = tokio::time::timeout(Duration::from_secs(1), async {
         loop {
@@ -3474,7 +3678,7 @@ async fn event_navigation_preserves_opening_through_internal_room_selection() {
             room_id: room_b.to_owned(),
         }])
         .await
-        .expect("internal room projection action");
+        .expect("late actor echo of the local selection is fenced");
     let after_internal_select = tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let snapshot = snapshot_rx.borrow().state.clone();
@@ -3504,7 +3708,7 @@ async fn event_navigation_preserves_opening_through_internal_room_selection() {
             if navigation_projection_rx.changed().await.is_err() {
                 panic!("room projection channel should remain open");
             }
-            if let Some(projection) = navigation_projection_rx.borrow_and_update().clone() {
+            if let Some(projection) = navigation_projection_rx.borrow_and_update().room.clone() {
                 break projection;
             }
         }
@@ -3603,7 +3807,7 @@ async fn event_navigation_external_room_selection_fences_stale_work() {
         actor,
         command_tx,
         action_tx,
-        mut account_rx,
+        _account_rx,
         mut event_rx,
         mut snapshot_rx,
         _navigation_projection_rx,
@@ -3630,21 +3834,7 @@ async fn event_navigation_external_room_selection_fences_stale_work() {
         })
         .await
         .expect("event navigation command");
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if matches!(
-                account_rx.recv().await.expect("internal select message"),
-                AccountMessage::RoomCommand(koushi_protocol::command::RoomCommand::SelectRoom {
-                    room_id,
-                    ..
-                }) if room_id == room_a
-            ) {
-                break;
-            }
-        }
-    })
-    .await
-    .expect("internal select should be routed");
+    wait_for_local_room_selection(&mut snapshot_rx, room_a).await;
 
     let room_request_id = RequestId {
         connection_id: RuntimeConnectionId(836),
@@ -3661,21 +3851,7 @@ async fn event_navigation_external_room_selection_fences_stale_work() {
         })
         .await
         .expect("external room selection command");
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if matches!(
-                account_rx.recv().await.expect("external select message"),
-                AccountMessage::RoomCommand(koushi_protocol::command::RoomCommand::SelectRoom {
-                    request_id,
-                    room_id,
-                }) if request_id == room_request_id && room_id == room_b
-            ) {
-                break;
-            }
-        }
-    })
-    .await
-    .expect("external select should be routed");
+    wait_for_local_room_selection(&mut snapshot_rx, room_b).await;
     let superseded = tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if let CoreEvent::IntentLifecycle {
@@ -3697,7 +3873,7 @@ async fn event_navigation_external_room_selection_fences_stale_work() {
             room_id: room_b.to_owned(),
         }])
         .await
-        .expect("external room projection action");
+        .expect("late actor echo of the external selection is fenced");
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if snapshot_rx
@@ -3845,38 +4021,10 @@ async fn run_event_navigation_latest_source_case(
             .await
             .expect("event navigation command");
         if request_id == first_request_id {
-            tokio::time::timeout(Duration::from_secs(1), async {
-                loop {
-                    if matches!(
-                        account_rx.recv().await.expect("first internal select"),
-                        AccountMessage::RoomCommand(koushi_protocol::command::RoomCommand::SelectRoom {
-                            room_id,
-                            ..
-                        }) if room_id == room_a
-                    ) {
-                        break;
-                    }
-                }
-            })
-            .await
-            .expect("first internal select should be routed");
+            wait_for_local_room_selection(&mut snapshot_rx, room_a).await;
         }
     }
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if matches!(
-                account_rx.recv().await.expect("second internal select"),
-                AccountMessage::RoomCommand(koushi_protocol::command::RoomCommand::SelectRoom {
-                    request_id,
-                    room_id,
-                }) if request_id.connection_id == RuntimeConnectionId(0) && room_id == room_b
-            ) {
-                break;
-            }
-        }
-    })
-    .await
-    .expect("second internal select should be routed");
+    wait_for_local_room_selection(&mut snapshot_rx, room_b).await;
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if let CoreEvent::IntentLifecycle {
@@ -3898,7 +4046,7 @@ async fn run_event_navigation_latest_source_case(
             room_id: room_b.to_owned(),
         }])
         .await
-        .expect("second internal room projection action");
+        .expect("late actor echo of the second selection is fenced");
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let snapshot = snapshot_rx.borrow().state.clone();
@@ -3966,11 +4114,17 @@ async fn run_event_navigation_latest_source_case(
     );
 
     loop {
-        if let AccountMessage::EnsureRoomEventCached { response_tx, .. } =
-            tokio::time::timeout(Duration::from_secs(1), account_rx.recv())
-                .await
-                .expect("latest lookup should be routed")
-                .expect("latest lookup message")
+        // #1060: the first navigation's room is already active, so its
+        // superseded lookup may be queued ahead of the latest one.
+        if let AccountMessage::EnsureRoomEventCached {
+            response_tx,
+            event_id,
+            ..
+        } = tokio::time::timeout(Duration::from_secs(1), account_rx.recv())
+            .await
+            .expect("latest lookup should be routed")
+            .expect("latest lookup message")
+            && event_id == event_b
         {
             response_tx
                 .send(crate::account::RoomEventLookupResult::Missing)
@@ -4083,9 +4237,9 @@ async fn run_event_navigation_external_supersession_case(command: CoreCommand) {
         actor,
         command_tx,
         action_tx,
-        mut account_rx,
+        _account_rx,
         mut event_rx,
-        snapshot_rx,
+        mut snapshot_rx,
         _navigation_projection_rx,
         event_navigation_prepared_tx,
         focused_projection_tx,
@@ -4110,22 +4264,17 @@ async fn run_event_navigation_external_supersession_case(command: CoreCommand) {
         })
         .await
         .expect("event navigation command");
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if matches!(
-                account_rx.recv().await.expect("internal select message"),
-                AccountMessage::RoomCommand(koushi_protocol::command::RoomCommand::SelectRoom {
-                    room_id,
-                    ..
-                }) if room_id == room_a
-            ) {
-                break;
-            }
-        }
-    })
-    .await
-    .expect("internal select should be routed");
+    wait_for_local_room_selection(&mut snapshot_rx, room_a).await;
 
+    // #1060: an external room selection commits locally; the other external
+    // navigations leave the room unchanged. Either way no stale work may
+    // restore the superseded event navigation's room.
+    let expected_room = match &command {
+        CoreCommand::Room(koushi_protocol::command::RoomCommand::SelectRoom {
+            room_id, ..
+        }) => room_id.clone(),
+        _ => room_a.to_owned(),
+    };
     command_tx
         .send(CoreCommandEnvelope::Public {
             command,
@@ -4195,7 +4344,7 @@ async fn run_event_navigation_external_supersession_case(command: CoreCommand) {
             .navigation
             .active_room_id
             .as_deref(),
-        Some(room_a)
+        Some(expected_room.as_str())
     );
     assert!(matches!(
         snapshot_rx.borrow().state.navigation.event_navigation,
@@ -4284,7 +4433,7 @@ async fn current_event_navigation_deadline_failure_clears_focused_owner_and_fenc
         mut account_rx,
         mut event_rx,
         mut snapshot_rx,
-        _navigation_projection_rx,
+        mut navigation_projection_rx,
         _event_navigation_prepared_tx,
         _focused_projection_tx,
     ) = app_actor_event_navigation_fixture(data_dir.path(), state);
@@ -4374,22 +4523,15 @@ async fn current_event_navigation_deadline_failure_clears_focused_owner_and_fenc
         Err(broadcast::error::TryRecvError::Empty)
     ));
 
-    match account_rx
-        .recv()
-        .await
-        .expect("focused unsubscribe command")
-    {
-        AccountMessage::TimelineCommand(
-            koushi_protocol::command::TimelineCommand::Unsubscribe {
-                request_id: unsubscribe_request_id,
-                key,
-            },
-        ) => {
-            assert_eq!(unsubscribe_request_id, request_id);
-            assert_eq!(key, focused_key);
-        }
-        _ => panic!("expected the focused timeline unsubscribe"),
-    }
+    // #1060: the focused owner is retired through the retained desired
+    // foreground, never through an AccountActor mailbox admission.
+    assert!(
+        navigation_projection_rx
+            .has_changed()
+            .expect("navigation projection channel"),
+        "the focused release must be admitted"
+    );
+    assert_eq!(navigation_projection_rx.borrow_and_update().focused, None);
     assert!(matches!(
         account_rx.try_recv(),
         Err(mpsc::error::TryRecvError::Empty)
@@ -4494,4 +4636,91 @@ async fn wait_for_runtime_sync_running(runtime: &CoreRuntime, stage: &'static st
     });
 }
 
+/// Issue #1062: a successful leave arrives as an actor-projected
+/// `RoomLeftLocally`. When the left room is a child of the selected Space, the
+/// runtime routes a fresh Space children load to the room actor under the new
+/// generation, without waiting for the renderer to ask.
+#[tokio::test]
+async fn leaving_a_selected_space_child_routes_a_space_children_reload() {
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let space_id = "!leave-space:example.invalid";
+    let child_id = "!leave-child:example.invalid";
+    let mut state = AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://example.invalid".to_owned(),
+            user_id: "@synthetic:example.invalid".to_owned(),
+            device_id: "SYNTHETIC".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        }),
+        ..AppState::default()
+    };
+    state.rooms = vec![unread_diagnostic_room(child_id)];
+    state.spaces = vec![koushi_state::SpaceSummary {
+        space_id: space_id.to_owned(),
+        raw_name: None,
+        display_name: "Synthetic space".to_owned(),
+        avatar: None,
+        join_rule: None,
+        child_room_ids: vec![child_id.to_owned()],
+    }];
+    state.navigation.active_space_id = Some(space_id.to_owned());
+    state.space_children = koushi_state::SpaceChildrenState {
+        selected_space_id: Some(space_id.to_owned()),
+        generation: 7,
+        children: vec![koushi_state::SpaceChildSummary {
+            room_id: child_id.to_owned(),
+            display_name: "Synthetic room".to_owned(),
+            avatar: None,
+            membership: koushi_state::SpaceChildMembership::Joined,
+            can_join: false,
+            is_space: false,
+            joined_members: 2,
+        }],
+        load: koushi_state::SpaceChildrenLoadState::Idle,
+    };
+
+    let (
+        actor,
+        _command_tx,
+        action_tx,
+        mut account_rx,
+        _event_rx,
+        _snapshot_rx,
+        _navigation_projection_rx,
+        _event_navigation_prepared_tx,
+        _focused_projection_tx,
+    ) = app_actor_event_navigation_fixture(data_dir.path(), state);
+    let actor_task = tokio::spawn(actor.run());
+
+    action_tx
+        .send(vec![AppAction::RoomLeftLocally {
+            room_id: child_id.to_owned(),
+        }])
+        .await
+        .expect("leave action");
+
+    let reload = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if let AccountMessage::RoomCommand(
+                koushi_protocol::command::RoomCommand::LoadSpaceChildren {
+                    request_id,
+                    space_id,
+                    generation,
+                },
+            ) = account_rx.recv().await.expect("account message")
+            {
+                break (request_id, space_id, generation);
+            }
+        }
+    })
+    .await
+    .expect("a leave of a selected Space child should reload its children");
+    assert_eq!(reload.0.connection_id, INTERNAL_RUNTIME_CONNECTION_ID);
+    assert_eq!(reload.1, space_id);
+    assert_eq!(reload.2, 8);
+
+    actor_task.abort();
+}
+
 mod anchored_send;
+mod navigation_network;

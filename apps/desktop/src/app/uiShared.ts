@@ -18,7 +18,10 @@ import type {
   TimelineMessage
 } from "../domain/types";
 import type { ContextMenuItem } from "../domain/contextMenus";
-import { t } from "../i18n/messages";
+import { getActiveLocale, t } from "../i18n/messages";
+import { roomDisplayLabel } from "../domain/roomDisplayLabel";
+
+export { roomDisplayLabel, roomListItemLabel } from "../domain/roomDisplayLabel";
 
 export type { MentionCandidate } from "../domain/projectionTypes";
 
@@ -268,25 +271,22 @@ function syncReasonLabel(reason: string | null | undefined): string | null {
   }
 }
 
-export function initials(value: string): string {
-  const ascii = value.match(/[A-Za-z]/g);
-  if (ascii?.length) {
-    return ascii.slice(0, 2).join("").toUpperCase();
-  }
-  return value.slice(0, 2);
-}
-
-export function compactAvatarLabel(value: string): string {
-  const normalized = value.trim().replace(/\s+/g, " ");
-  return normalized || initials(value);
-}
-
 const avatarGraphemeSegmenter = new Intl.Segmenter();
 
-export function elementAvatarInitial(name: string): string {
-  const value = ["@", "#", "+"].includes(name[0] ?? "") ? name.slice(1) : name;
-  const first = avatarGraphemeSegmenter.segment(value)[Symbol.iterator]().next();
-  return first.done ? "" : first.value.segment;
+/**
+ * The one placeholder-avatar initial for people, rooms, and Spaces (#1055).
+ *
+ * Element/Compound's rule (#414): drop one leading Matrix sigil (`@`, `#`,
+ * `+`) and take the first grapheme, so accented letters, CJK, and emoji
+ * sequences stay whole. It is uppercased here, as Compound's CSS does. The Rust
+ * receipt-reader initials in `koushi-core` follow the same rule.
+ */
+export function avatarInitial(name: string | null | undefined): string {
+  const trimmed = (name ?? "").trimStart();
+  const value = ["@", "#", "+"].includes(trimmed[0] ?? "") ? trimmed.slice(1) : trimmed;
+  const first = avatarGraphemeSegmenter.segment(value.trimStart())[Symbol.iterator]().next();
+  const initial = first.done ? "" : first.value.segment.trim();
+  return initial ? initial.toUpperCase() : "?";
 }
 
 export function elementAvatarColorIndex(id: string): 1 | 2 | 3 | 4 | 5 | 6 {
@@ -383,7 +383,11 @@ const NO_PINNED_EVENT_IDS: string[] = [];
 const pinnedEventIdsByEvents = new WeakMap<PinnedEvents, string[]>();
 const forwardDestinationsByRooms = new WeakMap<
   import("../domain/types").DesktopSnapshot["state"]["domain"]["rooms"],
-  import("../domain/projectionTypes").TimelineForwardDestination[]
+  {
+    // Labels include catalog text (#1050), so a locale change invalidates them.
+    locale: ReturnType<typeof getActiveLocale>;
+    destinations: import("../domain/projectionTypes").TimelineForwardDestination[];
+  }
 >();
 
 export function pinnedEventsForRoom(
@@ -418,13 +422,15 @@ export function forwardDestinationsFromSnapshot(
   snapshot: import("../domain/types").DesktopSnapshot
 ): import("../domain/projectionTypes").TimelineForwardDestination[] {
   const rooms = snapshot.state.domain.rooms;
-  let destinations = forwardDestinationsByRooms.get(rooms);
+  const locale = getActiveLocale();
+  const cached = forwardDestinationsByRooms.get(rooms);
+  let destinations = cached?.locale === locale ? cached.destinations : undefined;
   if (!destinations) {
     destinations = rooms.map((room) => ({
       room_id: room.room_id,
-      display_name: room.display_label
+      display_name: roomDisplayLabel(room)
     }));
-    forwardDestinationsByRooms.set(rooms, destinations);
+    forwardDestinationsByRooms.set(rooms, { locale, destinations });
   }
   return destinations;
 }

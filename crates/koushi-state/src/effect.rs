@@ -172,6 +172,14 @@ pub enum AppEffect {
     /// Tell the `SearchActor` to clear its in-memory search document store and
     /// crawler queues before a full local search rebuild.
     RebuildSearchIndex,
+    /// Issue #1062: reload the selected Space's advertised children under
+    /// `generation`. The reducer has already admitted the load (the slice is
+    /// `Loading` under this generation), so the runtime only routes the
+    /// command to the room actor.
+    LoadSpaceChildren {
+        space_id: String,
+        generation: u64,
+    },
     RecordNativeAttentionRecomputed {
         observation: crate::NativeAttentionObservationKind,
         unread_count: u64,

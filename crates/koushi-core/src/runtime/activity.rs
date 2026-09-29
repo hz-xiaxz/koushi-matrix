@@ -68,6 +68,11 @@ pub(super) struct ActivityProjection {
     redaction_ordinals: BTreeMap<String, u64>,
     cleared_event_ordinals: BTreeMap<String, u64>,
     next_ordinal: u64,
+    /// Room-unread candidates, keyed by room with their activity timestamp,
+    /// that the latest resolution generation attempted. A live update only
+    /// schedules resolution for a candidate absent here or newer (#1061), so
+    /// a no-progress settlement stays retryable instead of looping.
+    resolution_attempts: BTreeMap<String, u64>,
 }
 
 #[derive(Default)]
@@ -595,10 +600,68 @@ impl ActivityProjection {
             .and_then(|row| row.event_id.clone())
     }
 
+    /// Current room-unread placeholders by room with their newest activity
+    /// timestamp, or `None` when Activity is not open.
+    pub(super) fn resolution_candidates(state: &AppState) -> Option<BTreeMap<String, u64>> {
+        let ActivityState::Open { unread, .. } = &state.activity else {
+            return None;
+        };
+        let mut candidates = BTreeMap::<String, u64>::new();
+        for row in unread
+            .rows
+            .iter()
+            .filter(|row| row.kind == ActivityRowKind::RoomUnread)
+        {
+            candidates
+                .entry(row.room_id.clone())
+                .and_modify(|timestamp_ms| *timestamp_ms = (*timestamp_ms).max(row.timestamp_ms))
+                .or_insert(row.timestamp_ms);
+        }
+        Some(candidates)
+    }
+
+    pub(super) fn record_resolution_attempt(&mut self, candidates: BTreeMap<String, u64>) {
+        self.resolution_attempts = candidates;
+    }
+
+    /// Whether live Activity has a room-unread candidate no resolution
+    /// generation attempted yet. An in-flight generation is never preempted
+    /// by live updates; its settlement re-evaluates the remaining candidates.
+    pub(super) fn has_unattempted_resolution_candidate(&self, state: &AppState) -> bool {
+        if matches!(
+            &state.activity,
+            ActivityState::Open { unread, .. }
+                if matches!(unread.resolution, ActivityResolutionState::Resolving { .. })
+        ) {
+            return false;
+        }
+        Self::resolution_candidates(state).is_some_and(|candidates| {
+            candidates.iter().any(|(room_id, timestamp_ms)| {
+                self.resolution_attempts
+                    .get(room_id)
+                    .is_none_or(|attempted_ms| attempted_ms < timestamp_ms)
+            })
+        })
+    }
+
     pub(super) fn update_action_for_open_state(&mut self, state: &AppState) -> Option<AppAction> {
         if !matches!(state.activity, ActivityState::Open { .. }) {
             return None;
         }
+        let (recent, unread, excluded_room_ids) = self.snapshot_preserving_resolution(state);
+        Some(AppAction::ActivityRowsUpdated {
+            recent,
+            unread,
+            excluded_room_ids,
+        })
+    }
+
+    /// A row refresh never owns the resolution lifecycle: keep the current
+    /// generation so its settlement stays admissible.
+    pub(super) fn snapshot_preserving_resolution(
+        &mut self,
+        state: &AppState,
+    ) -> (ActivityStream, ActivityStream, Vec<String>) {
         let (mut recent, mut unread, excluded_room_ids) = self.snapshot(state);
         if let ActivityState::Open {
             recent: current_recent,
@@ -609,11 +672,7 @@ impl ActivityProjection {
             recent.resolution = current_recent.resolution;
             unread.resolution = current_unread.resolution;
         }
-        Some(AppAction::ActivityRowsUpdated {
-            recent,
-            unread,
-            excluded_room_ids,
-        })
+        (recent, unread, excluded_room_ids)
     }
 
     pub(super) fn room_ids_without_remaining_unread(
@@ -671,7 +730,9 @@ impl ActivityProjection {
         let mut recent = Vec::new();
         let mut unread = Vec::new();
         let mut recent_event_ids = BTreeSet::new();
-        let mut unread_event_room_ids = BTreeSet::new();
+        // Newest unread event row per room. A room is covered only when that
+        // row reaches its known conversation activity (#1061).
+        let mut newest_unread_timestamp_by_room = BTreeMap::<String, u64>::new();
         let effective_rows = self.effective_rows();
         for row in effective_rows.values() {
             if excluded.contains(row.room_id.as_str()) {
@@ -728,7 +789,7 @@ impl ActivityProjection {
                 recent_event_ids.insert(event_id);
             }
             if row.unread {
-                unread_event_room_ids.insert(row.room_id.clone());
+                record_newest_unread_timestamp(&mut newest_unread_timestamp_by_room, &row);
                 unread.push(row.clone());
             }
             recent.push(row);
@@ -799,7 +860,7 @@ impl ActivityProjection {
             row.thread_root_event_id = latest_event.thread_root_event_id.clone();
             row.context_label = context_label;
             if row.unread {
-                unread_event_room_ids.insert(row.room_id.clone());
+                record_newest_unread_timestamp(&mut newest_unread_timestamp_by_room, &row);
                 unread.push(row.clone());
             }
             recent.push(row);
@@ -858,7 +919,13 @@ impl ActivityProjection {
                 );
                 continue;
             }
-            if unread_event_room_ids.contains(&room.room_id) {
+            if newest_unread_timestamp_by_room
+                .get(&room.room_id)
+                .is_some_and(|newest_unread_timestamp_ms| {
+                    room.conversation_activity
+                        .is_none_or(|activity| *newest_unread_timestamp_ms >= activity.timestamp_ms)
+                })
+            {
                 continue;
             }
             let highlight = room.highlight_count > 0;
@@ -956,6 +1023,13 @@ impl ActivityProjection {
             excluded_room_ids,
         )
     }
+}
+
+fn record_newest_unread_timestamp(newest: &mut BTreeMap<String, u64>, row: &ActivityRow) {
+    newest
+        .entry(row.room_id.clone())
+        .and_modify(|timestamp_ms| *timestamp_ms = (*timestamp_ms).max(row.timestamp_ms))
+        .or_insert(row.timestamp_ms);
 }
 
 fn activity_row_newest_first(left: &ActivityRow, right: &ActivityRow) -> std::cmp::Ordering {

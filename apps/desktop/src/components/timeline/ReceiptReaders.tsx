@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { getActiveLocale, t } from "../../i18n/messages";
-import { peopleFacingLabel } from "../../app/uiShared";
+import { avatarInitial, peopleFacingLabel } from "../../app/uiShared";
 import {
   FloatingLayer,
   floatingPlacementStyle,
@@ -403,7 +403,7 @@ export function ReceiptReaders({
             avatar={receipt.avatar}
             className="receipt-reader-avatar"
             colorSeed={receipt.user_id}
-            fallback={receiptInitials(receipt)}
+            fallback={avatarInitial(receiptDisplayName(receipt))}
             key={receipt.user_id}
             onRequestAvatarThumbnail={onRequestAvatarThumbnail}
           />
@@ -558,7 +558,7 @@ function compactReaderRow(receipt: LiveReadReceipt): ReaderRow {
     user_id: receipt.user_id,
     display_label: receiptDisplayName(receipt),
     original_display_label: receipt.original_display_label,
-    initials: receiptInitials(receipt),
+    initials: avatarInitial(receiptDisplayName(receipt)),
     timestamp: receipt.timestamp_ms === null ? null : {
       unix_ms: String(receipt.timestamp_ms),
       locale: getActiveLocale() === "ja" ? "ja" : "en"
@@ -580,15 +580,6 @@ function formatReaderRow(row: ReaderRow): string {
 
 export function receiptDisplayName(receipt: LiveReadReceipt): string {
   return peopleFacingLabel(receipt.display_name, receipt.original_display_label);
-}
-
-function receiptInitials(receipt: LiveReadReceipt): string {
-  const label = receiptDisplayName(receipt);
-  const ascii = label.match(/[A-Za-z]/g);
-  if (ascii?.length) {
-    return ascii.slice(0, 2).join("").toUpperCase();
-  }
-  return label.slice(0, 2);
 }
 
 function createReaderResourceUrl(

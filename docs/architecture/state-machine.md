@@ -135,6 +135,16 @@ stateDiagram-v2
     LoggingOut --> SignedOut: LogoutFinished
 ```
 
+Every reset to `SignedOut` that rebuilds `AppState` (`LogoutFinished`,
+`ProvisionalSessionDiscarded`, and the local-reset `DeviceCleanupCompleted`) keeps the
+process-local account epoch, the retired session-status schedule, and the
+app-level `AppState.settings` (#1057). Settings come from the app-level
+`settings/settings.json`, are loaded once at runtime start, and are persisted
+as a whole struct, so the signed-out screen keeps the saved locale and the next
+settings save cannot overwrite saved preferences with defaults. Account-scoped
+state, including room link-preview overrides and room notification settings,
+still resets.
+
 `session_lock_reason` is an optional, separate Rust-owned authentication-lock
 projection. Current-device trust loss never enters `Locked`: authoritative
 `Unverified` re-enters the actionable verification gate, while `Unknown`
@@ -912,6 +922,21 @@ code without a matching command-success correlation.
   or a mismatched snapshot must not reveal the previously committed room as if
   the newer navigation succeeded. Invite acceptance and direct join delegate to
   this shared selection path and never switch the pane independently.
+- Room and Space selection is purely local navigation (#1060). AppActor admits
+  `SelectRoom`/`SelectSpace` (user and internal event-navigation selections)
+  and reduces them through its single action-batch commit pipeline: session and
+  room guards, composer hydration, request correlation, publication, the one
+  request-correlated terminal and projection generations are unchanged, but no
+  step waits for the AccountActor/RoomActor network-operation mailboxes.
+  RoomActor never projects a selection. After publication and before the
+  terminal, AppActor replaces one retained, latest-wins navigation-enrichment
+  value (session key, active room, active Space; Home/cleared included, and an
+  already-active room re-admits). RoomActor consumes it after its serial SDK
+  work: it refreshes the active room's pinned events and hydrates the active
+  Space's members, ignores demand for another session, and replays the current
+  demand when a session is established or sync (the room-list observer) starts.
+  An unknown room schedules nothing. A late actor echo of a selection has no
+  request owner left and is dropped, so it cannot restore an older room.
 
 Event navigation is a Rust-owned outer operation. Its lifecycle is normative:
 
@@ -1935,9 +1960,9 @@ stateDiagram-v2
     has no event-navigation owner; an event-navigation owner for the room is
     cancelled (`Superseded`); and a date jump still awaiting the server is
     fenced, so the account actor's late `OpenFocusedContext` +
-    `EnterAnchoredTimeline` pair is dropped and its focused subscription
-    released. A late projection commit therefore finds no owner and cannot
-    re-anchor the pane over the pending echo.
+    `EnterAnchoredTimeline` pair is dropped and never subscribed. A late
+    projection commit therefore finds no owner and cannot re-anchor the pane
+    over the pending echo.
   Rejected, duplicate, other-room, and thread-composer sends leave navigation
   unchanged; a send from a live main pane with no pending main-pane navigation
   leaves an independent right-panel focused context open.
@@ -2242,9 +2267,12 @@ stateDiagram-v2
   Because cleanup may already have cleared profiles, this bounded transient
   projection can use the safe raw-sender fallback and remain orphaned until the
   next authoritative pinned refresh; it never recreates room/list/tag state.
-  Selection commits without waiting for pinned bodies. The actor owns the
-  asynchronous refresh, discards results from older sessions or superseded
-  requests, and cancels outstanding refreshes on session replacement/shutdown.
+  Selection commits without waiting for pinned bodies or for admission of their
+  refresh: RoomActor schedules the selected room's refresh from the retained
+  navigation-enrichment demand (#1060), and the desktop adapter no longer
+  submits one. The actor owns the asynchronous refresh, discards results from
+  older sessions or superseded requests, and cancels outstanding refreshes on
+  session replacement/shutdown.
 - `PinEventRequested` and `UnpinEventRequested` are accepted only for a Ready
   session, a known room, a non-empty event id, and an `Idle` or recoverable
   `Failed` pin operation. Requests while another pin/unpin is pending are
@@ -2991,15 +3019,36 @@ stateDiagram-v2
   runtime unsubscribes the previous focused timeline before subscribing the new
   key. Reopening the same focused key is idempotent as far as runtime
   subscription ownership allows.
+- The retained navigation-projection ingress carries the desired main-pane
+  foreground (#1060): the latest committed room projection plus the one
+  `TimelineKind::Focused` key AppActor still wants (an in-flight focused
+  navigation, else the open focused context). TimelineManager retires every
+  other focused actor with the full unsubscribe bookkeeping (generation
+  invalidation/quiescence, local-read correlation, retained send-completion
+  cleanup, actor lease); room/thread actors and session residency are untouched.
+  AppActor admits a new desired focused key before that key's `Subscribe`
+  enters the mailbox, so coalesced Focused A → None → A or Focused A → Room B
+  can never let an old release retire the newer owner, and a focused-only update
+  carries the retained room projection forward without replaying it. Event
+  navigation supersession, failure, and room/Space/Home switches release focused
+  timelines this way and never wait for AccountActor admission. Every focused
+  subscription is issued by AppActor after that admission, including the
+  server-resolved date-jump target: the AccountActor only replies with the
+  `OpenFocusedContext` + `EnterAnchoredTimeline` pair, and AppActor subscribes
+  the key when it reduces that pair (a fenced reply is never subscribed).
+  Explicit focused-context commands still release a replaced key with the
+  mailbox `Unsubscribe`, which stays ordered before the replacement's
+  `Subscribe`.
 - Focused timeline release is core-owned for every reducer transition, not only
   the explicit `CloseFocusedContext` command (#1037, #1046). Whenever a reduce
   within the same account leaves `focused_context` without its previous
   `Opening`/`Open` key (accepted main send from anchored history, room switch,
-  subscription failure, replacement, live fallback), AppActor unsubscribes
-  that `TimelineKind::Focused` key, which drops its actor and room lease, and
+  subscription failure, replacement, live fallback), AppActor releases
+  that `TimelineKind::Focused` key through the desired foreground above, which
+  drops its actor and room lease, and
   drops a pending main-pane navigation for the same key; one without an
   event-navigation owner (date jump, `OpenAnchoredTimeline`) settles
-  `Superseded`, an owned one is settled by its owner. Unsubscribe is
+  `Superseded`, an owned one is settled by its owner. Release is
   idempotent, so paths that also unsubscribe explicitly stay correct. Account
   teardown (logout, account switch) is excluded because it drops the whole
   timeline manager. `ReturnMainTimelineToLive` leaves `focused_context`, and so
@@ -3088,10 +3137,15 @@ stateDiagram-v2
 ## Outbound Send Queue
 
 Outbound timeline send presentation and retry/cancel handles are Rust-owned.
-Before composer acceptance clears a draft, the session-scoped
-`TimelineManager` installs a bounded display projection keyed by the client
-transaction ID and waits for the current generation-fenced `TimelineActor` to
-acknowledge publication. SDK enqueue then binds the SDK transaction ID and
+Before composer acceptance, the session-scoped `TimelineManager` installs a
+bounded display projection keyed by the client transaction ID in its send
+coordinator and asks the current generation-fenced `TimelineActor` to publish
+it. Publication is presentation only and never gates admission: the manager
+does not wait for the actor's acknowledgement, and a busy, full-mailbox, or
+replaced actor reconciles the coordinator-owned projection when it next
+processes a refresh or starts from the coordinator snapshot (#1064). A slow
+actor handler therefore delays only the pending row, never SDK enqueue. SDK
+enqueue then binds the SDK transaction ID and
 `SendHandle`; terminal success binds the event ID. The actor combines these
 pending projections with canonical SDK slots without changing canonical SDK
 indexes. A session-scoped `TimelineManager` also owns supervised
@@ -3105,7 +3159,7 @@ missing local-echo diff no longer creates a visibility gap.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PendingProjection: accepted payload / actor publication ack
+    [*] --> PendingProjection: accepted payload / coordinator projection registered
     PendingProjection --> Sending: SDK transaction + SendHandle bound
     PendingProjection --> SentAwaitingRemote: SentEvent before local echo
     Sending --> NotSent: SendError
@@ -3120,7 +3174,7 @@ stateDiagram-v2
 
 | Command / update | Accepted states | Rejected states | Notes |
 | --- | --- | --- | --- |
-| accepted text/reply | below the bounded pending cap and current actor publication acknowledged | cap full, actor replaced without successful reroute, publication unavailable | Publishes one client-transaction `sending` row, retaining the persisted draft until SDK enqueue succeeds. Replies construct their relation from known event IDs, and plain thread sends use the known root as fallback, without a network fetch before enqueue. `ComposerSubmissionQueued` then clears the submitted draft revision and releases only that composer while the submission registry retains its remote terminal. A failed pre-enqueue attempt leaves the draft intact. |
+| accepted text/reply | below the bounded pending cap with a subscribed timeline enqueue context | cap full, not subscribed, registration activation or reducer acceptance delivery failed | Actor publication is best-effort and never waited on; the row appears when the actor catches up. Publishes one client-transaction `sending` row, retaining the persisted draft until SDK enqueue succeeds. Replies construct their relation from known event IDs, and plain thread sends use the known root as fallback, without a network fetch before enqueue. `ComposerSubmissionQueued` then clears the submitted draft revision and releases only that composer while the submission registry retains its remote terminal. A failed pre-enqueue attempt leaves the draft intact. |
 | `NewLocalEvent` | any | none | Exact SDK binding merges the canonical local echo into the pending row and stores the SDK `SendHandle`; it never inserts a duplicate. Restored local echoes from `RoomSendQueue::subscribe()` initialize the same actor table before commands. |
 | `SendError` | `sending` | none | Records `not_sent { reason }` using only the SDK recoverable flag. Release diagnostics may record a closed app-owned failure class plus that recoverable flag, but raw SDK errors stay out of DTOs, logs, QA tokens, and React state. The matching composer pending state is failed once if enqueue never succeeded. A recoverable SDK failure after enqueue schedules room-queue re-enablement with bounded backoff and server Retry-After; later success can still emit `SendCompleted`. |
 | `RetrySend { room_id, transaction_id }` | `not_sent` with a stored `SendHandle` | `sending`, `sent`, `cancelled`, unknown transaction | Re-enables the SDK room queue with `room.send_queue().set_enabled(true)`, then calls `SendHandle::unwedge()`. FIFO order remains the SDK send queue's responsibility; React never reorders or manually marks successors sent. |
@@ -4265,10 +4319,10 @@ stateDiagram-v2
     Opening --> Closed: CloseActivity
     Open --> Open: SetActivityTab
     Open --> Open: ActivityRowsUpdated
-    Open --> Resolving: unresolved RoomUnread rows
+    Open --> Resolving: unattempted RoomUnread rows (open, live update, or settlement)
     Resolving --> Open: ActivityResolutionSucceeded [matching generation]
     Resolving --> ResolutionFailed: ActivityResolutionFailed [matching generation]
-    ResolutionFailed --> Resolving: RetryActivityResolution [new generation]
+    ResolutionFailed --> Resolving: RetryActivityResolution or newer unattempted RoomUnread [new generation]
     Resolving --> Closed: close/session clear cancels task
     Open --> Open: PaginateActivity/ActivitySnapshotLoaded
     Open --> MarkReadPending: MarkActivityRead(room|all)
@@ -4289,7 +4343,11 @@ stateDiagram-v2
   highlight state but no observed unread event row survives the fully-read
   marker / cleared-event filter, `ActivityProjection` synthesizes a private-data-
   minimized room-level placeholder row (`kind = RoomUnread`, `event_id = None`).
-  Observed event rows remain preferred for the same room. The placeholder is a
+  Observed event rows remain preferred for the same room, but only when the
+  newest surviving unread row reaches the room's known
+  `conversation_activity` timestamp: an older cached unread row is not proof
+  that newer activity was resolved, so such a room keeps its event rows and
+  also gets a placeholder (#1061). The placeholder is a
   transient resolver input, never completed message content: `AccountActor`
   consumes decrypted cache/live timeline items and bounded 50-event backward
   pages (maximum 32 per room and 16 rooms per generation) through the shared
@@ -4297,6 +4355,13 @@ stateDiagram-v2
   observation. Per-room successes are retained when another room fails; capped
   batches rotate across retry generations to avoid starvation.
 - `ActivityStream.resolution` is Rust-owned `Idle | Resolving | Failed` state.
+  `OpenActivity` and `RetryActivityResolution` start a generation over every
+  current placeholder. After each action batch, `AppActor` also starts one
+  when open Activity has a placeholder whose room/activity timestamp no
+  generation attempted yet and no generation is `Resolving`; live updates never
+  preempt an in-flight generation, and a no-progress settlement stays `Failed`
+  (retryable) until newer activity or an explicit retry. Row refreshes,
+  including `PaginateActivity`, preserve the current resolution state.
   Generation guards reject late completion after retry, close, logout, lock, or
   account replacement. Failure exposes only a coarse `OperationFailureKind` and
   unresolved count. React hides `RoomUnread` rows, renders resolving/failure

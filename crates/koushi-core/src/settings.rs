@@ -11,7 +11,12 @@ use koushi_store::atomic_replace_file;
 /// the user saved any unrelated setting, so they cannot distinguish an
 /// explicit opt-in from that default. After migration only an opt-in written
 /// with version 1 or later enables encrypted-room link previews.
-pub const SETTINGS_SCHEMA_VERSION: u32 = 1;
+///
+/// Version 2 (#1054) resets `notifications.message_previews` for the same
+/// reason: version-0 and version-1 files persisted the retired ON default, so
+/// after migration only an opt-in written with version 2 or later shows
+/// message content in OS notifications.
+pub const SETTINGS_SCHEMA_VERSION: u32 = 2;
 
 const SCHEMA_VERSION_KEY: &str = "schema_version";
 
@@ -115,5 +120,10 @@ fn migrate(values: &mut SettingsValues, from_version: u32) {
         // #1034: keep the privacy-conservative value for encrypted-room link
         // previews; the user can opt in again from Settings.
         values.display.encrypted_url_previews_enabled = false;
+    }
+    if from_version < 2 {
+        // #1054: OS notifications carry counts only until the user opts in to
+        // message previews again from Settings.
+        values.notifications.message_previews = false;
     }
 }

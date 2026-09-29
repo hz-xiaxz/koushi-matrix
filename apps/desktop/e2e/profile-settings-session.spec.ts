@@ -871,7 +871,7 @@ test("notification settings dispatch Rust-owned update_settings patches", async 
           desktop_notifications: false,
           sound: true,
           badges: true,
-          message_previews: true,
+          message_previews: false,
           send_read_receipts: true,
           send_typing_notifications: true
         }
@@ -895,7 +895,7 @@ test("notification settings dispatch Rust-owned update_settings patches", async 
           desktop_notifications: false,
           sound: false,
           badges: true,
-          message_previews: true,
+          message_previews: false,
           send_read_receipts: true,
           send_typing_notifications: true
         }
@@ -907,7 +907,8 @@ test("notification settings dispatch Rust-owned update_settings patches", async 
   const previews = page.getByRole("switch", {
     name: "Show message content in notifications"
   });
-  await expect(previews).toHaveAttribute("aria-checked", "true");
+  // #1054: message previews default OFF; the user opts in explicitly.
+  await expect(previews).toHaveAttribute("aria-checked", "false");
   await previews.click();
 
   await expect.poll(() => invocationCount(page, "update_settings")).toBeGreaterThanOrEqual(1);
@@ -921,13 +922,13 @@ test("notification settings dispatch Rust-owned update_settings patches", async 
           desktop_notifications: false,
           sound: false,
           badges: true,
-          message_previews: false,
+          message_previews: true,
           send_read_receipts: true,
           send_typing_notifications: true
         }
       }
     });
-  await expect(previews).toHaveAttribute("aria-checked", "false");
+  await expect(previews).toHaveAttribute("aria-checked", "true");
 });
 
 test("timeline auto-load setting dispatches a Rust-owned update_settings patch", async ({
@@ -1433,7 +1434,7 @@ test("privacy toggles dispatch Rust-owned update_settings patches for read recei
           desktop_notifications: true,
           sound: true,
           badges: true,
-          message_previews: true,
+          message_previews: false,
           send_read_receipts: false,
           send_typing_notifications: true
         }
@@ -1457,7 +1458,7 @@ test("privacy toggles dispatch Rust-owned update_settings patches for read recei
           desktop_notifications: true,
           sound: true,
           badges: true,
-          message_previews: true,
+          message_previews: false,
           send_read_receipts: false,
           send_typing_notifications: false
         }

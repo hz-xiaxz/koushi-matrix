@@ -23,6 +23,7 @@ import {
   type PropertySaveStatus
 } from "./SettingsPropertyCard";
 import { EntityAvatar } from "./Shell";
+import { avatarInitial, roomDisplayLabel } from "../app/uiShared";
 import {
   HistoryExportSection,
   type HistoryExportControls
@@ -85,7 +86,7 @@ export function RoomInfoPanel({
   historyExportControls?: HistoryExportControls;
 }) {
   const roomId = room?.room_id ?? "";
-  const roomName = room?.display_label ?? "";
+  const roomName = room ? roomDisplayLabel(room) : "";
   const isEncrypted = room?.is_encrypted ?? false;
   const globalUrlPreviewsEnabled = isEncrypted
     ? appSettings?.values.display.encrypted_url_previews_enabled ?? false
@@ -251,7 +252,7 @@ export function RoomInfoPanel({
       <header className="settings-panel-header">
         <div>
           <h2 id="room-info-title" className="sr-only" dir="auto">
-            {room.display_label}
+            {roomDisplayLabel(room)}
           </h2>
           <ImeSafeForm
             className="room-name-header-form"
@@ -387,7 +388,7 @@ export function RoomInfoPanel({
                     avatar={room.avatar}
                     className="settings-property-avatar"
                     colorSeed={room.room_id}
-                    fallback={Array.from(room.display_label.trim())[0] ?? "#"}
+                    fallback={avatarInitial(roomDisplayLabel(room))}
                   />
                   <small className="settings-property-secondary" dir="ltr">
                     {settings.avatar_url?.trim()}
@@ -619,7 +620,7 @@ export function RoomInfoPanel({
       {historyExport && historyExportControls ? (
         <HistoryExportSection
           key={roomId}
-          target={{ kind: "room", roomId, name: room.display_label, encrypted: room.is_encrypted }}
+          target={{ kind: "room", roomId, name: roomDisplayLabel(room), encrypted: room.is_encrypted }}
           exportState={historyExport}
           controls={historyExportControls}
         />

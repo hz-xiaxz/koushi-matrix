@@ -564,10 +564,36 @@ describe("SpaceMembersPanel", () => {
     const avatar = screen.getByRole("img", { name: "" });
     const image = avatar.querySelector("img");
     expect(image?.getAttribute("src")).toBe("asset://alice-avatar");
-    expect(screen.getByText("BO")).toBeTruthy();
+    expect(screen.getByText("B")).toBeTruthy();
 
     fireEvent.error(image!);
-    expect(screen.getByText("AL")).toBeTruthy();
+    expect(screen.getByText("A")).toBeTruthy();
+  });
+
+  it("uses the shared single-grapheme initial for two-word, accented, and emoji names", () => {
+    // #1055: the same rule as the timeline, People panel, and User settings.
+    render(
+      <SpaceMembersPanel
+        state={state({
+          space_joined: [
+            member("@first:example.invalid", "Firstname Lastname", "space_joined"),
+            member("@emile:example.invalid", "Émile Zola", "space_joined"),
+            member("@smile:example.invalid", "😀 Smile", "space_joined")
+          ],
+          space_invited: [],
+          child_room_only: []
+        })}
+        canInvite={true}
+        onInviteUser={vi.fn()}
+        onOpenProfile={vi.fn()}
+      />
+    );
+
+    expect(
+      Array.from(document.querySelectorAll(".avatar-fallback"))
+        .map((avatar) => avatar.textContent)
+        .sort()
+    ).toEqual(["F", "É", "😀"].sort());
   });
 
   it("requests an unresolved avatar only once after its row becomes visible", () => {

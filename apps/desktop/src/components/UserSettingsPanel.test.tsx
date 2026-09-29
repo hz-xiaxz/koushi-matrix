@@ -256,6 +256,46 @@ describe("UserSettingsPanel", () => {
     expect(markup).not.toContain("TARGETDEVICE");
   });
 
+  test("uses the shared single-grapheme initial for profile and account placeholders", () => {
+    // #1055: the same rule as the timeline, People panel, and Space members.
+    const renderInitials = (displayName: string | null) => {
+      const markup = renderToStaticMarkup(
+        <UserSettingsPanel
+          currentSession={{
+            homeserver: "https://matrix.org",
+            user_id: "@demo-user:example.invalid",
+            device_id: "FAKEDEVICE"
+          }}
+          e2eeTrust={e2eeTrust}
+          localEncryption={{ kind: "healthy" }}
+          platform="linux"
+          accountManagement={idleAccountManagement}
+          accountManagementCapabilities={idleAccountManagementCapabilities}
+          savedSessions={[
+            {
+              homeserver: "https://matrix.org",
+              user_id: "@émile:example.invalid",
+              device_id: "SECONDDEVICE"
+            }
+          ]}
+          profile={{ ...profile, own: { display_name: displayName, avatar: null } }}
+          settings={settings}
+          {...handlers}
+        />
+      );
+      const container = document.createElement("div");
+      container.innerHTML = markup;
+      return {
+        profile: container.querySelector(".profile-settings-avatar")?.textContent,
+        account: container.querySelector(".account-switcher-avatar")?.textContent
+      };
+    };
+
+    expect(renderInitials("Firstname Lastname")).toEqual({ profile: "F", account: "É" });
+    expect(renderInitials("😀 Smile").profile).toBe("😀");
+    expect(renderInitials(null).profile).toBe("D");
+  });
+
   test("renders Manage account & devices only when the active session has a safe URL", () => {
     const withoutUrl = renderToStaticMarkup(
       <UserSettingsPanel

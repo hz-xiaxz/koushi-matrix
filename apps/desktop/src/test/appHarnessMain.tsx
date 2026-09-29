@@ -62,6 +62,7 @@ import {
 } from "../domain/types";
 import { TauriIpcMock, type IpcInvocation } from "./tauriIpcMock";
 import { documentFromText, plainBodyFromDocument } from "../domain/composerDocument";
+import { avatarInitial } from "../app/uiShared";
 import {
   COMPOSER_DRAFT_REVISION_ZERO,
   compareComposerDraftRevisions,
@@ -351,7 +352,7 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
         desktop_notifications: true,
         sound: true,
         badges: true,
-        message_previews: true,
+        message_previews: false,
         send_read_receipts: true,
         send_typing_notifications: true
       },
@@ -794,7 +795,7 @@ function receiptReaderRows(source: ReceiptSourceRef): {
       user_id: reader.user_id,
       display_label: displayLabel,
       original_display_label: reader.original_display_label,
-      initials: displayLabel.slice(0, 2),
+      initials: avatarInitial(displayLabel),
       timestamp:
         reader.timestamp_ms === null
           ? null

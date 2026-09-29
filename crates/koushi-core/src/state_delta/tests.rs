@@ -304,6 +304,8 @@ fn live_signal_room_changes_use_a_scoped_delta() {
 
 fn room(id: &str) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: id.into(),
         display_name: id.into(),
         display_label: id.into(),

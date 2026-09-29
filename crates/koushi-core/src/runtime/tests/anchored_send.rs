@@ -82,24 +82,31 @@ fn accepted_send(submission: &str) -> AppAction {
     }
 }
 
-/// Drain Core→AccountActor messages until the focused unsubscribe for `key`
-/// arrives, failing on timeout.
-async fn expect_unsubscribe(account_rx: &mut mpsc::Receiver<AccountMessage>, key: &TimelineKey) {
+/// #1060: a released focused timeline is retired through the retained
+/// desired-foreground ingress rather than a mailbox `Unsubscribe`, so wait
+/// until the admitted demand no longer desires `key`.
+async fn expect_focused_released(
+    navigation_projection_rx: &mut watch::Receiver<crate::timeline::NavigationProjectionDemand>,
+    key: &TimelineKey,
+) {
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
-            match account_rx.recv().await.expect("account actor channel") {
-                AccountMessage::TimelineCommand(
-                    koushi_protocol::command::TimelineCommand::Unsubscribe {
-                        key: unsubscribed,
-                        ..
-                    },
-                ) if &unsubscribed == key => break,
-                _ => {}
+            navigation_projection_rx
+                .changed()
+                .await
+                .expect("navigation projection channel");
+            if navigation_projection_rx
+                .borrow_and_update()
+                .focused
+                .as_ref()
+                != Some(key)
+            {
+                break;
             }
         }
     })
     .await
-    .expect("the focused timeline must be unsubscribed");
+    .expect("the focused timeline must be released");
 }
 
 async fn wait_for_snapshot(
@@ -161,10 +168,10 @@ async fn accepted_send_from_anchored_history_releases_the_focused_timeline() {
         actor,
         _command_tx,
         action_tx,
-        mut account_rx,
+        _account_rx,
         _event_rx,
         mut snapshot_rx,
-        _navigation_projection_rx,
+        mut navigation_projection_rx,
         _event_navigation_prepared_tx,
         _focused_projection_tx,
     ) = app_actor_event_navigation_fixture(data_dir.path(), anchored_state());
@@ -180,7 +187,7 @@ async fn accepted_send_from_anchored_history_releases_the_focused_timeline() {
             && state.focused_context == koushi_state::FocusedContextState::Closed
     })
     .await;
-    expect_unsubscribe(&mut account_rx, &focused_key(ROOM, EVENT)).await;
+    expect_focused_released(&mut navigation_projection_rx, &focused_key(ROOM, EVENT)).await;
     actor_task.abort();
 }
 
@@ -193,10 +200,10 @@ async fn room_switch_releases_the_focused_timeline() {
         mut actor,
         _command_tx,
         action_tx,
-        mut account_rx,
+        _account_rx,
         _event_rx,
         mut snapshot_rx,
-        _navigation_projection_rx,
+        mut navigation_projection_rx,
         _event_navigation_prepared_tx,
         _focused_projection_tx,
     ) = app_actor_event_navigation_fixture(data_dir.path(), anchored_state());
@@ -218,7 +225,7 @@ async fn room_switch_releases_the_focused_timeline() {
             && state.focused_context == koushi_state::FocusedContextState::Closed
     })
     .await;
-    expect_unsubscribe(&mut account_rx, &focused_key(ROOM, EVENT)).await;
+    expect_focused_released(&mut navigation_projection_rx, &focused_key(ROOM, EVENT)).await;
     actor_task.abort();
 }
 
@@ -239,10 +246,10 @@ async fn room_switch_during_a_loading_date_jump_settles_the_jump_superseded() {
         mut actor,
         _command_tx,
         action_tx,
-        mut account_rx,
+        _account_rx,
         mut event_rx,
         mut snapshot_rx,
-        _navigation_projection_rx,
+        mut navigation_projection_rx,
         _event_navigation_prepared_tx,
         _focused_projection_tx,
     ) = app_actor_event_navigation_fixture(data_dir.path(), state);
@@ -273,7 +280,7 @@ async fn room_switch_during_a_loading_date_jump_settles_the_jump_superseded() {
         state.navigation.active_room_id.as_deref() == Some(OTHER_ROOM)
     })
     .await;
-    expect_unsubscribe(&mut account_rx, &key).await;
+    expect_focused_released(&mut navigation_projection_rx, &key).await;
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             if matches!(
@@ -311,10 +318,10 @@ async fn accepted_send_cancels_a_loading_date_jump_before_its_projection_lands()
         mut actor,
         _command_tx,
         action_tx,
-        mut account_rx,
+        _account_rx,
         _event_rx,
         mut snapshot_rx,
-        _navigation_projection_rx,
+        mut navigation_projection_rx,
         _event_navigation_prepared_tx,
         focused_projection_tx,
     ) = app_actor_event_navigation_fixture(data_dir.path(), state);
@@ -339,7 +346,7 @@ async fn accepted_send_cancels_a_loading_date_jump_before_its_projection_lands()
             && state.focused_context == koushi_state::FocusedContextState::Closed
     })
     .await;
-    expect_unsubscribe(&mut account_rx, &key).await;
+    expect_focused_released(&mut navigation_projection_rx, &key).await;
 
     focused_projection_tx
         .send(committed(projection_request_id, key))
@@ -351,8 +358,8 @@ async fn accepted_send_cancels_a_loading_date_jump_before_its_projection_lands()
 #[tokio::test]
 async fn accepted_send_fences_a_date_jump_still_awaiting_the_server() {
     // Jump-to-date without a cached target: the account actor later replies
-    // with the OpenFocusedContext + EnterAnchoredTimeline pair and subscribes
-    // the focused timeline itself. A send accepted in between must win.
+    // with the OpenFocusedContext + EnterAnchoredTimeline pair, which AppActor
+    // subscribes only if it reduces it. A send accepted in between must win.
     let data_dir = tempfile::tempdir().expect("runtime data directory");
     let (
         mut actor,
@@ -390,8 +397,20 @@ async fn accepted_send_fences_a_date_jump_still_awaiting_the_server() {
         ])
         .await
         .expect("late date-jump reply");
-    expect_unsubscribe(&mut account_rx, &focused_key(ROOM, EVENT)).await;
     assert_never_reanchors(&mut snapshot_rx).await;
+    // The fenced reply is never subscribed, so nothing needs releasing.
+    while let Ok(message) = account_rx.try_recv() {
+        assert!(
+            !matches!(
+                message,
+                AccountMessage::TimelineCommand(
+                    koushi_protocol::command::TimelineCommand::Subscribe { .. }
+                        | koushi_protocol::command::TimelineCommand::Unsubscribe { .. }
+                )
+            ),
+            "a fenced date-jump reply must not touch timeline subscriptions"
+        );
+    }
     assert_eq!(
         snapshot_rx.borrow().state.focused_context,
         koushi_state::FocusedContextState::Closed
@@ -427,10 +446,10 @@ async fn accepted_send_cancels_an_in_flight_event_navigation() {
         mut actor,
         _command_tx,
         action_tx,
-        mut account_rx,
+        _account_rx,
         _event_rx,
         mut snapshot_rx,
-        _navigation_projection_rx,
+        mut navigation_projection_rx,
         _event_navigation_prepared_tx,
         focused_projection_tx,
     ) = app_actor_event_navigation_fixture(data_dir.path(), state);
@@ -464,7 +483,7 @@ async fn accepted_send_cancels_an_in_flight_event_navigation() {
             && state.navigation.event_navigation == koushi_state::EventNavigationState::Idle
     })
     .await;
-    expect_unsubscribe(&mut account_rx, &key).await;
+    expect_focused_released(&mut navigation_projection_rx, &key).await;
 
     focused_projection_tx
         .send(committed(navigation_request_id, key))
@@ -486,10 +505,10 @@ async fn accepted_attachment_send_returns_anchored_pane_to_live_and_releases_foc
         mut actor,
         _command_tx,
         _action_tx,
-        mut account_rx,
+        _account_rx,
         _event_rx,
         _snapshot_rx,
-        _navigation_projection_rx,
+        mut navigation_projection_rx,
         _event_navigation_prepared_tx,
         _focused_projection_tx,
     ) = app_actor_event_navigation_fixture(data_dir.path(), state);
@@ -509,5 +528,69 @@ async fn accepted_attachment_send_returns_anchored_pane_to_live_and_releases_foc
         actor.state.focused_context,
         koushi_state::FocusedContextState::Closed
     );
-    expect_unsubscribe(&mut account_rx, &focused_key(ROOM, EVENT)).await;
+    expect_focused_released(&mut navigation_projection_rx, &focused_key(ROOM, EVENT)).await;
+}
+
+#[tokio::test]
+async fn date_jump_reply_admits_the_focused_owner_before_subscribing_it() {
+    // #1060 review: the server-resolved date-jump target must be subscribed by
+    // AppActor only after it is the retained desired focused foreground, so no
+    // concurrent focused admission can retire it before the pair is reduced.
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let (
+        mut actor,
+        _command_tx,
+        action_tx,
+        mut account_rx,
+        _event_rx,
+        _snapshot_rx,
+        navigation_projection_rx,
+        _event_navigation_prepared_tx,
+        _focused_projection_tx,
+    ) = app_actor_event_navigation_fixture(data_dir.path(), selected_room_state());
+    actor.pending_date_navigation_request_id = Some(request(3));
+    let actor_task = tokio::spawn(actor.run());
+
+    action_tx
+        .send(vec![
+            AppAction::OpenFocusedContext {
+                room_id: ROOM.to_owned(),
+                event_id: EVENT.to_owned(),
+            },
+            AppAction::EnterAnchoredTimeline {
+                room_id: ROOM.to_owned(),
+                event_id: EVENT.to_owned(),
+            },
+        ])
+        .await
+        .expect("date-jump reply");
+    let key = focused_key(ROOM, EVENT);
+    let subscribe_request_id = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let AccountMessage::TimelineCommand(
+                koushi_protocol::command::TimelineCommand::Subscribe {
+                    request_id,
+                    key: subscribed,
+                    ..
+                },
+            ) = account_rx.recv().await.expect("account actor channel")
+                && subscribed == key
+            {
+                break request_id;
+            }
+        }
+    })
+    .await
+    .expect("AppActor must subscribe the date-jump focused timeline");
+    assert_eq!(
+        subscribe_request_id,
+        request(3),
+        "the subscription keeps the date jump's projection correlation"
+    );
+    assert_eq!(
+        navigation_projection_rx.borrow().focused.as_ref(),
+        Some(&key),
+        "the focused owner is admitted as desired before its Subscribe"
+    );
+    actor_task.abort();
 }

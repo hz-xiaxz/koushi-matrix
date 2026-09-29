@@ -16,7 +16,7 @@ import type {
 
 import { EntityAvatar } from "./Shell";
 import { ContactSecurityDetails, type ContactSecurityActions } from "./ContactSecurityDetails";
-import { ICON_SIZE, initials } from "../app/uiShared";
+import { avatarInitial, ICON_SIZE } from "../app/uiShared";
 
 const PEOPLE_MEMBER_ROW_HEIGHT_PX = 58;
 const PEOPLE_MEMBER_OVERSCAN_ROWS = 6;
@@ -232,7 +232,7 @@ function PeopleListRow({
           avatar={null}
           className="people-list-avatar is-user"
           colorSeed={member.user_id}
-          fallback={initials(displayLabel)}
+          fallback={avatarInitial(displayLabel)}
         />
         <span className="people-list-text">
           <span className="people-list-name" dir="auto">
@@ -335,7 +335,7 @@ export function ProfilePanel({
           avatar={avatar}
           className="profile-large-avatar is-user"
           colorSeed={userId}
-          fallback={initials(displayLabel)}
+          fallback={avatarInitial(displayLabel)}
         />
         <h3 dir="auto">{displayLabel}</h3>
         <p dir="auto">{userId}</p>

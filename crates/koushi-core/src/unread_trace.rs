@@ -188,6 +188,8 @@ mod tests {
 
     fn private_room() -> RoomSummary {
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "!private-room:example.invalid".to_owned(),
             display_name: "Private Room".to_owned(),
             display_label: "Private Room".to_owned(),

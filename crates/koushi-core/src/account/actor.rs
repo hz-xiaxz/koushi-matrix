@@ -630,6 +630,8 @@ pub struct AccountActorHandle {
         tokio::sync::watch::Sender<Option<Arc<crate::view_scope_lifecycle::ChargedAvatarDemand>>>,
     avatar_session_generation: Arc<AtomicU64>,
     navigation_projection: NavigationProjectionIngress,
+    /// RoomActor's retained post-commit navigation demand (#1060).
+    navigation_enrichment: crate::room::NavigationEnrichmentIngress,
     focused_projection_rx:
         Arc<Mutex<Option<mpsc::UnboundedReceiver<crate::timeline::FocusedProjectionCommitted>>>>,
     #[cfg(any(test, feature = "test-hooks"))]
@@ -852,8 +854,45 @@ impl AccountActorHandle {
         completion.await.unwrap_or(false)
     }
 
-    pub(crate) fn admit_navigation_projection(&self, intent: NavigationProjectionIntent) -> bool {
-        self.navigation_projection.admit(intent)
+    pub(crate) fn admit_navigation_projection(
+        &self,
+        intent: NavigationProjectionIntent,
+        focused: Option<koushi_protocol::ids::TimelineKey>,
+    ) -> bool {
+        self.navigation_projection.admit(intent, focused)
+    }
+
+    /// Replace the desired main-pane focused timeline without waiting for
+    /// any mailbox; TimelineManager retires every other focused actor (#1060).
+    pub(crate) fn admit_focused_foreground(
+        &self,
+        focused: Option<koushi_protocol::ids::TimelineKey>,
+    ) {
+        self.navigation_projection.admit_focused(focused);
+    }
+
+    /// Hand committed navigation to RoomActor-owned enrichment without
+    /// waiting for, or filling, any actor mailbox (#1060).
+    pub(crate) fn admit_navigation_enrichment(
+        &self,
+        session_key: SessionKeyId,
+        active_room_id: Option<String>,
+        active_space_id: Option<String>,
+        space_selected: bool,
+    ) {
+        self.navigation_enrichment.admit(
+            session_key,
+            active_room_id,
+            active_space_id,
+            space_selected,
+        );
+    }
+
+    #[cfg(test)]
+    pub(crate) fn latest_navigation_enrichment(
+        &self,
+    ) -> Option<crate::room::NavigationEnrichmentDemand> {
+        self.navigation_enrichment.latest()
     }
 
     pub(crate) fn take_focused_projection_commits(
@@ -873,6 +912,7 @@ impl AccountActorHandle {
         Self {
             tx,
             navigation_projection,
+            navigation_enrichment: crate::room::NavigationEnrichmentIngress::channel().0,
             avatar_demand_tx: tokio::sync::watch::channel(None).0,
             avatar_session_generation: Arc::new(AtomicU64::new(0)),
             focused_projection_rx: Arc::new(Mutex::new(None)),
@@ -1209,6 +1249,7 @@ impl AccountActor {
             sliding_sync_diagnostics.clone(),
             account_work.clone(),
         );
+        let navigation_enrichment = room_actor.navigation_enrichment();
         let (navigation_projection, navigation_projection_rx) =
             NavigationProjectionIngress::channel();
         let (focused_projection_tx, focused_projection_rx) = mpsc::unbounded_channel();
@@ -1376,6 +1417,7 @@ impl AccountActor {
             avatar_demand_tx,
             avatar_session_generation,
             navigation_projection,
+            navigation_enrichment,
             focused_projection_rx: Arc::new(Mutex::new(Some(focused_projection_rx))),
             #[cfg(any(test, feature = "test-hooks"))]
             residency_room_tx,

@@ -617,13 +617,16 @@ async fn ordinary_completion_burst_does_not_run_before_committed_room_selection(
             })
             .expect("ordinary completion should fit the test mailbox");
     }
-    assert!(navigation_projection.admit(NavigationProjectionIntent {
-        generation: 1,
-        key: key.clone(),
-        cause_request_id: request_id,
-        replay_existing: true,
-        cleanup: NavigationProjectionCleanup::default(),
-    }));
+    assert!(navigation_projection.admit(
+        NavigationProjectionIntent {
+            generation: 1,
+            key: key.clone(),
+            cause_request_id: request_id,
+            replay_existing: true,
+            cleanup: NavigationProjectionCleanup::default(),
+        },
+        None
+    ));
     let (state_tx, state_rx) = oneshot::channel();
     manager
         .msg_tx
@@ -678,13 +681,16 @@ async fn manager_shutdown_control_quiesces_before_retained_navigation() {
     let (navigation_projection, navigation_projection_rx) = NavigationProjectionIngress::channel();
     let mut manager = live_tail_test_manager(HashMap::from([(key.clone(), actor_handle)]));
     manager.navigation_projection_rx = Some(navigation_projection_rx);
-    assert!(navigation_projection.admit(NavigationProjectionIntent {
-        generation: 1,
-        key,
-        cause_request_id: fake_rid(28_514),
-        replay_existing: true,
-        cleanup: NavigationProjectionCleanup::default(),
-    }));
+    assert!(navigation_projection.admit(
+        NavigationProjectionIntent {
+            generation: 1,
+            key,
+            cause_request_id: fake_rid(28_514),
+            replay_existing: true,
+            cleanup: NavigationProjectionCleanup::default(),
+        },
+        None
+    ));
     let (control_tx, control_rx) = mpsc::channel(1);
     manager.control_rx = Some(control_rx);
     let (acknowledged, acknowledgement) = oneshot::channel();
@@ -717,27 +723,36 @@ async fn navigation_projection_retains_latest_value_across_manager_replacement()
     let newest_key = room_key();
     let newest_cause = fake_rid(28_511);
 
-    assert!(ingress.admit(NavigationProjectionIntent {
-        generation: 7,
-        key: newest_key.clone(),
-        cause_request_id: newest_cause,
-        replay_existing: false,
-        cleanup: NavigationProjectionCleanup::default(),
-    }));
-    assert!(ingress.admit(NavigationProjectionIntent {
-        generation: 6,
-        key: TimelineKey::room(AccountKey("@a:test".to_owned()), "!stale:test"),
-        cause_request_id: fake_rid(28_512),
-        replay_existing: true,
-        cleanup: NavigationProjectionCleanup::default(),
-    }));
-    assert!(ingress.admit(NavigationProjectionIntent {
-        generation: 7,
-        key: newest_key.clone(),
-        cause_request_id: fake_rid(28_513),
-        replay_existing: true,
-        cleanup: NavigationProjectionCleanup::default(),
-    }));
+    assert!(ingress.admit(
+        NavigationProjectionIntent {
+            generation: 7,
+            key: newest_key.clone(),
+            cause_request_id: newest_cause,
+            replay_existing: false,
+            cleanup: NavigationProjectionCleanup::default(),
+        },
+        None
+    ));
+    assert!(ingress.admit(
+        NavigationProjectionIntent {
+            generation: 6,
+            key: TimelineKey::room(AccountKey("@a:test".to_owned()), "!stale:test"),
+            cause_request_id: fake_rid(28_512),
+            replay_existing: true,
+            cleanup: NavigationProjectionCleanup::default(),
+        },
+        None
+    ));
+    assert!(ingress.admit(
+        NavigationProjectionIntent {
+            generation: 7,
+            key: newest_key.clone(),
+            cause_request_id: fake_rid(28_513),
+            replay_existing: true,
+            cleanup: NavigationProjectionCleanup::default(),
+        },
+        None
+    ));
 
     let mut replacement_receiver = Some(ingress.subscribe());
     let retained = executor::timeout(
@@ -746,7 +761,9 @@ async fn navigation_projection_retains_latest_value_across_manager_replacement()
     )
     .await
     .expect("replacement manager wake should be bounded")
-    .expect("latest desired projection should remain retained");
+    .expect("latest desired projection should remain retained")
+    .room
+    .expect("the room projection remains retained");
 
     assert_eq!(retained.generation, 7);
     assert_eq!(retained.key, newest_key);
@@ -779,31 +796,40 @@ async fn coalesced_navigation_projection_cleans_the_actual_manager_foreground() 
         .await;
     assert_eq!(manager.live_tail_refreshes.active_key(), Some(&room_a));
 
-    assert!(navigation_projection.admit(NavigationProjectionIntent {
-        generation: 1,
-        key: room_b.clone(),
-        cause_request_id: fake_rid(28_516),
-        replay_existing: false,
-        cleanup: NavigationProjectionCleanup {
-            cancel_pagination: Some(room_a.clone()),
-            cancel_link_previews: Some(room_a.clone()),
+    assert!(navigation_projection.admit(
+        NavigationProjectionIntent {
+            generation: 1,
+            key: room_b.clone(),
+            cause_request_id: fake_rid(28_516),
+            replay_existing: false,
+            cleanup: NavigationProjectionCleanup {
+                cancel_pagination: Some(room_a.clone()),
+                cancel_link_previews: Some(room_a.clone()),
+            },
         },
-    }));
-    assert!(navigation_projection.admit(NavigationProjectionIntent {
-        generation: 2,
-        key: room_c.clone(),
-        cause_request_id: fake_rid(28_517),
-        replay_existing: false,
-        cleanup: NavigationProjectionCleanup {
-            cancel_pagination: Some(room_b.clone()),
-            cancel_link_previews: Some(room_b),
+        None
+    ));
+    assert!(navigation_projection.admit(
+        NavigationProjectionIntent {
+            generation: 2,
+            key: room_c.clone(),
+            cause_request_id: fake_rid(28_517),
+            replay_existing: false,
+            cleanup: NavigationProjectionCleanup {
+                cancel_pagination: Some(room_b.clone()),
+                cancel_link_previews: Some(room_b),
+            },
         },
-    }));
+        None
+    ));
 
     let projection = receive_navigation_projection(&mut manager.navigation_projection_rx)
         .await
         .expect("latest navigation projection");
-    assert_eq!(projection.key, room_c);
+    assert_eq!(
+        projection.room.as_ref().map(|room| room.key.clone()),
+        Some(room_c.clone())
+    );
     manager.handle_navigation_projection(projection).await;
 
     assert_eq!(
@@ -925,12 +951,16 @@ async fn committed_navigation_projection_failure_does_not_emit_a_second_terminal
     let request_id = fake_rid(29_604);
 
     manager
-        .handle_navigation_projection(NavigationProjectionIntent {
-            generation: 1,
-            key: room_key(),
-            cause_request_id: request_id,
-            replay_existing: true,
-            cleanup: NavigationProjectionCleanup::default(),
+        .handle_navigation_projection(crate::timeline::NavigationProjectionDemand {
+            room_revision: 1,
+            room: Some(NavigationProjectionIntent {
+                generation: 1,
+                key: room_key(),
+                cause_request_id: request_id,
+                replay_existing: true,
+                cleanup: NavigationProjectionCleanup::default(),
+            }),
+            focused: None,
         })
         .await;
 
@@ -2960,4 +2990,145 @@ async fn replay_initial_items_republishes_unchanged_read_navigation() {
     .await
     .expect("replayed items must include unchanged read navigation for a new subscriber");
     assert_eq!(replayed, expected);
+}
+
+fn other_focused_key() -> TimelineKey {
+    TimelineKey {
+        account_key: AccountKey("@a:test".to_owned()),
+        kind: TimelineKind::Focused {
+            room_id: "!r:test".to_owned(),
+            event_id: "$other:test".to_owned(),
+        },
+    }
+}
+
+#[tokio::test]
+async fn navigation_demand_retires_only_undesired_focused_timelines() {
+    // #1060: the retained desired foreground retires obsolete focused actors
+    // with the full unsubscribe bookkeeping; cached room actors survive.
+    let mut manager = live_tail_test_manager(HashMap::from([
+        (room_key(), test_timeline_actor_handle()),
+        (thread_key(), test_timeline_actor_handle()),
+        (focused_key(), test_timeline_actor_handle()),
+        (other_focused_key(), test_timeline_actor_handle()),
+    ]));
+
+    manager
+        .handle_navigation_projection(crate::timeline::NavigationProjectionDemand {
+            room_revision: 1,
+            room: None,
+            focused: Some(focused_key()),
+        })
+        .await;
+    assert!(manager.timelines.contains_key(&focused_key()));
+    assert!(!manager.timelines.contains_key(&other_focused_key()));
+    assert!(manager.timelines.contains_key(&room_key()));
+    assert!(manager.timelines.contains_key(&thread_key()));
+
+    manager
+        .handle_navigation_projection(crate::timeline::NavigationProjectionDemand {
+            room_revision: 1,
+            room: None,
+            focused: None,
+        })
+        .await;
+    assert!(!manager.timelines.contains_key(&focused_key()));
+    assert!(manager.timelines.contains_key(&room_key()));
+    assert!(manager.timelines.contains_key(&thread_key()));
+}
+
+#[tokio::test]
+async fn coalesced_focused_release_and_reopen_keeps_the_new_owner() {
+    // Focused A -> None -> same Focused A coalesces to the latest value, so
+    // the old release can never retire the reopened owner of the same key.
+    let (ingress, receiver) = NavigationProjectionIngress::channel();
+    let mut manager = live_tail_test_manager(HashMap::from([(
+        focused_key(),
+        test_timeline_actor_handle(),
+    )]));
+    manager.navigation_projection_rx = Some(receiver);
+
+    ingress.admit_focused(Some(focused_key()));
+    ingress.admit_focused(None);
+    ingress.admit_focused(Some(focused_key()));
+    let demand = receive_navigation_projection(&mut manager.navigation_projection_rx)
+        .await
+        .expect("latest desired foreground");
+    manager.handle_navigation_projection(demand).await;
+    assert!(manager.timelines.contains_key(&focused_key()));
+}
+
+#[tokio::test]
+async fn focused_only_update_does_not_replay_the_retained_room_projection() {
+    let (ingress, receiver) = NavigationProjectionIngress::channel();
+    let mut manager = live_tail_test_manager(HashMap::new());
+    manager.test_session_available = false;
+    manager.navigation_projection_rx = Some(receiver);
+    assert!(ingress.admit(
+        NavigationProjectionIntent {
+            generation: 3,
+            key: room_key(),
+            cause_request_id: fake_rid(1_060),
+            replay_existing: true,
+            cleanup: NavigationProjectionCleanup::default(),
+        },
+        Some(focused_key()),
+    ));
+    let demand = receive_navigation_projection(&mut manager.navigation_projection_rx)
+        .await
+        .expect("room demand");
+    manager.handle_navigation_projection(demand).await;
+    let applied = manager.applied_room_projection;
+    assert!(applied.is_some());
+
+    ingress.admit_focused(None);
+    let demand = receive_navigation_projection(&mut manager.navigation_projection_rx)
+        .await
+        .expect("focused-only demand");
+    assert_eq!(
+        demand.room.as_ref().map(|room| room.generation),
+        Some(3),
+        "a focused-only update carries the retained room part forward"
+    );
+    manager.handle_navigation_projection(demand).await;
+    assert_eq!(manager.applied_room_projection, applied);
+}
+
+#[tokio::test]
+async fn same_generation_room_readmission_reprojects_the_room() {
+    // Same (generation, key) re-admission happens when `active_room_id` is
+    // unchanged but `timeline.room_id` differed; it must re-run the committed
+    // room selection even when the earlier admission already asked for replay.
+    let (ingress, receiver) = NavigationProjectionIngress::channel();
+    let mut manager = live_tail_test_manager(HashMap::new());
+    manager.test_session_available = false;
+    manager.navigation_projection_rx = Some(receiver);
+    let intent = || NavigationProjectionIntent {
+        generation: 4,
+        key: room_key(),
+        cause_request_id: fake_rid(1_061),
+        replay_existing: true,
+        cleanup: NavigationProjectionCleanup::default(),
+    };
+    for expected in [1, 2] {
+        assert!(ingress.admit(intent(), None));
+        let demand = receive_navigation_projection(&mut manager.navigation_projection_rx)
+            .await
+            .expect("room demand");
+        manager.handle_navigation_projection(demand).await;
+        assert_eq!(manager.applied_room_projection, Some(expected));
+    }
+    // A stale room admission is not a re-admission.
+    assert!(ingress.admit(
+        NavigationProjectionIntent {
+            generation: 3,
+            ..intent()
+        },
+        None,
+    ));
+    let demand = receive_navigation_projection(&mut manager.navigation_projection_rx)
+        .await
+        .expect("stale demand wake");
+    manager.handle_navigation_projection(demand).await;
+    assert_eq!(manager.applied_room_projection, Some(2));
 }

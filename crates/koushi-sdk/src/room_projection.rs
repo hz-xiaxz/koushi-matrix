@@ -63,6 +63,9 @@ pub struct MatrixRoomListSpace {
 pub struct MatrixRoomListRoom {
     pub room_id: String,
     pub display_name: String,
+    /// Set when `display_name` is the SDK's calculated empty-room name
+    /// (#1050), so product text can come from the GUI catalog.
+    pub display_name_placeholder: Option<koushi_state::RoomNamePlaceholder>,
     pub avatar_mxc_uri: Option<String>,
     pub is_dm: bool,
     pub dm_user_ids: Vec<String>,
@@ -2189,8 +2192,11 @@ async fn matrix_room_list_snapshot_from_rooms(
                 .room_notification_modes
                 .insert(room_id.clone(), mode);
         }
-        let display_name = room
-            .cached_display_name()
+        let cached_display_name = room.cached_display_name();
+        let display_name_placeholder = cached_display_name
+            .as_ref()
+            .and_then(matrix_room_name_placeholder);
+        let display_name = cached_display_name
             .map(|name| name.to_string())
             .unwrap_or_else(|| room_id.clone());
 
@@ -2275,7 +2281,7 @@ async fn matrix_room_list_snapshot_from_rooms(
             });
         }
 
-        snapshot.rooms.push(matrix_room_list_room_from_counts(
+        let mut list_room = matrix_room_list_room_from_counts(
             room_id,
             display_name,
             room.avatar_url().map(|uri| uri.to_string()),
@@ -2294,7 +2300,9 @@ async fn matrix_room_list_snapshot_from_rooms(
             parent_space_ids,
             is_encrypted,
             joined_members,
-        ));
+        );
+        list_room.display_name_placeholder = display_name_placeholder;
+        snapshot.rooms.push(list_room);
     }
     snapshot.user_profiles = user_profiles.into_values().collect();
     snapshot
@@ -2463,6 +2471,24 @@ fn room_attention_unread_count(
     }
 }
 
+/// Structured form of the SDK's calculated empty-room name (#1050), whose
+/// `Display` text is English-only; every other name is caller data.
+pub(super) fn matrix_room_name_placeholder(
+    name: &matrix_sdk::RoomDisplayName,
+) -> Option<koushi_state::RoomNamePlaceholder> {
+    match name {
+        matrix_sdk::RoomDisplayName::Empty => Some(koushi_state::RoomNamePlaceholder::Empty),
+        matrix_sdk::RoomDisplayName::EmptyWas(previous_names) => {
+            Some(koushi_state::RoomNamePlaceholder::EmptyWas {
+                previous_names: previous_names.clone(),
+            })
+        }
+        matrix_sdk::RoomDisplayName::Named(_)
+        | matrix_sdk::RoomDisplayName::Aliased(_)
+        | matrix_sdk::RoomDisplayName::Calculated(_) => None,
+    }
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
@@ -2498,6 +2524,7 @@ pub(super) fn matrix_room_list_room_from_counts(
         (unread_messages, notification_count, highlight_count)
     };
     MatrixRoomListRoom {
+        display_name_placeholder: None,
         room_id,
         display_name,
         avatar_mxc_uri,

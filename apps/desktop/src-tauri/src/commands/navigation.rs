@@ -1,4 +1,3 @@
-use super::room::build_refresh_pinned_events_command;
 use super::timeline::{
     build_observe_timeline_viewport_command, build_open_timeline_at_timestamp_command,
     build_update_navigation_scroll_anchor_command,
@@ -90,22 +89,14 @@ pub async fn select_room(
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendCommandSettlement, String> {
-    let selected_room_id = room_id.clone();
     let mut event_conn = state.runtime.attach();
     let generation = event_conn
-        .select_room_and_wait(selected_room_id.clone(), SELECT_ROOM_EVENT_TIMEOUT)
+        .select_room_and_wait(room_id, SELECT_ROOM_EVENT_TIMEOUT)
         .await
         .map_err(invoke_error_from_select_room_error)?;
-    // Pinned-event bodies may require network fetches. Their refresh is
-    // independent of the committed room selection and must not delay it.
-    let refresh_request_id = event_conn.next_request_id();
-    event_conn
-        .command(build_refresh_pinned_events_command(
-            refresh_request_id,
-            selected_room_id.clone(),
-        ))
-        .await
-        .map_err(|e| format!("command submit failed: {e}"))?;
+    // Pinned-event bodies may require network fetches. Core schedules their
+    // refresh after the committed selection (#1060); the adapter never waits
+    // for that supplementary work or its admission.
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(FrontendCommandSettlement::from_published_generation(
         generation,
