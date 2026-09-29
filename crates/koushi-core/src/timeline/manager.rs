@@ -47,8 +47,8 @@ use super::gap_repair::{
     GlobalResponseCommit, LIVE_TAIL_CANCELLATION_DEADLINE, TimelineGapRepairTrigger,
 };
 use super::navigation::{
-    INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT, NavigationProjectionIntent,
-    TimelineActorGenerationGate, receive_navigation_projection,
+    INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT, TimelineActorGenerationGate,
+    receive_navigation_projection,
 };
 use super::outbound_send::{
     GlobalSendCompletionObserverFuture, SendComposerProjection, SendEnqueueWorkerSupervisor,
@@ -312,7 +312,7 @@ impl TimelineManagerHandle {
         event_tx: broadcast::Sender<CoreEvent>,
         data_dir: Option<std::path::PathBuf>,
         account_work: AccountWorkScheduler,
-        navigation_projection_rx: Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
+        navigation_projection_rx: Option<watch::Receiver<super::NavigationProjectionDemand>>,
         focused_projection_tx: Option<mpsc::UnboundedSender<super::FocusedProjectionCommitted>>,
     ) -> Self {
         TimelineManagerActor::spawn(
@@ -341,7 +341,7 @@ impl TimelineManagerHandle {
         data_dir: Option<std::path::PathBuf>,
         link_preview_policy: LinkPreviewContext,
         account_work: AccountWorkScheduler,
-        navigation_projection_rx: Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
+        navigation_projection_rx: Option<watch::Receiver<super::NavigationProjectionDemand>>,
         focused_projection_tx: Option<mpsc::UnboundedSender<super::FocusedProjectionCommitted>>,
     ) -> Self {
         TimelineManagerActor::spawn_with_session(
@@ -489,9 +489,11 @@ pub struct TimelineManagerActor {
     pub(super) msg_tx: mpsc::Sender<TimelineMessage>,
     pub(super) msg_rx: mpsc::Receiver<TimelineMessage>,
     pub(super) control_rx: Option<mpsc::Receiver<TimelineManagerControl>>,
-    pub(super) navigation_projection_rx:
-        Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
+    pub(super) navigation_projection_rx: Option<watch::Receiver<super::NavigationProjectionDemand>>,
     pub(super) last_navigation_projection_generation: u64,
+    /// The room projection last applied from the retained demand, so a
+    /// focused-only update does not replay an unchanged room (#1060).
+    pub(super) applied_room_projection: Option<(u64, TimelineKey, bool)>,
     /// Non-evicting active terminal-delivery state. Admission is synchronous
     /// under the shared send tracker lock, so its FIFO is bounded logically by
     /// already-admitted/outstanding sends (at most one failure and one final
@@ -538,7 +540,7 @@ impl TimelineManagerActor {
         event_tx: broadcast::Sender<CoreEvent>,
         data_dir: Option<std::path::PathBuf>,
         account_work: AccountWorkScheduler,
-        navigation_projection_rx: Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
+        navigation_projection_rx: Option<watch::Receiver<super::NavigationProjectionDemand>>,
         focused_projection_tx: Option<mpsc::UnboundedSender<super::FocusedProjectionCommitted>>,
     ) -> TimelineManagerHandle {
         let (tx, msg_rx) = mpsc::channel(crate::ACTOR_MESSAGE_QUEUE_CAPACITY);
@@ -577,6 +579,7 @@ impl TimelineManagerActor {
             control_rx: Some(control_rx),
             navigation_projection_rx,
             last_navigation_projection_generation: 0,
+            applied_room_projection: None,
             terminal_ingress: terminal_ingress.clone(),
             terminal_rx,
             search_index_tx: None,
@@ -623,7 +626,7 @@ impl TimelineManagerActor {
         data_dir: Option<std::path::PathBuf>,
         link_preview_policy: LinkPreviewContext,
         account_work: AccountWorkScheduler,
-        navigation_projection_rx: Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
+        navigation_projection_rx: Option<watch::Receiver<super::NavigationProjectionDemand>>,
         focused_projection_tx: Option<mpsc::UnboundedSender<super::FocusedProjectionCommitted>>,
     ) -> TimelineManagerHandle {
         let (tx, msg_rx) = mpsc::channel(crate::ACTOR_MESSAGE_QUEUE_CAPACITY);
@@ -676,6 +679,7 @@ impl TimelineManagerActor {
             control_rx: Some(control_rx),
             navigation_projection_rx,
             last_navigation_projection_generation: 0,
+            applied_room_projection: None,
             terminal_ingress: terminal_ingress.clone(),
             terminal_rx,
             search_index_tx: Some(search_index_tx),
@@ -1151,31 +1155,7 @@ impl TimelineManagerActor {
             }
             TimelineCommand::Unsubscribe { request_id, key } => {
                 trace_timeline_route("manager_received", "unsubscribe", request_id, &key);
-                // Drop the actor handle, which cancels its relay task and drops
-                // the SDK Timeline handle — no dedicated success event per spec.
-                if matches!(key.kind, TimelineKind::Room { .. }) {
-                    self.clear_thread_root_projections_for_room(&key).await;
-                } else {
-                    self.timeline_actor_generations
-                        .invalidate_and_quiesce(&key)
-                        .await;
-                }
-                let removed_actor = self.timelines.remove(&key);
-                if removed_actor.is_some() {
-                    self.read_workers.remove_local_read_correlation(&key);
-                }
-                self.send_completion
-                    .lock()
-                    .expect("send completion coordinator lock must not be poisoned")
-                    .drop_direct_retained_for_key(&key);
-                // Release the actor-resource lease only when an actor was
-                // actually removed. Session residency is intentionally
-                // independent and is never removed by unsubscribe.
-                if removed_actor.is_some()
-                    && let Ok(room_id) = key.room_id().parse::<OwnedRoomId>()
-                {
-                    self.release_room_lease(&room_id);
-                }
+                self.unsubscribe_timeline(&key).await;
             }
             TimelineCommand::Paginate {
                 request_id,
@@ -1698,6 +1678,57 @@ impl TimelineManagerActor {
                 .await;
         }
     }
+    /// Full unsubscribe bookkeeping for one key: generation invalidation and
+    /// quiescence, local-read correlation cleanup, retained send-completion
+    /// cleanup, and actor-resource lease release. Session residency is
+    /// intentionally independent and is never removed here.
+    pub(super) async fn unsubscribe_timeline(&mut self, key: &TimelineKey) {
+        // Drop the actor handle, which cancels its relay task and drops
+        // the SDK Timeline handle — no dedicated success event per spec.
+        if matches!(key.kind, TimelineKind::Room { .. }) {
+            self.clear_thread_root_projections_for_room(key).await;
+        } else {
+            self.timeline_actor_generations
+                .invalidate_and_quiesce(key)
+                .await;
+        }
+        let removed_actor = self.timelines.remove(key);
+        if removed_actor.is_some() {
+            self.read_workers.remove_local_read_correlation(key);
+        }
+        self.send_completion
+            .lock()
+            .expect("send completion coordinator lock must not be poisoned")
+            .drop_direct_retained_for_key(key);
+        // Release the actor-resource lease only when an actor was
+        // actually removed.
+        if removed_actor.is_some()
+            && let Ok(room_id) = key.room_id().parse::<OwnedRoomId>()
+        {
+            self.release_room_lease(&room_id);
+        }
+    }
+
+    /// #1060: retire every main-pane focused timeline AppActor no longer
+    /// desires. Driven by the retained navigation demand rather than a
+    /// mailbox `Unsubscribe`, so AppActor never waits for admission and a
+    /// delayed key-only cleanup cannot remove a newer owner of the same key.
+    pub(super) async fn retire_undesired_focused_timelines(
+        &mut self,
+        desired: Option<&TimelineKey>,
+    ) {
+        let obsolete = self
+            .timelines
+            .keys()
+            .filter(|key| matches!(key.kind, TimelineKind::Focused { .. }))
+            .filter(|key| Some(*key) != desired)
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in obsolete {
+            self.unsubscribe_timeline(&key).await;
+        }
+    }
+
     pub(super) async fn handle_subscribe(
         &mut self,
         request_id: RequestId,

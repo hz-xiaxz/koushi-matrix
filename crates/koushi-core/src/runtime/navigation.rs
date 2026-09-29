@@ -298,14 +298,7 @@ impl AppActor {
             published_generation,
         });
         if let Some(focused) = focused {
-            self.send_timeline_command_or_fail(
-                pending.request_id,
-                TimelineCommand::Unsubscribe {
-                    request_id: pending.request_id,
-                    key: focused.key,
-                },
-            )
-            .await;
+            self.release_focused_foreground(&focused.key);
         }
     }
 
@@ -357,14 +350,9 @@ impl AppActor {
                 published_generation,
             });
             if let Some(key) = focused_key {
-                self.send_timeline_command_or_fail(
-                    pending.request_id,
-                    TimelineCommand::Unsubscribe {
-                        request_id: pending.request_id,
-                        key,
-                    },
-                )
-                .await;
+                // #1060: this runs before a superseding room selection is
+                // reduced, so it must not wait for AccountActor admission.
+                self.release_focused_foreground(&key);
             }
         }
     }
@@ -407,14 +395,7 @@ impl AppActor {
             published_generation,
         });
         if let Some(focused) = focused {
-            self.send_timeline_command_or_fail(
-                pending.request_id,
-                TimelineCommand::Unsubscribe {
-                    request_id: pending.request_id,
-                    key: focused.key,
-                },
-            )
-            .await;
+            self.release_focused_foreground(&focused.key);
         }
     }
 
@@ -512,14 +493,9 @@ impl AppActor {
             EVENT_NAVIGATION_TIMEOUT,
         ));
         if let Some(key) = focused_key {
-            self.send_timeline_command_or_fail(
-                select_request_id,
-                TimelineCommand::Unsubscribe {
-                    request_id: select_request_id,
-                    key,
-                },
-            )
-            .await;
+            // #1060: retire the replaced focused owner without waiting for
+            // AccountActor admission ahead of the internal room selection.
+            self.release_focused_foreground(&key);
         }
 
         self.pending_select
@@ -1104,10 +1080,32 @@ impl AppActor {
     /// `OpenAnchoredTimeline`) settles `Superseded` here, while an owned one
     /// is settled by its event-navigation owner. Unsubscribe is idempotent in
     /// the timeline manager.
-    pub(super) async fn release_focused_timeline(&mut self, key: TimelineKey) {
+    ///
+    /// #1060: the release is admitted through the retained desired-foreground
+    /// ingress, so a room/Space/Home switch never waits for AccountActor
+    /// admission after its commit.
+    pub(super) fn release_focused_timeline(&mut self, key: TimelineKey) {
+        self.drop_pending_focused_navigation_for(&key);
+        self.release_focused_foreground(&key);
+    }
+
+    /// Release a focused timeline the AccountActor subscribed on its own
+    /// (#1037 date jump whose reply was fenced). That subscription travels the
+    /// TimelineManager mailbox, so its `Unsubscribe` must follow it there.
+    pub(super) async fn release_account_subscribed_focused_timeline(&mut self, key: TimelineKey) {
+        self.drop_pending_focused_navigation_for(&key);
+        let request_id = self.next_internal_request_id();
+        self.send_timeline_command_or_fail(
+            request_id,
+            TimelineCommand::Unsubscribe { request_id, key },
+        )
+        .await;
+    }
+
+    fn drop_pending_focused_navigation_for(&mut self, key: &TimelineKey) {
         if let Some(pending) = self
             .pending_focused_navigation
-            .take_if(|pending| pending.key == key)
+            .take_if(|pending| pending.key == *key)
             && pending.generation.is_none()
         {
             self.emit(CoreEvent::IntentLifecycle {
@@ -1116,12 +1114,33 @@ impl AppActor {
                 published_generation: self.state_generation,
             });
         }
-        let request_id = self.next_internal_request_id();
-        self.send_timeline_command_or_fail(
-            request_id,
-            TimelineCommand::Unsubscribe { request_id, key },
-        )
-        .await;
+    }
+
+    /// #1060: the one main-pane focused timeline AppActor still wants: an
+    /// in-flight focused navigation, else the reducer's open focused context.
+    pub(super) fn desired_focused_foreground(&self) -> Option<TimelineKey> {
+        self.pending_focused_navigation
+            .as_ref()
+            .map(|pending| pending.key.clone())
+            .or_else(|| self.current_focused_context_timeline_key())
+    }
+
+    /// Publish the current desired focused foreground. Called before a new
+    /// focused `Subscribe` enters the mailbox, so the retained value can never
+    /// retire that newer owner.
+    pub(super) fn admit_focused_foreground(&self) {
+        self.account_actor
+            .admit_focused_foreground(self.desired_focused_foreground());
+    }
+
+    /// Retire `released` (and any other undesired focused timeline) through
+    /// the retained ingress. It mirrors the former key-scoped `Unsubscribe`:
+    /// the released key is excluded even while the reducer still shows it.
+    pub(super) fn release_focused_foreground(&self, released: &TimelineKey) {
+        let desired = self
+            .desired_focused_foreground()
+            .filter(|desired| desired != released);
+        self.account_actor.admit_focused_foreground(desired);
     }
 
     /// #1037: an accepted main-composer send for `room_id` returns the main
@@ -1148,7 +1167,7 @@ impl AppActor {
                 self.apply_deferred_reducer_side_effects(deferred).await;
                 self.handle_ui_event_effects(&effects).await;
             } else {
-                self.release_focused_timeline(pending.key.clone()).await;
+                self.release_focused_timeline(pending.key.clone());
             }
             if pending.generation.is_none() {
                 self.emit(CoreEvent::IntentLifecycle {

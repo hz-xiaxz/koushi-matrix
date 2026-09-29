@@ -102,6 +102,33 @@ async fn expect_unsubscribe(account_rx: &mut mpsc::Receiver<AccountMessage>, key
     .expect("the focused timeline must be unsubscribed");
 }
 
+/// #1060: a released focused timeline is retired through the retained
+/// desired-foreground ingress rather than a mailbox `Unsubscribe`, so wait
+/// until the admitted demand no longer desires `key`.
+async fn expect_focused_released(
+    navigation_projection_rx: &mut watch::Receiver<crate::timeline::NavigationProjectionDemand>,
+    key: &TimelineKey,
+) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            navigation_projection_rx
+                .changed()
+                .await
+                .expect("navigation projection channel");
+            if navigation_projection_rx
+                .borrow_and_update()
+                .focused
+                .as_ref()
+                != Some(key)
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("the focused timeline must be released");
+}
+
 async fn wait_for_snapshot(
     snapshot_rx: &mut watch::Receiver<VersionedAppStateSnapshot>,
     predicate: impl Fn(&AppState) -> bool,
@@ -161,10 +188,10 @@ async fn accepted_send_from_anchored_history_releases_the_focused_timeline() {
         actor,
         _command_tx,
         action_tx,
-        mut account_rx,
+        _account_rx,
         _event_rx,
         mut snapshot_rx,
-        _navigation_projection_rx,
+        mut navigation_projection_rx,
         _event_navigation_prepared_tx,
         _focused_projection_tx,
     ) = app_actor_event_navigation_fixture(data_dir.path(), anchored_state());
@@ -180,7 +207,7 @@ async fn accepted_send_from_anchored_history_releases_the_focused_timeline() {
             && state.focused_context == koushi_state::FocusedContextState::Closed
     })
     .await;
-    expect_unsubscribe(&mut account_rx, &focused_key(ROOM, EVENT)).await;
+    expect_focused_released(&mut navigation_projection_rx, &focused_key(ROOM, EVENT)).await;
     actor_task.abort();
 }
 
@@ -193,10 +220,10 @@ async fn room_switch_releases_the_focused_timeline() {
         mut actor,
         _command_tx,
         action_tx,
-        mut account_rx,
+        _account_rx,
         _event_rx,
         mut snapshot_rx,
-        _navigation_projection_rx,
+        mut navigation_projection_rx,
         _event_navigation_prepared_tx,
         _focused_projection_tx,
     ) = app_actor_event_navigation_fixture(data_dir.path(), anchored_state());
@@ -218,7 +245,7 @@ async fn room_switch_releases_the_focused_timeline() {
             && state.focused_context == koushi_state::FocusedContextState::Closed
     })
     .await;
-    expect_unsubscribe(&mut account_rx, &focused_key(ROOM, EVENT)).await;
+    expect_focused_released(&mut navigation_projection_rx, &focused_key(ROOM, EVENT)).await;
     actor_task.abort();
 }
 
@@ -239,10 +266,10 @@ async fn room_switch_during_a_loading_date_jump_settles_the_jump_superseded() {
         mut actor,
         _command_tx,
         action_tx,
-        mut account_rx,
+        _account_rx,
         mut event_rx,
         mut snapshot_rx,
-        _navigation_projection_rx,
+        mut navigation_projection_rx,
         _event_navigation_prepared_tx,
         _focused_projection_tx,
     ) = app_actor_event_navigation_fixture(data_dir.path(), state);
@@ -273,7 +300,7 @@ async fn room_switch_during_a_loading_date_jump_settles_the_jump_superseded() {
         state.navigation.active_room_id.as_deref() == Some(OTHER_ROOM)
     })
     .await;
-    expect_unsubscribe(&mut account_rx, &key).await;
+    expect_focused_released(&mut navigation_projection_rx, &key).await;
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             if matches!(
@@ -311,10 +338,10 @@ async fn accepted_send_cancels_a_loading_date_jump_before_its_projection_lands()
         mut actor,
         _command_tx,
         action_tx,
-        mut account_rx,
+        _account_rx,
         _event_rx,
         mut snapshot_rx,
-        _navigation_projection_rx,
+        mut navigation_projection_rx,
         _event_navigation_prepared_tx,
         focused_projection_tx,
     ) = app_actor_event_navigation_fixture(data_dir.path(), state);
@@ -339,7 +366,7 @@ async fn accepted_send_cancels_a_loading_date_jump_before_its_projection_lands()
             && state.focused_context == koushi_state::FocusedContextState::Closed
     })
     .await;
-    expect_unsubscribe(&mut account_rx, &key).await;
+    expect_focused_released(&mut navigation_projection_rx, &key).await;
 
     focused_projection_tx
         .send(committed(projection_request_id, key))
@@ -427,10 +454,10 @@ async fn accepted_send_cancels_an_in_flight_event_navigation() {
         mut actor,
         _command_tx,
         action_tx,
-        mut account_rx,
+        _account_rx,
         _event_rx,
         mut snapshot_rx,
-        _navigation_projection_rx,
+        mut navigation_projection_rx,
         _event_navigation_prepared_tx,
         focused_projection_tx,
     ) = app_actor_event_navigation_fixture(data_dir.path(), state);
@@ -464,7 +491,7 @@ async fn accepted_send_cancels_an_in_flight_event_navigation() {
             && state.navigation.event_navigation == koushi_state::EventNavigationState::Idle
     })
     .await;
-    expect_unsubscribe(&mut account_rx, &key).await;
+    expect_focused_released(&mut navigation_projection_rx, &key).await;
 
     focused_projection_tx
         .send(committed(navigation_request_id, key))
@@ -486,10 +513,10 @@ async fn accepted_attachment_send_returns_anchored_pane_to_live_and_releases_foc
         mut actor,
         _command_tx,
         _action_tx,
-        mut account_rx,
+        _account_rx,
         _event_rx,
         _snapshot_rx,
-        _navigation_projection_rx,
+        mut navigation_projection_rx,
         _event_navigation_prepared_tx,
         _focused_projection_tx,
     ) = app_actor_event_navigation_fixture(data_dir.path(), state);
@@ -509,5 +536,5 @@ async fn accepted_attachment_send_returns_anchored_pane_to_live_and_releases_foc
         actor.state.focused_context,
         koushi_state::FocusedContextState::Closed
     );
-    expect_unsubscribe(&mut account_rx, &focused_key(ROOM, EVENT)).await;
+    expect_focused_released(&mut navigation_projection_rx, &focused_key(ROOM, EVENT)).await;
 }

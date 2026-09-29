@@ -854,8 +854,21 @@ impl AccountActorHandle {
         completion.await.unwrap_or(false)
     }
 
-    pub(crate) fn admit_navigation_projection(&self, intent: NavigationProjectionIntent) -> bool {
-        self.navigation_projection.admit(intent)
+    pub(crate) fn admit_navigation_projection(
+        &self,
+        intent: NavigationProjectionIntent,
+        focused: Option<koushi_protocol::ids::TimelineKey>,
+    ) -> bool {
+        self.navigation_projection.admit(intent, focused)
+    }
+
+    /// Replace the desired main-pane focused timeline without waiting for
+    /// any mailbox; TimelineManager retires every other focused actor (#1060).
+    pub(crate) fn admit_focused_foreground(
+        &self,
+        focused: Option<koushi_protocol::ids::TimelineKey>,
+    ) {
+        self.navigation_projection.admit_focused(focused);
     }
 
     /// Hand committed navigation to RoomActor-owned enrichment without

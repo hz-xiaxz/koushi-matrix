@@ -686,7 +686,11 @@ Rules:
    where a dropped update self-heals. Silently dropping `SelectRoom` under a
    saturated `ACTION_QUEUE_CAPACITY` inbox was the large-account "room selection
    did not complete" / blank-timeline / unloaded-members regression; it passed
-   every small-account headless lane.
+   every small-account headless lane. Purely local navigation must not wait
+   for a network-operation mailbox at all: AppActor reduces
+   `SelectRoom`/`SelectSpace` itself, and their post-commit network
+   enrichment and focused-timeline release travel as retained latest-wins
+   values rather than awaited mailbox admission (#1060).
 12. User-intent commands resolve to a correlated, observable terminal outcome —
    never a silent no-op. A foreground one-shot command
    (account restore/login/logout, `SelectRoom`/`SelectSpace`, send/edit/redact,

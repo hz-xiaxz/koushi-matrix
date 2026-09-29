@@ -88,7 +88,7 @@ struct BlockedMailbox {
     action_tx: mpsc::Sender<Vec<AppAction>>,
     event_rx: broadcast::Receiver<CoreEvent>,
     snapshot_rx: watch::Receiver<VersionedAppStateSnapshot>,
-    navigation_projection_rx: watch::Receiver<Option<crate::timeline::NavigationProjectionIntent>>,
+    navigation_projection_rx: watch::Receiver<crate::timeline::NavigationProjectionDemand>,
     account_rx: mpsc::Receiver<AccountMessage>,
     account_actor: AccountActorHandle,
     initial: AppState,
@@ -265,6 +265,7 @@ impl BlockedMailbox {
     fn retained_projection_key(&mut self) -> Option<TimelineKey> {
         self.navigation_projection_rx
             .borrow_and_update()
+            .room
             .as_ref()
             .map(|intent| intent.key.clone())
     }
@@ -541,8 +542,20 @@ fn anchored_state() -> AppState {
     state
 }
 
+/// Start from a focused context whose timeline the manager currently owns.
+async fn start_focused(state: AppState, prepare: impl FnOnce(&mut AppActor)) -> BlockedMailbox {
+    BlockedMailbox::start_with(state, |actor| {
+        actor
+            .account_actor
+            .admit_focused_foreground(Some(focused_key(ROOM_A)));
+        prepare(actor);
+    })
+    .await
+}
+
 /// Two selections in a row: the second proves no post-commit focused cleanup
-/// left the AppActor loop waiting on the full AccountActor mailbox.
+/// left the AppActor loop waiting on the full AccountActor mailbox. The old
+/// focused owner is retired through the retained desired foreground.
 async fn assert_two_selections_commit(harness: &mut BlockedMailbox) {
     harness.select_room(request(11), ROOM_B).await;
     harness.select_room(request(12), ROOM_C).await;
@@ -553,6 +566,8 @@ async fn assert_two_selections_commit(harness: &mut BlockedMailbox) {
         Some(ROOM_C)
     );
     assert_eq!(terminals[1].1.timeline.room_id.as_deref(), Some(ROOM_C));
+    assert_eq!(harness.navigation_projection_rx.borrow().focused, None);
+    assert_eq!(harness.retained_projection_key(), Some(room_key(ROOM_C)));
 }
 
 #[tokio::test]
@@ -568,7 +583,7 @@ async fn navigation_network_selection_from_opening_focused_context_commits() {
         generation,
         source: koushi_state::EventNavigationSource::Activity,
     };
-    let mut harness = BlockedMailbox::start_with(state, |actor| {
+    let mut harness = start_focused(state, |actor| {
         actor.pending_event_navigation = Some(PendingEventNavigation {
             request_id: request(1),
             select_request_id: request(2),
@@ -594,14 +609,14 @@ async fn navigation_network_selection_from_opening_focused_context_commits() {
 
 #[tokio::test]
 async fn navigation_network_selection_from_anchored_focused_context_commits() {
-    let mut harness = BlockedMailbox::start(anchored_state()).await;
+    let mut harness = start_focused(anchored_state(), |_| {}).await;
     assert_two_selections_commit(&mut harness).await;
     harness.finish();
 }
 
 #[tokio::test]
 async fn navigation_network_home_from_anchored_focused_context_commits() {
-    let mut harness = BlockedMailbox::start(anchored_state()).await;
+    let mut harness = start_focused(anchored_state(), |_| {}).await;
     let _ = harness
         .submit(CoreCommand::Room(RoomCommand::SelectSpace {
             request_id: request(10),
@@ -614,7 +629,7 @@ async fn navigation_network_home_from_anchored_focused_context_commits() {
 
 #[tokio::test]
 async fn navigation_network_empty_space_from_anchored_focused_context_commits() {
-    let mut harness = BlockedMailbox::start(anchored_state()).await;
+    let mut harness = start_focused(anchored_state(), |_| {}).await;
     let _ = harness
         .submit(CoreCommand::Room(RoomCommand::SelectSpace {
             request_id: request(10),

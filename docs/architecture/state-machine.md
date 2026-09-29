@@ -912,6 +912,21 @@ code without a matching command-success correlation.
   or a mismatched snapshot must not reveal the previously committed room as if
   the newer navigation succeeded. Invite acceptance and direct join delegate to
   this shared selection path and never switch the pane independently.
+- Room and Space selection is purely local navigation (#1060). AppActor admits
+  `SelectRoom`/`SelectSpace` (user and internal event-navigation selections)
+  and reduces them through its single action-batch commit pipeline: session and
+  room guards, composer hydration, request correlation, publication, the one
+  request-correlated terminal and projection generations are unchanged, but no
+  step waits for the AccountActor/RoomActor network-operation mailboxes.
+  RoomActor never projects a selection. After publication and before the
+  terminal, AppActor replaces one retained, latest-wins navigation-enrichment
+  value (session key, active room, active Space; Home/cleared included, and an
+  already-active room re-admits). RoomActor consumes it after its serial SDK
+  work: it refreshes the active room's pinned events and hydrates the active
+  Space's members, ignores demand for another session, and replays the current
+  demand when a session is established or sync (the room-list observer) starts.
+  An unknown room schedules nothing. A late actor echo of a selection has no
+  request owner left and is dropped, so it cannot restore an older room.
 
 Event navigation is a Rust-owned outer operation. Its lifecycle is normative:
 
@@ -2242,9 +2257,12 @@ stateDiagram-v2
   Because cleanup may already have cleared profiles, this bounded transient
   projection can use the safe raw-sender fallback and remain orphaned until the
   next authoritative pinned refresh; it never recreates room/list/tag state.
-  Selection commits without waiting for pinned bodies. The actor owns the
-  asynchronous refresh, discards results from older sessions or superseded
-  requests, and cancels outstanding refreshes on session replacement/shutdown.
+  Selection commits without waiting for pinned bodies or for admission of their
+  refresh: RoomActor schedules the selected room's refresh from the retained
+  navigation-enrichment demand (#1060), and the desktop adapter no longer
+  submits one. The actor owns the asynchronous refresh, discards results from
+  older sessions or superseded requests, and cancels outstanding refreshes on
+  session replacement/shutdown.
 - `PinEventRequested` and `UnpinEventRequested` are accepted only for a Ready
   session, a known room, a non-empty event id, and an `Idle` or recoverable
   `Failed` pin operation. Requests while another pin/unpin is pending are
@@ -2991,15 +3009,32 @@ stateDiagram-v2
   runtime unsubscribes the previous focused timeline before subscribing the new
   key. Reopening the same focused key is idempotent as far as runtime
   subscription ownership allows.
+- The retained navigation-projection ingress carries the desired main-pane
+  foreground (#1060): the latest committed room projection plus the one
+  `TimelineKind::Focused` key AppActor still wants (an in-flight focused
+  navigation, else the open focused context). TimelineManager retires every
+  other focused actor with the full unsubscribe bookkeeping (generation
+  invalidation/quiescence, local-read correlation, retained send-completion
+  cleanup, actor lease); room/thread actors and session residency are untouched.
+  AppActor admits a new desired focused key before that key's `Subscribe`
+  enters the mailbox, so coalesced Focused A → None → A or Focused A → Room B
+  can never let an old release retire the newer owner, and a focused-only update
+  carries the retained room projection forward without replaying it. Event
+  navigation supersession, failure, and room/Space/Home switches release focused
+  timelines this way and never wait for AccountActor admission. A timeline the
+  AccountActor subscribed itself (a fenced #1037 date-jump reply) and explicit
+  focused-context commands still use the mailbox `Unsubscribe`, which stays
+  ordered after that subscription.
 - Focused timeline release is core-owned for every reducer transition, not only
   the explicit `CloseFocusedContext` command (#1037, #1046). Whenever a reduce
   within the same account leaves `focused_context` without its previous
   `Opening`/`Open` key (accepted main send from anchored history, room switch,
-  subscription failure, replacement, live fallback), AppActor unsubscribes
-  that `TimelineKind::Focused` key, which drops its actor and room lease, and
+  subscription failure, replacement, live fallback), AppActor releases
+  that `TimelineKind::Focused` key through the desired foreground above, which
+  drops its actor and room lease, and
   drops a pending main-pane navigation for the same key; one without an
   event-navigation owner (date jump, `OpenAnchoredTimeline`) settles
-  `Superseded`, an owned one is settled by its owner. Unsubscribe is
+  `Superseded`, an owned one is settled by its owner. Release is
   idempotent, so paths that also unsubscribe explicitly stay correct. Account
   teardown (logout, account switch) is excluded because it drops the whole
   timeline manager. `ReturnMainTimelineToLive` leaves `focused_context`, and so

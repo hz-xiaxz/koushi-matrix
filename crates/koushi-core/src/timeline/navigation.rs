@@ -97,21 +97,35 @@ pub(crate) struct NavigationProjectionCleanup {
     pub(crate) cancel_link_previews: Option<TimelineKey>,
 }
 
+/// The desired main-pane foreground retained for TimelineManager (#1060).
+///
+/// `room` is the latest committed room projection; `focused` is the only
+/// `TimelineKind::Focused` timeline AppActor still wants. Every other focused
+/// actor is retired by the manager. AppActor admits both synchronously, in
+/// program order, and always before it sends the mailbox `Subscribe` for a new
+/// focused key, so a retained value can never retire a newer focused owner.
+/// Cached room actors and session residency are never retired from here.
+#[derive(Clone, Default)]
+pub(crate) struct NavigationProjectionDemand {
+    pub(crate) room: Option<NavigationProjectionIntent>,
+    pub(crate) focused: Option<TimelineKey>,
+}
+
 /// Stable latest-wins ingress shared across session-scoped timeline-manager
 /// replacement. A watch channel is a one-slot value plus a coalesced wake:
 /// replacing a value cannot fill or block the AppActor/AccountActor mailbox.
 #[derive(Clone)]
 pub(crate) struct NavigationProjectionIngress {
-    tx: watch::Sender<Option<NavigationProjectionIntent>>,
+    tx: watch::Sender<NavigationProjectionDemand>,
 }
 
 impl NavigationProjectionIngress {
-    pub(crate) fn channel() -> (Self, watch::Receiver<Option<NavigationProjectionIntent>>) {
-        let (tx, rx) = watch::channel(None);
+    pub(crate) fn channel() -> (Self, watch::Receiver<NavigationProjectionDemand>) {
+        let (tx, rx) = watch::channel(NavigationProjectionDemand::default());
         (Self { tx }, rx)
     }
 
-    pub(crate) fn subscribe(&self) -> watch::Receiver<Option<NavigationProjectionIntent>> {
+    pub(crate) fn subscribe(&self) -> watch::Receiver<NavigationProjectionDemand> {
         let receiver = self.tx.subscribe();
         // A replacement manager must observe the retained latest desired
         // projection even when it subscribed after that value was admitted.
@@ -119,23 +133,37 @@ impl NavigationProjectionIngress {
         receiver
     }
 
-    pub(crate) fn admit(&self, intent: NavigationProjectionIntent) -> bool {
-        let retained = self.tx.borrow().clone();
-        let next = match retained {
-            Some(current) if current.generation > intent.generation => return true,
-            Some(mut current)
-                if current.generation == intent.generation && current.key == intent.key =>
-            {
-                current.replay_existing |= intent.replay_existing;
-                current
-            }
-            _ => intent,
-        };
-        // `send_replace` retains the value even during the brief interval in
+    /// Admit a committed room projection together with the focused
+    /// foreground desired at that commit. A stale room part is ignored, but
+    /// the focused part is always the caller's current desired value.
+    pub(crate) fn admit(
+        &self,
+        intent: NavigationProjectionIntent,
+        focused: Option<TimelineKey>,
+    ) -> bool {
+        // `send_modify` retains the value even during the brief interval in
         // which a session-scoped manager is being replaced and no receiver
         // exists. A later `subscribe` explicitly wakes on that retained value.
-        self.tx.send_replace(Some(next));
+        self.tx.send_modify(|demand| {
+            demand.room = match demand.room.take() {
+                Some(current) if current.generation > intent.generation => Some(current),
+                Some(mut current)
+                    if current.generation == intent.generation && current.key == intent.key =>
+                {
+                    current.replay_existing |= intent.replay_existing;
+                    Some(current)
+                }
+                _ => Some(intent),
+            };
+            demand.focused = focused;
+        });
         true
+    }
+
+    /// Replace only the desired focused foreground, carrying the retained
+    /// room projection forward so an unpolled room subscription survives.
+    pub(crate) fn admit_focused(&self, focused: Option<TimelineKey>) {
+        self.tx.send_modify(|demand| demand.focused = focused);
     }
 }
 
@@ -744,8 +772,8 @@ pub(super) fn commit_prepared_initial_window_with_lease<F>(
 }
 
 pub(super) async fn receive_navigation_projection(
-    receiver: &mut Option<watch::Receiver<Option<NavigationProjectionIntent>>>,
-) -> Option<NavigationProjectionIntent> {
+    receiver: &mut Option<watch::Receiver<NavigationProjectionDemand>>,
+) -> Option<NavigationProjectionDemand> {
     let Some(active) = receiver.as_mut() else {
         return futures_util::future::pending().await;
     };
@@ -753,17 +781,41 @@ pub(super) async fn receive_navigation_projection(
         *receiver = None;
         return None;
     }
-    active.borrow_and_update().clone()
+    Some(active.borrow_and_update().clone())
 }
 
 impl TimelineManagerActor {
     pub(super) async fn handle_navigation_projection(
         &mut self,
-        intent: NavigationProjectionIntent,
+        demand: super::NavigationProjectionDemand,
     ) {
+        // Retire before (re)projecting the room so obsolete focused work can
+        // never anchor over the committed foreground.
+        self.retire_undesired_focused_timelines(demand.focused.as_ref())
+            .await;
+        let Some(intent) = demand.room else {
+            return;
+        };
         if intent.generation < self.last_navigation_projection_generation {
             return;
         }
+        // A focused-only update carries the retained room part forward; apply
+        // that room projection only when it is new or newly asks for replay.
+        let applied = (
+            intent.generation,
+            intent.key.clone(),
+            intent.replay_existing,
+        );
+        if self
+            .applied_room_projection
+            .as_ref()
+            .is_some_and(|previous| {
+                previous.0 == applied.0 && previous.1 == applied.1 && (previous.2 || !applied.2)
+            })
+        {
+            return;
+        }
+        self.applied_room_projection = Some(applied);
         if intent.generation > self.last_navigation_projection_generation {
             self.last_navigation_projection_generation = intent.generation;
         }

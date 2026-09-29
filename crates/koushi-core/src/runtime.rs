@@ -132,9 +132,10 @@ pub const EVENT_QUEUE_CAPACITY: usize = 16384;
 ///
 /// The action queue remains large because the RoomActor projects through a
 /// drop-on-full `try_send`: an overflow silently drops one-shot actions such as
-/// room selection (`SelectRoom`) and room-settings/member loads, which is the
-/// large-account "room selection did not complete" / blank-timeline bug. See
-/// the async channel-capacity rule in docs/policies/engineering-rules.md.
+/// room-settings/member loads, which is the large-account blank-timeline /
+/// unloaded-members bug class. Room and Space selection never use this queue:
+/// AppActor reduces them locally (#1060). See the async channel-capacity rule
+/// in docs/policies/engineering-rules.md.
 pub const ACTION_QUEUE_CAPACITY: usize = 16384;
 const INTERNAL_RUNTIME_CONNECTION_ID: RuntimeConnectionId = RuntimeConnectionId(0);
 macro_rules! trace_runtime_sync {
@@ -1778,7 +1779,7 @@ impl AppActor {
             }
         }
         for key in cancelled_date_navigation_keys {
-            self.release_focused_timeline(key).await;
+            self.release_account_subscribed_focused_timeline(key).await;
         }
         // Apply every captured persistence effect before loading the
         // final session's views. In particular, an old-account draft
@@ -4122,6 +4123,10 @@ impl AppActor {
                         });
                         continue;
                     };
+                    // #1060: publish the new desired focused owner before its
+                    // Subscribe enters the mailbox, so the retained demand can
+                    // never retire it.
+                    self.admit_focused_foreground();
                     self.send_timeline_command_or_fail(
                         request_id,
                         TimelineCommand::Subscribe {
@@ -4506,6 +4511,7 @@ impl AppActor {
                             replay_existing: true,
                             cleanup: navigation_cleanup.clone(),
                         },
+                        self.desired_focused_foreground(),
                     );
                 }
                 AppEffect::PersistRoomPreferences { preferences, .. } => {

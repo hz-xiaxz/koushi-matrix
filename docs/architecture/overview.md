@@ -1486,9 +1486,12 @@ fails on real accounts:
 
 Delivery discipline by payload type:
 
-- One-shot, non-re-projected actions — navigation (`SelectRoom`, `SelectSpace`,
-  `ReorderSpaces`) and command-result projections — MUST use reliable delivery
-  (`send().await`), never a drop-on-full `try_send`. A dropped one-shot action
+- One-shot, non-re-projected actions — navigation (`ReorderSpaces`) and
+  command-result projections — MUST use reliable delivery (`send().await`),
+  never a drop-on-full `try_send`. `SelectRoom` and `SelectSpace` no longer
+  cross this inbox: AppActor reduces them itself through the action-batch
+  commit pipeline, so a pending SDK operation or mailbox backpressure cannot
+  delay local navigation (#1060). A dropped one-shot action
   is lost forever; an overflow that silently drops `SelectRoom` is the
   large-account "room selection did not complete" / blank-timeline /
   unloaded-members regression class.

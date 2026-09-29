@@ -385,7 +385,7 @@ impl super::AppActor {
         // Release before the event-navigation owner cleanup so a matching
         // pending focused navigation is unsubscribed exactly once here.
         if let Some(key) = deferred.release_focused_timeline {
-            self.release_focused_timeline(key).await;
+            self.release_focused_timeline(key);
         }
         if deferred.cancel_event_navigation_owner {
             self.cancel_event_navigation_owner().await;

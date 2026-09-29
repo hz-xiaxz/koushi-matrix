@@ -1364,6 +1364,7 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
     let retained = retained_rx
         .borrow_and_update()
         .clone()
+        .room
         .expect("cleanup and replacement projection remain latest-wins");
     assert_eq!(
         retained.cleanup.cancel_pagination,
@@ -3083,7 +3084,7 @@ type EventNavigationFixture = (
     mpsc::Receiver<AccountMessage>,
     broadcast::Receiver<CoreEvent>,
     watch::Receiver<VersionedAppStateSnapshot>,
-    watch::Receiver<Option<crate::timeline::NavigationProjectionIntent>>,
+    watch::Receiver<crate::timeline::NavigationProjectionDemand>,
     mpsc::UnboundedSender<EventNavigationPrepared>,
     mpsc::UnboundedSender<FocusedProjectionCommitted>,
 );
@@ -3243,7 +3244,7 @@ async fn run_app_actor_cross_room_missing_navigation(
             room_id: room_b.to_owned(),
         }])
         .await
-        .expect("internal room projection action");
+        .expect("late actor echo of the local selection is fenced");
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let snapshot = snapshot_rx.borrow().state.clone();
@@ -3270,7 +3271,7 @@ async fn run_app_actor_cross_room_missing_navigation(
                 .changed()
                 .await
                 .expect("room projection channel");
-            if let Some(projection) = navigation_projection_rx.borrow_and_update().clone() {
+            if let Some(projection) = navigation_projection_rx.borrow_and_update().room.clone() {
                 break projection;
             }
         }
@@ -3483,7 +3484,7 @@ async fn event_navigation_preserves_opening_through_internal_room_selection() {
             room_id: room_b.to_owned(),
         }])
         .await
-        .expect("internal room projection action");
+        .expect("late actor echo of the local selection is fenced");
     let after_internal_select = tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let snapshot = snapshot_rx.borrow().state.clone();
@@ -3513,7 +3514,7 @@ async fn event_navigation_preserves_opening_through_internal_room_selection() {
             if navigation_projection_rx.changed().await.is_err() {
                 panic!("room projection channel should remain open");
             }
-            if let Some(projection) = navigation_projection_rx.borrow_and_update().clone() {
+            if let Some(projection) = navigation_projection_rx.borrow_and_update().room.clone() {
                 break projection;
             }
         }
@@ -3678,7 +3679,7 @@ async fn event_navigation_external_room_selection_fences_stale_work() {
             room_id: room_b.to_owned(),
         }])
         .await
-        .expect("external room projection action");
+        .expect("late actor echo of the external selection is fenced");
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if snapshot_rx
@@ -3851,7 +3852,7 @@ async fn run_event_navigation_latest_source_case(
             room_id: room_b.to_owned(),
         }])
         .await
-        .expect("second internal room projection action");
+        .expect("late actor echo of the second selection is fenced");
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let snapshot = snapshot_rx.borrow().state.clone();
@@ -4238,7 +4239,7 @@ async fn current_event_navigation_deadline_failure_clears_focused_owner_and_fenc
         mut account_rx,
         mut event_rx,
         mut snapshot_rx,
-        _navigation_projection_rx,
+        mut navigation_projection_rx,
         _event_navigation_prepared_tx,
         _focused_projection_tx,
     ) = app_actor_event_navigation_fixture(data_dir.path(), state);
@@ -4328,22 +4329,15 @@ async fn current_event_navigation_deadline_failure_clears_focused_owner_and_fenc
         Err(broadcast::error::TryRecvError::Empty)
     ));
 
-    match account_rx
-        .recv()
-        .await
-        .expect("focused unsubscribe command")
-    {
-        AccountMessage::TimelineCommand(
-            koushi_protocol::command::TimelineCommand::Unsubscribe {
-                request_id: unsubscribe_request_id,
-                key,
-            },
-        ) => {
-            assert_eq!(unsubscribe_request_id, request_id);
-            assert_eq!(key, focused_key);
-        }
-        _ => panic!("expected the focused timeline unsubscribe"),
-    }
+    // #1060: the focused owner is retired through the retained desired
+    // foreground, never through an AccountActor mailbox admission.
+    assert!(
+        navigation_projection_rx
+            .has_changed()
+            .expect("navigation projection channel"),
+        "the focused release must be admitted"
+    );
+    assert_eq!(navigation_projection_rx.borrow_and_update().focused, None);
     assert!(matches!(
         account_rx.try_recv(),
         Err(mpsc::error::TryRecvError::Empty)

@@ -2115,10 +2115,12 @@ function timelineSection(relativePath, startMarker, endMarker) {
 
 export function checkCoreTimelineUnsubscribeCleanupOrder() {
   const rule = "core.timeline.unsubscribe_cleanup_order";
+  // #1060: the command branch and focused retirement share one helper.
   const branch = timelineSection("manager.rs", "TimelineCommand::Unsubscribe { request_id, key } => {", "TimelineCommand::Paginate");
-  const clear = branch?.indexOf("self.clear_thread_root_projections_for_room(&key).await") ?? -1;
-  const remove = branch?.indexOf("self.timelines.remove(&key)") ?? -1;
-  return clear >= 0 && remove >= 0 && clear < remove
+  const body = timelineItemBody("manager.rs", "pub(super) async fn unsubscribe_timeline");
+  const clear = body?.indexOf("self.clear_thread_root_projections_for_room(key).await") ?? -1;
+  const remove = body?.indexOf("self.timelines.remove(key)") ?? -1;
+  return branch?.includes("self.unsubscribe_timeline(&key).await") && clear >= 0 && remove >= 0 && clear < remove
     ? []
     : [sourceContractFailure(rule, "Room unsubscribe does not clear projection state before dropping the actor")];
 }
