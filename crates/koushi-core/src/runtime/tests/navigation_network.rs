@@ -983,3 +983,32 @@ async fn navigation_network_deferred_crawler_notification_delivers_only_the_late
     );
     harness.actor_task.abort();
 }
+
+#[tokio::test]
+async fn navigation_network_deferred_crawler_notification_is_dropped_after_the_session_ends() {
+    let mut harness = BlockedMailbox::start(navigation_state()).await;
+    harness.live_unresolved_dms(&[UNRESOLVED_DM]).await;
+    executor::timeout(
+        DEADLINE,
+        harness.action_tx.send(vec![AppAction::LogoutFinished]),
+    )
+    .await
+    .expect("action ingress must not wait for the AccountActor")
+    .expect("action ingress remains open");
+    harness
+        .wait_for_snapshot(|state| !matches!(state.session, SessionState::Ready(_)))
+        .await;
+
+    // Free the mailbox: the signed-out session's rooms never reach a crawler.
+    assert!(matches!(
+        harness.account_rx.recv().await,
+        Some(AccountMessage::CancelActivityResolution)
+    ));
+    assert!(
+        next_crawler_rooms(&mut harness.account_rx, Duration::from_millis(200))
+            .await
+            .is_none(),
+        "a deferred crawler notification is fenced to its session"
+    );
+    harness.actor_task.abort();
+}

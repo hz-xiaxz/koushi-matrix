@@ -30,8 +30,10 @@ pub(super) struct DeferredActivityResolution {
     requests: Vec<ActivityResolutionRequest>,
 }
 
-/// The latest search-crawler room availability waiting for capacity.
+/// The latest search-crawler room availability waiting for capacity, fenced
+/// to the session whose room list produced it.
 pub(super) struct DeferredSearchCrawlerRooms {
+    session_key: Option<koushi_protocol::SessionKeyId>,
     room_ids: Vec<String>,
     latest_event_ids: std::collections::BTreeMap<String, String>,
     settings: koushi_state::SearchCrawlerSettings,
@@ -119,6 +121,7 @@ impl AppActor {
         {
             self.deferred_account_dispatch.search_crawler_rooms =
                 Some(DeferredSearchCrawlerRooms {
+                    session_key: super::navigation::navigation_session_key(&self.state),
                     room_ids,
                     latest_event_ids,
                     settings,
@@ -172,7 +175,10 @@ impl AppActor {
                 generation: deferred.generation,
                 requests: deferred.requests,
             });
-        } else if let Some(deferred) = self.deferred_account_dispatch.search_crawler_rooms.take() {
+        } else if let Some(deferred) = self.deferred_account_dispatch.search_crawler_rooms.take()
+            // Another session's rooms must not reach this session's crawler.
+            && deferred.session_key == super::navigation::navigation_session_key(&self.state)
+        {
             permit.send(AccountMessage::NotifySearchCrawlerRoomsAvailable {
                 room_ids: deferred.room_ids,
                 latest_event_ids: deferred.latest_event_ids,
