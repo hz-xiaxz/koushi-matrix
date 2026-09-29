@@ -13,7 +13,7 @@
 
 use matrix_sdk::{RoomMemberships, RoomState};
 use matrix_sdk_ui::spaces::{SpaceRoomList, room_list::SpaceRoomListPaginationState};
-use ruma::{RoomId, events::room::join_rules::JoinRule, room::JoinRuleSummary};
+use ruma::{RoomId, room::JoinRuleSummary};
 
 use crate::{
     client_session::MatrixClientSession,
@@ -77,7 +77,7 @@ pub async fn matrix_space_children_projection(
     for room in room_list.rooms().await {
         let room_id = room.room_id.to_string();
         let joined_members =
-            local_joined_member_count(session, &room_id, room.num_joined_members).await;
+            hierarchy_child_joined_member_count(session, &room_id, room.num_joined_members).await;
         entries.push(MatrixSpaceChildEntry {
             room_id,
             raw_name: room
@@ -127,7 +127,10 @@ pub async fn matrix_space_children_projection(
             let state = room.state();
             let joined_members =
                 local_joined_member_count(session, &room_id, room.joined_members_count()).await;
-            let can_join = local_room_can_join(&room);
+            // The same rule as a hierarchy-described child (#1053): where the
+            // description came from must not change what the user is offered.
+            let join_rule = room.join_rule().map(JoinRuleSummary::from);
+            let can_join = can_join(Some(state), join_rule.as_ref());
             entries.push(MatrixSpaceChildEntry {
                 room_id,
                 raw_name,
@@ -172,6 +175,27 @@ fn space_child_is_visible(entry: &MatrixSpaceChildEntry) -> bool {
         )
 }
 
+/// The joined-member count for a child `/hierarchy` described (#1062).
+///
+/// Sync keeps a room's member list current only while the account is in it.
+/// Once the account has left, the local list is frozen at the moment of
+/// leaving and can never reach zero on its own, so for any room the account is
+/// not joined to, the server's fresh count is the authority.
+async fn hierarchy_child_joined_member_count(
+    session: &MatrixClientSession,
+    room_id: &str,
+    hierarchy_count: u64,
+) -> u64 {
+    let joined_locally = RoomId::parse(room_id)
+        .ok()
+        .and_then(|parsed_room_id| session.client().get_room(&parsed_room_id))
+        .is_some_and(|room| room.state() == RoomState::Joined);
+    if !joined_locally {
+        return hierarchy_count;
+    }
+    local_joined_member_count(session, room_id, hierarchy_count).await
+}
+
 async fn local_joined_member_count(
     session: &MatrixClientSession,
     room_id: &str,
@@ -187,20 +211,6 @@ async fn local_joined_member_count(
         .await
         .map(|members| members.len() as u64)
         .unwrap_or(fallback)
-}
-
-fn local_room_can_join(room: &matrix_sdk::Room) -> bool {
-    match room.state() {
-        RoomState::Joined | RoomState::Banned => false,
-        // Accepting a pending invitation is a join.
-        RoomState::Invited => true,
-        _ => matches!(
-            room.join_rule(),
-            Some(JoinRule::Public)
-                | Some(JoinRule::Restricted(_))
-                | Some(JoinRule::KnockRestricted(_))
-        ),
-    }
 }
 
 fn membership_from_room_state(state: Option<RoomState>) -> MatrixSpaceChildMembership {
@@ -221,6 +231,10 @@ fn membership_from_room_state(state: Option<RoomState>) -> MatrixSpaceChildMembe
 /// Only rules that admit a plain join say yes. Knocking is a different request
 /// than joining, and an invite-only room cannot be joined by asking, so neither
 /// is presented as a join the user can make.
+///
+/// Both a hierarchy-described child and one known only from local state are
+/// judged here (#1053); a local `JoinRule` is converted to its summary form
+/// first, so the two sources cannot disagree about the same room.
 fn can_join(state: Option<RoomState>, join_rule: Option<&JoinRuleSummary>) -> bool {
     match state {
         Some(RoomState::Joined) | Some(RoomState::Banned) => false,
@@ -232,6 +246,9 @@ fn can_join(state: Option<RoomState>, join_rule: Option<&JoinRuleSummary>) -> bo
         ),
     }
 }
+
+#[cfg(test)]
+mod mock_tests;
 
 #[cfg(test)]
 mod tests {
@@ -252,6 +269,37 @@ mod tests {
             is_space: false,
             joined_members,
         }
+    }
+
+    #[test]
+    fn only_rules_that_admit_a_plain_join_offer_one() {
+        use ruma::{
+            events::room::join_rules::{AllowRule, JoinRule, Restricted},
+            owned_room_id,
+        };
+
+        let restricted = Restricted::new(vec![AllowRule::room_membership(owned_room_id!(
+            "!allowed:example.invalid"
+        ))]);
+        for (rule, expected) in [
+            (JoinRule::Public, true),
+            (JoinRule::Restricted(restricted.clone()), true),
+            (JoinRule::KnockRestricted(restricted), false),
+            (JoinRule::Knock, false),
+            (JoinRule::Invite, false),
+        ] {
+            let summary = JoinRuleSummary::from(rule);
+            assert_eq!(
+                can_join(Some(RoomState::Left), Some(&summary)),
+                expected,
+                "{summary:?}"
+            );
+            assert_eq!(can_join(None, Some(&summary)), expected, "{summary:?}");
+        }
+        assert!(can_join(
+            Some(RoomState::Invited),
+            Some(&JoinRuleSummary::Invite)
+        ));
     }
 
     #[test]
