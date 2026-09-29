@@ -155,6 +155,26 @@ observer needs a bounded debug/test `SyncOnce` on the observer account after
 `SetTyping` is acknowledged, to wake the same Rust-owned typing observer. Do not
 replace this with React polling or local UI timers.
 
+### Multi-stage QA participant ownership
+
+Multi-stage QA must thread participant ownership through typed helper inputs.
+A later stage borrows an already-live role without creating or cleaning up a
+duplicate; a focused stage may own one participant when none exists. It must
+not hard-code bootstrap for an initialized account, manufacture a duplicate
+device, stop another valid owner to avoid a protocol race, guess the gate
+from timing, or hide a setup mismatch with retries or a longer timeout.
+Ownership starts before fallible login submission and records enough phase
+to clean an unsubmitted runtime, a submitted provisional session, or a keyed
+logged-in session without guessing. Error paths attempt cleanup for every
+owned participant, preserve borrowed participants for their outer owner, and
+order logout confirmation before connection drop and runtime shutdown.
+Logout confirmation follows the authoritative-snapshot waiter rule
+(engineering rules "Async and Runtime" 1), including a final `SignedOut` read
+after timeout, lag, or closure under the original deadline. Failure-injection
+acceptance drives each ownership phase through the behavioral cleanup boundary
+and asserts logout/barrier/drop/shutdown order plus continuation to the
+remaining owners. Source-text inventory guards alone are not evidence.
+
 ## Linux virtual-display GUI lane
 
 Real Tauri WebView driven through WebDriver under Xvfb. Command shape:
@@ -327,9 +347,10 @@ Safety rules:
   `KOUSHI_SKIP_SAVED_SESSIONS=1` only prevents saved-session reads; a successful
   login can still prompt macOS Keychain during session persistence or encrypted
   SDK store key creation.
-- First-run GUI smoke should set `KOUSHI_SKIP_SAVED_SESSIONS=1`, or opening User
+- First-run GUI smoke sets `KOUSHI_SKIP_SAVED_SESSIONS=1`, or opening User
   Settings can read the macOS Keychain and show a confirmation prompt that
-  blocks unattended automation.
+  blocks unattended automation. Real-login smoke additionally sets
+  `KOUSHI_SKIP_KEYCHAIN_PERSISTENCE=1` and `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR`.
 - Do not pass the parent shell environment wholesale into GUI smoke child
   processes. Filter out secret-like variables such as API keys, tokens, and
   passwords before spawning `npm run tauri dev`.
@@ -338,7 +359,8 @@ Safety rules:
   sync/timeline QA can leave a live smoke device on the homeserver.
 - Avoid repeated destructive real-account login cycles while debugging GUI
   automation. Prefer preserving the same running Tauri session while iterating
-  on panel/menu checks.
+  on panel/menu checks; restart only when the script or Tauri capability
+  changes require it.
 - `--qa-profile=<name>` is the opt-in path for persistent restore/sync QA. It
   preserves the SDK SQLite store, cache, search index, saved session, and
   incremental sync state under ignored
@@ -372,8 +394,9 @@ Prompt order differs between the two entry points:
   `.github/workflows.disabled/macos-keychain-tier2.yml`, and GitHub also has the
   workflow disabled manually. Do not run `gh workflow run
   macos-keychain-tier2.yml` until that file is deliberately moved back under
-  `.github/workflows/` and re-enabled. Use a manual macOS session instead. Keep
-  any future workflow key-crate-only: it copies `crates/koushi-key` to
+  `.github/workflows/` and re-enabled. Use a manual macOS session instead. A
+  re-enabled lane must not use the debug/test file credential store, and its
+  output stays private-data-free. Keep any future workflow key-crate-only: it copies `crates/koushi-key` to
   `$RUNNER_TEMP` and runs `cargo test --manifest-path` there, so it must not
   require the private vendored Matrix SDK submodule. For a manual macOS session
   without an initialized vendor submodule, use the same temp-copy pattern before

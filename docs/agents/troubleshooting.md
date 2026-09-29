@@ -145,7 +145,7 @@ to work around that distinction.
   this repo, `process <variable>` hung when resolving the Tauri process. Use
   `first process whose name is <variable>` for variable process names.
 - If screenshot capture is blocked, also grant Screen Recording permission.
-- In Tauri dev mode the macOS process name can be `matrix-desktop-app`, while the
+- In Tauri dev mode the macOS process name is `koushi-desktop`, while the
   product/window title is `Koushi`. GUI automation must check both names.
 - Failed GUI smoke runs must clean up the full process group. A stale Vite
   process leaves port `5173` occupied and makes the next `tauri dev` fail. After

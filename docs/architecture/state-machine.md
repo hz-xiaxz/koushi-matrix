@@ -92,8 +92,7 @@ here as a Mermaid `stateDiagram-v2`. When the reducer changes (a new state,
 transition, or guard), the matching diagram and its guard notes are updated in
 the same change. A transition that exists in the reducer but not in the diagram,
 or vice versa, is a defect; phase-exit docs-sync checks for it (see
-[REPOSITORY_RULES.md](../../REPOSITORY_RULES.md) -> State-Machine Discipline and
-[engineering-rules.md](../policies/engineering-rules.md) -> Documentation).
+[REPOSITORY_RULES.md](../../REPOSITORY_RULES.md) -> State-Machine Discipline).
 
 Convention: each transition is labeled with the `AppAction` that causes it, and
 guards are stated as prose under the diagram. Unless noted, every transition

@@ -1207,6 +1207,15 @@ normal QA-title mode and cannot change product title semantics.
   `reschedule_scheduled_send`, and `cancel_scheduled_send` IPC calls, and verifies
   rows stay visible until a later Rust-shaped snapshot changes `scheduled_sends`:
   `cd apps/desktop && npx playwright test e2e/composer-send-queue-upload.spec.ts -g "scheduled send UI"`.
+- Settings schema versioning: `settings/settings.json` carries a top-level
+  `schema_version` (`koushi_core::settings::SETTINGS_SCHEMA_VERSION`). Because the
+  store writes the whole `SettingsValues`, a saved file records every default in
+  force when any setting was saved; a default change that saved files must not
+  inherit needs a schema bump plus a migration in `SettingsStore::load`, which
+  rewrites the file at the new version. Version 1 resets
+  `encrypted_url_previews_enabled` to false for unversioned files, since they may
+  carry the retired `true` default without an opt-in; opt-ins saved at version 1
+  or later are preserved.
 
 ## E2EE trust
 
@@ -1380,6 +1389,15 @@ normal QA-title mode and cannot change product title semantics.
   `apps/desktop/src/i18n/messages.ts`. SDK-provided SAS emoji descriptions are not
   catalog strings; render emoji symbols or add a Rust-owned localized DTO before
   showing descriptions.
+- Trust-recheck coalescing is lossless by contract: keep at most one query in
+  flight, remember one pending demand, replay it after query settlement, and if a
+  projection ack does not match the reducer's current state, discard that
+  obsolete transition and run the pending query. A matching Ready/Locked ack may
+  satisfy the redundant demand. Clear pending demand on provisional-session
+  teardown. An ack for the exact generation/transition that does not reach
+  Ready/Locked always makes that transition obsolete: clear it whether demand
+  arrived before or after the ack, then start any already-pending query. Focused
+  gates are in [troubleshooting](troubleshooting.md#local-homeserver-core-qa).
 
 ## Device-to-device verification and device cleanup
 
@@ -1529,3 +1547,6 @@ has caused a real visible bug.
   `EMOJI_PICKER_GRID_COLUMNS` feeds both `--emoji-picker-columns` and the
   ArrowUp/ArrowDown step, and `styles.contract.test.ts` pins the CSS fallback to
   that constant so the grid and the keyboard step cannot disagree.
+- Product surfaces that need deterministic headless tooltip coverage must not
+  rely on native `title=`; styled reusable tooltips must use `role="tooltip"` and
+  `aria-describedby`.
