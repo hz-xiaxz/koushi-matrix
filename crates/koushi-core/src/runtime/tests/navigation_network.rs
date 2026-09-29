@@ -166,7 +166,7 @@ impl BlockedMailbox {
     }
 
     async fn select_room(&self, request_id: RequestId, room_id: &str) {
-        let _ = self
+        let _admitted = self
             .submit(CoreCommand::Room(RoomCommand::SelectRoom {
                 request_id,
                 room_id: room_id.to_owned(),
@@ -371,7 +371,7 @@ async fn navigation_network_space_selection_commits_while_account_mailbox_is_ful
     );
 
     // Returning Home clears the Space-restored room without member hydration.
-    let _ = harness
+    let _admitted = harness
         .submit(CoreCommand::Room(RoomCommand::SelectSpace {
             request_id: request(2),
             space_id: None,
@@ -617,7 +617,7 @@ async fn navigation_network_selection_from_anchored_focused_context_commits() {
 #[tokio::test]
 async fn navigation_network_home_from_anchored_focused_context_commits() {
     let mut harness = start_focused(anchored_state(), |_| {}).await;
-    let _ = harness
+    let _admitted = harness
         .submit(CoreCommand::Room(RoomCommand::SelectSpace {
             request_id: request(10),
             space_id: None,
@@ -630,7 +630,7 @@ async fn navigation_network_home_from_anchored_focused_context_commits() {
 #[tokio::test]
 async fn navigation_network_empty_space_from_anchored_focused_context_commits() {
     let mut harness = start_focused(anchored_state(), |_| {}).await;
-    let _ = harness
+    let _admitted = harness
         .submit(CoreCommand::Room(RoomCommand::SelectSpace {
             request_id: request(10),
             space_id: Some(EMPTY_SPACE.to_owned()),
