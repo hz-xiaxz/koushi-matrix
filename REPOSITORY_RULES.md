@@ -194,7 +194,7 @@ to upstream or revert.
   delivered reliably or paired with a deterministic failure transition. Silent
   `try_send` drops are prohibited for send, reply, thread, room, search, cleanup,
   recovery, and login state machines; the permitted nonblocking cases are in
-  engineering rules "Async and Runtime" 6.
+  overview "Async Design Rules" (delivery discipline).
 
 ## Security Rules
 

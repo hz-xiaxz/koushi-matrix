@@ -295,15 +295,9 @@ below are the policy those rules do not state.
    fixture/demo effects that are documented as non-production.
 6. Core async channels are sized for large-account (100+ room) sync bursts via
    the named capacity constants in overview "Async Design Rules", never small
-   magic literals. Messages that settle pending state or are never superseded
-   (navigation, command-result projections) MUST use reliable `send().await` or
-   a reserved permit. Nonblocking `try_send` is allowed only when a failed send is
-   recovered deterministically: a later observation re-projects the same latest
-   value (room-list snapshots, progress, typing, refresh wakes), the owning actor
-   retains the newest pending payload and retries it, or `Full` falls back to a
-   reliable path (a deferred `reserve().await`, or overflow followed by
-   resubscribe). An ignored `Err` with none of these recoveries is prohibited.
-   Background workers that consume authoritative latest snapshots, such as the
+   magic literals. Delivery discipline, including when `try_send` is permitted,
+   is owned by overview "Async Design Rules" (delivery discipline by payload
+   type). Background workers that consume authoritative latest snapshots, such as the
    search history crawler's joined-room availability notification, must not
    block user-visible actor commands.
 7. User-intent commands resolve to a correlated, observable terminal outcome —

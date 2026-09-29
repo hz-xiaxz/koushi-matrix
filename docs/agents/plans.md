@@ -19,8 +19,6 @@ feasibility gate. Historical plans below are not the new implementation brief.
 
 ## Runtime and roadmap
 
-- Reinstall/update history preservation and local-first display (proposal):
-  [2026-09-19-reinstall-update-history-preservation-design.md](../superpowers/specs/2026-09-19-reinstall-update-history-preservation-design.md)
 - Rooms / DMs collapsible sidebar sections (design and implementation record):
   [2026-09-19-sidebar-sections-design.md](../superpowers/specs/2026-09-19-sidebar-sections-design.md)
   — its Low priority removal is superseded by #955 below.

@@ -130,10 +130,12 @@ pub const EVENT_QUEUE_CAPACITY: usize = 16384;
 /// - background work (search-crawler room availability, inactive enrichment,
 ///   non-visible media) is latest-wins / coalesced / drop-recoverable only.
 ///
-/// The action queue remains large because the RoomActor projects through a
-/// drop-on-full `try_send`: an overflow silently drops one-shot actions such as
-/// room-settings/member loads, which is the large-account blank-timeline /
-/// unloaded-members bug class. Room and Space selection never use this queue:
+/// The action queue remains large because actors project action bursts here
+/// during large-account sync. The RoomActor delivers through `send().await`,
+/// so a too-small queue backpressures it; a drop-on-full sender would lose
+/// one-shot actions such as room-settings/member loads, which is the
+/// large-account blank-timeline / unloaded-members bug class. Room and Space
+/// selection never use this queue:
 /// AppActor reduces them locally (#1060). See the async channel-capacity rule
 /// in docs/policies/engineering-rules.md.
 pub const ACTION_QUEUE_CAPACITY: usize = 16384;
@@ -572,7 +574,7 @@ impl CoreRuntime {
         let (command_tx, command_rx) = mpsc::channel(COMMAND_INBOX_CAPACITY);
         // NOTE: action_tx is the high-volume action-projection inbox; it must be
         // ACTION_QUEUE_CAPACITY (not COMMAND_INBOX_CAPACITY) so large-account
-        // sync bursts never overflow the RoomActor's drop-on-full try_send.
+        // sync bursts do not backpressure the projecting actors.
         let (event_tx, _) = broadcast::channel(event_capacity);
         let (action_tx, action_rx) = mpsc::channel(ACTION_QUEUE_CAPACITY);
         #[cfg(any(test, feature = "test-hooks"))]
