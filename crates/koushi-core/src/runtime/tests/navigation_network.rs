@@ -1198,7 +1198,7 @@ async fn navigation_network_crawler_pause_supersedes_a_deferred_notification() {
     // The stale active notification was superseded while held, and nothing
     // else of the lane is delivered.
     let paused = "notify:Paused:captions=true:filenames=true".to_owned();
-    assert_eq!(held, [paused.clone()]);
+    assert_eq!(held, std::slice::from_ref(&paused));
     assert_eq!(delivered, [paused]);
 }
 
