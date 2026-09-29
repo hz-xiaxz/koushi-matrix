@@ -148,9 +148,9 @@ to work around that distinction.
 - In Tauri dev mode the macOS process name is `koushi-desktop`, while the
   product/window title is `Koushi`. GUI automation must check both names.
 - Failed GUI smoke runs must clean up the full process group. A stale Vite
-  process leaves port `5173` occupied and makes the next `tauri dev` fail. After
-  a manual Ctrl-C, verify `lsof -nP -iTCP:5173 -sTCP:LISTEN` is empty before
-  retrying.
+  process leaves port `5173` occupied and makes the next `tauri dev` fail.
+  Before any GUI retry, including after a manual Ctrl-C, verify
+  `lsof -nP -iTCP:5173 -sTCP:LISTEN` is empty.
 - Do not use `Cmd+Q` to stop the Tauri app from GUI smoke. If focus slips, the
   shortcut reaches the app running the agent and raises its own quit confirmation
   dialog, which blocks unattended automation. Let the script's process-group
@@ -206,14 +206,8 @@ to work around that distinction.
   Headless login timeouts also include an allowlisted `trust_path` of stage
   tokens only; read it before rerunning. The full investigation is in
   [history.md](history.md#login-timeout-investigation-334-375).
-- Trust-recheck coalescing is lossless by contract: keep at most one query in
-  flight, remember one pending demand, replay it after query settlement, and if a
-  projection ack does not match the reducer's current state, discard that obsolete
-  transition and run the pending query. A matching Ready/Locked ack may satisfy
-  the redundant demand. Clear pending demand on provisional-session teardown. An
-  ack for the exact generation/transition that does not reach Ready/Locked always
-  makes that transition obsolete: clear it whether demand arrived before or after
-  the ack, then start any already-pending query. Focused gates:
+- Trust-recheck coalescing is lossless; the contract is in
+  [state ownership](state-ownership.md#e2ee-trust). Focused gates:
 
 ```bash
 cargo test -p koushi-core --lib explicit_trust_recheck

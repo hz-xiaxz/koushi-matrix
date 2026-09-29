@@ -115,7 +115,8 @@ to upstream or revert.
   it, and its projection claims authority only when entry count equals
   distinct-identity count (engineering rules "Crate Ownership And Projection
   Authority").
-- Before designing new user-visible Matrix functionality, inspect the equivalent
+- Before designing or implementing new user-visible Matrix functionality,
+  inspect the equivalent
   Element Web and Element X Android/iOS flow, record the observed upstream
   command/state shape and UX in the issue, plan, or PR notes, and call out any
   intentional divergence before code lands. If they differ, prefer the behavior
@@ -133,7 +134,8 @@ to upstream or revert.
   future native adapters may own transport, layout, focus, IME composition, and
   platform capabilities, but must not add a competing semantic state machine,
   retry/resource policy, or toolkit-dependent product contract. Touched legacy
-  owners move toward this boundary and are removed with their migration slice.
+  owners move toward this boundary and are removed with their migration slice;
+  this does not require shipping future renderers.
 - React may own ephemeral presentation state only: focus, popovers, unsent form
   text, viewport measurements, virtual-list cache, and scroll anchors. UI state
   that affects a Matrix command shape, selected target, pending operation,
@@ -151,7 +153,8 @@ to upstream or revert.
 - Browser and component tests use explicit Rust-shaped snapshots/events plus
   transport fixtures. A frontend fake must not implement reducer, actor,
   projection, search-matching, composer-resolution, ordering, retry, or terminal
-  semantics that could let the browser tier pass against a second state machine.
+  semantics that could let the browser tier pass against a second state machine;
+  tests for those contracts belong in Rust.
 - `apps/desktop/src-tauri` is a transport/platform adapter: it holds
   `CoreRuntime`, constructs `koushi-protocol` commands, forwards events and
   snapshots, and never calls Matrix SDK wrapper APIs directly. Platform URI
@@ -159,8 +162,9 @@ to upstream or revert.
   expose only opaque references and typed ports.
 - Every public `#[tauri::command]` in `apps/desktop/src-tauri/src/commands/` is
   registered in `tauri::generate_handler!` in `apps/desktop/src-tauri/src/lib.rs`;
-  an unregistered command compiles yet never reaches Rust. Keep
-  `every_tauri_command_is_registered_in_generate_handler` green.
+  an unregistered command compiles yet never reaches Rust. Keep the exhaustive
+  `every_tauri_command_is_registered_in_generate_handler` test in
+  `apps/desktop/src-tauri/src/commands/mod.rs` green.
 - Crate ownership follows engineering rules "Crate Ownership And Projection Authority": `koushi-sdk`,
   `koushi-store`, `koushi-search`, `koushi-media`, `koushi-qa`, and
   `koushi-core-testkit` own only their stated leaf concerns, and product policy
@@ -259,9 +263,9 @@ to upstream or revert.
   its crypto store and device keys; any missing, mismatched, or unknown state
   fails closed and never creates replacement crypto. Fresh-login stores are
   journaled before network authorization and cleaned up only explicitly and
-  exact-root. Details: overview "Security Model".
-- Key bytes and passphrases use zeroizing containers where practical and stay
-  out of long-lived UI state.
+  exact-root. Details: overview "Runtime Model".
+- Key bytes and passphrases should use zeroizing containers where practical and
+  should be kept out of long-lived UI state.
 - Standard outbound Megolm pre-share, identical to Element X / stock
   matrix-rust-sdk, is the sole production send path. Koushi adds no readiness
   fence, duplicate or post-send re-share, index-0 API, recipient ledger, repair
@@ -280,6 +284,8 @@ to upstream or revert.
   (engineering rules "Build, Dependencies, QA Gates" 4).
 - QA scripts assert scenario-specific success tokens, not only exit codes. If a
   document promises a token, the script enforces it or the document is wrong.
+- QA binaries attempt logout cleanup after any post-login failure unless
+  `--keep-session` was explicitly requested.
 - Real-account and real-homeserver QA uses cleanup guards for every resource it
   creates (sessions/devices, rooms, spaces, memberships, stores, search indexes,
   background processes). After the first post-login side effect, early returns
@@ -292,14 +298,16 @@ to upstream or revert.
 
 ## Tests And Fixtures
 
-- Tests, fixtures, screenshots, seed data, examples, and docs use synthetic
-  credentials, Matrix IDs (under `example.invalid`), and content such as
-  `Member 1`, `Synthetic Workspace`, or `fixture_budget.xlsx`, unless a test is
-  explicitly marked manual and documents its local setup. Never copy real room
-  messages, tokens, recovery keys, attachment filenames, or production search
-  indexes into the repository, and never transcribe user screenshots or real
-  chats. Real affiliations or institutions are prohibited even when the user
-  mentions them.
+- Tests use synthetic credentials, Matrix IDs, and event content unless a test
+  is explicitly marked manual and documents its local setup.
+- Tests, fixtures, screenshots, seed data, examples, and docs never use real
+  personal information; use neutral examples such as `Member 1`,
+  `Synthetic Workspace`, `fixture_budget.xlsx`, and Matrix IDs under
+  `example.invalid`. Never copy real room messages, tokens, recovery keys,
+  attachment filenames, or production search indexes into the repository, and
+  never transcribe user screenshots or real chats. Real affiliations or
+  institutions are prohibited in synthetic data even when the user mentions
+  them.
 - Manual live-login smoke collects real credentials interactively or through an
   approved secret-minimized QA pipe, never through argv, environment variables,
   fixtures, committed scripts, or captured output.

@@ -46,7 +46,8 @@ Rules:
    only) and CI must verify release builds ignore these paths.
 3. QA credentials enter processes via FIFO (`KOUSHI_QA_LOGIN_PIPE`)
    or the gated file credential store — never via argv, never typed by
-   coordinates, never echoed to a terminal, never in screenshots or logs.
+   coordinates, never echoed to a terminal, never in screenshots, logs, or
+   committed scripts.
 4. Do not pass the parent shell environment wholesale into QA child
    processes. Filter out secret-like variables (API keys, tokens,
    passwords) before spawning.
@@ -112,8 +113,8 @@ Rules:
    privacy-reviewed local store.
    Unsent composer drafts and scheduled-send bodies are account-scoped
    encrypted message content, not settings; their storage, revision, lease, and
-   quota contract is the composer-draft part of overview "Runtime Model" and
-   state machines. Bounded
+   quota contract is the composer-draft paragraphs of overview (under "Async
+   Design Rules") and state machines. Bounded
    draft persistence prioritizes targets with non-empty content before
    revision-only tombstones. Timer cancellation or a second racing empty save is
    not a correctness fence. Normal `Debug`, QA logs, issue evidence, and
@@ -158,7 +159,7 @@ Rules:
    exist there either. Read-only Megolm diagnostics may expose aliases, closed
    states, count/time buckets, and unchanged-index facts — not identifiers,
    keys, sync positions, request data, content, or raw errors.
-   Session admission (overview Security Model): authoritative `Unknown` trust
+   Session admission (overview "Runtime Model"): authoritative `Unknown` trust
    must not be labelled Unverified. Rejection and logout erase local keyed
    stores and attempt server logout before projecting `SignedOut`.
    The `device_cleanup` diagnostic source may record only request correlation,
@@ -292,13 +293,16 @@ below are the policy those rules do not state.
 6. Core async channels are sized for large-account (100+ room) sync bursts via
    the named capacity constants in overview "Async Design Rules", never small
    magic literals. Messages that settle pending state or are never superseded
-   (navigation, command-result projections) use reliable `send().await` or a
-   reserved permit. Nonblocking `try_send` is allowed only when a failed send is
+   (navigation, command-result projections) MUST use reliable `send().await` or
+   a reserved permit. Nonblocking `try_send` is allowed only when a failed send is
    recovered deterministically: a later observation re-projects the same latest
    value (room-list snapshots, progress, typing, refresh wakes), the owning actor
    retains the newest pending payload and retries it, or `Full` falls back to a
    reliable path (a deferred `reserve().await`, or overflow followed by
    resubscribe). An ignored `Err` with none of these recoveries is prohibited.
+   Background workers that consume authoritative latest snapshots, such as the
+   search history crawler's joined-room availability notification, must not
+   block user-visible actor commands.
 7. User-intent commands resolve to a correlated, observable terminal outcome —
    never a silent no-op. A foreground one-shot command
    (account restore/login/logout, `SelectRoom`/`SelectSpace`, send/edit/redact,
@@ -336,7 +340,10 @@ below are the policy those rules do not state.
    bug only by such a test, and a transient room-list projection that drops a
    known-joined room is caught here, not in CI.
 11. Verified-session sync ownership, verification transport, and key-query
-   claims are specified in overview Security Model and state machines. In
+   claims are specified in overview "Runtime Model" (sync ownership), overview
+   "Security Model" (verification transport and key-query claims), and state
+   machines. A QA device-readiness checkpoint must not expose its target in
+   diagnostics. In
    addition: the pending to-device verification owner must have tests for
    missing, expired, duplicate, and capacity cases; its owner lock must not be
    nested with the request cache or held across async/fallible work; do not
@@ -383,7 +390,8 @@ GUI automation is a thin smoke layer, never the primary correctness gate.
    owner does not state: room-list section tests must prove tag-driven movement
    from Rust-shaped `RoomSummary.tags` snapshots, and shell tests must prove
    section order, counts, unread badges, and mention dots from Rust-shaped
-   `SidebarModel` fields. `SettingsValues.display.hide_redacted` defaults to
+   `SidebarModel` fields. The formatted-message renderer keeps direct list
+   element children as `li`. `SettingsValues.display.hide_redacted` defaults to
    `true` and `SettingsValues.media.image_upload_compression` defaults to `ask`.
 4. Operational GUI-smoke safety (FIFO credential entry, `Cmd+Q`, AppleScript
    process names, Keychain-suppressing environment, `--allow-empty-timeline`)

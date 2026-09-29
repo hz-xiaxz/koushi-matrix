@@ -357,7 +357,7 @@ Safety rules:
 - The smoke CLI must attempt logout cleanup after any post-login QA failure
   unless `--keep-session` was explicitly requested. Otherwise a failed
   sync/timeline QA can leave a live smoke device on the homeserver.
-- Avoid repeated destructive real-account login cycles while debugging GUI
+- Avoid repeated destructive real-account login cycles while debugging
   automation. Prefer preserving the same running Tauri session while iterating
   on panel/menu checks; restart only when the script or Tauri capability
   changes require it.
@@ -394,7 +394,9 @@ Prompt order differs between the two entry points:
   `.github/workflows.disabled/macos-keychain-tier2.yml`, and GitHub also has the
   workflow disabled manually. Do not run `gh workflow run
   macos-keychain-tier2.yml` until that file is deliberately moved back under
-  `.github/workflows/` and re-enabled. Use a manual macOS session instead. A
+  `.github/workflows/` and re-enabled. Use a manual macOS session instead: Tier
+  2 evidence runs only through the env-gated temporary-keychain test on a real
+  macOS session. A
   re-enabled lane must not use the debug/test file credential store, and its
   output stays private-data-free. Keep any future workflow key-crate-only: it copies `crates/koushi-key` to
   `$RUNNER_TEMP` and runs `cargo test --manifest-path` there, so it must not

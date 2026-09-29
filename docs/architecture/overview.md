@@ -1498,9 +1498,12 @@ Delivery discipline by payload type:
   is lost forever; an overflow that silently drops `SelectRoom` is the
   large-account "room selection did not complete" / blank-timeline /
   unloaded-members regression class.
-- Drop-on-full `try_send` is permitted ONLY for high-frequency data that is
-  re-projected on the next sync (e.g. room-list snapshots), where a dropped
-  update self-heals. Such channels still must be sized for large-account bursts.
+- Nonblocking `try_send` is permitted ONLY when a failed send is recovered
+  deterministically: a later observation re-projects the same latest value
+  (e.g. room-list snapshots), the owning actor retains and retries the newest
+  pending payload, or `Full` falls back to a reliable path (engineering rules
+  "Async and Runtime" 6). Such channels still must be sized for large-account
+  bursts.
 
 If a bounded event or diff queue overflows, the runtime marks that consumer or
 timeline generation dirty, drops further incremental diffs for that generation,
