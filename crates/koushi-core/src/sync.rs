@@ -47,6 +47,12 @@ use koushi_protocol::ids::RequestId;
 const SYNC_ACTOR_SHUTDOWN_SEND_TIMEOUT: Duration = Duration::from_secs(1);
 const SYNC_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(10);
 const SYNC_SERVICE_STOP_TIMEOUT: Duration = Duration::from_secs(5);
+/// Bound on forwarding a still-pending ignored-user set at teardown. The drain
+/// is best-effort: it must stay well inside the sync actor's shutdown budget,
+/// and a new session re-reads the list during account hydration. A restart
+/// within one session resumes the shared sliding-sync position and does not
+/// re-deliver unchanged account data, so the drain is still attempted there.
+const IGNORED_USER_LIST_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 const ROOM_OBSERVATION_ACK_TIMEOUT: Duration = Duration::from_secs(10);
 
 macro_rules! trace_sync {
@@ -709,7 +715,7 @@ impl IgnoredUserListForwarder {
 
     async fn shutdown(mut self, client: &matrix_sdk::Client) {
         client.remove_event_handler(self.handler.clone());
-        if executor::timeout(SYNC_ACTOR_SHUTDOWN_JOIN_TIMEOUT, &mut self.task)
+        if executor::timeout(IGNORED_USER_LIST_DRAIN_TIMEOUT, &mut self.task)
             .await
             .is_err()
         {

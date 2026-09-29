@@ -8,7 +8,7 @@ use matrix_sdk_test::event_factory::EventFactory;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use super::IgnoredUserListForwarder;
+use super::{IGNORED_USER_LIST_DRAIN_TIMEOUT, IgnoredUserListForwarder};
 use crate::timeline::TimelineMessage;
 
 const DEADLINE: Duration = Duration::from_secs(10);
@@ -186,5 +186,46 @@ async fn rapid_ignored_user_list_changes_converge_to_latest_set() {
     assert!(
         timeline_rx.try_recv().is_err(),
         "no set after the latest one"
+    );
+}
+
+#[tokio::test]
+async fn shutdown_with_a_stuck_mailbox_settles_within_the_drain_bound() {
+    let deadline = Instant::now() + DEADLINE;
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let (forwarder, mut action_rx, _timeline_rx) = register_with_full_mailboxes(&client);
+
+    let ignored = vec![user_id!("@bob:example.org").to_owned()];
+    tokio::time::timeout_at(
+        deadline,
+        server.mock_sync().ok_and_run(&client, |builder| {
+            builder.add_global_account_data(EventFactory::new().ignored_user_list(ignored.clone()));
+        }),
+    )
+    .await
+    .expect("sync handler does not block on full mailboxes");
+
+    // Nothing drains the action mailbox, so the pending set can never be sent.
+    let started = Instant::now();
+    tokio::time::timeout_at(deadline, forwarder.shutdown(&client))
+        .await
+        .expect("forwarder settles");
+    assert!(
+        started.elapsed() < IGNORED_USER_LIST_DRAIN_TIMEOUT * 3,
+        "shutdown bounded by the drain timeout"
+    );
+
+    // The aborted task released its sender: only the filler remains.
+    assert_eq!(
+        recv_action_set(&mut action_rx, deadline).await,
+        filler_set()
+    );
+    assert!(
+        tokio::time::timeout_at(deadline, action_rx.recv())
+            .await
+            .expect("action channel settles")
+            .is_none(),
+        "forwarder task settled without a detached sender"
     );
 }
