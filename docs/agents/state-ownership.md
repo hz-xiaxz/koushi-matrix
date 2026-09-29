@@ -90,6 +90,13 @@ update procedures (this section owns those procedures):
   the update variable. The update run writes the artifact and returns before
   the equality assertion; it is not verification by itself.
 
+An `ActivityState` shape or Activity projection/resolution change also affects
+`apps/desktop/e2e/fixtures/activity-resolution-states.generated.json`, the
+Rust-produced Activity states the `activity-resolution-states.spec.ts` renderer
+regression publishes (#1061). Regenerate it with
+`UPDATE_ACTIVITY_RENDERER_GOLDEN=1 cargo test -p koushi-core --lib activity_renderer_states`,
+then follow the same inspect-and-rerun procedure.
+
 Likewise, rerun the frontend snapshot golden test without `UPDATE_GOLDEN` after
 regeneration. Neither update switch substitutes for checking the intended shape.
 

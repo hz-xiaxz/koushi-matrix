@@ -7,9 +7,9 @@
 //! an invitation.
 
 use koushi_state::{
-    AppAction, AppState, InvitePreview, RoomListSource, RoomSummary, RoomTags, SessionInfo,
-    SessionState, SpaceChildMembership, SpaceChildSummary, SpaceChildrenState, SpaceSummary,
-    compose_sidebar_for_state, reduce,
+    AppAction, AppState, InvitePreview, RoomListSource, RoomNamePlaceholder, RoomSummary, RoomTags,
+    SessionInfo, SessionState, SpaceChildMembership, SpaceChildSummary, SpaceChildrenState,
+    SpaceSummary, compose_sidebar_for_state, reduce,
 };
 
 const SPACE_ID: &str = "!space:example.invalid";
@@ -44,6 +44,7 @@ fn child(room_id: &str, label: &str, membership: SpaceChildMembership) -> SpaceC
     SpaceChildSummary {
         room_id: room_id.to_owned(),
         display_name: label.to_owned(),
+        display_name_placeholder: None,
         avatar: None,
         membership,
         can_join: matches!(
@@ -530,4 +531,49 @@ fn leaving_a_room_outside_the_selected_space_requests_no_refresh() {
 
     assert!(refresh_requests(&effects).is_empty());
     assert_eq!(state.space_children.generation, 1);
+}
+
+/// #1070: the Not-joined lane carries a child's structured empty-room name,
+/// so the GUI renders catalog text instead of the SDK's English "Empty Room".
+#[test]
+fn not_joined_lane_keeps_the_empty_room_placeholder() {
+    let state = state_with_children(vec![
+        SpaceChildSummary {
+            display_name_placeholder: Some(RoomNamePlaceholder::Empty),
+            ..child(
+                "!unnamed:example.invalid",
+                "Empty Room",
+                SpaceChildMembership::NotJoined,
+            )
+        },
+        child(
+            "!literal:example.invalid",
+            "Empty Room",
+            SpaceChildMembership::NotJoined,
+        ),
+    ]);
+
+    let sidebar = compose_sidebar_for_state(&state);
+
+    let placeholders: Vec<(&str, Option<&RoomNamePlaceholder>)> = sidebar
+        .sections
+        .not_joined
+        .iter()
+        .map(|item| {
+            (
+                item.room_id.as_str(),
+                item.display_name_placeholder.as_ref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        placeholders,
+        [
+            ("!literal:example.invalid", None),
+            (
+                "!unnamed:example.invalid",
+                Some(&RoomNamePlaceholder::Empty)
+            ),
+        ]
+    );
 }

@@ -694,6 +694,27 @@ impl AccountActorHandle {
         self.tx.send(msg).await.is_ok()
     }
 
+    /// Enqueue without waiting for mailbox capacity. AppActor uses this for
+    /// dispatches that must never hold its loop (#1060).
+    pub(crate) fn try_send(
+        &self,
+        msg: AccountMessage,
+    ) -> Result<(), Box<mpsc::error::TrySendError<AccountMessage>>> {
+        self.tx.try_send(msg).map_err(Box::new)
+    }
+
+    /// Wait for one mailbox slot. Cancel-safe and independent of this handle,
+    /// so AppActor can select on it alongside its other ingress while a
+    /// dispatch is deferred.
+    pub(crate) fn reserve_owned(
+        &self,
+    ) -> impl std::future::Future<
+        Output = Result<mpsc::OwnedPermit<AccountMessage>, mpsc::error::SendError<()>>,
+    > + Send
+    + 'static {
+        self.tx.clone().reserve_owned()
+    }
+
     pub(crate) fn unregister_native_artifact(
         &self,
         request_id: RequestId,

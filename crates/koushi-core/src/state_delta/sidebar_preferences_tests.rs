@@ -220,6 +220,7 @@ fn loading_space_children_publishes_the_not_joined_sidebar_lane() {
     next.space_children.children = vec![SpaceChildSummary {
         room_id: "!private:example.invalid".to_owned(),
         display_name: "Private Room".to_owned(),
+        display_name_placeholder: None,
         avatar: None,
         membership: SpaceChildMembership::NotJoined,
         can_join: false,

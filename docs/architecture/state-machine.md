@@ -4360,7 +4360,11 @@ stateDiagram-v2
   when open Activity has a placeholder whose room/activity timestamp no
   generation attempted yet and no generation is `Resolving`; live updates never
   preempt an in-flight generation, and a no-progress settlement stays `Failed`
-  (retryable) until newer activity or an explicit retry. Row refreshes,
+  (retryable) until newer activity or an explicit retry. Starting a generation
+  never waits for AccountActor mailbox capacity (#1060): a full mailbox defers
+  its request while the stream stays `Resolving`, and AppActor delivers it once
+  a slot frees; a closed mailbox settles it `Failed` (retryable). A deferred
+  request is dropped once a newer generation starts or Activity closes. Row refreshes,
   including `PaginateActivity`, preserve the current resolution state.
   Generation guards reject late completion after retry, close, logout, lock, or
   account replacement. Failure exposes only a coarse `OperationFailureKind` and

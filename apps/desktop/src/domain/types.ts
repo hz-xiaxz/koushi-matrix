@@ -1130,6 +1130,8 @@ export type SpaceChildMembership =
 export interface SpaceChildSummary {
   room_id: string;
   display_name: string;
+  /** Set when `display_name` is the SDK's English calculated empty-room name (#1070). */
+  display_name_placeholder?: RoomNamePlaceholder | null;
   avatar: AvatarImage | null;
   membership: SpaceChildMembership;
   /** Whether the join rule the server reported permits an attempt to join. */

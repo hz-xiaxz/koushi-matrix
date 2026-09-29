@@ -12,13 +12,13 @@
 //! name and membership. Only completely unknown rooms remain opaque.
 
 use matrix_sdk::{RoomMemberships, RoomState};
-use matrix_sdk_ui::spaces::{SpaceRoomList, room_list::SpaceRoomListPaginationState};
+use matrix_sdk_ui::spaces::{SpaceRoom, SpaceRoomList, room_list::SpaceRoomListPaginationState};
 use ruma::{RoomId, room::JoinRuleSummary};
 
 use crate::{
     client_session::MatrixClientSession,
     room_operations::MatrixRoomOperationError,
-    room_projection::{matrix_room, matrix_space_child_room_ids},
+    room_projection::{matrix_room, matrix_room_name_placeholder, matrix_space_child_room_ids},
 };
 
 /// The account's relationship to a Space child room.
@@ -41,6 +41,9 @@ pub struct MatrixSpaceChildEntry {
     pub raw_name: Option<String>,
     /// The name the server computed, or the room ID when it described nothing.
     pub display_name: String,
+    /// Set when `display_name` is the SDK's English calculated empty-room
+    /// name (#1070), whose product text the GUI catalog owns.
+    pub display_name_placeholder: Option<koushi_state::RoomNamePlaceholder>,
     pub avatar_mxc_uri: Option<String>,
     pub membership: MatrixSpaceChildMembership,
     pub can_join: bool,
@@ -91,6 +94,7 @@ pub async fn matrix_space_children_projection(
             } else {
                 room.display_name.trim().to_owned()
             },
+            display_name_placeholder: hierarchy_name_placeholder(&room),
             avatar_mxc_uri: room.avatar_url.as_ref().map(ToString::to_string),
             membership: membership_from_room_state(room.state),
             can_join: can_join(room.state, room.join_rule.as_ref()),
@@ -118,10 +122,14 @@ pub async fn matrix_space_children_projection(
                 .name()
                 .map(|name| name.trim().to_owned())
                 .filter(|name| !name.is_empty());
-            let display_name = room
+            let cached_display_name = room
                 .cached_display_name()
+                .filter(|name| !name.to_string().trim().is_empty());
+            let display_name_placeholder = cached_display_name
+                .as_ref()
+                .and_then(matrix_room_name_placeholder);
+            let display_name = cached_display_name
                 .map(|name| name.to_string())
-                .filter(|name| !name.trim().is_empty())
                 .or_else(|| raw_name.clone())
                 .unwrap_or_else(|| room_id.clone());
             let state = room.state();
@@ -135,6 +143,7 @@ pub async fn matrix_space_children_projection(
                 room_id,
                 raw_name,
                 display_name,
+                display_name_placeholder,
                 avatar_mxc_uri: room.avatar_url().map(|url| url.to_string()),
                 membership: membership_from_room_state(Some(state)),
                 can_join,
@@ -148,6 +157,7 @@ pub async fn matrix_space_children_projection(
             room_id: room_id.clone(),
             raw_name: None,
             display_name: room_id,
+            display_name_placeholder: None,
             avatar_mxc_uri: None,
             membership: MatrixSpaceChildMembership::Unknown,
             can_join: false,
@@ -163,6 +173,31 @@ pub async fn matrix_space_children_projection(
     // actionable even when the room has no joined members.
     entries.retain(space_child_is_visible);
     Ok(entries)
+}
+
+/// The structured form of a hierarchy child's calculated empty-room name
+/// (#1070). `SpaceRoom` keeps only the SDK's English `Display` text, so the
+/// variant is re-derived from the same name, alias, and heroes and accepted
+/// only when its text is exactly what the SDK produced. An empty-room name
+/// requires at most one effective member, and the SDK's service-member
+/// adjustment can only lower the count, so one member is the count that
+/// reproduces it; a literal room name "Empty Room" is `Named` and never
+/// matches.
+fn hierarchy_name_placeholder(room: &SpaceRoom) -> Option<koushi_state::RoomNamePlaceholder> {
+    let calculated = matrix_sdk::BaseRoom::compute_display_name_with_fields(
+        room.name.clone(),
+        room.canonical_alias.as_deref(),
+        room.heroes
+            .iter()
+            .flatten()
+            .map(matrix_sdk::RoomHero::from)
+            .collect(),
+        1,
+    );
+    if calculated.to_string().trim() != room.display_name.trim() {
+        return None;
+    }
+    matrix_room_name_placeholder(&calculated)
 }
 
 fn space_child_is_visible(entry: &MatrixSpaceChildEntry) -> bool {
@@ -263,6 +298,7 @@ mod tests {
             room_id: "!room:example.invalid".to_owned(),
             raw_name: Some("Room".to_owned()),
             display_name: "Room".to_owned(),
+            display_name_placeholder: None,
             avatar_mxc_uri: None,
             membership,
             can_join,
