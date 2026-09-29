@@ -214,10 +214,12 @@ carry tokens and counts only. The full prohibited list is in
 - Core must not depend on that SDK local-echo diff for first visibility. The
   session-scoped send coordinator owns one bounded pending display projection
   from accepted client transaction through SDK/event identity convergence. The
-  current `TimelineActor` combines that projection with canonical SDK slots and
-  acknowledges publication before the matching composer acceptance may clear
-  the draft. Actor replacement receives the same bounded snapshot; React only
-  applies the resulting ordinary Rust-authored timeline diffs.
+  current `TimelineActor` combines that projection with canonical SDK slots.
+  Admission does not wait for the actor's publication acknowledgement (#1064):
+  a busy or replaced actor reconciles from the coordinator when it catches up,
+  so actor latency cannot reject or delay SDK enqueue. Actor replacement
+  receives the same bounded snapshot; React only applies the resulting
+  ordinary Rust-authored timeline diffs.
 - Retry/cancel is driven by SDK `SendHandle`, not by a direct
   `RoomSendQueue::retry(transaction_id)` API. `TimelineActor` keeps its
   transaction-id keyed handle registry from `RoomSendQueue::subscribe()` local

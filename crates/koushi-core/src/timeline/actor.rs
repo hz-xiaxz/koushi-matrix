@@ -697,10 +697,6 @@ impl TimelineActorHandle {
         self.tx.send(msg).await.is_ok()
     }
 
-    pub(super) fn try_send(&self, msg: TimelineActorMessage) -> bool {
-        self.tx.try_send(msg).is_ok()
-    }
-
     pub(super) async fn send_control(&self, control: TimelineActorControl) -> bool {
         match &self.control_tx {
             Some(tx) => tx.send(control).await.is_ok(),
