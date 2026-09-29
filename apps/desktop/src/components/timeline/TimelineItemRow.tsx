@@ -24,6 +24,7 @@ import {
 } from "react";
 
 import {
+  avatarInitial,
   ignoreComposerKeyAction,
   peopleFacingLabel,
   type MentionCandidate
@@ -902,7 +903,7 @@ export function TimelineItemRow({
       avatar={senderAvatar}
       className="avatar-content"
       colorSeed={item.sender}
-      fallback={senderInitials(senderDisplayLabel || item.sender)}
+      fallback={avatarInitial(senderDisplayLabel || item.sender)}
       onRequestAvatarThumbnail={onRequestAvatarThumbnail}
     />
   );
@@ -1563,17 +1564,6 @@ function localizedTimelineItemBody(item: TimelineItem): string {
     default:
       return item.body ?? "";
   }
-}
-
-function senderInitials(sender: string | null): string {
-  if (!sender) {
-    return "?";
-  }
-  const ascii = sender.match(/[A-Za-z]/g);
-  if (ascii?.length) {
-    return ascii.slice(0, 2).join("").toUpperCase();
-  }
-  return sender.slice(0, 2);
 }
 
 function formatThreadSummary(

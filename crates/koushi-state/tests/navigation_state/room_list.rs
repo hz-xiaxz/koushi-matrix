@@ -89,6 +89,8 @@ fn room_list_readiness_round_trips_every_engine_neutral_wire_state() {
 #[test]
 fn room_summary_serializes_projected_label_and_dm_identity_contract() {
     let room = RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: "dm-a".to_owned(),
         display_name: "Alice Upstream".to_owned(),
         display_label: "Alice Upstream".to_owned(),
@@ -156,6 +158,8 @@ fn room_list_update_projects_dm_room_display_labels_from_aliases() {
         AppAction::RoomListUpdated {
             spaces: Vec::new(),
             rooms: vec![RoomSummary {
+                display_name_placeholder: None,
+                display_label_placeholder: None,
                 room_id: "dm-a".to_owned(),
                 display_name: "Alice Upstream".to_owned(),
                 display_label: "Alice Upstream".to_owned(),
@@ -210,6 +214,8 @@ fn room_list_update_projects_dm_room_avatar_from_counterpart_profile() {
         AppAction::RoomListUpdated {
             spaces: Vec::new(),
             rooms: vec![RoomSummary {
+                display_name_placeholder: None,
+                display_label_placeholder: None,
                 room_id: "dm-a".to_owned(),
                 display_name: "Alice Upstream".to_owned(),
                 display_label: "Alice Upstream".to_owned(),
@@ -256,6 +262,8 @@ fn avatar_thumbnail_update_refreshes_people_filter_room_avatar_surface() {
     let mxc_uri = "mxc://example.invalid/dm-avatar";
     let thumbnail = ready_avatar_thumbnail("people-filter");
     state.rooms = vec![RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: "dm-a".to_owned(),
         display_name: "Alice".to_owned(),
         display_label: "Alice".to_owned(),
@@ -320,6 +328,8 @@ fn avatar_thumbnail_update_refreshes_people_filter_room_avatar_surface() {
 fn local_alias_update_refreshes_open_dm_room_labels_and_notification_candidate() {
     let mut state = ready_state();
     state.rooms = vec![RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: "dm-a".to_owned(),
         display_name: "Alice Upstream".to_owned(),
         display_label: "Alice Upstream".to_owned(),
@@ -620,6 +630,8 @@ fn room_list_update_clears_missing_active_space_and_room() {
         AppAction::RoomListUpdated {
             spaces: Vec::new(),
             rooms: vec![RoomSummary {
+                display_name_placeholder: None,
+                display_label_placeholder: None,
                 room_id: "global-room".to_owned(),
                 display_name: "Global Room".to_owned(),
                 display_label: "Global Room".to_owned(),
@@ -679,6 +691,8 @@ fn room_list_update_moves_active_room_when_it_leaves_selected_space() {
         }],
         rooms: vec![
             RoomSummary {
+                display_name_placeholder: None,
+                display_label_placeholder: None,
                 room_id: "room-a".to_owned(),
                 display_name: "Room A".to_owned(),
                 display_label: "Room A".to_owned(),
@@ -700,6 +714,8 @@ fn room_list_update_moves_active_room_when_it_leaves_selected_space() {
                 joined_members: 0,
             },
             RoomSummary {
+                display_name_placeholder: None,
+                display_label_placeholder: None,
                 room_id: "room-b".to_owned(),
                 display_name: "Room B".to_owned(),
                 display_label: "Room B".to_owned(),
@@ -763,6 +779,8 @@ fn room_list_update_moves_active_room_when_it_leaves_selected_space() {
             }],
             rooms: vec![
                 RoomSummary {
+                    display_name_placeholder: None,
+                    display_label_placeholder: None,
                     room_id: "room-a".to_owned(),
                     display_name: "Room A".to_owned(),
                     display_label: "Room A".to_owned(),
@@ -784,6 +802,8 @@ fn room_list_update_moves_active_room_when_it_leaves_selected_space() {
                     joined_members: 0,
                 },
                 RoomSummary {
+                    display_name_placeholder: None,
+                    display_label_placeholder: None,
                     room_id: "room-b".to_owned(),
                     display_name: "Room B".to_owned(),
                     display_label: "Room B".to_owned(),
@@ -848,6 +868,8 @@ fn room_list_update_moves_active_room_when_it_disappears_from_selected_space() {
             child_room_ids: vec!["room-a".to_owned()],
         }],
         rooms: vec![RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "room-a".to_owned(),
             display_name: "Room A".to_owned(),
             display_label: "Room A".to_owned(),
@@ -901,6 +923,8 @@ fn room_list_update_moves_active_room_when_it_disappears_from_selected_space() {
                 child_room_ids: vec!["room-b".to_owned()],
             }],
             rooms: vec![RoomSummary {
+                display_name_placeholder: None,
+                display_label_placeholder: None,
                 room_id: "room-b".to_owned(),
                 display_name: "Room B".to_owned(),
                 display_label: "Room B".to_owned(),

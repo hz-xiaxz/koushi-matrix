@@ -44,6 +44,8 @@ fn result(event_id: &str) -> SearchResult {
 
 fn room_summary(room_id: &str) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: room_id.to_owned(),
         display_label: room_id.to_owned(),

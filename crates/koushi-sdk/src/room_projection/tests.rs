@@ -740,3 +740,29 @@ fn room_list_room_from_counts_preserves_unread_when_read_marker_differs_from_lat
     assert_eq!(room.notification_count, 2);
     assert_eq!(room.highlight_count, 1);
 }
+
+#[test]
+fn room_name_placeholder_maps_only_the_sdk_empty_room_names() {
+    use koushi_state::RoomNamePlaceholder;
+    use matrix_sdk::RoomDisplayName;
+
+    // #1050: the SDK renders these as English "Empty Room" text.
+    assert_eq!(
+        super::matrix_room_name_placeholder(&RoomDisplayName::Empty),
+        Some(RoomNamePlaceholder::Empty)
+    );
+    assert_eq!(
+        super::matrix_room_name_placeholder(&RoomDisplayName::EmptyWas("Bob".to_owned())),
+        Some(RoomNamePlaceholder::EmptyWas {
+            previous_names: "Bob".to_owned()
+        })
+    );
+    // A room explicitly named "Empty Room" is caller data, not a placeholder.
+    for name in [
+        RoomDisplayName::Named("Empty Room".to_owned()),
+        RoomDisplayName::Aliased("#empty:example.invalid".to_owned()),
+        RoomDisplayName::Calculated("Alice and Bob".to_owned()),
+    ] {
+        assert_eq!(super::matrix_room_name_placeholder(&name), None);
+    }
+}

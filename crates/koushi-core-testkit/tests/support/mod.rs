@@ -84,6 +84,8 @@ pub fn future_epoch_ms(offset: Duration) -> u64 {
 
 pub fn room_summary(room_id: &str) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: "QA Room".to_owned(),
         display_label: "QA Room".to_owned(),

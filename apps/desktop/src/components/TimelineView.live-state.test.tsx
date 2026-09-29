@@ -324,8 +324,12 @@ describe("TimelineView", () => {
     await waitFor(() => {
       const receipts = document.querySelector(".message-receipts");
       expect(receipts).not.toBeNull();
-      expect(receipts?.textContent).toContain("KE");
-      expect(receipts?.textContent).toContain("SA");
+      // #1055: the shared single-grapheme placeholder rule.
+      expect(
+        Array.from(receipts?.querySelectorAll(".receipt-avatars .avatar-fallback") ?? []).map(
+          (avatar) => avatar.textContent
+        )
+      ).toEqual(["K", "S"]);
       expect(receipts?.textContent).not.toContain("Read by 2");
       expect(receipts?.getAttribute("aria-label")).toContain("Read by 2");
       expect(receipts?.getAttribute("title")).toBe("Ken Inayoshi\nSatoshi Terasaki");

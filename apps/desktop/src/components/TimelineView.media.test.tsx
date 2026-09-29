@@ -1203,7 +1203,7 @@ describe("TimelineView", () => {
     fireEvent.error(image);
 
     expect(document.querySelector(".message .avatar img")).toBeNull();
-    expect(document.querySelector(".message .avatar")?.textContent).toBe("KE");
+    expect(document.querySelector(".message .avatar")?.textContent).toBe("K");
   });
 
   it("retries a transiently broken sender avatar image URL", async () => {

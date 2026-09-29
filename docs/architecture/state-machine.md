@@ -135,6 +135,16 @@ stateDiagram-v2
     LoggingOut --> SignedOut: LogoutFinished
 ```
 
+Every reset to `SignedOut` that rebuilds `AppState` (`LogoutFinished`,
+`ProvisionalSessionDiscarded`, and the local-reset `DeviceCleanupCompleted`) keeps the
+process-local account epoch, the retired session-status schedule, and the
+app-level `AppState.settings` (#1057). Settings come from the app-level
+`settings/settings.json`, are loaded once at runtime start, and are persisted
+as a whole struct, so the signed-out screen keeps the saved locale and the next
+settings save cannot overwrite saved preferences with defaults. Account-scoped
+state, including room link-preview overrides and room notification settings,
+still resets.
+
 `session_lock_reason` is an optional, separate Rust-owned authentication-lock
 projection. Current-device trust loss never enters `Locked`: authoritative
 `Unverified` re-enters the actionable verification gate, while `Unknown`

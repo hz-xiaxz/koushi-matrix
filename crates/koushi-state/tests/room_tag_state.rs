@@ -22,6 +22,8 @@ fn ready_state() -> AppState {
 
 fn room(room_id: &str, tags: RoomTags) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: "Room".to_owned(),
         display_label: "Room".to_owned(),

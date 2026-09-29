@@ -969,7 +969,7 @@ test("ready receipt thumbnails replace initials in place without changing marker
 
   const avatar = page.locator('[data-event-id="$seed-event:example.invalid"]')
     .locator(".receipt-reader-avatar");
-  await expect(avatar).toHaveText("AL");
+  await expect(avatar).toHaveText("A");
   await expect(avatar.locator("img")).toHaveCount(0);
   await avatar.evaluate((element) => {
     element.setAttribute("data-receipt-node-identity", "preserved");
@@ -993,7 +993,7 @@ test("ready receipt thumbnails replace initials in place without changing marker
   });
 
   await expect(avatar.locator("img")).toHaveCount(1);
-  await expect(avatar).not.toHaveText("AL");
+  await expect(avatar).not.toHaveText("A");
   await expect(avatar).toHaveAttribute("data-receipt-node-identity", "preserved");
   expect(await avatar.evaluate((element) => {
     const marker = getComputedStyle(element);
@@ -1017,7 +1017,7 @@ test("ready receipt thumbnails replace initials in place without changing marker
     window.__harness.pushStateUpdate();
   });
   await expect(avatar.locator("img")).toHaveCount(0);
-  await expect(avatar).toHaveText("AL");
+  await expect(avatar).toHaveText("A");
   await expect(avatar).toHaveAttribute("data-receipt-node-identity", "preserved");
 });
 
@@ -1092,7 +1092,7 @@ test("read receipt avatars render from Rust projection with overflow and tooltip
   await expect(receipts).toHaveAttribute("aria-label", /Alice/);
   await expect(receipts.locator(".receipt-reader-avatar")).toHaveCount(3);
   await expect(receipts.locator(".receipt-reader-avatar img")).toHaveCount(1);
-  await expect(receipts.locator(".receipt-reader-avatar").nth(1)).toHaveText("DA");
+  await expect(receipts.locator(".receipt-reader-avatar").nth(1)).toHaveText("D");
   await expect(receipts.locator(".receipt-overflow")).toHaveText("+1");
 
   // #314: the reader popup lives in the body-level floating layer so a clipped

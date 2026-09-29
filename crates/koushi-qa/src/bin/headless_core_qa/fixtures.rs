@@ -406,6 +406,8 @@ pub(super) fn native_attention_room(
     highlight_count: u64,
 ) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: display_name.to_owned(),
         display_label: display_name.to_owned(),

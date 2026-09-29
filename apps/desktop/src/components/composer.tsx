@@ -52,7 +52,7 @@ import {
   activeMentionQuery,
   mentionTargetKey,
   peopleFacingLabel,
-  initials,
+  avatarInitial,
   defaultScheduleDateTimeValue,
   scheduledSendTimestampFromInput,
   type MentionCandidate,
@@ -1033,7 +1033,7 @@ function MentionOption({
           candidate.target.kind === "roomMention" ? "is-room-mention" : "is-user"
         }`}
         colorSeed={mentionTargetKey(candidate.target)}
-        fallback={candidate.target.kind === "roomMention" ? "@" : initials(displayLabel)}
+        fallback={candidate.target.kind === "roomMention" ? "@" : avatarInitial(displayLabel)}
       />
       <span className="mention-option-main">
         <span className="mention-option-label" dir="auto">

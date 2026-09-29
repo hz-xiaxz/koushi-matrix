@@ -465,15 +465,17 @@ pub fn refresh_room_summary_display_projection(
 ) -> bool {
     let mut changed = false;
     for room in rooms {
-        let (display_label, original_display_label) =
+        let (display_label, original_display_label, display_label_placeholder) =
             projected_room_summary_display_labels(room, profiles, own_user_id);
         let avatar = projected_room_summary_avatar(room, profiles);
         if room.display_label != display_label
             || room.original_display_label != original_display_label
+            || room.display_label_placeholder != display_label_placeholder
             || room.avatar != avatar
         {
             room.display_label = display_label;
             room.original_display_label = original_display_label;
+            room.display_label_placeholder = display_label_placeholder;
             room.avatar = avatar;
             changed = true;
         }
@@ -485,14 +487,21 @@ fn projected_room_summary_display_labels(
     room: &super::room::RoomSummary,
     profiles: &ProfileState,
     own_user_id: Option<&str>,
-) -> (String, String) {
+) -> (String, String, Option<super::room::RoomNamePlaceholder>) {
     if room.is_dm
         && room.dm_user_ids.len() == 1
         && let Some(user_id) = room.dm_user_ids.first()
     {
+        // #1050: the SDK's English empty-room name is not a member name; let
+        // the member's profile or identity fallback label the DM instead.
+        let upstream = room
+            .display_name_placeholder
+            .is_none()
+            .then_some(room.display_name.as_str());
         return (
-            resolve_user_display_name(profiles, user_id, Some(&room.display_name), own_user_id),
-            original_user_display_name(profiles, user_id, Some(&room.display_name), own_user_id),
+            resolve_user_display_name(profiles, user_id, upstream, own_user_id),
+            original_user_display_name(profiles, user_id, upstream, own_user_id),
+            None,
         );
     }
 
@@ -501,7 +510,11 @@ fn projected_room_summary_display_labels(
     } else {
         room.display_name.trim().to_owned()
     };
-    (display_label.clone(), display_label)
+    (
+        display_label.clone(),
+        display_label,
+        room.display_name_placeholder.clone(),
+    )
 }
 
 fn projected_room_summary_avatar(

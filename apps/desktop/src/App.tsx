@@ -240,6 +240,7 @@ import {
   ICON_SIZE,
   composerModeProp,
   operationFailureLabel,
+  roomDisplayLabel,
   syncStatePresentation,
   type ActiveContextMenu,
   type ContextMenuTarget,
@@ -2941,8 +2942,9 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
 
   /** Rust-projected display label for the room in the leave confirmation. */
   function roomLeaveDisplayName(roomId: string): string {
+    const leaveRoom = snapshot?.state.domain.rooms.find((room) => room.room_id === roomId);
     return (
-      snapshot?.state.domain.rooms.find((room) => room.room_id === roomId)?.display_label ??
+      (leaveRoom ? roomDisplayLabel(leaveRoom) : null) ??
       roomId
     );
   }
@@ -6244,7 +6246,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
       >
         <TopBar
           accountManagementUrl={snapshot.state.domain.account_management_url ?? undefined}
-          activeRoomName={activeRoom?.display_label ?? null}
+          activeRoomName={activeRoom ? roomDisplayLabel(activeRoom) : null}
           activeSpaceName={activeSpaceName}
           currentSessionStatus={snapshot.state.domain.current_session_status}
           deviceId={snapshot.state.domain.session.device_id ?? null}
@@ -6432,7 +6434,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           />
         ) : (
           <TimelinePane
-            activeRoomName={activeRoom?.display_label ?? t("room.noRoomSelected")}
+            activeRoomName={activeRoom ? roomDisplayLabel(activeRoom) : t("room.noRoomSelected")}
             composerDocument={composerDocument}
             composerNotice={
               composerNotice &&

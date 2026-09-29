@@ -47,7 +47,8 @@ import {
   scheduledSendCapabilityLabel,
   datetimeLocalValueFromTimestamp,
   scheduledSendTimestampFromInput,
-  initials,
+  avatarInitial,
+  roomDisplayLabel,
   peopleFacingLabel,
   type OpenContextMenu
 } from "../app/uiShared";
@@ -421,7 +422,7 @@ function PinnedEventsList({
                 {avatarSource ? (
                   <img src={avatarSource} alt={undefined} />
                 ) : (
-                  initials(senderLabel)
+                  avatarInitial(senderLabel)
                 )}
               </span>
               <span className="pinned-event-details">
@@ -528,7 +529,7 @@ function SearchResults({
               >
                 <span dir="auto">{highlight(result.snippet, result.highlights)}</span>
                 <span className="result-meta">
-                  <span dir="auto">{result.context_label ?? room?.display_label ?? result.room_id}</span> ·{" "}
+                  <span dir="auto">{result.context_label ?? (room ? roomDisplayLabel(room) : null) ?? result.room_id}</span> ·{" "}
                   <time dateTime={new Date(result.timestamp_ms).toISOString()}>
                     {formatScheduledSendTime(result.timestamp_ms)}
                   </time>{" "}
@@ -610,7 +611,7 @@ function MessageArticle({
       }
     >
       <div className="avatar" aria-hidden="true">
-        {initials(senderDisplayLabel)}
+        {avatarInitial(senderDisplayLabel)}
       </div>
       <div className="message-main">
         <div className="message-heading">

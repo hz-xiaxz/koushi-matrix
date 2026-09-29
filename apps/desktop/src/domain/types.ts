@@ -1283,11 +1283,23 @@ export interface RoomTags {
   low_priority: RoomTagInfo | null;
 }
 
+/**
+ * #1050: the SDK's calculated empty-room name, marked structurally by Rust so
+ * product text comes from the message catalog. `previous_names` is caller data.
+ */
+export type RoomNamePlaceholder =
+  | { kind: "empty" }
+  | { kind: "emptyWas"; previous_names: string };
+
 export interface RoomSummary {
   room_id: string;
   display_name: string;
+  /** Set when `display_name` is the SDK's English empty-room name. */
+  display_name_placeholder?: RoomNamePlaceholder | null;
   display_label: string;
   original_display_label: string;
+  /** Set when `display_label` is that placeholder; render via `roomDisplayLabel`. */
+  display_label_placeholder?: RoomNamePlaceholder | null;
   avatar: AvatarImage | null;
   is_dm: boolean;
   dm_user_ids: string[];
@@ -2763,6 +2775,8 @@ export interface RoomListItem {
   /** Whether this row offers a join. Always false for a joined room. */
   can_join?: boolean;
   display_name: string;
+  /** Mirrors `RoomSummary.display_label_placeholder`; render via `roomListItemLabel`. */
+  display_name_placeholder?: RoomNamePlaceholder | null;
   avatar: AvatarImage | null;
   tags: RoomTags;
   unread_count: number;

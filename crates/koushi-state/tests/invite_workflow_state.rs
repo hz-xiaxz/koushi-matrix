@@ -19,6 +19,8 @@ const CAROL: &str = "@carol:example.org";
 
 fn room(room_id: &str, display_name: &str, parent_space_ids: Vec<String>) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: display_name.to_owned(),
         display_label: display_name.to_owned(),

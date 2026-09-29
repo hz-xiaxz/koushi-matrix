@@ -37,6 +37,7 @@ import {
   ignoreComposerKeyAction,
   pinnedEventIdsForRoom,
   pinnedEventsForRoom,
+  roomDisplayLabel,
   shortcutLabelProfileFromLocaleProfile,
   threadReplyToTimelineMessage
 } from "../app/uiShared";
@@ -616,7 +617,7 @@ export function ContextualRightPanel({
               ? () =>
                   onInviteUser(
                     activeRoom.room_id,
-                    t("dialog.invitePeopleTitle", { name: activeRoom.display_label })
+                    t("dialog.invitePeopleTitle", { name: roomDisplayLabel(activeRoom) })
                   )
               : undefined
           }
@@ -667,7 +668,7 @@ export function ContextualRightPanel({
     );
     const childRoomLabels = new Map<string, string>();
     for (const room of snapshot.state.domain.rooms) {
-      const label = [room.display_label, room.display_name]
+      const label = [roomDisplayLabel(room), room.display_name]
         .map((value) => value.trim())
         .find((value) => value.length > 0 && value !== room.room_id);
       if (label) {
@@ -739,7 +740,7 @@ export function ContextualRightPanel({
                       t("dialog.invitePeopleTitle", {
                         name:
                           "display_label" in roomOrSpace
-                            ? roomOrSpace.display_label
+                            ? roomDisplayLabel(roomOrSpace)
                             : roomOrSpace.display_name
                       })
                     )

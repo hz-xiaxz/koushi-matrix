@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use eyeball_im::{Vector, VectorDiff};
 use matrix_sdk_ui::timeline::{ReadReceiptSnapshot, TimelineItem as SdkTimelineItem};
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::receipt_index::{ReceiptEpoch, ReceiptReaderIndex};
 use koushi_protocol::view::{ReaderWindowLimit, ReceiptSourceRef, TimelineViewSource};
@@ -287,17 +288,20 @@ impl RawReceiptWindow {
     }
 }
 
+/// Placeholder-avatar initial for a receipt reader (#1055).
+///
+/// Same rule as the desktop `avatarInitial` helper, which owns every other
+/// placeholder avatar: Element/Compound's (#414) first grapheme after one
+/// leading Matrix sigil (`@`, `#`, `+`), uppercased, or `?` when empty.
 fn reader_initials(label: &str) -> String {
-    let ascii: String = label
-        .chars()
-        .filter(char::is_ascii_alphabetic)
-        .take(2)
-        .collect();
-    if ascii.is_empty() {
-        // Preserve the two-character fallback without splitting a UTF-16 surrogate.
-        label.chars().take(2).collect()
-    } else {
-        ascii.to_ascii_uppercase()
+    let trimmed = label.trim_start();
+    let value = trimmed
+        .strip_prefix(['@', '#', '+'])
+        .unwrap_or(trimmed)
+        .trim_start();
+    match value.graphemes(true).next().map(str::trim) {
+        Some(initial) if !initial.is_empty() => initial.to_uppercase(),
+        _ => "?".to_owned(),
     }
 }
 
