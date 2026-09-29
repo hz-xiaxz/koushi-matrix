@@ -4,7 +4,7 @@ import { act, cleanup, createEvent, fireEvent, render, screen, within } from "@t
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { SpaceInfoPanel } from "./SpaceInfoPanel";
-import { t } from "../i18n/messages";
+import { setActiveLocaleProfile, t } from "../i18n/messages";
 import type { SpaceSummary } from "../domain/types";
 
 afterEach(cleanup);
@@ -630,6 +630,70 @@ describe("SpaceInfoPanel", () => {
 
     fireEvent.click(open?.querySelector("button") as HTMLButtonElement);
     expect(onJoinRoom).toHaveBeenCalledWith("!open:example.invalid");
+  });
+
+  // Issue #1070: an outside child the SDK named with its English calculated
+  // "Empty Room" carries the Rust placeholder and renders catalog text, while
+  // a room literally named "Empty Room" stays caller data.
+  test("renders an outside child's empty-room placeholder in the active locale", () => {
+    setActiveLocaleProfile("ja", "none");
+    try {
+      render(
+        <SpaceInfoPanel
+          fallbackName="Fallback"
+          rooms={[]}
+          space={{
+            space_id: "!space-work:example.invalid",
+            raw_name: "Work",
+            display_name: "Work",
+            avatar: null,
+            join_rule: null,
+            child_room_ids: []
+          }}
+          spaceChildren={[
+            {
+              room_id: "!unnamed:example.invalid",
+              display_name: "Empty Room",
+              display_name_placeholder: { kind: "empty" },
+              avatar: null,
+              membership: "not_joined",
+              can_join: true,
+              is_space: false,
+              joined_members: 1
+            },
+            {
+              room_id: "!was:example.invalid",
+              display_name: "Empty Room (was Alice)",
+              display_name_placeholder: { kind: "emptyWas", previous_names: "Alice" },
+              avatar: null,
+              membership: "not_joined",
+              can_join: false,
+              is_space: false,
+              joined_members: 1
+            },
+            {
+              room_id: "!literal:example.invalid",
+              display_name: "Empty Room",
+              display_name_placeholder: null,
+              avatar: null,
+              membership: "not_joined",
+              can_join: false,
+              is_space: false,
+              joined_members: 3
+            }
+          ]}
+          onJoinRoom={vi.fn()}
+        />
+      );
+
+      const rooms = screen.getByRole("region", { name: t("workspace.rooms") });
+      const labels = Array.from(rooms.querySelectorAll(".settings-detail-row > span")).map(
+        (label) => label.textContent
+      );
+      expect(labels).toEqual(["空のルーム", "空のルーム（以前: Alice）", "Empty Room"]);
+    } finally {
+      setActiveLocaleProfile("en", "none");
+    }
   });
 
   // An invitation belongs to the invite workflow, which owns the account's

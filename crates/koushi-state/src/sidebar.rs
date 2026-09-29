@@ -467,7 +467,7 @@ fn not_joined_room_list_item(
         (false, membership) => membership,
     };
     RoomListItem {
-        display_name_placeholder: None,
+        display_name_placeholder: child.display_name_placeholder.clone(),
         room_id: child.room_id.clone(),
         membership,
         // Accepting an invitation this account holds is always available; for
@@ -589,6 +589,7 @@ mod tests {
         SpaceChildSummary {
             room_id: "!room:example.invalid".to_owned(),
             display_name: "Room".to_owned(),
+            display_name_placeholder: None,
             avatar: None,
             membership,
             can_join: false,

@@ -1,5 +1,6 @@
-//! Mock-homeserver coverage for the Space children projection: which count and
-//! which join rule decide a child the account is not in (#1053, #1062).
+//! Mock-homeserver coverage for the Space children projection: which count,
+//! which join rule, and which name decide a child the account is not in
+//! (#1053, #1062, #1070).
 
 use matrix_sdk::{
     Client, RoomState,
@@ -243,4 +244,42 @@ async fn locally_known_knock_restricted_child_cannot_be_joined() {
         .expect("the locally known child stays in the Space");
     assert_eq!(child.membership, MatrixSpaceChildMembership::Left);
     assert!(!child.can_join);
+}
+
+/// #1070: an unnamed hierarchy child with one member gets the SDK's English
+/// calculated "Empty Room". It is marked structurally so the GUI renders its
+/// own catalog text, while a room literally named "Empty Room" stays data.
+#[tokio::test]
+async fn hierarchy_child_with_a_calculated_empty_name_is_marked_as_a_placeholder() {
+    for (name, expected) in [
+        (None, Some(koushi_state::RoomNamePlaceholder::Empty)),
+        (Some("Empty Room"), None),
+    ] {
+        let server = MatrixMockServer::new().await;
+        let client = server.client_builder().build().await;
+        sync_space_advertising_child(&server, &client).await;
+        let mut child = serde_json::json!({
+            "room_id": CHILD_ID,
+            "num_joined_members": 1,
+            "world_readable": false,
+            "guest_can_join": false,
+            "join_rule": "public",
+            "children_state": [],
+        });
+        if let Some(name) = name {
+            child["name"] = serde_json::json!(name);
+        }
+        mount_hierarchy(&server, Some(child)).await;
+
+        let entries = matrix_space_children_projection(&session(&server, client), SPACE_ID)
+            .await
+            .unwrap();
+
+        let child = entries
+            .iter()
+            .find(|entry| entry.room_id == CHILD_ID)
+            .expect("a child with a member is projected");
+        assert_eq!(child.display_name, "Empty Room");
+        assert_eq!(child.display_name_placeholder, expected, "name {name:?}");
+    }
 }

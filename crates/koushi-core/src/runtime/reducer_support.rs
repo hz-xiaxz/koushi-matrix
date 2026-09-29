@@ -19,7 +19,6 @@ use super::profile_display_diagnostics::{
 };
 use super::scheduled_send::{DeferredScheduledSendPersist, scheduled_send_session_key};
 
-use crate::account::AccountMessage;
 use crate::unread_trace;
 
 fn live_receipt_source_changes(action: &AppAction) -> Option<(String, Vec<String>)> {
@@ -391,10 +390,8 @@ impl super::AppActor {
             self.cancel_event_navigation_owner().await;
         }
         if deferred.cancel_activity_resolution {
-            let _ = self
-                .account_actor
-                .send(AccountMessage::CancelActivityResolution)
-                .await;
+            // #1060: this runs inside the action-batch commit.
+            self.dispatch_cancel_activity_resolution();
         }
         if let Some((key_id, navigation, explicit_preference_mutation)) = deferred.navigation {
             let load_failed = self.navigation_persistence_status

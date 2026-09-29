@@ -1311,6 +1311,7 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         account_actor,
         activity_projection: ActivityProjection::default(),
         activity_resolution_generation: 0,
+        deferred_account_dispatch: Default::default(),
         next_internal_request_sequence: 1,
         navigation_projection_generation: 0,
         pending_select,
@@ -1492,6 +1493,7 @@ async fn same_batch_select_room_settles_only_final_selection() {
         account_actor,
         activity_projection: ActivityProjection::default(),
         activity_resolution_generation: 0,
+        deferred_account_dispatch: Default::default(),
         next_internal_request_sequence: 1,
         navigation_projection_generation: 0,
         pending_select,
@@ -3164,6 +3166,7 @@ fn app_actor_fixture_with_account_capacity(
         account_actor,
         activity_projection: ActivityProjection::default(),
         activity_resolution_generation: 0,
+        deferred_account_dispatch: Default::default(),
         next_internal_request_sequence: 1,
         navigation_projection_generation: 0,
         pending_select: HashMap::new(),
@@ -4670,6 +4673,7 @@ async fn leaving_a_selected_space_child_routes_a_space_children_reload() {
         children: vec![koushi_state::SpaceChildSummary {
             room_id: child_id.to_owned(),
             display_name: "Synthetic room".to_owned(),
+            display_name_placeholder: None,
             avatar: None,
             membership: koushi_state::SpaceChildMembership::Joined,
             can_join: false,
@@ -4722,5 +4726,6 @@ async fn leaving_a_selected_space_child_routes_a_space_children_reload() {
     actor_task.abort();
 }
 
+mod activity_renderer_states;
 mod anchored_send;
 mod navigation_network;

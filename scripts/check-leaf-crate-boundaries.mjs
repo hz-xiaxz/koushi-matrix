@@ -31,6 +31,7 @@ export const testkitTargets = [
   "runtime_e2ee.rs",
   "runtime_intent_lifecycle.rs",
   "runtime_navigation.rs",
+  "runtime_navigation_network.rs",
   "runtime_notification_settings.rs",
   "runtime_room_list_sync.rs",
   "runtime_room_preferences.rs",

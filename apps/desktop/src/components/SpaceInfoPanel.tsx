@@ -2,7 +2,7 @@ import { ChevronRight, FileText, MailPlus, Settings, Users } from "lucide-react"
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { t } from "../i18n/messages";
-import { roomDisplayLabel } from "../domain/roomDisplayLabel";
+import { roomDisplayLabel, spaceChildLabel } from "../domain/roomDisplayLabel";
 import type {
   HistoryExportState,
   RoomJoinRule,
@@ -278,7 +278,7 @@ export function SpaceInfoPanel({
           */}
           {outsideChildren.map((child) => (
             <div className="settings-detail-row" key={child.room_id}>
-              <span dir="auto">{child.display_name}</span>
+              <span dir="auto">{spaceChildLabel(child)}</span>
               <small className="space-child-status">
                 <span className="room-membership-badge">
                   {spaceChildMembershipLabel(child.membership)}

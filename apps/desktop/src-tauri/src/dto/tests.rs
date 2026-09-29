@@ -1341,6 +1341,10 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         children: vec![koushi_state::SpaceChildSummary {
             room_id: "!not-joined-room:example.invalid".to_owned(),
             display_name: "Fixture Not Joined Room".to_owned(),
+            // #1070: populated so the golden proves the placeholder shape.
+            display_name_placeholder: Some(koushi_state::RoomNamePlaceholder::EmptyWas {
+                previous_names: "Fixture Former Member".to_owned(),
+            }),
             avatar: Some(AvatarImage {
                 mxc_uri: "mxc://example.invalid/not-joined".to_owned(),
                 thumbnail: AvatarThumbnailState::NotRequested,

@@ -10,6 +10,7 @@
 mod activity;
 mod composer;
 mod connection;
+mod deferred_dispatch;
 mod navigation;
 mod profile_display_diagnostics;
 mod readers;
@@ -670,6 +671,7 @@ impl CoreRuntime {
             account_actor,
             activity_projection: ActivityProjection::default(),
             activity_resolution_generation: 0,
+            deferred_account_dispatch: Default::default(),
             next_internal_request_sequence: 1,
             navigation_projection_generation: 0,
             pending_select: HashMap::new(),
@@ -838,6 +840,19 @@ impl CoreRuntime {
             .await
     }
 
+    /// Test hook: install an SDK session (for example one bound to a mock
+    /// homeserver) into this runtime's AccountActor and RoomActor, without a
+    /// login or restore flow. Not part of the public production API.
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn install_account_session_for_testing(
+        &self,
+        session: Arc<koushi_sdk::MatrixClientSession>,
+    ) -> bool {
+        self.account_actor_test_handle
+            .install_residency_test_session(session)
+            .await
+    }
+
     #[cfg(any(test, feature = "test-hooks"))]
     pub async fn inspect_sync_owners_for_testing(&self) -> (bool, bool, bool) {
         let (response, receiver) = oneshot::channel();
@@ -986,6 +1001,9 @@ struct AppActor {
     account_actor: AccountActorHandle,
     activity_projection: ActivityProjection,
     activity_resolution_generation: u64,
+    /// #1060: batch-commit dispatches waiting for AccountActor mailbox
+    /// capacity; delivered from the run loop, never awaited in a commit.
+    deferred_account_dispatch: deferred_dispatch::DeferredAccountDispatch,
     next_internal_request_sequence: u64,
     /// Private ordering fence for committed room projections. Request ids are
     /// correlation values and are not monotonic across connections.
@@ -1179,6 +1197,12 @@ impl AppActor {
             let composer_draft_persist_delay = self.composer_draft_persist_delay();
             let navigation_persist_delay = self.navigation_persist_delay();
             let scheduled_send_delay = self.scheduled_send_delay();
+            // #1060: wait for AccountActor capacity only while a batch-commit
+            // dispatch is deferred.
+            let deferred_dispatch_permit = self
+                .deferred_account_dispatch
+                .is_pending()
+                .then(|| self.account_actor.reserve_owned());
             tokio::select! {
                 _ = async {
                     match composer_draft_persist_delay {
@@ -1266,6 +1290,16 @@ impl AppActor {
                     if shutdown {
                         break;
                     }
+                }
+                // Guarded: without a deferred dispatch this arm is disabled,
+                // so free mailbox capacity cannot spin the loop.
+                permit = async {
+                    match deferred_dispatch_permit {
+                        Some(permit) => permit.await,
+                        None => future::pending().await,
+                    }
+                }, if self.deferred_account_dispatch.is_pending() => {
+                    self.deliver_deferred_account_dispatch(permit).await;
                 }
                 event_navigation_prepared = self.event_navigation_prepared_rx.recv() => {
                     if let Some(event_navigation_prepared) = event_navigation_prepared {
@@ -1880,20 +1914,14 @@ impl AppActor {
     /// Issue #1062: route a reducer-admitted Space children reload to the room
     /// actor. The reducer already put the slice in `Loading` under
     /// `generation`; if the command cannot be delivered, settle it as failed so
-    /// the slice does not stay loading and the cached children remain.
+    /// the slice does not stay loading and the cached children remain. A live
+    /// leave emits this inside the action-batch commit, so it never waits for
+    /// AccountActor mailbox capacity (#1060).
     async fn forward_space_children_reload(&mut self, space_id: String, generation: u64) {
         let request_id = self.next_internal_request_id();
-        let forwarded = self
-            .account_actor
-            .send(crate::account::AccountMessage::RoomCommand(
-                koushi_protocol::command::RoomCommand::LoadSpaceChildren {
-                    request_id,
-                    space_id: space_id.clone(),
-                    generation,
-                },
-            ))
-            .await;
-        if !forwarded {
+        if let deferred_dispatch::GuardedDispatch::Closed =
+            self.dispatch_space_children_reload(request_id, space_id.clone(), generation)
+        {
             let effects = self
                 .reduce_app_action(AppAction::SpaceChildrenLoadFailed {
                     space_id,
@@ -1954,13 +1982,10 @@ impl AppActor {
             })
             .await;
         self.handle_ui_event_effects(&effects).await;
-        if !self
-            .account_actor
-            .send(AccountMessage::ResolveActivity {
-                generation,
-                requests,
-            })
-            .await
+        // #1060: this runs inside the action-batch commit, so the dispatch
+        // must never wait for AccountActor mailbox capacity.
+        if let deferred_dispatch::GuardedDispatch::Closed =
+            self.dispatch_activity_resolution(generation, total_unresolved_room_count, requests)
         {
             // No task will settle this generation; keep it retryable.
             let effects = self
@@ -2036,6 +2061,10 @@ impl AppActor {
 
     /// Returns whether `AppState` changed.
     async fn handle_command(&mut self, envelope: CoreCommandEnvelope) -> bool {
+        // Test-only causal fence: the command is being handled, so the run
+        // loop cannot deliver a deferred dispatch until it returns.
+        #[cfg(test)]
+        self.deferred_account_dispatch.observe("command");
         match envelope {
             CoreCommandEnvelope::ReaderPrepared(prepared) => {
                 self.handle_reader_prepared(prepared);
@@ -3277,10 +3306,7 @@ impl AppActor {
                             true
                         }
                         AppCommand::CloseActivity { request_id } => {
-                            let _ = self
-                                .account_actor
-                                .send(AccountMessage::CancelActivityResolution)
-                                .await;
+                            self.dispatch_cancel_activity_resolution();
                             let effects = self.reduce_app_action(AppAction::ActivityClosed).await;
                             self.handle_app_effects(request_id, effects).await;
                             self.emit(CoreEvent::Activity(ActivityEvent::Closed { request_id }));
@@ -3652,6 +3678,9 @@ impl AppActor {
                             });
                             return false;
                         }
+                        // This command is forwarded below; a held live-leave
+                        // reload of the same generation would only repeat it.
+                        self.drop_deferred_space_children_reload(space_id, *generation);
                         self.handle_ui_event_effects(&effects).await;
                         state_changed = true;
                     }
@@ -4286,33 +4315,27 @@ impl AppActor {
                         ))
                         .await;
                 }
+                // #1060: one ordered crawler lane for every path, so a held
+                // notification is never delivered after a newer settings
+                // change (a caption opt-out must stay effective).
                 AppEffect::NotifySearchCrawlerRoomsAvailable {
                     room_ids,
                     latest_event_ids,
                     settings,
                 } => {
-                    let _ = self
-                        .account_actor
-                        .send(
-                            crate::account::AccountMessage::NotifySearchCrawlerRoomsAvailable {
-                                room_ids,
-                                latest_event_ids,
-                                settings,
-                            },
-                        )
-                        .await;
+                    self.dispatch_crawler(deferred_dispatch::CrawlerDispatch::Notify(
+                        deferred_dispatch::CrawlerRooms {
+                            room_ids,
+                            latest_event_ids,
+                            settings,
+                        },
+                    ));
                 }
                 AppEffect::InvalidateSearchCrawlerCache => {
-                    let _ = self
-                        .account_actor
-                        .send(crate::account::AccountMessage::InvalidateSearchCrawlerCache)
-                        .await;
+                    self.dispatch_crawler(deferred_dispatch::CrawlerDispatch::Invalidate);
                 }
                 AppEffect::RebuildSearchIndex => {
-                    let _ = self
-                        .account_actor
-                        .send(crate::account::AccountMessage::RebuildSearchIndex)
-                        .await;
+                    self.dispatch_crawler(deferred_dispatch::CrawlerDispatch::Rebuild);
                 }
                 AppEffect::LoadSpaceChildren {
                     space_id,
@@ -4688,7 +4711,7 @@ impl AppActor {
         }
     }
 
-    async fn handle_ui_event_effects(&self, effects: &[AppEffect]) {
+    async fn handle_ui_event_effects(&mut self, effects: &[AppEffect]) {
         for effect in effects {
             if let AppEffect::EmitUiEvent(ui_event) = effect {
                 self.handle_ui_event_effect(ui_event).await;
@@ -4699,27 +4722,20 @@ impl AppActor {
             } = effect
             {
                 // Route from actor-projection path: forward to SearchActor via
-                // AccountActor (fire-and-forget, idempotent).
-                let _ = self
-                    .account_actor
-                    .send(
-                        crate::account::AccountMessage::NotifySearchCrawlerRoomsAvailable {
-                            room_ids: room_ids.clone(),
-                            latest_event_ids: latest_event_ids.clone(),
-                            settings: settings.clone(),
-                        },
-                    )
-                    .await;
+                // AccountActor (fire-and-forget, idempotent). Every live
+                // room-list update emits this, so it joins the ordered crawler
+                // lane rather than awaiting a full mailbox (#1060).
+                self.dispatch_crawler(deferred_dispatch::CrawlerDispatch::Notify(
+                    deferred_dispatch::CrawlerRooms {
+                        room_ids: room_ids.clone(),
+                        latest_event_ids: latest_event_ids.clone(),
+                        settings: settings.clone(),
+                    },
+                ));
             } else if let AppEffect::InvalidateSearchCrawlerCache = effect {
-                let _ = self
-                    .account_actor
-                    .send(crate::account::AccountMessage::InvalidateSearchCrawlerCache)
-                    .await;
+                self.dispatch_crawler(deferred_dispatch::CrawlerDispatch::Invalidate);
             } else if let AppEffect::RebuildSearchIndex = effect {
-                let _ = self
-                    .account_actor
-                    .send(crate::account::AccountMessage::RebuildSearchIndex)
-                    .await;
+                self.dispatch_crawler(deferred_dispatch::CrawlerDispatch::Rebuild);
             }
         }
     }

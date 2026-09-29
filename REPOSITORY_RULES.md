@@ -429,6 +429,10 @@ This policy does not change the language used to converse with the user.
 - Put closing keywords (`Closes`, `Fixes`, `Resolves`) only in the PR body
   of a PR that meets the criteria above; commit messages use `Refs #N`, since
   a keyword in a merged commit closes the issue regardless of the PR body.
+  GitHub treats every tense (close/closes/closed, fix/fixes/fixed,
+  resolve/resolves/resolved) followed by `#N` anywhere in a merged PR
+  description or commit message as a closing keyword, so describe past events
+  without that pattern (for example "#1061 was auto-closed").
 
 ## Documentation And Work Records
 
