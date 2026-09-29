@@ -890,6 +890,107 @@ test("timeline header Threads button opens the threads list and row opens a thre
     });
 });
 
+test("scoped Threads list row for another room selects that room before opening its thread", async ({
+  page
+}) => {
+  // #1056: Rust admits OpenThread only for the active timeline room, so a
+  // Home/Space-scoped Threads row for another room must navigate there first.
+  const otherRoomId = "!threads-other-room:example.invalid";
+  const otherRootEventId = "$threads-other-root:example.invalid";
+  await gotoReadyShell(page);
+  await page.evaluate(
+    ({ otherRoomId, otherRootEventId }) => {
+      const snapshot = window.__harness.currentSnapshot();
+      const baseRoom = snapshot.state.domain.rooms[0];
+      window.__harness.setSnapshot({
+        ...snapshot,
+        state: {
+          ...snapshot.state,
+          domain: {
+            ...snapshot.state.domain,
+            rooms: [
+              ...snapshot.state.domain.rooms,
+              {
+                ...baseRoom,
+                room_id: otherRoomId,
+                display_name: "Threads other room",
+                display_label: "Threads other room",
+                original_display_label: "Threads other room",
+                parent_space_ids: []
+              }
+            ]
+          }
+        }
+      });
+      window.__harness.setCommandResponse("open_threads_list", () => {
+        const current = window.__harness.currentSnapshot();
+        const next = {
+          ...current,
+          state: {
+            ...current.state,
+            ui: {
+              ...current.state.ui,
+              threads_list: {
+                kind: "open",
+                room_id: "home",
+                request_id: 1,
+                items: [
+                  {
+                    room_id: otherRoomId,
+                    root_event_id: otherRootEventId,
+                    root_sender: "@thread-root-sender:example.invalid",
+                    root_sender_label: null,
+                    root_body_preview: "Other room thread root",
+                    root_timestamp_ms: 1_800_000_000_000,
+                    latest_event_id: "$threads-other-latest:example.invalid",
+                    latest_sender: "@thread-latest-sender:example.invalid",
+                    latest_sender_label: null,
+                    latest_body_preview: "Other room latest reply",
+                    latest_timestamp_ms: 1_800_000_000_100,
+                    reply_count: 3
+                  }
+                ],
+                is_paginating: false,
+                end_reached: true
+              }
+            }
+          }
+        };
+        window.__harness.setSnapshot(next);
+        return next;
+      });
+      window.__harness.pushStateUpdate();
+      window.__harness.clearInvocations();
+    },
+    { otherRoomId, otherRootEventId }
+  );
+
+  const sidebar = page.getByRole("complementary", { name: t("workspace.rooms") });
+  await sidebar.getByRole("button", { name: t("workspace.threads") }).click();
+  const contextPanel = page.locator('aside[aria-label="Context panel"]');
+  await expect(contextPanel.getByText("Other room thread root")).toBeVisible();
+
+  await page.getByRole("button", { name: /3 replies/ }).click({ force: true });
+
+  await expect.poll(() => invocationCount(page, "open_thread")).toBeGreaterThanOrEqual(1);
+  const order = await page.evaluate(() =>
+    window.__harness
+      .invocations()
+      .map(({ command }) => command)
+      .filter((command) => command === "select_room" || command === "open_thread")
+  );
+  expect(order).toEqual(["select_room", "open_thread"]);
+  expect(
+    await page.evaluate(() => window.__harness.invocationsOf("select_room")[0]?.args)
+  ).toEqual({ roomId: otherRoomId });
+  expect(
+    await page.evaluate(() => window.__harness.invocationsOf("open_thread")[0]?.args)
+  ).toEqual({ roomId: otherRoomId, rootEventId: otherRootEventId, intent: "existingThread" });
+  await expect
+    .poll(() => page.evaluate(() => window.__harness.currentSnapshot().state.ui.thread.kind))
+    .toBe("open");
+});
+
 test("thread attention renders one Rust count in the root and header and clears on acknowledgement snapshot", async ({
   page
 }) => {
