@@ -95,7 +95,7 @@ recurrence is a regression to investigate, not a known failure.
 - **#116.** The blocker was three stacked silent no-ops (`handle_select_room`
   `Vec::new()`, an empty `build_state_delta`, then neither `StateDelta` nor
   `StateChanged`) behind one opaque 10 s timeout, invisible because every lane
-  used small accounts (Async 7 and 10).
+  used small accounts (engineering rules "Async and Runtime" 7 and 10).
 - **Wave 2 (#38, #39).** Parallel Phase A work collided on shared surfaces used
   as free-form append targets, which produced the hot-file and parallel
   protocol rules.

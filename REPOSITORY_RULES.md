@@ -263,7 +263,7 @@ to upstream or revert.
   its crypto store and device keys; any missing, mismatched, or unknown state
   fails closed and never creates replacement crypto. Fresh-login stores are
   journaled before network authorization and cleaned up only explicitly and
-  exact-root. Details: overview "Runtime Model".
+  exact-root. Details: overview "Runtime Model" and state machines.
 - Key bytes and passphrases should use zeroizing containers where practical and
   should be kept out of long-lived UI state.
 - Standard outbound Megolm pre-share, identical to Element X / stock

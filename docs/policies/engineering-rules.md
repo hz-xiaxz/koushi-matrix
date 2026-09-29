@@ -288,7 +288,8 @@ below are the policy those rules do not state.
    accepted operation. Lossy observer lag becomes an immediate, correlated,
    private-data-safe failure rather than a fixed-delay wait. Shutdown drain
    order, owner-polled futures, and media enqueue ordering are specified in
-   overview and state machines.
+   overview and state machines; per-worker graceful shutdown timeouts are
+   forbidden because they make shutdown latency scale with worker count.
 5. If a reducer returns an `AppEffect` that matters in production, the
    production runtime executes it or the behavior is redesigned as an explicit
    `CoreCommand`/actor command. Discarding such effects is allowed only for
