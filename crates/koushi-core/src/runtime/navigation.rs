@@ -526,32 +526,41 @@ impl AppActor {
             .entry(room_id.clone())
             .or_default()
             .push_back(select_request_id);
-        let sent = self
-            .account_actor
-            .send(crate::account::AccountMessage::RoomCommand(
-                koushi_protocol::command::RoomCommand::SelectRoom {
-                    request_id: select_request_id,
-                    room_id: room_id.clone(),
-                },
-            ))
+        // #1060: the internal selection commits locally, like a user one.
+        self.commit_local_navigation(AppAction::SelectRoom { room_id })
             .await;
-        if !sent {
-            if let Some(queue) = self.pending_select.get_mut(&room_id) {
-                if let Some(position) = queue.iter().position(|id| *id == select_request_id) {
-                    queue.remove(position);
-                }
-                if queue.is_empty() {
-                    self.pending_select.remove(&room_id);
-                }
-            }
-            self.settle_event_navigation_failure(
-                request_id,
-                generation,
-                koushi_state::EventNavigationFailureKind::Timeline,
-            )
-            .await;
-        }
         true
+    }
+
+    /// #1060: reduce AppActor-admitted room/Space navigation through the one
+    /// action-batch commit pipeline, then hand the reducer-accepted result to
+    /// RoomActor-owned enrichment. Nothing here waits for an AccountActor or
+    /// RoomActor mailbox; pinned-event and Space-member network work runs
+    /// after the commit and can never gate its publication or terminal.
+    pub(super) async fn commit_local_navigation(&mut self, action: AppAction) {
+        // Earlier commands in this coalesced turn may have changed state
+        // without publishing it yet; keep their deltas ahead of this commit.
+        let published = self.snapshot_tx.borrow().state.clone();
+        if self.state != published {
+            self.publish_state_change(&published);
+        }
+        Box::pin(self.commit_action_batch(vec![action], super::ActionBatchOrigin::LocalNavigation))
+            .await;
+    }
+
+    /// Publish reducer-accepted navigation as RoomActor's retained enrichment
+    /// demand. Only an accepted selection (including an already-active room)
+    /// schedules enrichment; an unknown room leaves the current demand.
+    pub(super) fn admit_navigation_enrichment(&self, requested_room_id: Option<&str>) {
+        let accepted = requested_room_id
+            .is_none_or(|room_id| self.state.navigation.active_room_id.as_deref() == Some(room_id));
+        if accepted && let Some(session_key) = navigation_session_key(&self.state) {
+            self.account_actor.admit_navigation_enrichment(
+                session_key,
+                self.state.navigation.active_room_id.clone(),
+                self.state.navigation.active_space_id.clone(),
+            );
+        }
     }
 
     pub(super) async fn handle_event_navigation_select_outcome(

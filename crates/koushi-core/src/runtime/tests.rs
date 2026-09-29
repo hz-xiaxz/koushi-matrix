@@ -3048,6 +3048,34 @@ async fn receipt_resolution_borrows_current_alias_without_publishing_global_stat
     ));
 }
 
+/// #1060: user and internal event-navigation room selection commit in
+/// AppActor; neither is routed through the AccountActor mailbox.
+async fn wait_for_local_room_selection(
+    snapshot_rx: &mut watch::Receiver<VersionedAppStateSnapshot>,
+    room_id: &str,
+) {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if snapshot_rx
+                .borrow_and_update()
+                .state
+                .navigation
+                .active_room_id
+                .as_deref()
+                == Some(room_id)
+            {
+                break;
+            }
+            snapshot_rx
+                .changed()
+                .await
+                .expect("room selection snapshot");
+        }
+    })
+    .await
+    .expect("room selection should commit locally");
+}
+
 type EventNavigationFixture = (
     AppActor,
     mpsc::Sender<CoreCommandEnvelope>,
@@ -3209,21 +3237,7 @@ async fn run_app_actor_cross_room_missing_navigation(
         })
         .await
         .expect("event navigation command");
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if matches!(
-                account_rx.recv().await.expect("internal select message"),
-                AccountMessage::RoomCommand(koushi_protocol::command::RoomCommand::SelectRoom {
-                    room_id,
-                    ..
-                }) if room_id == room_b
-            ) {
-                break;
-            }
-        }
-    })
-    .await
-    .expect("internal select should be routed");
+    wait_for_local_room_selection(&mut snapshot_rx, room_b).await;
     action_tx
         .send(vec![AppAction::SelectRoom {
             room_id: room_b.to_owned(),
@@ -3441,22 +3455,7 @@ async fn event_navigation_preserves_opening_through_internal_room_selection() {
         .await
         .expect("event navigation command");
 
-    let internal_select = tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if let AccountMessage::RoomCommand(
-                koushi_protocol::command::RoomCommand::SelectRoom {
-                    request_id: select_request_id,
-                    room_id,
-                },
-            ) = account_rx.recv().await.expect("internal select message")
-            {
-                break (select_request_id, room_id);
-            }
-        }
-    })
-    .await
-    .expect("internal room selection should be routed");
-    assert_eq!(internal_select.1, room_b);
+    wait_for_local_room_selection(&mut snapshot_rx, room_b).await;
 
     let opening_after_command = tokio::time::timeout(Duration::from_secs(1), async {
         loop {
@@ -3613,7 +3612,7 @@ async fn event_navigation_external_room_selection_fences_stale_work() {
         actor,
         command_tx,
         action_tx,
-        mut account_rx,
+        _account_rx,
         mut event_rx,
         mut snapshot_rx,
         _navigation_projection_rx,
@@ -3640,21 +3639,7 @@ async fn event_navigation_external_room_selection_fences_stale_work() {
         })
         .await
         .expect("event navigation command");
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if matches!(
-                account_rx.recv().await.expect("internal select message"),
-                AccountMessage::RoomCommand(koushi_protocol::command::RoomCommand::SelectRoom {
-                    room_id,
-                    ..
-                }) if room_id == room_a
-            ) {
-                break;
-            }
-        }
-    })
-    .await
-    .expect("internal select should be routed");
+    wait_for_local_room_selection(&mut snapshot_rx, room_a).await;
 
     let room_request_id = RequestId {
         connection_id: RuntimeConnectionId(836),
@@ -3671,21 +3656,7 @@ async fn event_navigation_external_room_selection_fences_stale_work() {
         })
         .await
         .expect("external room selection command");
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if matches!(
-                account_rx.recv().await.expect("external select message"),
-                AccountMessage::RoomCommand(koushi_protocol::command::RoomCommand::SelectRoom {
-                    request_id,
-                    room_id,
-                }) if request_id == room_request_id && room_id == room_b
-            ) {
-                break;
-            }
-        }
-    })
-    .await
-    .expect("external select should be routed");
+    wait_for_local_room_selection(&mut snapshot_rx, room_b).await;
     let superseded = tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if let CoreEvent::IntentLifecycle {
@@ -3855,38 +3826,10 @@ async fn run_event_navigation_latest_source_case(
             .await
             .expect("event navigation command");
         if request_id == first_request_id {
-            tokio::time::timeout(Duration::from_secs(1), async {
-                loop {
-                    if matches!(
-                        account_rx.recv().await.expect("first internal select"),
-                        AccountMessage::RoomCommand(koushi_protocol::command::RoomCommand::SelectRoom {
-                            room_id,
-                            ..
-                        }) if room_id == room_a
-                    ) {
-                        break;
-                    }
-                }
-            })
-            .await
-            .expect("first internal select should be routed");
+            wait_for_local_room_selection(&mut snapshot_rx, room_a).await;
         }
     }
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if matches!(
-                account_rx.recv().await.expect("second internal select"),
-                AccountMessage::RoomCommand(koushi_protocol::command::RoomCommand::SelectRoom {
-                    request_id,
-                    room_id,
-                }) if request_id.connection_id == RuntimeConnectionId(0) && room_id == room_b
-            ) {
-                break;
-            }
-        }
-    })
-    .await
-    .expect("second internal select should be routed");
+    wait_for_local_room_selection(&mut snapshot_rx, room_b).await;
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if let CoreEvent::IntentLifecycle {
@@ -3976,11 +3919,17 @@ async fn run_event_navigation_latest_source_case(
     );
 
     loop {
-        if let AccountMessage::EnsureRoomEventCached { response_tx, .. } =
-            tokio::time::timeout(Duration::from_secs(1), account_rx.recv())
-                .await
-                .expect("latest lookup should be routed")
-                .expect("latest lookup message")
+        // #1060: the first navigation's room is already active, so its
+        // superseded lookup may be queued ahead of the latest one.
+        if let AccountMessage::EnsureRoomEventCached {
+            response_tx,
+            event_id,
+            ..
+        } = tokio::time::timeout(Duration::from_secs(1), account_rx.recv())
+            .await
+            .expect("latest lookup should be routed")
+            .expect("latest lookup message")
+            && event_id == event_b
         {
             response_tx
                 .send(crate::account::RoomEventLookupResult::Missing)
@@ -4093,9 +4042,9 @@ async fn run_event_navigation_external_supersession_case(command: CoreCommand) {
         actor,
         command_tx,
         action_tx,
-        mut account_rx,
+        _account_rx,
         mut event_rx,
-        snapshot_rx,
+        mut snapshot_rx,
         _navigation_projection_rx,
         event_navigation_prepared_tx,
         focused_projection_tx,
@@ -4120,22 +4069,17 @@ async fn run_event_navigation_external_supersession_case(command: CoreCommand) {
         })
         .await
         .expect("event navigation command");
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if matches!(
-                account_rx.recv().await.expect("internal select message"),
-                AccountMessage::RoomCommand(koushi_protocol::command::RoomCommand::SelectRoom {
-                    room_id,
-                    ..
-                }) if room_id == room_a
-            ) {
-                break;
-            }
-        }
-    })
-    .await
-    .expect("internal select should be routed");
+    wait_for_local_room_selection(&mut snapshot_rx, room_a).await;
 
+    // #1060: an external room selection commits locally; the other external
+    // navigations leave the room unchanged. Either way no stale work may
+    // restore the superseded event navigation's room.
+    let expected_room = match &command {
+        CoreCommand::Room(koushi_protocol::command::RoomCommand::SelectRoom {
+            room_id, ..
+        }) => room_id.clone(),
+        _ => room_a.to_owned(),
+    };
     command_tx
         .send(CoreCommandEnvelope::Public {
             command,
@@ -4205,7 +4149,7 @@ async fn run_event_navigation_external_supersession_case(command: CoreCommand) {
             .navigation
             .active_room_id
             .as_deref(),
-        Some(room_a)
+        Some(expected_room.as_str())
     );
     assert!(matches!(
         snapshot_rx.borrow().state.navigation.event_navigation,

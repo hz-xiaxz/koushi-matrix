@@ -78,6 +78,8 @@ struct BlockedMailbox {
     snapshot_rx: watch::Receiver<VersionedAppStateSnapshot>,
     navigation_projection_rx: watch::Receiver<Option<crate::timeline::NavigationProjectionIntent>>,
     account_rx: mpsc::Receiver<AccountMessage>,
+    account_actor: AccountActorHandle,
+    initial: AppState,
     actor_task: executor::JoinHandle<()>,
     _data_dir: tempfile::TempDir,
     _event_navigation_prepared_tx: mpsc::UnboundedSender<EventNavigationPrepared>,
@@ -99,7 +101,7 @@ impl BlockedMailbox {
             navigation_projection_rx,
             event_navigation_prepared_tx,
             focused_projection_tx,
-        ) = app_actor_fixture_with_account_capacity(data_dir.path(), state, 1);
+        ) = app_actor_fixture_with_account_capacity(data_dir.path(), state.clone(), 1);
         assert!(
             actor
                 .account_actor
@@ -107,6 +109,7 @@ impl BlockedMailbox {
                 .await,
             "fill the AccountActor mailbox"
         );
+        let account_actor = actor.account_actor.clone();
         let actor_task = executor::spawn(async move {
             let _ = actor.run().await;
         });
@@ -117,6 +120,8 @@ impl BlockedMailbox {
             snapshot_rx,
             navigation_projection_rx,
             account_rx,
+            account_actor,
+            initial: state,
             actor_task,
             _data_dir: data_dir,
             _event_navigation_prepared_tx: event_navigation_prepared_tx,
@@ -150,31 +155,44 @@ impl BlockedMailbox {
     }
 
     /// Collect the terminal outcome for every request, asserting each arrives
-    /// exactly once and only after the state generation it names was published.
+    /// exactly once and only after the state generation it names was
+    /// published. The returned state is the navigation/timeline the WebView
+    /// had received when that terminal arrived, rebuilt from ordered deltas.
     async fn terminals(&mut self, requests: &[RequestId]) -> Vec<(IntentOutcome, AppState)> {
-        let mut published: BTreeMap<u64, AppState> = BTreeMap::new();
+        let mut received = self.initial.clone();
+        let mut received_generation = 0;
         let mut outcomes: HashMap<RequestId, (IntentOutcome, AppState)> = HashMap::new();
         executor::timeout(DEADLINE, async {
             while outcomes.len() < requests.len() {
-                match self.event_rx.recv().await.expect("event stream remains open") {
+                match self
+                    .event_rx
+                    .recv()
+                    .await
+                    .expect("event stream remains open")
+                {
                     CoreEvent::StateDelta(delta) => {
-                        published.insert(
-                            delta.generation,
-                            self.snapshot_rx.borrow().state.clone(),
-                        );
+                        assert!(delta.generation > received_generation);
+                        received_generation = delta.generation;
+                        if let Some(navigation) = delta.changed.navigation {
+                            received.navigation = navigation;
+                        }
+                        if let Some(timeline) = delta.changed.timeline {
+                            received.timeline = timeline;
+                        }
                     }
                     CoreEvent::IntentLifecycle {
                         request_id,
                         outcome,
                         published_generation,
                     } if requests.contains(&request_id) => {
-                        let state = published
-                            .range(..=published_generation)
-                            .next_back()
-                            .map(|(_, state)| state.clone())
-                            .unwrap_or_else(|| self.snapshot_rx.borrow().state.clone());
                         assert!(
-                            outcomes.insert(request_id, (outcome, state)).is_none(),
+                            published_generation <= received_generation,
+                            "terminal for {request_id:?} preceded its state publication"
+                        );
+                        assert!(
+                            outcomes
+                                .insert(request_id, (outcome, received.clone()))
+                                .is_none(),
                             "request {request_id:?} settled twice"
                         );
                     }
@@ -205,6 +223,23 @@ impl BlockedMailbox {
         })
         .await
         .expect("navigation must publish while the AccountActor mailbox is full")
+    }
+
+    /// The retained post-commit enrichment demand, as (room, space).
+    fn enrichment(&self) -> Option<(u64, Option<String>, Option<String>)> {
+        self.account_actor
+            .latest_navigation_enrichment()
+            .map(|demand| {
+                assert_eq!(
+                    demand.session_key.user_id, USER,
+                    "enrichment is fenced to the committing session"
+                );
+                (
+                    demand.generation,
+                    demand.active_room_id,
+                    demand.active_space_id,
+                )
+            })
     }
 
     fn retained_projection_key(&mut self) -> Option<TimelineKey> {
@@ -249,11 +284,18 @@ async fn navigation_network_dm_selection_commits_while_account_mailbox_is_full()
     let mut harness = BlockedMailbox::start(navigation_state()).await;
     harness.select_room(request(1), DM).await;
 
-    let [(outcome, state)] = harness.terminals(&[request(1)]).await.try_into().ok().unwrap();
+    let [(outcome, state)] = harness
+        .terminals(&[request(1)])
+        .await
+        .try_into()
+        .ok()
+        .unwrap();
     assert_eq!(outcome, IntentOutcome::Committed);
     assert_eq!(state.navigation.active_room_id.as_deref(), Some(DM));
     assert_eq!(state.timeline.room_id.as_deref(), Some(DM));
     assert_eq!(harness.retained_projection_key(), Some(room_key(DM)));
+    // Pinned-event refresh is scheduled after the commit, not awaited by it.
+    assert_eq!(harness.enrichment(), Some((1, Some(DM.to_owned()), None)));
     harness.finish();
 }
 
@@ -262,7 +304,12 @@ async fn navigation_network_room_selection_commits_while_account_mailbox_is_full
     let mut harness = BlockedMailbox::start(navigation_state()).await;
     harness.select_room(request(1), ROOM_B).await;
 
-    let [(outcome, state)] = harness.terminals(&[request(1)]).await.try_into().ok().unwrap();
+    let [(outcome, state)] = harness
+        .terminals(&[request(1)])
+        .await
+        .try_into()
+        .ok()
+        .unwrap();
     assert_eq!(outcome, IntentOutcome::Committed);
     assert_eq!(state.navigation.active_room_id.as_deref(), Some(ROOM_B));
     assert_eq!(state.timeline.room_id.as_deref(), Some(ROOM_B));
@@ -292,7 +339,15 @@ async fn navigation_network_space_selection_commits_while_account_mailbox_is_ful
         .expect("Space selection admission must not wait for the AccountActor")
         .expect("admission sender retained");
     assert!(admission.admitted_generation > 0);
-    assert_eq!(harness.retained_projection_key(), Some(room_key(SPACE_ROOM)));
+    assert_eq!(
+        harness.retained_projection_key(),
+        Some(room_key(SPACE_ROOM))
+    );
+    // Member hydration and the restored room's pins follow the commit.
+    assert_eq!(
+        harness.enrichment(),
+        Some((1, Some(SPACE_ROOM.to_owned()), Some(SPACE.to_owned())))
+    );
 
     // Returning Home clears the Space-restored room without member hydration.
     let _ = harness
@@ -303,10 +358,11 @@ async fn navigation_network_space_selection_commits_while_account_mailbox_is_ful
         .await;
     harness
         .wait_for_snapshot(|state| {
-            state.navigation.active_space_id.is_none()
-                && state.navigation.active_room_id.is_none()
+            state.navigation.active_space_id.is_none() && state.navigation.active_room_id.is_none()
         })
         .await;
+    // Home is retained as current demand too, superseding the Space.
+    assert_eq!(harness.enrichment(), Some((2, None, None)));
     harness.finish();
 }
 
@@ -351,6 +407,8 @@ async fn navigation_network_rapid_selection_leaves_last_room_authoritative() {
     assert_eq!(state.navigation.active_room_id.as_deref(), Some(DM));
     assert_eq!(state.timeline.room_id.as_deref(), Some(DM));
     assert_eq!(harness.retained_projection_key(), Some(room_key(DM)));
+    // Only the latest selection remains as enrichment demand.
+    assert_eq!(harness.enrichment(), Some((3, Some(DM.to_owned()), None)));
     harness.finish();
 }
 
@@ -363,7 +421,12 @@ async fn navigation_network_selection_from_home_commits_while_account_mailbox_is
     let mut harness = BlockedMailbox::start(state).await;
     harness.select_room(request(1), SPACE_ROOM).await;
 
-    let [(outcome, state)] = harness.terminals(&[request(1)]).await.try_into().ok().unwrap();
+    let [(outcome, state)] = harness
+        .terminals(&[request(1)])
+        .await
+        .try_into()
+        .ok()
+        .unwrap();
     assert_eq!(outcome, IntentOutcome::Committed);
     assert_eq!(state.navigation.active_room_id.as_deref(), Some(SPACE_ROOM));
     // Selecting a Space child from Home moves navigation into its Space.
@@ -384,7 +447,10 @@ async fn navigation_network_selection_from_activity_commits_while_account_mailbo
 
     let terminals = harness.terminals(&[request(1), request(2)]).await;
     assert_eq!(terminals[1].0, IntentOutcome::Committed);
-    assert_eq!(terminals[1].1.navigation.active_room_id.as_deref(), Some(ROOM_C));
+    assert_eq!(
+        terminals[1].1.navigation.active_room_id.as_deref(),
+        Some(ROOM_C)
+    );
     harness.finish();
 }
 
@@ -406,8 +472,20 @@ async fn navigation_network_already_active_and_unknown_rooms_keep_their_outcomes
         IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState)
     );
     assert_eq!(
-        harness.snapshot_rx.borrow().state.navigation.active_room_id.as_deref(),
+        harness
+            .snapshot_rx
+            .borrow()
+            .state
+            .navigation
+            .active_room_id
+            .as_deref(),
         Some(ROOM_A)
+    );
+    // Re-selecting the active room still refreshes its pins; an unknown room
+    // schedules nothing.
+    assert_eq!(
+        harness.enrichment(),
+        Some((1, Some(ROOM_A.to_owned()), None))
     );
     harness.finish();
 }

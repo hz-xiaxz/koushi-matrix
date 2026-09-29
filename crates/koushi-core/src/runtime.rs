@@ -1008,11 +1008,21 @@ struct AppActor {
 #[derive(Clone, Copy)]
 enum ActionBatchOrigin {
     Actor,
+    /// AppActor-admitted room/Space navigation (#1060). It never crossed an
+    /// AccountActor/RoomActor mailbox, so it cannot wait for network work.
+    LocalNavigation,
     #[cfg(any(test, feature = "test-hooks"))]
     TestInjected,
 }
 
 impl ActionBatchOrigin {
+    fn trace_stage(self) -> &'static str {
+        match self {
+            Self::LocalNavigation => "local_navigation",
+            _ => "action",
+        }
+    }
+
     fn is_test_injected(self) -> bool {
         #[cfg(any(test, feature = "test-hooks"))]
         {
@@ -1277,503 +1287,11 @@ impl AppActor {
                     #[cfg(any(test, feature = "test-hooks"))]
                     let composer_draft_test_completions =
                         self.apply_pending_composer_draft_test_mutations().await;
-                    let loop_started = std::time::Instant::now();
-                    let action_batch = actions.len() as u32;
-                    let before_state = self.state.clone();
-                    let clone_ms = loop_started.elapsed().as_millis();
-                    let mut state_changed = false;
-                    let mut pending_select_settlements = Vec::new();
-                    let mut post_projection_work: Vec<PostProjectionWork> = Vec::new();
-                    let mut cancelled_date_navigation_keys: Vec<TimelineKey> = Vec::new();
-                    for action in actions {
-                        let Some(action) = normalize_activity_resolution_action(&self.state, action)
-                        else {
-                            continue;
-                        };
-                        if let AppAction::SelectRoom { room_id } = &action
-                            && self
-                                .pending_select
-                                .get(room_id).is_none_or(|queue| queue.is_empty())
-                            && !batch_origin.is_test_injected()
-                        {
-                            // A cancelled internal selection has no request owner left;
-                            // do not let its delayed actor projection resurrect the room.
-                            continue;
-                        }
-                        // Load each session-owned view before later projections can
-                        // mutate it, unless an earlier action in this batch captured a
-                        // persistence fence that must be applied first post-commit.
-                        let navigation_load_fenced = post_projection_work.iter().any(
-                            |(_, _, _, _, deferred, _)| deferred.has_navigation_persist(),
-                        );
-                        let composer_load_fenced = post_projection_work.iter().any(
-                            |(_, _, _, _, deferred, _)| deferred.has_composer_draft_persist(),
-                        );
-                        let scheduled_load_fenced = post_projection_work.iter().any(
-                            |(_, _, _, _, deferred, _)| deferred.has_scheduled_send_persist(),
-                        );
-                        if !navigation_load_fenced
-                            && !matches!(&action, AppAction::NavigationLoaded { .. })
-                        {
-                            self.load_navigation_for_current_session().await;
-                        }
-                        if !composer_load_fenced {
-                            self.load_composer_drafts_for_current_session().await;
-                        }
-                        if !scheduled_load_fenced {
-                            self.load_scheduled_sends_for_current_session().await;
-                        }
-                        let action = guard_activity_resolution_completion(&self.state, action);
-                        let composer_acceptance =
-                            composer_acceptance_identity_for_action(&action);
-                        let trust_projection_transition = match &action {
-                            AppAction::AuthoritativeDeviceTrustChanged { generation, transition_id, .. } => {
-                                Some((*generation, *transition_id))
-                            }
-                            _ => None,
-                        };
-                        match &action {
-                            AppAction::ActivityRowsObserved { rows } => {
-                                self.activity_projection.ingest(rows.clone());
-                            }
-                            AppAction::CanonicalActivityWindowReconciled {
-                                room_id,
-                                rows,
-                                redacted_event_ids,
-                                hidden_event_ids,
-                            } => {
-                                self.activity_projection.reconcile_canonical_window(
-                                    room_id.clone(),
-                                    rows.clone(),
-                                    redacted_event_ids.clone(),
-                                    hidden_event_ids.clone(),
-                                );
-                            }
-                            AppAction::ActivityResolutionRowsObserved { rows, .. } => {
-                                self.activity_projection.ingest_resolution_rows(rows.clone());
-                            }
-                            _ => {}
-                        }
-                        if self.cancelled_date_navigation_request_id.is_some() {
-                            // #1037: an accepted send superseded this date jump
-                            // while its server lookup was in flight. Drop the
-                            // account actor's atomic reply pair and release the
-                            // focused timeline it subscribed after sending it.
-                            match &action {
-                                AppAction::OpenFocusedContext { room_id, event_id } => {
-                                    if let Some(account_key) = self.current_account_key() {
-                                        cancelled_date_navigation_keys.push(TimelineKey {
-                                            account_key,
-                                            kind: TimelineKind::Focused {
-                                                room_id: room_id.clone(),
-                                                event_id: event_id.clone(),
-                                            },
-                                        });
-                                    }
-                                    continue;
-                                }
-                                AppAction::EnterAnchoredTimeline { .. } => {
-                                    self.cancelled_date_navigation_request_id = None;
-                                    continue;
-                                }
-                                _ => {}
-                            }
-                        }
-                        if let (
-                            Some(projection_request_id),
-                            AppAction::OpenFocusedContext { room_id, event_id },
-                        ) = (self.pending_date_navigation_request_id, &action)
-                            && let Some(account_key) = self.current_account_key() {
-                                self.pending_focused_navigation = Some(PendingFocusedNavigation {
-                                    projection_request_id,
-                                    key: TimelineKey {
-                                        account_key,
-                                        kind: TimelineKind::Focused {
-                                            room_id: room_id.clone(),
-                                            event_id: event_id.clone(),
-                                        },
-                                    },
-                                    room_id: room_id.clone(),
-                                    event_id: event_id.clone(),
-                                    allow_live_fallback: true,
-                                    generation: None,
-                                });
-                            }
-                        if self.pending_date_navigation_request_id.is_some()
-                            && matches!(&action, AppAction::EnterAnchoredTimeline { .. })
-                        {
-                            // The account actor emits the legacy pair atomically;
-                            // retain only Open and wait for the WebView projection ACK.
-                            self.pending_date_navigation_request_id = None;
-                            continue;
-                        }
-                        // For SelectRoom: capture observable facts BEFORE reduce so
-                        // we can classify the outcome afterwards and emit the
-                        // telemetry-lane IntentLifecycle event. Private-data-free:
-                        // we capture only boolean flags and a count.
-                        let select_intent_pre: Option<(String, bool, bool, bool, usize)> =
-                            if let AppAction::SelectRoom { room_id } = &action {
-                                let session_ready = matches!(
-                                    self.state.session,
-                                    SessionState::Ready(_)
-                                );
-                                let found =
-                                    self.state.rooms.iter().any(|r| r.room_id == *room_id);
-                                let already = self
-                                    .state
-                                    .navigation
-                                    .active_room_id
-                                    .as_deref()
-                                    == Some(room_id.as_str());
-                                let rooms_len = self.state.rooms.len();
-                                Some((
-                                    room_id.clone(),
-                                    session_ready,
-                                    found,
-                                    already,
-                                    rooms_len,
-                                ))
-                            } else {
-                                None
-                            };
-                        // Actor-originated actions are post-side-effect
-                        // projections: the owner actor has already performed
-                        // the corresponding Matrix/store/sync operation.
-                        // AppActor owns AppCommand effects above; replaying
-                        // actor-projection effects here would double-execute
-                        // login, restore, sync, or recovery work.
-                        let active_room_before_reduce =
-                            self.state.navigation.active_room_id.clone();
-                        let room_timeline_before_reduce = self.current_room_timeline_key();
-                        let action_for_navigation_cleanup = action.clone();
-                        let (post_projection_effects, deferred_reducer_side_effects) =
-                            self.reduce_app_action_state(action);
-                        if deferred_reducer_side_effects.discards_composer_drafts() {
-                            // A destructive transition in this same reducer batch
-                            // supersedes draft saves captured by earlier actions.
-                            for (_, _, _, _, queued_deferred, _) in &mut post_projection_work {
-                                queued_deferred.cancel_composer_draft_persist();
-                            }
-                        }
-                        let active_room_changed = active_room_before_reduce
-                            != self.state.navigation.active_room_id;
-                        let replacement_room_for_cleanup = navigation_replacement_room_for_cleanup(
-                            &action_for_navigation_cleanup,
-                            active_room_before_reduce.as_deref(),
-                            self.state.navigation.active_room_id.as_deref(),
-                        );
-                        let replacement_room_id_for_cleanup = replacement_room_for_cleanup
-                            .as_ref()
-                            .and_then(NavigationReplacementRoomForCleanup::room_id);
-                        let cancel_replaced_room_timeline_pagination =
-                            replacement_room_for_cleanup.as_ref().and_then(|_| {
-                                cancel_replaced_room_timeline_pagination_key(
-                                    room_timeline_before_reduce.clone(),
-                                    replacement_room_id_for_cleanup,
-                                )
-                            });
-                        let cancel_replaced_room_timeline_link_previews =
-                            replacement_room_for_cleanup.as_ref().and_then(|_| {
-                                cancel_replaced_room_timeline_link_previews_key(
-                                    room_timeline_before_reduce.clone(),
-                                    replacement_room_id_for_cleanup,
-                                )
-                            });
-                        let navigation_projection_generation = if active_room_changed {
-                            match self.navigation_projection_generation.checked_add(1) {
-                                Some(generation) => {
-                                    self.navigation_projection_generation = generation;
-                                    Some(generation)
-                                }
-                                None => {
-                                    record(DiagnosticEvent::new(
-                                        DiagnosticLevel::Error,
-                                        "core.navigation",
-                                        "projection_generation_exhausted",
-                                    ));
-                                    None
-                                }
-                            }
-                        } else {
-                            None
-                        };
-                        if matches!(
-                            action_for_navigation_cleanup,
-                            AppAction::SelectSpace { .. }
-                        ) {
-                            record(
-                                DiagnosticEvent::new(
-                                    DiagnosticLevel::Debug,
-                                    "core.space.transition",
-                                    "reduce",
-                                )
-                                .field(DiagnosticField::boolean(
-                                    "active_room_changed",
-                                    active_room_changed,
-                                ))
-                                .field(DiagnosticField::boolean(
-                                    "active_room_present",
-                                    self.state.navigation.active_room_id.is_some(),
-                                ))
-                                .field(DiagnosticField::boolean(
-                                    "cleanup_pending",
-                                    cancel_replaced_room_timeline_pagination.is_some()
-                                        || cancel_replaced_room_timeline_link_previews.is_some(),
-                                ))
-                                .field(DiagnosticField::count(
-                                    "rooms",
-                                    self.state.rooms.len() as u64,
-                                ))
-                                .field(DiagnosticField::count(
-                                    "projection_generation",
-                                    navigation_projection_generation.unwrap_or(0),
-                                )),
-                            );
-                        }
-                        let mut navigation_projection_cause = None;
-                        if let Some((generation, transition_id)) = trust_projection_transition {
-                            let ready = matches!(self.state.session, SessionState::Ready(_));
-                            let locked = matches!(self.state.session, SessionState::Locked(_));
-                            record(
-                                DiagnosticEvent::new(
-                                    DiagnosticLevel::Info,
-                                    "core.verification_admission",
-                                    if ready {
-                                        "trust_projection_reduced_ready"
-                                    } else if locked {
-                                        "trust_projection_reduced_locked"
-                                    } else {
-                                        "trust_projection_reduced_gated"
-                                    },
-                                )
-                                .field(DiagnosticField::count("generation", generation))
-                                .field(DiagnosticField::count("transition_id", transition_id)),
-                            );
-                            let delivered = self
-                                .account_actor
-                                .send(AccountMessage::TrustProjectionApplied {
-                                    generation,
-                                    transition_id,
-                                    ready,
-                                    locked,
-                                })
-                                .await;
-                            record(
-                                DiagnosticEvent::new(
-                                    if delivered {
-                                        DiagnosticLevel::Info
-                                    } else {
-                                        DiagnosticLevel::Warn
-                                    },
-                                    "core.verification_admission",
-                                    if delivered {
-                                        "trust_projection_ack_delivered"
-                                    } else {
-                                        "trust_projection_ack_delivery_failed"
-                                    },
-                                )
-                                .field(DiagnosticField::count("generation", generation))
-                                .field(DiagnosticField::count("transition_id", transition_id)),
-                            );
-                        }
-                        // Capture the correlated request now, but settle its outcome after
-                        // the whole action batch has reduced. This keeps telemetry before
-                        // publication while ensuring a superseded intermediate room is not
-                        // reported as committed.
-                        let select_request_id = select_intent_pre.as_ref().and_then(
-                            |(room_id, ..)| {
-                                let request_id = self
-                                    .pending_select
-                                    .get_mut(room_id)
-                                    .and_then(|q| q.pop_front());
-                                if self
-                                    .pending_select
-                                    .get(room_id)
-                                    .map(|q| q.is_empty())
-                                    .unwrap_or(false)
-                                {
-                                    self.pending_select.remove(room_id);
-                                }
-                                request_id
-                            },
-                        );
-                        if let Some((room_id, session_ready, found, already, rooms_len)) =
-                            select_intent_pre
-                        {
-                            let committed = self
-                                .state
-                                .navigation
-                                .active_room_id
-                                .as_deref()
-                                == Some(room_id.as_str());
-                            record(
-                                DiagnosticEvent::new(
-                                    DiagnosticLevel::Debug,
-                                    "core.intent",
-                                    "select_reduce",
-                                )
-                                .field(DiagnosticField::boolean("found", found))
-                                .field(DiagnosticField::boolean("session_ready", session_ready))
-                                .field(DiagnosticField::count("rooms", rooms_len as u64))
-                                .field(DiagnosticField::boolean("committed", committed)),
-                            );
-                            if let Some(request_id) = select_request_id {
-                                pending_select_settlements.push((
-                                    request_id,
-                                    room_id,
-                                    session_ready,
-                                    found,
-                                    already,
-                                    rooms_len,
-                                    committed,
-                                ));
-                            }
-                            if committed {
-                                navigation_projection_cause = select_request_id;
-                            }
-                        }
-                        // Stage 1 keeps only synchronous state derivation before publish.
-                        // Every transport, cleanup, persistence, and UI effect from this
-                        // action is queued uniformly for the post-commit stage below.
-                        if let Some(activity_update) = self
-                            .activity_projection
-                            .update_action_for_open_state(&self.state)
-                        {
-                            let (activity_effects, activity_deferred) =
-                                self.reduce_app_action_state(activity_update);
-                            post_projection_work.push((
-                                activity_effects,
-                                None,
-                                None,
-                                crate::timeline::NavigationProjectionCleanup::default(),
-                                activity_deferred,
-                                None,
-                            ));
-                        }
-                        post_projection_work.push((
-                            post_projection_effects,
-                            navigation_projection_generation,
-                            navigation_projection_cause,
-                            crate::timeline::NavigationProjectionCleanup {
-                                cancel_pagination: cancel_replaced_room_timeline_pagination,
-                                cancel_link_previews: cancel_replaced_room_timeline_link_previews,
-                            },
-                            deferred_reducer_side_effects,
-                            composer_acceptance,
-                        ));
-                        state_changed = true;
-                    }
-                    let published_generation = if state_changed {
-                        self.publish_state_change(&before_state)
-                    } else {
-                        self.state_generation
-                    };
-                    let final_active_room_id = self.state.navigation.active_room_id.clone();
-                    for (
-                        request_id,
-                        room_id,
-                        session_ready,
-                        found,
-                        already,
-                        rooms_len,
-                        reduced_committed,
-                    ) in pending_select_settlements
-                    {
-                        let outcome = if !session_ready {
-                            IntentOutcome::FailedNoOp(IntentNoOpReason::SessionNotReady)
-                        } else if !found {
-                            IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState)
-                        } else if (already || reduced_committed)
-                            && final_active_room_id.as_deref() != Some(room_id.as_str())
-                        {
-                            IntentOutcome::FailedNoOp(IntentNoOpReason::Superseded)
-                        } else if already {
-                            IntentOutcome::BenignNoOp(IntentNoOpReason::AlreadyActive)
-                        } else if reduced_committed {
-                            IntentOutcome::Committed
-                        } else {
-                            IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState)
-                        };
-                        record(
-                            DiagnosticEvent::new(
-                                DiagnosticLevel::Debug,
-                                "core.intent",
-                                "lifecycle",
-                            )
-                            .field(DiagnosticField::request_id(
-                                "request_id",
-                                request_id.connection_id.0,
-                                request_id.sequence,
-                            ))
-                            .field(DiagnosticField::count("rooms", rooms_len as u64))
-                            .field(DiagnosticField::token(
-                                "outcome",
-                                intent_outcome_token(&outcome),
-                            )),
-                        );
-                        self.handle_event_navigation_select_outcome(request_id, outcome)
-                            .await;
-                        self.emit(CoreEvent::IntentLifecycle {
-                            request_id,
-                            outcome,
-                            published_generation,
-                        });
-                    }
-
-                    // Only after publication and every terminal has been emitted may
-                    // cleanup, persistence, and other post-commit effects run.
-                    for (
-                        effects,
-                        navigation_projection_generation,
-                        navigation_projection_cause,
-                        navigation_cleanup,
-                        deferred_reducer_side_effects,
-                        composer_acceptance,
-                    ) in post_projection_work
-                    {
-                        let before_post_projection = self.state.clone();
-                        self.handle_post_projection_effects(
-                            &effects,
-                            navigation_projection_generation,
-                            navigation_projection_cause,
-                            navigation_cleanup,
-                        )
-                        .await;
-                        self.apply_deferred_reducer_side_effects(
-                            deferred_reducer_side_effects,
-                        )
-                        .await;
-                        if let Some(identity) = composer_acceptance {
-                            self.pending_composer_acceptances
-                                .retain(|_, pending| pending.identity != identity);
-                        }
-                        self.handle_ui_event_effects(&effects).await;
-                        if self.state != before_post_projection {
-                            self.publish_state_change(&before_post_projection);
-                        }
-                    }
-                    for key in cancelled_date_navigation_keys {
-                        self.release_focused_timeline(key).await;
-                    }
-                    // Apply every captured persistence effect before loading the
-                    // final session's views. In particular, an old-account draft
-                    // save must not be overtaken by the new-account load.
-                    let before_post_commit_loads = self.state.clone();
-                    self.load_room_preferences_for_current_session().await;
-                    // A queued old-account navigation write must not be
-                    // overtaken by the new account's load (#971).
-                    self.flush_pending_navigation().await;
-                    self.load_navigation_for_current_session().await;
-                    self.load_composer_drafts_for_current_session().await;
-                    self.load_scheduled_sends_for_current_session().await;
-                    if self.state != before_post_commit_loads {
-                        self.publish_state_change(&before_post_commit_loads);
-                    }
+                    self.commit_action_batch(actions, batch_origin).await;
                     #[cfg(any(test, feature = "test-hooks"))]
                     for completion in composer_draft_test_completions {
                         let _ = completion.send(self.state.clone());
                     }
-                    app_loop_trace("action", action_batch, clone_ms, loop_started.elapsed());
                 }
             }
         }
@@ -1802,6 +1320,486 @@ impl AppActor {
             Ok(true) if draft_flush_ok && navigation_flush_ok => Ok(()),
             Ok(_) | Err(_) => Err(CoreShutdownError::Incomplete),
         }
+    }
+
+    /// The single action-batch commit pipeline (#1060). Actor projections and
+    /// AppActor-local navigation both enter here, so session/room guards,
+    /// composer hydration, request correlation, publication, exactly-once
+    /// room-intent settlement, projection generations, and ordered cleanup
+    /// stay authoritative in one reducer turn.
+    async fn commit_action_batch(
+        &mut self,
+        actions: Vec<AppAction>,
+        batch_origin: ActionBatchOrigin,
+    ) {
+        let loop_started = std::time::Instant::now();
+        let action_batch = actions.len() as u32;
+        let before_state = self.state.clone();
+        let clone_ms = loop_started.elapsed().as_millis();
+        let mut state_changed = false;
+        let mut pending_select_settlements = Vec::new();
+        let mut post_projection_work: Vec<PostProjectionWork> = Vec::new();
+        let mut cancelled_date_navigation_keys: Vec<TimelineKey> = Vec::new();
+        // #1060: the requested room (`None` for a Space) of AppActor-local
+        // navigation whose enrichment is scheduled after publication.
+        let mut local_navigation_target: Option<Option<String>> = None;
+        for action in actions {
+            let Some(action) = normalize_activity_resolution_action(&self.state, action) else {
+                continue;
+            };
+            if matches!(batch_origin, ActionBatchOrigin::LocalNavigation) {
+                match &action {
+                    AppAction::SelectRoom { room_id } => {
+                        local_navigation_target = Some(Some(room_id.clone()));
+                    }
+                    AppAction::SelectSpace { .. } => local_navigation_target = Some(None),
+                    _ => {}
+                }
+            }
+            if let AppAction::SelectRoom { room_id } = &action
+                && self
+                    .pending_select
+                    .get(room_id)
+                    .is_none_or(|queue| queue.is_empty())
+                && !batch_origin.is_test_injected()
+            {
+                // A cancelled internal selection has no request owner left;
+                // do not let its delayed actor projection resurrect the room.
+                continue;
+            }
+            // Load each session-owned view before later projections can
+            // mutate it, unless an earlier action in this batch captured a
+            // persistence fence that must be applied first post-commit.
+            let navigation_load_fenced = post_projection_work
+                .iter()
+                .any(|(_, _, _, _, deferred, _)| deferred.has_navigation_persist());
+            let composer_load_fenced = post_projection_work
+                .iter()
+                .any(|(_, _, _, _, deferred, _)| deferred.has_composer_draft_persist());
+            let scheduled_load_fenced = post_projection_work
+                .iter()
+                .any(|(_, _, _, _, deferred, _)| deferred.has_scheduled_send_persist());
+            if !navigation_load_fenced && !matches!(&action, AppAction::NavigationLoaded { .. }) {
+                self.load_navigation_for_current_session().await;
+            }
+            if !composer_load_fenced {
+                self.load_composer_drafts_for_current_session().await;
+            }
+            if !scheduled_load_fenced {
+                self.load_scheduled_sends_for_current_session().await;
+            }
+            let action = guard_activity_resolution_completion(&self.state, action);
+            let composer_acceptance = composer_acceptance_identity_for_action(&action);
+            let trust_projection_transition = match &action {
+                AppAction::AuthoritativeDeviceTrustChanged {
+                    generation,
+                    transition_id,
+                    ..
+                } => Some((*generation, *transition_id)),
+                _ => None,
+            };
+            match &action {
+                AppAction::ActivityRowsObserved { rows } => {
+                    self.activity_projection.ingest(rows.clone());
+                }
+                AppAction::CanonicalActivityWindowReconciled {
+                    room_id,
+                    rows,
+                    redacted_event_ids,
+                    hidden_event_ids,
+                } => {
+                    self.activity_projection.reconcile_canonical_window(
+                        room_id.clone(),
+                        rows.clone(),
+                        redacted_event_ids.clone(),
+                        hidden_event_ids.clone(),
+                    );
+                }
+                AppAction::ActivityResolutionRowsObserved { rows, .. } => {
+                    self.activity_projection
+                        .ingest_resolution_rows(rows.clone());
+                }
+                _ => {}
+            }
+            if self.cancelled_date_navigation_request_id.is_some() {
+                // #1037: an accepted send superseded this date jump
+                // while its server lookup was in flight. Drop the
+                // account actor's atomic reply pair and release the
+                // focused timeline it subscribed after sending it.
+                match &action {
+                    AppAction::OpenFocusedContext { room_id, event_id } => {
+                        if let Some(account_key) = self.current_account_key() {
+                            cancelled_date_navigation_keys.push(TimelineKey {
+                                account_key,
+                                kind: TimelineKind::Focused {
+                                    room_id: room_id.clone(),
+                                    event_id: event_id.clone(),
+                                },
+                            });
+                        }
+                        continue;
+                    }
+                    AppAction::EnterAnchoredTimeline { .. } => {
+                        self.cancelled_date_navigation_request_id = None;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            if let (
+                Some(projection_request_id),
+                AppAction::OpenFocusedContext { room_id, event_id },
+            ) = (self.pending_date_navigation_request_id, &action)
+                && let Some(account_key) = self.current_account_key()
+            {
+                self.pending_focused_navigation = Some(PendingFocusedNavigation {
+                    projection_request_id,
+                    key: TimelineKey {
+                        account_key,
+                        kind: TimelineKind::Focused {
+                            room_id: room_id.clone(),
+                            event_id: event_id.clone(),
+                        },
+                    },
+                    room_id: room_id.clone(),
+                    event_id: event_id.clone(),
+                    allow_live_fallback: true,
+                    generation: None,
+                });
+            }
+            if self.pending_date_navigation_request_id.is_some()
+                && matches!(&action, AppAction::EnterAnchoredTimeline { .. })
+            {
+                // The account actor emits the legacy pair atomically;
+                // retain only Open and wait for the WebView projection ACK.
+                self.pending_date_navigation_request_id = None;
+                continue;
+            }
+            // For SelectRoom: capture observable facts BEFORE reduce so
+            // we can classify the outcome afterwards and emit the
+            // telemetry-lane IntentLifecycle event. Private-data-free:
+            // we capture only boolean flags and a count.
+            let select_intent_pre: Option<(String, bool, bool, bool, usize)> =
+                if let AppAction::SelectRoom { room_id } = &action {
+                    let session_ready = matches!(self.state.session, SessionState::Ready(_));
+                    let found = self.state.rooms.iter().any(|r| r.room_id == *room_id);
+                    let already =
+                        self.state.navigation.active_room_id.as_deref() == Some(room_id.as_str());
+                    let rooms_len = self.state.rooms.len();
+                    Some((room_id.clone(), session_ready, found, already, rooms_len))
+                } else {
+                    None
+                };
+            // Actor-originated actions are post-side-effect
+            // projections: the owner actor has already performed
+            // the corresponding Matrix/store/sync operation.
+            // AppActor owns AppCommand effects above; replaying
+            // actor-projection effects here would double-execute
+            // login, restore, sync, or recovery work.
+            let active_room_before_reduce = self.state.navigation.active_room_id.clone();
+            let room_timeline_before_reduce = self.current_room_timeline_key();
+            let action_for_navigation_cleanup = action.clone();
+            let (post_projection_effects, deferred_reducer_side_effects) =
+                self.reduce_app_action_state(action);
+            if deferred_reducer_side_effects.discards_composer_drafts() {
+                // A destructive transition in this same reducer batch
+                // supersedes draft saves captured by earlier actions.
+                for (_, _, _, _, queued_deferred, _) in &mut post_projection_work {
+                    queued_deferred.cancel_composer_draft_persist();
+                }
+            }
+            let active_room_changed =
+                active_room_before_reduce != self.state.navigation.active_room_id;
+            let replacement_room_for_cleanup = navigation_replacement_room_for_cleanup(
+                &action_for_navigation_cleanup,
+                active_room_before_reduce.as_deref(),
+                self.state.navigation.active_room_id.as_deref(),
+            );
+            let replacement_room_id_for_cleanup = replacement_room_for_cleanup
+                .as_ref()
+                .and_then(NavigationReplacementRoomForCleanup::room_id);
+            let cancel_replaced_room_timeline_pagination =
+                replacement_room_for_cleanup.as_ref().and_then(|_| {
+                    cancel_replaced_room_timeline_pagination_key(
+                        room_timeline_before_reduce.clone(),
+                        replacement_room_id_for_cleanup,
+                    )
+                });
+            let cancel_replaced_room_timeline_link_previews =
+                replacement_room_for_cleanup.as_ref().and_then(|_| {
+                    cancel_replaced_room_timeline_link_previews_key(
+                        room_timeline_before_reduce.clone(),
+                        replacement_room_id_for_cleanup,
+                    )
+                });
+            let navigation_projection_generation = if active_room_changed {
+                match self.navigation_projection_generation.checked_add(1) {
+                    Some(generation) => {
+                        self.navigation_projection_generation = generation;
+                        Some(generation)
+                    }
+                    None => {
+                        record(DiagnosticEvent::new(
+                            DiagnosticLevel::Error,
+                            "core.navigation",
+                            "projection_generation_exhausted",
+                        ));
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            if matches!(action_for_navigation_cleanup, AppAction::SelectSpace { .. }) {
+                record(
+                    DiagnosticEvent::new(DiagnosticLevel::Debug, "core.space.transition", "reduce")
+                        .field(DiagnosticField::boolean(
+                            "active_room_changed",
+                            active_room_changed,
+                        ))
+                        .field(DiagnosticField::boolean(
+                            "active_room_present",
+                            self.state.navigation.active_room_id.is_some(),
+                        ))
+                        .field(DiagnosticField::boolean(
+                            "cleanup_pending",
+                            cancel_replaced_room_timeline_pagination.is_some()
+                                || cancel_replaced_room_timeline_link_previews.is_some(),
+                        ))
+                        .field(DiagnosticField::count(
+                            "rooms",
+                            self.state.rooms.len() as u64,
+                        ))
+                        .field(DiagnosticField::count(
+                            "projection_generation",
+                            navigation_projection_generation.unwrap_or(0),
+                        )),
+                );
+            }
+            let mut navigation_projection_cause = None;
+            if let Some((generation, transition_id)) = trust_projection_transition {
+                let ready = matches!(self.state.session, SessionState::Ready(_));
+                let locked = matches!(self.state.session, SessionState::Locked(_));
+                record(
+                    DiagnosticEvent::new(
+                        DiagnosticLevel::Info,
+                        "core.verification_admission",
+                        if ready {
+                            "trust_projection_reduced_ready"
+                        } else if locked {
+                            "trust_projection_reduced_locked"
+                        } else {
+                            "trust_projection_reduced_gated"
+                        },
+                    )
+                    .field(DiagnosticField::count("generation", generation))
+                    .field(DiagnosticField::count("transition_id", transition_id)),
+                );
+                let delivered = self
+                    .account_actor
+                    .send(AccountMessage::TrustProjectionApplied {
+                        generation,
+                        transition_id,
+                        ready,
+                        locked,
+                    })
+                    .await;
+                record(
+                    DiagnosticEvent::new(
+                        if delivered {
+                            DiagnosticLevel::Info
+                        } else {
+                            DiagnosticLevel::Warn
+                        },
+                        "core.verification_admission",
+                        if delivered {
+                            "trust_projection_ack_delivered"
+                        } else {
+                            "trust_projection_ack_delivery_failed"
+                        },
+                    )
+                    .field(DiagnosticField::count("generation", generation))
+                    .field(DiagnosticField::count("transition_id", transition_id)),
+                );
+            }
+            // Capture the correlated request now, but settle its outcome after
+            // the whole action batch has reduced. This keeps telemetry before
+            // publication while ensuring a superseded intermediate room is not
+            // reported as committed.
+            let select_request_id = select_intent_pre.as_ref().and_then(|(room_id, ..)| {
+                let request_id = self
+                    .pending_select
+                    .get_mut(room_id)
+                    .and_then(|q| q.pop_front());
+                if self
+                    .pending_select
+                    .get(room_id)
+                    .map(|q| q.is_empty())
+                    .unwrap_or(false)
+                {
+                    self.pending_select.remove(room_id);
+                }
+                request_id
+            });
+            if let Some((room_id, session_ready, found, already, rooms_len)) = select_intent_pre {
+                let committed =
+                    self.state.navigation.active_room_id.as_deref() == Some(room_id.as_str());
+                record(
+                    DiagnosticEvent::new(DiagnosticLevel::Debug, "core.intent", "select_reduce")
+                        .field(DiagnosticField::boolean("found", found))
+                        .field(DiagnosticField::boolean("session_ready", session_ready))
+                        .field(DiagnosticField::count("rooms", rooms_len as u64))
+                        .field(DiagnosticField::boolean("committed", committed)),
+                );
+                if let Some(request_id) = select_request_id {
+                    pending_select_settlements.push((
+                        request_id,
+                        room_id,
+                        session_ready,
+                        found,
+                        already,
+                        rooms_len,
+                        committed,
+                    ));
+                }
+                if committed {
+                    navigation_projection_cause = select_request_id;
+                }
+            }
+            // Stage 1 keeps only synchronous state derivation before publish.
+            // Every transport, cleanup, persistence, and UI effect from this
+            // action is queued uniformly for the post-commit stage below.
+            if let Some(activity_update) = self
+                .activity_projection
+                .update_action_for_open_state(&self.state)
+            {
+                let (activity_effects, activity_deferred) =
+                    self.reduce_app_action_state(activity_update);
+                post_projection_work.push((
+                    activity_effects,
+                    None,
+                    None,
+                    crate::timeline::NavigationProjectionCleanup::default(),
+                    activity_deferred,
+                    None,
+                ));
+            }
+            post_projection_work.push((
+                post_projection_effects,
+                navigation_projection_generation,
+                navigation_projection_cause,
+                crate::timeline::NavigationProjectionCleanup {
+                    cancel_pagination: cancel_replaced_room_timeline_pagination,
+                    cancel_link_previews: cancel_replaced_room_timeline_link_previews,
+                },
+                deferred_reducer_side_effects,
+                composer_acceptance,
+            ));
+            state_changed = true;
+        }
+        let published_generation = if state_changed {
+            self.publish_state_change(&before_state)
+        } else {
+            self.state_generation
+        };
+        if let Some(requested_room_id) = local_navigation_target {
+            // Scheduled before the terminal, never awaited by it.
+            self.admit_navigation_enrichment(requested_room_id.as_deref());
+        }
+        let final_active_room_id = self.state.navigation.active_room_id.clone();
+        for (request_id, room_id, session_ready, found, already, rooms_len, reduced_committed) in
+            pending_select_settlements
+        {
+            let outcome = if !session_ready {
+                IntentOutcome::FailedNoOp(IntentNoOpReason::SessionNotReady)
+            } else if !found {
+                IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState)
+            } else if (already || reduced_committed)
+                && final_active_room_id.as_deref() != Some(room_id.as_str())
+            {
+                IntentOutcome::FailedNoOp(IntentNoOpReason::Superseded)
+            } else if already {
+                IntentOutcome::BenignNoOp(IntentNoOpReason::AlreadyActive)
+            } else if reduced_committed {
+                IntentOutcome::Committed
+            } else {
+                IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState)
+            };
+            record(
+                DiagnosticEvent::new(DiagnosticLevel::Debug, "core.intent", "lifecycle")
+                    .field(DiagnosticField::request_id(
+                        "request_id",
+                        request_id.connection_id.0,
+                        request_id.sequence,
+                    ))
+                    .field(DiagnosticField::count("rooms", rooms_len as u64))
+                    .field(DiagnosticField::token(
+                        "outcome",
+                        intent_outcome_token(&outcome),
+                    )),
+            );
+            self.handle_event_navigation_select_outcome(request_id, outcome)
+                .await;
+            self.emit(CoreEvent::IntentLifecycle {
+                request_id,
+                outcome,
+                published_generation,
+            });
+        }
+
+        // Only after publication and every terminal has been emitted may
+        // cleanup, persistence, and other post-commit effects run.
+        for (
+            effects,
+            navigation_projection_generation,
+            navigation_projection_cause,
+            navigation_cleanup,
+            deferred_reducer_side_effects,
+            composer_acceptance,
+        ) in post_projection_work
+        {
+            let before_post_projection = self.state.clone();
+            self.handle_post_projection_effects(
+                &effects,
+                navigation_projection_generation,
+                navigation_projection_cause,
+                navigation_cleanup,
+            )
+            .await;
+            self.apply_deferred_reducer_side_effects(deferred_reducer_side_effects)
+                .await;
+            if let Some(identity) = composer_acceptance {
+                self.pending_composer_acceptances
+                    .retain(|_, pending| pending.identity != identity);
+            }
+            self.handle_ui_event_effects(&effects).await;
+            if self.state != before_post_projection {
+                self.publish_state_change(&before_post_projection);
+            }
+        }
+        for key in cancelled_date_navigation_keys {
+            self.release_focused_timeline(key).await;
+        }
+        // Apply every captured persistence effect before loading the
+        // final session's views. In particular, an old-account draft
+        // save must not be overtaken by the new-account load.
+        let before_post_commit_loads = self.state.clone();
+        self.load_room_preferences_for_current_session().await;
+        // A queued old-account navigation write must not be
+        // overtaken by the new account's load (#971).
+        self.flush_pending_navigation().await;
+        self.load_navigation_for_current_session().await;
+        self.load_composer_drafts_for_current_session().await;
+        self.load_scheduled_sends_for_current_session().await;
+        if self.state != before_post_commit_loads {
+            self.publish_state_change(&before_post_commit_loads);
+        }
+        app_loop_trace(
+            batch_origin.trace_stage(),
+            action_batch,
+            clone_ms,
+            loop_started.elapsed(),
+        );
     }
 
     #[cfg(any(test, feature = "test-hooks"))]
@@ -3781,19 +3779,35 @@ impl AppActor {
                     }
                     _ => {}
                 }
-                // User-intent lane: for SelectRoom, record the request_id→room_id
-                // correlation BEFORE forwarding so the action loop can emit the
-                // terminal IntentLifecycle outcome. This command path is reliable
-                // and must never be converted into a drop-on-full background path.
-                if let koushi_protocol::command::RoomCommand::SelectRoom {
-                    request_id,
-                    ref room_id,
-                } = room_command
-                {
-                    self.pending_select
-                        .entry(room_id.clone())
-                        .or_default()
-                        .push_back(request_id);
+                // #1060: room and Space selection are purely local navigation.
+                // AppActor reduces them through the action-batch commit
+                // pipeline instead of a round trip through the AccountActor /
+                // RoomActor network-operation mailboxes.
+                match room_command {
+                    koushi_protocol::command::RoomCommand::SelectRoom {
+                        request_id,
+                        room_id,
+                    } => {
+                        // User-intent lane: record the request_id→room_id
+                        // correlation BEFORE reducing so the commit pipeline
+                        // emits exactly one terminal IntentLifecycle outcome.
+                        self.pending_select
+                            .entry(room_id.clone())
+                            .or_default()
+                            .push_back(request_id);
+                        self.commit_local_navigation(AppAction::SelectRoom { room_id })
+                            .await;
+                        return state_changed;
+                    }
+                    koushi_protocol::command::RoomCommand::SelectSpace {
+                        request_id: _,
+                        space_id,
+                    } => {
+                        self.commit_local_navigation(AppAction::SelectSpace { space_id })
+                            .await;
+                        return state_changed;
+                    }
+                    _ => {}
                 }
                 let forward_failure = space_member_forward_failure_action(&room_command);
                 // Route to AccountActor (which forwards to RoomActor).
