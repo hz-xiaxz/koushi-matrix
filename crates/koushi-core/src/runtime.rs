@@ -10,6 +10,7 @@
 mod activity;
 mod composer;
 mod connection;
+mod deferred_dispatch;
 mod navigation;
 mod profile_display_diagnostics;
 mod readers;
@@ -668,6 +669,7 @@ impl CoreRuntime {
             account_actor,
             activity_projection: ActivityProjection::default(),
             activity_resolution_generation: 0,
+            deferred_account_dispatch: Default::default(),
             next_internal_request_sequence: 1,
             navigation_projection_generation: 0,
             pending_select: HashMap::new(),
@@ -984,6 +986,9 @@ struct AppActor {
     account_actor: AccountActorHandle,
     activity_projection: ActivityProjection,
     activity_resolution_generation: u64,
+    /// #1060: batch-commit dispatches waiting for AccountActor mailbox
+    /// capacity; delivered from the run loop, never awaited in a commit.
+    deferred_account_dispatch: deferred_dispatch::DeferredAccountDispatch,
     next_internal_request_sequence: u64,
     /// Private ordering fence for committed room projections. Request ids are
     /// correlation values and are not monotonic across connections.
@@ -1177,6 +1182,12 @@ impl AppActor {
             let composer_draft_persist_delay = self.composer_draft_persist_delay();
             let navigation_persist_delay = self.navigation_persist_delay();
             let scheduled_send_delay = self.scheduled_send_delay();
+            // #1060: wait for AccountActor capacity only while a batch-commit
+            // dispatch is deferred.
+            let deferred_dispatch_permit = self
+                .deferred_account_dispatch
+                .is_pending()
+                .then(|| self.account_actor.reserve_owned());
             tokio::select! {
                 _ = async {
                     match composer_draft_persist_delay {
@@ -1264,6 +1275,16 @@ impl AppActor {
                     if shutdown {
                         break;
                     }
+                }
+                // Guarded: without a deferred dispatch this arm is disabled,
+                // so free mailbox capacity cannot spin the loop.
+                permit = async {
+                    match deferred_dispatch_permit {
+                        Some(permit) => permit.await,
+                        None => future::pending().await,
+                    }
+                }, if self.deferred_account_dispatch.is_pending() => {
+                    self.deliver_deferred_account_dispatch(permit).await;
                 }
                 event_navigation_prepared = self.event_navigation_prepared_rx.recv() => {
                     if let Some(event_navigation_prepared) = event_navigation_prepared {
@@ -1952,13 +1973,10 @@ impl AppActor {
             })
             .await;
         self.handle_ui_event_effects(&effects).await;
-        if !self
-            .account_actor
-            .send(AccountMessage::ResolveActivity {
-                generation,
-                requests,
-            })
-            .await
+        // #1060: this runs inside the action-batch commit, so the dispatch
+        // must never wait for AccountActor mailbox capacity.
+        if let deferred_dispatch::ActivityResolutionDispatch::Closed =
+            self.dispatch_activity_resolution(generation, total_unresolved_room_count, requests)
         {
             // No task will settle this generation; keep it retryable.
             let effects = self
@@ -4686,7 +4704,7 @@ impl AppActor {
         }
     }
 
-    async fn handle_ui_event_effects(&self, effects: &[AppEffect]) {
+    async fn handle_ui_event_effects(&mut self, effects: &[AppEffect]) {
         for effect in effects {
             if let AppEffect::EmitUiEvent(ui_event) = effect {
                 self.handle_ui_event_effect(ui_event).await;
@@ -4697,17 +4715,14 @@ impl AppActor {
             } = effect
             {
                 // Route from actor-projection path: forward to SearchActor via
-                // AccountActor (fire-and-forget, idempotent).
-                let _ = self
-                    .account_actor
-                    .send(
-                        crate::account::AccountMessage::NotifySearchCrawlerRoomsAvailable {
-                            room_ids: room_ids.clone(),
-                            latest_event_ids: latest_event_ids.clone(),
-                            settings: settings.clone(),
-                        },
-                    )
-                    .await;
+                // AccountActor (fire-and-forget, idempotent). Every live
+                // room-list update emits this, so it is latest-wins deferred
+                // rather than awaited when the mailbox is full (#1060).
+                self.dispatch_search_crawler_rooms(
+                    room_ids.clone(),
+                    latest_event_ids.clone(),
+                    settings.clone(),
+                );
             } else if let AppEffect::InvalidateSearchCrawlerCache = effect {
                 let _ = self
                     .account_actor

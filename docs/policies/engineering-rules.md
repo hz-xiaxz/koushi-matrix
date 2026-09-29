@@ -690,7 +690,12 @@ Rules:
    for a network-operation mailbox at all: AppActor reduces
    `SelectRoom`/`SelectSpace` itself, and their post-commit network
    enrichment and focused-timeline release travel as retained latest-wins
-   values rather than awaited mailbox admission (#1060).
+   values rather than awaited mailbox admission (#1060). Work that an
+   action-batch commit dispatches to the AccountActor must not hold the
+   AppActor loop either: generation-guarded or latest-wins dispatches
+   (Activity resolution, search-crawler room availability) try the mailbox
+   once and otherwise keep one deferred value per kind, which the AppActor
+   loop delivers when a slot frees; a newer value replaces a deferred one.
 12. User-intent commands resolve to a correlated, observable terminal outcome —
    never a silent no-op. A foreground one-shot command
    (account restore/login/logout, `SelectRoom`/`SelectSpace`, send/edit/redact,
