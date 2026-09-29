@@ -1079,37 +1079,57 @@ async fn navigation_network_selection_commits_after_a_live_leave_reloads_space_c
     harness.actor_task.abort();
 }
 
-/// Every crawler-lane message delivered after the mailbox frees, in order.
-async fn crawler_lane(account_rx: &mut mpsc::Receiver<AccountMessage>) -> Vec<String> {
-    let mut lane = Vec::new();
-    while let Ok(Some(message)) =
-        executor::timeout(Duration::from_millis(200), account_rx.recv()).await
-    {
-        match message {
-            AccountMessage::NotifySearchCrawlerRoomsAvailable { settings, .. } => {
-                lane.push(format!(
-                    "notify:{:?}:captions={}:filenames={}",
-                    settings.speed, settings.include_media_captions, settings.include_filenames
-                ))
-            }
-            AccountMessage::InvalidateSearchCrawlerCache => lane.push("invalidate".to_owned()),
-            AccountMessage::RebuildSearchIndex => lane.push("rebuild".to_owned()),
-            _ => {}
-        }
-    }
-    lane
+type Observation = super::super::deferred_dispatch::DeferredDispatchObservation;
+
+/// Start with the test-only deferred-dispatch observer installed. Each
+/// observation follows one dispatch decision, so it is a causal fence for
+/// "AppActor has handled this" without any sleep.
+async fn start_observed(state: AppState) -> (BlockedMailbox, mpsc::UnboundedReceiver<Observation>) {
+    let (observer, observations) = mpsc::unbounded_channel();
+    let harness = BlockedMailbox::start_with(state, |actor| {
+        actor.deferred_account_dispatch.observer = Some(observer);
+    })
+    .await;
+    (harness, observations)
 }
 
-/// A live room-list update defers a crawler notification with the current
+/// The first observation matching `predicate`, under one absolute deadline.
+async fn observation(
+    observations: &mut mpsc::UnboundedReceiver<Observation>,
+    predicate: impl Fn(&Observation) -> bool,
+) -> Observation {
+    executor::timeout(DEADLINE, async {
+        loop {
+            let observed = observations.recv().await.expect("observer remains open");
+            if predicate(&observed) {
+                return observed;
+            }
+        }
+    })
+    .await
+    .expect("AppActor makes the expected dispatch decision while the mailbox is full")
+}
+
+fn crawler_label(settings: &koushi_state::SearchCrawlerSettings) -> String {
+    super::super::deferred_dispatch::crawler_settings_label(settings)
+}
+
+/// A live room-list update holds a crawler notification with the current
 /// settings; then the user changes crawler settings while the mailbox is
-/// still full. The settings change must win: no stale notification may be
-/// delivered after it.
+/// still full. Returns the held lane after the change and the crawler-lane
+/// messages delivered once the mailbox frees, up to the last notification.
 async fn crawler_settings_change_while_deferred(
     change: impl FnOnce(&mut koushi_state::SearchCrawlerSettings),
-) -> Vec<String> {
-    let mut harness = BlockedMailbox::start(navigation_state()).await;
+) -> (Vec<String>, Vec<String>) {
+    let (mut harness, mut observations) = start_observed(navigation_state()).await;
+    let before = harness.initial.settings.values.search_crawler.clone();
     harness.live_unresolved_dms(&[UNRESOLVED_DM]).await;
-    let mut settings = harness.initial.settings.values.search_crawler.clone();
+    observation(&mut observations, |observed| {
+        observed.crawler_lane == [crawler_label(&before)]
+    })
+    .await;
+
+    let mut settings = before;
     change(&mut settings);
     let _admitted = harness
         .submit(CoreCommand::App(AppCommand::UpdateSettings {
@@ -1120,70 +1140,82 @@ async fn crawler_settings_change_while_deferred(
             },
         }))
         .await;
-    // Let AppActor take the settings command before the mailbox frees; it may
-    // publish the new settings only after delivering what the change needs.
-    executor::sleep(Duration::from_millis(50)).await;
+    // AppActor is now inside the settings command, so the run loop cannot
+    // deliver the held notification until the command returns. The command
+    // itself waits on the full mailbox for its settings-policy broadcasts, so
+    // no settings snapshot can be awaited while the mailbox is held.
+    observation(&mut observations, |observed| observed.event == "command").await;
 
-    assert!(matches!(
-        harness.account_rx.recv().await,
-        Some(AccountMessage::CancelActivityResolution)
-    ));
-    let lane = crawler_lane(&mut harness.account_rx).await;
-    harness
-        .wait_for_snapshot(|state| state.settings.values.search_crawler == settings)
-        .await;
+    // Free the mailbox and keep draining it. The command's crawler dispatch
+    // joins the held lane, and the lane ends with its notification, so every
+    // lane message has arrived once that one has.
+    let expected_last = crawler_label(&settings);
+    let delivered = drain_crawler_lane(&mut harness.account_rx, &expected_last).await;
+    // The final authoritative check of what the command left held: its last
+    // crawler dispatch decision, made before anything could be delivered.
+    let held = std::iter::from_fn(|| observations.try_recv().ok())
+        .filter(|observed| observed.event == "crawler")
+        .last()
+        .expect("the settings change made a crawler dispatch decision")
+        .crawler_lane;
     harness.actor_task.abort();
-    lane
+    (held, delivered)
 }
 
+/// Drain the freed mailbox until the crawler lane's last notification,
+/// returning every crawler-lane message in delivery order.
+async fn drain_crawler_lane(
+    account_rx: &mut mpsc::Receiver<AccountMessage>,
+    expected_last: &str,
+) -> Vec<String> {
+    executor::timeout(DEADLINE, async {
+        let mut delivered = Vec::new();
+        loop {
+            match account_rx.recv().await.expect("mailbox remains open") {
+                AccountMessage::NotifySearchCrawlerRoomsAvailable { settings, .. } => {
+                    delivered.push(crawler_label(&settings));
+                    if delivered.last().map(String::as_str) == Some(expected_last) {
+                        return delivered;
+                    }
+                }
+                AccountMessage::InvalidateSearchCrawlerCache => {
+                    delivered.push("invalidate".to_owned());
+                }
+                AccountMessage::RebuildSearchIndex => delivered.push("rebuild".to_owned()),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("the held crawler lane is delivered once the mailbox has capacity")
+}
 #[tokio::test]
 async fn navigation_network_crawler_pause_supersedes_a_deferred_notification() {
-    let lane = crawler_settings_change_while_deferred(|settings| {
+    let (held, delivered) = crawler_settings_change_while_deferred(|settings| {
         settings.speed = koushi_state::SearchCrawlerSpeed::Paused;
     })
     .await;
-    assert_eq!(
-        lane.last().map(String::as_str),
-        Some("notify:Paused:captions=true:filenames=true"),
-        "the last crawler notification carries the paused settings: {lane:?}"
-    );
-    assert_eq!(
-        lane.iter()
-            .filter(|entry| entry.starts_with("notify:"))
-            .count(),
-        1,
-        "the stale active notification is superseded: {lane:?}"
-    );
+    // The stale active notification was superseded while held, and nothing
+    // else of the lane is delivered.
+    let paused = "notify:Paused:captions=true:filenames=true".to_owned();
+    assert_eq!(held, [paused.clone()]);
+    assert_eq!(delivered, [paused]);
 }
 
 #[tokio::test]
 async fn navigation_network_caption_opt_out_supersedes_a_deferred_notification() {
-    let lane = crawler_settings_change_while_deferred(|settings| {
+    let (held, delivered) = crawler_settings_change_while_deferred(|settings| {
         settings.include_media_captions = false;
     })
     .await;
-    let invalidate = lane
-        .iter()
-        .position(|entry| entry == "invalidate")
-        .unwrap_or_else(|| panic!("the opt-out invalidates the crawler cache: {lane:?}"));
-    let notifies: Vec<(usize, &String)> = lane
-        .iter()
-        .enumerate()
-        .filter(|(_, entry)| entry.starts_with("notify:"))
-        .collect();
-    assert_eq!(
-        notifies.len(),
-        1,
-        "no stale notification survives: {lane:?}"
-    );
-    assert!(
-        notifies[0].0 > invalidate,
-        "invalidate precedes the re-crawl: {lane:?}"
-    );
-    assert!(
-        notifies[0].1.contains("captions=false"),
-        "the re-crawl uses the opted-out settings: {lane:?}"
-    );
+    // The cache is invalidated before the re-crawl, which uses the opted-out
+    // settings; the stale caption-enabled notification never follows.
+    let expected = [
+        "invalidate".to_owned(),
+        "notify:Standard:captions=false:filenames=true".to_owned(),
+    ];
+    assert_eq!(held, expected);
+    assert_eq!(delivered, expected);
 }
 
 #[tokio::test]
@@ -1234,7 +1266,7 @@ async fn navigation_network_user_reload_replaces_a_held_live_leave_reload() {
             space_id: Some(SPACE.to_owned()),
         },
     );
-    let mut harness = BlockedMailbox::start(state).await;
+    let (mut harness, mut observations) = start_observed(state).await;
     executor::timeout(
         DEADLINE,
         harness.action_tx.send(vec![AppAction::RoomLeftLocally {
@@ -1244,43 +1276,90 @@ async fn navigation_network_user_reload_replaces_a_held_live_leave_reload() {
     .await
     .expect("action ingress must not wait for the AccountActor")
     .expect("action ingress remains open");
-    let left = harness
-        .wait_for_snapshot(|state| {
-            state.space_children.load == koushi_state::SpaceChildrenLoadState::Loading
-        })
-        .await;
-    // The user asks for the same Space and generation while the leave's
-    // reload is still held.
+    let generation = observation(&mut observations, |observed| {
+        observed.event == "space_children_reload"
+    })
+    .await
+    .space_children_reload
+    .expect("the live leave's reload is held");
+
+    // The user asks for the same Space and generation while it is held; the
+    // held reload is dropped as AppActor admits the user's.
     let _admitted = harness
         .submit(CoreCommand::Room(RoomCommand::LoadSpaceChildren {
             request_id: request(50),
             space_id: SPACE.to_owned(),
-            generation: left.space_children.generation,
+            generation,
         }))
         .await;
-    // AppActor has taken the command once the one-slot ingress is free again;
-    // it then forwards the command before the mailbox frees below.
-    executor::timeout(DEADLINE, async {
-        while harness.command_tx.capacity() == 0 {
-            executor::sleep(Duration::from_millis(1)).await;
+    let admitted = observation(&mut observations, |observed| {
+        observed.event == "user_space_children_reload"
+    })
+    .await;
+    assert_eq!(
+        admitted.space_children_reload, None,
+        "nothing else holds a /hierarchy request for this generation"
+    );
+
+    // Once the mailbox frees, the only reload for this generation is the
+    // user's own request.
+    assert!(matches!(
+        harness.account_rx.recv().await,
+        Some(AccountMessage::CancelActivityResolution)
+    ));
+    let reload = executor::timeout(DEADLINE, async {
+        loop {
+            if let Some(AccountMessage::RoomCommand(RoomCommand::LoadSpaceChildren {
+                request_id,
+                generation: loaded,
+                ..
+            })) = harness.account_rx.recv().await
+            {
+                return (request_id, loaded);
+            }
         }
     })
     .await
-    .expect("AppActor takes the reload command");
-    executor::sleep(Duration::from_millis(20)).await;
+    .expect("the user's reload is forwarded once the mailbox has capacity");
+    assert_eq!(reload, (request(50), generation));
+    harness.actor_task.abort();
+}
+
+#[tokio::test]
+async fn navigation_network_rebuild_keeps_a_held_paused_notification() {
+    // #1060 review: a rebuild changes no crawler settings, and its reducer
+    // re-notifies only while crawling is active. A held paused notification
+    // must survive it, or an older active notification could restart
+    // crawling while settings say paused.
+    let mut state = navigation_state();
+    state.settings.values.search_crawler.speed = koushi_state::SearchCrawlerSpeed::Paused;
+    let paused = state.settings.values.search_crawler.clone();
+    let (observer, mut observations) = mpsc::unbounded_channel();
+    let mut harness = BlockedMailbox::start_with(state, |actor| {
+        let session_key = super::super::navigation::navigation_session_key(&actor.state);
+        actor
+            .deferred_account_dispatch
+            .hold_crawler_notification_for_test(session_key, paused.clone());
+        actor.deferred_account_dispatch.observer = Some(observer);
+    })
+    .await;
+
+    let _admitted = harness
+        .submit(CoreCommand::App(AppCommand::RebuildSearchIndex {
+            request_id: request(60),
+        }))
+        .await;
+    let held = observation(&mut observations, |observed| observed.event == "crawler")
+        .await
+        .crawler_lane;
+    let paused_label = crawler_label(&paused);
+    assert_eq!(held, ["rebuild".to_owned(), paused_label.clone()]);
 
     assert!(matches!(
         harness.account_rx.recv().await,
         Some(AccountMessage::CancelActivityResolution)
     ));
-    let mut reloads = 0;
-    while let Ok(Some(message)) =
-        executor::timeout(Duration::from_millis(200), harness.account_rx.recv()).await
-    {
-        if let AccountMessage::RoomCommand(RoomCommand::LoadSpaceChildren { .. }) = message {
-            reloads += 1;
-        }
-    }
-    assert_eq!(reloads, 1, "one /hierarchy request per Space generation");
+    let delivered = drain_crawler_lane(&mut harness.account_rx, &paused_label).await;
+    assert_eq!(delivered, ["rebuild".to_owned(), paused_label]);
     harness.actor_task.abort();
 }

@@ -701,8 +701,10 @@ Rules:
    through that path, command-originated ones included, so a held value is
    never delivered after a newer one; the crawler lane stays ordered, so a
    stale notification can never undo a caption or filename opt-out.
-   Session-lifecycle effects (sync start/stop, trust and backup checks,
-   session status) still await admission.
+   Still awaiting admission: session-lifecycle effects (sync start/stop,
+   trust and backup checks, session status), the settings-policy broadcasts
+   that follow a settings change (read-receipt, display, and link-preview
+   policy), and user commands routed to the AccountActor.
 12. User-intent commands resolve to a correlated, observable terminal outcome —
    never a silent no-op. A foreground one-shot command
    (account restore/login/logout, `SelectRoom`/`SelectSpace`, send/edit/redact,

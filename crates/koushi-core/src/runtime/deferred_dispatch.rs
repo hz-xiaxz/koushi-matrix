@@ -22,11 +22,12 @@
 //!   `InvalidateSearchCrawlerCache`, `NotifySearchCrawlerRoomsAvailable`):
 //!   ordered. While anything is held, later lane messages join the held lane
 //!   instead of overtaking it. Rebuild and invalidate are idempotent flags
-//!   delivered before the notification; they supersede a held earlier
-//!   notification, because every reducer that emits them also emits the
-//!   follow-up notification (with the new settings) whenever crawling is
-//!   active. A newer notification replaces a held one. The lane is fenced to
-//!   the session that produced it.
+//!   delivered before the notification. A rebuild changes no settings, so a
+//!   held notification stays and follows it. An invalidate (a caption or
+//!   filename opt-out) supersedes a held earlier notification, because its
+//!   reducer also emits the follow-up notification with the new settings. A
+//!   newer notification replaces a held one. The lane is fenced to the
+//!   session that produced it.
 //!
 //! The run loop waits for one mailbox slot only while something is deferred,
 //! so free capacity can never spin it.
@@ -96,10 +97,9 @@ impl DeferredCrawlerLane {
 
     fn push(&mut self, dispatch: CrawlerDispatch) {
         match dispatch {
-            CrawlerDispatch::Rebuild => {
-                self.rebuild = true;
-                self.notify = None;
-            }
+            // A rebuild changes no crawler settings: a held notification is
+            // still the newest and follows the rebuild (#1060 review).
+            CrawlerDispatch::Rebuild => self.rebuild = true,
             CrawlerDispatch::Invalidate => {
                 self.invalidate = true;
                 self.notify = None;
@@ -163,12 +163,81 @@ pub(super) struct DeferredAccountDispatch {
     activity: Option<DeferredActivity>,
     space_children_reload: Option<DeferredSpaceChildrenReload>,
     crawler: Option<DeferredCrawlerLane>,
+    /// Test-only causal fence: after each dispatch decision, the held state.
+    #[cfg(test)]
+    pub(super) observer: Option<mpsc::UnboundedSender<DeferredDispatchObservation>>,
+}
+
+/// Test-only view of what is held after one dispatch decision.
+#[cfg(test)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct DeferredDispatchObservation {
+    pub(super) event: &'static str,
+    pub(super) space_children_reload: Option<u64>,
+    pub(super) crawler_lane: Vec<String>,
 }
 
 impl DeferredAccountDispatch {
     pub(super) fn is_pending(&self) -> bool {
         self.activity.is_some() || self.space_children_reload.is_some() || self.crawler.is_some()
     }
+
+    /// Test-only: start with a crawler notification already held.
+    #[cfg(test)]
+    pub(super) fn hold_crawler_notification_for_test(
+        &mut self,
+        session_key: Option<SessionKeyId>,
+        settings: koushi_state::SearchCrawlerSettings,
+    ) {
+        let mut lane = DeferredCrawlerLane::new(session_key);
+        lane.push(CrawlerDispatch::Notify(CrawlerRooms {
+            room_ids: Vec::new(),
+            latest_event_ids: Default::default(),
+            settings,
+        }));
+        self.crawler = Some(lane);
+    }
+
+    #[cfg(test)]
+    pub(super) fn observe(&self, event: &'static str) {
+        let Some(observer) = &self.observer else {
+            return;
+        };
+        let crawler_lane = self
+            .crawler
+            .as_ref()
+            .map(|lane| {
+                let mut entries = Vec::new();
+                if lane.rebuild {
+                    entries.push("rebuild".to_owned());
+                }
+                if lane.invalidate {
+                    entries.push("invalidate".to_owned());
+                }
+                if let Some(rooms) = &lane.notify {
+                    entries.push(crawler_settings_label(&rooms.settings));
+                }
+                entries
+            })
+            .unwrap_or_default();
+        let _ = observer.send(DeferredDispatchObservation {
+            event,
+            space_children_reload: self
+                .space_children_reload
+                .as_ref()
+                .map(|reload| reload.generation),
+            crawler_lane,
+        });
+    }
+}
+
+/// Test-only label of a crawler notification's settings.
+#[cfg(test)]
+pub(super) fn crawler_settings_label(settings: &koushi_state::SearchCrawlerSettings) -> String {
+    format!(
+        "notify:{:?}:captions={}:filenames={}",
+        settings.speed, settings.include_media_captions, settings.include_filenames
+    )
 }
 
 /// Whether a generation-guarded dispatch reached the mailbox (now or
@@ -260,6 +329,9 @@ impl AppActor {
                         space_id,
                         generation,
                     });
+                #[cfg(test)]
+                self.deferred_account_dispatch
+                    .observe("space_children_reload");
                 GuardedDispatch::SentOrDeferred
             }
             mpsc::error::TrySendError::Closed(_) => GuardedDispatch::Closed,
@@ -280,6 +352,9 @@ impl AppActor {
         {
             self.deferred_account_dispatch.space_children_reload = None;
         }
+        #[cfg(test)]
+        self.deferred_account_dispatch
+            .observe("user_space_children_reload");
     }
 
     /// Send one search-crawler lane message, or hold it behind the lane.
@@ -292,6 +367,8 @@ impl AppActor {
                 *lane = DeferredCrawlerLane::new(session_key);
             }
             lane.push(dispatch);
+            #[cfg(test)]
+            self.deferred_account_dispatch.observe("crawler");
             return;
         }
         if let Err(unsent) = self.account_actor.try_send(crawler_message(dispatch))
@@ -302,6 +379,8 @@ impl AppActor {
             self.deferred_account_dispatch.crawler = Some(lane);
         }
         // A closed mailbox has no crawler to notify; there is nothing to settle.
+        #[cfg(test)]
+        self.deferred_account_dispatch.observe("crawler");
     }
 
     /// Whether open Activity still waits on this resolution generation.

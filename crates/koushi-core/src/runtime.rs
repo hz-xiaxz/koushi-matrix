@@ -2059,6 +2059,10 @@ impl AppActor {
 
     /// Returns whether `AppState` changed.
     async fn handle_command(&mut self, envelope: CoreCommandEnvelope) -> bool {
+        // Test-only causal fence: the command is being handled, so the run
+        // loop cannot deliver a deferred dispatch until it returns.
+        #[cfg(test)]
+        self.deferred_account_dispatch.observe("command");
         match envelope {
             CoreCommandEnvelope::ReaderPrepared(prepared) => {
                 self.handle_reader_prepared(prepared);
