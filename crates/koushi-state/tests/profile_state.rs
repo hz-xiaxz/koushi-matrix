@@ -1185,6 +1185,8 @@ fn room_space_and_invite_summaries_surface_avatar_mxc() {
                 child_room_ids: vec!["!room:localhost".to_owned()],
             }],
             rooms: vec![RoomSummary {
+                display_name_placeholder: None,
+                display_label_placeholder: None,
                 room_id: "!room:localhost".to_owned(),
                 display_name: "Room".to_owned(),
                 display_label: "Room".to_owned(),

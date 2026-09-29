@@ -14,7 +14,7 @@ import type {
 } from "../domain/types";
 import { contextMenuItems } from "../domain/contextMenus";
 import { t } from "../i18n/messages";
-import { ICON_SIZE, operationFailureLabel, type OpenContextMenu } from "../app/uiShared";
+import { avatarInitial, ICON_SIZE, operationFailureLabel, type OpenContextMenu } from "../app/uiShared";
 import { ImeTextField } from "./ImeTextControl";
 import { EntityAvatar } from "./Shell";
 
@@ -58,12 +58,6 @@ interface SpaceMembersSection {
   id: "joined" | "invited" | "child-only";
   label: string;
   entries: SpaceMemberEntry[];
-}
-
-function memberInitials(entry: SpaceMemberEntry): string {
-  const words = entry.display_label.trim().split(/\s+/).filter(Boolean);
-  const initials = words.length > 1 ? `${words[0]?.[0] ?? ""}${words[1]?.[0] ?? ""}` : words[0]?.slice(0, 2);
-  return (initials || "?").toUpperCase();
 }
 
 function memberRoleLabel(role: SpaceMemberEntry["role"]): string | null {
@@ -861,7 +855,7 @@ function SpaceMemberRow({
             avatar={avatar}
             className="space-members-avatar-content"
             colorSeed={entry.user_id}
-            fallback={memberInitials(entry)}
+            fallback={avatarInitial(entry.display_label)}
           />
         </span>
         <span className="space-members-row-text">

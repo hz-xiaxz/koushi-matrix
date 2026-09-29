@@ -173,7 +173,7 @@ pub struct NativeAttentionProjectionInput<'a> {
     pub window_focused: bool,
     pub observation: NativeAttentionObservationKind,
     pub previous_candidate: Option<&'a NativeAttentionCandidate>,
-    /// `SettingsValues.notifications.message_previews`. Device-local and ON
+    /// `SettingsValues.notifications.message_previews`. Device-local and OFF
     /// by default; when OFF the notification body carries counts only.
     pub message_previews: bool,
     pub capabilities: NativeAttentionCapabilities,
@@ -652,6 +652,8 @@ mod tests {
 
     fn unread_room() -> RoomSummary {
         RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "!room:example.invalid".to_owned(),
             display_name: "Room".to_owned(),
             display_label: "Room".to_owned(),

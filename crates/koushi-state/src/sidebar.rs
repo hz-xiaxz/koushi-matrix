@@ -101,6 +101,10 @@ pub struct RoomListItem {
     #[serde(default)]
     pub can_join: bool,
     pub display_name: String,
+    /// Mirrors `RoomSummary.display_label_placeholder` for `display_name`
+    /// (#1050): the GUI renders it through the message catalog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name_placeholder: Option<crate::state::RoomNamePlaceholder>,
     pub avatar: Option<AvatarImage>,
     pub tags: RoomTags,
     pub unread_count: u64,
@@ -463,6 +467,7 @@ fn not_joined_room_list_item(
         (false, membership) => membership,
     };
     RoomListItem {
+        display_name_placeholder: None,
         room_id: child.room_id.clone(),
         membership,
         // Accepting an invitation this account holds is always available; for
@@ -515,6 +520,7 @@ fn room_list_item(
         .map(|settings| settings.mode);
     let projection = room_attention_projection(room, mode);
     RoomListItem {
+        display_name_placeholder: room.display_label_placeholder.clone(),
         room_id: room.room_id.clone(),
         membership: SpaceChildMembership::Joined,
         can_join: false,

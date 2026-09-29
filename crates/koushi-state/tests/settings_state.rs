@@ -711,6 +711,8 @@ fn settings_load_and_persist_failures_are_private_data_free() {
 
 fn test_room(room_id: &str, display_name: &str, activity_timestamp_ms: u64) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: display_name.to_owned(),
         display_label: display_name.to_owned(),
@@ -1014,4 +1016,78 @@ fn close_to_tray_defaults_on_persists_and_backfills_for_legacy_stores() {
     )
     .expect("legacy settings should deserialize");
     assert!(legacy.window.close_to_tray);
+}
+
+#[test]
+fn sign_out_preserves_app_level_settings_for_the_next_save() {
+    // #1057: settings.json is app-level, not account-scoped. Signing out must
+    // not reset the in-memory values, or the next whole-struct save would
+    // overwrite the saved language (and every other preference) with defaults.
+    let mut state = AppState {
+        session: koushi_state::SessionState::Ready(koushi_state::SessionInfo {
+            homeserver: "https://matrix.example.org".to_owned(),
+            user_id: "@user:example.invalid".to_owned(),
+            device_id: "DEVICE".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        }),
+        ..AppState::default()
+    };
+    let loaded = SettingsValues {
+        locale: LocaleSettings {
+            language_tag: Some("ja-JP".to_owned()),
+            text_direction: TextDirectionPreference::Auto,
+        },
+        appearance: AppearanceSettings {
+            theme: ThemePreference::Dark,
+            ..AppearanceSettings::default()
+        },
+        ..SettingsValues::default()
+    };
+    reduce(
+        &mut state,
+        AppAction::SettingsLoaded {
+            values: loaded.clone(),
+        },
+    );
+
+    reduce(&mut state, AppAction::LogoutRequested);
+    reduce(&mut state, AppAction::LogoutFinished);
+
+    assert!(matches!(
+        state.session,
+        koushi_state::SessionState::SignedOut
+    ));
+    assert_eq!(state.settings.values, loaded);
+    assert_eq!(
+        koushi_state::resolve_catalog_locale(&state.settings.values.locale),
+        koushi_state::CatalogLocale::Ja
+    );
+
+    let effects = reduce(
+        &mut state,
+        AppAction::SettingsUpdateRequested {
+            request_id: 7,
+            patch: SettingsPatch {
+                appearance: Some(AppearanceSettings {
+                    theme: ThemePreference::Dark,
+                    density: koushi_state::DisplayDensity::Compact,
+                }),
+                ..SettingsPatch::default()
+            },
+        },
+    );
+
+    let persisted = effects
+        .iter()
+        .find_map(|effect| match effect {
+            AppEffect::PersistSettings { values, .. } => Some(values),
+            _ => None,
+        })
+        .expect("settings update persists");
+    assert_eq!(persisted.locale.language_tag.as_deref(), Some("ja-JP"));
+    assert_eq!(persisted.appearance.theme, ThemePreference::Dark);
+    assert_eq!(
+        persisted.appearance.density,
+        koushi_state::DisplayDensity::Compact
+    );
 }

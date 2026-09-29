@@ -24,6 +24,8 @@ fn ready_state_with_rooms(room_ids: &[&str]) -> AppState {
         rooms: room_ids
             .iter()
             .map(|id| RoomSummary {
+                display_name_placeholder: None,
+                display_label_placeholder: None,
                 room_id: (*id).to_owned(),
                 display_name: (*id).to_owned(),
                 display_label: (*id).to_owned(),

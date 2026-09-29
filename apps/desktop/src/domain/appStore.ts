@@ -3,6 +3,8 @@ import { subscribeWithSelector } from "zustand/middleware";
 
 import type { StateDeltaChangedSlices, StateDeltaPayload } from "./coreEvents";
 import type { MentionCandidate, TimelineForwardDestination } from "./projectionTypes";
+import { roomDisplayLabel } from "./roomDisplayLabel";
+import { getActiveLocale, type Locale } from "../i18n/messages";
 import type {
   ActivityRow,
   AppState,
@@ -25,6 +27,7 @@ const ROOM_MENTION_CANDIDATE: MentionCandidate = {
 };
 
 let cachedForwardRooms: DesktopSnapshot["state"]["domain"]["rooms"] | null = null;
+let cachedForwardLocale: Locale | null = null;
 let cachedForwardDestinations: TimelineForwardDestination[] = EMPTY_FORWARD_DESTINATIONS;
 const cachedMentionCandidatesByKey = new Map<
   string,
@@ -487,13 +490,16 @@ export function selectForwardDestinations(
     cachedForwardDestinations = EMPTY_FORWARD_DESTINATIONS;
     return cachedForwardDestinations;
   }
-  if (rooms === cachedForwardRooms) {
+  // Labels include catalog text (#1050), so a locale change invalidates them.
+  const locale = getActiveLocale();
+  if (rooms === cachedForwardRooms && locale === cachedForwardLocale) {
     return cachedForwardDestinations;
   }
   cachedForwardRooms = rooms;
+  cachedForwardLocale = locale;
   cachedForwardDestinations = rooms.map((room) => ({
     room_id: room.room_id,
-    display_name: room.display_label
+    display_name: roomDisplayLabel(room)
   }));
   return cachedForwardDestinations;
 }

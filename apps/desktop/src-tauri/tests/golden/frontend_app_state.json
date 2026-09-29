@@ -139,6 +139,15 @@
       "candidates": [
         {
           "avatar": null,
+          "display_name": "Empty Room (was Former Fixture)",
+          "room_id": "!redacted-room:example.invalid",
+          "status": {
+            "kind": "failed",
+            "reason": "network"
+          }
+        },
+        {
+          "avatar": null,
           "display_name": "Fixture Low Priority Room",
           "room_id": "!low-priority-room:example.invalid",
           "status": {
@@ -160,15 +169,6 @@
           "room_id": "!room:example.invalid",
           "status": {
             "kind": "added"
-          }
-        },
-        {
-          "avatar": null,
-          "display_name": "Redacted Fixture Room",
-          "room_id": "!redacted-room:example.invalid",
-          "status": {
-            "kind": "failed",
-            "reason": "network"
           }
         }
       ],
@@ -832,8 +832,16 @@
         {
           "avatar": null,
           "conversation_activity": null,
-          "display_label": "Redacted Fixture Room",
-          "display_name": "Redacted Fixture Room",
+          "display_label": "Empty Room (was Former Fixture)",
+          "display_label_placeholder": {
+            "kind": "emptyWas",
+            "previous_names": "Former Fixture"
+          },
+          "display_name": "Empty Room (was Former Fixture)",
+          "display_name_placeholder": {
+            "kind": "emptyWas",
+            "previous_names": "Former Fixture"
+          },
           "dm_space_ids": [],
           "dm_user_ids": [],
           "highlight_count": 0,
@@ -854,7 +862,7 @@
           },
           "marked_unread": false,
           "notification_count": 0,
-          "original_display_label": "Redacted Fixture Room",
+          "original_display_label": "Empty Room (was Former Fixture)",
           "parent_space_ids": [],
           "recency_stamp": 900000,
           "room_id": "!redacted-room:example.invalid",
@@ -942,7 +950,7 @@
           "notifications": {
             "badges": true,
             "desktop_notifications": true,
-            "message_previews": true,
+            "message_previews": false,
             "send_read_receipts": true,
             "send_typing_notifications": true,
             "sound": true

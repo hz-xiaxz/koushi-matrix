@@ -12,6 +12,8 @@ fn ready_state() -> AppState {
             authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
         }),
         rooms: vec![RoomSummary {
+            display_name_placeholder: None,
+            display_label_placeholder: None,
             room_id: "!room:localhost".to_owned(),
             display_name: "QA Seed Room".to_owned(),
             display_label: "QA Seed Room".to_owned(),

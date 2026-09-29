@@ -12,6 +12,8 @@ const DOMAINLESS: &str = "!31hneApxJ_1o-63DmFrpeqnkFfWppnzWso1JvH3ogLM";
 
 fn room(room_id: &str, name: &str, is_dm: bool, parents: &[&str]) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: name.to_owned(),
         display_label: name.to_owned(),

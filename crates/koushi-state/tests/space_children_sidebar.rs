@@ -16,6 +16,8 @@ const SPACE_ID: &str = "!space:example.invalid";
 
 fn joined_room(room_id: &str, label: &str) -> RoomSummary {
     RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: room_id.to_owned(),
         display_name: label.to_owned(),
         display_label: label.to_owned(),

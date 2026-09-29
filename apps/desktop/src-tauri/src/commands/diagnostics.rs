@@ -408,6 +408,8 @@ mod qa_tests {
         let snapshot = AppState {
             rooms: vec![
                 RoomSummary {
+                    display_name_placeholder: None,
+                    display_label_placeholder: None,
                     room_id: "!room1:example.org".to_owned(),
                     display_name: "Room 1".to_owned(),
                     display_label: "Room 1".to_owned(),
@@ -429,6 +431,8 @@ mod qa_tests {
                     joined_members: 0,
                 },
                 RoomSummary {
+                    display_name_placeholder: None,
+                    display_label_placeholder: None,
                     room_id: "!room2:example.org".to_owned(),
                     display_name: "Room 2".to_owned(),
                     display_label: "Room 2".to_owned(),

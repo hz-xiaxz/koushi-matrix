@@ -422,6 +422,99 @@ fn settings_store_rejects_non_integer_schema_version_as_corrupt() {
     assert_eq!(err.kind(), SettingsStoreErrorKind::Corrupt);
 }
 
+/// A 0.16.x file: schema version 1 persisted the whole `SettingsValues`,
+/// including the retired `message_previews: true` default, alongside an
+/// explicit version-1 encrypted-room link-preview opt-in.
+const VERSION_1_WITH_RETIRED_MESSAGE_PREVIEW_DEFAULT: &str = r#"{
+  "schema_version": 1,
+  "locale": { "language_tag": "ja-JP", "text_direction": "auto" },
+  "appearance": { "theme": "dark" },
+  "typography": { "font": "system", "emoji": "system" },
+  "keyboard": { "composer_send_shortcut": "enter" },
+  "notifications": {
+    "desktop_notifications": true,
+    "sound": false,
+    "badges": true,
+    "message_previews": true,
+    "send_read_receipts": true,
+    "send_typing_notifications": true
+  },
+  "display": {
+    "code_block_wrap": true,
+    "hide_redacted": true,
+    "url_previews_enabled": true,
+    "encrypted_url_previews_enabled": true
+  }
+}
+"#;
+
+#[test]
+fn settings_store_resets_version_1_message_previews_default() {
+    // #1054: version-1 files cannot distinguish an explicit opt-in from the
+    // retired ON default, so message previews reset to OFF exactly once.
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let path = write_settings_file(
+        data_dir.path(),
+        VERSION_1_WITH_RETIRED_MESSAGE_PREVIEW_DEFAULT,
+    );
+
+    let values = SettingsStore::new(data_dir.path())
+        .load()
+        .expect("version-1 settings load");
+
+    assert!(!values.notifications.message_previews);
+    // Unrelated values survive, and the version-0 (#1034) reset does not
+    // re-run for a version-1 opt-in.
+    assert!(values.display.encrypted_url_previews_enabled);
+    assert!(!values.notifications.sound);
+    assert_eq!(values.locale.language_tag.as_deref(), Some("ja-JP"));
+    assert_eq!(values.appearance.theme, ThemePreference::Dark);
+
+    let persisted = persisted_settings_json(&path);
+    assert_eq!(persisted["schema_version"], serde_json::json!(2));
+    assert_eq!(
+        persisted["notifications"]["message_previews"],
+        serde_json::json!(false)
+    );
+}
+
+#[test]
+fn settings_store_resets_unversioned_message_previews_default() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    write_settings_file(
+        data_dir.path(),
+        &VERSION_1_WITH_RETIRED_MESSAGE_PREVIEW_DEFAULT.replace("\"schema_version\": 1,", ""),
+    );
+
+    let values = SettingsStore::new(data_dir.path())
+        .load()
+        .expect("unversioned settings load");
+
+    assert!(!values.notifications.message_previews);
+    assert!(!values.display.encrypted_url_previews_enabled);
+}
+
+#[test]
+fn settings_store_keeps_versioned_message_previews_opt_in() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let store = SettingsStore::new(data_dir.path());
+    let mut values = store.load().expect("default settings");
+    assert!(!values.notifications.message_previews);
+    values.notifications.message_previews = true;
+    store.save(&values).expect("save explicit opt-in");
+
+    let reloaded = store.load().expect("reload versioned settings");
+    assert!(reloaded.notifications.message_previews);
+    assert_eq!(reloaded, values);
+    assert!(
+        store
+            .load()
+            .expect("load again")
+            .notifications
+            .message_previews
+    );
+}
+
 #[tokio::test]
 async fn runtime_start_migrates_unversioned_encrypted_url_preview_opt_in() {
     let data_dir = tempfile::tempdir().expect("tempdir");

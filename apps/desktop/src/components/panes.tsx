@@ -36,7 +36,7 @@ import type {
 import { focusedTimelineKey, roomTimelineKey } from "../domain/coreEvents";
 import {
   ICON_SIZE,
-  initials,
+  avatarInitial,
   operationFailureLabel,
   type ComposerModeProp,
   type OpenContextMenu
@@ -224,7 +224,7 @@ export function ActivityPane({
                         avatar={null}
                         className="activity-row-avatar is-room"
                         colorSeed={row.room_id}
-                        fallback={initials(row.room_label)}
+                        fallback={avatarInitial(row.room_label)}
                       />
                       <span className="activity-row-body">
                         <span className="activity-row-topline">
@@ -247,7 +247,7 @@ export function ActivityPane({
                         avatar={row.sender_avatar}
                         className="activity-row-avatar is-user"
                         colorSeed={row.sender_id ?? row.room_id}
-                        fallback={initials(row.sender_label ?? row.room_label)}
+                        fallback={avatarInitial(row.sender_label ?? row.room_label)}
                       />
                       <span className="activity-row-body">
                         <span className="activity-row-topline">
@@ -475,7 +475,7 @@ export function ExplorePane({
             return (
               <article className="directory-result" key={room.room_id}>
                 <div className="directory-result-avatar" aria-hidden="true">
-                  <span dir="auto">{initials(displayName)}</span>
+                  <span dir="auto">{avatarInitial(displayName)}</span>
                 </div>
                 <div className="directory-result-main">
                   <h2>
@@ -595,7 +595,7 @@ export function InvitesPane({
                   avatar={invite.avatar}
                   className={`invite-row-icon ${invite.is_dm ? "is-user" : "is-room"}`}
                   colorSeed={invite.room_id}
-                  fallback={initials(invite.display_name)}
+                  fallback={avatarInitial(invite.display_name)}
                 />
                 <span className="invite-row-main">
                   <strong dir="auto">{invite.display_name}</strong>
@@ -619,7 +619,7 @@ export function InvitesPane({
                   avatar={selectedInvite.avatar}
                   className={`invite-preview-icon ${selectedInvite.is_dm ? "is-user" : "is-room"}`}
                   colorSeed={selectedInvite.room_id}
-                  fallback={initials(selectedInvite.display_name)}
+                  fallback={avatarInitial(selectedInvite.display_name)}
                 />
                 <div>
                   <h2 dir="auto">{selectedInvite.display_name}</h2>
@@ -975,7 +975,7 @@ export function TimelinePane({
             avatar={activeRoom?.avatar ?? null}
             className="channel-avatar is-room"
             colorSeed={activeRoom?.room_id ?? activeRoomName}
-            fallback={initials(activeRoomName)}
+            fallback={avatarInitial(activeRoomName)}
           />
           <span>{activeRoomName}</span>
         </div>

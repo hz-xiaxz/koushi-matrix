@@ -337,6 +337,8 @@ fn invite_list_updated_preserves_avatar_thumbnails_from_room_snapshot_state() {
     let mxc_uri = "mxc://example.invalid/shared-avatar";
     let thumbnail = ready_avatar_thumbnail("shared");
     state.rooms = vec![koushi_state::RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
         room_id: "!dm-avatar:localhost".to_owned(),
         display_name: "Avatar Room".to_owned(),
         display_label: "Avatar Room".to_owned(),

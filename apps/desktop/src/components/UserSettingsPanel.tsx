@@ -34,6 +34,7 @@ import { DetailRow } from "./user-settings/SettingsStatusPrimitives";
 import type { DisplayDensity } from "../domain/types";
 import type { ShortcutLabelProfile } from "../domain/shortcuts";
 import { renderableThumbnailSourceUrl } from "../backend/linkMediaRuntime";
+import { avatarInitial } from "../app/uiShared";
 import { currentSessionStatusDetails } from "../domain/currentSessionStatus";
 import type {
   AccountManagementCapabilities,
@@ -212,8 +213,9 @@ export function UserSettingsPanel({
   const displayNameBusy = profile.update.kind === "settingDisplayName";
   const avatarBusy = profile.update.kind === "settingAvatar";
   const profileAvatarUrl = avatarSourceUrl(profile.own.avatar);
-  const profileInitial = profile.own.display_name?.charAt(0).toUpperCase()
-    || accountInitial(currentSession?.user_id ?? "");
+  const profileInitial = avatarInitial(
+    profile.own.display_name?.trim() || currentSession?.user_id
+  );
   const currentSessionDetails = currentSessionStatusDetails(currentSessionStatus);
 
   useEffect(() => {
@@ -664,7 +666,7 @@ function AccountSwitcherSection({
           return (
             <article className="account-switcher-row" key={sessionKey(session)}>
               <div className="account-switcher-avatar" aria-hidden="true">
-                {accountInitial(session.user_id)}
+                {avatarInitial(session.user_id)}
               </div>
               <div className="account-switcher-main">
                 <div className="account-switcher-user" dir="auto">{session.user_id}</div>
@@ -981,10 +983,6 @@ function avatarSourceUrl(avatar: ProfileState["own"]["avatar"]): string | null {
     return null;
   }
   return renderableThumbnailSourceUrl(avatar.thumbnail.source_ref);
-}
-
-function accountInitial(userId: string): string {
-  return userId.replace(/^@/, "").charAt(0).toUpperCase() || "?";
 }
 
 const defaultAccountNotificationsState: AccountNotificationsState = {

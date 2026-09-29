@@ -5,7 +5,7 @@ Dated specs and plans under `docs/superpowers/` are implementation guides
 toward this document and must not contradict it. Amend this document first
 when a design change is needed, then update or supersede the affected specs.
 
-Last amended: 2026-09-28.
+Last amended: 2026-09-29.
 
 The evidence-based classification of remaining frontend-owned resources and
 semantic migration candidates is maintained in
@@ -1279,12 +1279,15 @@ event can never silently replace the target of an already composed banner. It is
 never serialized: `NativeAttentionState.notification` is `serde(skip)`, and only
 the Rust desktop adapter reads it from live `AppState`.
 
-The message-preview policy is device-local and ON by default, matching the
-other messengers users compare Koushi against.
+The message-preview policy is device-local and OFF by default (#994, #1054),
+as engineering rule 9 requires for OS notifications: until the user opts in,
+the banner carries counts only.
 `SettingsValues.notifications.message_previews` is Rust-owned and persisted; a
-settings file without the field takes the current default rather than failing
-the load. Turning it OFF keeps counts only and lets no message content leave
-Rust. While it is ON the body
+settings file without the field loads as OFF rather than failing the load.
+Settings schema version 2 resets the field to OFF once for version-0 and
+version-1 files, because those persisted the retired ON default and cannot
+distinguish it from an explicit opt-in. While it is OFF no message content
+leaves Rust. While it is ON the body
 is the triggering event's already-sanitized plain-text preview, bounded in
 length and with whitespace collapsed; an event without usable preview text
 (undecrypted, redacted, non-text, or missing history) falls back to the count
