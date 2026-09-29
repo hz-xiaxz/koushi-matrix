@@ -878,9 +878,14 @@ impl AccountActorHandle {
         session_key: SessionKeyId,
         active_room_id: Option<String>,
         active_space_id: Option<String>,
+        space_selected: bool,
     ) {
-        self.navigation_enrichment
-            .admit(session_key, active_room_id, active_space_id);
+        self.navigation_enrichment.admit(
+            session_key,
+            active_room_id,
+            active_space_id,
+            space_selected,
+        );
     }
 
     #[cfg(test)]

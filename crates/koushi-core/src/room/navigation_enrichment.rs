@@ -24,6 +24,10 @@ pub(crate) struct NavigationEnrichmentDemand {
     pub(crate) session_key: SessionKeyId,
     pub(crate) active_room_id: Option<String>,
     pub(crate) active_space_id: Option<String>,
+    /// An explicit Space/Home selection (re)requests member hydration even
+    /// when the active Space is unchanged; a room selection only hydrates
+    /// when it moved navigation into another Space.
+    pub(crate) space_selected: bool,
 }
 
 /// One-slot latest-wins ingress. Replacing the value never waits for, or
@@ -44,6 +48,7 @@ impl NavigationEnrichmentIngress {
         session_key: SessionKeyId,
         active_room_id: Option<String>,
         active_space_id: Option<String>,
+        space_selected: bool,
     ) {
         // `send_modify` retains the value even while no receiver exists.
         self.tx.send_modify(|current| {
@@ -55,6 +60,7 @@ impl NavigationEnrichmentIngress {
                 session_key,
                 active_room_id,
                 active_space_id,
+                space_selected,
             });
         });
     }
@@ -73,6 +79,10 @@ impl NavigationEnrichmentIngress {
 pub(super) struct NavigationEnrichmentApplied {
     pinned: Option<u64>,
     space_members: Option<u64>,
+    /// The Space whose hydration was last requested for this observation.
+    /// Only reset with the observation, so an unchanged Space is not
+    /// re-hydrated by every room selection inside it.
+    hydrated_space: Option<Option<String>>,
 }
 
 impl NavigationEnrichmentApplied {
@@ -126,8 +136,12 @@ impl RoomActor {
             && self.navigation_enrichment_applied.space_members != Some(demand.generation)
         {
             self.navigation_enrichment_applied.space_members = Some(demand.generation);
-            self.enqueue_space_member_hydration(demand.active_space_id)
-                .await;
+            let space = Some(demand.active_space_id.clone());
+            if demand.space_selected || self.navigation_enrichment_applied.hydrated_space != space {
+                self.navigation_enrichment_applied.hydrated_space = space;
+                self.enqueue_space_member_hydration(demand.active_space_id)
+                    .await;
+            }
         }
     }
 

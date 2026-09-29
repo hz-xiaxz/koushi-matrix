@@ -535,6 +535,7 @@ impl AppActor {
                 session_key,
                 self.state.navigation.active_room_id.clone(),
                 self.state.navigation.active_space_id.clone(),
+                requested_room_id.is_none(),
             );
         }
     }

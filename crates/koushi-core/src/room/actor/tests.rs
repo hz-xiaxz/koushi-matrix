@@ -135,7 +135,7 @@ async fn navigation_enrichment_refreshes_pins_for_the_current_session_only() {
     let enrichment = handle.navigation_enrichment();
 
     // Demand retained before the session exists is replayed once it does.
-    enrichment.admit(session_key.clone(), Some(room_id.to_string()), None);
+    enrichment.admit(session_key.clone(), Some(room_id.to_string()), None, false);
     assert!(
         handle
             .send(RoomMessage::SessionEstablished { session })
@@ -163,9 +163,10 @@ async fn navigation_enrichment_refreshes_pins_for_the_current_session_only() {
         },
         Some(room_id.to_string()),
         None,
+        false,
     );
     // Re-selecting the same room for this session refreshes again.
-    enrichment.admit(session_key, Some(room_id.to_string()), None);
+    enrichment.admit(session_key, Some(room_id.to_string()), None, false);
     let actions = tokio::time::timeout(Duration::from_secs(5), action_rx.recv())
         .await
         .expect("re-selection refreshes pins")
