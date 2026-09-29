@@ -108,6 +108,10 @@ pub(crate) struct NavigationProjectionCleanup {
 #[derive(Clone, Default)]
 pub(crate) struct NavigationProjectionDemand {
     pub(crate) room: Option<NavigationProjectionIntent>,
+    /// Bumped by every accepted room admission (including a same-generation
+    /// merge) and never by a focused-only update, so the manager re-runs the
+    /// room projection exactly when it did before #1060.
+    pub(crate) room_revision: u64,
     pub(crate) focused: Option<TimelineKey>,
 }
 
@@ -145,16 +149,26 @@ impl NavigationProjectionIngress {
         // which a session-scoped manager is being replaced and no receiver
         // exists. A later `subscribe` explicitly wakes on that retained value.
         self.tx.send_modify(|demand| {
-            demand.room = match demand.room.take() {
-                Some(current) if current.generation > intent.generation => Some(current),
+            let accepted = match demand.room.take() {
+                Some(current) if current.generation > intent.generation => {
+                    demand.room = Some(current);
+                    false
+                }
                 Some(mut current)
                     if current.generation == intent.generation && current.key == intent.key =>
                 {
                     current.replay_existing |= intent.replay_existing;
-                    Some(current)
+                    demand.room = Some(current);
+                    true
                 }
-                _ => Some(intent),
+                _ => {
+                    demand.room = Some(intent);
+                    true
+                }
             };
+            if accepted {
+                demand.room_revision = demand.room_revision.wrapping_add(1);
+            }
             demand.focused = focused;
         });
         true
@@ -799,23 +813,15 @@ impl TimelineManagerActor {
         if intent.generation < self.last_navigation_projection_generation {
             return;
         }
-        // A focused-only update carries the retained room part forward; apply
-        // that room projection only when it is new or newly asks for replay.
-        let applied = (
-            intent.generation,
-            intent.key.clone(),
-            intent.replay_existing,
-        );
-        if self
-            .applied_room_projection
-            .as_ref()
-            .is_some_and(|previous| {
-                previous.0 == applied.0 && previous.1 == applied.1 && (previous.2 || !applied.2)
-            })
-        {
+        // A focused-only update carries the retained room part forward without
+        // bumping `room_revision`; skip only that case. Every room admission,
+        // including a same-(generation, key) re-admission (SubscribeTimeline
+        // for an unchanged `active_room_id` whose `timeline.room_id` differed),
+        // still re-runs the committed room selection as before #1060.
+        if self.applied_room_projection == Some(demand.room_revision) {
             return;
         }
-        self.applied_room_projection = Some(applied);
+        self.applied_room_projection = Some(demand.room_revision);
         if intent.generation > self.last_navigation_projection_generation {
             self.last_navigation_projection_generation = intent.generation;
         }

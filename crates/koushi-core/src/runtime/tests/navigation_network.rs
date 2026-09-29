@@ -670,3 +670,51 @@ async fn navigation_network_empty_space_from_anchored_focused_context_commits() 
     assert_two_selections_commit(&mut harness).await;
     harness.finish();
 }
+
+#[tokio::test]
+async fn navigation_network_event_navigation_room_selection_commits_while_account_mailbox_is_full()
+{
+    // #1060 step 6: navigating to an event in another room selects that room
+    // through the same local commit; only the later event lookup may wait.
+    for start in [navigation_state(), anchored_state()] {
+        let mut harness = start_focused(start, |_| {}).await;
+        let _admitted = harness
+            .submit(CoreCommand::App(AppCommand::NavigateToEvent {
+                request_id: request(20),
+                room_id: ROOM_B.to_owned(),
+                event_id: EVENT.to_owned(),
+                source: koushi_state::EventNavigationSource::Activity,
+                missing_target_policy:
+                    koushi_protocol::command::EventNavigationMissingTargetPolicy::LiveFallback,
+            }))
+            .await;
+        let state = harness
+            .wait_for_snapshot(|state| {
+                state.navigation.active_room_id.as_deref() == Some(ROOM_B)
+                    && state.timeline.room_id.as_deref() == Some(ROOM_B)
+                    && matches!(
+                        state.navigation.event_navigation,
+                        koushi_state::EventNavigationState::Opening { .. }
+                    )
+            })
+            .await;
+        assert_eq!(
+            state.focused_context,
+            koushi_state::FocusedContextState::Closed
+        );
+        assert_eq!(harness.retained_projection_key(), Some(room_key(ROOM_B)));
+        assert_eq!(harness.navigation_projection_rx.borrow().focused, None);
+        // A user selection that supersedes the in-flight event navigation also
+        // commits without waiting.
+        harness.select_room(request(21), ROOM_C).await;
+        let [(outcome, state)] = harness
+            .terminals(&[request(21)])
+            .await
+            .try_into()
+            .ok()
+            .unwrap();
+        assert_eq!(outcome, IntentOutcome::Committed);
+        assert_eq!(state.navigation.active_room_id.as_deref(), Some(ROOM_C));
+        harness.finish();
+    }
+}

@@ -952,6 +952,7 @@ async fn committed_navigation_projection_failure_does_not_emit_a_second_terminal
 
     manager
         .handle_navigation_projection(crate::timeline::NavigationProjectionDemand {
+            room_revision: 1,
             room: Some(NavigationProjectionIntent {
                 generation: 1,
                 key: room_key(),
@@ -3014,6 +3015,7 @@ async fn navigation_demand_retires_only_undesired_focused_timelines() {
 
     manager
         .handle_navigation_projection(crate::timeline::NavigationProjectionDemand {
+            room_revision: 1,
             room: None,
             focused: Some(focused_key()),
         })
@@ -3025,6 +3027,7 @@ async fn navigation_demand_retires_only_undesired_focused_timelines() {
 
     manager
         .handle_navigation_projection(crate::timeline::NavigationProjectionDemand {
+            room_revision: 1,
             room: None,
             focused: None,
         })
@@ -3075,7 +3078,7 @@ async fn focused_only_update_does_not_replay_the_retained_room_projection() {
         .await
         .expect("room demand");
     manager.handle_navigation_projection(demand).await;
-    let applied = manager.applied_room_projection.clone();
+    let applied = manager.applied_room_projection;
     assert!(applied.is_some());
 
     ingress.admit_focused(None);
@@ -3089,4 +3092,43 @@ async fn focused_only_update_does_not_replay_the_retained_room_projection() {
     );
     manager.handle_navigation_projection(demand).await;
     assert_eq!(manager.applied_room_projection, applied);
+}
+
+#[tokio::test]
+async fn same_generation_room_readmission_reprojects_the_room() {
+    // Same (generation, key) re-admission happens when `active_room_id` is
+    // unchanged but `timeline.room_id` differed; it must re-run the committed
+    // room selection even when the earlier admission already asked for replay.
+    let (ingress, receiver) = NavigationProjectionIngress::channel();
+    let mut manager = live_tail_test_manager(HashMap::new());
+    manager.test_session_available = false;
+    manager.navigation_projection_rx = Some(receiver);
+    let intent = || NavigationProjectionIntent {
+        generation: 4,
+        key: room_key(),
+        cause_request_id: fake_rid(1_061),
+        replay_existing: true,
+        cleanup: NavigationProjectionCleanup::default(),
+    };
+    for expected in [1, 2] {
+        assert!(ingress.admit(intent(), None));
+        let demand = receive_navigation_projection(&mut manager.navigation_projection_rx)
+            .await
+            .expect("room demand");
+        manager.handle_navigation_projection(demand).await;
+        assert_eq!(manager.applied_room_projection, Some(expected));
+    }
+    // A stale room admission is not a re-admission.
+    assert!(ingress.admit(
+        NavigationProjectionIntent {
+            generation: 3,
+            ..intent()
+        },
+        None,
+    ));
+    let demand = receive_navigation_projection(&mut manager.navigation_projection_rx)
+        .await
+        .expect("stale demand wake");
+    manager.handle_navigation_projection(demand).await;
+    assert_eq!(manager.applied_room_projection, Some(2));
 }

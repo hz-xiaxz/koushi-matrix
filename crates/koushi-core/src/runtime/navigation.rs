@@ -4,7 +4,7 @@ use super::{AppActor, composer_draft_session_key};
 use crate::executor;
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_protocol::command::{
-    AppCommand, CoreCommand, EventNavigationMissingTargetPolicy, RoomCommand, TimelineCommand,
+    AppCommand, CoreCommand, EventNavigationMissingTargetPolicy, RoomCommand,
 };
 use koushi_protocol::event::{CoreEvent, IntentNoOpReason, IntentOutcome};
 use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
@@ -1088,19 +1088,6 @@ impl AppActor {
     pub(super) fn release_focused_timeline(&mut self, key: TimelineKey) {
         self.drop_pending_focused_navigation_for(&key);
         self.release_focused_foreground(&key);
-    }
-
-    /// Release a focused timeline the AccountActor subscribed on its own
-    /// (#1037 date jump whose reply was fenced). That subscription travels the
-    /// TimelineManager mailbox, so its `Unsubscribe` must follow it there.
-    pub(super) async fn release_account_subscribed_focused_timeline(&mut self, key: TimelineKey) {
-        self.drop_pending_focused_navigation_for(&key);
-        let request_id = self.next_internal_request_id();
-        self.send_timeline_command_or_fail(
-            request_id,
-            TimelineCommand::Unsubscribe { request_id, key },
-        )
-        .await;
     }
 
     fn drop_pending_focused_navigation_for(&mut self, key: &TimelineKey) {

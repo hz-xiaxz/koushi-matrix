@@ -493,7 +493,7 @@ pub struct TimelineManagerActor {
     pub(super) last_navigation_projection_generation: u64,
     /// The room projection last applied from the retained demand, so a
     /// focused-only update does not replay an unchanged room (#1060).
-    pub(super) applied_room_projection: Option<(u64, TimelineKey, bool)>,
+    pub(super) applied_room_projection: Option<u64>,
     /// Non-evicting active terminal-delivery state. Admission is synchronous
     /// under the shared send tracker lock, so its FIFO is bounded logically by
     /// already-admitted/outstanding sends (at most one failure and one final

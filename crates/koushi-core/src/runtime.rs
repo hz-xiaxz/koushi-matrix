@@ -1340,7 +1340,6 @@ impl AppActor {
         let mut state_changed = false;
         let mut pending_select_settlements = Vec::new();
         let mut post_projection_work: Vec<PostProjectionWork> = Vec::new();
-        let mut cancelled_date_navigation_keys: Vec<TimelineKey> = Vec::new();
         // #1060: the requested room (`None` for a Space) of AppActor-local
         // navigation whose enrichment is scheduled after publication.
         let mut local_navigation_target: Option<Option<String>> = None;
@@ -1425,19 +1424,11 @@ impl AppActor {
             if self.cancelled_date_navigation_request_id.is_some() {
                 // #1037: an accepted send superseded this date jump
                 // while its server lookup was in flight. Drop the
-                // account actor's atomic reply pair and release the
-                // focused timeline it subscribed after sending it.
+                // account actor's atomic reply pair; nothing was
+                // subscribed for it (#1060: AppActor subscribes only a
+                // reduced reply).
                 match &action {
-                    AppAction::OpenFocusedContext { room_id, event_id } => {
-                        if let Some(account_key) = self.current_account_key() {
-                            cancelled_date_navigation_keys.push(TimelineKey {
-                                account_key,
-                                kind: TimelineKind::Focused {
-                                    room_id: room_id.clone(),
-                                    event_id: event_id.clone(),
-                                },
-                            });
-                        }
+                    AppAction::OpenFocusedContext { .. } => {
                         continue;
                     }
                     AppAction::EnterAnchoredTimeline { .. } => {
@@ -1777,9 +1768,6 @@ impl AppActor {
             if self.state != before_post_projection {
                 self.publish_state_change(&before_post_projection);
             }
-        }
-        for key in cancelled_date_navigation_keys {
-            self.release_account_subscribed_focused_timeline(key).await;
         }
         // Apply every captured persistence effect before loading the
         // final session's views. In particular, an old-account draft
@@ -4572,6 +4560,39 @@ impl AppActor {
                 AppEffect::PersistRoomPreferences { preferences, .. } => {
                     self.persist_room_preferences(preferences).await;
                 }
+                AppEffect::OpenFocusedTimeline { room_id, event_id } => {
+                    // #1060: an actor-projected focused open (the date-jump
+                    // reply) is subscribed here, after its key is admitted as
+                    // the desired focused foreground, so no concurrent focused
+                    // admission can retire it before this reduction.
+                    let Some(account_key) = self.current_account_key() else {
+                        continue;
+                    };
+                    let key = TimelineKey {
+                        account_key,
+                        kind: TimelineKind::Focused {
+                            room_id: room_id.clone(),
+                            event_id: event_id.clone(),
+                        },
+                    };
+                    let request_id = self
+                        .pending_focused_navigation
+                        .as_ref()
+                        .filter(|pending| pending.key == key)
+                        .map(|pending| pending.projection_request_id)
+                        .unwrap_or_else(|| self.next_internal_request_id());
+                    self.admit_focused_foreground();
+                    self.send_timeline_command_or_fail(
+                        request_id,
+                        TimelineCommand::Subscribe {
+                            request_id,
+                            key,
+                            initial_backfill:
+                                koushi_protocol::command::InitialBackfillPolicy::Disabled,
+                        },
+                    )
+                    .await;
+                }
                 AppEffect::RejectProvisionalSession => {
                     let request_id = self.next_internal_request_id();
                     let _ = self
@@ -4650,7 +4671,6 @@ impl AppActor {
                 | AppEffect::PaginateTimelineBackwards { .. }
                 | AppEffect::SendText { .. }
                 | AppEffect::OpenThreadTimeline { .. }
-                | AppEffect::OpenFocusedTimeline { .. }
                 | AppEffect::SearchMessages { .. }
                 | AppEffect::SearchAttachments { .. }
                 | AppEffect::SubscribeThreadsList { .. }

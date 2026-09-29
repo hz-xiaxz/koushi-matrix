@@ -1960,9 +1960,9 @@ stateDiagram-v2
     has no event-navigation owner; an event-navigation owner for the room is
     cancelled (`Superseded`); and a date jump still awaiting the server is
     fenced, so the account actor's late `OpenFocusedContext` +
-    `EnterAnchoredTimeline` pair is dropped and its focused subscription
-    released. A late projection commit therefore finds no owner and cannot
-    re-anchor the pane over the pending echo.
+    `EnterAnchoredTimeline` pair is dropped and never subscribed. A late
+    projection commit therefore finds no owner and cannot re-anchor the pane
+    over the pending echo.
   Rejected, duplicate, other-room, and thread-composer sends leave navigation
   unchanged; a send from a live main pane with no pending main-pane navigation
   leaves an independent right-panel focused context open.
@@ -3031,10 +3031,14 @@ stateDiagram-v2
   can never let an old release retire the newer owner, and a focused-only update
   carries the retained room projection forward without replaying it. Event
   navigation supersession, failure, and room/Space/Home switches release focused
-  timelines this way and never wait for AccountActor admission. A timeline the
-  AccountActor subscribed itself (a fenced #1037 date-jump reply) and explicit
-  focused-context commands still use the mailbox `Unsubscribe`, which stays
-  ordered after that subscription.
+  timelines this way and never wait for AccountActor admission. Every focused
+  subscription is issued by AppActor after that admission, including the
+  server-resolved date-jump target: the AccountActor only replies with the
+  `OpenFocusedContext` + `EnterAnchoredTimeline` pair, and AppActor subscribes
+  the key when it reduces that pair (a fenced reply is never subscribed).
+  Explicit focused-context commands still release a replaced key with the
+  mailbox `Unsubscribe`, which stays ordered before the replacement's
+  `Subscribe`.
 - Focused timeline release is core-owned for every reducer transition, not only
   the explicit `CloseFocusedContext` command (#1037, #1046). Whenever a reduce
   within the same account leaves `focused_context` without its previous

@@ -530,10 +530,6 @@ impl AccountActor {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         };
-        let Some(account_key) = self.active_account_key() else {
-            self.emit_failure(request_id, CoreFailure::SessionRequired);
-            return;
-        };
         let parsed_room_id = match matrix_sdk::ruma::RoomId::parse(room_id.as_str()) {
             Ok(room_id) => room_id,
             Err(_) => {
@@ -564,6 +560,9 @@ impl AccountActor {
         // #161: jump-to-date renders the focused timeline in the MAIN pane
         // (marked by `main_timeline_anchor`), reusing the focused-context
         // subscription lifecycle; it must not open the right panel.
+        // #1060: AppActor subscribes the focused timeline when it reduces this
+        // pair, after admitting it as the desired focused foreground; a
+        // subscription from here could be retired before that admission.
         let _ = self
             .action_tx
             .send(vec![
@@ -577,15 +576,6 @@ impl AccountActor {
                 },
             ])
             .await;
-        self.route_timeline_command(TimelineCommand::Subscribe {
-            request_id,
-            key: TimelineKey {
-                account_key,
-                kind: TimelineKind::Focused { room_id, event_id },
-            },
-            initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
-        })
-        .await;
     }
 
     #[cfg(any(test, feature = "test-hooks"))]
