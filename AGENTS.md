@@ -6,7 +6,9 @@ this file routes to the relevant contracts and operational instructions.
 ## Essential contracts
 
 - Write GitHub issues in English; see the
-  [issue language policy](REPOSITORY_RULES.md#github-issue-language).
+  [issue language policy](REPOSITORY_RULES.md#github-issue-language). Close
+  issues whose only remaining items are manual checks; see
+  [issue closure](REPOSITORY_RULES.md#github-issue-closure).
 - Rust owns product state and Matrix semantics. React renders Rust DTOs and
   dispatches typed commands; Tauri is a transport/platform adapter.
 - The runtime uses only Element X-compatible Simplified Sliding Sync. Local QA
