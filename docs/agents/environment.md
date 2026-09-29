@@ -146,9 +146,10 @@ the newly required dependency builds recompile on every run.
 
 The Rust job runs `cargo test --profile ci --workspace --exclude
 sidebar-composition --exclude key-management` once; `koushi-core-testkit` and
-`koushi-desktop` are workspace members, so it covers their tests. Do not add
-standalone per-package `-p` test steps: each resolves its own dependency graph
-and feature set and only recompiles the vendored SDK and Koushi stack. No test
+`koushi-desktop` are workspace members, so it covers their tests. Standalone
+per-package `-p` test steps for members this run already covers add no test:
+each resolves its own dependency graph and feature set and only recompiles the
+vendored SDK and Koushi stack. No test
 is gated on `not(feature = "test-hooks")`. Production feature sets (without
 dev-dependency features) are compiled by `macOS Tauri cargo check` and the
 release workflow. QA binaries, wasm, macOS, Windows, and homeserver jobs stay
@@ -281,9 +282,10 @@ scenario-specific so retries do not blur results between lanes.
 
 ## CodeGraph
 
-When a worktree has `.codegraph/`, use `codegraph explore` / `codegraph node`
-before `rg`/`grep`/file reads for orientation; a new worktree without it is
-initialized with `codegraph init .` before broad investigation.
+When a worktree has `.codegraph/`, use CodeGraph before `rg`, `grep`, `find`,
+or file reads for orientation: `codegraph explore` for architecture or flow
+questions, `codegraph node` for exact symbol/file source. A new worktree without
+it is initialized with `codegraph init .` before broad investigation.
 
 ## Signed macOS DMG
 

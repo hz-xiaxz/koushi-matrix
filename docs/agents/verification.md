@@ -212,7 +212,8 @@ Scope notes that repeatedly matter:
 `.github/workflows/issue-738-flake-probe.yml` is a scheduled/manual,
 non-required measurement job; the required CI workflow remains retry-free, and a
 failed probe cannot turn a required check green. It runs a closed list of named
-probes at one SHA with a 120-second bound per attempt and records only fixed
+probes at one SHA with a 120-second bound per attempt, compiles Rust test
+binaries in a warm-up step outside measured attempts, and records only fixed
 failure signatures. A workflow rerun must not replace or hide failed attempt
 records. Run locally with a bounded attempt count:
 

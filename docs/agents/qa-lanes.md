@@ -340,7 +340,8 @@ never computes expected geometry or uses fixed window coordinates. The
 Safety rules:
 
 - Pass credentials through `KOUSHI_QA_LOGIN_PIPE`, which contains only a FIFO
-  path in the environment (engineering rules Secrets 3). Never drive
+  path in the environment
+  ([engineering rules](../policies/engineering-rules.md#secrets-and-private-data) Secrets 3). Never drive
   real-account login by fixed window-relative coordinates.
 - Real-login GUI smoke must set `KOUSHI_SKIP_KEYCHAIN_PERSISTENCE=1`.
   `KOUSHI_SKIP_SAVED_SESSIONS=1` only prevents saved-session reads; a successful
@@ -351,7 +352,7 @@ Safety rules:
   blocks unattended automation. Real-login smoke additionally sets
   `KOUSHI_SKIP_KEYCHAIN_PERSISTENCE=1` and `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR`.
 - Filter the child environment before spawning `npm run tauri dev`
-  (engineering rules Secrets 4), and attempt logout cleanup after any
+  ([engineering rules](../policies/engineering-rules.md#secrets-and-private-data) Secrets 4), and attempt logout cleanup after any
   post-login failure unless `--keep-session` was requested
   ([QA Gates And Cleanup](../../REPOSITORY_RULES.md#qa-gates-and-cleanup));
   otherwise a failed run leaves a live smoke device on the homeserver.

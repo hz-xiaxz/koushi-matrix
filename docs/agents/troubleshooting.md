@@ -11,8 +11,9 @@ the lane that shows the symptom. Lane commands are in
   missing resource seal.** `scripts/desktop-build-dmg.mjs` passes
   `signingIdentity: "-"` only for local builds without an explicit identity or
   certificate configuration and verifies the whole app before reporting success
-  (`apps/desktop/src/scripts/dmgSigning.test.ts`); signed releases follow the
-  [signing contract](environment.md#signed-macos-dmg). Ad-hoc signatures prove
+  (`apps/desktop/src/scripts/dmgSigning.test.ts`); signed releases are unchanged
+  and follow the [signing contract](environment.md#signed-macos-dmg) and the
+  [release runbook](../releases/desktop-release.md). Ad-hoc signatures prove
   bundle integrity, not one signing identity across rebuilds: do not delete
   credentials or weaken Keychain access controls to work around lost Keychain
   access after an app replacement.
