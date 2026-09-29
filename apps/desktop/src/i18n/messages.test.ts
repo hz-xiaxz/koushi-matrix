@@ -123,6 +123,51 @@ describe("i18n message catalog", () => {
     expect(identicalMessageIds).toEqual([]);
   });
 
+  test("Japanese catalog explicitly overrides every English message id except the named allowlist", () => {
+    // `ja` spreads `en`, so a missing translation silently keeps the English
+    // text at runtime (#1058). Only the source literal shows which ids the
+    // Japanese catalog overrides explicitly.
+    const url = new URL("./messages.ts", import.meta.url);
+    const sourceFile = ts.createSourceFile(
+      "messages.ts",
+      readFileSync(url, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS
+    );
+    let jaLiteral: ts.ObjectLiteralExpression | undefined;
+    function visit(node: ts.Node): void {
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.name.text === "ja" &&
+        node.initializer &&
+        ts.isObjectLiteralExpression(node.initializer)
+      ) {
+        jaLiteral = node.initializer;
+        return;
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(sourceFile);
+    expect(jaLiteral).toBeDefined();
+
+    const explicitJapaneseIds = new Set<string>();
+    for (const property of jaLiteral?.properties ?? []) {
+      if (ts.isPropertyAssignment(property) && ts.isStringLiteral(property.name)) {
+        explicitJapaneseIds.add(property.name.text);
+      }
+    }
+    const inheritedIds = Object.keys(catalogs.en).filter(
+      (id) => !explicitJapaneseIds.has(id) && !japaneseInheritedMessageAllowlist.has(id as MessageId)
+    );
+
+    expect(inheritedIds).toEqual([]);
+    for (const id of japaneseInheritedMessageAllowlist) {
+      expect(explicitJapaneseIds.has(id)).toBe(false);
+    }
+  });
+
   test("product branding uses Koushi in English and Japanese", () => {
     expect(t("app.title")).toBe("Koushi");
     expect(t("window.title")).toBe("Koushi");
@@ -353,8 +398,17 @@ describe("i18n message catalog", () => {
   });
 });
 
+// Ids the Japanese catalog deliberately inherits from `en` via the spread:
+// font names, a format-only string, and protocol acronyms.
+const japaneseInheritedMessageAllowlist = new Set<MessageId>([
+  "settings.fontInter",
+  "settings.twemojiColr",
+  "timeline.mediaUploadProgress",
+  "auth.flowOidc",
+  "auth.flowToken"
+]);
+
 const japaneseIdenticalMessageAllowlist = new Set<MessageId>([
-  "auth.failureForbidden",
   // Scale fractions and image-format names are not prose: "1/2" and "JPEG"
   // read the same in both catalogs, and translating them would be wrong.
   "upload.resizeHalf",
@@ -364,15 +418,8 @@ const japaneseIdenticalMessageAllowlist = new Set<MessageId>([
   "upload.formatWebp",
   "upload.formatJpeg",
   "upload.formatPng",
-  "auth.failureNetwork",
-  "auth.failureSdk",
-  "auth.failureTimeout",
-  "auth.failureUnsupported",
   "auth.flowOidc",
-  "auth.flowPassword",
-  "auth.flowSso",
   "auth.flowToken",
-  "auth.flowUnknown",
   "roomList.filterPeople",
   "space.directMessages",
   "settings.fontInter",
