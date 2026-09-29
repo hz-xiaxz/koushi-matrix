@@ -596,7 +596,13 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   clears it and bumps its generation wherever the active Space changes
   (`navigation`, `room`, `directory`), the frontend asks for it by quoting that
   generation through `load_space_children`, and a response is admitted only for
-  the Space selected now. The joined room list stays authoritative: a child that
+  the Space selected now. A successful leave of a cached child (#1062) marks it
+  left with the room list's count minus the account, bumps the generation and
+  emits `AppEffect::LoadSpaceChildren`, which the runtime routes to the room
+  actor; the renderer does not ask again. For a child the account is not
+  joined to, the `/hierarchy` joined-member count is authoritative over the
+  frozen local member list; one `can_join` rule serves hierarchy-described and
+  locally known children, and knock-only rules never offer a plain join (#1053). The joined room list stays authoritative: a child that
   is already a joined room never appears in the lane, and a pending invitation is
   reported from `AppState.invites`, not from the server summary. A child the
   server did not describe is `unknown` with no join action — the permission model

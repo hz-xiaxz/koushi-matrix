@@ -1888,6 +1888,34 @@ impl AppActor {
                 .await;
     }
 
+    /// Issue #1062: route a reducer-admitted Space children reload to the room
+    /// actor. The reducer already put the slice in `Loading` under
+    /// `generation`; if the command cannot be delivered, settle it as failed so
+    /// the slice does not stay loading and the cached children remain.
+    async fn forward_space_children_reload(&mut self, space_id: String, generation: u64) {
+        let request_id = self.next_internal_request_id();
+        let forwarded = self
+            .account_actor
+            .send(crate::account::AccountMessage::RoomCommand(
+                koushi_protocol::command::RoomCommand::LoadSpaceChildren {
+                    request_id,
+                    space_id: space_id.clone(),
+                    generation,
+                },
+            ))
+            .await;
+        if !forwarded {
+            let effects = self
+                .reduce_app_action(AppAction::SpaceChildrenLoadFailed {
+                    space_id,
+                    generation,
+                    failure: koushi_state::OperationFailureKind::Sdk,
+                })
+                .await;
+            self.handle_ui_event_effects(&effects).await;
+        }
+    }
+
     fn next_internal_request_id(&mut self) -> RequestId {
         let sequence = self.next_internal_request_sequence;
         self.next_internal_request_sequence = self.next_internal_request_sequence.saturating_add(1);
@@ -4277,6 +4305,12 @@ impl AppActor {
                         .send(crate::account::AccountMessage::RebuildSearchIndex)
                         .await;
                 }
+                AppEffect::LoadSpaceChildren {
+                    space_id,
+                    generation,
+                } => {
+                    Box::pin(self.forward_space_children_reload(space_id, generation)).await;
+                }
                 AppEffect::PersistSettings {
                     request_id: effect_request_id,
                     values,
@@ -4569,6 +4603,13 @@ impl AppActor {
                 // cleanup (not a replayed Matrix operation) post-commit too.
                 AppEffect::CancelPendingMainTimelineNavigation { room_id } => {
                     Box::pin(self.cancel_pending_main_timeline_navigation(room_id)).await;
+                }
+                AppEffect::LoadSpaceChildren {
+                    space_id,
+                    generation,
+                } => {
+                    Box::pin(self.forward_space_children_reload(space_id.clone(), *generation))
+                        .await;
                 }
                 AppEffect::RestoreSession
                 | AppEffect::DiscoverLogin { .. }

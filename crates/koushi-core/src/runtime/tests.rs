@@ -4686,4 +4686,90 @@ async fn wait_for_runtime_sync_running(runtime: &CoreRuntime, stage: &'static st
     });
 }
 
+/// Issue #1062: a successful leave arrives as an actor-projected
+/// `RoomLeftLocally`. When the left room is a child of the selected Space, the
+/// runtime routes a fresh Space children load to the room actor under the new
+/// generation, without waiting for the renderer to ask.
+#[tokio::test]
+async fn leaving_a_selected_space_child_routes_a_space_children_reload() {
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let space_id = "!leave-space:example.invalid";
+    let child_id = "!leave-child:example.invalid";
+    let mut state = AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://example.invalid".to_owned(),
+            user_id: "@synthetic:example.invalid".to_owned(),
+            device_id: "SYNTHETIC".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        }),
+        ..AppState::default()
+    };
+    state.rooms = vec![unread_diagnostic_room(child_id)];
+    state.spaces = vec![koushi_state::SpaceSummary {
+        space_id: space_id.to_owned(),
+        raw_name: None,
+        display_name: "Synthetic space".to_owned(),
+        avatar: None,
+        join_rule: None,
+        child_room_ids: vec![child_id.to_owned()],
+    }];
+    state.navigation.active_space_id = Some(space_id.to_owned());
+    state.space_children = koushi_state::SpaceChildrenState {
+        selected_space_id: Some(space_id.to_owned()),
+        generation: 7,
+        children: vec![koushi_state::SpaceChildSummary {
+            room_id: child_id.to_owned(),
+            display_name: "Synthetic room".to_owned(),
+            avatar: None,
+            membership: koushi_state::SpaceChildMembership::Joined,
+            can_join: false,
+            is_space: false,
+            joined_members: 2,
+        }],
+        load: koushi_state::SpaceChildrenLoadState::Idle,
+    };
+
+    let (
+        actor,
+        _command_tx,
+        action_tx,
+        mut account_rx,
+        _event_rx,
+        _snapshot_rx,
+        _navigation_projection_rx,
+        _event_navigation_prepared_tx,
+        _focused_projection_tx,
+    ) = app_actor_event_navigation_fixture(data_dir.path(), state);
+    let actor_task = tokio::spawn(actor.run());
+
+    action_tx
+        .send(vec![AppAction::RoomLeftLocally {
+            room_id: child_id.to_owned(),
+        }])
+        .await
+        .expect("leave action");
+
+    let reload = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if let AccountMessage::RoomCommand(
+                koushi_protocol::command::RoomCommand::LoadSpaceChildren {
+                    request_id,
+                    space_id,
+                    generation,
+                },
+            ) = account_rx.recv().await.expect("account message")
+            {
+                break (request_id, space_id, generation);
+            }
+        }
+    })
+    .await
+    .expect("a leave of a selected Space child should reload its children");
+    assert_eq!(reload.0.connection_id, INTERNAL_RUNTIME_CONNECTION_ID);
+    assert_eq!(reload.1, space_id);
+    assert_eq!(reload.2, 8);
+
+    actor_task.abort();
+}
+
 mod anchored_send;
