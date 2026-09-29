@@ -838,6 +838,19 @@ impl CoreRuntime {
             .await
     }
 
+    /// Test hook: install an SDK session (for example one bound to a mock
+    /// homeserver) into this runtime's AccountActor and RoomActor, without a
+    /// login or restore flow. Not part of the public production API.
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn install_account_session_for_testing(
+        &self,
+        session: Arc<koushi_sdk::MatrixClientSession>,
+    ) -> bool {
+        self.account_actor_test_handle
+            .install_residency_test_session(session)
+            .await
+    }
+
     #[cfg(any(test, feature = "test-hooks"))]
     pub async fn inspect_sync_owners_for_testing(&self) -> (bool, bool, bool) {
         let (response, receiver) = oneshot::channel();
