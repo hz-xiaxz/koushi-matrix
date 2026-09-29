@@ -2115,10 +2115,12 @@ function timelineSection(relativePath, startMarker, endMarker) {
 
 export function checkCoreTimelineUnsubscribeCleanupOrder() {
   const rule = "core.timeline.unsubscribe_cleanup_order";
+  // #1060: the command branch and focused retirement share one helper.
   const branch = timelineSection("manager.rs", "TimelineCommand::Unsubscribe { request_id, key } => {", "TimelineCommand::Paginate");
-  const clear = branch?.indexOf("self.clear_thread_root_projections_for_room(&key).await") ?? -1;
-  const remove = branch?.indexOf("self.timelines.remove(&key)") ?? -1;
-  return clear >= 0 && remove >= 0 && clear < remove
+  const body = timelineItemBody("manager.rs", "pub(super) async fn unsubscribe_timeline");
+  const clear = body?.indexOf("self.clear_thread_root_projections_for_room(key).await") ?? -1;
+  const remove = body?.indexOf("self.timelines.remove(key)") ?? -1;
+  return branch?.includes("self.unsubscribe_timeline(&key).await") && clear >= 0 && remove >= 0 && clear < remove
     ? []
     : [sourceContractFailure(rule, "Room unsubscribe does not clear projection state before dropping the actor")];
 }
@@ -3525,7 +3527,9 @@ export function checkCoreIntegrationSelectRoomRouting() {
   const runtime = coreSource("runtime.rs");
   const room = protocolSource("command/room.rs");
   const failures = [];
-  for (const marker of ["User-intent lane: for SelectRoom, record the request_id→room_id", "terminal IntentLifecycle outcome", "AccountMessage::RoomCommand(room_command)", ".await;"]) if (!runtime.includes(marker)) failures.push(sourceContractFailure(rule, `SelectRoom route lacks ${marker}`));
+  // #1060: selection is admitted and reduced in AppActor itself; only other
+  // room commands are forwarded to the AccountActor.
+  for (const marker of ["User-intent lane: record the request_id→room_id", "terminal IntentLifecycle outcome", "self.commit_local_navigation(AppAction::SelectRoom { room_id })", "AccountMessage::RoomCommand(room_command)"]) if (!runtime.includes(marker)) failures.push(sourceContractFailure(rule, `SelectRoom route lacks ${marker}`));
   if (runtime.includes("try_send(crate::account::AccountMessage::RoomCommand")) failures.push(sourceContractFailure(rule, "SelectRoom uses lossy routing"));
   if (!room.includes("User-intent lane: room selection is request-id correlated")) failures.push(sourceContractFailure(rule, "RoomCommand SelectRoom lacks its correlation comment"));
   return failures;

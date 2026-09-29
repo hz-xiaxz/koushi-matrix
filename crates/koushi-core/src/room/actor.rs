@@ -2,6 +2,10 @@ use super::list_observer::{
     RoomListObservation, RoomListObservationCommand, room_stop_matches_generation,
 };
 use super::mentions::MentionDemand;
+use super::navigation_enrichment::{
+    NavigationEnrichmentApplied, NavigationEnrichmentDemand, NavigationEnrichmentIngress,
+    receive_navigation_enrichment,
+};
 use super::operations::SpaceChildLinkKey;
 #[cfg(any(test, feature = "test-hooks"))]
 use super::operations::{RoomOperationTestControl, RoomOperationTestControlSlot};
@@ -176,6 +180,7 @@ pub(super) struct TimelineResidencyBinding {
 pub struct RoomActorHandle {
     pub(crate) tx: mpsc::Sender<RoomMessage>,
     timeline_residency: watch::Sender<Option<TimelineResidencyBinding>>,
+    navigation_enrichment: NavigationEnrichmentIngress,
     #[cfg(any(test, feature = "test-hooks"))]
     session: watch::Sender<Option<Arc<MatrixClientSession>>>,
     #[cfg(any(test, feature = "test-hooks"))]
@@ -201,6 +206,12 @@ impl RoomActorHandle {
 
     pub(crate) fn sender(&self) -> mpsc::Sender<RoomMessage> {
         self.tx.clone()
+    }
+
+    /// Retained post-commit navigation demand (#1060); AppActor admits into
+    /// it without touching this actor's mailbox.
+    pub(crate) fn navigation_enrichment(&self) -> NavigationEnrichmentIngress {
+        self.navigation_enrichment.clone()
     }
 
     pub(crate) fn bind_timeline_residency(
@@ -391,6 +402,9 @@ pub struct RoomActor {
     pub(super) room_operation_test_reached_count: Arc<AtomicUsize>,
     pub(super) observation: Option<RoomListObservation>,
     pub(super) space_hydration_enqueue_task: Option<executor::JoinHandle<()>>,
+    pub(super) navigation_enrichment_rx:
+        Option<watch::Receiver<Option<NavigationEnrichmentDemand>>>,
+    pub(super) navigation_enrichment_applied: NavigationEnrichmentApplied,
     room_list_generation: u64,
     room_list_source: Option<RoomListSource>,
     room_list_backend_generation: Option<u64>,
@@ -445,6 +459,8 @@ impl RoomActor {
     ) -> RoomActorHandle {
         let (tx, command_rx) = mpsc::channel(crate::ACTOR_MESSAGE_QUEUE_CAPACITY);
         let (timeline_residency, timeline_residency_rx) = watch::channel(None);
+        let (navigation_enrichment, navigation_enrichment_rx) =
+            NavigationEnrichmentIngress::channel();
         let (session_slot, _session_rx) = watch::channel(None);
         #[cfg(any(test, feature = "test-hooks"))]
         let room_operation_test_control = Arc::new(Mutex::new(None));
@@ -460,6 +476,8 @@ impl RoomActor {
             room_operation_test_reached_count: room_operation_test_reached_count.clone(),
             observation: None,
             space_hydration_enqueue_task: None,
+            navigation_enrichment_rx: Some(navigation_enrichment_rx),
+            navigation_enrichment_applied: NavigationEnrichmentApplied::default(),
             room_list_generation: 0,
             room_list_source: None,
             room_list_backend_generation: None,
@@ -493,6 +511,7 @@ impl RoomActor {
         RoomActorHandle {
             tx,
             timeline_residency,
+            navigation_enrichment,
             #[cfg(any(test, feature = "test-hooks"))]
             session: session_slot,
             #[cfg(any(test, feature = "test-hooks"))]
@@ -504,7 +523,17 @@ impl RoomActor {
     }
 
     async fn run(mut self) {
-        while let Some(msg) = self.command_rx.recv().await {
+        loop {
+            let msg = tokio::select! {
+                msg = self.command_rx.recv() => {
+                    let Some(msg) = msg else { break };
+                    msg
+                }
+                _ = receive_navigation_enrichment(&mut self.navigation_enrichment_rx) => {
+                    self.apply_navigation_enrichment().await;
+                    continue;
+                }
+            };
             match msg {
                 RoomMessage::Shutdown => {
                     self.stop_pinned_refreshes().await;
@@ -530,6 +559,9 @@ impl RoomActor {
                     self.clear_known_rooms();
                     self.clear_space_child_repair_attempts();
                     self.clear_mention_candidates();
+                    // Replay the retained navigation for the new session.
+                    self.navigation_enrichment_applied.reset_session();
+                    self.apply_navigation_enrichment().await;
                 }
                 RoomMessage::SyncStarted {
                     session,
@@ -575,6 +607,10 @@ impl RoomActor {
                         source,
                         timeline_residency,
                     );
+                    // Pinned refreshes were stopped above and the observation
+                    // is new: replay the retained navigation for both.
+                    self.navigation_enrichment_applied.reset_session();
+                    self.apply_navigation_enrichment().await;
                 }
                 RoomMessage::ReconcileCommittedRange {
                     source,
@@ -673,6 +709,7 @@ impl RoomActor {
                     self.reset_space_member_session();
                     self.session = None;
                     self.session_slot.send_replace(None);
+                    self.navigation_enrichment_applied.reset_session();
                     self.clear_known_rooms();
                     self.clear_space_child_repair_attempts();
                     self.clear_mention_candidates();
@@ -1037,29 +1074,12 @@ impl RoomActor {
                 )
                 .await;
             }
-            RoomCommand::SelectSpace {
-                request_id: _,
-                space_id,
-            } => {
-                // Navigation commits before membership hydration; the room-list
-                // observer owns the SDK await and subsequent reprojection.
-                let hydration_space_id = space_id.clone();
-                self.reduce_reliable(vec![AppAction::SelectSpace { space_id }])
-                    .await;
-                if let Some(task) = self.space_hydration_enqueue_task.take() {
-                    task.abort();
-                    let _ = task.await;
-                }
-                if let Some(space_id) = hydration_space_id
-                    && let Some(observation) = &self.observation
-                {
-                    let command_tx = observation.command_tx.clone();
-                    self.space_hydration_enqueue_task = Some(executor::spawn(async move {
-                        let _ = command_tx
-                            .send(RoomListObservationCommand::HydrateSpaceMembers { space_id })
-                            .await;
-                    }));
-                }
+            RoomCommand::SelectSpace { .. } | RoomCommand::SelectRoom { .. } => {
+                // #1060: AppActor admits and reduces navigation locally and
+                // never routes it here. Its post-commit enrichment (pinned
+                // events, Space-member hydration) arrives through the retained
+                // navigation-enrichment ingress; this actor must never project
+                // a selection.
             }
             RoomCommand::ReorderSpaces {
                 request_id: _,
@@ -1068,18 +1088,6 @@ impl RoomActor {
                 // Pure navigation preference: project to reducer; no domain event.
                 // One-shot navigation MUST be delivered reliably (see reduce_reliable).
                 self.reduce_reliable(vec![AppAction::ReorderSpaces { space_ids }])
-                    .await;
-            }
-            RoomCommand::SelectRoom {
-                request_id: _,
-                room_id,
-            } => {
-                // Pure navigation: project to reducer; no domain event.
-                // Core updates navigation state here and does not consume
-                // reducer effects in this actor. One-shot navigation MUST be
-                // delivered reliably: a dropped SelectRoom is the large-account
-                // "room selection did not complete" bug (see reduce_reliable).
-                self.reduce_reliable(vec![AppAction::SelectRoom { room_id }])
                     .await;
             }
             RoomCommand::MarkRoomAsRead {

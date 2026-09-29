@@ -78,8 +78,8 @@ pub use manager::{TIMELINE_DIFF_QUEUE_CAPACITY, TimelineManagerActor, TimelineMa
 #[cfg(any(test, feature = "test-hooks"))]
 pub use navigation::display_projection_reset_fallback_count;
 pub(crate) use navigation::{
-    FocusedProjectionCommitted, NavigationProjectionCleanup, NavigationProjectionIngress,
-    NavigationProjectionIntent,
+    FocusedProjectionCommitted, NavigationProjectionCleanup, NavigationProjectionDemand,
+    NavigationProjectionIngress, NavigationProjectionIntent,
 };
 pub(crate) use read_state::{ReadPersistenceIngress, ReadPersistenceRequest};
 pub(crate) use residency::{

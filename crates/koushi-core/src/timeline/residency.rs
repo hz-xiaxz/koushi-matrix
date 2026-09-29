@@ -363,6 +363,7 @@ impl TimelineManagerActor {
             control_rx: None,
             navigation_projection_rx: None,
             last_navigation_projection_generation: 0,
+            applied_room_projection: None,
             terminal_ingress,
             terminal_rx,
             search_index_tx: None,
