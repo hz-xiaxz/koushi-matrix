@@ -7,39 +7,26 @@ the lane that shows the symptom. Lane commands are in
 
 ## Local macOS app signing
 
-On 2026-09-15, `build:dmg` reported ad-hoc signing when no Developer ID identity
-was available, but did not actually pass a signing identity to Tauri. The
-resulting app failed `codesign --verify --deep --strict` with a missing resource
-seal. A linker-signed executable does not establish a valid app bundle.
-
-`scripts/desktop-build-dmg.mjs` now passes `signingIdentity: "-"` only for local
-builds without an explicit identity or certificate configuration, and verifies
-the complete app before reporting success. Signed-release preflight remains
-unchanged; see the [signing contract](environment.md#signed-macos-dmg) and
-[release runbook](../releases/desktop-release.md). The headless reproduction in
-`apps/desktop/src/scripts/dmgSigning.test.ts` failed before the fix and checks
-that release and supplied-certificate configurations never receive this
-fallback. The corrected local DMG build and whole-app verification passed.
-
-Ad-hoc signatures still do not establish one signing identity across rebuilds.
-This fix proves bundle integrity, not uninterrupted Keychain access after an
-app replacement. Do not delete credentials or weaken Keychain access controls
-to work around that distinction.
+- **A local `build:dmg` app fails `codesign --verify --deep --strict` with a
+  missing resource seal.** `scripts/desktop-build-dmg.mjs` passes
+  `signingIdentity: "-"` only for local builds without an explicit identity or
+  certificate configuration and verifies the whole app before reporting success
+  (`apps/desktop/src/scripts/dmgSigning.test.ts`); signed releases are unchanged
+  and follow the [signing contract](environment.md#signed-macos-dmg) and the
+  [release runbook](../releases/desktop-release.md). Ad-hoc signatures prove
+  bundle integrity, not one signing identity across rebuilds: do not delete
+  credentials or weaken Keychain access controls to work around lost Keychain
+  access after an app replacement.
 
 ## Browser-headless harness
 
 - **Timeline rows vanish mid-assertion, with harness seed content in the failure
   snapshot.** The app harness boot loop re-emits its generation-1 seed
-  `InitialItems` every 25ms (up to 40 attempts) until the seed row is visible in
-  the DOM. Until 2026-07-30 that visibility check was its ONLY exit, so a spec
-  that replaced the timeline while the loop was still running (e.g.
-  `timeline-thread-latest-placement.spec.ts` pushing generation 101 right after
-  `gotoReadyApp`) had its rows overwritten by a late seed re-emit: a row passes
-  `toHaveCount(1)` and vanishes
-  one assertion later. `appHarnessMain.tsx` now sets `externalCoreEventPushSeen`
-  inside `pushCoreEvent` and the boot loop stops re-emitting once any spec push
-  has happened. If this recurs, look for a new path that bypasses
-  `pushCoreEvent` instead of adding waits to specs.
+  `InitialItems` every 25ms (up to 40 attempts) until the seed row is visible;
+  `appHarnessMain.tsx` stops re-emitting once `pushCoreEvent` sees any spec push
+  (`externalCoreEventPushSeen`). If rows are overwritten by a late seed re-emit
+  again, look for a new path that bypasses `pushCoreEvent` instead of adding
+  waits to specs.
 - **A diagnostics assertion passes locally and fails on CI.** Assert
   scroll/render diagnostics on a CUMULATIVE counter, never on `latestFrame`.
   `TimelineScrollDiagnostics.latestFrame` is overwritten every frame, and
@@ -145,12 +132,12 @@ to work around that distinction.
   this repo, `process <variable>` hung when resolving the Tauri process. Use
   `first process whose name is <variable>` for variable process names.
 - If screenshot capture is blocked, also grant Screen Recording permission.
-- In Tauri dev mode the macOS process name can be `matrix-desktop-app`, while the
+- In Tauri dev mode the macOS process name is `koushi-desktop`, while the
   product/window title is `Koushi`. GUI automation must check both names.
 - Failed GUI smoke runs must clean up the full process group. A stale Vite
-  process leaves port `5173` occupied and makes the next `tauri dev` fail. After
-  a manual Ctrl-C, verify `lsof -nP -iTCP:5173 -sTCP:LISTEN` is empty before
-  retrying.
+  process leaves port `5173` occupied and makes the next `tauri dev` fail.
+  Before any GUI retry, including after a manual Ctrl-C, verify
+  `lsof -nP -iTCP:5173 -sTCP:LISTEN` is empty.
 - Do not use `Cmd+Q` to stop the Tauri app from GUI smoke. If focus slips, the
   shortcut reaches the app running the agent and raises its own quit confirmation
   dialog, which blocks unattended automation. Let the script's process-group
@@ -206,14 +193,8 @@ to work around that distinction.
   Headless login timeouts also include an allowlisted `trust_path` of stage
   tokens only; read it before rerunning. The full investigation is in
   [history.md](history.md#login-timeout-investigation-334-375).
-- Trust-recheck coalescing is lossless by contract: keep at most one query in
-  flight, remember one pending demand, replay it after query settlement, and if a
-  projection ack does not match the reducer's current state, discard that obsolete
-  transition and run the pending query. A matching Ready/Locked ack may satisfy
-  the redundant demand. Clear pending demand on provisional-session teardown. An
-  ack for the exact generation/transition that does not reach Ready/Locked always
-  makes that transition obsolete: clear it whether demand arrived before or after
-  the ack, then start any already-pending query. Focused gates:
+- Trust-recheck coalescing is lossless; the contract is in
+  [state ownership](state-ownership.md#e2ee-trust). Focused gates:
 
 ```bash
 cargo test -p koushi-core --lib explicit_trust_recheck
@@ -229,7 +210,5 @@ cargo test -p koushi-core --lib runtime::tests::authoritative_trust_runs_through
   Restricting the `media` scenario to two CPUs (`taskset -c 0,1`) reliably
   surfaced the recheck stall that ran green on a full machine.
 - `complete_new_identity_gate_for_qa` settles its `ConfirmSessionBootstrapSaved`
-  confirmation and surfaces a correlated failure as its own error. It previously
-  returned without observing the outcome, which made a failed confirmation
-  indistinguishable from a stall — after it had already printed
-  `gate_new_identity_bootstrap=ok`.
+  confirmation and surfaces a correlated failure as its own error; a failed
+  confirmation must not look like a stall after `gate_new_identity_bootstrap=ok`.

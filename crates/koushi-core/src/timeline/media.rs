@@ -566,7 +566,7 @@ impl TimelineActor {
             kind,
         }));
         // Use reliable delivery — a dropped failure action leaves the UI stuck
-        // in a pending download state (REPOSITORY_RULES L124-128).
+        // in a pending download state (REPOSITORY_RULES State-Machine Discipline).
         self.emit_action_reliable(AppAction::MediaDownloadUpdated {
             room_id: self.key.room_id().to_owned(),
             event_id: event_id.to_owned(),

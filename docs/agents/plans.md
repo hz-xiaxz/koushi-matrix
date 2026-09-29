@@ -19,37 +19,25 @@ feasibility gate. Historical plans below are not the new implementation brief.
 
 ## Runtime and roadmap
 
-- Reinstall/update history preservation and local-first display (proposal):
-  [2026-09-19-reinstall-update-history-preservation-design.md](../superpowers/specs/2026-09-19-reinstall-update-history-preservation-design.md)
-
 - Rooms / DMs collapsible sidebar sections (design and implementation record):
   [2026-09-19-sidebar-sections-design.md](../superpowers/specs/2026-09-19-sidebar-sections-design.md)
   — its Low priority removal is superseded by #955 below.
-
 - Low priority section restoration and Rooms / DMs unread badges (#955):
   [2026-09-20-issue955-low-priority-and-section-unread.md](../superpowers/plans/2026-09-20-issue955-low-priority-and-section-unread.md)
-
 - macOS auto-update with portable desktop state (#878):
   [2026-09-12-issue878-macos-auto-update.md](../superpowers/plans/2026-09-12-issue878-macos-auto-update.md)
-
 - Scoped receipt-reader vertical (#839/#840/#846):
   [2026-09-06-issue839-scoped-readers.md](../superpowers/plans/2026-09-06-issue839-scoped-readers.md)
-
 - Shared SDK receipt snapshots (#839/#840):
   [2026-09-06-issue839-sdk-receipt-sharing.md](../superpowers/plans/2026-09-06-issue839-sdk-receipt-sharing.md)
-
 - Narrow settled outcome payloads (#840):
   [2026-09-06-issue840-outcome-payloads.md](../superpowers/plans/2026-09-06-issue840-outcome-payloads.md)
-
 - Scalar state-generation reads (#840):
   [2026-09-06-issue840-scalar-generations.md](../superpowers/plans/2026-09-06-issue840-scalar-generations.md)
-
 - Profile display-label mutation identities (#840):
   [2026-09-06-issue840-profile-change-identities.md](../superpowers/plans/2026-09-06-issue840-profile-change-identities.md)
-
 - Bounded AppActor command turns (#840):
   [2026-09-06-issue840-command-turns.md](../superpowers/plans/2026-09-06-issue840-command-turns.md)
-
 - Headless core runtime:
   [2026-06-12-headless-core-runtime-implementation.md](../superpowers/plans/2026-06-12-headless-core-runtime-implementation.md)
 - Phase 10+ product surface and release roadmap:
@@ -73,162 +61,82 @@ space tooltips do not bypass the Rust-owned Phase A rule for product behavior.
 
 ## Feature areas
 
-Phase A is Rust/headless work and comes before Phase B GUI wiring.
+Phase A is Rust/headless work and comes before Phase B GUI wiring. A `plan`
+link means the same plan covers both phases; `Phase A` or `Phase B` alone
+means the index recorded only that phase. Rows marked superseded are kept
+only because older issues link to them; they do not govern current work.
 
-| Area | Phase A | Phase B |
-| --- | --- | --- |
-| Media / file timeline | [2026-06-15-media-phase-a.md](../superpowers/plans/2026-06-15-media-phase-a.md) | — |
-| History export archive: room and Space folders with HTML, attachments, resume | [2026-09-25-history-export-archive.md](../superpowers/plans/2026-09-25-history-export-archive.md) | [spec](../superpowers/specs/2026-09-25-history-export-archive-design.md) |
-| Room-history export, Element-compatible JSON (#59) | [2026-09-23-issue59-room-history-export-phase-a.md](../superpowers/plans/2026-09-23-issue59-room-history-export-phase-a.md) | [2026-09-23-issue59-room-history-export-phase-b.md](../superpowers/plans/2026-09-23-issue59-room-history-export-phase-b.md) |
-| Media preparation/cache retention (#547) | [2026-08-18-issue547-memory-bounds.md](../superpowers/plans/2026-08-18-issue547-memory-bounds.md) | [2026-08-18-issue547-memory-bounds.md](../superpowers/plans/2026-08-18-issue547-memory-bounds.md) |
-| Muted-room native Dock attention (#543) | [2026-08-18-issue543-muted-dock-badge.md](../superpowers/plans/2026-08-18-issue543-muted-dock-badge.md) | [2026-08-18-issue543-muted-dock-badge.md](../superpowers/plans/2026-08-18-issue543-muted-dock-badge.md) |
-| Rust lifecycle ownership / leak cleanup (#550) | [2026-08-18-issue550-rust-lifecycle-ownership.md](../superpowers/plans/2026-08-18-issue550-rust-lifecycle-ownership.md) | [2026-08-18-issue550-rust-lifecycle-ownership.md](../superpowers/plans/2026-08-18-issue550-rust-lifecycle-ownership.md) |
-| Feature-seam decomposition (#551) | [2026-08-18-issue551-feature-seam-decomposition.md](../superpowers/plans/2026-08-18-issue551-feature-seam-decomposition.md) | [2026-08-18-issue551-feature-seam-decomposition.md](../superpowers/plans/2026-08-18-issue551-feature-seam-decomposition.md) |
-| Remaining QA decomposition (#551) | [2026-08-20-issue551-remaining-qa-decomposition.md](../superpowers/plans/2026-08-20-issue551-remaining-qa-decomposition.md) | [2026-08-20-issue551-remaining-qa-decomposition.md](../superpowers/plans/2026-08-20-issue551-remaining-qa-decomposition.md) |
-| SDK feature-seam decomposition (#551) | [2026-08-20-issue551-sdk-decomposition.md](../superpowers/plans/2026-08-20-issue551-sdk-decomposition.md) | [2026-08-20-issue551-sdk-decomposition.md](../superpowers/plans/2026-08-20-issue551-sdk-decomposition.md) |
-| RoomActor feature-seam decomposition (#551) | [2026-08-21-issue551-room-actor-decomposition.md](../superpowers/plans/2026-08-21-issue551-room-actor-decomposition.md) | [2026-08-21-issue551-room-actor-decomposition.md](../superpowers/plans/2026-08-21-issue551-room-actor-decomposition.md) |
-| AccountActor feature-seam decomposition (#551) | [2026-08-21-issue551-account-actor-decomposition.md](../superpowers/plans/2026-08-21-issue551-account-actor-decomposition.md) | [2026-08-21-issue551-account-actor-decomposition.md](../superpowers/plans/2026-08-21-issue551-account-actor-decomposition.md) |
-| Timeline ownership decomposition (#551) | [2026-08-21-issue551-timeline-actor-decomposition.md](../superpowers/plans/2026-08-21-issue551-timeline-actor-decomposition.md) | [2026-08-21-issue551-timeline-actor-decomposition.md](../superpowers/plans/2026-08-21-issue551-timeline-actor-decomposition.md) |
-| TimelineView message-body decomposition (#551) | [2026-08-21-issue551-timeline-view-message-body.md](../superpowers/plans/2026-08-21-issue551-timeline-view-message-body.md) | [2026-08-21-issue551-timeline-view-message-body.md](../superpowers/plans/2026-08-21-issue551-timeline-view-message-body.md) |
-| TimelineView message-metadata decomposition (#551) | [2026-08-21-issue551-timeline-view-message-meta.md](../superpowers/plans/2026-08-21-issue551-timeline-view-message-meta.md) | [2026-08-21-issue551-timeline-view-message-meta.md](../superpowers/plans/2026-08-21-issue551-timeline-view-message-meta.md) |
-| TimelineView receipt-surface decomposition (#551) | [2026-08-21-issue551-timeline-view-receipts.md](../superpowers/plans/2026-08-21-issue551-timeline-view-receipts.md) | [2026-08-21-issue551-timeline-view-receipts.md](../superpowers/plans/2026-08-21-issue551-timeline-view-receipts.md) |
-| TimelineView media decomposition (#551) | [2026-08-21-issue551-timeline-view-media.md](../superpowers/plans/2026-08-21-issue551-timeline-view-media.md) | [2026-08-21-issue551-timeline-view-media.md](../superpowers/plans/2026-08-21-issue551-timeline-view-media.md) |
-| TimelineView row decomposition (#551) | [2026-08-21-issue551-timeline-view-row.md](../superpowers/plans/2026-08-21-issue551-timeline-view-row.md) | [2026-08-21-issue551-timeline-view-row.md](../superpowers/plans/2026-08-21-issue551-timeline-view-row.md) |
-| TimelineView transport contract decomposition (#551) | [2026-08-21-issue551-timeline-view-transport-contract.md](../superpowers/plans/2026-08-21-issue551-timeline-view-transport-contract.md) | [2026-08-21-issue551-timeline-view-transport-contract.md](../superpowers/plans/2026-08-21-issue551-timeline-view-transport-contract.md) |
-| TimelineView virtualization-model decomposition (#551) | [2026-08-21-issue551-timeline-view-virtualization.md](../superpowers/plans/2026-08-21-issue551-timeline-view-virtualization.md) | [2026-08-21-issue551-timeline-view-virtualization.md](../superpowers/plans/2026-08-21-issue551-timeline-view-virtualization.md) |
-| TimelineView event-projection classification (#551) | [2026-08-21-issue551-timeline-view-event-projection.md](../superpowers/plans/2026-08-21-issue551-timeline-view-event-projection.md) | [2026-08-21-issue551-timeline-view-event-projection.md](../superpowers/plans/2026-08-21-issue551-timeline-view-event-projection.md) |
-| TimelineView anchor/session ownership (#551) | [2026-08-21-issue551-timeline-view-anchor-session.md](../superpowers/plans/2026-08-21-issue551-timeline-view-anchor-session.md) | [2026-08-21-issue551-timeline-view-anchor-session.md](../superpowers/plans/2026-08-21-issue551-timeline-view-anchor-session.md) |
-| TimelineView projection commit boundary (#551) | [2026-08-21-issue551-timeline-view-projection-boundary.md](../superpowers/plans/2026-08-21-issue551-timeline-view-projection-boundary.md) | [2026-08-21-issue551-timeline-view-projection-boundary.md](../superpowers/plans/2026-08-21-issue551-timeline-view-projection-boundary.md) |
-| TimelineView viewport observation (#551) | [2026-08-21-issue551-timeline-view-viewport-observation.md](../superpowers/plans/2026-08-21-issue551-timeline-view-viewport-observation.md) | [2026-08-21-issue551-timeline-view-viewport-observation.md](../superpowers/plans/2026-08-21-issue551-timeline-view-viewport-observation.md) |
-| TimelineView subscription lifecycle (#551) | [2026-08-21-issue551-timeline-view-subscription-lifecycle.md](../superpowers/plans/2026-08-21-issue551-timeline-view-subscription-lifecycle.md) | [2026-08-21-issue551-timeline-view-subscription-lifecycle.md](../superpowers/plans/2026-08-21-issue551-timeline-view-subscription-lifecycle.md) |
-| TimelineView message-source dialog (#551) | [2026-08-21-issue551-timeline-view-message-source-dialog.md](../superpowers/plans/2026-08-21-issue551-timeline-view-message-source-dialog.md) | [2026-08-21-issue551-timeline-view-message-source-dialog.md](../superpowers/plans/2026-08-21-issue551-timeline-view-message-source-dialog.md) |
-| Timeline diagnostics projection (#551) | [2026-08-21-issue551-timeline-diagnostics-projection.md](../superpowers/plans/2026-08-21-issue551-timeline-diagnostics-projection.md) | [2026-08-21-issue551-timeline-diagnostics-projection.md](../superpowers/plans/2026-08-21-issue551-timeline-diagnostics-projection.md) |
-| Timeline row transport actions (#551) | [2026-08-21-issue551-timeline-row-transport-actions.md](../superpowers/plans/2026-08-21-issue551-timeline-row-transport-actions.md) | [2026-08-21-issue551-timeline-row-transport-actions.md](../superpowers/plans/2026-08-21-issue551-timeline-row-transport-actions.md) |
-| TimelineView composition-root audit (#551) | [2026-08-21-issue551-timeline-view-composition-root-audit.md](../superpowers/plans/2026-08-21-issue551-timeline-view-composition-root-audit.md) | [2026-08-21-issue551-timeline-view-composition-root-audit.md](../superpowers/plans/2026-08-21-issue551-timeline-view-composition-root-audit.md) |
-| Runtime decomposition (#551) | [2026-08-21-issue551-runtime-decomposition.md](../superpowers/plans/2026-08-21-issue551-runtime-decomposition.md) | [2026-08-21-issue551-runtime-decomposition.md](../superpowers/plans/2026-08-21-issue551-runtime-decomposition.md) |
-| Runtime Activity projection (#551) | [2026-08-21-issue551-runtime-activity-projection.md](../superpowers/plans/2026-08-21-issue551-runtime-activity-projection.md) | [2026-08-21-issue551-runtime-activity-projection.md](../superpowers/plans/2026-08-21-issue551-runtime-activity-projection.md) |
-| Runtime connection transport (#551) | [2026-08-21-issue551-runtime-connection-transport.md](../superpowers/plans/2026-08-21-issue551-runtime-connection-transport.md) | [2026-08-21-issue551-runtime-connection-transport.md](../superpowers/plans/2026-08-21-issue551-runtime-connection-transport.md) |
-| Runtime profile/display diagnostics (#551) | [2026-08-21-issue551-runtime-profile-display-diagnostics.md](../superpowers/plans/2026-08-21-issue551-runtime-profile-display-diagnostics.md) | [2026-08-21-issue551-runtime-profile-display-diagnostics.md](../superpowers/plans/2026-08-21-issue551-runtime-profile-display-diagnostics.md) |
-| Runtime composer-draft lifecycle (#551) | [2026-08-21-issue551-runtime-composer-draft-lifecycle.md](../superpowers/plans/2026-08-21-issue551-runtime-composer-draft-lifecycle.md) | [2026-08-21-issue551-runtime-composer-draft-lifecycle.md](../superpowers/plans/2026-08-21-issue551-runtime-composer-draft-lifecycle.md) |
-| Runtime navigation support (#551) | [2026-08-22-issue551-runtime-navigation-support.md](../superpowers/plans/2026-08-22-issue551-runtime-navigation-support.md) | [2026-08-22-issue551-runtime-navigation-support.md](../superpowers/plans/2026-08-22-issue551-runtime-navigation-support.md) |
-| Runtime scheduled-send support (#551) | [2026-08-22-issue551-runtime-scheduled-send.md](../superpowers/plans/2026-08-22-issue551-runtime-scheduled-send.md) | [2026-08-22-issue551-runtime-scheduled-send.md](../superpowers/plans/2026-08-22-issue551-runtime-scheduled-send.md) |
-| Runtime reducer/deferred support (#551) | [2026-08-22-issue551-runtime-reducer-support.md](../superpowers/plans/2026-08-22-issue551-runtime-reducer-support.md) | [2026-08-22-issue551-runtime-reducer-support.md](../superpowers/plans/2026-08-22-issue551-runtime-reducer-support.md) |
-| Account encrypted-content admission (#551) | [2026-08-22-issue551-account-encrypted-admission.md](../superpowers/plans/2026-08-22-issue551-account-encrypted-admission.md) | [2026-08-22-issue551-account-encrypted-admission.md](../superpowers/plans/2026-08-22-issue551-account-encrypted-admission.md) |
-| Runtime residual composition-root audit (#551) | [2026-08-22-issue551-runtime-residual-audit.md](../superpowers/plans/2026-08-22-issue551-runtime-residual-audit.md) | [2026-08-22-issue551-runtime-residual-audit.md](../superpowers/plans/2026-08-22-issue551-runtime-residual-audit.md) |
-| App Tauri timeline transport (#551) | [2026-08-22-issue551-app-tauri-timeline-transport.md](../superpowers/plans/2026-08-22-issue551-app-tauri-timeline-transport.md) | [2026-08-22-issue551-app-tauri-timeline-transport.md](../superpowers/plans/2026-08-22-issue551-app-tauri-timeline-transport.md) |
-| App QA diagnostics projection (#551) | [2026-08-22-issue551-app-qa-diagnostics.md](../superpowers/plans/2026-08-22-issue551-app-qa-diagnostics.md) | [2026-08-22-issue551-app-qa-diagnostics.md](../superpowers/plans/2026-08-22-issue551-app-qa-diagnostics.md) |
-| App destructive confirmation dialog (#551) | [2026-08-22-issue551-app-reset-dialog.md](../superpowers/plans/2026-08-22-issue551-app-reset-dialog.md) | [2026-08-22-issue551-app-reset-dialog.md](../superpowers/plans/2026-08-22-issue551-app-reset-dialog.md) |
-| App session-verification gate (#551) | [2026-08-22-issue551-app-session-verification-gate.md](../superpowers/plans/2026-08-22-issue551-app-session-verification-gate.md) | [2026-08-22-issue551-app-session-verification-gate.md](../superpowers/plans/2026-08-22-issue551-app-session-verification-gate.md) |
-| App desktop-attention effects (#551) | [2026-08-22-issue551-app-desktop-attention-effects.md](../superpowers/plans/2026-08-22-issue551-app-desktop-attention-effects.md) | [2026-08-22-issue551-app-desktop-attention-effects.md](../superpowers/plans/2026-08-22-issue551-app-desktop-attention-effects.md) |
-| App residual composition-root audit (#551) | [2026-08-22-issue551-app-residual-audit.md](../superpowers/plans/2026-08-22-issue551-app-residual-audit.md) | [2026-08-22-issue551-app-residual-audit.md](../superpowers/plans/2026-08-22-issue551-app-residual-audit.md) |
-| Logical window-state restore (#544) | — | [2026-08-22-issue544-logical-window-state.md](../superpowers/plans/2026-08-22-issue544-logical-window-state.md) |
-| Rust-owned live viewport synchronization (#666) | [2026-08-22-issue666-rust-viewport-synchronization.md](../superpowers/plans/2026-08-22-issue666-rust-viewport-synchronization.md) | [2026-08-22-issue666-rust-viewport-synchronization.md](../superpowers/plans/2026-08-22-issue666-rust-viewport-synchronization.md) |
-| Invite-workflow admission and settlement guards (#658) | [2026-08-22-issue658-invite-workflow-admission.md](../superpowers/plans/2026-08-22-issue658-invite-workflow-admission.md) | — |
-| Composer-load session fence evidence (#645) | [2026-08-22-issue645-composer-load-session-fence.md](../superpowers/plans/2026-08-22-issue645-composer-load-session-fence.md) | — |
-| Browser harness resource lifecycle (#657) | — | [2026-08-22-issue657-harness-resource-lifecycle.md](../superpowers/plans/2026-08-22-issue657-harness-resource-lifecycle.md) |
-| Bounded KaTeX math rendering (#668) | — | [2026-08-22-issue668-bounded-math-rendering.md](../superpowers/plans/2026-08-22-issue668-bounded-math-rendering.md) |
-| Transient settlements and trust-loss resets (#660) | [2026-08-23-issue660-transient-settlement-trust-reset.md](../superpowers/plans/2026-08-23-issue660-transient-settlement-trust-reset.md) | — |
-| Room-list session-fence acceptance (#659) | [2026-08-24-issue659-room-list-session-fence-acceptance.md](../superpowers/plans/2026-08-24-issue659-room-list-session-fence-acceptance.md) | — |
-| Authentication invalidation diagnostics and UI (#608) | [2026-08-24-issue608-authentication-invalidation-diagnostics.md](../superpowers/plans/2026-08-24-issue608-authentication-invalidation-diagnostics.md) | — |
-| Rust-owned live thread-summary authority (#678) | [2026-08-25-issue678-rust-thread-summary-authority.md](../superpowers/plans/2026-08-25-issue678-rust-thread-summary-authority.md) | [2026-08-25-issue678-rust-thread-summary-authority.md](../superpowers/plans/2026-08-25-issue678-rust-thread-summary-authority.md) |
-| Historical sender-profile hydration (#688) | [2026-08-25-issue688-historical-sender-profiles.md](../superpowers/plans/2026-08-25-issue688-historical-sender-profiles.md) | — |
-| Secure Backup startup convergence | [2026-08-25-secure-backup-startup-convergence.md](../superpowers/plans/2026-08-25-secure-backup-startup-convergence.md) | [2026-08-25-secure-backup-startup-convergence.md](../superpowers/plans/2026-08-25-secure-backup-startup-convergence.md) |
-| User Settings session/account convergence | [2026-08-25-user-settings-session-convergence.md](../superpowers/plans/2026-08-25-user-settings-session-convergence.md) | [2026-08-25-user-settings-session-convergence.md](../superpowers/plans/2026-08-25-user-settings-session-convergence.md) |
-| Authoritative current-device verification (#694 Priority 1) | [2026-08-25-issue694-authoritative-verification.md](../superpowers/plans/2026-08-25-issue694-authoritative-verification.md) | [2026-08-25-issue694-authoritative-verification.md](../superpowers/plans/2026-08-25-issue694-authoritative-verification.md) |
-| Active-session account management (#694 Priority 2) | [2026-08-26-issue694-active-session-account-management.md](../superpowers/plans/2026-08-26-issue694-active-session-account-management.md) | [2026-08-26-issue694-active-session-account-management.md](../superpowers/plans/2026-08-26-issue694-active-session-account-management.md) |
-| Room-latest redaction/edit convergence (#570 Task C) | [2026-08-24-issue570-room-latest-convergence.md](../superpowers/plans/2026-08-24-issue570-room-latest-convergence.md) | [2026-08-24-issue570-room-latest-convergence.md](../superpowers/plans/2026-08-24-issue570-room-latest-convergence.md) |
-| Local-viewed read-state convergence (#559) | [2026-08-24-issue559-local-viewed-read-state-convergence.md](../superpowers/plans/2026-08-24-issue559-local-viewed-read-state-convergence.md) | [2026-08-24-issue559-local-viewed-read-state-convergence.md](../superpowers/plans/2026-08-24-issue559-local-viewed-read-state-convergence.md) |
-| Frontend semantic-ownership inventory (#552) | [2026-08-23-issue552-frontend-ownership-inventory.md](../superpowers/plans/2026-08-23-issue552-frontend-ownership-inventory.md) | — |
-| Remaining frontend ownership migration phases (#552) | [2026-08-27-issue552-remaining-ownership-phases.md](../superpowers/plans/2026-08-27-issue552-remaining-ownership-phases.md) | [2026-08-27-issue552-remaining-ownership-phases.md](../superpowers/plans/2026-08-27-issue552-remaining-ownership-phases.md) |
-| Rust-owned thread-root projection lifecycle (#708 / #552 Phase 1) | [2026-08-27-issue708-thread-root-projection-ownership.md](../superpowers/plans/2026-08-27-issue708-thread-root-projection-ownership.md) | [2026-08-27-issue708-thread-root-projection-ownership.md](../superpowers/plans/2026-08-27-issue708-thread-root-projection-ownership.md) |
-| Deterministic settlement (#738) | [2026-08-28-issue-738-deterministic-settlement.md](../superpowers/plans/2026-08-28-issue-738-deterministic-settlement.md) | [2026-08-28-issue-738-deterministic-settlement.md](../superpowers/plans/2026-08-28-issue-738-deterministic-settlement.md) |
-| Canon and low-risk architecture cleanup (#750) | [2026-08-29-issue750-architecture-cleanup.md](../superpowers/plans/2026-08-29-issue750-architecture-cleanup.md) | — |
-| Rust source-contract and test-module cleanup (#753) | [2026-08-30-issue753-rust-test-structure.md](../superpowers/plans/2026-08-30-issue753-rust-test-structure.md) | — |
-| DM Space-membership readiness (#780) | [2026-08-31-issue780-dm-space-membership-readiness.md](../superpowers/plans/2026-08-31-issue780-dm-space-membership-readiness.md) | — |
-| Thin Tauri adapter and Core-owned settlement (#755) | [2026-08-30-issue755-thin-tauri-adapter.md](../superpowers/plans/2026-08-30-issue755-thin-tauri-adapter.md) | [2026-08-30-issue755-thin-tauri-adapter.md](../superpowers/plans/2026-08-30-issue755-thin-tauri-adapter.md) |
-| Ordered state transport and renderer-independent settlement (#759) | [2026-09-01-issue759-ordered-state-transport.md](../superpowers/plans/2026-09-01-issue759-ordered-state-transport.md) | [2026-09-01-issue759-ordered-state-transport.md](../superpowers/plans/2026-09-01-issue759-ordered-state-transport.md) |
-| Rust-owned frontend preferences and TypeScript semantic deletion (#761) | [2026-09-04-issue761-rust-owned-preferences.md](../superpowers/plans/2026-09-04-issue761-rust-owned-preferences.md) | [2026-09-04-issue761-rust-owned-preferences.md](../superpowers/plans/2026-09-04-issue761-rust-owned-preferences.md) |
-| Rust-owned Activity event navigation (#836) | [2026-09-04-issue836-activity-event-navigation.md](../superpowers/plans/2026-09-04-issue836-activity-event-navigation.md) | — |
-| Deterministic README application screenshot (#835) | — | [2026-09-05-issue835-readme-screenshot.md](../superpowers/plans/2026-09-05-issue835-readme-screenshot.md) |
-| Desktop polish batch (#806, #826, #827, #828, #831, #832, #833) | [2026-09-04-issues826-827-828-831-832-desktop-polish.md](../superpowers/plans/2026-09-04-issues826-827-828-831-832-desktop-polish.md) | [2026-09-04-issues826-827-828-831-832-desktop-polish.md](../superpowers/plans/2026-09-04-issues826-827-828-831-832-desktop-polish.md) |
-| Frontend-neutral protocol and QA isolation (#763) | [2026-09-05-issue763-frontend-neutral-protocol-qa.md](../superpowers/plans/2026-09-05-issue763-frontend-neutral-protocol-qa.md) | — |
-| Leaf crate boundaries and Core edge cleanup (#765) | [2026-09-05-issue765-leaf-boundaries.md](../superpowers/plans/2026-09-05-issue765-leaf-boundaries.md) | — |
-| Neutral DesktopApi contract (#552 Phase 2A) | [2026-08-28-issue552-neutral-desktop-api-contract.md](../superpowers/plans/2026-08-28-issue552-neutral-desktop-api-contract.md) | — |
-| External-link and media platform ports (#552 Phase 2B1) | [2026-08-28-issue552-link-media-platform-ports.md](../superpowers/plans/2026-08-28-issue552-link-media-platform-ports.md) | — |
-| Desktop attention platform port (#552 Phase 2B2) | [2026-08-28-issue552-desktop-attention-platform-port.md](../superpowers/plans/2026-08-28-issue552-desktop-attention-platform-port.md) | — |
-| Window and dialog platform port (#552 Phase 2B3) | [2026-08-28-issue552-window-dialog-platform-port.md](../superpowers/plans/2026-08-28-issue552-window-dialog-platform-port.md) | — |
-| Event subscription platform port (#552 Phase 2B4) | [2026-08-28-issue552-event-subscription-platform-port.md](../superpowers/plans/2026-08-28-issue552-event-subscription-platform-port.md) | — |
-| Timeline acknowledgement delivery ownership (#552 Phase 3) | [2026-08-28-issue552-timeline-acknowledgement-delivery.md](../superpowers/plans/2026-08-28-issue552-timeline-acknowledgement-delivery.md) | — |
-| Room-settings view-fence decision (#552 Phase 4.1) | [2026-08-28-issue552-room-settings-view-fences.md](../superpowers/plans/2026-08-28-issue552-room-settings-view-fences.md) | — |
-| Diagnostics dialog request-fence decision (#552 Phase 4.2) | [2026-08-28-issue552-diagnostics-view-fence.md](../superpowers/plans/2026-08-28-issue552-diagnostics-view-fence.md) | — |
-| Space-member panel demand ownership (#552 Phase 4.3a) | [2026-08-28-issue552-space-member-panel-demand.md](../superpowers/plans/2026-08-28-issue552-space-member-panel-demand.md) | — |
-| Space invite-search lifetime/convergence (#552 Phase 4.3b) | [2026-08-28-issue552-space-invite-search-lifetime.md](../superpowers/plans/2026-08-28-issue552-space-invite-search-lifetime.md) | — |
-| Space-member invite admission ownership (#552 Phase 4.3c) | [2026-08-29-issue552-space-member-invite-admission.md](../superpowers/plans/2026-08-29-issue552-space-member-invite-admission.md) | — |
-| Space invite-cancellation failure epoch (#552 Phase 4.3d) | [2026-08-29-issue552-space-invite-cancel-failure-epoch.md](../superpowers/plans/2026-08-29-issue552-space-invite-cancel-failure-epoch.md) | — |
-| Space-member role failure epoch (#552 Phase 4.3e) | [2026-08-29-issue552-space-member-role-failure-epoch.md](../superpowers/plans/2026-08-29-issue552-space-member-role-failure-epoch.md) | — |
-| Navigation intent epochs (#552 Phase 4.4) | [2026-08-29-issue552-navigation-intent-epochs.md](../superpowers/plans/2026-08-29-issue552-navigation-intent-epochs.md) | — |
-| Alias mutation sequencing ownership (#552 Phase 5A) | [2026-08-29-issue552-alias-mutation-sequencing.md](../superpowers/plans/2026-08-29-issue552-alias-mutation-sequencing.md) | — |
-| Staged-caption mutation sequencing ownership (#552 Phase 5B) | [2026-08-29-issue552-caption-mutation-sequencing.md](../superpowers/plans/2026-08-29-issue552-caption-mutation-sequencing.md) | — |
-| Frontend-neutral Core boundary proof (#552 Phase 6) | [2026-08-29-issue552-frontend-neutral-core-boundary.md](../superpowers/plans/2026-08-29-issue552-frontend-neutral-core-boundary.md) | — |
-| Final acceptance audit (#552 Phase 7) | [2026-08-29-issue552-final-acceptance-audit.md](../superpowers/plans/2026-08-29-issue552-final-acceptance-audit.md) | — |
-| Activity/edit/redaction convergence (#570 umbrella) | [2026-08-23-issue570-redaction-edit-convergence.md](../superpowers/plans/2026-08-23-issue570-redaction-edit-convergence.md) | [2026-08-23-issue570-redaction-edit-convergence.md](../superpowers/plans/2026-08-23-issue570-redaction-edit-convergence.md) |
-| SDK thread relation aggregate (#570 Task A) | [2026-08-23-issue570-sdk-thread-aggregate-spike.md](../superpowers/plans/2026-08-23-issue570-sdk-thread-aggregate-spike.md) | — |
-| Space member role management (#582) | [2026-08-23-issue582-space-member-role-management.md](../superpowers/plans/2026-08-23-issue582-space-member-role-management.md) | [2026-08-23-issue582-space-member-role-management.md](../superpowers/plans/2026-08-23-issue582-space-member-role-management.md) |
-| Core Activity/unread/thread convergence (#570 Task B) | [2026-08-24-issue570-core-activity-thread-convergence.md](../superpowers/plans/2026-08-24-issue570-core-activity-thread-convergence.md) | — |
-| Invite/mention query ownership leaf (#552) | [2026-08-24-issue552-invite-mention-query-ownership-leaf.md](../superpowers/plans/2026-08-24-issue552-invite-mention-query-ownership-leaf.md) | — |
-| App UI-latency hook (#551) | [2026-08-22-issue551-app-ui-latency-hook.md](../superpowers/plans/2026-08-22-issue551-app-ui-latency-hook.md) | [2026-08-22-issue551-app-ui-latency-hook.md](../superpowers/plans/2026-08-22-issue551-app-ui-latency-hook.md) |
-| Browser fake room management (#551) | [2026-08-22-issue551-browser-fake-room-management.md](../superpowers/plans/2026-08-22-issue551-browser-fake-room-management.md) | [2026-08-22-issue551-browser-fake-room-management.md](../superpowers/plans/2026-08-22-issue551-browser-fake-room-management.md) |
-| Browser fake link-preview fixture isolation (#634) | [2026-08-22-issue634-browser-fake-link-preview-isolation.md](../superpowers/plans/2026-08-22-issue634-browser-fake-link-preview-isolation.md) | [2026-08-22-issue634-browser-fake-link-preview-isolation.md](../superpowers/plans/2026-08-22-issue634-browser-fake-link-preview-isolation.md) |
-| Browser fake search request IDs (#634) | [2026-08-22-issue634-browser-fake-search-request-ids.md](../superpowers/plans/2026-08-22-issue634-browser-fake-search-request-ids.md) | [2026-08-22-issue634-browser-fake-search-request-ids.md](../superpowers/plans/2026-08-22-issue634-browser-fake-search-request-ids.md) |
-| Browser fake submission bookkeeping (#634) | [2026-08-22-issue634-browser-fake-submission-bookkeeping.md](../superpowers/plans/2026-08-22-issue634-browser-fake-submission-bookkeeping.md) | [2026-08-22-issue634-browser-fake-submission-bookkeeping.md](../superpowers/plans/2026-08-22-issue634-browser-fake-submission-bookkeeping.md) |
-| Browser fake composer lease revocation (#634) | [2026-08-22-issue634-browser-fake-composer-lease-revocation.md](../superpowers/plans/2026-08-22-issue634-browser-fake-composer-lease-revocation.md) | [2026-08-22-issue634-browser-fake-composer-lease-revocation.md](../superpowers/plans/2026-08-22-issue634-browser-fake-composer-lease-revocation.md) |
-| Browser fake prepared-upload lifecycle (#634) | [2026-08-22-issue634-browser-fake-prepared-upload-lifecycle.md](../superpowers/plans/2026-08-22-issue634-browser-fake-prepared-upload-lifecycle.md) | [2026-08-22-issue634-browser-fake-prepared-upload-lifecycle.md](../superpowers/plans/2026-08-22-issue634-browser-fake-prepared-upload-lifecycle.md) |
-| Browser fake settings projection (#551) | [2026-08-22-issue551-browser-fake-settings-projection.md](../superpowers/plans/2026-08-22-issue551-browser-fake-settings-projection.md) | [2026-08-22-issue551-browser-fake-settings-projection.md](../superpowers/plans/2026-08-22-issue551-browser-fake-settings-projection.md) |
-| Browser fake composer/upload projection (#551) | [2026-08-22-issue551-browser-fake-composer-upload-projection.md](../superpowers/plans/2026-08-22-issue551-browser-fake-composer-upload-projection.md) | [2026-08-22-issue551-browser-fake-composer-upload-projection.md](../superpowers/plans/2026-08-22-issue551-browser-fake-composer-upload-projection.md) |
-| Browser fake invite-workflow projection (#551) | [2026-08-22-issue551-browser-fake-invite-workflow-projection.md](../superpowers/plans/2026-08-22-issue551-browser-fake-invite-workflow-projection.md) | [2026-08-22-issue551-browser-fake-invite-workflow-projection.md](../superpowers/plans/2026-08-22-issue551-browser-fake-invite-workflow-projection.md) |
-| Browser fake space-member projection (#551) | [2026-08-22-issue551-browser-fake-space-member-projection.md](../superpowers/plans/2026-08-22-issue551-browser-fake-space-member-projection.md) | [2026-08-22-issue551-browser-fake-space-member-projection.md](../superpowers/plans/2026-08-22-issue551-browser-fake-space-member-projection.md) |
-| Browser fake snapshot defaults (#551) | [2026-08-22-issue551-browser-fake-snapshot-defaults.md](../superpowers/plans/2026-08-22-issue551-browser-fake-snapshot-defaults.md) | [2026-08-22-issue551-browser-fake-snapshot-defaults.md](../superpowers/plans/2026-08-22-issue551-browser-fake-snapshot-defaults.md) |
-| Browser fake async completion fences (#649) | [2026-08-22-issue649-browser-fake-async-fences.md](../superpowers/plans/2026-08-22-issue649-browser-fake-async-fences.md) | [2026-08-22-issue649-browser-fake-async-fences.md](../superpowers/plans/2026-08-22-issue649-browser-fake-async-fences.md) |
-| Browser fake room-removal cleanup (#650) | [2026-08-22-issue650-browser-fake-room-removal-cleanup.md](../superpowers/plans/2026-08-22-issue650-browser-fake-room-removal-cleanup.md) | [2026-08-22-issue650-browser-fake-room-removal-cleanup.md](../superpowers/plans/2026-08-22-issue650-browser-fake-room-removal-cleanup.md) |
-| Browser fake staged-upload transitions (#651) | [2026-08-22-issue651-browser-fake-staged-upload-transitions.md](../superpowers/plans/2026-08-22-issue651-browser-fake-staged-upload-transitions.md) | [2026-08-22-issue651-browser-fake-staged-upload-transitions.md](../superpowers/plans/2026-08-22-issue651-browser-fake-staged-upload-transitions.md) |
-| Browser fake sidebar projection (#551) | [2026-08-22-issue551-browser-fake-sidebar-projection.md](../superpowers/plans/2026-08-22-issue551-browser-fake-sidebar-projection.md) | [2026-08-22-issue551-browser-fake-sidebar-projection.md](../superpowers/plans/2026-08-22-issue551-browser-fake-sidebar-projection.md) |
-| Tauri core-event forwarder lifecycle (#656) | [2026-08-22-issue656-tauri-forwarder-lifecycle.md](../superpowers/plans/2026-08-22-issue656-tauri-forwarder-lifecycle.md) | [2026-08-22-issue656-tauri-forwarder-lifecycle.md](../superpowers/plans/2026-08-22-issue656-tauri-forwarder-lifecycle.md) |
-| Tauri desktop menu adapter (#551) | [2026-08-22-issue551-tauri-menu-adapter.md](../superpowers/plans/2026-08-22-issue551-tauri-menu-adapter.md) | [2026-08-22-issue551-tauri-menu-adapter.md](../superpowers/plans/2026-08-22-issue551-tauri-menu-adapter.md) |
-| Tauri window-state owner (#551) | [2026-08-22-issue551-tauri-window-state.md](../superpowers/plans/2026-08-22-issue551-tauri-window-state.md) | [2026-08-22-issue551-tauri-window-state.md](../superpowers/plans/2026-08-22-issue551-tauri-window-state.md) |
-| Tauri core-event forwarder (#551) | [2026-08-22-issue551-tauri-core-event-forwarder.md](../superpowers/plans/2026-08-22-issue551-tauri-core-event-forwarder.md) | [2026-08-22-issue551-tauri-core-event-forwarder.md](../superpowers/plans/2026-08-22-issue551-tauri-core-event-forwarder.md) |
-| Browser fake session-view reset (#641) | [2026-08-22-issue641-browser-fake-session-view-reset.md](../superpowers/plans/2026-08-22-issue641-browser-fake-session-view-reset.md) | [2026-08-22-issue641-browser-fake-session-view-reset.md](../superpowers/plans/2026-08-22-issue641-browser-fake-session-view-reset.md) |
-| Timeline viewport scheduler teardown (#551) | [2026-08-21-issue551-viewport-scheduler-teardown.md](../superpowers/plans/2026-08-21-issue551-viewport-scheduler-teardown.md) | [2026-08-21-issue551-viewport-scheduler-teardown.md](../superpowers/plans/2026-08-21-issue551-viewport-scheduler-teardown.md) |
-| SAS diagnostic test isolation (#551) | [2026-08-21-issue551-sas-diagnostic-test-isolation.md](../superpowers/plans/2026-08-21-issue551-sas-diagnostic-test-isolation.md) | [2026-08-21-issue551-sas-diagnostic-test-isolation.md](../superpowers/plans/2026-08-21-issue551-sas-diagnostic-test-isolation.md) |
-| Linux GUI new-identity bootstrap QA (#586) | [2026-08-20-issue586-linux-gui-new-identity-bootstrap.md](../superpowers/plans/2026-08-20-issue586-linux-gui-new-identity-bootstrap.md) | [2026-08-20-issue586-linux-gui-new-identity-bootstrap.md](../superpowers/plans/2026-08-20-issue586-linux-gui-new-identity-bootstrap.md) |
-| Live signals (receipts, markers, typing, presence) | [2026-06-15-live-signals-phase-a.md](../superpowers/plans/2026-06-15-live-signals-phase-a.md) | [2026-06-15-live-signals-phase-b-gui.md](../superpowers/plans/2026-06-15-live-signals-phase-b-gui.md) |
-| E2EE trust state machine | [2026-06-14-e2ee-trust-phase-a.md](../superpowers/plans/2026-06-14-e2ee-trust-phase-a.md) | — |
-| Rust-owned settings | [2026-06-14-rust-owned-settings-phase-a.md](../superpowers/plans/2026-06-14-rust-owned-settings-phase-a.md) | — |
-| i18n substrate | [2026-06-14-i18n-substrate-phase-a.md](../superpowers/plans/2026-06-14-i18n-substrate-phase-a.md) | [2026-06-14-i18n-substrate-phase-b.md](../superpowers/plans/2026-06-14-i18n-substrate-phase-b.md) |
-| Cross-platform font/emoji substrate | [2026-06-15-font-emoji-phase-a.md](../superpowers/plans/2026-06-15-font-emoji-phase-a.md) | [2026-06-15-font-emoji-phase-b-gui.md](../superpowers/plans/2026-06-15-font-emoji-phase-b-gui.md) |
-| Compact message density (#609) | — | [2026-08-22-issue609-compact-message-density.md](../superpowers/plans/2026-08-22-issue609-compact-message-density.md) |
-| Timeline navigation aids (#41) | [2026-06-16-timeline-navigation-phase-a.md](../superpowers/plans/2026-06-16-timeline-navigation-phase-a.md) | — |
-| Unread navigation and thread notifications (#569) | — | [2026-08-22-issue569-unread-navigation-thread-notifications.md](../superpowers/plans/2026-08-22-issue569-unread-navigation-thread-notifications.md) |
-| Account work scheduler | [2026-07-25-account-work-scheduler-phase-a.md](../superpowers/plans/2026-07-25-account-work-scheduler-phase-a.md) | — |
-| Startup latency observability (#123) | [2026-06-23-startup-latency-observability-phase-a.md](../superpowers/plans/2026-06-23-startup-latency-observability-phase-a.md) | — |
-| Element X-compatible login/store lifecycle (#699) | [2026-08-26-issue699-element-x-login-store-lifecycle.md](../superpowers/plans/2026-08-26-issue699-element-x-login-store-lifecycle.md) | — |
-| Initial index-0 key-share diagnostics (#509) | [2026-08-13-index0-share-diagnostics.md](../superpowers/plans/2026-08-13-index0-share-diagnostics.md) | — |
-| Bounded index-0 duplicate share (#510) | [2026-08-13-index0-reshare.md](../superpowers/plans/2026-08-13-index0-reshare.md) | — |
-| Initial Megolm Olm-claim repair (#523) | [2026-08-14-initial-megolm-olm-repair.md](../superpowers/plans/2026-08-14-initial-megolm-olm-repair.md) | — |
-| Element X Megolm send parity (runtime-disable #510/#523) | [2026-08-15-element-x-megolm-send-parity.md](../superpowers/plans/2026-08-15-element-x-megolm-send-parity.md) | — |
-| Room-subscription ownership (#518) | [2026-08-14-room-subscription-ownership.md](../superpowers/plans/2026-08-14-room-subscription-ownership.md) | — |
-| Session-resident room subscriptions (#532) | [2026-08-15-room-subscription-residency.md](../superpowers/plans/2026-08-15-room-subscription-residency.md) | — |
-| Room-key rotation correlation diagnostics | [2026-08-14-room-key-rotation-correlation-diagnostics.md](../superpowers/plans/2026-08-14-room-key-rotation-correlation-diagnostics.md) | — |
-| Eviction-resistant Megolm rotation attribution (#591) | [2026-08-21-issue591-rotation-ledger.md](../superpowers/plans/2026-08-21-issue591-rotation-ledger.md) | [2026-08-21-issue591-rotation-ledger.md](../superpowers/plans/2026-08-21-issue591-rotation-ledger.md) |
-| Persisted Megolm rotation attribution (#794) | [2026-09-05-issue794-persisted-rotation-attribution.md](../superpowers/plans/2026-09-05-issue794-persisted-rotation-attribution.md) | — |
-| Element X Megolm send parity (#795) | [2026-09-05-issue795-element-x-megolm-send-parity.md](../superpowers/plans/2026-09-05-issue795-element-x-megolm-send-parity.md) | — |
-| Stock forced rotation debug control / JS-error attribution (#797) | [2026-09-06-force-rotation-issue797-js-errors.md](../superpowers/plans/2026-09-06-force-rotation-issue797-js-errors.md) | [2026-09-06-force-rotation-issue797-js-errors.md](../superpowers/plans/2026-09-06-force-rotation-issue797-js-errors.md) |
-| New-session Megolm readiness — phase 1 (#577) | [2026-08-21-issue577-megolm-readiness.md](../superpowers/plans/2026-08-21-issue577-megolm-readiness.md) | — |
-| Same-user secondary-device QA credential isolation (#577 follow-up) | [2026-08-21-issue577-secondary-device-qa-credentials.md](../superpowers/plans/2026-08-21-issue577-secondary-device-qa-credentials.md) | — |
-| Formatted-body newline preservation (#522) | [2026-08-14-formatted-body-newlines.md](../superpowers/plans/2026-08-14-formatted-body-newlines.md) | — |
-| Nested Markdown bullet lists (#648) | [2026-08-22-issue648-nested-markdown-lists.md](../superpowers/plans/2026-08-22-issue648-nested-markdown-lists.md) | — |
-| Unified renderer viewport stabilization (#837) | — | [2026-09-05-issue837-viewport-transaction.md](../superpowers/plans/2026-09-05-issue837-viewport-transaction.md) |
-| Active prepend anchor preservation (#520) | [2026-08-14-active-prepend-anchor.md](../superpowers/plans/2026-08-14-active-prepend-anchor.md) | — |
-
-Font asset loading and any bundled font package must update
-`THIRD_PARTY_NOTICES.md` with version, local path, license, and provenance — see
-[state-ownership.md](state-ownership.md#settings-composer-and-scheduled-send).
+| Area | Plans |
+| --- | --- |
+| Media / file timeline | [Phase A](../superpowers/plans/2026-06-15-media-phase-a.md) |
+| History export archive: room and Space folders with HTML, attachments, resume | [Phase A](../superpowers/plans/2026-09-25-history-export-archive.md), [spec](../superpowers/specs/2026-09-25-history-export-archive-design.md) |
+| Room-history export, Element-compatible JSON (#59) | [Phase A](../superpowers/plans/2026-09-23-issue59-room-history-export-phase-a.md), [Phase B](../superpowers/plans/2026-09-23-issue59-room-history-export-phase-b.md) |
+| Media preparation/cache retention (#547) | [plan](../superpowers/plans/2026-08-18-issue547-memory-bounds.md) |
+| Muted-room native Dock attention (#543) | [plan](../superpowers/plans/2026-08-18-issue543-muted-dock-badge.md) |
+| Rust lifecycle ownership / leak cleanup (#550) | [plan](../superpowers/plans/2026-08-18-issue550-rust-lifecycle-ownership.md) |
+| Logical window-state restore (#544) | [Phase B](../superpowers/plans/2026-08-22-issue544-logical-window-state.md) |
+| Rust-owned live viewport synchronization (#666) | [plan](../superpowers/plans/2026-08-22-issue666-rust-viewport-synchronization.md) |
+| Invite-workflow admission and settlement guards (#658) | [Phase A](../superpowers/plans/2026-08-22-issue658-invite-workflow-admission.md) |
+| Composer-load session fence evidence (#645) | [Phase A](../superpowers/plans/2026-08-22-issue645-composer-load-session-fence.md) |
+| Browser harness resource lifecycle (#657) | [Phase B](../superpowers/plans/2026-08-22-issue657-harness-resource-lifecycle.md) |
+| Bounded KaTeX math rendering (#668) | [Phase B](../superpowers/plans/2026-08-22-issue668-bounded-math-rendering.md) |
+| Transient settlements and trust-loss resets (#660) | [Phase A](../superpowers/plans/2026-08-23-issue660-transient-settlement-trust-reset.md) |
+| Room-list session-fence acceptance (#659) | [Phase A](../superpowers/plans/2026-08-24-issue659-room-list-session-fence-acceptance.md) |
+| Authentication invalidation diagnostics and UI (#608) | [Phase A](../superpowers/plans/2026-08-24-issue608-authentication-invalidation-diagnostics.md) |
+| Rust-owned live thread-summary authority (#678) | [plan](../superpowers/plans/2026-08-25-issue678-rust-thread-summary-authority.md) |
+| Historical sender-profile hydration (#688) | [Phase A](../superpowers/plans/2026-08-25-issue688-historical-sender-profiles.md) |
+| Secure Backup startup convergence | [plan](../superpowers/plans/2026-08-25-secure-backup-startup-convergence.md) |
+| User Settings session/account convergence | [plan](../superpowers/plans/2026-08-25-user-settings-session-convergence.md) |
+| Authoritative current-device verification (#694 Priority 1) | [plan](../superpowers/plans/2026-08-25-issue694-authoritative-verification.md) |
+| Active-session account management (#694 Priority 2) | [plan](../superpowers/plans/2026-08-26-issue694-active-session-account-management.md) |
+| Room-latest redaction/edit convergence (#570 Task C) | [plan](../superpowers/plans/2026-08-24-issue570-room-latest-convergence.md) |
+| Local-viewed read-state convergence (#559) | [plan](../superpowers/plans/2026-08-24-issue559-local-viewed-read-state-convergence.md) |
+| Deterministic settlement (#738) | [plan](../superpowers/plans/2026-08-28-issue-738-deterministic-settlement.md) |
+| Canon and low-risk architecture cleanup (#750) | [Phase A](../superpowers/plans/2026-08-29-issue750-architecture-cleanup.md) |
+| Rust source-contract and test-module cleanup (#753) | [Phase A](../superpowers/plans/2026-08-30-issue753-rust-test-structure.md) |
+| DM Space-membership readiness (#780) | [Phase A](../superpowers/plans/2026-08-31-issue780-dm-space-membership-readiness.md) |
+| Thin Tauri adapter and Core-owned settlement (#755) | [plan](../superpowers/plans/2026-08-30-issue755-thin-tauri-adapter.md) |
+| Ordered state transport and renderer-independent settlement (#759) | [plan](../superpowers/plans/2026-09-01-issue759-ordered-state-transport.md) |
+| Rust-owned frontend preferences and TypeScript semantic deletion (#761) | [plan](../superpowers/plans/2026-09-04-issue761-rust-owned-preferences.md) |
+| Rust-owned Activity event navigation (#836) | [Phase A](../superpowers/plans/2026-09-04-issue836-activity-event-navigation.md) |
+| Deterministic README application screenshot (#835) | [Phase B](../superpowers/plans/2026-09-05-issue835-readme-screenshot.md) |
+| Desktop polish batch (#806, #826, #827, #828, #831, #832, #833) | [plan](../superpowers/plans/2026-09-04-issues826-827-828-831-832-desktop-polish.md) |
+| Frontend-neutral protocol and QA isolation (#763) | [Phase A](../superpowers/plans/2026-09-05-issue763-frontend-neutral-protocol-qa.md) |
+| Leaf crate boundaries and Core edge cleanup (#765) | [Phase A](../superpowers/plans/2026-09-05-issue765-leaf-boundaries.md) |
+| Activity/edit/redaction convergence (#570 umbrella) | [plan](../superpowers/plans/2026-08-23-issue570-redaction-edit-convergence.md) |
+| SDK thread relation aggregate (#570 Task A) | [Phase A](../superpowers/plans/2026-08-23-issue570-sdk-thread-aggregate-spike.md) |
+| Space member role management (#582) | [plan](../superpowers/plans/2026-08-23-issue582-space-member-role-management.md) |
+| Core Activity/unread/thread convergence (#570 Task B) | [Phase A](../superpowers/plans/2026-08-24-issue570-core-activity-thread-convergence.md) |
+| Tauri core-event forwarder lifecycle (#656) | [plan](../superpowers/plans/2026-08-22-issue656-tauri-forwarder-lifecycle.md) |
+| Linux GUI new-identity bootstrap QA (#586) | [plan](../superpowers/plans/2026-08-20-issue586-linux-gui-new-identity-bootstrap.md) |
+| Live signals (receipts, markers, typing, presence) | [Phase A](../superpowers/plans/2026-06-15-live-signals-phase-a.md), [Phase B](../superpowers/plans/2026-06-15-live-signals-phase-b-gui.md) |
+| E2EE trust state machine | [Phase A](../superpowers/plans/2026-06-14-e2ee-trust-phase-a.md) |
+| Rust-owned settings | [Phase A](../superpowers/plans/2026-06-14-rust-owned-settings-phase-a.md) |
+| i18n substrate | [Phase A](../superpowers/plans/2026-06-14-i18n-substrate-phase-a.md), [Phase B](../superpowers/plans/2026-06-14-i18n-substrate-phase-b.md) |
+| Cross-platform font/emoji substrate | [Phase A](../superpowers/plans/2026-06-15-font-emoji-phase-a.md), [Phase B](../superpowers/plans/2026-06-15-font-emoji-phase-b-gui.md) |
+| Compact message density (#609) | [Phase B](../superpowers/plans/2026-08-22-issue609-compact-message-density.md) |
+| Timeline navigation aids (#41) | [Phase A](../superpowers/plans/2026-06-16-timeline-navigation-phase-a.md) |
+| Unread navigation and thread notifications (#569) | [Phase B](../superpowers/plans/2026-08-22-issue569-unread-navigation-thread-notifications.md) |
+| Account work scheduler | [Phase A](../superpowers/plans/2026-07-25-account-work-scheduler-phase-a.md) |
+| Startup latency observability (#123) | [Phase A](../superpowers/plans/2026-06-23-startup-latency-observability-phase-a.md) |
+| Element X-compatible login/store lifecycle (#699) | [Phase A](../superpowers/plans/2026-08-26-issue699-element-x-login-store-lifecycle.md) |
+| Initial index-0 key-share diagnostics (#509) | [Phase A](../superpowers/plans/2026-08-13-index0-share-diagnostics.md) |
+| Bounded index-0 duplicate share (#510) — superseded by stock Element X pre-share, #795 | [Phase A](../superpowers/plans/2026-08-13-index0-reshare.md) |
+| Initial Megolm Olm-claim repair (#523) — superseded by stock Element X pre-share, #795 | [Phase A](../superpowers/plans/2026-08-14-initial-megolm-olm-repair.md) |
+| Element X Megolm send parity (runtime-disable #510/#523) | [Phase A](../superpowers/plans/2026-08-15-element-x-megolm-send-parity.md) |
+| Room-subscription ownership (#518) | [Phase A](../superpowers/plans/2026-08-14-room-subscription-ownership.md) |
+| Session-resident room subscriptions (#532) | [Phase A](../superpowers/plans/2026-08-15-room-subscription-residency.md) |
+| Room-key rotation correlation diagnostics | [Phase A](../superpowers/plans/2026-08-14-room-key-rotation-correlation-diagnostics.md) |
+| Eviction-resistant Megolm rotation attribution (#591) | [plan](../superpowers/plans/2026-08-21-issue591-rotation-ledger.md) |
+| Persisted Megolm rotation attribution (#794) | [Phase A](../superpowers/plans/2026-09-05-issue794-persisted-rotation-attribution.md) |
+| Element X Megolm send parity (#795) | [Phase A](../superpowers/plans/2026-09-05-issue795-element-x-megolm-send-parity.md) |
+| Stock forced rotation debug control / JS-error attribution (#797) | [plan](../superpowers/plans/2026-09-06-force-rotation-issue797-js-errors.md) |
+| New-session Megolm readiness — phase 1 (#577) — superseded; readiness fences are prohibited by overview "Initial outbound Megolm delivery" | [Phase A](../superpowers/plans/2026-08-21-issue577-megolm-readiness.md) |
+| Same-user secondary-device QA credential isolation (#577 follow-up) | [Phase A](../superpowers/plans/2026-08-21-issue577-secondary-device-qa-credentials.md) |
+| Formatted-body newline preservation (#522) | [Phase A](../superpowers/plans/2026-08-14-formatted-body-newlines.md) |
+| Nested Markdown bullet lists (#648) | [Phase A](../superpowers/plans/2026-08-22-issue648-nested-markdown-lists.md) |
+| Unified renderer viewport stabilization (#837) | [Phase B](../superpowers/plans/2026-09-05-issue837-viewport-transaction.md) |
+| Active prepend anchor preservation (#520) | [Phase A](../superpowers/plans/2026-08-14-active-prepend-anchor.md) |
+| Feature-seam decomposition wave (#551, 51 indexed plans) | [first plan](../superpowers/plans/2026-08-18-issue551-feature-seam-decomposition.md); children are `docs/superpowers/plans/2026-08-*-issue551-*.md` |
+| Frontend semantic-ownership migration (#552 phases 1-7, #708, 22 plans) | [inventory](../superpowers/plans/2026-08-23-issue552-frontend-ownership-inventory.md), [remaining phases](../superpowers/plans/2026-08-27-issue552-remaining-ownership-phases.md), [#708 thread-root phase 1](../superpowers/plans/2026-08-27-issue708-thread-root-projection-ownership.md); children are `docs/superpowers/plans/2026-08-*-issue552-*.md` |
+| Browser-fake cleanup (#634, #641, #649, #650, #651, 9 plans) | [first plan](../superpowers/plans/2026-08-22-issue634-browser-fake-link-preview-isolation.md); children are `docs/superpowers/plans/2026-08-22-issue6*-browser-fake-*.md` |

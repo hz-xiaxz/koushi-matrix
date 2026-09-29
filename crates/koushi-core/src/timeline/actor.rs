@@ -2761,7 +2761,7 @@ impl TimelineActor {
     /// `try_send`) so the action is not silently dropped when the channel is
     /// momentarily full.  Required for state-machine transitions where a
     /// dropped action would leave the UI stuck in a pending/inconsistent state
-    /// (REPOSITORY_RULES L124-128).
+    /// (REPOSITORY_RULES State-Machine Discipline).
     pub(super) async fn emit_action_reliable(&self, action: AppAction) -> bool {
         send_generation_fenced(
             &self.action_tx,
