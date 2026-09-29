@@ -214,10 +214,12 @@ carry tokens and counts only. The full prohibited list is in
 - Core must not depend on that SDK local-echo diff for first visibility. The
   session-scoped send coordinator owns one bounded pending display projection
   from accepted client transaction through SDK/event identity convergence. The
-  current `TimelineActor` combines that projection with canonical SDK slots and
-  acknowledges publication before the matching composer acceptance may clear
-  the draft. Actor replacement receives the same bounded snapshot; React only
-  applies the resulting ordinary Rust-authored timeline diffs.
+  current `TimelineActor` combines that projection with canonical SDK slots.
+  Admission does not wait for the actor's publication acknowledgement (#1064):
+  a busy or replaced actor reconciles from the coordinator when it catches up,
+  so actor latency cannot reject or delay SDK enqueue. Actor replacement
+  receives the same bounded snapshot; React only applies the resulting
+  ordinary Rust-authored timeline diffs.
 - Retry/cancel is driven by SDK `SendHandle`, not by a direct
   `RoomSendQueue::retry(transaction_id)` API. `TimelineActor` keeps its
   transaction-id keyed handle registry from `RoomSendQueue::subscribe()` local
@@ -594,7 +596,13 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   clears it and bumps its generation wherever the active Space changes
   (`navigation`, `room`, `directory`), the frontend asks for it by quoting that
   generation through `load_space_children`, and a response is admitted only for
-  the Space selected now. The joined room list stays authoritative: a child that
+  the Space selected now. A successful leave of a cached child (#1062) marks it
+  left with the room list's count minus the account, bumps the generation and
+  emits `AppEffect::LoadSpaceChildren`, which the runtime routes to the room
+  actor; the renderer does not ask again. For a child the account is not
+  joined to, the `/hierarchy` joined-member count is authoritative over the
+  frozen local member list; one `can_join` rule serves hierarchy-described and
+  locally known children, and knock-only rules never offer a plain join (#1053). The joined room list stays authoritative: a child that
   is already a joined room never appears in the lane, and a pending invitation is
   reported from `AppState.invites`, not from the server summary. A child the
   server did not describe is `unknown` with no join action — the permission model

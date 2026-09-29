@@ -354,3 +354,178 @@ fn only_joinable_rows_carry_a_join_affordance() {
     );
     assert!(sidebar.sections.rooms.iter().all(|item| !item.can_join));
 }
+
+fn ready(state: &mut AppState) {
+    state.session = SessionState::Ready(SessionInfo {
+        homeserver: "https://example.invalid".to_owned(),
+        user_id: "@alice:example.invalid".to_owned(),
+        device_id: "DEVICE".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    });
+}
+
+fn refresh_requests(effects: &[koushi_state::AppEffect]) -> Vec<(String, u64)> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            koushi_state::AppEffect::LoadSpaceChildren {
+                space_id,
+                generation,
+            } => Some((space_id.clone(), *generation)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Issue #1062: when the account was the child's last joined member, leaving
+/// empties the room. It has nobody to rejoin and no invitation, so it must not
+/// linger in the Not joined lane as an inert row until the Space is reselected.
+#[test]
+fn the_last_member_leaving_removes_the_child_from_the_not_joined_lane() {
+    let mut state = state_with_children(vec![child(
+        "!joined:example.invalid",
+        "Joined Room",
+        SpaceChildMembership::Joined,
+    )]);
+    state.rooms[0].joined_members = 1;
+    ready(&mut state);
+
+    reduce(
+        &mut state,
+        AppAction::RoomLeftLocally {
+            room_id: "!joined:example.invalid".to_owned(),
+        },
+    );
+
+    let sidebar = compose_sidebar_for_state(&state);
+    assert!(sidebar.sections.rooms.is_empty());
+    assert!(
+        sidebar.sections.not_joined.is_empty(),
+        "an emptied child is not offered: {:?}",
+        names(&sidebar.sections.not_joined)
+    );
+}
+
+/// Issue #1062: a leave makes the cached `/hierarchy` projection stale (its
+/// join rule, membership and count all predate the leave), so Rust asks for a
+/// fresh one under a new generation while the Space stays selected. A response
+/// that was already in flight for the old generation cannot overwrite it.
+#[test]
+fn leaving_a_child_refreshes_the_selected_spaces_children() {
+    let mut state = state_with_children(vec![child(
+        "!joined:example.invalid",
+        "Joined Room",
+        SpaceChildMembership::Joined,
+    )]);
+    ready(&mut state);
+
+    let effects = reduce(
+        &mut state,
+        AppAction::RoomLeftLocally {
+            room_id: "!joined:example.invalid".to_owned(),
+        },
+    );
+
+    assert_eq!(refresh_requests(&effects), [(SPACE_ID.to_owned(), 2)]);
+    assert_eq!(state.space_children.generation, 2);
+    assert_eq!(
+        state.space_children.load,
+        koushi_state::SpaceChildrenLoadState::Loading
+    );
+    // Still a member-bearing room, so it stays in the lane meanwhile, but the
+    // cached summary described a joined room: it grants no Join affordance.
+    let sidebar = compose_sidebar_for_state(&state);
+    assert_eq!(names(&sidebar.sections.not_joined), ["Joined Room"]);
+    assert!(!sidebar.sections.not_joined[0].can_join);
+
+    // A pre-leave response for the old generation is fenced.
+    reduce(
+        &mut state,
+        AppAction::SpaceChildrenLoaded {
+            space_id: SPACE_ID.to_owned(),
+            generation: 1,
+            children: vec![child(
+                "!joined:example.invalid",
+                "Joined Room",
+                SpaceChildMembership::Joined,
+            )],
+        },
+    );
+    assert_eq!(
+        state.space_children.children[0].membership,
+        SpaceChildMembership::Left
+    );
+
+    // The fresh projection decides.
+    reduce(
+        &mut state,
+        AppAction::SpaceChildrenLoaded {
+            space_id: SPACE_ID.to_owned(),
+            generation: 2,
+            children: vec![child(
+                "!joined:example.invalid",
+                "Joined Room",
+                SpaceChildMembership::Left,
+            )],
+        },
+    );
+    let sidebar = compose_sidebar_for_state(&state);
+    assert_eq!(names(&sidebar.sections.not_joined), ["Joined Room"]);
+    assert_eq!(
+        state.space_children.load,
+        koushi_state::SpaceChildrenLoadState::Idle
+    );
+}
+
+/// Issue #1062: leaving a child while the Space's first children load is still
+/// in flight fences that pre-leave answer and asks again.
+#[test]
+fn leaving_a_child_during_the_first_load_fences_it_and_reloads() {
+    let mut state = state_with_children(Vec::new());
+    state.space_children.load = koushi_state::SpaceChildrenLoadState::Loading;
+    ready(&mut state);
+
+    let effects = reduce(
+        &mut state,
+        AppAction::RoomLeftLocally {
+            room_id: "!joined:example.invalid".to_owned(),
+        },
+    );
+
+    assert_eq!(refresh_requests(&effects), [(SPACE_ID.to_owned(), 2)]);
+    reduce(
+        &mut state,
+        AppAction::SpaceChildrenLoaded {
+            space_id: SPACE_ID.to_owned(),
+            generation: 1,
+            children: vec![child(
+                "!joined:example.invalid",
+                "Joined Room",
+                SpaceChildMembership::Joined,
+            )],
+        },
+    );
+    assert!(state.space_children.children.is_empty());
+}
+
+#[test]
+fn leaving_a_room_outside_the_selected_space_requests_no_refresh() {
+    let mut state = state_with_children(vec![child(
+        "!other:example.invalid",
+        "Other Room",
+        SpaceChildMembership::NotJoined,
+    )]);
+    // The joined room belongs to no Space.
+    state.spaces[0].child_room_ids.clear();
+    ready(&mut state);
+
+    let effects = reduce(
+        &mut state,
+        AppAction::RoomLeftLocally {
+            room_id: "!joined:example.invalid".to_owned(),
+        },
+    );
+
+    assert!(refresh_requests(&effects).is_empty());
+    assert_eq!(state.space_children.generation, 1);
+}

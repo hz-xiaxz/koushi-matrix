@@ -652,6 +652,112 @@ async fn full_actor_mailbox_defers_pending_refresh_without_blocking_manager() {
     ));
 }
 
+/// A timeline actor that holds its mailbox open but never services it, as
+/// when a handler awaits a slow typing-notification request (#1064).
+fn busy_send_timeline_actor_handle(
+    requests: mpsc::UnboundedSender<SyntheticSendEnqueueRequest>,
+) -> TimelineActorHandle {
+    let mut handle = test_timeline_actor_handle();
+    let (tx, rx) = mpsc::channel(4);
+    handle.tx = tx;
+    handle.task = Some(executor::spawn(async move {
+        let _mailbox = rx;
+        std::future::pending::<()>().await;
+    }));
+    handle.enqueue_context = Some(TimelineSendEnqueueContext::Synthetic { requests });
+    handle
+}
+
+async fn assert_submission_reaches_enqueue_despite_unacknowledged_projection(
+    actor: fn(mpsc::UnboundedSender<SyntheticSendEnqueueRequest>) -> TimelineActorHandle,
+) {
+    let key = room_key();
+    let (enqueue_tx, mut enqueue_rx) = mpsc::unbounded_channel();
+    let mut manager = live_tail_test_manager(HashMap::from([(key.clone(), actor(enqueue_tx))]));
+    let (action_tx, mut action_rx) = mpsc::channel(4);
+    let (event_tx, mut event_rx) = broadcast::channel(8);
+    manager.action_tx = action_tx;
+    manager.event_tx = event_tx;
+    let submission_id = SubmissionId::new("slow-projection-submission");
+    let started = tokio::time::Instant::now();
+
+    manager
+        .handle_command(TimelineCommand::SubmitText {
+            request_id: fake_rid(7_700),
+            expected_account: test_session_key(),
+            submission_id: submission_id.clone(),
+            key: key.clone(),
+            transaction_id: "txn-slow-projection".to_owned(),
+            document: ComposerDocument::from_plain_text("body"),
+            draft_revision: 1.into(),
+        })
+        .await;
+
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "admission must not wait on the timeline actor's projection acknowledgement"
+    );
+    let request = enqueue_rx
+        .try_recv()
+        .expect("an accepted submission reaches SDK enqueue");
+    assert!(matches!(
+        request.payload,
+        TimelineSendEnqueuePayload::Text { ref document, .. } if document.plain_body() == "body"
+    ));
+    assert!(matches!(
+        action_rx.try_recv(),
+        Ok(actions) if matches!(actions.as_slice(), [AppAction::ComposerSubmissionAcceptedAtRevision { submission_id: accepted, .. }] if accepted == &submission_id)
+    ));
+    let mut accepted = false;
+    while let Ok(event) = event_rx.try_recv() {
+        match event {
+            CoreEvent::Timeline(TimelineEvent::SubmissionAccepted {
+                submission_id: accepted_id,
+                ..
+            }) if accepted_id == submission_id => accepted = true,
+            CoreEvent::Timeline(TimelineEvent::SubmissionRejected { kind, .. }) => {
+                panic!("slow projection publication rejected the submission as {kind:?}")
+            }
+            _ => {}
+        }
+    }
+    assert!(accepted, "the submission is accepted exactly once");
+    assert!(
+        manager
+            .send_completion
+            .lock()
+            .expect("coordinator")
+            .projections_for_key(&key)
+            .iter()
+            .any(|projection| projection.client_txn_id == "txn-slow-projection"),
+        "the coordinator keeps the pending projection for the actor to reconcile"
+    );
+    assert!(
+        request
+            .response
+            .send(Ok(SendEnqueueSuccess::terminal_only(
+                "sdk-transaction-slow".to_owned(),
+            )))
+            .is_ok()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn busy_timeline_actor_does_not_reject_an_admitted_submission() {
+    assert_submission_reaches_enqueue_despite_unacknowledged_projection(
+        busy_send_timeline_actor_handle,
+    )
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn replaced_timeline_actor_generation_does_not_reject_an_admitted_submission() {
+    assert_submission_reaches_enqueue_despite_unacknowledged_projection(|requests| {
+        synthetic_send_timeline_actor_handle_with_projection_probe(requests, None, false)
+    })
+    .await;
+}
+
 async fn poll_manager_enqueue_workers_once(manager: &mut TimelineManagerActor) {
     let completion = std::future::poll_fn(|context| {
         Poll::Ready(
@@ -832,49 +938,6 @@ async fn duplicate_submission_routes_one_manager_enqueue_worker() {
         })) if submission_id == cap_rejected_id
     ));
     drop(cap_registrations);
-
-    let (rejected_projection_enqueue_tx, mut rejected_projection_enqueue_rx) =
-        mpsc::unbounded_channel();
-    manager.timelines.insert(
-        key.clone(),
-        synthetic_send_timeline_actor_handle_with_projection_probe(
-            rejected_projection_enqueue_tx,
-            None,
-            false,
-        ),
-    );
-    let publication_rejected_id = SubmissionId::new("publication-rejected");
-    manager
-        .handle_command(TimelineCommand::SubmitText {
-            request_id: fake_rid(7_600),
-            expected_account: test_session_key(),
-            submission_id: publication_rejected_id.clone(),
-            key: key.clone(),
-            transaction_id: "txn-publication-rejected".to_owned(),
-            document: ComposerDocument::from_plain_text("body"),
-            draft_revision: 3.into(),
-        })
-        .await;
-    manager.join_send_enqueue_workers().await;
-    assert!(action_rx.try_recv().is_err());
-    assert!(rejected_projection_enqueue_rx.try_recv().is_err());
-    assert!(matches!(
-        event_rx.try_recv(),
-        Ok(CoreEvent::Timeline(TimelineEvent::SubmissionRejected {
-            submission_id,
-            kind: TimelineFailureKind::QueueOverflow,
-            ..
-        })) if submission_id == publication_rejected_id
-    ));
-    assert!(
-        manager
-            .send_completion
-            .lock()
-            .expect("coordinator")
-            .projections_for_key(&key)
-            .iter()
-            .all(|projection| projection.client_txn_id != "txn-publication-rejected")
-    );
 
     manager.timelines.remove(&key);
     let rejected_id = SubmissionId::new("unsubscribed-submission");

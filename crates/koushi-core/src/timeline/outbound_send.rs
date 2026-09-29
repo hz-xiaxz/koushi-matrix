@@ -783,30 +783,7 @@ async fn enqueue_timeline_send(
 }
 
 pub(super) const MAX_PENDING_SEND_PROJECTIONS: usize = 128;
-const PENDING_SEND_PROJECTION_ACK_DEADLINE: Duration = Duration::from_secs(5);
 const MAX_SUBMISSION_TOMBSTONES: usize = 128;
-
-async fn publish_pending_send_projection(
-    actor_tx: mpsc::Sender<TimelineActorMessage>,
-    actor_generation: u64,
-    projections: Vec<PendingSendProjection>,
-) -> bool {
-    let (acknowledged, acknowledgement) = oneshot::channel();
-    if actor_tx
-        .try_send(TimelineActorMessage::RefreshPendingSendProjection {
-            actor_generation,
-            projections,
-            acknowledged,
-        })
-        .is_err()
-    {
-        return false;
-    }
-    matches!(
-        executor::timeout(PENDING_SEND_PROJECTION_ACK_DEADLINE, acknowledgement).await,
-        Ok(Ok(true))
-    )
-}
 
 #[derive(Default)]
 pub(super) struct SubmissionAdmissionLedger {
@@ -1329,40 +1306,10 @@ impl TimelineManagerActor {
                 phase: PendingSendPhase::Pending,
             }),
         );
-        let registration_id = registration
-            .registration_id()
-            .expect("new send registration must own its id");
         registration.activate();
-        let actor_tx = self.timelines.get(key).map(|actor| actor.tx.clone());
-        let pending_projections = self
-            .send_completion
-            .lock()
-            .expect("send completion coordinator lock must not be poisoned")
-            .projections_for_key(key);
-        let actor_generation = self
-            .timeline_actor_generations
-            .current_generation(key)
-            .unwrap_or_default();
-        let published = match actor_tx {
-            Some(actor_tx) => {
-                publish_pending_send_projection(actor_tx, actor_generation, pending_projections)
-                    .await
-            }
-            None => false,
-        };
-        if !published {
-            self.send_completion
-                .lock()
-                .expect("send completion coordinator lock must not be poisoned")
-                .cancel_registration(registration_id);
-            self.emit_failure(
-                request_id,
-                CoreFailure::TimelineOperationFailed {
-                    kind: TimelineFailureKind::QueueOverflow,
-                },
-            );
-            return;
-        }
+        // Actor publication is presentation only (#1064); see
+        // `route_submission_to_worker`.
+        self.refresh_pending_send_projection(key).await;
         let preflight_started = self.spawn_send_enqueue(context, registration, None, payload, None);
         // Directly-owned futures are not independently scheduled Tokio tasks. Drive this
         // admitted worker through its permit to the start of payload-specific preflight before
@@ -1547,44 +1494,11 @@ impl TimelineManagerActor {
             }));
             return;
         }
-        let (acknowledged, acknowledgement) = oneshot::channel();
-        let pending_projections = self
-            .send_completion
-            .lock()
-            .expect("send completion coordinator lock must not be poisoned")
-            .projections_for_key(key);
-        let actor_generation = self
-            .timeline_actor_generations
-            .current_generation(key)
-            .unwrap_or_default();
-        let admitted = if let Some(actor) = self.timelines.get(key) {
-            actor.try_send(TimelineActorMessage::RefreshPendingSendProjection {
-                actor_generation,
-                projections: pending_projections,
-                acknowledged,
-            }) && matches!(
-                executor::timeout(PENDING_SEND_PROJECTION_ACK_DEADLINE, acknowledgement).await,
-                Ok(Ok(true))
-            )
-        } else {
-            false
-        };
-        if !admitted {
-            self.send_completion
-                .lock()
-                .expect("send completion coordinator lock must not be poisoned")
-                .cancel_registration(registration_id);
-            self.accepted_submissions
-                .reject(submission_id.clone(), key.clone());
-            self.refresh_pending_send_projection(key).await;
-            self.emit(CoreEvent::Timeline(TimelineEvent::SubmissionRejected {
-                request_id,
-                key: key.clone(),
-                submission_id,
-                kind: TimelineFailureKind::QueueOverflow,
-            }));
-            return;
-        }
+        // #1064: the session-scoped coordinator already owns this pending
+        // projection, and every current or replacement actor reconciles from
+        // it. Actor publication is presentation only, so a busy or replaced
+        // actor must not hold or reject SDK enqueue.
+        self.refresh_pending_send_projection(key).await;
         let action = match (projection, &key.kind) {
             (SendComposerProjection::Room, TimelineKind::Room { room_id }) => {
                 Some(AppAction::ComposerSubmissionAcceptedAtRevision {

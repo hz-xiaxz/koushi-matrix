@@ -823,3 +823,122 @@ fn activity_projection_does_not_append_annotation_latest_event() {
     assert!(recent.rows.is_empty());
     assert!(unread.rows.is_empty());
 }
+
+fn stale_unread_dm_state(latest: Option<RoomLatestEventSummary>) -> AppState {
+    let mut room = super::super::tests::unread_diagnostic_room("!dm:example.invalid");
+    room.is_dm = true;
+    room.unread_count = 1;
+    room.notification_count = 1;
+    room.highlight_count = 0;
+    room.marked_unread = false;
+    room.conversation_activity = Some(ConversationActivity {
+        timestamp_ms: 200,
+        source: ConversationActivitySource::Message,
+    });
+    room.latest_event = latest;
+    AppState {
+        rooms: vec![room],
+        ..Default::default()
+    }
+}
+
+fn stale_unread_dm_old_row() -> ActivityRow {
+    ActivityRow::event(
+        "!dm:example.invalid".to_owned(),
+        "$old:example.invalid".to_owned(),
+        Some("@sender:example.invalid".to_owned()),
+        "DM".to_owned(),
+        Some("Sender".to_owned()),
+        Some("old body".to_owned()),
+        100,
+        true,
+        false,
+    )
+}
+
+#[test]
+fn old_unread_row_does_not_hide_newer_unresolved_room_activity() {
+    // #1061 gap 2: an old cached unread row is not proof that newer
+    // conversation activity was resolved.
+    let state = stale_unread_dm_state(None);
+    let mut projection = ActivityProjection::default();
+    projection.ingest(vec![stale_unread_dm_old_row()]);
+
+    let (recent, unread, _excluded) = projection.snapshot(&state);
+
+    assert_eq!(recent.rows.len(), 1);
+    assert!(
+        unread
+            .rows
+            .iter()
+            .any(|row| row.kind == ActivityRowKind::Event
+                && row.event_id.as_deref() == Some("$old:example.invalid")),
+        "the old unread row stays visible"
+    );
+    let placeholder = unread
+        .rows
+        .iter()
+        .find(|row| row.kind == ActivityRowKind::RoomUnread)
+        .expect("newer unresolved activity is queued as a resolution candidate");
+    assert_eq!(placeholder.room_id, "!dm:example.invalid");
+    assert_eq!(placeholder.timestamp_ms, 200);
+}
+
+#[test]
+fn unread_row_covering_current_activity_suppresses_the_room_placeholder() {
+    let state = stale_unread_dm_state(Some(RoomLatestEventSummary {
+        event_id: "$new:example.invalid".to_owned(),
+        relation_type: None,
+        relation_event_id: None,
+        thread_root_event_id: None,
+        sender_id: Some("@sender:example.invalid".to_owned()),
+        sender_label: Some("Sender".to_owned()),
+        sender_avatar: None,
+        preview: Some("new body".to_owned()),
+        timestamp_ms: 200,
+        is_redacted: false,
+    }));
+    let mut projection = ActivityProjection::default();
+    projection.ingest(vec![stale_unread_dm_old_row()]);
+
+    let (recent, unread, _excluded) = projection.snapshot(&state);
+
+    assert!(
+        recent
+            .rows
+            .iter()
+            .any(|row| row.event_id.as_deref() == Some("$new:example.invalid"))
+    );
+    assert!(
+        unread
+            .rows
+            .iter()
+            .all(|row| row.kind == ActivityRowKind::Event),
+        "covered activity needs no resolution placeholder"
+    );
+}
+
+#[test]
+fn row_refresh_preserves_the_in_flight_resolution_generation() {
+    // PaginateActivity refreshes rows; resetting `Resolving` to `Idle` would
+    // make the running generation's settlement inadmissible.
+    let mut state = stale_unread_dm_state(None);
+    let resolving = ActivityResolutionState::Resolving {
+        generation: 3,
+        unresolved_room_count: 1,
+    };
+    state.activity = ActivityState::Open {
+        active_tab: ActivityTab::Unread,
+        recent: ActivityStream::default(),
+        unread: ActivityStream {
+            resolution: resolving,
+            ..ActivityStream::default()
+        },
+        mark_read: Default::default(),
+    };
+
+    let (_recent, unread, _excluded) =
+        ActivityProjection::default().snapshot_preserving_resolution(&state);
+
+    assert_eq!(unread.resolution, resolving);
+}

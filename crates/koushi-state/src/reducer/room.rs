@@ -52,9 +52,23 @@ pub(crate) fn handle_room_left_locally(state: &mut AppState, room_id: String) ->
         .room_list
         .locally_left_room_ids
         .insert(room_id.clone());
+    let joined_members_before_leave = state
+        .rooms
+        .iter()
+        .find(|room| room.room_id == room_id)
+        .map(|room| room.joined_members);
     let mut rooms = state.rooms.clone();
     rooms.retain(|room| room.room_id != room_id);
-    handle_room_list_updated_with_crawler(state, state.spaces.clone(), rooms, false, false)
+    let mut effects =
+        handle_room_list_updated_with_crawler(state, state.spaces.clone(), rooms, false, false);
+    // After the room-list update, so a Space deselected by this leave asks for
+    // nothing.
+    effects.extend(super::space_children::handle_room_left(
+        state,
+        &room_id,
+        joined_members_before_leave,
+    ));
+    effects
 }
 
 pub(crate) fn handle_room_joined_locally(state: &mut AppState, room_id: String) -> Vec<AppEffect> {

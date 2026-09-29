@@ -1829,9 +1829,8 @@ describe("desktop integration source guards", () => {
       "function openActivityRow(roomId: string, eventId: string, threadRootEventId: string | null)"
     );
     expect(openActivityRowSource).toContain("if (threadRootEventId)");
-    expect(openActivityRowSource).toContain("await selectRoom(roomId)");
     expect(openActivityRowSource).toContain(
-      'await openThread(roomId, threadRootEventId, "existingThread")'
+      'await openThreadInRoom(roomId, threadRootEventId, "existingThread")'
     );
     expect(openActivityRowSource).toContain(".openActivityEvent(roomId, eventId)");
     expect(openActivityRowSource).not.toContain(".selectSearchResult(roomId, eventId)");
