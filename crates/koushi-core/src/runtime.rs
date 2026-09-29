@@ -3300,10 +3300,7 @@ impl AppActor {
                             true
                         }
                         AppCommand::CloseActivity { request_id } => {
-                            let _ = self
-                                .account_actor
-                                .send(AccountMessage::CancelActivityResolution)
-                                .await;
+                            self.dispatch_cancel_activity_resolution();
                             let effects = self.reduce_app_action(AppAction::ActivityClosed).await;
                             self.handle_app_effects(request_id, effects).await;
                             self.emit(CoreEvent::Activity(ActivityEvent::Closed { request_id }));
@@ -3675,6 +3672,9 @@ impl AppActor {
                             });
                             return false;
                         }
+                        // This command is forwarded below; a held live-leave
+                        // reload of the same generation would only repeat it.
+                        self.drop_deferred_space_children_reload(space_id, *generation);
                         self.handle_ui_event_effects(&effects).await;
                         state_changed = true;
                     }
@@ -4309,33 +4309,27 @@ impl AppActor {
                         ))
                         .await;
                 }
+                // #1060: one ordered crawler lane for every path, so a held
+                // notification is never delivered after a newer settings
+                // change (a caption opt-out must stay effective).
                 AppEffect::NotifySearchCrawlerRoomsAvailable {
                     room_ids,
                     latest_event_ids,
                     settings,
                 } => {
-                    let _ = self
-                        .account_actor
-                        .send(
-                            crate::account::AccountMessage::NotifySearchCrawlerRoomsAvailable {
-                                room_ids,
-                                latest_event_ids,
-                                settings,
-                            },
-                        )
-                        .await;
+                    self.dispatch_crawler(deferred_dispatch::CrawlerDispatch::Notify(
+                        deferred_dispatch::CrawlerRooms {
+                            room_ids,
+                            latest_event_ids,
+                            settings,
+                        },
+                    ));
                 }
                 AppEffect::InvalidateSearchCrawlerCache => {
-                    let _ = self
-                        .account_actor
-                        .send(crate::account::AccountMessage::InvalidateSearchCrawlerCache)
-                        .await;
+                    self.dispatch_crawler(deferred_dispatch::CrawlerDispatch::Invalidate);
                 }
                 AppEffect::RebuildSearchIndex => {
-                    let _ = self
-                        .account_actor
-                        .send(crate::account::AccountMessage::RebuildSearchIndex)
-                        .await;
+                    self.dispatch_crawler(deferred_dispatch::CrawlerDispatch::Rebuild);
                 }
                 AppEffect::LoadSpaceChildren {
                     space_id,
@@ -4723,23 +4717,19 @@ impl AppActor {
             {
                 // Route from actor-projection path: forward to SearchActor via
                 // AccountActor (fire-and-forget, idempotent). Every live
-                // room-list update emits this, so it is latest-wins deferred
-                // rather than awaited when the mailbox is full (#1060).
-                self.dispatch_search_crawler_rooms(
-                    room_ids.clone(),
-                    latest_event_ids.clone(),
-                    settings.clone(),
-                );
+                // room-list update emits this, so it joins the ordered crawler
+                // lane rather than awaiting a full mailbox (#1060).
+                self.dispatch_crawler(deferred_dispatch::CrawlerDispatch::Notify(
+                    deferred_dispatch::CrawlerRooms {
+                        room_ids: room_ids.clone(),
+                        latest_event_ids: latest_event_ids.clone(),
+                        settings: settings.clone(),
+                    },
+                ));
             } else if let AppEffect::InvalidateSearchCrawlerCache = effect {
-                let _ = self
-                    .account_actor
-                    .send(crate::account::AccountMessage::InvalidateSearchCrawlerCache)
-                    .await;
+                self.dispatch_crawler(deferred_dispatch::CrawlerDispatch::Invalidate);
             } else if let AppEffect::RebuildSearchIndex = effect {
-                let _ = self
-                    .account_actor
-                    .send(crate::account::AccountMessage::RebuildSearchIndex)
-                    .await;
+                self.dispatch_crawler(deferred_dispatch::CrawlerDispatch::Rebuild);
             }
         }
     }

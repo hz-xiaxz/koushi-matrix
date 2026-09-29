@@ -693,10 +693,16 @@ Rules:
    values rather than awaited mailbox admission (#1060). Work that an
    action-batch commit dispatches to the AccountActor must not hold the
    AppActor loop either: generation-guarded or latest-wins dispatches
-   (Activity resolution, a Space-children reload after a live leave,
-   search-crawler room availability) try the mailbox
-   once and otherwise keep one deferred value per kind, which the AppActor
-   loop delivers when a slot frees; a newer value replaces a deferred one.
+   (Activity resolution and its cancel, a Space-children reload after a live
+   leave, and the search-crawler lane of rebuild, cache invalidation, and
+   room availability) try the mailbox once and otherwise keep one deferred
+   value per kind, which the AppActor loop delivers when a slot frees; a
+   newer value replaces a deferred one. Every dispatch of such a kind goes
+   through that path, command-originated ones included, so a held value is
+   never delivered after a newer one; the crawler lane stays ordered, so a
+   stale notification can never undo a caption or filename opt-out.
+   Session-lifecycle effects (sync start/stop, trust and backup checks,
+   session status) still await admission.
 12. User-intent commands resolve to a correlated, observable terminal outcome —
    never a silent no-op. A foreground one-shot command
    (account restore/login/logout, `SelectRoom`/`SelectSpace`, send/edit/redact,

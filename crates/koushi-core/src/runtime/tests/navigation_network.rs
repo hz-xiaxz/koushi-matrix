@@ -1078,3 +1078,209 @@ async fn navigation_network_selection_commits_after_a_live_leave_reloads_space_c
     assert_eq!(reload, (SPACE.to_owned(), left.space_children.generation));
     harness.actor_task.abort();
 }
+
+/// Every crawler-lane message delivered after the mailbox frees, in order.
+async fn crawler_lane(account_rx: &mut mpsc::Receiver<AccountMessage>) -> Vec<String> {
+    let mut lane = Vec::new();
+    while let Ok(Some(message)) =
+        executor::timeout(Duration::from_millis(200), account_rx.recv()).await
+    {
+        match message {
+            AccountMessage::NotifySearchCrawlerRoomsAvailable { settings, .. } => {
+                lane.push(format!(
+                    "notify:{:?}:captions={}:filenames={}",
+                    settings.speed, settings.include_media_captions, settings.include_filenames
+                ))
+            }
+            AccountMessage::InvalidateSearchCrawlerCache => lane.push("invalidate".to_owned()),
+            AccountMessage::RebuildSearchIndex => lane.push("rebuild".to_owned()),
+            _ => {}
+        }
+    }
+    lane
+}
+
+/// A live room-list update defers a crawler notification with the current
+/// settings; then the user changes crawler settings while the mailbox is
+/// still full. The settings change must win: no stale notification may be
+/// delivered after it.
+async fn crawler_settings_change_while_deferred(
+    change: impl FnOnce(&mut koushi_state::SearchCrawlerSettings),
+) -> Vec<String> {
+    let mut harness = BlockedMailbox::start(navigation_state()).await;
+    harness.live_unresolved_dms(&[UNRESOLVED_DM]).await;
+    let mut settings = harness.initial.settings.values.search_crawler.clone();
+    change(&mut settings);
+    let _admitted = harness
+        .submit(CoreCommand::App(AppCommand::UpdateSettings {
+            request_id: request(40),
+            patch: koushi_state::SettingsPatch {
+                search_crawler: Some(settings.clone()),
+                ..Default::default()
+            },
+        }))
+        .await;
+    // Let AppActor take the settings command before the mailbox frees; it may
+    // publish the new settings only after delivering what the change needs.
+    executor::sleep(Duration::from_millis(50)).await;
+
+    assert!(matches!(
+        harness.account_rx.recv().await,
+        Some(AccountMessage::CancelActivityResolution)
+    ));
+    let lane = crawler_lane(&mut harness.account_rx).await;
+    harness
+        .wait_for_snapshot(|state| state.settings.values.search_crawler == settings)
+        .await;
+    harness.actor_task.abort();
+    lane
+}
+
+#[tokio::test]
+async fn navigation_network_crawler_pause_supersedes_a_deferred_notification() {
+    let lane = crawler_settings_change_while_deferred(|settings| {
+        settings.speed = koushi_state::SearchCrawlerSpeed::Paused;
+    })
+    .await;
+    assert_eq!(
+        lane.last().map(String::as_str),
+        Some("notify:Paused:captions=true:filenames=true"),
+        "the last crawler notification carries the paused settings: {lane:?}"
+    );
+    assert_eq!(
+        lane.iter()
+            .filter(|entry| entry.starts_with("notify:"))
+            .count(),
+        1,
+        "the stale active notification is superseded: {lane:?}"
+    );
+}
+
+#[tokio::test]
+async fn navigation_network_caption_opt_out_supersedes_a_deferred_notification() {
+    let lane = crawler_settings_change_while_deferred(|settings| {
+        settings.include_media_captions = false;
+    })
+    .await;
+    let invalidate = lane
+        .iter()
+        .position(|entry| entry == "invalidate")
+        .unwrap_or_else(|| panic!("the opt-out invalidates the crawler cache: {lane:?}"));
+    let notifies: Vec<(usize, &String)> = lane
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| entry.starts_with("notify:"))
+        .collect();
+    assert_eq!(
+        notifies.len(),
+        1,
+        "no stale notification survives: {lane:?}"
+    );
+    assert!(
+        notifies[0].0 > invalidate,
+        "invalidate precedes the re-crawl: {lane:?}"
+    );
+    assert!(
+        notifies[0].1.contains("captions=false"),
+        "the re-crawl uses the opted-out settings: {lane:?}"
+    );
+}
+
+#[tokio::test]
+async fn navigation_network_selection_commits_after_a_live_batch_closes_activity() {
+    // #1060 review: an actor-projected batch that closes open Activity cancels
+    // its resolution; that cancel must not hold the AppActor loop either.
+    let mut harness = BlockedMailbox::start(activity_open_state()).await;
+    executor::timeout(
+        DEADLINE,
+        harness.action_tx.send(vec![AppAction::ActivityClosed]),
+    )
+    .await
+    .expect("action ingress must not wait for the AccountActor")
+    .expect("action ingress remains open");
+    harness
+        .wait_for_snapshot(|state| matches!(state.activity, ActivityState::Closed { .. }))
+        .await;
+    // The loop is free: an internal action batch is taken right away.
+    harness.drain_action_batches().await;
+
+    assert!(matches!(
+        harness.account_rx.recv().await,
+        Some(AccountMessage::CancelActivityResolution)
+    ));
+    let cancel = executor::timeout(DEADLINE, async {
+        loop {
+            if let Some(AccountMessage::CancelActivityResolution) = harness.account_rx.recv().await
+            {
+                return;
+            }
+        }
+    })
+    .await;
+    assert!(
+        cancel.is_ok(),
+        "the deferred cancel is delivered once capacity frees"
+    );
+    harness.actor_task.abort();
+}
+
+#[tokio::test]
+async fn navigation_network_user_reload_replaces_a_held_live_leave_reload() {
+    let mut state = navigation_state();
+    state.settings.values.search_crawler.speed = koushi_state::SearchCrawlerSpeed::Paused;
+    reduce(
+        &mut state,
+        AppAction::SelectSpace {
+            space_id: Some(SPACE.to_owned()),
+        },
+    );
+    let mut harness = BlockedMailbox::start(state).await;
+    executor::timeout(
+        DEADLINE,
+        harness.action_tx.send(vec![AppAction::RoomLeftLocally {
+            room_id: SPACE_ROOM.to_owned(),
+        }]),
+    )
+    .await
+    .expect("action ingress must not wait for the AccountActor")
+    .expect("action ingress remains open");
+    let left = harness
+        .wait_for_snapshot(|state| {
+            state.space_children.load == koushi_state::SpaceChildrenLoadState::Loading
+        })
+        .await;
+    // The user asks for the same Space and generation while the leave's
+    // reload is still held.
+    let _admitted = harness
+        .submit(CoreCommand::Room(RoomCommand::LoadSpaceChildren {
+            request_id: request(50),
+            space_id: SPACE.to_owned(),
+            generation: left.space_children.generation,
+        }))
+        .await;
+    // AppActor has taken the command once the one-slot ingress is free again;
+    // it then forwards the command before the mailbox frees below.
+    executor::timeout(DEADLINE, async {
+        while harness.command_tx.capacity() == 0 {
+            executor::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("AppActor takes the reload command");
+    executor::sleep(Duration::from_millis(20)).await;
+
+    assert!(matches!(
+        harness.account_rx.recv().await,
+        Some(AccountMessage::CancelActivityResolution)
+    ));
+    let mut reloads = 0;
+    while let Ok(Some(message)) =
+        executor::timeout(Duration::from_millis(200), harness.account_rx.recv()).await
+    {
+        if let AccountMessage::RoomCommand(RoomCommand::LoadSpaceChildren { .. }) = message {
+            reloads += 1;
+        }
+    }
+    assert_eq!(reloads, 1, "one /hierarchy request per Space generation");
+    harness.actor_task.abort();
+}
