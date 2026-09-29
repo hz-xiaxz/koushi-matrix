@@ -1,5 +1,5 @@
 import { t } from "../i18n/messages";
-import type { RoomListItem, RoomNamePlaceholder, RoomSummary } from "./types";
+import type { RoomListItem, RoomNamePlaceholder, RoomSummary, SpaceChildSummary } from "./types";
 
 function roomNamePlaceholderText(placeholder: RoomNamePlaceholder): string {
   switch (placeholder.kind) {
@@ -30,4 +30,13 @@ export function roomListItemLabel(
   return room.display_name_placeholder
     ? roomNamePlaceholderText(room.display_name_placeholder)
     : room.display_name;
+}
+
+/** `roomDisplayLabel` for a Space child the account has not joined (#1070). */
+export function spaceChildLabel(
+  child: Pick<SpaceChildSummary, "display_name" | "display_name_placeholder">
+): string {
+  return child.display_name_placeholder
+    ? roomNamePlaceholderText(child.display_name_placeholder)
+    : child.display_name;
 }

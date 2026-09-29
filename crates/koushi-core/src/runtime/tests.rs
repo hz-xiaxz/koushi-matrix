@@ -4673,6 +4673,7 @@ async fn leaving_a_selected_space_child_routes_a_space_children_reload() {
         children: vec![koushi_state::SpaceChildSummary {
             room_id: child_id.to_owned(),
             display_name: "Synthetic room".to_owned(),
+            display_name_placeholder: None,
             avatar: None,
             membership: koushi_state::SpaceChildMembership::Joined,
             can_join: false,

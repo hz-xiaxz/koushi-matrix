@@ -33,6 +33,10 @@
         "can_join": true,
         "display_count": 0,
         "display_name": "Fixture Not Joined Room",
+        "display_name_placeholder": {
+          "kind": "emptyWas",
+          "previous_names": "Fixture Former Member"
+        },
         "has_unread_content": false,
         "has_unread_mention": false,
         "highlight_count": 0,
@@ -88,6 +92,10 @@
           "can_join": true,
           "display_count": 0,
           "display_name": "Fixture Not Joined Room",
+          "display_name_placeholder": {
+            "kind": "emptyWas",
+            "previous_names": "Fixture Former Member"
+          },
           "has_unread_content": false,
           "has_unread_mention": false,
           "highlight_count": 0,
@@ -1029,6 +1037,10 @@
             },
             "can_join": true,
             "display_name": "Fixture Not Joined Room",
+            "display_name_placeholder": {
+              "kind": "emptyWas",
+              "previous_names": "Fixture Former Member"
+            },
             "is_space": false,
             "joined_members": 12,
             "membership": "not_joined",
