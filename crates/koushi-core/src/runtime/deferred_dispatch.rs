@@ -9,14 +9,22 @@
 //! - `ResolveActivity`: its `Resolving` state is published before dispatch,
 //!   so live updates never restart it, and every settlement is fenced by
 //!   generation. A newer generation supersedes a deferred older one.
+//! - A Space-children reload (`LoadSpaceChildren`, from a live leave): the
+//!   reducer already put the slice in `Loading` under its generation, which
+//!   fences every result. A newer reload supersedes a deferred older one, and
+//!   one whose generation is no longer current is dropped.
 //! - `NotifySearchCrawlerRoomsAvailable`: the AccountActor already stores it
 //!   as a latest-wins pending notification; a newer one replaces the deferred
-//!   payload.
+//!   payload, and it is fenced to the session that produced it.
 //!
 //! The run loop waits for one mailbox slot only while something is deferred,
 //! so free capacity can never spin it.
 
-use koushi_state::{ActivityResolutionState, ActivityState, AppAction, OperationFailureKind};
+use koushi_protocol::command::RoomCommand;
+use koushi_protocol::ids::RequestId;
+use koushi_state::{
+    ActivityResolutionState, ActivityState, AppAction, OperationFailureKind, SpaceChildrenLoadState,
+};
 use tokio::sync::mpsc;
 
 use super::{ActionBatchOrigin, AppActor};
@@ -28,6 +36,13 @@ pub(super) struct DeferredActivityResolution {
     generation: u64,
     unresolved_room_count: u32,
     requests: Vec<ActivityResolutionRequest>,
+}
+
+/// A reducer-admitted Space-children reload waiting for capacity.
+pub(super) struct DeferredSpaceChildrenReload {
+    request_id: RequestId,
+    space_id: String,
+    generation: u64,
 }
 
 /// The latest search-crawler room availability waiting for capacity, fenced
@@ -43,18 +58,21 @@ pub(super) struct DeferredSearchCrawlerRooms {
 #[derive(Default)]
 pub(super) struct DeferredAccountDispatch {
     activity_resolution: Option<DeferredActivityResolution>,
+    space_children_reload: Option<DeferredSpaceChildrenReload>,
     search_crawler_rooms: Option<DeferredSearchCrawlerRooms>,
 }
 
 impl DeferredAccountDispatch {
     pub(super) fn is_pending(&self) -> bool {
-        self.activity_resolution.is_some() || self.search_crawler_rooms.is_some()
+        self.activity_resolution.is_some()
+            || self.space_children_reload.is_some()
+            || self.search_crawler_rooms.is_some()
     }
 }
 
-/// Whether `ResolveActivity` reached the mailbox (now or deferred), or the
-/// AccountActor is gone and the generation must be settled as failed.
-pub(super) enum ActivityResolutionDispatch {
+/// Whether a generation-guarded dispatch reached the mailbox (now or
+/// deferred), or the AccountActor is gone and it must be settled as failed.
+pub(super) enum GuardedDispatch {
     SentOrDeferred,
     Closed,
 }
@@ -65,7 +83,7 @@ impl AppActor {
         generation: u64,
         unresolved_room_count: u32,
         requests: Vec<ActivityResolutionRequest>,
-    ) -> ActivityResolutionDispatch {
+    ) -> GuardedDispatch {
         // A newer generation supersedes any still-deferred older dispatch; it
         // must not reach the AccountActor after this one.
         self.deferred_account_dispatch.activity_resolution = None;
@@ -76,7 +94,7 @@ impl AppActor {
                 requests,
             })
         else {
-            return ActivityResolutionDispatch::SentOrDeferred;
+            return GuardedDispatch::SentOrDeferred;
         };
         match *unsent {
             mpsc::error::TrySendError::Full(AccountMessage::ResolveActivity {
@@ -88,10 +106,50 @@ impl AppActor {
                         unresolved_room_count,
                         requests,
                     });
-                ActivityResolutionDispatch::SentOrDeferred
+                GuardedDispatch::SentOrDeferred
             }
             mpsc::error::TrySendError::Full(_) | mpsc::error::TrySendError::Closed(_) => {
-                ActivityResolutionDispatch::Closed
+                GuardedDispatch::Closed
+            }
+        }
+    }
+
+    pub(super) fn dispatch_space_children_reload(
+        &mut self,
+        request_id: RequestId,
+        space_id: String,
+        generation: u64,
+    ) -> GuardedDispatch {
+        // The reducer bumped the generation for this reload, so an older
+        // deferred one is already superseded.
+        self.deferred_account_dispatch.space_children_reload = None;
+        let Err(unsent) = self.account_actor.try_send(AccountMessage::RoomCommand(
+            RoomCommand::LoadSpaceChildren {
+                request_id,
+                space_id,
+                generation,
+            },
+        )) else {
+            return GuardedDispatch::SentOrDeferred;
+        };
+        match *unsent {
+            mpsc::error::TrySendError::Full(AccountMessage::RoomCommand(
+                RoomCommand::LoadSpaceChildren {
+                    request_id,
+                    space_id,
+                    generation,
+                },
+            )) => {
+                self.deferred_account_dispatch.space_children_reload =
+                    Some(DeferredSpaceChildrenReload {
+                        request_id,
+                        space_id,
+                        generation,
+                    });
+                GuardedDispatch::SentOrDeferred
+            }
+            mpsc::error::TrySendError::Full(_) | mpsc::error::TrySendError::Closed(_) => {
+                GuardedDispatch::Closed
             }
         }
     }
@@ -143,6 +201,14 @@ impl AppActor {
         )
     }
 
+    /// Whether the Space-children slice still waits on this reload.
+    fn space_children_reload_is_current(&self, reload: &DeferredSpaceChildrenReload) -> bool {
+        let children = &self.state.space_children;
+        children.selected_space_id.as_deref() == Some(reload.space_id.as_str())
+            && children.generation == reload.generation
+            && children.load == SpaceChildrenLoadState::Loading
+    }
+
     /// Spend one reserved mailbox slot on the most important deferred
     /// dispatch, or settle what can no longer be delivered.
     pub(super) async fn deliver_deferred_account_dispatch(
@@ -152,18 +218,26 @@ impl AppActor {
         let Ok(permit) = permit else {
             // The AccountActor is gone. A crawler notification needs no
             // settlement; a started resolution becomes failed and retryable,
-            // exactly as an AccountActor without a session reports it.
+            // exactly as an AccountActor without a session reports it, and a
+            // reload fails while the cached children remain.
             self.deferred_account_dispatch.search_crawler_rooms = None;
+            let mut failures = Vec::new();
             if let Some(deferred) = self.deferred_account_dispatch.activity_resolution.take() {
-                Box::pin(self.commit_action_batch(
-                    vec![AppAction::ActivityResolutionFailed {
-                        generation: deferred.generation,
-                        unresolved_room_count: deferred.unresolved_room_count,
-                        kind: OperationFailureKind::Sdk,
-                    }],
-                    ActionBatchOrigin::Actor,
-                ))
-                .await;
+                failures.push(AppAction::ActivityResolutionFailed {
+                    generation: deferred.generation,
+                    unresolved_room_count: deferred.unresolved_room_count,
+                    kind: OperationFailureKind::Sdk,
+                });
+            }
+            if let Some(deferred) = self.deferred_account_dispatch.space_children_reload.take() {
+                failures.push(AppAction::SpaceChildrenLoadFailed {
+                    space_id: deferred.space_id,
+                    generation: deferred.generation,
+                    failure: OperationFailureKind::Sdk,
+                });
+            }
+            if !failures.is_empty() {
+                Box::pin(self.commit_action_batch(failures, ActionBatchOrigin::Actor)).await;
             }
             return;
         };
@@ -175,6 +249,16 @@ impl AppActor {
                 generation: deferred.generation,
                 requests: deferred.requests,
             });
+        } else if let Some(deferred) = self.deferred_account_dispatch.space_children_reload.take()
+            && self.space_children_reload_is_current(&deferred)
+        {
+            permit.send(AccountMessage::RoomCommand(
+                RoomCommand::LoadSpaceChildren {
+                    request_id: deferred.request_id,
+                    space_id: deferred.space_id,
+                    generation: deferred.generation,
+                },
+            ));
         } else if let Some(deferred) = self.deferred_account_dispatch.search_crawler_rooms.take()
             // Another session's rooms must not reach this session's crawler.
             && deferred.session_key == super::navigation::navigation_session_key(&self.state)

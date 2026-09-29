@@ -1012,3 +1012,69 @@ async fn navigation_network_deferred_crawler_notification_is_dropped_after_the_s
     );
     harness.actor_task.abort();
 }
+
+#[tokio::test]
+async fn navigation_network_selection_commits_after_a_live_leave_reloads_space_children() {
+    // #1060 audit: leaving a child of the selected Space asks for a fresh
+    // children projection inside the action-batch commit; that dispatch must
+    // not hold the AppActor loop either, and is delivered once a slot frees.
+    let mut state = navigation_state();
+    state.settings.values.search_crawler.speed = koushi_state::SearchCrawlerSpeed::Paused;
+    reduce(
+        &mut state,
+        AppAction::SelectSpace {
+            space_id: Some(SPACE.to_owned()),
+        },
+    );
+    assert_eq!(
+        state.space_children.selected_space_id.as_deref(),
+        Some(SPACE)
+    );
+    let mut harness = BlockedMailbox::start(state).await;
+    executor::timeout(
+        DEADLINE,
+        harness.action_tx.send(vec![AppAction::RoomLeftLocally {
+            room_id: SPACE_ROOM.to_owned(),
+        }]),
+    )
+    .await
+    .expect("action ingress must not wait for the AccountActor")
+    .expect("action ingress remains open");
+    let left = harness
+        .wait_for_snapshot(|state| {
+            state.space_children.load == koushi_state::SpaceChildrenLoadState::Loading
+        })
+        .await;
+    // A DM is global: selecting it keeps the Space and its pending reload.
+    harness.select_room(request(1), DM).await;
+    let [(outcome, selected)] = harness
+        .terminals(&[request(1)])
+        .await
+        .try_into()
+        .ok()
+        .unwrap();
+    assert_eq!(outcome, IntentOutcome::Committed);
+    assert_eq!(selected.navigation.active_room_id.as_deref(), Some(DM));
+    assert_eq!(selected.navigation.active_space_id.as_deref(), Some(SPACE));
+
+    assert!(matches!(
+        harness.account_rx.recv().await,
+        Some(AccountMessage::CancelActivityResolution)
+    ));
+    let reload = executor::timeout(DEADLINE, async {
+        loop {
+            if let Some(AccountMessage::RoomCommand(RoomCommand::LoadSpaceChildren {
+                space_id,
+                generation,
+                ..
+            })) = harness.account_rx.recv().await
+            {
+                return (space_id, generation);
+            }
+        }
+    })
+    .await
+    .expect("the deferred reload is delivered once the mailbox has capacity");
+    assert_eq!(reload, (SPACE.to_owned(), left.space_children.generation));
+    harness.actor_task.abort();
+}

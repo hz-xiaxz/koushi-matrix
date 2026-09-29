@@ -1912,20 +1912,14 @@ impl AppActor {
     /// Issue #1062: route a reducer-admitted Space children reload to the room
     /// actor. The reducer already put the slice in `Loading` under
     /// `generation`; if the command cannot be delivered, settle it as failed so
-    /// the slice does not stay loading and the cached children remain.
+    /// the slice does not stay loading and the cached children remain. A live
+    /// leave emits this inside the action-batch commit, so it never waits for
+    /// AccountActor mailbox capacity (#1060).
     async fn forward_space_children_reload(&mut self, space_id: String, generation: u64) {
         let request_id = self.next_internal_request_id();
-        let forwarded = self
-            .account_actor
-            .send(crate::account::AccountMessage::RoomCommand(
-                koushi_protocol::command::RoomCommand::LoadSpaceChildren {
-                    request_id,
-                    space_id: space_id.clone(),
-                    generation,
-                },
-            ))
-            .await;
-        if !forwarded {
+        if let deferred_dispatch::GuardedDispatch::Closed =
+            self.dispatch_space_children_reload(request_id, space_id.clone(), generation)
+        {
             let effects = self
                 .reduce_app_action(AppAction::SpaceChildrenLoadFailed {
                     space_id,
@@ -1988,7 +1982,7 @@ impl AppActor {
         self.handle_ui_event_effects(&effects).await;
         // #1060: this runs inside the action-batch commit, so the dispatch
         // must never wait for AccountActor mailbox capacity.
-        if let deferred_dispatch::ActivityResolutionDispatch::Closed =
+        if let deferred_dispatch::GuardedDispatch::Closed =
             self.dispatch_activity_resolution(generation, total_unresolved_room_count, requests)
         {
             // No task will settle this generation; keep it retryable.
