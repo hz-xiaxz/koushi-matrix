@@ -1937,13 +1937,24 @@ impl AppActor {
             })
             .await;
         self.handle_ui_event_effects(&effects).await;
-        let _ = self
+        if !self
             .account_actor
             .send(AccountMessage::ResolveActivity {
                 generation,
                 requests,
             })
-            .await;
+            .await
+        {
+            // No task will settle this generation; keep it retryable.
+            let effects = self
+                .reduce_app_action(AppAction::ActivityResolutionFailed {
+                    generation,
+                    unresolved_room_count: total_unresolved_room_count,
+                    kind: koushi_state::OperationFailureKind::Sdk,
+                })
+                .await;
+            self.handle_ui_event_effects(&effects).await;
+        }
     }
 
     #[cfg(any(test, feature = "test-hooks"))]
