@@ -40,8 +40,9 @@ accident. The local Synapse lane could not evaluate sliding sync at all (MSC4186
 was off in its config), and the probe's `reason` token was logged at Debug level
 and never reached stderr.
 
-Lessons kept in the current rules: advertised support is not proof of behavior,
-and the deciding diagnostic token must be visible in a single run.
+Lessons: advertised support is not proof of behavior, and the deciding
+diagnostic token must be visible in a single run (see
+[verification.md](verification.md#minimize-human-round-trips)).
 
 ## Login timeout investigation (#334, #375)
 
@@ -52,7 +53,8 @@ baseline; Tuwunel failed identically. The current symptom guide is in
 - **#334 (2026-07-26).** A freshly registered primary A parks in the
   verification gate and `LoggedIn` stays held until promotion. Gate completion
   was a scenario allowlist, so every unlisted scenario could only time out. The
-  shared login route now completes the gate unconditionally.
+  shared login route now completes the gate unconditionally; scenarios that must
+  not bootstrap own their login and return from `run_async` before that route.
 - The failure recurred intermittently in 2026-07-30 CI. Naming the session phase
   in the timeout (`phase=…`) identified `phase=rechecking_trust` in one run.
 - **#375** routed `AppEffect::CheckCurrentDeviceTrust` through both production
@@ -74,7 +76,9 @@ recurrence is a regression to investigate, not a known failure.
 - Several `basic-operations` specs (reply-mode submit, pin/unpin) were flaky
   only in parallel runs: the harness `get_snapshot` returned a static snapshot
   that could reset composer or pin state mid-test, amplified by worker
-  contention. That is why `workers: 1` is pinned.
+  contention (see `playwright.config.ts` for the `workers: 1` rationale). A
+  durable fix would make the harness `get_snapshot` response follow the reply
+  lifecycle.
 - A shell-landmark a11y spec was once listed as pre-existing failure and later
   passed unnoticed; do not re-add a known-failures entry without a fresh failing
   run.

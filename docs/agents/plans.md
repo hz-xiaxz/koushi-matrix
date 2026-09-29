@@ -63,29 +63,30 @@ space tooltips do not bypass the Rust-owned Phase A rule for product behavior.
 
 ## Feature areas
 
-Phase A is Rust/headless work and comes before Phase B GUI wiring. One `plan`
-link means the same plan covers both phases. Rows marked superseded are kept
+Phase A is Rust/headless work and comes before Phase B GUI wiring. A `plan`
+link means the same plan covers both phases; `Phase A` or `Phase B` alone
+means the index recorded only that phase. Rows marked superseded are kept
 only because older issues link to them; they do not govern current work.
 
 | Area | Plans |
 | --- | --- |
-| Media / file timeline | [plan](../superpowers/plans/2026-06-15-media-phase-a.md) |
+| Media / file timeline | [Phase A](../superpowers/plans/2026-06-15-media-phase-a.md) |
 | History export archive: room and Space folders with HTML, attachments, resume | [Phase A](../superpowers/plans/2026-09-25-history-export-archive.md), [spec](../superpowers/specs/2026-09-25-history-export-archive-design.md) |
 | Room-history export, Element-compatible JSON (#59) | [Phase A](../superpowers/plans/2026-09-23-issue59-room-history-export-phase-a.md), [Phase B](../superpowers/plans/2026-09-23-issue59-room-history-export-phase-b.md) |
 | Media preparation/cache retention (#547) | [plan](../superpowers/plans/2026-08-18-issue547-memory-bounds.md) |
 | Muted-room native Dock attention (#543) | [plan](../superpowers/plans/2026-08-18-issue543-muted-dock-badge.md) |
 | Rust lifecycle ownership / leak cleanup (#550) | [plan](../superpowers/plans/2026-08-18-issue550-rust-lifecycle-ownership.md) |
-| Logical window-state restore (#544) | [plan](../superpowers/plans/2026-08-22-issue544-logical-window-state.md) |
+| Logical window-state restore (#544) | [Phase B](../superpowers/plans/2026-08-22-issue544-logical-window-state.md) |
 | Rust-owned live viewport synchronization (#666) | [plan](../superpowers/plans/2026-08-22-issue666-rust-viewport-synchronization.md) |
-| Invite-workflow admission and settlement guards (#658) | [plan](../superpowers/plans/2026-08-22-issue658-invite-workflow-admission.md) |
-| Composer-load session fence evidence (#645) | [plan](../superpowers/plans/2026-08-22-issue645-composer-load-session-fence.md) |
-| Browser harness resource lifecycle (#657) | [plan](../superpowers/plans/2026-08-22-issue657-harness-resource-lifecycle.md) |
-| Bounded KaTeX math rendering (#668) | [plan](../superpowers/plans/2026-08-22-issue668-bounded-math-rendering.md) |
-| Transient settlements and trust-loss resets (#660) | [plan](../superpowers/plans/2026-08-23-issue660-transient-settlement-trust-reset.md) |
-| Room-list session-fence acceptance (#659) | [plan](../superpowers/plans/2026-08-24-issue659-room-list-session-fence-acceptance.md) |
-| Authentication invalidation diagnostics and UI (#608) | [plan](../superpowers/plans/2026-08-24-issue608-authentication-invalidation-diagnostics.md) |
+| Invite-workflow admission and settlement guards (#658) | [Phase A](../superpowers/plans/2026-08-22-issue658-invite-workflow-admission.md) |
+| Composer-load session fence evidence (#645) | [Phase A](../superpowers/plans/2026-08-22-issue645-composer-load-session-fence.md) |
+| Browser harness resource lifecycle (#657) | [Phase B](../superpowers/plans/2026-08-22-issue657-harness-resource-lifecycle.md) |
+| Bounded KaTeX math rendering (#668) | [Phase B](../superpowers/plans/2026-08-22-issue668-bounded-math-rendering.md) |
+| Transient settlements and trust-loss resets (#660) | [Phase A](../superpowers/plans/2026-08-23-issue660-transient-settlement-trust-reset.md) |
+| Room-list session-fence acceptance (#659) | [Phase A](../superpowers/plans/2026-08-24-issue659-room-list-session-fence-acceptance.md) |
+| Authentication invalidation diagnostics and UI (#608) | [Phase A](../superpowers/plans/2026-08-24-issue608-authentication-invalidation-diagnostics.md) |
 | Rust-owned live thread-summary authority (#678) | [plan](../superpowers/plans/2026-08-25-issue678-rust-thread-summary-authority.md) |
-| Historical sender-profile hydration (#688) | [plan](../superpowers/plans/2026-08-25-issue688-historical-sender-profiles.md) |
+| Historical sender-profile hydration (#688) | [Phase A](../superpowers/plans/2026-08-25-issue688-historical-sender-profiles.md) |
 | Secure Backup startup convergence | [plan](../superpowers/plans/2026-08-25-secure-backup-startup-convergence.md) |
 | User Settings session/account convergence | [plan](../superpowers/plans/2026-08-25-user-settings-session-convergence.md) |
 | Authoritative current-device verification (#694 Priority 1) | [plan](../superpowers/plans/2026-08-25-issue694-authoritative-verification.md) |
@@ -93,51 +94,51 @@ only because older issues link to them; they do not govern current work.
 | Room-latest redaction/edit convergence (#570 Task C) | [plan](../superpowers/plans/2026-08-24-issue570-room-latest-convergence.md) |
 | Local-viewed read-state convergence (#559) | [plan](../superpowers/plans/2026-08-24-issue559-local-viewed-read-state-convergence.md) |
 | Deterministic settlement (#738) | [plan](../superpowers/plans/2026-08-28-issue-738-deterministic-settlement.md) |
-| Canon and low-risk architecture cleanup (#750) | [plan](../superpowers/plans/2026-08-29-issue750-architecture-cleanup.md) |
-| Rust source-contract and test-module cleanup (#753) | [plan](../superpowers/plans/2026-08-30-issue753-rust-test-structure.md) |
-| DM Space-membership readiness (#780) | [plan](../superpowers/plans/2026-08-31-issue780-dm-space-membership-readiness.md) |
+| Canon and low-risk architecture cleanup (#750) | [Phase A](../superpowers/plans/2026-08-29-issue750-architecture-cleanup.md) |
+| Rust source-contract and test-module cleanup (#753) | [Phase A](../superpowers/plans/2026-08-30-issue753-rust-test-structure.md) |
+| DM Space-membership readiness (#780) | [Phase A](../superpowers/plans/2026-08-31-issue780-dm-space-membership-readiness.md) |
 | Thin Tauri adapter and Core-owned settlement (#755) | [plan](../superpowers/plans/2026-08-30-issue755-thin-tauri-adapter.md) |
 | Ordered state transport and renderer-independent settlement (#759) | [plan](../superpowers/plans/2026-09-01-issue759-ordered-state-transport.md) |
 | Rust-owned frontend preferences and TypeScript semantic deletion (#761) | [plan](../superpowers/plans/2026-09-04-issue761-rust-owned-preferences.md) |
-| Rust-owned Activity event navigation (#836) | [plan](../superpowers/plans/2026-09-04-issue836-activity-event-navigation.md) |
-| Deterministic README application screenshot (#835) | [plan](../superpowers/plans/2026-09-05-issue835-readme-screenshot.md) |
+| Rust-owned Activity event navigation (#836) | [Phase A](../superpowers/plans/2026-09-04-issue836-activity-event-navigation.md) |
+| Deterministic README application screenshot (#835) | [Phase B](../superpowers/plans/2026-09-05-issue835-readme-screenshot.md) |
 | Desktop polish batch (#806, #826, #827, #828, #831, #832, #833) | [plan](../superpowers/plans/2026-09-04-issues826-827-828-831-832-desktop-polish.md) |
-| Frontend-neutral protocol and QA isolation (#763) | [plan](../superpowers/plans/2026-09-05-issue763-frontend-neutral-protocol-qa.md) |
-| Leaf crate boundaries and Core edge cleanup (#765) | [plan](../superpowers/plans/2026-09-05-issue765-leaf-boundaries.md) |
+| Frontend-neutral protocol and QA isolation (#763) | [Phase A](../superpowers/plans/2026-09-05-issue763-frontend-neutral-protocol-qa.md) |
+| Leaf crate boundaries and Core edge cleanup (#765) | [Phase A](../superpowers/plans/2026-09-05-issue765-leaf-boundaries.md) |
 | Activity/edit/redaction convergence (#570 umbrella) | [plan](../superpowers/plans/2026-08-23-issue570-redaction-edit-convergence.md) |
-| SDK thread relation aggregate (#570 Task A) | [plan](../superpowers/plans/2026-08-23-issue570-sdk-thread-aggregate-spike.md) |
+| SDK thread relation aggregate (#570 Task A) | [Phase A](../superpowers/plans/2026-08-23-issue570-sdk-thread-aggregate-spike.md) |
 | Space member role management (#582) | [plan](../superpowers/plans/2026-08-23-issue582-space-member-role-management.md) |
-| Core Activity/unread/thread convergence (#570 Task B) | [plan](../superpowers/plans/2026-08-24-issue570-core-activity-thread-convergence.md) |
+| Core Activity/unread/thread convergence (#570 Task B) | [Phase A](../superpowers/plans/2026-08-24-issue570-core-activity-thread-convergence.md) |
 | Tauri core-event forwarder lifecycle (#656) | [plan](../superpowers/plans/2026-08-22-issue656-tauri-forwarder-lifecycle.md) |
 | Linux GUI new-identity bootstrap QA (#586) | [plan](../superpowers/plans/2026-08-20-issue586-linux-gui-new-identity-bootstrap.md) |
 | Live signals (receipts, markers, typing, presence) | [Phase A](../superpowers/plans/2026-06-15-live-signals-phase-a.md), [Phase B](../superpowers/plans/2026-06-15-live-signals-phase-b-gui.md) |
-| E2EE trust state machine | [plan](../superpowers/plans/2026-06-14-e2ee-trust-phase-a.md) |
-| Rust-owned settings | [plan](../superpowers/plans/2026-06-14-rust-owned-settings-phase-a.md) |
+| E2EE trust state machine | [Phase A](../superpowers/plans/2026-06-14-e2ee-trust-phase-a.md) |
+| Rust-owned settings | [Phase A](../superpowers/plans/2026-06-14-rust-owned-settings-phase-a.md) |
 | i18n substrate | [Phase A](../superpowers/plans/2026-06-14-i18n-substrate-phase-a.md), [Phase B](../superpowers/plans/2026-06-14-i18n-substrate-phase-b.md) |
 | Cross-platform font/emoji substrate | [Phase A](../superpowers/plans/2026-06-15-font-emoji-phase-a.md), [Phase B](../superpowers/plans/2026-06-15-font-emoji-phase-b-gui.md) |
-| Compact message density (#609) | [plan](../superpowers/plans/2026-08-22-issue609-compact-message-density.md) |
-| Timeline navigation aids (#41) | [plan](../superpowers/plans/2026-06-16-timeline-navigation-phase-a.md) |
-| Unread navigation and thread notifications (#569) | [plan](../superpowers/plans/2026-08-22-issue569-unread-navigation-thread-notifications.md) |
-| Account work scheduler | [plan](../superpowers/plans/2026-07-25-account-work-scheduler-phase-a.md) |
-| Startup latency observability (#123) | [plan](../superpowers/plans/2026-06-23-startup-latency-observability-phase-a.md) |
-| Element X-compatible login/store lifecycle (#699) | [plan](../superpowers/plans/2026-08-26-issue699-element-x-login-store-lifecycle.md) |
-| Initial index-0 key-share diagnostics (#509) | [plan](../superpowers/plans/2026-08-13-index0-share-diagnostics.md) |
-| Bounded index-0 duplicate share (#510) — superseded by stock Element X pre-share, #795 | [plan](../superpowers/plans/2026-08-13-index0-reshare.md) |
-| Initial Megolm Olm-claim repair (#523) — superseded by stock Element X pre-share, #795 | [plan](../superpowers/plans/2026-08-14-initial-megolm-olm-repair.md) |
-| Element X Megolm send parity (runtime-disable #510/#523) | [plan](../superpowers/plans/2026-08-15-element-x-megolm-send-parity.md) |
-| Room-subscription ownership (#518) | [plan](../superpowers/plans/2026-08-14-room-subscription-ownership.md) |
-| Session-resident room subscriptions (#532) | [plan](../superpowers/plans/2026-08-15-room-subscription-residency.md) |
-| Room-key rotation correlation diagnostics | [plan](../superpowers/plans/2026-08-14-room-key-rotation-correlation-diagnostics.md) |
+| Compact message density (#609) | [Phase B](../superpowers/plans/2026-08-22-issue609-compact-message-density.md) |
+| Timeline navigation aids (#41) | [Phase A](../superpowers/plans/2026-06-16-timeline-navigation-phase-a.md) |
+| Unread navigation and thread notifications (#569) | [Phase B](../superpowers/plans/2026-08-22-issue569-unread-navigation-thread-notifications.md) |
+| Account work scheduler | [Phase A](../superpowers/plans/2026-07-25-account-work-scheduler-phase-a.md) |
+| Startup latency observability (#123) | [Phase A](../superpowers/plans/2026-06-23-startup-latency-observability-phase-a.md) |
+| Element X-compatible login/store lifecycle (#699) | [Phase A](../superpowers/plans/2026-08-26-issue699-element-x-login-store-lifecycle.md) |
+| Initial index-0 key-share diagnostics (#509) | [Phase A](../superpowers/plans/2026-08-13-index0-share-diagnostics.md) |
+| Bounded index-0 duplicate share (#510) — superseded by stock Element X pre-share, #795 | [Phase A](../superpowers/plans/2026-08-13-index0-reshare.md) |
+| Initial Megolm Olm-claim repair (#523) — superseded by stock Element X pre-share, #795 | [Phase A](../superpowers/plans/2026-08-14-initial-megolm-olm-repair.md) |
+| Element X Megolm send parity (runtime-disable #510/#523) | [Phase A](../superpowers/plans/2026-08-15-element-x-megolm-send-parity.md) |
+| Room-subscription ownership (#518) | [Phase A](../superpowers/plans/2026-08-14-room-subscription-ownership.md) |
+| Session-resident room subscriptions (#532) | [Phase A](../superpowers/plans/2026-08-15-room-subscription-residency.md) |
+| Room-key rotation correlation diagnostics | [Phase A](../superpowers/plans/2026-08-14-room-key-rotation-correlation-diagnostics.md) |
 | Eviction-resistant Megolm rotation attribution (#591) | [plan](../superpowers/plans/2026-08-21-issue591-rotation-ledger.md) |
-| Persisted Megolm rotation attribution (#794) | [plan](../superpowers/plans/2026-09-05-issue794-persisted-rotation-attribution.md) |
-| Element X Megolm send parity (#795) | [plan](../superpowers/plans/2026-09-05-issue795-element-x-megolm-send-parity.md) |
+| Persisted Megolm rotation attribution (#794) | [Phase A](../superpowers/plans/2026-09-05-issue794-persisted-rotation-attribution.md) |
+| Element X Megolm send parity (#795) | [Phase A](../superpowers/plans/2026-09-05-issue795-element-x-megolm-send-parity.md) |
 | Stock forced rotation debug control / JS-error attribution (#797) | [plan](../superpowers/plans/2026-09-06-force-rotation-issue797-js-errors.md) |
-| New-session Megolm readiness — phase 1 (#577) — superseded; readiness fences are prohibited by overview "Initial outbound Megolm delivery" | [plan](../superpowers/plans/2026-08-21-issue577-megolm-readiness.md) |
-| Same-user secondary-device QA credential isolation (#577 follow-up) | [plan](../superpowers/plans/2026-08-21-issue577-secondary-device-qa-credentials.md) |
-| Formatted-body newline preservation (#522) | [plan](../superpowers/plans/2026-08-14-formatted-body-newlines.md) |
-| Nested Markdown bullet lists (#648) | [plan](../superpowers/plans/2026-08-22-issue648-nested-markdown-lists.md) |
-| Unified renderer viewport stabilization (#837) | [plan](../superpowers/plans/2026-09-05-issue837-viewport-transaction.md) |
-| Active prepend anchor preservation (#520) | [plan](../superpowers/plans/2026-08-14-active-prepend-anchor.md) |
-| Feature-seam decomposition wave (#551, 51 plans) | [first plan](../superpowers/plans/2026-08-18-issue551-feature-seam-decomposition.md); children are `docs/superpowers/plans/2026-08-*-issue551-*.md` |
+| New-session Megolm readiness — phase 1 (#577) — superseded; readiness fences are prohibited by overview "Initial outbound Megolm delivery" | [Phase A](../superpowers/plans/2026-08-21-issue577-megolm-readiness.md) |
+| Same-user secondary-device QA credential isolation (#577 follow-up) | [Phase A](../superpowers/plans/2026-08-21-issue577-secondary-device-qa-credentials.md) |
+| Formatted-body newline preservation (#522) | [Phase A](../superpowers/plans/2026-08-14-formatted-body-newlines.md) |
+| Nested Markdown bullet lists (#648) | [Phase A](../superpowers/plans/2026-08-22-issue648-nested-markdown-lists.md) |
+| Unified renderer viewport stabilization (#837) | [Phase B](../superpowers/plans/2026-09-05-issue837-viewport-transaction.md) |
+| Active prepend anchor preservation (#520) | [Phase A](../superpowers/plans/2026-08-14-active-prepend-anchor.md) |
+| Feature-seam decomposition wave (#551, 51 indexed plans) | [first plan](../superpowers/plans/2026-08-18-issue551-feature-seam-decomposition.md); children are `docs/superpowers/plans/2026-08-*-issue551-*.md` |
 | Frontend semantic-ownership migration (#552 phases 1-7, #708, 22 plans) | [inventory](../superpowers/plans/2026-08-23-issue552-frontend-ownership-inventory.md), [remaining phases](../superpowers/plans/2026-08-27-issue552-remaining-ownership-phases.md), [#708 thread-root phase 1](../superpowers/plans/2026-08-27-issue708-thread-root-projection-ownership.md); children are `docs/superpowers/plans/2026-08-*-issue552-*.md` |
 | Browser-fake cleanup (#634, #641, #649, #650, #651, 9 plans) | [first plan](../superpowers/plans/2026-08-22-issue634-browser-fake-link-preview-isolation.md); children are `docs/superpowers/plans/2026-08-22-issue6*-browser-fake-*.md` |
