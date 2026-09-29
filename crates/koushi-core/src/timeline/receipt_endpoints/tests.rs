@@ -12,13 +12,27 @@ fn endpoint(event: &str, timestamp: u32) -> Option<ReceiptEndpoint> {
 }
 
 #[test]
-fn reader_initials_preserve_ascii_policy_and_valid_unicode() {
+fn reader_initials_use_the_shared_single_grapheme_rule() {
+    // #1055: the Element/Compound rule (#414) shared with the desktop
+    // `avatarInitial` helper; keep these cases in sync with
+    // apps/desktop/src/app/avatarInitial.test.ts.
     for (label, expected) in [
-        ("Current alias", "CU"),
-        ("日a本b", "AB"),
-        ("日本語", "日本"),
-        ("😀😀", "😀😀"),
-        ("علي", "عل"),
+        ("Current alias", "C"),
+        ("Firstname Lastname", "F"),
+        ("alice", "A"),
+        ("Émile Zola", "É"),
+        ("e\u{301}mile", "E\u{301}"),
+        ("😀 Smile", "😀"),
+        ("👩\u{200d}👩\u{200d}👧 Family", "👩\u{200d}👩\u{200d}👧"),
+        ("日本語", "日"),
+        ("日a本b", "日"),
+        ("علي", "ع"),
+        ("@alice:example.invalid", "A"),
+        ("#general:example.invalid", "G"),
+        ("+community:example.invalid", "C"),
+        ("  Padded Name", "P"),
+        ("", "?"),
+        ("   ", "?"),
     ] {
         assert_eq!(reader_initials(label), expected);
     }

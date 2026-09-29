@@ -52,9 +52,8 @@ import {
   syncStatePresentation,
   type OpenContextMenu,
   type PrimaryView,
-  initials,
+  avatarInitial,
   elementAvatarColorIndex,
-  elementAvatarInitial,
   EMPTY_ROOM_TAGS
 } from "../app/uiShared";
 const HOME_SCOPE_KEY = "__home__";
@@ -801,7 +800,7 @@ export function WorkspaceRail({
                     avatar={space.avatar}
                     className="workspace-button-avatar is-space"
                     colorSeed={space.space_id}
-                    fallback={localIcon || elementAvatarInitial(fallbackName) || "?"}
+                    fallback={localIcon || avatarInitial(fallbackName)}
                     fallbackMode={localIcon ? "compactLabel" : "elementSpace"}
                     onRequestAvatarThumbnail={onRequestAvatarThumbnail}
                   />
@@ -1538,7 +1537,7 @@ function RoomButton({
           avatar={room.avatar}
           className={`room-avatar ${kind === "dm" ? "is-user" : "is-room"}`}
           colorSeed={room.room_id}
-          fallback={initials(room.display_name)}
+          fallback={avatarInitial(room.display_name)}
           onRequestAvatarThumbnail={onRequestAvatarThumbnail}
         />
         {isOnlineDm ? <span className="room-presence-dot" aria-hidden="true" /> : null}

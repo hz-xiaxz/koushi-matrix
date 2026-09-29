@@ -47,7 +47,7 @@ import {
   scheduledSendCapabilityLabel,
   datetimeLocalValueFromTimestamp,
   scheduledSendTimestampFromInput,
-  initials,
+  avatarInitial,
   peopleFacingLabel,
   type OpenContextMenu
 } from "../app/uiShared";
@@ -421,7 +421,7 @@ function PinnedEventsList({
                 {avatarSource ? (
                   <img src={avatarSource} alt={undefined} />
                 ) : (
-                  initials(senderLabel)
+                  avatarInitial(senderLabel)
                 )}
               </span>
               <span className="pinned-event-details">
@@ -610,7 +610,7 @@ function MessageArticle({
       }
     >
       <div className="avatar" aria-hidden="true">
-        {initials(senderDisplayLabel)}
+        {avatarInitial(senderDisplayLabel)}
       </div>
       <div className="message-main">
         <div className="message-heading">

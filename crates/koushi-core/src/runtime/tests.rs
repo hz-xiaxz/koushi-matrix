@@ -2956,7 +2956,7 @@ async fn receipt_resolution_borrows_current_alias_without_publishing_global_stat
         "a captured SDK hint must not resurrect a removed avatar"
     );
     assert_eq!(window.rows[0].original_display_label, "Current global");
-    assert_eq!(window.rows[0].initials, "CU");
+    assert_eq!(window.rows[0].initials, "C");
     assert_eq!(window.rows[0].timestamp.unwrap().unix_ms.get(), 42);
     assert_eq!(
         window.rows[0].timestamp.unwrap().locale,

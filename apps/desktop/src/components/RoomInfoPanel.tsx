@@ -23,6 +23,7 @@ import {
   type PropertySaveStatus
 } from "./SettingsPropertyCard";
 import { EntityAvatar } from "./Shell";
+import { avatarInitial } from "../app/uiShared";
 import {
   HistoryExportSection,
   type HistoryExportControls
@@ -387,7 +388,7 @@ export function RoomInfoPanel({
                     avatar={room.avatar}
                     className="settings-property-avatar"
                     colorSeed={room.room_id}
-                    fallback={Array.from(room.display_label.trim())[0] ?? "#"}
+                    fallback={avatarInitial(room.display_label)}
                   />
                   <small className="settings-property-secondary" dir="ltr">
                     {settings.avatar_url?.trim()}

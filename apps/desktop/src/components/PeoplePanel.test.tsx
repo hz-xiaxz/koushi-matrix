@@ -146,6 +146,35 @@ describe("PeoplePanel", () => {
     expect(screen.getByText("You")).toBeTruthy();
   });
 
+  test("uses the shared single-grapheme initial for member placeholder avatars", () => {
+    // #1055: the same rule as the timeline, Space members, and User settings.
+    const named = (userId: string, label: string): RoomMemberSummary => ({
+      ...members[0],
+      user_id: userId,
+      display_name: label,
+      display_label: label,
+      original_display_label: label
+    });
+    render(
+      <PeoplePanel
+        currentUserId="@current:example.invalid"
+        roomOrSpace={baseRoom}
+        roomManagement={roomManagement([
+          named("@first:example.invalid", "Firstname Lastname"),
+          named("@emile:example.invalid", "Émile Zola"),
+          named("@smile:example.invalid", "😀 Smile")
+        ])}
+        onOpenProfile={() => undefined}
+      />
+    );
+
+    expect(
+      Array.from(document.querySelectorAll(".people-list-avatar .avatar-fallback"))
+        .map((avatar) => avatar.textContent)
+        .sort()
+    ).toEqual(["F", "É", "😀"].sort());
+  });
+
   test("distinguishes invited members from joined members in the list and profile", () => {
     const invited = { ...members[0], membership: "invited" as const };
     const joined = { ...members[1], membership: "joined" as const };
