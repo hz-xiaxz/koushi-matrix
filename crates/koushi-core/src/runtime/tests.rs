@@ -3376,6 +3376,198 @@ async fn app_actor_cross_room_missing_activity_search_fallback_and_pinned_failur
     ));
 }
 
+fn live_unresolved_activity_room(room_id: &str, activity_timestamp_ms: u64) -> RoomSummary {
+    let mut room = unread_diagnostic_room(room_id);
+    room.is_dm = true;
+    room.unread_count = 1;
+    room.notification_count = 1;
+    room.highlight_count = 0;
+    room.marked_unread = false;
+    room.latest_event = None;
+    room.conversation_activity = Some(koushi_state::ConversationActivity {
+        timestamp_ms: activity_timestamp_ms,
+        source: koushi_state::ConversationActivitySource::Message,
+    });
+    room
+}
+
+async fn next_activity_resolution_request(
+    account_rx: &mut mpsc::Receiver<AccountMessage>,
+    within: Duration,
+) -> Option<(u64, BTreeSet<String>)> {
+    tokio::time::timeout(within, async {
+        loop {
+            if let AccountMessage::ResolveActivity {
+                generation,
+                requests,
+            } = account_rx.recv().await?
+            {
+                return Some((
+                    generation,
+                    requests
+                        .into_iter()
+                        .map(|request| request.room_id)
+                        .collect::<BTreeSet<_>>(),
+                ));
+            }
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+async fn wait_for_unread_resolution(
+    snapshot_rx: &mut watch::Receiver<VersionedAppStateSnapshot>,
+    expected: koushi_state::ActivityResolutionState,
+) {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if matches!(
+                &snapshot_rx.borrow().state.activity,
+                ActivityState::Open { unread, .. } if unread.resolution == expected
+            ) {
+                return;
+            }
+            snapshot_rx.changed().await.expect("activity snapshot");
+        }
+    })
+    .await
+    .expect("activity unread resolution reaches the expected state");
+}
+
+#[tokio::test]
+async fn live_unresolved_activity_starts_bounded_resolution_while_open() {
+    // #1061 gap 1: Activity is already open when a notified DM arrives
+    // without resolvable latest-event content.
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let first_room = "!live-unresolved-a:example.invalid";
+    let second_room = "!live-unresolved-b:example.invalid";
+    let state = AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://example.invalid".to_owned(),
+            user_id: "@synthetic:example.invalid".to_owned(),
+            device_id: "SYNTHETIC".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        }),
+        activity: ActivityState::Open {
+            active_tab: koushi_state::ActivityTab::Unread,
+            recent: koushi_state::ActivityStream::default(),
+            unread: koushi_state::ActivityStream::default(),
+            mark_read: Default::default(),
+        },
+        ..AppState::default()
+    };
+    let (
+        actor,
+        _command_tx,
+        action_tx,
+        mut account_rx,
+        _event_rx,
+        mut snapshot_rx,
+        _navigation_projection_rx,
+        _event_navigation_prepared_tx,
+        _focused_projection_tx,
+    ) = app_actor_event_navigation_fixture(data_dir.path(), state);
+    let actor_task = tokio::spawn(actor.run());
+    let room_list = |rooms: Vec<RoomSummary>| AppAction::RoomListUpdated {
+        spaces: Vec::new(),
+        rooms,
+    };
+
+    action_tx
+        .send(vec![room_list(vec![live_unresolved_activity_room(
+            first_room, 200,
+        )])])
+        .await
+        .expect("live room-list update");
+    let (first_generation, first_rooms) =
+        next_activity_resolution_request(&mut account_rx, Duration::from_secs(1))
+            .await
+            .expect("live unresolved attention starts Activity resolution");
+    assert_eq!(first_rooms, BTreeSet::from([first_room.to_owned()]));
+    wait_for_unread_resolution(
+        &mut snapshot_rx,
+        koushi_state::ActivityResolutionState::Resolving {
+            generation: first_generation,
+            unresolved_room_count: 1,
+        },
+    )
+    .await;
+
+    // Repeated live updates while resolving coalesce into the running
+    // generation instead of aborting it.
+    action_tx
+        .send(vec![room_list(vec![
+            live_unresolved_activity_room(first_room, 200),
+            live_unresolved_activity_room(second_room, 300),
+        ])])
+        .await
+        .expect("second live room-list update");
+    assert!(
+        next_activity_resolution_request(&mut account_rx, Duration::from_millis(200))
+            .await
+            .is_none(),
+        "an in-flight resolution is not restarted by live updates"
+    );
+
+    // The settled generation leaves the newly arrived room unattempted, so
+    // exactly one follow-up resolution covers it.
+    action_tx
+        .send(vec![AppAction::ActivityResolutionSucceeded {
+            generation: first_generation,
+        }])
+        .await
+        .expect("first resolution settles");
+    let (second_generation, second_rooms) =
+        next_activity_resolution_request(&mut account_rx, Duration::from_secs(1))
+            .await
+            .expect("unattempted live candidate starts a follow-up resolution");
+    assert!(second_generation > first_generation);
+    assert!(second_rooms.contains(second_room));
+
+    // Once every current candidate was attempted, a no-progress settlement
+    // stays retryable instead of looping.
+    action_tx
+        .send(vec![AppAction::ActivityResolutionSucceeded {
+            generation: second_generation,
+        }])
+        .await
+        .expect("second resolution settles");
+    wait_for_unread_resolution(
+        &mut snapshot_rx,
+        koushi_state::ActivityResolutionState::Failed {
+            generation: second_generation,
+            unresolved_room_count: 2,
+            failure_kind: OperationFailureKind::Timeout,
+        },
+    )
+    .await;
+    assert!(
+        next_activity_resolution_request(&mut account_rx, Duration::from_millis(200))
+            .await
+            .is_none(),
+        "attempted candidates wait for an explicit retry or newer activity"
+    );
+
+    // Newer activity in an attempted room is a new candidate.
+    action_tx
+        .send(vec![room_list(vec![
+            live_unresolved_activity_room(first_room, 400),
+            live_unresolved_activity_room(second_room, 300),
+        ])])
+        .await
+        .expect("newer activity update");
+    let (_, third_rooms) =
+        next_activity_resolution_request(&mut account_rx, Duration::from_secs(1))
+            .await
+            .expect("newer activity restarts resolution");
+    assert!(third_rooms.contains(first_room));
+
+    actor_task.abort();
+    let _ = actor_task.await;
+}
+
 #[tokio::test]
 async fn event_navigation_preserves_opening_through_internal_room_selection() {
     let data_dir = tempfile::tempdir().expect("runtime data directory");
