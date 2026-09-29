@@ -61,12 +61,12 @@ use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, reco
 #[cfg(any(test, feature = "test-hooks"))]
 use koushi_state::ComposerDraftStore;
 use koushi_state::{
-    AccountManagementOperation, ActivityRowKind, ActivityState, AppAction, AppEffect, AppState,
-    ComposerTarget, LoginAttemptId, ProfileUpdateRequest, ScheduledSendCapability,
-    ScheduledSendHandle, ScheduledSendItem, SearchScope as AppSearchScope,
-    SecureBackupSetupAdmission, SessionState, SpaceMembersCommandRejection, ThreadOpenIntent,
-    ThreadPaneState, UiEvent, admit_space_member_cancellation, admit_space_member_invite,
-    admit_space_member_role, admit_space_members_load, reduce,
+    AccountManagementOperation, ActivityState, AppAction, AppEffect, AppState, ComposerTarget,
+    LoginAttemptId, ProfileUpdateRequest, ScheduledSendCapability, ScheduledSendHandle,
+    ScheduledSendItem, SearchScope as AppSearchScope, SecureBackupSetupAdmission, SessionState,
+    SpaceMembersCommandRejection, ThreadOpenIntent, ThreadPaneState, UiEvent,
+    admit_space_member_cancellation, admit_space_member_invite, admit_space_member_role,
+    admit_space_members_load, reduce,
 };
 #[cfg(test)]
 use koushi_state::{NavigationState, OperationFailureKind};
@@ -1769,6 +1769,18 @@ impl AppActor {
                     if self.state != before_post_commit_loads {
                         self.publish_state_change(&before_post_commit_loads);
                     }
+                    // #1061: live room-list and resolution updates can leave
+                    // open Activity with unattempted room-unread candidates.
+                    if self
+                        .activity_projection
+                        .has_unattempted_resolution_candidate(&self.state)
+                    {
+                        let before_activity_resolution = self.state.clone();
+                        self.start_activity_resolution().await;
+                        if self.state != before_activity_resolution {
+                            self.publish_state_change(&before_activity_resolution);
+                        }
+                    }
                     #[cfg(any(test, feature = "test-hooks"))]
                     for completion in composer_draft_test_completions {
                         let _ = completion.send(self.state.clone());
@@ -1886,15 +1898,12 @@ impl AppActor {
     }
 
     async fn start_activity_resolution(&mut self) {
-        let placeholder_room_ids = match &self.state.activity {
-            ActivityState::Open { unread, .. } => unread
-                .rows
-                .iter()
-                .filter(|row| row.kind == ActivityRowKind::RoomUnread)
-                .map(|row| row.room_id.as_str())
-                .collect::<BTreeSet<_>>(),
-            _ => return,
+        let Some(candidates) = ActivityProjection::resolution_candidates(&self.state) else {
+            return;
         };
+        let placeholder_room_ids = candidates.keys().cloned().collect::<BTreeSet<_>>();
+        self.activity_projection
+            .record_resolution_attempt(candidates);
         if placeholder_room_ids.is_empty() {
             return;
         }
@@ -3293,8 +3302,9 @@ impl AppActor {
                         AppCommand::PaginateActivity {
                             request_id, tab, ..
                         } => {
-                            let (recent, unread, excluded_room_ids) =
-                                self.activity_projection.snapshot(&self.state);
+                            let (recent, unread, excluded_room_ids) = self
+                                .activity_projection
+                                .snapshot_preserving_resolution(&self.state);
                             let effects = self
                                 .reduce_app_action(AppAction::ActivityRowsUpdated {
                                     recent: recent.clone(),

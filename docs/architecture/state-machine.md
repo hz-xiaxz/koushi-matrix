@@ -4265,10 +4265,10 @@ stateDiagram-v2
     Opening --> Closed: CloseActivity
     Open --> Open: SetActivityTab
     Open --> Open: ActivityRowsUpdated
-    Open --> Resolving: unresolved RoomUnread rows
+    Open --> Resolving: unattempted RoomUnread rows (open, live update, or settlement)
     Resolving --> Open: ActivityResolutionSucceeded [matching generation]
     Resolving --> ResolutionFailed: ActivityResolutionFailed [matching generation]
-    ResolutionFailed --> Resolving: RetryActivityResolution [new generation]
+    ResolutionFailed --> Resolving: RetryActivityResolution or newer unattempted RoomUnread [new generation]
     Resolving --> Closed: close/session clear cancels task
     Open --> Open: PaginateActivity/ActivitySnapshotLoaded
     Open --> MarkReadPending: MarkActivityRead(room|all)
@@ -4289,7 +4289,11 @@ stateDiagram-v2
   highlight state but no observed unread event row survives the fully-read
   marker / cleared-event filter, `ActivityProjection` synthesizes a private-data-
   minimized room-level placeholder row (`kind = RoomUnread`, `event_id = None`).
-  Observed event rows remain preferred for the same room. The placeholder is a
+  Observed event rows remain preferred for the same room, but only when the
+  newest surviving unread row reaches the room's known
+  `conversation_activity` timestamp: an older cached unread row is not proof
+  that newer activity was resolved, so such a room keeps its event rows and
+  also gets a placeholder (#1061). The placeholder is a
   transient resolver input, never completed message content: `AccountActor`
   consumes decrypted cache/live timeline items and bounded 50-event backward
   pages (maximum 32 per room and 16 rooms per generation) through the shared
@@ -4297,6 +4301,13 @@ stateDiagram-v2
   observation. Per-room successes are retained when another room fails; capped
   batches rotate across retry generations to avoid starvation.
 - `ActivityStream.resolution` is Rust-owned `Idle | Resolving | Failed` state.
+  `OpenActivity` and `RetryActivityResolution` start a generation over every
+  current placeholder. After each action batch, `AppActor` also starts one
+  when open Activity has a placeholder whose room/activity timestamp no
+  generation attempted yet and no generation is `Resolving`; live updates never
+  preempt an in-flight generation, and a no-progress settlement stays `Failed`
+  (retryable) until newer activity or an explicit retry. Row refreshes,
+  including `PaginateActivity`, preserve the current resolution state.
   Generation guards reject late completion after retry, close, logout, lock, or
   account replacement. Failure exposes only a coarse `OperationFailureKind` and
   unresolved count. React hides `RoomUnread` rows, renders resolving/failure
