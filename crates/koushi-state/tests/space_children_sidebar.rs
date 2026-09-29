@@ -477,6 +477,37 @@ fn leaving_a_child_refreshes_the_selected_spaces_children() {
     );
 }
 
+/// Issue #1062: leaving a child while the Space's first children load is still
+/// in flight fences that pre-leave answer and asks again.
+#[test]
+fn leaving_a_child_during_the_first_load_fences_it_and_reloads() {
+    let mut state = state_with_children(Vec::new());
+    state.space_children.load = koushi_state::SpaceChildrenLoadState::Loading;
+    ready(&mut state);
+
+    let effects = reduce(
+        &mut state,
+        AppAction::RoomLeftLocally {
+            room_id: "!joined:example.invalid".to_owned(),
+        },
+    );
+
+    assert_eq!(refresh_requests(&effects), [(SPACE_ID.to_owned(), 2)]);
+    reduce(
+        &mut state,
+        AppAction::SpaceChildrenLoaded {
+            space_id: SPACE_ID.to_owned(),
+            generation: 1,
+            children: vec![child(
+                "!joined:example.invalid",
+                "Joined Room",
+                SpaceChildMembership::Joined,
+            )],
+        },
+    );
+    assert!(state.space_children.children.is_empty());
+}
+
 #[test]
 fn leaving_a_room_outside_the_selected_space_requests_no_refresh() {
     let mut state = state_with_children(vec![child(
@@ -484,6 +515,8 @@ fn leaving_a_room_outside_the_selected_space_requests_no_refresh() {
         "Other Room",
         SpaceChildMembership::NotJoined,
     )]);
+    // The joined room belongs to no Space.
+    state.spaces[0].child_room_ids.clear();
     ready(&mut state);
 
     let effects = reduce(

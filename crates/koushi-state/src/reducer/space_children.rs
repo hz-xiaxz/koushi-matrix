@@ -89,15 +89,24 @@ pub(crate) fn handle_room_left(
     let Some(space_id) = state.space_children.selected_space_id.clone() else {
         return Vec::new();
     };
-    let Some(child) = state
+    // The Space's own child list also counts: the first load may still be in
+    // flight with nothing cached yet, and its pre-leave answer must be fenced.
+    let advertised_by_space = state
+        .spaces
+        .iter()
+        .find(|space| space.space_id == space_id)
+        .is_some_and(|space| space.child_room_ids.iter().any(|child| child == room_id));
+    let cached_child = state
         .space_children
         .children
         .iter_mut()
-        .find(|child| child.room_id == room_id)
-    else {
+        .find(|child| child.room_id == room_id);
+    if cached_child.is_none() && !advertised_by_space {
         return Vec::new();
-    };
-    if child.membership == SpaceChildMembership::Joined {
+    }
+    if let Some(child) = cached_child
+        && child.membership == SpaceChildMembership::Joined
+    {
         child.membership = SpaceChildMembership::Left;
         child.can_join = false;
         child.joined_members = joined_members_before_leave
