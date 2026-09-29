@@ -4338,6 +4338,15 @@ stateDiagram-v2
   unread/highlight flags, and low-priority exclusions from `AppState`; React
   must not infer Activity rows from timeline DOM, browser-local state, or IPC
   mock convenience data.
+- Activity Unread is a notification inbox, not a message inbox (#1072). A
+  room qualifies when `max(notification_count, highlight_count) > 0` or it is
+  manually marked unread; a Mentions-only room qualifies only with
+  `highlight_count > 0`. Existing muted and low-priority exclusions still
+  apply. A positive plain `unread_count` alone never qualifies. The sidebar's room attention intentionally also counts
+  plain unread messages, so a room can be unread in the sidebar and absent
+  from Activity Unread; Activity Recent still shows its latest activity. This
+  choice does not change native banners, sounds, mention handling, or read
+  receipts, and viewing Activity never marks anything read.
 - Unread membership is `RoomSummary`-authoritative. When a room has unread or
   highlight state but no observed unread event row survives the fully-read
   marker / cleared-event filter, `ActivityProjection` synthesizes a private-data-
