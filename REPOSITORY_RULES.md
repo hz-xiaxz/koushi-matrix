@@ -743,6 +743,21 @@ requests another language. Preserve exact UI labels, quotations, and other
 source text in their original language when needed; explain them in English.
 This policy does not change the language used to converse with the user.
 
+## GitHub Issue Closure
+
+- Close an issue once its only remaining acceptance items are manual or
+  real-device checks (native GUI, live homeserver, throttled or offline
+  desktop). Manual inspection is confirmation, not correctness evidence, so it
+  must not keep an issue open. The closing comment lists the pending manual
+  checks and the headless evidence (the RED-then-GREEN tests) that the fix
+  rests on. A defect found later during manual checking gets a new issue.
+- Keep an issue open while any automatable test (headless, integration,
+  renderer), unfixed defect, or open decision remains. When only a user
+  policy decision remains, move it to its own issue and close the original.
+- Put closing keywords (`Closes`, `Fixes`, `Resolves`) only in the PR body
+  of a PR that meets the criteria above; commit messages use `Refs #N`, since
+  a keyword in a merged commit closes the issue regardless of the PR body.
+
 ## Documentation And Work Records
 
 - Before opening or updating a PR that changes user-visible behavior, check the
