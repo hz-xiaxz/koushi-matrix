@@ -155,6 +155,26 @@ observer needs a bounded debug/test `SyncOnce` on the observer account after
 `SetTyping` is acknowledged, to wake the same Rust-owned typing observer. Do not
 replace this with React polling or local UI timers.
 
+### Multi-stage QA participant ownership
+
+Multi-stage QA must thread participant ownership through typed helper inputs.
+A later stage borrows an already-live role without creating or cleaning up a
+duplicate; a focused stage may own one participant when none exists. It must
+not hard-code bootstrap for an initialized account, manufacture a duplicate
+device, stop another valid owner to avoid a protocol race, guess the gate
+from timing, or hide a setup mismatch with retries or a longer timeout.
+Ownership starts before fallible login submission and records enough phase
+to clean an unsubmitted runtime, a submitted provisional session, or a keyed
+logged-in session without guessing. Error paths attempt cleanup for every
+owned participant, preserve borrowed participants for their outer owner, and
+order logout confirmation before connection drop and runtime shutdown.
+Logout confirmation follows the authoritative-snapshot waiter rule
+(engineering rules "Async and Runtime" 1), including a final `SignedOut` read
+after timeout, lag, or closure under the original deadline. Failure-injection
+acceptance drives each ownership phase through the behavioral cleanup boundary
+and asserts logout/barrier/drop/shutdown order plus continuation to the
+remaining owners. Source-text inventory guards alone are not evidence.
+
 ## Linux virtual-display GUI lane
 
 Real Tauri WebView driven through WebDriver under Xvfb. Command shape:
@@ -196,7 +216,7 @@ scenario run. See [environment.md](environment.md#reusing-a-debug-build) for the
 | `local-receipt-readers` | five real helper users, a real read receipt, compact `3 + 2` reader affordance, Tauri subscribe/receive/ACK and keyboard close | `gui_local_reader_subscribe=ok`, `gui_local_reader_close=ok` |
 | `local-pins` | pin affordances | — |
 | `local-message-types` | injects `m.emote`, `m.notice`, and formatted spoiler events; checks `data-message-kind`, collapsed spoiler, reveal | — |
-| `local-composer` | mention autocomplete from `ProfileState.users`, Bold toolbar, slash input, then Rust-owned `send=sent` plus composer clear | `gui_local_mention=ok`, `gui_local_markdown=ok`, `gui_local_slash=ok` |
+| `local-composer` | mention autocomplete from `AppState.mention_candidates`, Bold toolbar, slash input, then Rust-owned `send=sent` plus composer clear | `gui_local_mention=ok`, `gui_local_markdown=ok`, `gui_local_slash=ok` |
 | `local-scheduled-send` | `Send later`, `datetime-local` via the shared setter, create/edit/cancel | `gui_local_scheduled_create=ok`, `gui_local_scheduled_reschedule=ok`, `gui_local_scheduled_cancel=ok` |
 | `local-timeline-navigation` | first-unread pill, bottom pill, jump-to-date focused context | `gui_local_timeline_unread_jump=ok`, `gui_local_timeline_bottom_jump=ok`, `gui_local_timeline_date_jump=ok` |
 | `local-rich-formatting` | sanitized Matrix HTML rendering (`strong`, blockquote, list, link, code block, copy control), then toggles `display.code_block_wrap` and waits for the code block CSS to switch from `pre-wrap` to `pre` | — |
@@ -320,25 +340,26 @@ never computes expected geometry or uses fixed window coordinates. The
 Safety rules:
 
 - Pass credentials through `KOUSHI_QA_LOGIN_PIPE`, which contains only a FIFO
-  path in the environment and keeps the payload out of argv, logs, screenshots,
-  and committed files. Never drive real-account login by fixed window-relative
-  coordinates.
+  path in the environment
+  ([engineering rules](../policies/engineering-rules.md#secrets-and-private-data) Secrets 3). Never drive
+  real-account login by fixed window-relative coordinates.
 - Real-login GUI smoke must set `KOUSHI_SKIP_KEYCHAIN_PERSISTENCE=1`.
   `KOUSHI_SKIP_SAVED_SESSIONS=1` only prevents saved-session reads; a successful
   login can still prompt macOS Keychain during session persistence or encrypted
   SDK store key creation.
-- First-run GUI smoke should set `KOUSHI_SKIP_SAVED_SESSIONS=1`, or opening User
+- First-run GUI smoke sets `KOUSHI_SKIP_SAVED_SESSIONS=1`, or opening User
   Settings can read the macOS Keychain and show a confirmation prompt that
-  blocks unattended automation.
-- Do not pass the parent shell environment wholesale into GUI smoke child
-  processes. Filter out secret-like variables such as API keys, tokens, and
-  passwords before spawning `npm run tauri dev`.
-- The smoke CLI must attempt logout cleanup after any post-login QA failure
-  unless `--keep-session` was explicitly requested. Otherwise a failed
-  sync/timeline QA can leave a live smoke device on the homeserver.
-- Avoid repeated destructive real-account login cycles while debugging GUI
+  blocks unattended automation. Real-login smoke additionally sets
+  `KOUSHI_SKIP_KEYCHAIN_PERSISTENCE=1` and `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR`.
+- Filter the child environment before spawning `npm run tauri dev`
+  ([engineering rules](../policies/engineering-rules.md#secrets-and-private-data) Secrets 4), and attempt logout cleanup after any
+  post-login failure unless `--keep-session` was requested
+  ([QA Gates And Cleanup](../../REPOSITORY_RULES.md#qa-gates-and-cleanup));
+  otherwise a failed run leaves a live smoke device on the homeserver.
+- Avoid repeated destructive real-account login cycles while debugging
   automation. Prefer preserving the same running Tauri session while iterating
-  on panel/menu checks.
+  on panel/menu checks; restart only when the script or Tauri capability
+  changes require it.
 - `--qa-profile=<name>` is the opt-in path for persistent restore/sync QA. It
   preserves the SDK SQLite store, cache, search index, saved session, and
   incremental sync state under ignored
@@ -372,10 +393,13 @@ Prompt order differs between the two entry points:
   `.github/workflows.disabled/macos-keychain-tier2.yml`, and GitHub also has the
   workflow disabled manually. Do not run `gh workflow run
   macos-keychain-tier2.yml` until that file is deliberately moved back under
-  `.github/workflows/` and re-enabled. Use a manual macOS session instead. Keep
-  any future workflow key-crate-only: it copies `crates/koushi-key` to
-  `$RUNNER_TEMP` and runs `cargo test --manifest-path` there, so it must not
-  require the private vendored Matrix SDK submodule. For a manual macOS session
+  `.github/workflows/` and re-enabled. Use a manual macOS session instead: Tier
+  2 evidence runs only through the env-gated temporary-keychain test on a real
+  macOS session. A re-enabled lane must not use the debug/test file credential
+  store, and its output stays private-data-free. Keep any future workflow
+  key-crate-only: it copies `crates/koushi-key` to `$RUNNER_TEMP` and runs
+  `cargo test --manifest-path` there, so it must not require the private
+  vendored Matrix SDK submodule. For a manual macOS session
   without an initialized vendor submodule, use the same temp-copy pattern before
   setting `KOUSHI_MACOS_KEYCHAIN_QA=1`. The test treats `security
   set-key-partition-list` as best-effort on hosted runners; the pass/fail proof

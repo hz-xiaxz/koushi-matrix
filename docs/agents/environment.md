@@ -1,17 +1,16 @@
 # Agent Environment Setup
 
 Machine-level setup for this repository: toolchains, submodule, local homeserver
-binaries, build reuse, containers, and signed release builds. Read
+binaries, CI maintenance, build reuse, containers, and signed release builds. Read
 [AGENTS.md](../../AGENTS.md) first for the current QA contract; failure symptoms
 live in [troubleshooting.md](troubleshooting.md).
 
 ## Matrix SDK submodule
 
-The root workspace compiles all Matrix SDK crates directly from
-`vendor/matrix-rust-sdk`. Do not replace those path dependencies with a Git URL
-or fixed `rev`: the submodule gitlink is the only SDK revision pin. After
-updating or switching worktrees, initialize the exact gitlink and run the guard
-before compiling:
+The policy is
+[engineering rules Build item 1](../policies/engineering-rules.md#build-dependencies-qa-gates).
+After updating or switching worktrees, initialize the exact gitlink and run the
+guard before compiling:
 
 ```bash
 git submodule update --init --recursive vendor/matrix-rust-sdk
@@ -107,6 +106,55 @@ lockfile is the reproducible security boundary: changing only an existing
 `node_modules` tree is not a fix. Commit dependency-security changes on an
 isolated branch so other developers and `origin/main` are unaffected until the
 change is reviewed and merged.
+
+## CI maintenance
+
+The required Rust jobs use the repository's `[profile.ci]` profile. It inherits
+the test profile, keeps debug assertions and overflow checks enabled, and sets
+`debug = 0`, `incremental = false`, and symbol stripping for reproducible
+hosted builds. Local `dev` and production `release` behavior is unchanged.
+
+Every job that sets `CARGO_TARGET_DIR` gives the rust-cache action the matching
+workspace mapping (`. -> target-ci`, `. -> target-macos-check`, or
+`. -> target-windows-overlay`). The scheduled flake probe uses the same
+explicit mapping. The primary Rust job's cache report fails closed when
+rust-cache claims an exact hit but representative registry and git dependency
+artifacts (`tokio`, `serde`, `ruma`) are absent from `target-ci/ci/deps`, or
+when the SDK cache claims a hit without SDK fingerprints and artifacts. The
+workspace metrics step records total and vendored-SDK `Compiling` lines and test
+totals, so a restored archive that Cargo does not reuse is visible.
+
+rust-cache prunes path dependencies under the repository root, so the vendored
+Matrix SDK has its own exact-keyed artifact cache. Cargo judges path
+dependencies by source mtime and checkout stamps every file with the current
+time, so the job first normalizes the SDK's tracked sources to a fixed old
+mtime. This is safe only because the key pins the SDK gitlink, the lockfile,
+every workspace manifest, `ci.yml`, the profile, and the rustc release; a
+different feature set still selects a different fingerprint hash. The CI key
+reads that release from `rustc -vV` in the job, where rustup resolves it from
+`rust-toolchain.toml`, so a toolchain bump rekeys it automatically. A
+toolchain bump still edits, together with `rust-toolchain.toml`, every
+`dtolnay/rust-toolchain@<version>` reference and step name in `ci.yml` and
+`release-desktop.yml`, and the literal `rust-<version>` in the release
+workflow's SDK cache keys. Keep every
+key complete when changing any of those inputs, because an exact hit is never
+re-saved.
+rust-cache has the same property, and its key hashes only manifests, the
+lockfile and the toolchain. When a change to the cargo command set changes the
+resolved dependency feature graph, bump the Rust job's `shared-key` suffix, or
+the newly required dependency builds recompile on every run.
+
+The Rust job runs `cargo test --profile ci --workspace --exclude
+sidebar-composition --exclude key-management` once; `koushi-core-testkit` and
+`koushi-desktop` are workspace members, so it covers their tests. Standalone
+per-package `-p` test steps for members this run already covers add no test:
+each resolves its own dependency graph and feature set and only recompiles the
+vendored SDK and Koushi stack. No test
+is gated on `not(feature = "test-hooks")`. Production feature sets (without
+dev-dependency features) are compiled by `macOS Tauri cargo check` and the
+release workflow. QA binaries, wasm, macOS, Windows, and homeserver jobs stay
+separate because they provide distinct feature, platform, target, or runtime
+coverage.
 
 ## Rust test stack and debug information
 
@@ -234,12 +282,10 @@ scenario-specific so retries do not blur results between lanes.
 
 ## CodeGraph
 
-When this worktree has a `.codegraph/` directory, use CodeGraph before `rg`,
-`grep`, `find`, or manual file reads for codebase-orientation questions. Prefer
-`codegraph explore "<question or symbols>"` for architectural or flow questions
-and `codegraph node <symbol-or-file>` for exact symbol/file source with call
-context. If a new worktree lacks `.codegraph/`, initialize it with `codegraph
-init .` before broad code investigation.
+When a worktree has `.codegraph/`, use CodeGraph before `rg`, `grep`, `find`,
+or file reads for orientation: `codegraph explore` for architecture or flow
+questions, `codegraph node` for exact symbol/file source. A new worktree without
+it is initialized with `codegraph init .` before broad investigation.
 
 ## Signed macOS DMG
 

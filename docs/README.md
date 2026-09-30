@@ -22,14 +22,17 @@ not dated snapshots; they are amended in place through review.
   architecture blueprint: layers, crate boundaries, runtime model, async design
   rules, security model, QA model.
 - [`../REPOSITORY_RULES.md`](../REPOSITORY_RULES.md) — root durable repository
-  rules: authority order, architecture boundaries, state-machine discipline,
-  security/privacy prohibitions, QA cleanup, tests, and documentation rules.
+  rules, read on every task: one short bullet per prohibition or mandatory
+  procedure (authority order, architecture boundaries, state-machine discipline,
+  security/privacy, QA cleanup, tests, collaboration, and documentation).
 - [architecture/state-machine.md](architecture/state-machine.md) — normative
   reducer state-machine diagrams and guard notes.
 - [architecture/i18n.md](architecture/i18n.md) — Rust-owned locale/display
   profile, catalog, pseudo-locale, RTL, and i18n headless gate rules.
-- [policies/engineering-rules.md](policies/engineering-rules.md) — prohibitions
-  and detailed policy rules: secrets, logging, QA automation, build gates.
+- [policies/engineering-rules.md](policies/engineering-rules.md) — detailed
+  policy, read by task: secrets, logging, async/runtime, GUI automation, text
+  input, localization, test placement, concurrent work, UI presentation, search
+  index, crate ownership, and build gates.
 
 ## Working documents (dated, short-term)
 
@@ -53,8 +56,8 @@ design change, amend `architecture/overview.md` first.
 
 ## Operational notes
 
-- [`/AGENTS.md`](../AGENTS.md) (repo root) — the operational entry file: current
-  runtime/QA contract plus an index into `agents/`. Kept small because every
+- [`/AGENTS.md`](../AGENTS.md) (repo root) — the router: essential contracts
+  plus a task table into `agents/` and the canon. Kept small because every
   agent session loads it.
 - [`agents/`](agents/) — the operational detail, one topic per file:
   [`environment.md`](agents/environment.md) (setup, toolchains, containers),

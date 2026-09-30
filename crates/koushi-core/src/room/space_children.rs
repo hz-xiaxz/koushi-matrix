@@ -72,6 +72,7 @@ fn space_child_summary(entry: &MatrixSpaceChildEntry) -> SpaceChildSummary {
     SpaceChildSummary {
         room_id: entry.room_id.clone(),
         display_name: entry.display_name.clone(),
+        display_name_placeholder: entry.display_name_placeholder.clone(),
         avatar: avatar_from_mxc_uri(entry.avatar_mxc_uri.as_deref()),
         membership: match entry.membership {
             MatrixSpaceChildMembership::Joined => SpaceChildMembership::Joined,

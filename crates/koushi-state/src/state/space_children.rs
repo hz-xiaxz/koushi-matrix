@@ -38,6 +38,10 @@ pub struct SpaceChildSummary {
     /// Display name as the server computed it, or the room ID when the server
     /// described nothing.
     pub display_name: String,
+    /// Set when `display_name` is the SDK's English calculated empty-room
+    /// name (#1070); the GUI renders catalog text for it instead.
+    #[serde(default)]
+    pub display_name_placeholder: Option<super::room::RoomNamePlaceholder>,
     #[serde(default)]
     pub avatar: Option<AvatarImage>,
     pub membership: SpaceChildMembership,
@@ -57,6 +61,7 @@ impl fmt::Debug for SpaceChildSummary {
             .debug_struct("SpaceChildSummary")
             .field("room_id", &"RoomId(..)")
             .field("display_name", &"RoomName(..)")
+            .field("display_name_placeholder", &self.display_name_placeholder)
             .field("avatar", &self.avatar.as_ref().map(|_| "AvatarImage(..)"))
             .field("membership", &self.membership)
             .field("can_join", &self.can_join)

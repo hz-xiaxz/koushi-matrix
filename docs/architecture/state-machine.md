@@ -92,8 +92,7 @@ here as a Mermaid `stateDiagram-v2`. When the reducer changes (a new state,
 transition, or guard), the matching diagram and its guard notes are updated in
 the same change. A transition that exists in the reducer but not in the diagram,
 or vice versa, is a defect; phase-exit docs-sync checks for it (see
-[REPOSITORY_RULES.md](../../REPOSITORY_RULES.md) -> State-Machine Discipline and
-[engineering-rules.md](../policies/engineering-rules.md) -> Documentation).
+[REPOSITORY_RULES.md](../../REPOSITORY_RULES.md) -> State-Machine Discipline).
 
 Convention: each transition is labeled with the `AppAction` that causes it, and
 guards are stated as prose under the diagram. Unless noted, every transition
@@ -2649,7 +2648,7 @@ sanitizes it before exposing it through `TimelineItem.formatted`.
   through the settings store. GUI code may map the snapshot value to CSS only;
   it must not keep a separate wrap preference.
 - Redacted-event visibility is controlled by Rust-owned
-  `SettingsValues.display.hide_redacted`, defaulting to `false` and persisted
+  `SettingsValues.display.hide_redacted`, defaulting to `true` and persisted
   through the settings store. Redacted events remain in timeline state; Rust
   projection marks redacted timeline DTOs with `TimelineItem.is_hidden` when
   the preference is enabled. React omits rows only from that DTO flag and must
@@ -4339,6 +4338,15 @@ stateDiagram-v2
   unread/highlight flags, and low-priority exclusions from `AppState`; React
   must not infer Activity rows from timeline DOM, browser-local state, or IPC
   mock convenience data.
+- Activity Unread is a notification inbox, not a message inbox (#1072). A
+  room qualifies when `max(notification_count, highlight_count) > 0` or it is
+  manually marked unread; a Mentions-only room qualifies only with
+  `highlight_count > 0`. Existing muted and low-priority exclusions still
+  apply. A positive plain `unread_count` alone never qualifies. The sidebar's room attention intentionally also counts
+  plain unread messages, so a room can be unread in the sidebar and absent
+  from Activity Unread; Activity Recent still shows its latest activity. This
+  choice does not change native banners, sounds, mention handling, or read
+  receipts, and viewing Activity never marks anything read.
 - Unread membership is `RoomSummary`-authoritative. When a room has unread or
   highlight state but no observed unread event row survives the fully-read
   marker / cleared-event filter, `ActivityProjection` synthesizes a private-data-
@@ -4360,7 +4368,11 @@ stateDiagram-v2
   when open Activity has a placeholder whose room/activity timestamp no
   generation attempted yet and no generation is `Resolving`; live updates never
   preempt an in-flight generation, and a no-progress settlement stays `Failed`
-  (retryable) until newer activity or an explicit retry. Row refreshes,
+  (retryable) until newer activity or an explicit retry. Starting a generation
+  never waits for AccountActor mailbox capacity (#1060): a full mailbox defers
+  its request while the stream stays `Resolving`, and AppActor delivers it once
+  a slot frees; a closed mailbox settles it `Failed` (retryable). A deferred
+  request is dropped once a newer generation starts or Activity closes. Row refreshes,
   including `PaginateActivity`, preserve the current resolution state.
   Generation guards reject late completion after retry, close, logout, lock, or
   account replacement. Failure exposes only a coarse `OperationFailureKind` and
