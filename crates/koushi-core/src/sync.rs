@@ -27,7 +27,7 @@ use koushi_sdk::MatrixClientSession;
 use koushi_state::{AppAction, RoomListSource, SyncLifecycleStatus};
 #[cfg(any(test, feature = "test-hooks"))]
 use matrix_sdk_ui::room_list_service::RoomListService;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::executor;
 use crate::room::{RoomListReconcileAck, RoomMessage};
@@ -47,6 +47,12 @@ use koushi_protocol::ids::RequestId;
 const SYNC_ACTOR_SHUTDOWN_SEND_TIMEOUT: Duration = Duration::from_secs(1);
 const SYNC_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(10);
 const SYNC_SERVICE_STOP_TIMEOUT: Duration = Duration::from_secs(5);
+/// Bound on forwarding a still-pending ignored-user set at teardown. The drain
+/// is best-effort: it must stay well inside the sync actor's shutdown budget,
+/// and a new session re-reads the list during account hydration. A restart
+/// within one session resumes the shared sliding-sync position and does not
+/// re-deliver unchanged account data, so the drain is still attempted there.
+const IGNORED_USER_LIST_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 const ROOM_OBSERVATION_ACK_TIMEOUT: Duration = Duration::from_secs(10);
 
 macro_rules! trace_sync {
@@ -291,7 +297,7 @@ pub struct SyncActor {
     sync_service: Option<Arc<matrix_sdk_ui::sync_service::SyncService>>,
     sync_observer_stop: Option<Arc<SyncObserverStop>>,
     active_start_request_id: Option<RequestId>,
-    ignored_user_list_handler: Option<matrix_sdk::event_handler::EventHandlerHandle>,
+    ignored_user_list_forwarder: Option<IgnoredUserListForwarder>,
     diagnostics: SlidingSyncDiagnostics,
 }
 
@@ -329,7 +335,7 @@ impl SyncActor {
             sync_service: None,
             sync_observer_stop: None,
             active_start_request_id: None,
-            ignored_user_list_handler: None,
+            ignored_user_list_forwarder: None,
             diagnostics,
         };
         let task = executor::spawn(actor.run());
@@ -526,25 +532,31 @@ impl SyncActor {
                 matrix_sdk::sliding_sync::Version::None => SlidingSyncSdkVersion::None,
                 matrix_sdk::sliding_sync::Version::Native => SlidingSyncSdkVersion::Native,
             });
-        self.register_ignored_user_list_handler(&client);
+        self.ignored_user_list_forwarder = Some(IgnoredUserListForwarder::register(
+            &client,
+            self.action_tx.clone(),
+            self.timeline_tx.clone(),
+        ));
         self.run_generation = self.run_generation.wrapping_add(1).max(1);
         let run_generation = self.run_generation;
 
-        let service = matrix_sdk_ui::sync_service::SyncService::builder(client.clone())
+        let service = match matrix_sdk_ui::sync_service::SyncService::builder(client.clone())
             .with_offline_mode()
             .with_encryption_sync_permit(self.encryption_sync_permit.clone())
             .build()
             .await
-            .map_err(|_| {
+        {
+            Ok(service) => service,
+            Err(_) => {
                 record(DiagnosticEvent::new(
                     DiagnosticLevel::Error,
                     "core.sync",
                     "service_build_failed",
                 ));
-                if let Some(handle) = self.ignored_user_list_handler.take() {
-                    client.remove_event_handler(handle);
-                }
-            })?;
+                self.shutdown_ignored_user_list_forwarder().await;
+                return Err(());
+            }
+        };
         let service = Arc::new(service);
         let room_list_service = service.room_list_service();
         let state_sub = service.state();
@@ -583,9 +595,7 @@ impl SyncActor {
         if let Some(service) = self.sync_service.take() {
             let _ = executor::timeout(SYNC_SERVICE_STOP_TIMEOUT, service.stop()).await;
         }
-        if let Some(handle) = self.ignored_user_list_handler.take() {
-            self.session.client().remove_event_handler(handle);
-        }
+        self.shutdown_ignored_user_list_forwarder().await;
         self.active_start_request_id = None;
     }
 
@@ -609,45 +619,13 @@ impl SyncActor {
         if let Some(service) = service {
             let _ = executor::timeout(SYNC_SERVICE_STOP_TIMEOUT, service.stop()).await;
         }
-        if let Some(handle) = self.ignored_user_list_handler.take() {
-            self.session.client().remove_event_handler(handle);
-        }
+        self.shutdown_ignored_user_list_forwarder().await;
         stop_room_observation(self.room_tx.clone(), run_generation).await;
         self.active_start_request_id = None;
         self.lifecycle = SyncLifecycle::Stopped;
         self.diagnostics.stopped();
         self.emit(CoreEvent::Sync(SyncEvent::Stopped { request_id }));
         self.project_sync_status(SyncLifecycleStatus::Stopped).await;
-    }
-
-    fn register_ignored_user_list_handler(&mut self, client: &matrix_sdk::Client) {
-        use matrix_sdk::ruma::events::{
-            GlobalAccountDataEvent, ignored_user_list::IgnoredUserListEventContent,
-        };
-
-        let action_tx = self.action_tx.clone();
-        let timeline_tx = self.timeline_tx.clone();
-        let handle = client.add_event_handler(
-            move |ev: GlobalAccountDataEvent<IgnoredUserListEventContent>| {
-                let action_tx = action_tx.clone();
-                let timeline_tx = timeline_tx.clone();
-                async move {
-                    let user_ids: BTreeSet<String> = ev
-                        .content
-                        .ignored_users
-                        .keys()
-                        .map(ToString::to_string)
-                        .collect();
-                    let _ = action_tx.try_send(vec![AppAction::IgnoredUsersLoaded {
-                        user_ids: user_ids.clone(),
-                    }]);
-                    let _ = timeline_tx.try_send(
-                        crate::timeline::TimelineMessage::IgnoredUsersUpdated { user_ids },
-                    );
-                }
-            },
-        );
-        self.ignored_user_list_handler = Some(handle);
     }
 
     #[cfg(any(test, feature = "test-hooks"))]
@@ -682,8 +660,97 @@ impl SyncActor {
         let _ = self.event_tx.send(event);
     }
 
+    async fn shutdown_ignored_user_list_forwarder(&mut self) {
+        if let Some(forwarder) = self.ignored_user_list_forwarder.take() {
+            forwarder.shutdown(&self.session.client()).await;
+        }
+    }
+
     async fn project_sync_status(&self, status: SyncLifecycleStatus) {
         send_sync_status(&self.action_tx, &self.sync_generation, status).await;
+    }
+}
+
+/// Account-data handler for `m.ignored_user_list`. The handler only records the
+/// latest set; one owned task forwards it with reliable sends to the AppActor
+/// and the timeline manager, so a full mailbox delays the update instead of
+/// dropping it and a newer set supersedes one still waiting for capacity.
+struct IgnoredUserListForwarder {
+    handler: matrix_sdk::event_handler::EventHandlerHandle,
+    task: executor::JoinHandle<()>,
+}
+
+impl IgnoredUserListForwarder {
+    fn register(
+        client: &matrix_sdk::Client,
+        action_tx: mpsc::Sender<Vec<AppAction>>,
+        timeline_tx: mpsc::Sender<crate::timeline::TimelineMessage>,
+    ) -> Self {
+        use matrix_sdk::ruma::events::{
+            GlobalAccountDataEvent, ignored_user_list::IgnoredUserListEventContent,
+        };
+
+        let (latest_tx, latest_rx) = watch::channel(BTreeSet::new());
+        let task = executor::spawn(forward_ignored_user_lists(
+            latest_rx,
+            action_tx,
+            timeline_tx,
+        ));
+        // The closure owns the only sender: removing the handler closes the
+        // channel, and the task forwards any unseen set before it exits.
+        let handler = client.add_event_handler(
+            move |ev: GlobalAccountDataEvent<IgnoredUserListEventContent>| {
+                latest_tx.send_replace(
+                    ev.content
+                        .ignored_users
+                        .keys()
+                        .map(ToString::to_string)
+                        .collect(),
+                );
+                async {}
+            },
+        );
+        Self { handler, task }
+    }
+
+    async fn shutdown(mut self, client: &matrix_sdk::Client) {
+        client.remove_event_handler(self.handler.clone());
+        if executor::timeout(IGNORED_USER_LIST_DRAIN_TIMEOUT, &mut self.task)
+            .await
+            .is_err()
+        {
+            self.task.abort();
+            let _ = (&mut self.task).await;
+        }
+    }
+}
+
+impl Drop for IgnoredUserListForwarder {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+async fn forward_ignored_user_lists(
+    mut latest_rx: watch::Receiver<BTreeSet<String>>,
+    action_tx: mpsc::Sender<Vec<AppAction>>,
+    timeline_tx: mpsc::Sender<crate::timeline::TimelineMessage>,
+) {
+    while latest_rx.changed().await.is_ok() {
+        let user_ids = latest_rx.borrow_and_update().clone();
+        if action_tx
+            .send(vec![AppAction::IgnoredUsersLoaded {
+                user_ids: user_ids.clone(),
+            }])
+            .await
+            .is_err()
+            || timeline_tx
+                .send(crate::timeline::TimelineMessage::IgnoredUsersUpdated { user_ids })
+                .await
+                .is_err()
+        {
+            break;
+        }
     }
 }
 
@@ -1719,3 +1786,6 @@ mod reconcile_tests;
 
 #[cfg(test)]
 mod observer_tests;
+
+#[cfg(test)]
+mod ignored_user_list_tests;

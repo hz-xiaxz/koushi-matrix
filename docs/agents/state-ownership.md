@@ -533,6 +533,9 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   fills room labels, unread flags, highlight flags, and low-priority exclusion
   from Rust-owned `AppState` facts. Keep this cache outside React and outside
   per-view browser fake state.
+- Activity Unread is a notification inbox: plain unread messages without a
+  notification, highlight, or manual unread mark stay sidebar-only (contract:
+  `docs/architecture/state-machine.md` Activity, #1072).
 - Opening or paginating Activity snapshots the Rust projection into separate
   Recent and Unread streams. Viewing the Unread tab does not mark anything read.
   `MarkActivityRead` settles both room targets and the all-activity target
