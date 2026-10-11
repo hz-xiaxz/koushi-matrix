@@ -48,11 +48,9 @@ pull-request review comment.
    status. Do not use `gh pr comment` as a substitute when the user asked for
    a threaded reply.
 
-7. Resolve the original review thread only when the user explicitly asks to
-   resolve it or explicitly confirms that resolution is wanted. A request to
-   reply alone authorizes only the reply; do not resolve the thread. When
-   resolution is authorized and the fix is pushed and the threaded reply
-   succeeds, obtain the actual GraphQL thread node ID; a
+7. After the fix is pushed and the threaded reply succeeds, automatically
+   resolve the original review thread. Obtain the actual GraphQL thread node
+   ID; a
    review-comment node ID (`PRRC_...`) is not a review-thread ID (`PRRT_...`):
 
    ```powershell
