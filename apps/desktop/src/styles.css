@@ -154,7 +154,12 @@
   --tooltip-padding-block: 7px;
   --tooltip-padding-inline: 9px;
   --tooltip-font-size: 12px;
-  --tooltip-z-index: 40;
+  /* Above every non-dialog floating panel (emoji pickers at 80/90, the
+     message-source dialog at 120, the media-details popover at 150). The
+     bubble renders in the body-level floating layer, so a panel with a higher
+     z-index painted over its own control's explanation. Modal `<dialog>`
+     surfaces live in the top layer and are unaffected by this value. */
+  --tooltip-z-index: 160;
   --receipt-row-gap: 7px;
   --receipt-row-min-block-size: 22px;
   --receipt-row-margin-block-start: 6px;
@@ -1323,6 +1328,14 @@ button:disabled {
 .tooltip-bubble.is-open {
   opacity: 1;
   visibility: visible;
+}
+
+/* The measured placements anchor on the trigger itself, so the host must not
+   introduce a box of its own: `display: contents` leaves the control as the
+   flex/grid item, which keeps composer row order, the math toggle's auto margin
+   and header action spacing intact. */
+.tooltip-host-anchored {
+  display: contents;
 }
 
 @media (prefers-reduced-motion: reduce) {

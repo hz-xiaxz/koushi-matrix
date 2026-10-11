@@ -17,6 +17,7 @@ import type {
 import { EntityAvatar } from "./Shell";
 import { ContactSecurityDetails, type ContactSecurityActions } from "./ContactSecurityDetails";
 import { avatarInitial, ICON_SIZE } from "../app/uiShared";
+import { Tooltip } from "./Tooltip";
 
 const PEOPLE_MEMBER_ROW_HEIGHT_PX = 58;
 const PEOPLE_MEMBER_OVERSCAN_ROWS = 6;
@@ -129,14 +130,23 @@ export function PeoplePanel(props: PeoplePanelProps) {
         <span className="people-panel-count">
           {t("people.memberCount", { count: String(members.length) })}
         </span>
-        <button
-          className="icon-button people-panel-close"
-          type="button"
-          aria-label={t("action.close", { title: t("panel.people") })}
-          onClick={onClose}
+        <Tooltip
+          label={t("action.close", { title: t("panel.people") })}
+          placement="below"
+          align="end"
         >
-          <X size={ICON_SIZE.control} />
-        </button>
+          {(tooltipProps) => (
+            <button
+              className="icon-button people-panel-close"
+              type="button"
+              aria-label={t("action.close", { title: t("panel.people") })}
+              onClick={onClose}
+              {...tooltipProps}
+            >
+              <X size={ICON_SIZE.control} />
+            </button>
+          )}
+        </Tooltip>
       </header>
       <div className="people-panel-actions">
         {onInvitePeople ? (
@@ -249,14 +259,23 @@ function PeopleListRow({
         </span>
       </button>
       {!isCurrentUser && onStartDirectMessage ? (
-        <button
-          className="icon-button people-list-action"
-          type="button"
-          aria-label={t("room.messageMember", { name: displayLabel })}
-          onClick={() => onStartDirectMessage(member.user_id)}
+        <Tooltip
+          label={t("room.messageMember", { name: displayLabel })}
+          placement="below"
+          align="end"
         >
-          <MessageCircle size={ICON_SIZE.small} />
-        </button>
+          {(tooltipProps) => (
+            <button
+              className="icon-button people-list-action"
+              type="button"
+              aria-label={t("room.messageMember", { name: displayLabel })}
+              onClick={() => onStartDirectMessage(member.user_id)}
+              {...tooltipProps}
+            >
+              <MessageCircle size={ICON_SIZE.small} />
+            </button>
+          )}
+        </Tooltip>
       ) : null}
     </li>
   );
@@ -312,23 +331,37 @@ export function ProfilePanel({
   return (
     <section className="people-panel profile-panel" aria-labelledby="profile-title">
       <header className="people-panel-header">
-        <button
-          className="icon-button people-back-button"
-          type="button"
-          aria-label={t("action.back")}
-          onClick={onBack}
-        >
-          <ChevronLeft size={ICON_SIZE.control} />
-        </button>
+        <Tooltip label={t("action.back")} placement="below">
+          {(tooltipProps) => (
+            <button
+              className="icon-button people-back-button"
+              type="button"
+              aria-label={t("action.back")}
+              onClick={onBack}
+              {...tooltipProps}
+            >
+              <ChevronLeft size={ICON_SIZE.control} />
+            </button>
+          )}
+        </Tooltip>
         <h2 id="profile-title">{t("panel.profile")}</h2>
-        <button
-          className="icon-button people-panel-close"
-          type="button"
-          aria-label={t("action.close", { title: t("panel.profile") })}
-          onClick={onClose}
+        <Tooltip
+          label={t("action.close", { title: t("panel.profile") })}
+          placement="below"
+          align="end"
         >
-          <X size={ICON_SIZE.control} />
-        </button>
+          {(tooltipProps) => (
+            <button
+              className="icon-button people-panel-close"
+              type="button"
+              aria-label={t("action.close", { title: t("panel.profile") })}
+              onClick={onClose}
+              {...tooltipProps}
+            >
+              <X size={ICON_SIZE.control} />
+            </button>
+          )}
+        </Tooltip>
       </header>
       <div className="profile-identity">
         <EntityAvatar

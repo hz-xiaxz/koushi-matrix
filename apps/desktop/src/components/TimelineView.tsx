@@ -343,6 +343,8 @@ export const TimelineView = memo(function TimelineView({
   codeBlockWrap = true,
   recentEmojis = [],
   onRecentEmojisChange,
+  mathModeEnabled = true,
+  onMathModeChange,
   searchHighlightsByEventId = {},
   mediaDownloads = {},
   continuity = { kind: "unknown" },
@@ -396,6 +398,13 @@ export const TimelineView = memo(function TimelineView({
   codeBlockWrap?: boolean;
   recentEmojis?: string[];
   onRecentEmojisChange?: (emojis: string[]) => void | Promise<void>;
+  /**
+   * Composer math mode reaches the inline message edit so an edit formats its
+   * replacement body the way the main composer would. Leaving it unset made
+   * the edit form show math mode ON and ignore the setting.
+   */
+  mathModeEnabled?: boolean;
+  onMathModeChange?: (enabled: boolean) => void | Promise<void>;
   searchHighlightsByEventId?: Record<string, { snippet: string; ranges: TextRange[] }>;
   mediaDownloads?: Record<string, TimelineMediaDownloadState>;
   continuity?: TimelineContinuityState;
@@ -3595,6 +3604,8 @@ export const TimelineView = memo(function TimelineView({
                 resolveComposerKeyAction={resolveComposerKeyAction}
                 recentEmojis={recentEmojis}
                 onRecentEmojisChange={onRecentEmojisChange}
+                mathModeEnabled={mathModeEnabled}
+                onMathModeChange={onMathModeChange}
                 mediaUploadProgress={mediaUploadProgressForItem(store, timelineKey, item)}
                 {...rowTransportActions}
                 isPinned={contentEventId ? pinnedEventIds.includes(contentEventId) : false}

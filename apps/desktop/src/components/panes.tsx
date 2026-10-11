@@ -153,14 +153,23 @@ export function ActivityPane({
               <span>{t("activity.markAllRead")}</span>
             </button>
           ) : null}
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("action.close", { title: t("workspace.activity") })}
-            onClick={onClose}
+          <Tooltip
+            label={t("action.close", { title: t("workspace.activity") })}
+            placement="below"
+            align="end"
           >
-            <X size={ICON_SIZE.control} />
-          </button>
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("action.close", { title: t("workspace.activity") })}
+                onClick={onClose}
+                {...tooltipProps}
+              >
+                <X size={ICON_SIZE.control} />
+              </button>
+            )}
+          </Tooltip>
         </div>
       </header>
       <div className="tabs" role="tablist" aria-label={t("activity.tabs")}>
@@ -284,21 +293,26 @@ export function ActivityPane({
                     </button>
                   )}
                   {activeTab === "unread" && !isPlaceholder ? (
-                    <button
-                      className="activity-row-action"
-                      type="button"
-                      aria-label={t("activity.markRoomRead")}
-                      disabled={markRoomPending(row)}
-                      onClick={() =>
-                        onMarkRead({
-                          kind: "room",
-                          room_id: row.room_id,
-                          up_to_event_id: row.event_id
-                        })
-                      }
-                    >
-                      <Check size={ICON_SIZE.small} />
-                    </button>
+                    <Tooltip label={t("activity.markRoomRead")} placement="below" align="end">
+                      {(tooltipProps) => (
+                        <button
+                          className="activity-row-action"
+                          type="button"
+                          aria-label={t("activity.markRoomRead")}
+                          disabled={markRoomPending(row)}
+                          onClick={() =>
+                            onMarkRead({
+                              kind: "room",
+                              room_id: row.room_id,
+                              up_to_event_id: row.event_id
+                            })
+                          }
+                          {...tooltipProps}
+                        >
+                          <Check size={ICON_SIZE.small} />
+                        </button>
+                      )}
+                    </Tooltip>
                   ) : null}
                 </li>
               );
@@ -1095,63 +1109,83 @@ export function TimelinePane({
         </div>
         <div className="channel-actions">
           <nav className="timeline-header-navigation" aria-label={t("timeline.navigation")}>
-            <button
-              className="icon-button timeline-control"
-              type="button"
-              aria-label={t("timeline.latest")}
-              title={t("timeline.latest")}
-              onClick={() => {
-                if (mainTimelineAnchorEventId && onReturnToLive) {
-                  invokeReturnToLiveSafely(onReturnToLive);
-                  return;
-                }
-                jumpToLatestRef.current?.();
-              }}
-            >
-              <ArrowDown size={ICON_SIZE.control} aria-hidden="true" />
-            </button>
+            <Tooltip label={t("timeline.latest")} placement="below" align="end">
+              {(tooltipProps) => (
+                <button
+                  className="icon-button timeline-control"
+                  type="button"
+                  aria-label={t("timeline.latest")}
+                  onClick={() => {
+                    if (mainTimelineAnchorEventId && onReturnToLive) {
+                      invokeReturnToLiveSafely(onReturnToLive);
+                      return;
+                    }
+                    jumpToLatestRef.current?.();
+                  }}
+                  {...tooltipProps}
+                >
+                  <ArrowDown size={ICON_SIZE.control} aria-hidden="true" />
+                </button>
+              )}
+            </Tooltip>
           </nav>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("panel.people")}
-            title={t("panel.people")}
-            onClick={onOpenPeopleStable}
-          >
-            <Users size={ICON_SIZE.panel} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("mediaGallery.open")}
-            title={t("mediaGallery.open")}
-            onClick={() => setGalleryOpen((open) => !open)}
-          >
-            <ImageIcon size={ICON_SIZE.panel} />
-          </button>
+          <Tooltip label={t("panel.people")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("panel.people")}
+                onClick={onOpenPeopleStable}
+                {...tooltipProps}
+              >
+                <Users size={ICON_SIZE.panel} />
+              </button>
+            )}
+          </Tooltip>
+          <Tooltip label={t("mediaGallery.open")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("mediaGallery.open")}
+                onClick={() => setGalleryOpen((open) => !open)}
+                {...tooltipProps}
+              >
+                <ImageIcon size={ICON_SIZE.panel} />
+              </button>
+            )}
+          </Tooltip>
           {/* #330: the only entry point to this room's threads, so it is always
               offered. The counts render as badges when non-zero. */}
-          <button
-            className="icon-button"
-            type="button"
-            data-count={threadsHeaderNotificationCount || undefined}
-            data-live-count={threadsHeaderLiveCount || undefined}
-            data-mention-count={threadsHeaderHighlightCount || undefined}
-            aria-label={t("workspace.threads")}
-            title={t("workspace.threads")}
-            onClick={onOpenThreadsStable}
-          >
-            <MessageCircle size={ICON_SIZE.panel} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("room.roomInfo")}
-            title={t("room.roomInfo")}
-            onClick={onToggleRoomInfoStable}
-          >
-            <MoreHorizontal size={ICON_SIZE.panel} />
-          </button>
+          <Tooltip label={t("workspace.threads")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                data-count={threadsHeaderNotificationCount || undefined}
+                data-live-count={threadsHeaderLiveCount || undefined}
+                data-mention-count={threadsHeaderHighlightCount || undefined}
+                aria-label={t("workspace.threads")}
+                onClick={onOpenThreadsStable}
+                {...tooltipProps}
+              >
+                <MessageCircle size={ICON_SIZE.panel} />
+              </button>
+            )}
+          </Tooltip>
+          <Tooltip label={t("room.roomInfo")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("room.roomInfo")}
+                onClick={onToggleRoomInfoStable}
+                {...tooltipProps}
+              >
+                <MoreHorizontal size={ICON_SIZE.panel} />
+              </button>
+            )}
+          </Tooltip>
         </div>
       </header>
       {galleryOpen ? (
@@ -1213,6 +1247,8 @@ export function TimelinePane({
               codeBlockWrap={snapshot.state.domain.settings.values.display.code_block_wrap}
               recentEmojis={snapshot.state.domain.settings.values.composer.recent_emojis}
               onRecentEmojisChange={onRecentEmojisChangeStable}
+              mathModeEnabled={snapshot.state.domain.settings.values.composer.math_mode}
+              onMathModeChange={onComposerMathModeChangeStable}
               searchHighlightsByEventId={searchHighlightsByEventId}
               mediaDownloads={mediaDownloads}
               editMentionCandidates={editMentionCandidates}
@@ -1260,6 +1296,8 @@ export function TimelinePane({
         items={snapshot.state.ui.timeline.scheduled_sends}
         onCancel={onCancelScheduledSendStable}
         onReschedule={onRescheduleScheduledSendStable}
+        mathModeEnabled={snapshot.state.domain.settings.values.composer.math_mode}
+        onMathModeChange={onComposerMathModeChangeStable}
       />
       {stagedUploads.length > 0 ? (
         <UploadStagingDialog

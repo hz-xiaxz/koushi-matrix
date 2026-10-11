@@ -66,6 +66,7 @@ import {
   type NativeFileDropEvent
 } from "../backend/nativeFileDropRuntime";
 import { EntityAvatar } from "./Shell";
+import { Tooltip } from "./Tooltip";
 import { useStableEvent } from "./useStableEvent";
 import {
   attachmentPasteNeedsNativeImageRead,
@@ -731,17 +732,22 @@ export const Composer = memo(function Composer({
 
   const emojiControl = (
     <span className="composer-emoji-anchor">
-      <button
-        ref={emojiButtonRef}
-        className="icon-button"
-        type="button"
-        aria-label={t("composer.emoji")}
-        aria-expanded={emojiPickerOpen}
-        aria-haspopup="dialog"
-        onClick={toggleEmojiPicker}
-      >
-        <Smile size={ICON_SIZE.control} />
-      </button>
+      <Tooltip label={t("composer.emoji")} placement="above">
+        {(tooltipProps) => (
+          <button
+            ref={emojiButtonRef}
+            className="icon-button"
+            type="button"
+            aria-label={t("composer.emoji")}
+            aria-expanded={emojiPickerOpen}
+            aria-haspopup="dialog"
+            onClick={toggleEmojiPicker}
+            {...tooltipProps}
+          >
+            <Smile size={ICON_SIZE.control} />
+          </button>
+        )}
+      </Tooltip>
       {emojiPickerOpen ? (
         <LazyEmojiPicker
           anchorRef={emojiButtonRef}
@@ -767,49 +773,73 @@ export const Composer = memo(function Composer({
           void onAttachFileChange(event);
         }}
       />
-      <button
-        className="icon-button"
-        type="button"
-        aria-label={t("composer.attachFile")}
-        disabled={!canEdit}
-        onClick={() => fileInputRef.current?.click()}
-      >
-        <Paperclip size={ICON_SIZE.control} />
-      </button>
-      <button
-        className="icon-button"
-        type="button"
-        aria-label={t("composer.mention")}
-        onMouseDown={keepComposerFocus}
-        onClick={insertMentionTrigger}
-      >
-        <AtSign size={ICON_SIZE.control} />
-      </button>
+      <Tooltip label={t("composer.attachFile")} placement="above">
+        {(tooltipProps) => (
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={t("composer.attachFile")}
+            disabled={!canEdit}
+            onClick={() => fileInputRef.current?.click()}
+            {...tooltipProps}
+          >
+            <Paperclip size={ICON_SIZE.control} />
+          </button>
+        )}
+      </Tooltip>
+      <Tooltip label={t("composer.mention")} placement="above">
+        {(tooltipProps) => (
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={t("composer.mention")}
+            onMouseDown={keepComposerFocus}
+            onClick={insertMentionTrigger}
+            {...tooltipProps}
+          >
+            <AtSign size={ICON_SIZE.control} />
+          </button>
+        )}
+      </Tooltip>
       {emojiControl}
       {onScheduleSend ? (
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("scheduled.sendLater")}
-          disabled={!canEdit || isSending || !localValue.trim() || hasStagedUploads}
-          onClick={openScheduleForm}
-        >
-          <Clock3 size={ICON_SIZE.control} />
-        </button>
+        <Tooltip label={t("scheduled.sendLater")} placement="above">
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("scheduled.sendLater")}
+              disabled={!canEdit || isSending || !localValue.trim() || hasStagedUploads}
+              onClick={openScheduleForm}
+              {...tooltipProps}
+            >
+              <Clock3 size={ICON_SIZE.control} />
+            </button>
+          )}
+        </Tooltip>
       ) : null}
     </div>
   );
   const sendControl = (
-    <button
-      ref={sendButtonRef}
-      className={`send-button ${localValue.trim() && !isSending ? "ready" : ""} ${isSending ? "is-sending" : ""}`}
-      type="button"
-      aria-label={isSending ? t("action.sending") : t("action.send")}
-      disabled={!sendEnabled}
-      onClick={() => submitDocument("button", localDocument, localValue)}
+    <Tooltip
+      label={isSending ? t("action.sending") : t("action.send")}
+      placement="above"
+      align="end"
     >
-      <Send size={ICON_SIZE.input} />
-    </button>
+      {(tooltipProps) => (
+        <button
+          ref={sendButtonRef}
+          className={`send-button ${localValue.trim() && !isSending ? "ready" : ""} ${isSending ? "is-sending" : ""}`}
+          type="button"
+          aria-label={isSending ? t("action.sending") : t("action.send")}
+          disabled={!sendEnabled}
+          onClick={() => submitDocument("button", localDocument, localValue)}
+          {...tooltipProps}
+        >
+          <Send size={ICON_SIZE.input} />
+        </button>
+      )}
+    </Tooltip>
   );
 
   const sendingAccountLabel = sendingAccount
@@ -847,62 +877,92 @@ export const Composer = memo(function Composer({
       {!editorOnly && composerMode.kind === "reply" ? (
         <div className="composer-reply-banner">
           <span className="composer-reply-label">{t("composer.replying")}</span>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("composer.cancelReply")}
-            onClick={onCancelReply}
-          >
-            <X size={ICON_SIZE.small} />
-          </button>
+          <Tooltip label={t("composer.cancelReply")} placement="below">
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("composer.cancelReply")}
+                onClick={onCancelReply}
+                {...tooltipProps}
+              >
+                <X size={ICON_SIZE.small} />
+              </button>
+            )}
+          </Tooltip>
         </div>
       ) : null}
       <div className="composer-tools">
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("composer.bold")}
-          onMouseDown={keepComposerFocus}
-          onClick={() => applyInlineMarkdown("**", "**", "bold")}
-        >
-          <Bold size={ICON_SIZE.input} />
-        </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("composer.italic")}
-          onMouseDown={keepComposerFocus}
-          onClick={() => applyInlineMarkdown("_", "_", "italic")}
-        >
-          <Italic size={ICON_SIZE.input} />
-        </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("composer.link")}
-          onMouseDown={keepComposerFocus}
-          onClick={applyLinkMarkdown}
-        >
-          <Link2 size={ICON_SIZE.input} />
-        </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("composer.list")}
-          onMouseDown={keepComposerFocus}
-          onClick={applyListMarkdown}
-        >
-          <List size={ICON_SIZE.input} />
-        </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("composer.code")}
-          onMouseDown={keepComposerFocus}
-          onClick={() => applyInlineMarkdown("`", "`", "code")}
-        >
-          <Code2 size={ICON_SIZE.input} />
-        </button>
+        <Tooltip label={t("composer.bold")} placement="below">
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("composer.bold")}
+              onMouseDown={keepComposerFocus}
+              onClick={() => applyInlineMarkdown("**", "**", "bold")}
+              {...tooltipProps}
+            >
+              <Bold size={ICON_SIZE.input} />
+            </button>
+          )}
+        </Tooltip>
+        <Tooltip label={t("composer.italic")} placement="below">
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("composer.italic")}
+              onMouseDown={keepComposerFocus}
+              onClick={() => applyInlineMarkdown("_", "_", "italic")}
+              {...tooltipProps}
+            >
+              <Italic size={ICON_SIZE.input} />
+            </button>
+          )}
+        </Tooltip>
+        <Tooltip label={t("composer.link")} placement="below">
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("composer.link")}
+              onMouseDown={keepComposerFocus}
+              onClick={applyLinkMarkdown}
+              {...tooltipProps}
+            >
+              <Link2 size={ICON_SIZE.input} />
+            </button>
+          )}
+        </Tooltip>
+        <Tooltip label={t("composer.list")} placement="below">
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("composer.list")}
+              onMouseDown={keepComposerFocus}
+              onClick={applyListMarkdown}
+              {...tooltipProps}
+            >
+              <List size={ICON_SIZE.input} />
+            </button>
+          )}
+        </Tooltip>
+        <Tooltip label={t("composer.code")} placement="below">
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("composer.code")}
+              onMouseDown={keepComposerFocus}
+              onClick={() => applyInlineMarkdown("`", "`", "code")}
+              {...tooltipProps}
+            >
+              <Code2 size={ICON_SIZE.input} />
+            </button>
+          )}
+        </Tooltip>
         {/* Multi-account only: the toolbar row names the sender by Matrix ID,
             since display names alone do not tell accounts apart. */}
         {!editorOnly && sendingAccount ? (
@@ -924,24 +984,32 @@ export const Composer = memo(function Composer({
             not an insert-markup action like the buttons beside it. It speaks the
             same switch vocabulary as the settings panels so the state is
             readable at rest. */}
-        <button
-          className="composer-math-toggle"
-          type="button"
-          role="switch"
-          aria-checked={mathModeEnabled}
-          aria-label={mathModeEnabled ? t("composer.mathModeOn") : t("composer.mathModeOff")}
-          title={mathModeEnabled ? t("composer.mathModeOn") : t("composer.mathModeOff")}
-          onMouseDown={keepComposerFocus}
-          onClick={() => {
-            void onMathModeChange(!mathModeEnabled);
-          }}
+        <Tooltip
+          label={mathModeEnabled ? t("composer.mathModeOn") : t("composer.mathModeOff")}
+          placement="below"
+          align="end"
         >
-          <Sigma size={ICON_SIZE.input} aria-hidden="true" />
-          <span>{t("composer.mathMode")}</span>
-          <span className="composer-math-switch-track" aria-hidden="true">
-            <span className="composer-math-switch-thumb" />
-          </span>
-        </button>
+          {(tooltipProps) => (
+            <button
+              className="composer-math-toggle"
+              type="button"
+              role="switch"
+              aria-checked={mathModeEnabled}
+              aria-label={mathModeEnabled ? t("composer.mathModeOn") : t("composer.mathModeOff")}
+              onMouseDown={keepComposerFocus}
+              onClick={() => {
+                void onMathModeChange(!mathModeEnabled);
+              }}
+              {...tooltipProps}
+            >
+              <Sigma size={ICON_SIZE.input} aria-hidden="true" />
+              <span>{t("composer.mathMode")}</span>
+              <span className="composer-math-switch-track" aria-hidden="true">
+                <span className="composer-math-switch-thumb" />
+              </span>
+            </button>
+          )}
+        </Tooltip>
       </div>
       <MentionAutocomplete
         open={autocompleteOpen}

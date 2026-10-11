@@ -301,6 +301,8 @@ export function TimelineItemRow({
   resolveComposerKeyAction = ignoreComposerKeyAction,
   recentEmojis = [],
   onRecentEmojisChange,
+  mathModeEnabled = true,
+  onMathModeChange = () => undefined,
   mediaUploadProgress = null,
   onSendReaction,
   onRedactReaction,
@@ -371,6 +373,8 @@ export function TimelineItemRow({
   resolveComposerKeyAction?: ResolveComposerKeyAction;
   recentEmojis?: string[];
   onRecentEmojisChange?: (emojis: string[]) => void | Promise<void>;
+  mathModeEnabled?: boolean;
+  onMathModeChange?: (enabled: boolean) => void | Promise<void>;
   mediaUploadProgress?: MediaTransferProgress | null;
   onSendReaction: TimelineRowActionHandlers["onSendReaction"];
   onRedactReaction: TimelineRowActionHandlers["onRedactReaction"];
@@ -868,6 +872,8 @@ export function TimelineItemRow({
         document={editDocument}
         draftKey={`edit:${eventId ?? "no-event"}`}
         isSending={false}
+        mathModeEnabled={mathModeEnabled}
+        onMathModeChange={onMathModeChange}
         mentionCandidates={mentionCandidates}
         mentionCandidatesLoading={mentionCandidatesLoading}
         resolveComposerKeyAction={resolveComposerKeyAction}
@@ -993,17 +999,25 @@ export function TimelineItemRow({
     />
   );
   const avatarElement = canStartDirectMessage ? (
-    <button
-      className="avatar avatar-button"
-      type="button"
-      aria-label={t("room.messageMember", { name: senderDisplayLabel })}
-      onClick={(event) => {
-        event.stopPropagation();
-        onStartDirectMessage?.(item.sender!);
-      }}
+    <Tooltip
+      label={t("room.messageMember", { name: senderDisplayLabel })}
+      placement="below"
     >
-      {avatar}
-    </button>
+      {(tooltipProps) => (
+        <button
+          className="avatar avatar-button"
+          type="button"
+          aria-label={t("room.messageMember", { name: senderDisplayLabel })}
+          onClick={(event) => {
+            event.stopPropagation();
+            onStartDirectMessage?.(item.sender!);
+          }}
+          {...tooltipProps}
+        >
+          {avatar}
+        </button>
+      )}
+    </Tooltip>
   ) : (
     <div className="avatar" aria-hidden="true">
       {avatar}
@@ -1287,17 +1301,22 @@ export function TimelineItemRow({
       <div className="message-actions message-actions-floating">
         {!isEditing && canShowActionButtons && item.can_react ? (
           <div className="reaction-control">
-            <button
-              ref={reactionTriggerRef}
-              className="message-action"
-              type="button"
-              aria-label={t("timeline.addReaction")}
-              aria-expanded={isReactionPickerOpen}
-              aria-haspopup="dialog"
-              onClick={toggleReactionPicker}
-            >
-              <SmilePlus size={14} />
-            </button>
+            <Tooltip label={t("timeline.addReaction")} placement="below" align="end">
+              {(tooltipProps) => (
+                <button
+                  ref={reactionTriggerRef}
+                  className="message-action"
+                  type="button"
+                  aria-label={t("timeline.addReaction")}
+                  aria-expanded={isReactionPickerOpen}
+                  aria-haspopup="dialog"
+                  onClick={toggleReactionPicker}
+                  {...tooltipProps}
+                >
+                  <SmilePlus size={14} />
+                </button>
+              )}
+            </Tooltip>
             {isReactionPickerOpen ? (
               <LazyEmojiPicker
                   anchorRef={reactionTriggerRef}
@@ -1314,7 +1333,7 @@ export function TimelineItemRow({
           </div>
         ) : null}
         {!isEditing && canShowReply ? (
-          <Tooltip label={replyLabel}>
+          <Tooltip label={replyLabel} placement="below" align="end">
             {(tooltipProps) => (
               <button
                 {...tooltipProps}
@@ -1333,7 +1352,7 @@ export function TimelineItemRow({
           </Tooltip>
         ) : null}
         {!isEditing && canShowReplyInThread ? (
-          <Tooltip label={replyInThreadLabel}>
+          <Tooltip label={replyInThreadLabel} placement="below" align="end">
             {(tooltipProps) => (
               <button
                 {...tooltipProps}
@@ -1352,39 +1371,58 @@ export function TimelineItemRow({
           </Tooltip>
         ) : null}
         {!isEditing && canShowActionButtons && item.can_edit ? (
-          <button
-            className="message-action"
-            type="button"
-            aria-label={t("timeline.editMessage")}
-            onClick={openEditForm}
-          >
-            <Edit3 size={14} />
-          </button>
+          <Tooltip label={t("timeline.editMessage")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="message-action"
+                type="button"
+                aria-label={t("timeline.editMessage")}
+                onClick={openEditForm}
+                {...tooltipProps}
+              >
+                <Edit3 size={14} />
+              </button>
+            )}
+          </Tooltip>
         ) : null}
         {!isEditing && canShowActionButtons ? (
-          <button
-            className="message-action"
-            type="button"
-            aria-label={isPinned ? t("timeline.unpinMessage") : t("timeline.pinMessage")}
-            aria-pressed={isPinned}
-            onClick={isPinned ? submitUnpin : submitPin}
+          <Tooltip
+            label={isPinned ? t("timeline.unpinMessage") : t("timeline.pinMessage")}
+            placement="below"
+            align="end"
           >
-            {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
-          </button>
+            {(tooltipProps) => (
+              <button
+                className="message-action"
+                type="button"
+                aria-label={isPinned ? t("timeline.unpinMessage") : t("timeline.pinMessage")}
+                aria-pressed={isPinned}
+                onClick={isPinned ? submitUnpin : submitPin}
+                {...tooltipProps}
+              >
+                {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+              </button>
+            )}
+          </Tooltip>
         ) : null}
         {!isEditing && canShowMessageActionMenu ? (
           <div className="message-action-menu-control" ref={actionMenuControlRef}>
-            <button
-              ref={actionMenuTriggerRef}
-              className="message-action"
-              type="button"
-              aria-label={t("timeline.messageActions")}
-              aria-expanded={isActionMenuOpen}
-              aria-haspopup="menu"
-              onClick={openActionMenu}
-            >
-              <MoreHorizontal size={14} />
-            </button>
+            <Tooltip label={t("timeline.messageActions")} placement="below" align="end">
+              {(tooltipProps) => (
+                <button
+                  ref={actionMenuTriggerRef}
+                  className="message-action"
+                  type="button"
+                  aria-label={t("timeline.messageActions")}
+                  aria-expanded={isActionMenuOpen}
+                  aria-haspopup="menu"
+                  onClick={openActionMenu}
+                  {...tooltipProps}
+                >
+                  <MoreHorizontal size={14} />
+                </button>
+              )}
+            </Tooltip>
             {isActionMenuOpen ? (
               <div
                 className={`message-action-menu is-${actionMenuPlacement}`}
@@ -1509,14 +1547,19 @@ export function TimelineItemRow({
           </div>
         ) : null}
         {!isEditing && canShowActionButtons && item.can_redact ? (
-          <button
-            className="message-action"
-            type="button"
-            aria-label={t("timeline.redactMessage")}
-            onClick={submitRedaction}
-          >
-            <Trash2 size={14} />
-          </button>
+          <Tooltip label={t("timeline.redactMessage")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="message-action"
+                type="button"
+                aria-label={t("timeline.redactMessage")}
+                onClick={submitRedaction}
+                {...tooltipProps}
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+          </Tooltip>
         ) : null}
       </div>
     </article>

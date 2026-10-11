@@ -58,6 +58,7 @@ import {
 import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
 import { Composer } from "./composer";
 import { FloatingLayer } from "./floatingLayer";
+import { Tooltip } from "./Tooltip";
 import { documentFromText } from "../domain/composerDocument";
 import { diagnosticReportPreview } from "../domain/diagnostics";
 import { roomListItemLabel } from "../domain/roomDisplayLabel";
@@ -815,14 +816,23 @@ export function DiagnosticDialog({
       <div className="dialog-box diagnostics-dialog">
         <div className="dialog-title-row">
           <div className="dialog-title">{t("diagnostics.title")}</div>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("action.close", { title: t("diagnostics.title") })}
-            onClick={onClose}
+          <Tooltip
+            label={t("action.close", { title: t("diagnostics.title") })}
+            placement="below"
+            align="end"
           >
-            <X size={ICON_SIZE.small} />
-          </button>
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("action.close", { title: t("diagnostics.title") })}
+                onClick={onClose}
+                {...tooltipProps}
+              >
+                <X size={ICON_SIZE.small} />
+              </button>
+            )}
+          </Tooltip>
         </div>
         <pre className="diagnostics-output">{diagnosticReportPreview(report)}</pre>
         <div className="dialog-actions">
@@ -981,13 +991,18 @@ export function InviteTargetsDialog({
           {workflow.selected_targets.map((target) => (
             <span className="invite-selected-target" key={target.user_id}>
               <span dir="auto">{target.display_label}</span>
-              <button
-                type="button"
-                aria-label={t("dialog.removeInviteTarget")}
-                onClick={() => onRemoveTarget(target.user_id)}
-              >
-                <X size={ICON_SIZE.micro} aria-hidden="true" />
-              </button>
+              <Tooltip label={t("dialog.removeInviteTarget")} placement="above" align="end">
+                {(tooltipProps) => (
+                  <button
+                    type="button"
+                    aria-label={t("dialog.removeInviteTarget")}
+                    onClick={() => onRemoveTarget(target.user_id)}
+                    {...tooltipProps}
+                  >
+                    <X size={ICON_SIZE.micro} aria-hidden="true" />
+                  </button>
+                )}
+              </Tooltip>
             </span>
           ))}
         </div>
@@ -1296,9 +1311,20 @@ export function UploadStagingDialog({
         >
           <div className="upload-staging-header">
             <h2>{t("upload.dialogTitle")}</h2>
-            <button ref={closeButtonRef} className="icon-button" type="button" aria-label={t("upload.clear")} onClick={onClear}>
-              <X size={ICON_SIZE.small} />
-            </button>
+            <Tooltip label={t("upload.clear")} placement="below" align="end">
+              {(tooltipProps) => (
+                <button
+                  ref={closeButtonRef}
+                  className="icon-button"
+                  type="button"
+                  aria-label={t("upload.clear")}
+                  onClick={onClear}
+                  {...tooltipProps}
+                >
+                  <X size={ICON_SIZE.small} />
+                </button>
+              )}
+            </Tooltip>
           </div>
           <div className={`upload-staging-list${items.length === 1 ? " is-single" : ""}`}>
             {items.map((item, index) => (
@@ -1637,16 +1663,20 @@ function PreparedUploadPreview({
         data-recompressing={recompressing ? "true" : undefined}
       >
         {previewUrl ? (
-          <button
-            type="button"
-            ref={previewButtonRef}
-            className="upload-preview-open"
-            aria-label={t("upload.previewActualSize")}
-            title={t("upload.previewActualSize")}
-            onClick={() => setActualSizeOpen(true)}
-          >
-            <img className="upload-staging-preview" src={previewUrl} alt={t("upload.previewAlt")} />
-          </button>
+          <Tooltip label={t("upload.previewActualSize")} placement="above">
+            {(tooltipProps) => (
+              <button
+                type="button"
+                ref={previewButtonRef}
+                className="upload-preview-open"
+                aria-label={t("upload.previewActualSize")}
+                onClick={() => setActualSizeOpen(true)}
+                {...tooltipProps}
+              >
+                <img className="upload-staging-preview" src={previewUrl} alt={t("upload.previewAlt")} />
+              </button>
+            )}
+          </Tooltip>
         ) : (
           <div className="upload-staging-preview-placeholder" aria-label={t("upload.previewAlt")} />
         )}
@@ -1685,9 +1715,23 @@ function UploadActualSizePreview({ url, filename, onClose, returnFocusRef }: {
       >
         <div className="upload-staging-header">
           <h2 dir="auto">{filename}</h2>
-          <button type="button" className="icon-button" aria-label={t("action.close", { title: t("upload.previewActualSize") })} onClick={onClose}>
-            <X size={ICON_SIZE.small} />
-          </button>
+          <Tooltip
+            label={t("action.close", { title: t("upload.previewActualSize") })}
+            placement="below"
+            align="end"
+          >
+            {(tooltipProps) => (
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={t("action.close", { title: t("upload.previewActualSize") })}
+                onClick={onClose}
+                {...tooltipProps}
+              >
+                <X size={ICON_SIZE.small} />
+              </button>
+            )}
+          </Tooltip>
         </div>
         <div className="upload-actual-size-viewport" tabIndex={0}>
           <img src={url} alt={t("upload.previewAlt")} />

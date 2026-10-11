@@ -236,28 +236,36 @@ export function AccountTabStrip({
               ) : null}
             </button>
             {tab.status === "signedOut" || (tab.status === "addAccount" && tabs.length > 1) ? (
-              <button
-                className="account-tab-remove"
-                type="button"
-                aria-label={removeLabel(tab, label)}
-                title={removeLabel(tab, label)}
-                onClick={() => onRemove(tab.id)}
-              >
-                <X size={ICON_SIZE.micro} aria-hidden="true" />
-              </button>
+              <Tooltip label={removeLabel(tab, label)} placement="below" align="end">
+                {(tooltipProps) => (
+                  <button
+                    className="account-tab-remove"
+                    type="button"
+                    aria-label={removeLabel(tab, label)}
+                    onClick={() => onRemove(tab.id)}
+                    {...tooltipProps}
+                  >
+                    <X size={ICON_SIZE.micro} aria-hidden="true" />
+                  </button>
+                )}
+              </Tooltip>
             ) : null}
           </div>
         );
       })}
-      <button
-        className="account-tab-add"
-        type="button"
-        aria-label={t("accountTabs.addAccount")}
-        title={t("accountTabs.addAccount")}
-        onClick={onAdd}
-      >
-        <Plus size={ICON_SIZE.control} aria-hidden="true" />
-      </button>
+      <Tooltip label={t("accountTabs.addAccount")} placement="below">
+        {(tooltipProps) => (
+          <button
+            className="account-tab-add"
+            type="button"
+            aria-label={t("accountTabs.addAccount")}
+            onClick={onAdd}
+            {...tooltipProps}
+          >
+            <Plus size={ICON_SIZE.control} aria-hidden="true" />
+          </button>
+        )}
+      </Tooltip>
     </nav>
   );
 }
@@ -387,23 +395,32 @@ export function TopBar({
         <option value="currentRoom">{t("search.scopeRoom")}</option>
       </select> : null}
       <div className="top-actions">
-        <button
-          className="icon-button app-settings-button"
-          type="button"
-          aria-label={t("settings.appSettings")}
-          title={t("settings.appSettings")}
-          onClick={onOpenAppSettings}
-        >
-          <Settings size={ICON_SIZE.small} aria-hidden="true" />
-        </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("diagnostics.open")}
-          onClick={onOpenDiagnostics}
-        >
-          <Bug size={ICON_SIZE.control} />
-        </button>
+        <Tooltip label={t("settings.appSettings")} placement="below" align="end">
+          {(tooltipProps) => (
+            <button
+              className="icon-button app-settings-button"
+              type="button"
+              aria-label={t("settings.appSettings")}
+              onClick={onOpenAppSettings}
+              {...tooltipProps}
+            >
+              <Settings size={ICON_SIZE.small} aria-hidden="true" />
+            </button>
+          )}
+        </Tooltip>
+        <Tooltip label={t("diagnostics.open")} placement="below" align="end">
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("diagnostics.open")}
+              onClick={onOpenDiagnostics}
+              {...tooltipProps}
+            >
+              <Bug size={ICON_SIZE.control} />
+            </button>
+          )}
+        </Tooltip>
       </div>
     </header>
   );
@@ -459,6 +476,10 @@ export function WorkspaceRail({
     <nav className="workspace-rail" aria-label={t("workspace.workspaces")}>
       <div className="workspace-rail-main">
         <div className="workspace-list workspace-system-list">
+          {/* The Home rail button is deliberately tooltip-free: the accessibility
+              name already carries the account home label, and e2e
+              (`room-space-invites.spec.ts`, "Home rail tooltip is absent")
+              asserts no tooltip and no `aria-describedby` here. */}
           <button
             className={`workspace-button workspace-system-button workspace-home-button ${
               snapshot.sidebar.account_home.is_active ? "is-active" : ""
@@ -574,23 +595,33 @@ export function WorkspaceRail({
         </div>
       </div>
       <div className="rail-footer">
-        <button
-          className="rail-action"
-          type="button"
-          aria-label={t("action.createSpace")}
-          onClick={onCreateSpace}
-        >
-          <Plus size={ICON_SIZE.large} />
-        </button>
-        <button
-          className="user-presence"
-          type="button"
-          aria-label={t("workspace.userSettings")}
-          onClick={onOpenUserSettings}
-          onContextMenu={(event) =>
-            onOpenContextMenu(event, { kind: "account" }, contextMenuItems({ kind: "account" }))
-          }
-        />
+        <Tooltip label={t("action.createSpace")}>
+          {(tooltipProps) => (
+            <button
+              className="rail-action"
+              type="button"
+              aria-label={t("action.createSpace")}
+              onClick={onCreateSpace}
+              {...tooltipProps}
+            >
+              <Plus size={ICON_SIZE.large} />
+            </button>
+          )}
+        </Tooltip>
+        <Tooltip label={t("workspace.userSettings")}>
+          {(tooltipProps) => (
+            <button
+              className="user-presence"
+              type="button"
+              aria-label={t("workspace.userSettings")}
+              onClick={onOpenUserSettings}
+              onContextMenu={(event) =>
+                onOpenContextMenu(event, { kind: "account" }, contextMenuItems({ kind: "account" }))
+              }
+              {...tooltipProps}
+            />
+          )}
+        </Tooltip>
       </div>
     </nav>
   );
@@ -944,14 +975,19 @@ function RoomListControls({
           placeholder={filterPlaceholder}
         />
         {filter.length > 0 ? (
-          <button
-            className="icon-button room-list-filter-clear"
-            type="button"
-            aria-label={t("roomList.clearFilter")}
-            onClick={() => onFilterChange("")}
-          >
-            <X size={ICON_SIZE.input} aria-hidden="true" />
-          </button>
+          <Tooltip label={t("roomList.clearFilter")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="icon-button room-list-filter-clear"
+                type="button"
+                aria-label={t("roomList.clearFilter")}
+                onClick={() => onFilterChange("")}
+                {...tooltipProps}
+              >
+                <X size={ICON_SIZE.input} aria-hidden="true" />
+              </button>
+            )}
+          </Tooltip>
         ) : null}
       </div>
     </div>
@@ -1113,7 +1149,7 @@ function SpaceMembersNavButton({
     childOnly: childOnlyCount
   });
   return (
-    <Tooltip label={label}>
+    <Tooltip label={label} placement="below">
       {(triggerProps) => (
         <button
           {...triggerProps}
@@ -1162,6 +1198,9 @@ function SectionTitle({
   selectedSort?: RoomListSort;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  // One label for the tooltip and the accessible name, so the button can never
+  // explain itself with one word and announce another.
+  const createActionLabel = createLabel ?? t("action.createRoom");
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!menuOpen) return;
@@ -1211,27 +1250,41 @@ function SectionTitle({
           </span>
         ) : null}
         {onCreate ? (
-          <button
-            className="section-title-action"
-            type="button"
-            aria-label={createLabel}
-            onClick={onCreate}
-          >
-            <Plus size={ICON_SIZE.compact} aria-hidden="true" />
-          </button>
+          <Tooltip label={createActionLabel} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="section-title-action"
+                type="button"
+                aria-label={createActionLabel}
+                onClick={onCreate}
+                {...tooltipProps}
+              >
+                <Plus size={ICON_SIZE.compact} aria-hidden="true" />
+              </button>
+            )}
+          </Tooltip>
         ) : null}
         {onSelectSort && selectedSort ? (
           <span className="section-menu-wrap">
-            <button
-              ref={menuTriggerRef}
-              className="section-title-action"
-              type="button"
-              aria-label={t("roomList.sectionOptions", { section: label })}
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((open) => !open)}
+            <Tooltip
+              label={t("roomList.sectionOptions", { section: label })}
+              placement="below"
+              align="end"
             >
-              <MoreHorizontal size={ICON_SIZE.compact} aria-hidden="true" />
-            </button>
+              {(tooltipProps) => (
+                <button
+                  ref={menuTriggerRef}
+                  className="section-title-action"
+                  type="button"
+                  aria-label={t("roomList.sectionOptions", { section: label })}
+                  aria-expanded={menuOpen}
+                  onClick={() => setMenuOpen((open) => !open)}
+                  {...tooltipProps}
+                >
+                  <MoreHorizontal size={ICON_SIZE.compact} aria-hidden="true" />
+                </button>
+              )}
+            </Tooltip>
             {menuOpen ? (
               <div className="section-menu" role="menu" aria-label={t("roomList.sectionOptions", { section: label })}>
                 {onAddExisting ? (

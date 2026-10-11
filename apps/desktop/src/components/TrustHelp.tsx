@@ -3,6 +3,7 @@ import { FloatingLayer, floatingPlacementStyle, useFloatingPlacement } from "./f
 import { HelpCircle } from "lucide-react";
 
 import { t } from "../i18n/messages";
+import { Tooltip } from "./Tooltip";
 import type { UserTrustState } from "../domain/types";
 
 export function TrustHelpButton({
@@ -17,22 +18,35 @@ export function TrustHelpButton({
 
   return (
     <span className="trust-help">
-      <button
-        ref={trigger}
-        className="trust-help-button"
-        type="button"
-        aria-label={t("help.userTrust.explain")}
-        title={t("help.userTrust.explain")}
-        aria-expanded={open}
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && open && !event.nativeEvent.isComposing) {
-            event.preventDefault(); event.stopPropagation(); setOpen(false);
-          }
+      <Tooltip label={t("help.userTrust.explain")} placement="above">
+        {(tooltipProps) => {
+          // The trigger owns Escape (close the popup) and the tooltip owns
+          // Escape (dismiss the bubble), so merge instead of letting the spread
+          // overwrite the popup handler.
+          const { onKeyDown: onTooltipKeyDown, ...triggerProps } = tooltipProps;
+          return (
+            <button
+              ref={trigger}
+              className="trust-help-button"
+              type="button"
+              aria-label={t("help.userTrust.explain")}
+              aria-expanded={open}
+              onKeyDown={(event) => {
+                onTooltipKeyDown(event);
+                if (event.key === "Escape" && open && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setOpen(false);
+                }
+              }}
+              onClick={() => setOpen((value) => !value)}
+              {...triggerProps}
+            >
+              <HelpCircle size={13} aria-hidden="true" />
+            </button>
+          );
         }}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <HelpCircle size={13} aria-hidden="true" />
-      </button>
+      </Tooltip>
       {open ? (
         <TrustHelpPopup trigger={trigger} title={title} body={body} onClose={() => setOpen(false)} />
       ) : null}
