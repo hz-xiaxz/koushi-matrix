@@ -2512,6 +2512,9 @@ pub(super) fn internal_timeline_request_id() -> RequestId {
 mod edit_text_formatting_tests;
 
 #[cfg(test)]
+mod thread_mention_projection_tests;
+
+#[cfg(test)]
 mod tests {
 
     use futures_util::StreamExt;

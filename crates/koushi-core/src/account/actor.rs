@@ -228,6 +228,9 @@ pub(crate) enum AccountMessage {
         send_at_ms: u64,
         draft_revision: ComposerDraftRevision,
         composer_permit: ForwardedComposerDraftPermit,
+        /// #1348: the composer formatting the schedule was admitted under, so the
+        /// stored delayed content matches what the composer would have sent.
+        formatting_options: koushi_state::ComposerFormattingOptions,
     },
     DispatchLocalScheduledSend {
         request_id: RequestId,
@@ -236,6 +239,8 @@ pub(crate) enum AccountMessage {
         room_id: String,
         thread_root_event_id: Option<String>,
         body: String,
+        /// #1348: the live composer formatting for the local fallback dispatch.
+        formatting_options: koushi_state::ComposerFormattingOptions,
     },
     CancelServerDelayedSend {
         request_id: RequestId,
@@ -250,6 +255,8 @@ pub(crate) enum AccountMessage {
         body: String,
         delay_id: String,
         send_at_ms: u64,
+        /// #1348: the live composer formatting for the replaced delayed content.
+        formatting_options: koushi_state::ComposerFormattingOptions,
     },
     OpenTimelineAtTimestamp {
         request_id: RequestId,
@@ -1809,6 +1816,7 @@ impl AccountActor {
                     send_at_ms,
                     draft_revision,
                     composer_permit,
+                    formatting_options,
                 } => {
                     self.handle_schedule_server_delayed_send(
                         request_id,
@@ -1820,6 +1828,7 @@ impl AccountActor {
                         send_at_ms,
                         draft_revision,
                         composer_permit,
+                        formatting_options,
                     )
                     .await;
                 }
@@ -1830,6 +1839,7 @@ impl AccountActor {
                     room_id,
                     thread_root_event_id,
                     body,
+                    formatting_options,
                 } => {
                     self.handle_dispatch_local_scheduled_send(
                         request_id,
@@ -1838,6 +1848,7 @@ impl AccountActor {
                         room_id,
                         thread_root_event_id,
                         body,
+                        formatting_options,
                     )
                     .await;
                 }
@@ -1857,6 +1868,7 @@ impl AccountActor {
                     body,
                     delay_id,
                     send_at_ms,
+                    formatting_options,
                 } => {
                     self.handle_reschedule_server_delayed_send(
                         request_id,
@@ -1866,6 +1878,7 @@ impl AccountActor {
                         body,
                         delay_id,
                         send_at_ms,
+                        formatting_options,
                     )
                     .await;
                 }

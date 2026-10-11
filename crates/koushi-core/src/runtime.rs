@@ -2910,6 +2910,15 @@ impl AppActor {
                                         send_at_ms,
                                         draft_revision,
                                         composer_permit: forwarded_permit,
+                                        // #1348: the delayed content is built by the
+                                        // account actor, so the live composer
+                                        // formatting travels with the command.
+                                        formatting_options: self
+                                            .state
+                                            .settings
+                                            .values
+                                            .composer
+                                            .formatting_options(),
                                     })
                                     .await
                                 {
@@ -3050,6 +3059,14 @@ impl AppActor {
                                         body,
                                         delay_id,
                                         send_at_ms,
+                                        // #1348: the replacement content also
+                                        // follows the live composer formatting.
+                                        formatting_options: self
+                                            .state
+                                            .settings
+                                            .values
+                                            .composer
+                                            .formatting_options(),
                                     })
                                     .await
                                 {
