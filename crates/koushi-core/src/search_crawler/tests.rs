@@ -381,11 +381,12 @@ async fn catch_up_page_indexes_only_events_newer_than_the_boundary_from_the_cach
     assert_eq!((checkpoint.processed, checkpoint.indexed), (11, 8));
 }
 
-/// #996: after a limited sync the persisted chunks hold the newest event behind
-/// a gap and the boundary older than it; the catch-up stops at the boundary
-/// instead of walking the whole room.
+/// #996: a boundary the persisted walk only reaches across a gap is not proof of
+/// catch-up. The events inside that gap were never delivered locally, so the walk
+/// must not acknowledge completion; the crawl repairs the gap through
+/// back-pagination and only then stops at the boundary.
 #[tokio::test]
-async fn catch_up_page_finds_the_boundary_in_the_persisted_chunks() {
+async fn catch_up_page_repairs_a_gap_before_accepting_the_boundary() {
     let server = MatrixMockServer::new().await;
     let client = server.client_builder().build().await;
     let room_id = room_id!("!catchup-gap:example.invalid");
@@ -417,8 +418,19 @@ async fn catch_up_page_finds_the_boundary_in_the_persisted_chunks() {
             );
         })
         .await;
-    // The persisted chunks already hold the boundary, and no `/messages` mock is
-    // mounted, so a crawl that reached the network would fail instead.
+    server
+        .mock_room_messages()
+        .match_from("gap-token")
+        .ok(RoomMessagesResponseTemplate::default()
+            .events(vec![
+                f.text_msg("middle").event_id(event_id!("$gap-middle")),
+                f.text_msg("boundary").event_id(event_id!("$gap-boundary")),
+            ])
+            .end_token("gap-older"))
+        .mock_once()
+        .mount()
+        .await;
+
     let checkpoint = HistoryCrawlCheckpoint::catch_up(
         room_id.to_string(),
         SearchCrawlerSettings::default(),
@@ -427,20 +439,25 @@ async fn catch_up_page_finds_the_boundary_in_the_persisted_chunks() {
         0,
         0,
     );
-    let (.., messages, completed) = drain_crawl_pages(
+    let (checkpoint, messages, completed) = drain_crawl_pages(
         session_for(&client, &server),
         AccountWorkScheduler::default(),
         checkpoint,
-        1,
+        2,
     )
     .await;
-    assert!(completed, "the crawl reached the boundary");
+    assert_eq!(
+        checkpoint.history_source,
+        CrawlHistorySource::Network,
+        "a boundary behind a gap must hand the rest to back-pagination"
+    );
+    assert!(completed, "the fetched page holds the boundary");
     let mut ids = upserted_ids(&messages);
     ids.sort_unstable();
     assert_eq!(
         ids,
-        ["$gap-newest"],
-        "only events newer than the boundary are re-indexed, and the walk stops at it"
+        ["$gap-middle", "$gap-newest"],
+        "the gap's event is indexed and the boundary is not re-indexed"
     );
 }
 

@@ -144,12 +144,11 @@ struct CrawlPage {
     events: Vec<matrix_sdk::deserialized_responses::TimelineEvent>,
     /// Persisted cursor to resume from, when the source walks the store.
     next: Option<koushi_sdk::MatrixPersistedEventCursor>,
-    /// Whether this page crossed a gap chunk in the persisted store.
-    crossed_gap: bool,
+    /// Position in `events` at which the persisted walk crossed a gap chunk,
+    /// i.e. where the page stops being contiguous with the previous one.
+    gap_at: Option<usize>,
     /// Whether the source reached the start of the room's known history.
     reached_start: bool,
-    /// Whether a page was read at all. `false` only for the catch-up cache hit.
-    fetched: bool,
 }
 
 fn trace_crawler_page(
@@ -254,22 +253,13 @@ async fn run_history_crawl_page(
                 } else {
                     Vec::new()
                 };
-                // #996 catch-up: when the cache still holds the boundary event,
-                // everything newer is already local; no page is needed.
-                if let Some(boundary) = catch_up_after.as_deref()
-                    && let Some(position) = cached.iter().position(|event| {
-                        event.event_id().is_some_and(|id| id.as_str() == boundary)
-                    })
-                {
-                    cached.drain(..=position);
-                    return Ok::<_, ()>(CrawlPage {
-                        cached,
-                        events: Vec::new(),
-                        next: None,
-                        crossed_gap: false,
-                        reached_start: true,
-                        fetched: false,
-                    });
+                // The resident read above cannot prove the boundary is
+                // contiguous with the newest event: it flattens the linked
+                // chunk, so a gap between resident chunks is invisible, and it
+                // cannot be sliced safely for a catch-up. The persisted page
+                // reports that topology, so a catch-up decides from pages only.
+                if catch_up_after.is_some() {
+                    cached.clear();
                 }
                 match history_source {
                     CrawlHistorySource::Network => {
@@ -284,9 +274,8 @@ async fn run_history_crawl_page(
                             cached,
                             events: page.events,
                             next: None,
-                            crossed_gap: false,
+                            gap_at: None,
                             reached_start: page.reached_start,
-                            fetched: true,
                         })
                     }
                     CrawlHistorySource::Store => {
@@ -302,15 +291,14 @@ async fn run_history_crawl_page(
                         // the oldest stored chunk without crossing a gap. A gap
                         // proves the store does not hold the history in between,
                         // so the crawl must continue through the network.
-                        let gap_seen = crossed_store_gap || page.crossed_gap;
+                        let gap_seen = crossed_store_gap || page.gap_at.is_some();
                         let reached_start = page.next.is_none() && !gap_seen;
                         Ok::<_, ()>(CrawlPage {
                             cached,
                             events: page.events,
                             next: page.next,
-                            crossed_gap: page.crossed_gap,
+                            gap_at: page.gap_at,
                             reached_start,
-                            fetched: true,
                         })
                     }
                 }
@@ -340,27 +328,41 @@ async fn run_history_crawl_page(
         cached,
         events: page_events_owned,
         next,
-        crossed_gap,
+        gap_at,
         reached_start,
-        fetched,
     } = page;
     checkpoint.first_page = false;
     if checkpoint.history_source == CrawlHistorySource::Store {
         checkpoint.persisted_cursor = next;
-        checkpoint.crossed_store_gap = checkpoint.crossed_store_gap || crossed_gap;
+        checkpoint.crossed_store_gap = checkpoint.crossed_store_gap || gap_at.is_some();
     }
     let page_events = page_events_owned.as_slice();
     let chunk_len = page_events.len() as u64;
-    // Catch-up completes when it reaches the boundary: found in the cache
-    // (no page was fetched) or inside the fetched page. Page events are newest
-    // first, so the boundary and everything older were indexed before.
+    // Catch-up completes when a page holds the boundary and the range from the
+    // newest event down to it is continuous. Page events are newest first, so
+    // the boundary and everything older were indexed before.
     let boundary_in_page = catch_up_after.as_deref().and_then(|boundary| {
         page_events
             .iter()
             .position(|event| event.event_id().is_some_and(|id| id.as_str() == boundary))
     });
-    let reached_catch_up_boundary =
-        catch_up_after.is_some() && (!fetched || boundary_in_page.is_some());
+    // A boundary found in a page is only proof of catch-up when the range from
+    // the tail down to it is continuous. A persisted page can cross a gap chunk,
+    // in which case the events inside that gap were never delivered locally and
+    // must not be skipped: the crawl continues through back-pagination, which
+    // repairs the gap, instead of acknowledging catch-up. A fetched page is
+    // continuous by construction.
+    let boundary_is_continuous = match boundary_in_page {
+        None => false,
+        Some(position) => {
+            if checkpoint.history_source == CrawlHistorySource::Network {
+                true
+            } else {
+                !crossed_store_gap && gap_at.is_none_or(|gap| position < gap)
+            }
+        }
+    };
+    let reached_catch_up_boundary = catch_up_after.is_some() && boundary_is_continuous;
     let page_events = match boundary_in_page {
         Some(position) => &page_events[..position],
         None => page_events,
@@ -370,12 +372,16 @@ async fn run_history_crawl_page(
         // Preserved from the back-pagination path, which ends a crawl on an
         // empty page the way it always did. The persisted walk must not use it:
         // an empty page there can be a gap, not the start of the room.
-        || (checkpoint.history_source == CrawlHistorySource::Network
-            && fetched
-            && chunk_len == 0);
-    if !completed && checkpoint.history_source == CrawlHistorySource::Store && next.is_none() {
-        // The local store is exhausted and a crossed gap proves older history
-        // exists on the server, so the rest of this crawl is back-pagination.
+        || (checkpoint.history_source == CrawlHistorySource::Network && chunk_len == 0);
+    let boundary_blocks_completion =
+        catch_up_after.is_some() && boundary_in_page.is_some() && !reached_catch_up_boundary;
+    if !completed
+        && checkpoint.history_source == CrawlHistorySource::Store
+        && (next.is_none() || boundary_blocks_completion)
+    {
+        // Either the local store is exhausted with a gap behind it, or the
+        // catch-up boundary sits beyond a gap: both mean the rest of this crawl
+        // must come from back-pagination, which is the path that repairs gaps.
         checkpoint.history_source = CrawlHistorySource::Network;
     }
     let mut seen_event_ids = HashSet::new();

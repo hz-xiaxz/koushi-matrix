@@ -585,12 +585,14 @@ pub struct MatrixPersistedEventPage {
     /// Pass to the next call. `None` when the store holds no older chunk, i.e.
     /// the walk has reached the oldest chunk the local store has.
     pub next: Option<MatrixPersistedEventCursor>,
-    /// Whether this page crossed a gap chunk.
+    /// How many events of this page are newer than the first gap chunk the walk
+    /// crossed, i.e. the position at which continuity breaks.
     ///
     /// A gap means the store does not hold the history between two of its
-    /// chunks, so a caller that needs the full history must fetch the missing
-    /// range from the network rather than treat the walk as complete.
-    pub crossed_gap: bool,
+    /// chunks. `events[..gap_at]` are contiguous with the previous page;
+    /// `events[gap_at..]` are contiguous amongst themselves but separated from
+    /// the newer block by missing history. `None` when no gap was crossed.
+    pub gap_at: Option<usize>,
 }
 
 /// Read one bounded page of a room's persisted events from the local encrypted
@@ -647,7 +649,7 @@ pub async fn persisted_room_event_page(
 
     let mut events = Vec::new();
     let mut next = None;
-    let mut crossed_gap = false;
+    let mut gap_at = None;
     while let Some(chunk) = current.take() {
         let RawChunk {
             content,
@@ -661,7 +663,11 @@ pub async fn persisted_room_event_page(
                 // newest first.
                 events.extend(chunk_events.into_iter().rev());
             }
-            ChunkContent::Gap(_) => crossed_gap = true,
+            ChunkContent::Gap(_) => {
+                if gap_at.is_none() {
+                    gap_at = Some(events.len());
+                }
+            }
         }
         if events.len() >= max_events {
             // Stop at a chunk boundary so the cursor resumes exactly here.
@@ -677,7 +683,7 @@ pub async fn persisted_room_event_page(
     Ok(MatrixPersistedEventPage {
         events,
         next,
-        crossed_gap,
+        gap_at,
     })
 }
 
