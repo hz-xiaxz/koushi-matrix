@@ -851,7 +851,15 @@ export function TimelineItemRow({
                 onCopyText,
                 [],
                 spoilerState,
-                onOpenMatrixTarget
+                onOpenMatrixTarget,
+                // #1328: a quote previews the quoted message, so it pills that
+                // message's mentions instead of rendering bare matrix.to links.
+                {
+                  userIds: new Set(item.reply_quote.mentioned_user_ids ?? []),
+                  // A formatted body pills only `matrix.to` anchors, so a quote
+                  // has no room-mention form to mark.
+                  room: false
+                }
               )
             : replyQuoteBody(item.reply_quote)}
         </div>

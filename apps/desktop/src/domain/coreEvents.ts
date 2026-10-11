@@ -802,6 +802,9 @@ export interface ReplyQuote {
   sender_label?: string | null;
   body_preview: string | null;
   formatted?: TimelineFormattedBody | null;
+  // #1328: the quoted message's `m.mentions` facts, so the preview pills the
+  // same anchors the quoted row does.
+  mentioned_user_ids?: string[];
   state: ReplyQuoteState;
 }
 

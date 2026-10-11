@@ -711,6 +711,7 @@ fn reply_quote_projection_retains_sanitized_formatted_body() {
         "$root:example.invalid",
         Some("@bob:example.invalid".to_owned()),
         Some(projection),
+        Vec::new(),
     );
 
     assert_eq!(quote.state, ReplyQuoteState::Ready);
@@ -749,8 +750,12 @@ fn captionless_media_projections_can_reply_and_keep_filename_reply_quotes() {
         );
         assert!(actions.can_reply, "{filename} should be replyable");
 
-        let quote =
-            reply_quote_from_message_projection("$captionless-media:test", None, Some(projection));
+        let quote = reply_quote_from_message_projection(
+            "$captionless-media:test",
+            None,
+            Some(projection),
+            Vec::new(),
+        );
         assert_eq!(quote.body_preview.as_deref(), Some(filename.as_str()));
     }
 }

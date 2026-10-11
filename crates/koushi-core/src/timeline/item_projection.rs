@@ -2778,6 +2778,7 @@ pub(super) fn reply_quote_from_timeline_item(
             sender_label: item.sender_label.clone(),
             body_preview: None,
             formatted: None,
+            mentioned_user_ids: Vec::new(),
             state: ReplyQuoteState::Redacted,
         });
     }
@@ -2809,6 +2810,7 @@ pub(super) fn reply_quote_from_timeline_item(
         sender_label: item.sender_label.clone(),
         body_preview,
         formatted,
+        mentioned_user_ids: item.mentioned_user_ids.clone(),
         state,
     })
 }
@@ -2825,6 +2827,7 @@ fn reply_quote_from_embedded_event(
             sender_label: None,
             body_preview: None,
             formatted: None,
+            mentioned_user_ids: Vec::new(),
             state: ReplyQuoteState::Redacted,
         };
     }
@@ -2833,13 +2836,33 @@ fn reply_quote_from_embedded_event(
         .content
         .as_message()
         .map(|msg| message_projection_from_msgtype(msg.msgtype(), msg.body()));
-    reply_quote_from_message_projection(details.event_id.as_ref(), sender, projection)
+    // #1328: the SDK already resolved the quoted message's `m.mentions`; the
+    // quote preview needs them to mark the same anchors the quoted row pills.
+    let mentioned_user_ids = event
+        .content
+        .as_message()
+        .and_then(|msg| msg.mentions())
+        .map(|mentions| {
+            mentions
+                .user_ids
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    reply_quote_from_message_projection(
+        details.event_id.as_ref(),
+        sender,
+        projection,
+        mentioned_user_ids,
+    )
 }
 
 fn reply_quote_from_message_projection(
     event_id: &str,
     sender: Option<String>,
     projection: Option<MessageProjection>,
+    mentioned_user_ids: Vec<String>,
 ) -> ReplyQuote {
     let body_preview = projection
         .as_ref()
@@ -2860,6 +2883,7 @@ fn reply_quote_from_message_projection(
         sender_label: None,
         body_preview,
         formatted,
+        mentioned_user_ids,
         state,
     }
 }

@@ -418,6 +418,7 @@ pub(super) fn placeholder_quote(event_id: &str, state: ReplyQuoteState) -> Reply
         sender_label: None,
         body_preview: None,
         formatted: None,
+        mentioned_user_ids: Vec::new(),
         state,
     }
 }

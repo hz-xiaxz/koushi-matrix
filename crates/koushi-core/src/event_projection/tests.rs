@@ -206,6 +206,7 @@ fn timeline_item_serializes_reply_quote_without_debugging_body() {
             sender: Some("@bob:example.invalid".to_owned()),
             sender_label: None,
             body_preview: Some("quoted body".to_owned()),
+            mentioned_user_ids: Vec::new(),
             formatted: Some(koushi_state::ReplyQuoteFormattedBody {
                 html: "<p>quoted <strong>body</strong></p>".to_owned(),
                 plain_text: "quoted body".to_owned(),
