@@ -58,7 +58,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 tauri-plugin-updater = "2.11.0"
 
 [target.'cfg(windows)'.dependencies]
-reqwest = { version = "0.13.1", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13.1", default-features = false, features = ["json", "query", "rustls"] }
 
 [dev-dependencies]
 koushi-core = { path = "../../../crates/koushi-core", features = ["test-hooks"] }
