@@ -726,8 +726,10 @@ Each account remains an in-process actor system in `koushi-core`:
 - `SearchActor` — literal, offset-free paging over the persistent ngram index,
   cache-only resolution of each candidate's current content for
   canonical-text verification, attachment-metadata maintenance for the Files
-  view, and Element-style background history crawling. Historical `/messages`
-  requests
+  view, and Element-style background history crawling. A crawl reads the room's
+  persisted event chunks (bounded page, stable cursor, no shared-cache
+  hydration) and falls back to SDK back-pagination only for history the local
+  store does not hold; those `/messages` requests
   are account-wide backpressured: `TimelineActor` pagination and
   `SearchActor` crawler pages share one gate per account, and user-visible
   timeline pagination has priority over background crawler work.

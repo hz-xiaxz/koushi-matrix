@@ -5441,13 +5441,17 @@ stateDiagram-v2
   event id for that room differs, and whose latest event is not already in the
   document store, re-queues an automatic catch-up checkpoint
   (`HistoryCrawlStarted`: `Completed --> Queued`, so the pending-indexing hint
-  shows while the index is known stale). The catch-up indexes the room's cached
-  events newer than the recorded event and, only when the cache does not reach
-  it (a limited sync inserted a gap), pages backwards until a page contains the
-  recorded event or the start of the room. It does not re-walk the whole
+  shows while the index is known stale). The catch-up indexes the room's events
+  newer than the recorded event, reading them from the room's persisted event
+  chunks and, on the first page, from the resident cache as well. It walks
+  persisted chunks only when the boundary is older than the resident window, and
+  it continues through SDK back-pagination only when neither the cache nor the
+  local store holds the recorded event — it stops as soon as a read page contains
+  it. It does not re-walk the whole
   room, except when no boundary was recorded (the room had no latest event
   when its crawl started), where the only safe catch-up is a fresh crawl.
-  A page preempted by timeline pagination keeps its first-page work.
+  A page preempted by timeline pagination keeps its checkpoint, including the
+  persisted cursor, its history source and its first-page work.
   It carries the room's previous processed/indexed counts forward. Completion
   re-checks the newest known latest event id so an event that arrived during
   the catch-up is not missed.
@@ -5461,11 +5465,22 @@ stateDiagram-v2
   checkpoint queue: it skips rooms already queued, actively paging, or
   completed (unless a catch-up is due, above), fetches one bounded `/messages` page at a time, and pushes an
   unfinished checkpoint to the back of the queue. This round-robin shape avoids
-  one room monopolizing historical backfill. Every crawler page also passes
-  through the account-wide `/messages` backpressure gate shared with
-  `TimelineActor` pagination. The gate allows only one `/messages` page fetch
-  per account at a time, and timeline pagination has priority over background
-  crawler work.
+  one room monopolizing historical backfill. Every crawler page also holds the
+  account-wide crawler work permit shared with `TimelineActor` pagination, and
+  timeline pagination has priority over background crawler work. Only a page
+  that continues through SDK back-pagination issues a `/messages` request; the
+  account-wide `/messages` backpressure gate allows one such fetch
+  per account at a time.
+- **History source**: A crawl reads the room's persisted event chunks, newest
+  chunk first, through `koushi_sdk::persisted_room_event_page`. That read holds
+  the event-cache store lock only while one page is loaded, returns a stable
+  resumable chunk cursor, and does not insert what it reads into the shared
+  room-timeline linked chunk: search indexing must not leave a room's whole
+  history resident. Pages are newest first, which the redaction handling below
+  depends on. A page reports whether it crossed a gap chunk, and a crawl whose
+  walk ends on a gap before reaching the start of the room switches to SDK
+  back-pagination for the rest — that is the only path that reaches `/messages`
+  and the only one that loads chunks into the shared cache.
 - **Pump scheduling and pending-index ownership (#1276)**: The `SearchActor`
   starts the next checkpoint only at explicit pump points: a crawl page result,
   the startup-delay timer, the internal completed-page index queue drain, an
@@ -5559,7 +5574,9 @@ stateDiagram-v2
   redaction event itself). The crawler reads `redacts` (top-level or
   `content.redacts` per MSC2174) and records the target in a
   `pending_redactions` set so a later-crawled older original is not indexed
-  after its redaction.
+  after its redaction. That is why every page is ordered newest first, including
+  a persisted page, whose chunks run newest first while the items inside one
+  chunk run oldest first.
 - **Shutdown**: On actor `Shutdown`, all per-room cancel flags are set
   (`Ordering::Relaxed`) and every `JoinHandle` is awaited before the actor loop
   exits. This prevents stale crawl tasks from emitting `HistoryCrawl*` actions
@@ -5575,11 +5592,11 @@ stateDiagram-v2
   Completed rooms are NOT persisted across restarts, and neither is the
   document store: the actor keeps an in-memory `completed_rooms` map (room id to
   the recorded latest event id and counts) seeded fresh each session, and every
-  launch re-crawls every room from the SDK event cache after the startup
-  delay. Messages that arrived while the app was closed are covered by that
-  re-crawl (the first page indexes the cached newest events and backward
-  pagination resolves the gap a limited sync inserted), so no watermark needs
-  to survive a restart.
+  launch re-crawls every room from the room's persisted event chunks after the
+  startup delay. Messages that arrived while the app was closed are covered by that
+  re-crawl (the first page also indexes the resident newest events, and a crawl
+  that meets a gap continues through back-pagination, which resolves it), so no
+  watermark needs to survive a restart.
 
 ## Appearance / Theme Ownership
 
