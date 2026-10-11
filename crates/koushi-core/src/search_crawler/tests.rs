@@ -387,6 +387,76 @@ async fn crawler_page_indexes_history_that_is_not_resident() {
     );
 }
 
+/// A persisted cursor whose chunk the store no longer holds must not be read as
+/// the end of the store: that would let a stale record claim the room is fully
+/// indexed. The reader reports it and the crawler re-walks from the newest chunk.
+#[tokio::test]
+async fn a_stale_persisted_cursor_restarts_the_walk_instead_of_completing() {
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let room_id = room_id!("!stale-cursor:example.invalid");
+    let f = EventFactory::new()
+        .room(room_id)
+        .sender(user_id!("@crawler:test.invalid"));
+    client
+        .event_cache()
+        .subscribe()
+        .expect("event cache subscription");
+    server
+        .mock_sync()
+        .ok_and_run(&client, |builder| {
+            builder.add_joined_room(
+                JoinedRoomBuilder::new(room_id)
+                    .set_timeline_limited()
+                    .set_timeline_prev_batch("stale-prev")
+                    .add_timeline_event(f.text_msg("newest").event_id(event_id!("$stale-newest"))),
+            );
+        })
+        .await;
+
+    let session = session_for(&client, &server);
+    let stale = koushi_sdk::MatrixPersistedEventCursor::from_stable_id("999999")
+        .expect("cursor from a stable id");
+
+    let page = koushi_sdk::persisted_room_event_page(&session, room_id.as_str(), Some(stale), 100)
+        .await
+        .expect("page");
+    assert!(page.cursor_unknown, "an unknown cursor must be reported");
+    assert!(page.events.is_empty());
+    assert!(page.next.is_none());
+
+    // The crawler must recover rather than conclude that the room is complete.
+    let mut checkpoint = HistoryCrawlCheckpoint::new(
+        room_id.to_string(),
+        SearchCrawlerSettings::default(),
+        1,
+        true,
+    );
+    checkpoint.persisted_cursor = Some(stale);
+    checkpoint.crossed_store_gap = true;
+    checkpoint.history_source = CrawlHistorySource::Store;
+    let (checkpoint, messages, completed) =
+        drain_crawl_pages(session, AccountWorkScheduler::default(), checkpoint, 1).await;
+    assert!(
+        !completed,
+        "the restarted walk still has the gap behind the newest event to resolve"
+    );
+    assert_eq!(
+        upserted_ids(&messages),
+        ["$stale-newest"],
+        "the restart indexes the newest stored event"
+    );
+    assert_eq!(
+        checkpoint.crossed_store_gap, true,
+        "the restarted walk recomputes its gap evidence instead of trusting the stale one"
+    );
+    assert_ne!(
+        checkpoint.persisted_cursor,
+        Some(stale),
+        "the stale cursor is replaced by the restarted walk's cursor"
+    );
+}
+
 fn session_for(client: &matrix_sdk::Client, server: &MatrixMockServer) -> Arc<MatrixClientSession> {
     let session_info = SessionInfo {
         homeserver: server.server().uri(),

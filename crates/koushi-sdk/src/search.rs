@@ -585,6 +585,15 @@ pub struct MatrixPersistedEventPage {
     /// Pass to the next call. `None` when the store holds no older chunk, i.e.
     /// the walk has reached the oldest chunk the local store has.
     pub next: Option<MatrixPersistedEventCursor>,
+    /// Whether the caller's cursor named a chunk the store no longer holds.
+    ///
+    /// The store reports "no previous chunk" both when the walk reached its
+    /// oldest chunk and when the boundary is unknown, so a caller holding a
+    /// stored cursor must not read the first case out of the second: a stale
+    /// cursor would otherwise look like a completed traversal. When this is set,
+    /// `events` is empty and `next` is `None`, and the caller restarts the walk
+    /// from the newest chunk.
+    pub cursor_unknown: bool,
     /// How many events of this page are newer than the first gap chunk the walk
     /// crossed, i.e. the position at which continuity breaks.
     ///
@@ -634,10 +643,28 @@ pub async fn persisted_room_event_page(
 
     let max_events = max_events.max(1);
     let mut current = match cursor {
-        Some(MatrixPersistedEventCursor(identifier)) => guard
-            .load_previous_chunk(linked_chunk_id, identifier)
-            .await
-            .map_err(|_| MatrixSearchError::Internal)?,
+        Some(MatrixPersistedEventCursor(identifier)) => {
+            // Verify the cursor's chunk still exists before trusting a walk that
+            // starts from it.
+            let known = guard
+                .load_all_chunks_metadata(linked_chunk_id)
+                .await
+                .map_err(|_| MatrixSearchError::Internal)?
+                .iter()
+                .any(|metadata| metadata.identifier == identifier);
+            if !known {
+                return Ok(MatrixPersistedEventPage {
+                    events: Vec::new(),
+                    next: None,
+                    gap_at: None,
+                    cursor_unknown: true,
+                });
+            }
+            guard
+                .load_previous_chunk(linked_chunk_id, identifier)
+                .await
+                .map_err(|_| MatrixSearchError::Internal)?
+        }
         None => {
             guard
                 .load_last_chunk(linked_chunk_id)
@@ -684,6 +711,7 @@ pub async fn persisted_room_event_page(
         events,
         next,
         gap_at,
+        cursor_unknown: false,
     })
 }
 
