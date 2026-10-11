@@ -49,17 +49,17 @@ Copyright: Copyright 2016 The Inter Project Authors
 Notes: Used as the bundled-preferred UI font when the Rust-owned typography profile selects `font = inter`; system UI fonts remain fallback.
 
 Project: Twemoji COLR Font
-Repository: https://github.com/mrdrogdrog/twemoji-color-font
-Upstream commit: package `twemoji-colr-font@15.0.3`
-Source path: package `twemoji.css` and `twemoji.woff2`
-Local path: `apps/desktop/node_modules/twemoji-colr-font` during build; Vite bundles selected CSS/woff2 assets into desktop release artifacts
-License: package metadata `OFL-1.1`; package CSS header `MIT`; Twemoji visual design/artwork under Creative Commons Attribution 4.0 International (`CC-BY-4.0`)
-Copyright: Twemoji font package by Tilman Vatteroth; Twemoji artwork by the Twemoji project
-Notes: Used as the bundled-preferred emoji font when the Rust-owned typography profile selects `emoji = twemojiColr`; platform/system emoji fonts remain fallback. npm marks this package deprecated, so upgrades or replacement must revisit the font source and attribution.
+Repository: https://github.com/SableClient/twemoji-font
+Upstream commit: package `@sableclient/twemoji-font@1.0.4`
+Source path: package `dist/index.css` and `dist/files/twemoji.woff2`
+Local path: `apps/desktop/node_modules/@sableclient/twemoji-font` during build; Vite bundles selected CSS/woff2 assets into desktop release artifacts
+License: Apache-2.0 for code; Twemoji visual design/artwork under Creative Commons Attribution 4.0 International (`CC-BY-4.0`)
+Copyright: Copyright 2016-2018, Mozilla Foundation; Twemoji artwork by the Twemoji project
+Notes: Used as the bundled-preferred emoji font when the Rust-owned typography profile selects `emoji = twemojiColr`; platform/system emoji fonts remain fallback. The maintained SableClient package replaces the deprecated `twemoji-colr-font`; its `LICENSE.md` preserves the code and artwork attribution.
 
 Project: KaTeX
 Repository: https://github.com/KaTeX/KaTeX
-Upstream commit: npm package `katex@0.18.1` (the version pinned in `crates/koushi-core/assets/katex/VERSION`)
+Upstream commit: npm package `katex@0.18.10` (the version pinned in `crates/koushi-core/assets/katex/VERSION`)
 Source path: `dist/katex.min.js`, `dist/katex.min.css`, `dist/fonts/*.woff2`
 Local path: `crates/koushi-core/assets/katex`
 License: MIT

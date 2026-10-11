@@ -283,6 +283,12 @@ npm --prefix apps/desktop audit --package-lock-only --audit-level=high
 node scripts/check-linux-build-deps.mjs
 ```
 
+These commands prepare and check dependencies; they do not build or launch
+Koushi. npm deprecation and install-script warnings alone do not indicate a
+failed installation. A low-severity audit finding does not fail the
+`--audit-level=high` gate. Check that each command completes successfully before
+continuing to [build and run the standalone app](#build-and-run-the-linux-release).
+
 Stop and resolve any high/critical audit findings before building. The first
 build needs network access for Rust crates and may take a while. On a WSL VM
 with limited memory, reduce concurrent Rust compilation:
@@ -348,13 +354,23 @@ If Cargo reports `linker cc not found`, install `build-essential`. If a
 reported development package. If the compiler is killed with `SIGKILL`, check
 available WSL memory/swap and retry with `CARGO_BUILD_JOBS=1`.
 
-To build the release binary used for a final local launch check, omit
-`--debug`:
+#### Build and run the Linux release
+
+After the dependency checks above pass, run these commands from the repository
+root to build and launch the standalone app. Run the second command only after
+the build succeeds:
 
 ```bash
 npm --prefix apps/desktop run tauri -- build --no-bundle
-test -x target/release/koushi-desktop
+./target/release/koushi-desktop
 ```
+
+This embeds the web assets in a release binary; no Vite server is needed.
+`--no-bundle` creates the executable without an installer. The executable path
+assumes the default Cargo target directory. For sign-in, complete
+[the Linux keyring setup](#prepare-the-linux-keyring-and-retry-sso) and launch
+the app in the same graphical desktop and D-Bus session as the unlocked keyring,
+as your normal user.
 
 This checkout produces `koushi-desktop`. `target/release/koushi-matrix` is not
 an output of the current build, so do not launch an older binary with that name;
