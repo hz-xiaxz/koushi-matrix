@@ -2,7 +2,7 @@
 @import "@fontsource/inter/500.css";
 @import "@fontsource/inter/600.css";
 @import "@fontsource/inter/700.css";
-@import "twemoji-colr-font/twemoji.css";
+@import "@sableclient/twemoji-font";
 
 :root {
   /* #315 directory results: gap between the name and its type badge. */

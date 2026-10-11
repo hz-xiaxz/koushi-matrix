@@ -112,6 +112,23 @@ lockfile is the reproducible security boundary: changing only an existing
 isolated branch so other developers and `origin/main` are unaffected until the
 change is reviewed and merged.
 
+### Dependency warning maintenance
+
+The desktop package pins KaTeX to `0.18.10`: `0.18.11` was deprecated by its
+publisher for accidental breaking changes. Update the matching vendored history
+export assets and `THIRD_PARTY_NOTICES.md` together with the npm dependency;
+`src/i18n/katexVendor.test.ts` checks the version and offline font references.
+
+WebdriverIO stays on the 9.x line. Its Cheerio dependency uses an explicit
+`encoding-sniffer` override to replace deprecated `whatwg-encoding`, and
+`@wdio/config` uses a scoped `glob` override to a maintained release. Recheck
+buffer/stream decoding and config file matching when changing these overrides,
+and remove them when the parent dependencies support the maintained versions.
+
+`package.json` explicitly denies Edge and Firefox driver install scripts through
+npm's `allowScripts` setting. The Linux GUI lane uses the separately provisioned
+Tauri/WebKit drivers; it does not need those automatic browser downloads.
+
 ## CI maintenance
 
 The required Rust jobs use the repository's `[profile.ci]` profile. It inherits
