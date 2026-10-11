@@ -877,7 +877,18 @@ button:disabled {
   padding: 1px 5px;
   border-radius: 999px;
   color: var(--brand-contrast);
-  background: var(--unread);
+  background: var(--danger);
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}
+
+.account-tab-invite {
+  min-inline-size: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  color: var(--brand-contrast);
+  background: var(--success);
   font-size: 10px;
   line-height: 15px;
   text-align: center;
@@ -964,9 +975,7 @@ button:disabled {
   background: var(--surface-hover);
 }
 
-.channel-actions .icon-button[data-count],
-.channel-actions .icon-button[data-live-count],
-.channel-actions .icon-button[data-mention-count] {
+.channel-actions .icon-button[data-count] {
   position: relative;
 }
 
@@ -985,24 +994,7 @@ button:disabled {
   font-weight: 820;
   line-height: calc(var(--nav-badge-size) - 4px);
   text-align: center;
-  background: var(--unread);
-}
-
-.channel-actions .icon-button[data-mention-count]::before,
-.channel-actions .icon-button[data-live-count]:not([data-mention-count])::before {
-  position: absolute;
-  inset-block-end: 3px;
-  inset-inline-end: 3px;
-  inline-size: var(--nav-dot-size);
-  block-size: var(--nav-dot-size);
-  border: 2px solid var(--surface);
-  border-radius: var(--r-pill);
-  content: "";
-  background: var(--unread);
-}
-
-.channel-actions .icon-button[data-mention-count]::before {
-  background: var(--mention);
+  background: var(--danger);
 }
 
 .top-search {
@@ -1521,7 +1513,7 @@ button:disabled {
 .workspace-button[data-count]::after {
   position: absolute;
   inset-inline-end: var(--workspace-badge-offset);
-  inset-block-end: var(--workspace-badge-offset);
+  inset-block-start: var(--workspace-badge-offset);
   min-width: var(--workspace-badge-size);
   height: var(--workspace-badge-size);
   padding: 0 var(--workspace-badge-padding-inline);
@@ -1533,19 +1525,23 @@ button:disabled {
   line-height: calc(
     var(--workspace-badge-size) - (var(--workspace-badge-border-width) * 2)
   );
-  background: var(--unread);
+  background: var(--danger);
 }
 
-.workspace-button[data-mention-count]::before {
+.workspace-home-button[data-invite-count]::before {
   position: absolute;
-  inset-block-start: var(--workspace-badge-offset);
+  inset-block-end: var(--workspace-badge-offset);
   inset-inline-end: var(--workspace-badge-offset);
-  width: var(--workspace-mention-dot-size);
-  height: var(--workspace-mention-dot-size);
+  min-width: var(--workspace-badge-size);
+  height: var(--workspace-badge-size);
+  padding: 0 var(--workspace-badge-padding-inline);
   border: var(--workspace-badge-border-width) solid var(--rail);
   border-radius: var(--r-pill);
-  content: "";
-  background: var(--mention);
+  content: attr(data-invite-count);
+  color: var(--brand-contrast);
+  font-size: var(--nav-badge-font-size);
+  line-height: calc(var(--workspace-badge-size) - (var(--workspace-badge-border-width) * 2));
+  background: var(--success);
 }
 
 .user-presence {
@@ -1747,7 +1743,7 @@ button:disabled {
   inline-size: var(--nav-dot-size);
   block-size: var(--nav-dot-size);
   border-radius: var(--r-pill);
-  background: var(--unread);
+  background: var(--danger);
 }
 
 .room-list-controls {
@@ -1995,10 +1991,6 @@ button:disabled {
   color: var(--brand-contrast);
   font-weight: 800;
   line-height: var(--room-count-block-size);
-  background: var(--unread);
-}
-
-.room-count.is-attention {
   background: var(--danger);
 }
 
@@ -9267,10 +9259,10 @@ kbd {
   align-self: center;
   min-inline-size: 20px;
   padding-inline: 6px;
-  border: 1px solid var(--unread);
+  border: 1px solid var(--danger);
   border-radius: var(--r-pill);
-  color: var(--brand);
-  background: var(--selected);
+  color: var(--brand-contrast);
+  background: var(--danger);
   font-size: 12px;
   font-weight: 700;
   text-align: center;
@@ -10066,12 +10058,10 @@ button.channel-access-pill:focus-visible {
   white-space: nowrap;
 }
 
-/* #1166: the narrow Space rail summarises access at the avatar's upper trailing
-   corner so the unread/notification count keeps the lower one, and the Space
-   header carries the full label. */
+/* The Space unread badge owns the upper trailing corner; access stays below. */
 .workspace-access-overlay {
   position: absolute;
-  inset-block-start: 1px;
+  inset-block-end: 1px;
   inset-inline-end: 1px;
   display: grid;
   place-items: center;

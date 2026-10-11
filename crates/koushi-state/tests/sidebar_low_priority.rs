@@ -324,7 +324,7 @@ fn a_normal_room_keeps_its_native_contribution_beside_a_low_priority_room() {
             .candidate
             .as_ref()
             .map(|candidate| candidate.room_display_name.as_str()),
-        Some("Plain")
+        None
     );
 }
 

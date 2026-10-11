@@ -875,16 +875,13 @@ test("the Space rail summarises each access condition and keeps the unread badge
     `Invite Space${t("access.conditionSummarySeparator")}${t("access.inviteOnlyDescription")}`
   );
 
-  // The unread badge keeps the lower trailing corner; the access overlay stays
-  // in the upper half so it cannot obscure it.
+  // The unread badge keeps the upper trailing corner; access stays below.
   await expect(inviteItem).toHaveAttribute("data-count", "3");
   const itemBox = await inviteItem.boundingBox();
   const overlayBox = await inviteItem.locator("[data-space-access]").boundingBox();
   expect(itemBox).not.toBeNull();
   expect(overlayBox).not.toBeNull();
-  expect(overlayBox!.y + overlayBox!.height).toBeLessThanOrEqual(
-    itemBox!.y + itemBox!.height / 2
-  );
+  expect(overlayBox!.y).toBeGreaterThanOrEqual(itemBox!.y + itemBox!.height / 2);
 });
 
 test("the Space header uses the same participation vocabulary as the room list (#1327)", async ({

@@ -584,16 +584,6 @@ export function UserSettingsPanel({
                   />
                 </>
               ) : null}
-              {settingsScope !== "app" ? (
-                <NotificationSettingToggle
-                  label={t("settings.notificationMessagePreviews")}
-                  description={t("settings.notificationMessagePreviewsDescription")}
-                  settingKey="message_previews"
-                  current={selectedNotifications}
-                  onSelect={onUpdateSettings}
-                  icon={<Bell size={15} aria-hidden="true" />}
-                />
-              ) : null}
             </div>
           </section>
           {settingsScope !== "app" && currentSession ? (

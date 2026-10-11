@@ -140,6 +140,31 @@ has nothing new; reading the thread clears its share. Read markers, the
 first-unread position and event navigation stay on the main timeline and ignore
 thread replies.
 
+Red numbers count messages the app has observed as unread. The Home and Space
+numbers add the eligible room and DM numbers; invitations use a separate green
+badge. A muted conversation keeps its red number on its own row but does not add
+to Home, Space, or section totals. Hover over a conversation number to see its
+main-timeline and thread parts. The room's **Threads** button shows the thread
+part, and each counted thread can be opened from the Threads list. The Space
+number appears at the upper right of its icon; its access symbol stays at the
+lower right. If thread metadata fails to load, already counted threads remain
+openable by their known root IDs.
+
+Activity's **Unread conversations** tab lists rooms with a confirmed local
+unread count. It opens the room without naming an unverified message. **Recent**
+shows observed history; it does not claim those messages are unread. Activity
+does not offer a bulk read action because a room count cannot identify the
+right event IDs to acknowledge. A failure to load older Recent history does
+not hide the confirmed room entries in Unread conversations.
+
+The context-menu action **Mark room timeline as read** applies to the main
+timeline only. It appears only when the app has a current main-timeline event
+to mark. Open a thread to read its visible replies; a reply already on screen
+is marked read without requiring an extra scroll. A manually marked unread room
+uses a red dot on its row, not an invented numeric message count.
+Leaving a room discards its cached thread counts; rejoining starts a fresh
+read of those threads.
+
 A **Low priority** section appears below **DMs** when any conversation in the
 current view carries the low-priority tag. Low-priority rooms and DMs are listed
 there instead of in **Rooms** or **DMs**. Set or clear the tag from a

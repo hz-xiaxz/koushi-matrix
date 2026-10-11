@@ -337,6 +337,20 @@ fn handle_room_list_updated_with_crawler(
             .locally_left_room_ids
             .contains(&room.room_id)
     });
+    // A removed room's old per-root receipts cannot be reused on rejoin. A
+    // provisional list may be incomplete, so only prune it for a confirmed
+    // local leave; an authoritative list may prune every absent room.
+    let retained_room_ids = rooms
+        .iter()
+        .map(|room| room.room_id.clone())
+        .collect::<BTreeSet<_>>();
+    state.thread_unread.retain(|(room_id, _), _| {
+        if authoritative {
+            retained_room_ids.contains(room_id)
+        } else {
+            !state.room_list.locally_left_room_ids.contains(room_id)
+        }
+    });
     let mut spaces = spaces;
     preserve_known_avatar_thumbnails(state, &mut spaces, &mut rooms);
     suppress_stale_unread_after_local_read(state, &mut rooms);
@@ -350,11 +364,7 @@ fn handle_room_list_updated_with_crawler(
         &state.profile,
         own_user_id.as_deref(),
     );
-    let has_attention_increase = room_list_has_attention_increase(&state.rooms, &rooms);
-    let retained_room_ids = rooms
-        .iter()
-        .map(|room| room.room_id.clone())
-        .collect::<BTreeSet<_>>();
+    let newly_unread_room_id = newly_unread_room_id(&state.rooms, &rooms);
     let had_active_room_before_update = state.navigation.active_room_id.is_some();
     merge_new_spaces_into_preference(&mut state.navigation.space_order, &spaces);
     apply_space_order_preference(&mut spaces, &state.navigation.space_order);
@@ -386,13 +396,17 @@ fn handle_room_list_updated_with_crawler(
     if removed_room_interactions {
         effects.push(AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged));
     }
-    let observation = if has_attention_increase {
+    let observation = if newly_unread_room_id.is_some() {
         crate::state::NativeAttentionObservationKind::Live
     } else {
         crate::state::NativeAttentionObservationKind::InitialSync
     };
     let (native_attention_changed, native_attention_diagnostic) =
-        super::native_attention::recompute_native_attention_from_rooms(state, observation);
+        super::native_attention::recompute_native_attention_from_rooms_for_live_room(
+            state,
+            observation,
+            newly_unread_room_id.as_deref(),
+        );
     effects.push(native_attention_diagnostic);
     if native_attention_changed {
         effects.push(AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged));
@@ -689,21 +703,20 @@ fn room_list_authoritative_matches_current(
     )
 }
 
-fn room_list_has_attention_increase(previous_rooms: &[RoomSummary], rooms: &[RoomSummary]) -> bool {
+fn newly_unread_room_id(previous_rooms: &[RoomSummary], rooms: &[RoomSummary]) -> Option<String> {
     let previous_by_id: HashMap<&str, &RoomSummary> = previous_rooms
         .iter()
         .map(|room| (room.room_id.as_str(), room))
         .collect();
-    rooms.iter().any(|room| {
-        let Some(previous) = previous_by_id.get(room.room_id.as_str()) else {
-            return false;
-        };
-        room_attention_metric(room) > room_attention_metric(previous)
-    })
-}
-
-fn room_attention_metric(room: &RoomSummary) -> u64 {
-    crate::state::room_activity_unread_count(room).max(room.highlight_count)
+    rooms
+        .iter()
+        .filter_map(|room| {
+            let previous = previous_by_id.get(room.room_id.as_str())?;
+            (room.unread_count > previous.unread_count)
+                .then(|| (room.unread_count - previous.unread_count, room))
+        })
+        .max_by_key(|(increase, room)| (*increase, room.recency_stamp.unwrap_or_default()))
+        .map(|(_, room)| room.room_id.clone())
 }
 
 fn suppress_stale_unread_after_local_read(state: &AppState, rooms: &mut [RoomSummary]) {

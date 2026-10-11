@@ -159,6 +159,10 @@ pub struct RoomListItem {
     #[serde(default)]
     pub display_count: u64,
     #[serde(default)]
+    pub main_unread_count: u64,
+    #[serde(default)]
+    pub thread_unread_count: u64,
+    #[serde(default)]
     pub has_unread_content: bool,
     #[serde(default)]
     pub is_attention_highlighted: bool,
@@ -575,6 +579,8 @@ fn not_joined_room_list_item(
         highlight_count: 0,
         notification_count: 0,
         display_count: 0,
+        main_unread_count: 0,
+        thread_unread_count: 0,
         has_unread_content: false,
         is_attention_highlighted: false,
         has_unread_mention: false,
@@ -638,6 +644,8 @@ fn room_list_item(
         highlight_count: projection.highlight_count,
         notification_count: projection.notification_count,
         display_count: projection.display_count,
+        main_unread_count: projection.main_unread_count,
+        thread_unread_count: projection.thread_unread_count,
         has_unread_content: projection.has_unread_content,
         is_attention_highlighted: projection.is_attention_highlighted,
         has_unread_mention: projection.has_unread_mention,
@@ -724,11 +732,12 @@ fn contributes_attention(
 
 /// One Rust-owned per-account attention policy (#1219).
 ///
-/// The account tab badge and that account's Home aggregate read this same
-/// value, so this account's Home aggregate and its tab badge cannot disagree.
+/// The account tab conversation badge and that account's Home aggregate read
+/// this same `unread_count`, so the two conversation counts cannot disagree.
 /// `unread_count` is the sum of [`room_activity_unread_count`] over the rooms
 /// that [`contributes_attention`]; pending invites are counted separately and
-/// added into `attention_count`, which is the badge both surfaces render.
+/// added into `attention_count` only for aggregate attention policy. The UI
+/// renders invitations separately from unread conversations.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct AccountAttentionSummary {
     pub unread_count: u64,

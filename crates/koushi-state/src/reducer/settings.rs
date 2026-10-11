@@ -351,7 +351,7 @@ pub(crate) fn handle_room_preferences_loaded(
     }
     let (changed, diagnostic) = super::native_attention::recompute_native_attention_from_rooms(
         state,
-        NativeAttentionObservationKind::Live,
+        NativeAttentionObservationKind::InitialSync,
     );
     effects.push(diagnostic);
     if changed {
@@ -385,7 +385,7 @@ pub(crate) fn handle_room_notification_mode_set(
     recompute_room_list_projection(state);
     let (changed, diagnostic) = super::native_attention::recompute_native_attention_from_rooms(
         state,
-        NativeAttentionObservationKind::Live,
+        NativeAttentionObservationKind::InitialSync,
     );
     let mut effects = vec![
         AppEffect::EmitUiEvent(UiEvent::RoomNotificationSettingsChanged),

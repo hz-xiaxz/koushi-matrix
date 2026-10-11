@@ -564,21 +564,26 @@ fn account_tab_snapshot_projects_the_per_account_policy_from_every_runtime() {
 
     assert_eq!(snapshot.selected_tab_id, "account:@bob:example.invalid");
     assert_eq!(snapshot.badge_count, 6);
-    // The tab count is that account's Home aggregate, invites included.
+    // The tab's red number is the same conversation count as Home; invites
+    // retain a separate count even for a background account.
     assert_eq!(
         snapshot.tabs[0].unread_count,
         koushi_state::compose_sidebar_for_state(&alice)
             .account_home
-            .attention_count
+            .unread_count
     );
     assert_eq!(snapshot.tabs[0].unread_count, 1);
     assert_eq!(
         snapshot.tabs[1].unread_count,
         koushi_state::compose_sidebar_for_state(&bob)
             .account_home
-            .attention_count
+            .unread_count
     );
-    assert_eq!(snapshot.tabs[1].unread_count, 2);
+    assert_eq!(snapshot.tabs[1].unread_count, 0);
+    assert_eq!(
+        serde_json::to_value(&snapshot.tabs[1]).unwrap()["inviteCount"],
+        2
+    );
     // Background tab attention never leaks into the selected tab.
     assert_ne!(snapshot.tabs[0].unread_count, snapshot.tabs[1].unread_count);
 }

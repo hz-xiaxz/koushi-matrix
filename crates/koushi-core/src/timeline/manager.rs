@@ -1830,6 +1830,23 @@ impl TimelineManagerActor {
             .await;
             return;
         };
+        // A selection command may already be queued when a leave is acknowledged.
+        // Do not let it recreate an actor or room subscription until rejoin.
+        if key
+            .room_id()
+            .parse::<OwnedRoomId>()
+            .ok()
+            .is_some_and(|room_id| self.room_leave_states.contains_key(&room_id))
+        {
+            self.emit_subscription_failure(
+                request_id,
+                &key,
+                TimelineFailureKind::NotSubscribed,
+                emit_failure_terminal,
+            )
+            .await;
+            return;
+        }
         // #1146: a repeated subscribe while the focused SDK build is in flight
         // adopts the newest request instead of restarting the build.
         if self

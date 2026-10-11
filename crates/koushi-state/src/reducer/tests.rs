@@ -1220,6 +1220,7 @@ fn room_list_update_refreshes_native_attention_badge_without_initial_sync_sound_
     unread_room.unread_count = 3;
     unread_room.notification_count = 3;
     unread_room.highlight_count = 1;
+    unread_room.latest_event = Some(latest_event("$observed:example.invalid", 42));
 
     let effects = reduce(
         &mut state,
@@ -1236,9 +1237,7 @@ fn room_list_update_refreshes_native_attention_badge_without_initial_sync_sound_
     assert_eq!(state.native_attention.summary.candidate, None);
     assert_eq!(
         state.native_attention.dispatch,
-        crate::state::NativeAttentionDispatchState::Suppressed {
-            reason: crate::state::NativeAttentionSuppressionReason::InitialSync,
-        }
+        crate::state::NativeAttentionDispatchState::Idle
     );
 }
 
@@ -1785,6 +1784,7 @@ fn thread_unread_observation_stamps_the_threads_list_row() {
     }
 
     let mut state = ready_state();
+    state.rooms = vec![test_room("!r:example.invalid", None)];
     reduce(
         &mut state,
         AppAction::OpenThreadsList {

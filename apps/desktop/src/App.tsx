@@ -6721,11 +6721,8 @@ function AccountContent({
           return;
         case "markRoomAsRead": {
           const room = snapshot?.state.domain.rooms.find((candidate) => candidate.room_id === target.roomId);
-          const eventId =
-            roomLatestDisplayEventId(room?.latest_event) ??
-            snapshot?.state.domain.live_signals.rooms[target.roomId]?.fully_read_event_id ??
-            "";
-          if (eventId.trim().length > 0) {
+          const eventId = roomLatestDisplayEventId(room?.latest_event);
+          if (eventId && eventId.trim().length > 0) {
             settleCommandInBackground(api.markRoomAsRead(target.roomId, eventId));
           }
           return;

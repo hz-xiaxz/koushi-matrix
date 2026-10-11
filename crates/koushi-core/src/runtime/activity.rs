@@ -3,13 +3,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
     ActivityMarkReadTarget, ActivityResolutionState, ActivityRow, ActivityRowKind, ActivityState,
-    ActivityStream, ActivityTab, AppAction, AppState, OperationFailureKind, RoomLatestEventSummary,
-    RoomNotificationMode, RoomSummary, SpaceSummary,
+    ActivityStream, ActivityTab, AppAction, AppState, RoomLatestEventSummary, RoomNotificationMode,
+    RoomSummary, SpaceSummary, room_activity_unread_count,
 };
 
 use super::{ActivityResolutionRequest, RequestId};
-
-use crate::unread_trace;
 
 const MAX_ACTIVITY_RESOLUTION_ROOMS: usize = 16;
 const MAX_CANONICAL_ROOM_SLOTS: usize = 512;
@@ -58,6 +56,10 @@ pub(super) fn record_activity_transition(
 pub(super) struct ActivityProjection {
     canonical_rows_by_room: BTreeMap<String, BTreeMap<String, ActivityRow>>,
     resolution_rows_by_event_id: BTreeMap<String, ActivityRow>,
+    /// The exact fully-read marker against which resolver rows were selected.
+    resolution_marker_by_room: BTreeMap<String, String>,
+    /// Markers captured before dispatch, not markers observed when results return.
+    requested_resolution_marker_by_room: BTreeMap<String, String>,
     redacted_event_ids: BTreeSet<String>,
     hidden_event_ids_by_room: BTreeMap<String, BTreeSet<String>>,
     invalidated_placeholder_room_ids: BTreeSet<String>,
@@ -119,6 +121,7 @@ impl ActivityProjection {
             self.room_ordinals.clear();
             self.canonical_row_ordinals.clear();
             self.resolution_rows_by_event_id.clear();
+            self.resolution_marker_by_room.clear();
             self.resolution_row_ordinals.clear();
             return;
         }
@@ -146,11 +149,25 @@ impl ActivityProjection {
         self.enforce_resolution_bound();
     }
 
-    pub(super) fn ingest_resolution_rows(&mut self, rows: Vec<ActivityRow>) {
+    pub(super) fn ingest_resolution_rows(&mut self, rows: Vec<ActivityRow>, state: &AppState) {
         for row in rows {
             let Some(row) = Self::sanitize_row(row) else {
                 continue;
             };
+            let current_marker = state
+                .live_signals
+                .rooms
+                .get(&row.room_id)
+                .and_then(|signals| signals.fully_read_event_id.as_ref());
+            let Some(requested_marker) = self.requested_resolution_marker_by_room.get(&row.room_id)
+            else {
+                continue;
+            };
+            if current_marker != Some(requested_marker) {
+                continue;
+            }
+            self.resolution_marker_by_room
+                .insert(row.room_id.clone(), requested_marker.clone());
             self.insert_resolution_row(row);
         }
         self.enforce_resolution_bound();
@@ -277,6 +294,7 @@ impl ActivityProjection {
     }
 
     fn remove_resolution_rows_for_room(&mut self, room_id: &str) {
+        self.resolution_marker_by_room.remove(room_id);
         let event_ids = self
             .resolution_rows_by_event_id
             .iter()
@@ -452,133 +470,22 @@ impl ActivityProjection {
         rows
     }
 
+    /// Activity Unread contains room summaries, not proven event targets.
+    /// Reading is owned by the room/thread timeline after the user opens it.
     pub(super) fn mark_read(
         &mut self,
-        state: &AppState,
-        target: &ActivityMarkReadTarget,
+        _state: &AppState,
+        _target: &ActivityMarkReadTarget,
     ) -> ActivityMarkReadResult {
-        let (_recent, unread, _excluded) = self.snapshot(state);
-        let mut cleared_event_ids = Vec::new();
-        let mut cleared_placeholder_room_ids = Vec::new();
-        let mut cleared_event_row_room_ids = BTreeSet::new();
-        match target {
-            ActivityMarkReadTarget::All => {
-                for row in unread.rows {
-                    match row.kind {
-                        ActivityRowKind::Event => {
-                            if let Some(event_id) = row.event_id {
-                                cleared_event_ids.push(event_id);
-                                cleared_event_row_room_ids.insert(row.room_id);
-                            }
-                        }
-                        ActivityRowKind::RoomUnread => {
-                            cleared_placeholder_room_ids.push(row.room_id);
-                        }
-                    }
-                }
-            }
-            ActivityMarkReadTarget::Room {
-                room_id,
-                up_to_event_id,
-            } => {
-                let target_timestamp = unread
-                    .rows
-                    .iter()
-                    .find(|row| {
-                        row.room_id == *room_id
-                            && row.event_id.as_deref() == Some(up_to_event_id.as_str())
-                    })
-                    .map(|row| row.timestamp_ms);
-                for row in unread.rows {
-                    if row.room_id != *room_id {
-                        continue;
-                    }
-                    let matches_timestamp = target_timestamp
-                        .map(|timestamp| row.timestamp_ms <= timestamp)
-                        .unwrap_or(true);
-                    if !matches_timestamp {
-                        continue;
-                    }
-                    match row.kind {
-                        ActivityRowKind::Event => {
-                            if let Some(event_id) = row.event_id {
-                                cleared_event_ids.push(event_id);
-                                cleared_event_row_room_ids.insert(row.room_id);
-                            }
-                        }
-                        ActivityRowKind::RoomUnread => {
-                            cleared_placeholder_room_ids.push(row.room_id);
-                        }
-                    }
-                }
-            }
-        }
-        for event_id in &cleared_event_ids {
-            self.cleared_event_ids.insert(event_id.clone());
-            let ordinal = self.next_ordinal();
-            self.cleared_event_ordinals
-                .insert(event_id.clone(), ordinal);
-        }
-        for room_id in &cleared_placeholder_room_ids {
-            self.invalidated_placeholder_room_ids
-                .insert(room_id.clone());
-        }
-        // Suppress placeholder synthesis for rooms whose event rows are being
-        // cleared, until the reducer has zeroed out the room's unread counts.
-        for room_id in cleared_event_row_room_ids {
-            self.invalidated_placeholder_room_ids.insert(room_id);
-        }
-        self.enforce_cleared_event_bound();
-        ActivityMarkReadResult {
-            cleared_event_ids,
-            cleared_placeholder_room_ids,
-        }
+        ActivityMarkReadResult::default()
     }
 
     pub(super) fn fully_read_marker_updates(
         &mut self,
-        state: &AppState,
-        target: &ActivityMarkReadTarget,
+        _state: &AppState,
+        _target: &ActivityMarkReadTarget,
     ) -> Vec<(String, String)> {
-        match target {
-            ActivityMarkReadTarget::Room {
-                room_id,
-                up_to_event_id,
-            } => vec![(room_id.clone(), up_to_event_id.clone())],
-            ActivityMarkReadTarget::All => {
-                let (_recent, unread, _excluded) = self.snapshot(state);
-                let rooms_by_id = state
-                    .rooms
-                    .iter()
-                    .map(|room| (room.room_id.as_str(), room))
-                    .collect::<HashMap<_, _>>();
-                let mut latest_by_room: BTreeMap<String, (u64, String)> = BTreeMap::new();
-                for row in unread.rows {
-                    let event_id = match row.kind {
-                        ActivityRowKind::Event => row.event_id,
-                        ActivityRowKind::RoomUnread => rooms_by_id
-                            .get(row.room_id.as_str())
-                            .and_then(|room| activity_latest_display_event_id(room))
-                            .map(str::to_owned),
-                    };
-                    if let Some(event_id) = event_id {
-                        latest_by_room
-                            .entry(row.room_id)
-                            .and_modify(|(timestamp_ms, existing_event_id)| {
-                                if row.timestamp_ms > *timestamp_ms {
-                                    *timestamp_ms = row.timestamp_ms;
-                                    *existing_event_id = event_id.clone();
-                                }
-                            })
-                            .or_insert((row.timestamp_ms, event_id));
-                    }
-                }
-                latest_by_room
-                    .into_iter()
-                    .map(|(room_id, (_timestamp_ms, event_id))| (room_id, event_id))
-                    .collect()
-            }
-        }
+        Vec::new()
     }
 
     pub(super) fn event_at_or_after(&self, room_id: &str, timestamp_ms: u64) -> Option<String> {
@@ -622,6 +529,22 @@ impl ActivityProjection {
 
     pub(super) fn record_resolution_attempt(&mut self, candidates: BTreeMap<String, u64>) {
         self.resolution_attempts = candidates;
+        self.requested_resolution_marker_by_room.clear();
+    }
+
+    pub(super) fn record_resolution_request_markers(
+        &mut self,
+        requests: &[ActivityResolutionRequest],
+    ) {
+        self.requested_resolution_marker_by_room = requests
+            .iter()
+            .filter_map(|request| {
+                request
+                    .fully_read_event_id
+                    .as_ref()
+                    .map(|marker| (request.room_id.clone(), marker.clone()))
+            })
+            .collect();
     }
 
     /// Whether live Activity has a room-unread candidate no resolution
@@ -728,11 +651,7 @@ impl ActivityProjection {
         let excluded: BTreeSet<&str> = excluded_room_ids.iter().map(String::as_str).collect();
 
         let mut recent = Vec::new();
-        let mut unread = Vec::new();
         let mut recent_event_ids = BTreeSet::new();
-        // Newest unread event row per room. A room is covered only when that
-        // row reaches its known conversation activity (#1061).
-        let mut newest_unread_timestamp_by_room = BTreeMap::<String, u64>::new();
         let effective_rows = self.effective_rows();
         for row in effective_rows.values() {
             if excluded.contains(row.room_id.as_str()) {
@@ -741,32 +660,11 @@ impl ActivityProjection {
             let Some(room) = rooms_by_id.get(row.room_id.as_str()) else {
                 continue;
             };
-            let fully_read_event_id = state
-                .live_signals
-                .rooms
-                .get(row.room_id.as_str())
-                .and_then(|signals| signals.fully_read_event_id.as_deref());
             let mode = state
                 .room_notification_settings
                 .get(&room.room_id)
                 .map(|settings| settings.mode);
-            let room_activity_unread = room_has_activity_unread(room, mode);
-            let unread_by_marker = room_activity_unread
-                && match fully_read_event_id {
-                    Some(event_id) => match row.event_id.as_deref() {
-                        Some(row_event_id) if row_event_id == event_id => false,
-                        Some(_) => effective_rows
-                            .get(event_id)
-                            .map(|fully_read_row| row.timestamp_ms > fully_read_row.timestamp_ms)
-                            .unwrap_or(room_activity_unread),
-                        None => false,
-                    },
-                    None => true,
-                };
-            let unread_row = unread_by_marker
-                && !self
-                    .cleared_event_ids
-                    .contains(row.event_id.as_deref().unwrap_or(""));
+            let room_activity_unread = room_activity_unread_count_for_mode(room, mode) > 0;
             if !activity_recent_row_visible(mode, row.highlight, room_activity_unread) {
                 continue;
             }
@@ -781,21 +679,17 @@ impl ActivityProjection {
                 room_label: room.display_label.clone(),
                 sender_avatar,
                 context_label,
-                unread: unread_row,
-                highlight: row.highlight || (unread_row && room.highlight_count > 0),
+                unread: false,
+                highlight: row.highlight,
                 ..row.clone()
             };
             if let Some(event_id) = row.event_id.clone() {
                 recent_event_ids.insert(event_id);
             }
-            if row.unread {
-                record_newest_unread_timestamp(&mut newest_unread_timestamp_by_room, &row);
-                unread.push(row.clone());
-            }
             recent.push(row);
         }
 
-        for room in state.rooms.iter() {
+        for room in &state.rooms {
             if excluded.contains(room.room_id.as_str()) {
                 continue;
             }
@@ -808,43 +702,17 @@ impl ActivityProjection {
             if recent_event_ids.contains(display_event_id) {
                 continue;
             }
-            let fully_read_event_id = state
-                .live_signals
-                .rooms
-                .get(room.room_id.as_str())
-                .and_then(|signals| signals.fully_read_event_id.as_deref());
             let mode = state
                 .room_notification_settings
                 .get(&room.room_id)
                 .map(|settings| settings.mode);
-            let room_activity_unread = room_has_activity_unread(room, mode);
-            let has_room_metrics = room.unread_count > 0 || room_activity_unread;
-            let unread_row = room_activity_unread
-                && fully_read_event_id != Some(display_event_id)
-                && !self.cleared_event_ids.contains(display_event_id);
-            if has_room_metrics {
-                let reason = if !room_activity_unread {
-                    "plain_unread_only"
-                } else if unread_row {
-                    "unread"
-                } else if fully_read_event_id == Some(display_event_id) {
-                    "fully_read_latest"
-                } else {
-                    "cleared_latest"
-                };
-                unread_trace::trace_activity_room(
-                    "activity_recent_event",
-                    room,
-                    mode,
-                    unread_row,
-                    reason,
-                );
-            }
-            let latest_event_highlight = unread_row && room.highlight_count > 0;
-            if !activity_recent_row_visible(mode, latest_event_highlight, room_activity_unread) {
+            if !activity_recent_row_visible(
+                mode,
+                false,
+                room_activity_unread_count_for_mode(room, mode) > 0,
+            ) {
                 continue;
             }
-            let context_label = activity_row_context_label(room, &state.spaces);
             let mut row = ActivityRow::event(
                 room.room_id.clone(),
                 display_event_id.to_owned(),
@@ -853,123 +721,50 @@ impl ActivityProjection {
                 latest_event.sender_label.clone(),
                 latest_event.preview.clone(),
                 latest_event.timestamp_ms,
-                unread_row,
-                latest_event_highlight,
+                false,
+                false,
             );
             row.sender_avatar = latest_event.sender_avatar.clone();
             row.thread_root_event_id = latest_event.thread_root_event_id.clone();
-            row.context_label = context_label;
-            if row.unread {
-                record_newest_unread_timestamp(&mut newest_unread_timestamp_by_room, &row);
-                unread.push(row.clone());
-            }
+            row.context_label = activity_row_context_label(room, &state.spaces);
             recent.push(row);
         }
 
-        for room in state.rooms.iter() {
-            if excluded.contains(room.room_id.as_str()) {
-                continue;
-            }
-            let mode = state
-                .room_notification_settings
-                .get(&room.room_id)
-                .map(|settings| settings.mode);
-            let has_room_metrics = room.unread_count > 0 || room_has_activity_unread(room, mode);
-            if !has_room_metrics {
-                continue;
-            }
-            if !room_has_activity_unread(room, mode) {
-                unread_trace::trace_activity_room(
+        // The SDK count is verified at room scope. Fully-read markers, private
+        // receipts and the server notification counter can disagree, so no
+        // individual event row may claim to be unread here.
+        let mut unread: Vec<ActivityRow> = state
+            .rooms
+            .iter()
+            .filter(|room| !excluded.contains(room.room_id.as_str()))
+            .filter(|room| room_activity_unread_count(room) > 0)
+            .map(|room| {
+                crate::unread_trace::trace_activity_room(
                     "activity_placeholder",
                     room,
-                    mode,
-                    false,
-                    "plain_unread_only",
-                );
-                continue;
-            }
-            let latest_display_event_id = activity_latest_display_event_id(room);
-            let fully_read_event_id = state
-                .live_signals
-                .rooms
-                .get(room.room_id.as_str())
-                .and_then(|signals| signals.fully_read_event_id.as_deref());
-            if latest_display_event_id.is_some_and(|event_id| {
-                self.cleared_event_ids.contains(event_id) || fully_read_event_id == Some(event_id)
-            }) {
-                unread_trace::trace_activity_room(
-                    "activity_placeholder",
-                    room,
-                    mode,
-                    false,
-                    "latest_event_read",
-                );
-                continue;
-            }
-            if self
-                .invalidated_placeholder_room_ids
-                .contains(&room.room_id)
-            {
-                unread_trace::trace_activity_room(
-                    "activity_placeholder",
-                    room,
-                    mode,
-                    false,
-                    "cleared_local",
-                );
-                continue;
-            }
-            if newest_unread_timestamp_by_room
-                .get(&room.room_id)
-                .is_some_and(|newest_unread_timestamp_ms| {
-                    room.conversation_activity
-                        .is_none_or(|activity| *newest_unread_timestamp_ms >= activity.timestamp_ms)
-                })
-            {
-                continue;
-            }
-            let highlight = room.highlight_count > 0;
-            let timestamp_ms = activity_latest_display_event(room)
-                .map(|event| event.timestamp_ms)
-                .or_else(|| {
-                    room.conversation_activity
-                        .map(|activity| activity.timestamp_ms)
-                })
-                .unwrap_or_default();
-            let context_label = activity_row_context_label(room, &state.spaces);
-            let placeholder = ActivityRow::room_unread_placeholder(
-                room.room_id.clone(),
-                room.display_label.clone(),
-                timestamp_ms,
-                highlight,
-            );
-            let placeholder = ActivityRow {
-                context_label,
-                ..placeholder
-            };
-            unread_trace::trace_activity_room(
-                "activity_placeholder",
-                room,
-                mode,
-                true,
-                "room_metrics",
-            );
-            unread.push(placeholder);
-        }
-
-        self.invalidated_placeholder_room_ids.retain(|room_id| {
-            rooms_by_id
-                .get(room_id.as_str())
-                .map(|room| {
-                    let mode = state
+                    state
                         .room_notification_settings
                         .get(&room.room_id)
-                        .map(|settings| settings.mode);
-                    room_has_activity_unread(room, mode)
-                })
-                .unwrap_or(false)
-        });
-
+                        .map(|settings| settings.mode),
+                    true,
+                    "unread",
+                );
+                let timestamp_ms = room
+                    .conversation_activity
+                    .map(|activity| activity.timestamp_ms)
+                    .or_else(|| activity_latest_display_event(room).map(|event| event.timestamp_ms))
+                    .unwrap_or_default();
+                ActivityRow {
+                    context_label: activity_row_context_label(room, &state.spaces),
+                    ..ActivityRow::room_unread_placeholder(
+                        room.room_id.clone(),
+                        room.display_label.clone(),
+                        timestamp_ms,
+                        false,
+                    )
+                }
+            })
+            .collect();
         sort_activity_rows(&mut recent);
         sort_activity_rows(&mut unread);
 
@@ -1025,13 +820,6 @@ impl ActivityProjection {
     }
 }
 
-fn record_newest_unread_timestamp(newest: &mut BTreeMap<String, u64>, row: &ActivityRow) {
-    newest
-        .entry(row.room_id.clone())
-        .and_modify(|timestamp_ms| *timestamp_ms = (*timestamp_ms).max(row.timestamp_ms))
-        .or_insert(row.timestamp_ms);
-}
-
 fn activity_row_newest_first(left: &ActivityRow, right: &ActivityRow) -> std::cmp::Ordering {
     right
         .timestamp_ms
@@ -1053,33 +841,26 @@ fn bounded_event_ids(ids: Vec<String>) -> BTreeSet<String> {
     bounded.into_iter().collect()
 }
 
-fn room_has_activity_unread(room: &RoomSummary, mode: Option<RoomNotificationMode>) -> bool {
-    room_activity_unread_count_for_mode(room, mode) > 0
-}
-
 fn room_activity_unread_count_for_mode(
     room: &RoomSummary,
     mode: Option<RoomNotificationMode>,
 ) -> u64 {
-    // #1238: this is the notification-side counter behind the Activity Unread
-    // inbox, not the shared badge helper. A mention inside a thread is still a
-    // highlight, so the thread highlight term joins the client mention counter;
-    // plain thread unread deliberately does not, because the inbox keeps plain
-    // unread messages sidebar-only (canon, "Unread Source Of Truth").
+    // Activity remains notification-filtered, but server-only notification
+    // counts and manual flags cannot prove an unread message. Require the
+    // client-observed main/thread count before applying the push-rule filter.
+    let confirmed_unread_count = room_activity_unread_count(room);
+    if confirmed_unread_count == 0 {
+        return 0;
+    }
     let highlight_total = room
         .highlight_count
         .saturating_add(room.thread_highlight_count);
     if matches!(mode, Some(RoomNotificationMode::Mentions)) && highlight_total == 0 {
         0
     } else {
-        let count = room.notification_count.max(highlight_total);
-        if count > 0 {
-            count
-        } else if room.marked_unread {
-            1
-        } else {
-            0
-        }
+        room.notification_count
+            .max(highlight_total)
+            .min(confirmed_unread_count)
     }
 }
 
@@ -1125,44 +906,12 @@ fn sort_activity_rows(rows: &mut [ActivityRow]) {
 }
 
 pub(super) fn guard_activity_resolution_completion(
-    state: &AppState,
+    _state: &AppState,
     action: AppAction,
 ) -> AppAction {
-    let (generation, failure_kind) = match &action {
-        AppAction::ActivityResolutionSucceeded { generation } => (*generation, None),
-        AppAction::ActivityResolutionFailed {
-            generation, kind, ..
-        } => (*generation, Some(*kind)),
-        _ => return action,
-    };
-    let ActivityState::Open { unread, .. } = &state.activity else {
-        return action;
-    };
-    let ActivityResolutionState::Resolving {
-        generation: active_generation,
-        ..
-    } = unread.resolution
-    else {
-        return action;
-    };
-    if active_generation != generation {
-        return action;
-    }
-
-    let unresolved_room_count = unread
-        .rows
-        .iter()
-        .filter(|row| row.kind == ActivityRowKind::RoomUnread)
-        .count() as u32;
-    if unresolved_room_count == 0 {
-        AppAction::ActivityResolutionSucceeded { generation }
-    } else {
-        AppAction::ActivityResolutionFailed {
-            generation,
-            unresolved_room_count,
-            kind: failure_kind.unwrap_or(OperationFailureKind::Timeout),
-        }
-    }
+    // Room summaries remain visible after hydration because no event-level
+    // unread proof is claimed. Their presence is not a resolution failure.
+    action
 }
 
 pub(super) fn normalize_activity_resolution_action(

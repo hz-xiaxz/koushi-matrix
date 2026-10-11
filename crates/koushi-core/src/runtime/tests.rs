@@ -3804,8 +3804,8 @@ async fn live_unresolved_activity_starts_bounded_resolution_while_open() {
     assert!(second_generation > first_generation);
     assert!(second_rooms.contains(second_room));
 
-    // Once every current candidate was attempted, a no-progress settlement
-    // stays retryable instead of looping.
+    // Once every current candidate was attempted, a successful hydration
+    // settles while verified room summaries remain visible.
     action_tx
         .send(vec![AppAction::ActivityResolutionSucceeded {
             generation: second_generation,
@@ -3814,11 +3814,7 @@ async fn live_unresolved_activity_starts_bounded_resolution_while_open() {
         .expect("second resolution settles");
     wait_for_unread_resolution(
         &mut snapshot_rx,
-        koushi_state::ActivityResolutionState::Failed {
-            generation: second_generation,
-            unresolved_room_count: 2,
-            failure_kind: OperationFailureKind::Timeout,
-        },
+        koushi_state::ActivityResolutionState::Idle,
     )
     .await;
     assert!(

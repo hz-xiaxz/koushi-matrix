@@ -2098,8 +2098,8 @@ test("room sections follow Element-aligned order and render Rust-owned counts", 
   await expect(roomsSection.getByRole("button", { name: "Low Priority Room" })).toHaveCount(0);
 
   const favouriteRoom = roomsSection.getByRole("button", { name: "Favourite Room" });
-  await expect(favouriteRoom).toHaveAttribute("data-mention-count", "1");
-  await expect(favouriteRoom.locator(".room-mention-dot")).toBeVisible();
+  await expect(favouriteRoom).not.toHaveAttribute("data-mention-count", "1");
+  await expect(favouriteRoom.locator(".room-mention-dot")).toHaveCount(0);
   await expect(favouriteRoom.locator(".room-count")).toHaveText("1");
   await expect(page.locator(".workspace-rail .workspace-button").first()).toHaveAttribute(
     "data-count",
@@ -2415,7 +2415,7 @@ test("notification attention snapshot drives room, space, thread, and click rout
   const attentionRoom = page.getByRole("button", { name: "Attention Room" });
   const lowPriorityRoom = page.getByRole("button", { name: "Quiet Low Priority" });
   await expect(attentionRoom.locator(".room-count")).toHaveText("4");
-  await expect(attentionRoom.locator(".room-mention-dot")).toBeVisible();
+  await expect(attentionRoom.locator(".room-mention-dot")).toHaveCount(0);
   await expect(lowPriorityRoom.locator(".room-count")).toHaveText("8");
   const attentionSpace = page.getByRole("button", { name: "Attention Space" });
   await expect(attentionSpace).toHaveAttribute("data-count", "4");

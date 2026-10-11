@@ -1913,7 +1913,7 @@ impl TimelineManagerActor {
     }
 }
 
-/// Issue #872: the newest canonical item a settled viewport can claim the user
+/// The newest canonical item a settled viewport can claim the user
 /// read, together with its navigation index.
 ///
 /// A Room timeline hides thread replies behind their root row and reports the
@@ -1927,19 +1927,11 @@ fn viewed_boundary_target<'a>(
     navigation_items: &'a [TimelineItem],
     display_items: &'a [TimelineItem],
     last_visible_event_id: &str,
-    bottom_arrival: TimelineBottomArrival,
+    _bottom_arrival: TimelineBottomArrival,
 ) -> Option<(usize, &'a TimelineItem)> {
-    // #872: inside a thread, a live edge the client scrolled to is not something
-    // the reader read. Opening a thread snapped it to the newest reply, and that
-    // snap alone acknowledged the attention count the same open had just
-    // computed, so the badge and the "Thread notifications" pill were never
-    // observable. A bottom the reader reached — or content that fits entirely on
-    // screen — still reads.
-    if matches!(kind, TimelineKind::Thread { .. })
-        && bottom_arrival == TimelineBottomArrival::Programmatic
-    {
-        return None;
-    }
+    // The caller has already proved that the latest event is visible at a
+    // settled, gap-free bottom. How the viewport arrived there cannot make a
+    // visible thread reply unread.
     if matches!(kind, TimelineKind::Room { .. }) {
         // A reordered root can expose a reply's activity identity. It proves
         // the viewport reached this row, not that the hidden reply was read.

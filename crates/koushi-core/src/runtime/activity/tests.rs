@@ -7,7 +7,51 @@ use koushi_state::{
 use std::collections::BTreeSet;
 
 #[test]
-fn activity_resolution_cannot_succeed_while_room_placeholders_remain() {
+fn activity_does_not_project_server_only_unread_metrics() {
+    let mut room = unread_diagnostic_room("!room:example.invalid");
+    room.unread_count = 0;
+    room.thread_unread_count = 0;
+    room.notification_count = 7;
+    room.highlight_count = 7;
+    assert_eq!(room_activity_unread_count_for_mode(&room, None), 0);
+}
+
+#[test]
+fn resolver_result_from_an_old_read_marker_cannot_verify_an_event() {
+    let room_id = "!room:example.invalid";
+    let mut projection = ActivityProjection::default();
+    projection.record_resolution_request_markers(&[ActivityResolutionRequest {
+        room_id: room_id.to_owned(),
+        fully_read_event_id: Some("$marker-a:example.invalid".to_owned()),
+        own_user_id: "@self:example.invalid".to_owned(),
+    }]);
+    let mut state = AppState::default();
+    state.live_signals.rooms.insert(
+        room_id.to_owned(),
+        koushi_state::RoomLiveSignals {
+            fully_read_event_id: Some("$marker-b:example.invalid".to_owned()),
+            ..Default::default()
+        },
+    );
+    projection.ingest_resolution_rows(
+        vec![ActivityRow::event(
+            room_id.to_owned(),
+            "$old-result:example.invalid".to_owned(),
+            Some("@peer:example.invalid".to_owned()),
+            String::new(),
+            None,
+            None,
+            1,
+            false,
+            false,
+        )],
+        &state,
+    );
+    assert!(projection.resolution_rows_by_event_id.is_empty());
+}
+
+#[test]
+fn activity_resolution_can_succeed_while_verified_room_summaries_remain() {
     let generation = 7;
     let state = AppState {
         activity: ActivityState::Open {
@@ -35,11 +79,7 @@ fn activity_resolution_cannot_succeed_while_room_placeholders_remain() {
             &state,
             AppAction::ActivityResolutionSucceeded { generation },
         ),
-        AppAction::ActivityResolutionFailed {
-            generation,
-            unresolved_room_count: 1,
-            kind: OperationFailureKind::Timeout,
-        }
+        AppAction::ActivityResolutionSucceeded { generation }
     );
 }
 
@@ -105,7 +145,7 @@ fn activity_resolution_request_batch_has_an_account_wide_cap() {
         .map(|index| ActivityResolutionRequest {
             room_id: format!("!room-{index}:example.invalid"),
             fully_read_event_id: None,
-            minimum_unread_count: 1,
+            own_user_id: "@self:example.invalid".to_owned(),
         })
         .collect::<Vec<_>>();
     let first = cap_activity_resolution_requests(requests.clone(), 1);
@@ -168,10 +208,9 @@ fn activity_projection_ignores_plain_unread_count_for_activity_unread() {
     let mut projection = ActivityProjection::default();
     let (recent, unread, _excluded_room_ids) = projection.snapshot(&state);
 
-    assert!(
-        unread.rows.is_empty(),
-        "Activity Unread should not invent un-navigable rows from plain unread message counts"
-    );
+    assert_eq!(unread.rows.len(), 1);
+    assert_eq!(unread.rows[0].kind, ActivityRowKind::RoomUnread);
+    assert!(unread.rows[0].event_id.is_none());
     assert_eq!(recent.rows.len(), 1);
     assert!(
         !recent.rows[0].unread,
@@ -197,7 +236,7 @@ fn canonical_activity_authority_hidden_reversal_and_redaction_tombstone_converge
         )
     };
     let mut projection = ActivityProjection::default();
-    projection.ingest_resolution_rows(vec![row("resolver", 1)]);
+    projection.ingest_resolution_rows(vec![row("resolver", 1)], &AppState::default());
     projection.reconcile_canonical_window(
         room_id.to_owned(),
         vec![row("canonical", 2)],
@@ -318,10 +357,23 @@ fn canonical_activity_provenance_enforces_every_reviewed_bound() {
     );
 
     let mut resolver_bound = ActivityProjection::default();
+    resolver_bound.requested_resolution_marker_by_room.insert(
+        "!room-0:example.invalid".to_owned(),
+        "$before:example.invalid".to_owned(),
+    );
+    let mut resolver_state = AppState::default();
+    resolver_state.live_signals.rooms.insert(
+        "!room-0:example.invalid".to_owned(),
+        koushi_state::RoomLiveSignals {
+            fully_read_event_id: Some("$before:example.invalid".to_owned()),
+            ..Default::default()
+        },
+    );
     resolver_bound.ingest_resolution_rows(
         (0..=ACTIVITY_RECENT_MAX_ROWS)
             .map(|event_index| row(0, event_index))
             .collect(),
+        &resolver_state,
     );
     assert_eq!(
         resolver_bound.resolution_rows_by_event_id.len(),
@@ -395,7 +447,7 @@ fn activity_projection_bounds_recent_history_to_newest_observed_rows() {
 }
 
 #[test]
-fn activity_projection_keeps_old_unread_rows_outside_recent_window() {
+fn activity_projection_does_not_label_cached_rows_unread_without_a_boundary() {
     let state = AppState {
         rooms: vec![unread_diagnostic_room("!room:example.invalid")],
         ..Default::default()
@@ -422,12 +474,11 @@ fn activity_projection_keeps_old_unread_rows_outside_recent_window() {
     let (recent, unread, _excluded_room_ids) = projection.snapshot(&state);
 
     assert_eq!(recent.rows.len(), ACTIVITY_RECENT_MAX_ROWS);
-    assert_eq!(unread.rows.len(), ACTIVITY_RECENT_MAX_ROWS + 1);
     assert!(
         unread
             .rows
             .iter()
-            .any(|row| { row.event_id.as_deref() == Some("$event-0:example.invalid") })
+            .all(|row| row.kind != ActivityRowKind::Event)
     );
     assert_eq!(
         projection.effective_rows().len(),
@@ -480,7 +531,8 @@ fn activity_projection_ignores_plain_unread_count_for_ingested_event_rows() {
     )]);
     let (recent, unread, _excluded_room_ids) = projection.snapshot(&state);
 
-    assert!(unread.rows.is_empty());
+    assert_eq!(unread.rows.len(), 1);
+    assert_eq!(unread.rows[0].kind, ActivityRowKind::RoomUnread);
     assert_eq!(recent.rows.len(), 1);
     assert!(
         !recent.rows[0].unread,
@@ -555,7 +607,8 @@ fn activity_projection_skips_recent_rows_for_mentions_mode_without_highlight() {
     let (recent, unread, _excluded_room_ids) = projection.snapshot(&state);
 
     assert!(recent.rows.is_empty());
-    assert!(unread.rows.is_empty());
+    assert_eq!(unread.rows.len(), 1);
+    assert_eq!(unread.rows[0].kind, ActivityRowKind::RoomUnread);
 }
 
 #[test]
@@ -882,7 +935,7 @@ fn stale_unread_dm_old_row() -> ActivityRow {
 }
 
 #[test]
-fn old_unread_row_does_not_hide_newer_unresolved_room_activity() {
+fn old_row_without_observed_read_boundary_is_not_claimed_unread() {
     // #1061 gap 2: an old cached unread row is not proof that newer
     // conversation activity was resolved.
     let state = stale_unread_dm_state(None);
@@ -896,9 +949,7 @@ fn old_unread_row_does_not_hide_newer_unresolved_room_activity() {
         unread
             .rows
             .iter()
-            .any(|row| row.kind == ActivityRowKind::Event
-                && row.event_id.as_deref() == Some("$old:example.invalid")),
-        "the old unread row stays visible"
+            .all(|row| row.kind != ActivityRowKind::Event)
     );
     let placeholder = unread
         .rows
@@ -910,7 +961,7 @@ fn old_unread_row_does_not_hide_newer_unresolved_room_activity() {
 }
 
 #[test]
-fn unread_row_covering_current_activity_suppresses_the_room_placeholder() {
+fn latest_row_without_observed_read_boundary_is_not_claimed_unread() {
     let state = stale_unread_dm_state(Some(RoomLatestEventSummary {
         event_id: "$new:example.invalid".to_owned(),
         relation_type: None,
@@ -938,8 +989,7 @@ fn unread_row_covering_current_activity_suppresses_the_room_placeholder() {
         unread
             .rows
             .iter()
-            .all(|row| row.kind == ActivityRowKind::Event),
-        "covered activity needs no resolution placeholder"
+            .all(|row| row.kind != ActivityRowKind::Event)
     );
 }
 

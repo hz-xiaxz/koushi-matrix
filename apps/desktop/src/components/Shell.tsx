@@ -90,9 +90,8 @@ function filterSidebarRooms(rooms: RoomListItem[], query: string): RoomListItem[
 /**
  * Accessible name for the Home rail button.
  *
- * The badge shows one Rust-owned total, so the label is where unread messages
- * and invites stay individually readable (#330). A quiet Home keeps the plain
- * name rather than announcing two zeroes.
+ * The Home rail keeps unread messages and pending invitations in separate
+ * visual badges. A quiet Home keeps the plain name.
  */
 function accountHomeLabel(home: AccountHomeItem): string {
   if (home.attention_count === 0) {
@@ -220,11 +219,18 @@ export function AccountTabStrip({
               <span className="account-tab-label">{label}</span>
               <span className="account-tab-server">{shortHomeserverName(tab.homeserver)}</span>
               {tab.status === "ready" ? (
-                tab.unreadCount > 0 ? (
-                  <span className="account-tab-unread">{tab.unreadCount > 99 ? "99+" : tab.unreadCount}</span>
-                ) : (
-                  <span className="account-tab-ready-dot" role="img" aria-label={status} />
-                )
+                <>
+                  {tab.unreadCount > 0 ? (
+                    <span className="account-tab-unread">{tab.unreadCount > 99 ? "99+" : tab.unreadCount}</span>
+                  ) : (tab.inviteCount ?? 0) === 0 ? (
+                    <span className="account-tab-ready-dot" role="img" aria-label={status} />
+                  ) : null}
+                  {(tab.inviteCount ?? 0) > 0 ? (
+                    <span className="account-tab-invite" title={t("accountTabs.inviteCount", { count: tab.inviteCount ?? 0 })}>
+                      {tab.inviteCount! > 99 ? "99+" : tab.inviteCount}
+                    </span>
+                  ) : null}
+                </>
               ) : tab.status === "needsVerification" ? (
                 <AlertTriangle size={ICON_SIZE.small} aria-label={status} />
               ) : tab.status === "restoring" || tab.status === "authenticating" || tab.status === "loggingOut" ? (
@@ -484,7 +490,8 @@ export function WorkspaceRail({
             className={`workspace-button workspace-system-button workspace-home-button ${
               snapshot.sidebar.account_home.is_active ? "is-active" : ""
             }`}
-            data-count={snapshot.sidebar.account_home.attention_count || undefined}
+            data-count={snapshot.sidebar.account_home.unread_count || undefined}
+            data-invite-count={snapshot.sidebar.account_home.invite_count || undefined}
             type="button"
             aria-label={accountHomeLabel(snapshot.sidebar.account_home)}
             aria-current={snapshot.sidebar.account_home.is_active ? "page" : undefined}
@@ -577,9 +584,7 @@ export function WorkspaceRail({
                     fallbackMode={localIcon || hasLocalName ? "compactLabel" : "elementSpace"}
                     onRequestAvatarThumbnail={onRequestAvatarThumbnail}
                   />
-                  {/* The overlay sits at the avatar's *upper* trailing corner: the
-                      unread/notification count owns the lower one, and the access
-                      overlay must never obscure it. */}
+                  {/* The unread count sits above the avatar; access stays below. */}
                   <span
                     className="workspace-access-overlay"
                     data-space-access={railSummary}
@@ -1363,10 +1368,7 @@ function RoomButton({
       ? dmUserIds[0]
       : null;
   const isOnlineDm = dmUserId ? presence[dmUserId] === "online" : false;
-  const hasUnreadContent = room.has_unread_content ?? room.unread_count > 0;
   const displayCount = room.display_count ?? room.unread_count;
-  const mentionCount = room.highlight_count ?? (room.has_unread_mention ? 1 : 0);
-  const attentionHighlighted = room.is_attention_highlighted ?? mentionCount;
   // #1327: a joined ordinary room row shows its own access condition; while it
   // has not been projected the row says so instead of guessing. A DM row shows
   // neither an encryption nor an access indicator, and lanes without a joined
@@ -1397,9 +1399,8 @@ function RoomButton({
     return (
     <button
       className={`room-item ${room.room_id === activeRoomId ? "is-active" : ""}`}
-      aria-label={roomLabel}
+      aria-label={sourceRoom?.marked_unread && displayCount === 0 ? `${roomLabel}, ${t("room.manuallyMarkedUnread")}` : roomLabel}
       data-access={access?.glyph ?? undefined}
-      data-mention-count={mentionCount || undefined}
       data-room-kind={kind}
       data-testid="room-item"
       type="button"
@@ -1437,7 +1438,13 @@ function RoomButton({
             kind: "room",
             roomId: room.room_id,
             tags: room.tags ?? EMPTY_ROOM_TAGS,
-            dmUserIds: dmUserId ? [dmUserId] : []
+            dmUserIds: dmUserId ? [dmUserId] : [],
+            canMarkRoomAsRead:
+              ((room.main_unread_count ?? room.unread_count) > 0 || sourceRoom?.marked_unread === true) &&
+              Boolean(sourceRoom?.latest_event?.event_id) &&
+              !sourceRoom?.latest_event?.is_redacted &&
+              !sourceRoom?.latest_event?.relation_type &&
+              !sourceRoom?.latest_event?.thread_root_event_id
           })
         );
       }}
@@ -1492,14 +1499,19 @@ function RoomButton({
             {roomMembershipLabel(room.membership)}
           </span>
         ) : null}
-        {mentionCount ? <span className="room-mention-dot" aria-hidden="true" /> : null}
-        {hasUnreadContent && displayCount === 0 ? (
-          <span className="room-unread-dot" aria-hidden="true" />
-        ) : null}
         {displayCount > 0 ? (
-          <span className={`room-count ${attentionHighlighted ? "is-attention" : ""}`}>
+          <span
+            className="room-count"
+            title={t(room.is_muted ? "room.mutedUnreadBreakdown" : "room.unreadBreakdown", {
+              main: room.main_unread_count ?? 0,
+              threads: room.thread_unread_count ?? 0,
+            })}
+          >
             {displayCount}
           </span>
+        ) : null}
+        {displayCount === 0 && sourceRoom?.marked_unread ? (
+          <span className="room-unread-dot" title={t("room.manuallyMarkedUnread")} />
         ) : null}
       </span>
     </button>

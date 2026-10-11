@@ -10,6 +10,61 @@ import type { SpaceSummary } from "../domain/types";
 afterEach(cleanup);
 
 describe("SpaceInfoPanel", () => {
+  test("uses main and thread unread for each room and excludes muted rooms from the Space total", () => {
+    const markup = renderToStaticMarkup(
+      <SpaceInfoPanel
+        fallbackName="Workspace"
+        rooms={[
+          {
+            room_id: "!active:example.invalid",
+            display_name: "Active",
+            display_label: "Active",
+            original_display_label: "Active",
+            avatar: null,
+            is_dm: false,
+            dm_user_ids: [],
+            tags: { favourite: null, low_priority: null },
+            parent_space_ids: ["!space:example.invalid"],
+            dm_space_ids: [],
+            is_encrypted: false,
+            unread_count: 1,
+            thread_unread_count: 2
+          },
+          {
+            room_id: "!muted:example.invalid",
+            display_name: "Muted",
+            display_label: "Muted",
+            original_display_label: "Muted",
+            avatar: null,
+            is_dm: false,
+            dm_user_ids: [],
+            tags: { favourite: null, low_priority: null },
+            parent_space_ids: ["!space:example.invalid"],
+            dm_space_ids: [],
+            is_encrypted: false,
+            unread_count: 4
+          }
+        ]}
+        roomNotificationSettings={{
+          "!muted:example.invalid": { mode: { kind: "mute" }, operation: { kind: "idle" } }
+        }}
+        space={{
+          space_id: "!space:example.invalid",
+          raw_name: null,
+          display_name: "Workspace",
+          avatar: null,
+          join_rule: null,
+          child_room_ids: ["!active:example.invalid", "!muted:example.invalid"],
+          parent_side_child_room_ids: []
+        }}
+      />
+    );
+
+    expect(markup).toContain("Unread</span><strong>3</strong>");
+    expect(markup).toContain("3 unread");
+    expect(markup).toContain("4 unread");
+  });
+
   test("renders space identity, child rooms, unread total, and Element-like entries", () => {
     const markup = renderToStaticMarkup(
       <SpaceInfoPanel

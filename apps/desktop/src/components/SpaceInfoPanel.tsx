@@ -7,6 +7,7 @@ import type {
   HistoryExportState,
   RoomJoinRule,
   RoomManagementState,
+  RoomNotificationSettings,
   RoomSummary,
   SpaceChildMembership,
   SpaceChildSummary,
@@ -33,6 +34,7 @@ export function SpaceInfoPanel({
   localIcon = "",
   localName = "",
   rooms,
+  roomNotificationSettings = {},
   roomManagement,
   space,
   spaceChildren = [],
@@ -50,6 +52,7 @@ export function SpaceInfoPanel({
   localIcon?: string;
   localName?: string;
   rooms: RoomSummary[];
+  roomNotificationSettings?: Record<string, RoomNotificationSettings>;
   roomManagement?: RoomManagementState;
   space: SpaceSummary | null;
   /** Issue #961: every child the Space advertises, joined or not. */
@@ -84,7 +87,16 @@ export function SpaceInfoPanel({
         .map((roomId) => rooms.find((room) => room.room_id === roomId))
         .filter((room): room is RoomSummary => Boolean(room && !room.is_dm))
     : rooms.filter((room) => !room.is_dm);
-  const unreadTotal = childRooms.reduce((sum, room) => sum + room.unread_count, 0);
+  const roomUnreadCount = (room: RoomSummary) =>
+    room.unread_count + (room.thread_unread_count ?? 0);
+  const unreadTotal = childRooms.reduce(
+    (sum, room) =>
+      sum +
+      (room.tags.low_priority || roomNotificationSettings[room.room_id]?.mode.kind === "mute"
+        ? 0
+        : roomUnreadCount(room)),
+    0
+  );
   const childRoomIds = new Set([
     ...childRooms.map((room) => room.room_id),
     ...spaceChildren.map((child) => child.room_id)
@@ -268,7 +280,7 @@ export function SpaceInfoPanel({
           {childRooms.map((room) => (
             <div className="settings-detail-row" key={room.room_id}>
               <span dir="auto">{roomDisplayLabel(room)}</span>
-              <small dir="auto">{room.unread_count ? t("room.unreadCount", { count: room.unread_count }) : room.room_id}</small>
+              <small dir="auto">{roomUnreadCount(room) ? t("room.unreadCount", { count: roomUnreadCount(room) }) : room.room_id}</small>
             </div>
           ))}
           {/*
@@ -316,7 +328,7 @@ export function SpaceInfoPanel({
         <div className="settings-detail-list">
           <DetailRow label={t("space.roomMembership")} value={space ? t("space.childRooms") : t("space.allRooms")} />
           <DetailRow label={t("space.directMessages")} value={t("room.globalDmList")} />
-          <DetailRow label={t("room.notifications")} value={unreadTotal ? t("room.unreadCount", { count: unreadTotal }) : t("space.noUnread")} />
+          <DetailRow label={t("room.unread")} value={unreadTotal ? t("room.unreadCount", { count: unreadTotal }) : t("space.noUnread")} />
         </div>
       </section>
 

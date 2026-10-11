@@ -1231,16 +1231,18 @@ impl TimelineActor {
         true
     }
 
-    /// #1259: read the SDK thread cache for this room's roots. `force` re-reads every
-    /// root the window shows, which is what a thread read needs because it changes the
-    /// counters without changing the room-side summary identity.
+    /// #1259: read the SDK thread cache for this room's roots. A forced read
+    /// also revisits tracked unread roots outside the current room window.
     pub(super) async fn refresh_thread_unread_counts(&mut self, force: bool) {
         if !matches!(self.key.kind, TimelineKind::Room { .. }) {
             return;
         }
         let room_id = self.key.room_id().to_owned();
         let candidates = if force {
-            crate::threads_list::window_thread_roots(&self.navigation_items)
+            self.thread_root_projection_service
+                .lock()
+                .expect("thread-root projection service lock must not be poisoned")
+                .roots_forced_unread_refresh(&room_id, &self.navigation_items)
         } else {
             self.thread_root_projection_service
                 .lock()
@@ -1308,16 +1310,14 @@ impl TimelineActor {
         });
     }
 
-    /// #1259: whether any visible thread root still reports unread replies.
+    /// #1259: whether any tracked thread root still reports unread replies.
     fn has_unread_thread_root(&self) -> bool {
         let room_id = self.key.room_id();
         let service = self
             .thread_root_projection_service
             .lock()
             .expect("thread-root projection service lock must not be poisoned");
-        crate::threads_list::window_thread_roots(&self.navigation_items)
-            .into_iter()
-            .any(|(root_event_id, _)| service.thread_unread_for(room_id, &root_event_id).unread > 0)
+        service.has_tracked_unread_root(room_id)
     }
 
     /// #1259: re-overlay the root items whose dot changed and emit a `Set` for each, so

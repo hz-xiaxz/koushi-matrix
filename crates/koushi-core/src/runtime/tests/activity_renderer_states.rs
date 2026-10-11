@@ -19,7 +19,7 @@ const OLD_EVENT: &str = "$activity-renderer-old:example.invalid";
 const WAIT: Duration = Duration::from_secs(1);
 
 fn open_activity_state() -> AppState {
-    AppState {
+    let mut state = AppState {
         session: SessionState::Ready(SessionInfo {
             homeserver: "https://example.invalid".to_owned(),
             user_id: "@synthetic:example.invalid".to_owned(),
@@ -33,7 +33,15 @@ fn open_activity_state() -> AppState {
             mark_read: Default::default(),
         },
         ..AppState::default()
-    }
+    };
+    state.live_signals.rooms.insert(
+        DM.to_owned(),
+        koushi_state::RoomLiveSignals {
+            fully_read_event_id: Some("$before:example.invalid".to_owned()),
+            ..Default::default()
+        },
+    );
+    state
 }
 
 /// A notified unread DM whose newest activity is at `activity_timestamp_ms`.
@@ -136,8 +144,8 @@ async fn new_unread_dm_states() -> (ActivityState, ActivityState) {
     (resolving, resolved)
 }
 
-/// An old unread row stays while newer activity in the same room resolves,
-/// then fails: the stream never looks complete.
+/// An old cached row lacks read-boundary proof while newer activity in the
+/// same room resolves, then fails: the stream never looks complete.
 async fn stale_row_states() -> (ActivityState, ActivityState) {
     let data_dir = tempfile::tempdir().expect("runtime data directory");
     let (actor, _command_tx, action_tx, _account_rx, _event_rx, mut snapshot_rx, ..) =
@@ -204,13 +212,13 @@ async fn activity_renderer_states_match_the_checked_in_artifact() {
     assert!(
         unread_rows(&new_dm_resolved)
             .iter()
-            .all(|row| row.kind == ActivityRowKind::Event)
+            .all(|row| row.kind == ActivityRowKind::RoomUnread)
     );
     for activity in [&stale_resolving, &stale_failed] {
         let rows = unread_rows(activity);
         assert!(
             rows.iter()
-                .any(|row| row.event_id.as_deref() == Some(OLD_EVENT))
+                .all(|row| row.event_id.as_deref() != Some(OLD_EVENT))
         );
         assert!(
             rows.iter()

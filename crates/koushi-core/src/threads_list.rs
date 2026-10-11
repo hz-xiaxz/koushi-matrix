@@ -264,6 +264,47 @@ pub(crate) fn window_thread_roots(
 }
 
 impl ThreadRootProjectionService {
+    /// A confirmed leave ends the lifetime of cached threaded read state.
+    /// Ordinary timeline unsubscribe deliberately retains it.
+    pub(crate) fn forget_room_attention(&mut self, room_id: &str) {
+        self.thread_unread
+            .retain(|(entry_room_id, _), _| entry_room_id != room_id);
+        self.thread_unread_signatures
+            .retain(|(entry_room_id, _), _| entry_room_id != room_id);
+    }
+
+    /// Forced refreshes include roots still contributing unread attention even
+    /// after they have scrolled out of the room timeline window.
+    pub(crate) fn roots_forced_unread_refresh(
+        &self,
+        room_id: &str,
+        items: &[koushi_protocol::event::TimelineItem],
+    ) -> Vec<(String, String)> {
+        let mut roots = window_thread_roots(items)
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
+        for ((tracked_room, root_event_id), attention) in &self.thread_unread {
+            if tracked_room != room_id || (attention.unread == 0 && attention.highlight == 0) {
+                continue;
+            }
+            roots.entry(root_event_id.clone()).or_insert_with(|| {
+                self.thread_unread_signatures
+                    .get(&(tracked_room.clone(), root_event_id.clone()))
+                    .cloned()
+                    .unwrap_or_default()
+            });
+        }
+        roots.into_iter().collect()
+    }
+
+    pub(crate) fn has_tracked_unread_root(&self, room_id: &str) -> bool {
+        self.thread_unread
+            .iter()
+            .any(|((tracked_room, _), attention)| {
+                tracked_room == room_id && (attention.unread > 0 || attention.highlight > 0)
+            })
+    }
+
     /// #1259: the roots whose room-side summary changed, so the caller can read their
     /// SDK thread caches without holding this lock across an await.
     pub(crate) fn roots_needing_unread_refresh(

@@ -106,6 +106,10 @@ pub enum ThreadsListState {
         room_id: String,
         request_id: u64,
         failure_kind: OperationFailureKind,
+        /// Roots with locally observed unread replies remain navigable even
+        /// when the thread metadata service cannot load.
+        #[serde(default)]
+        items: Vec<ThreadsListItem>,
     },
 }
 
@@ -167,9 +171,9 @@ pub struct ThreadsListItem {
 ///
 /// `unread` and `highlight` are the thread cache's own `num_unread` /
 /// `num_mentions`. The reducer sums these per room into
-/// `RoomSummary.thread_unread_count` / `thread_highlight_count`, which the shared
-/// badge helper maxes against the main-timeline counters; a root's value never
-/// enters the main-only `RoomSummary.unread_count`.
+/// `RoomSummary.thread_unread_count` / `thread_highlight_count`. The shared
+/// badge helper adds confirmed threaded unread to main-timeline unread; a
+/// root's value never enters the main-only `RoomSummary.unread_count`.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ThreadRootAttention {
     pub unread: u32,

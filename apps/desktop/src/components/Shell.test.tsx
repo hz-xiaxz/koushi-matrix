@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EntityAvatar, Sidebar, WorkspaceRail, composerSendingAccount } from "./Shell";
+import { AccountTabStrip, EntityAvatar, Sidebar, WorkspaceRail, composerSendingAccount } from "./Shell";
 import { readyDesktopSnapshotFixture } from "../test/desktopApiFixture";
 import type { AccountTabSummary, DesktopSnapshot, RoomListItem } from "../domain/types";
 import { setActiveLocaleProfile, t } from "../i18n/messages";
@@ -100,6 +100,20 @@ afterEach(() => {
 });
 
 describe("Rust-projected workspace shell", () => {
+  it("shows verified unread and pending invitations as separate account badges", () => {
+    render(<AccountTabStrip
+      tabs={[{
+        id: "account-one", accountKey: "@alice:example.invalid", homeserver: "https://example.invalid",
+        displayName: "Alice", avatarSourceRef: null, status: "ready", unreadCount: 2, inviteCount: 1
+      }]}
+      selectedTabId="account-one"
+      onSelect={vi.fn()}
+      onAdd={vi.fn()}
+      onRemove={vi.fn()}
+    />);
+    expect(document.querySelector(".account-tab-unread")?.textContent).toBe("2");
+    expect(document.querySelector(".account-tab-invite")?.textContent).toBe("1");
+  });
   // #1246: the reorder drag must not put the bare room ID on the system text
   // pasteboard, where macOS turns it into a broken web location.
   it("carries the Space drag payload under an app-private type", () => {

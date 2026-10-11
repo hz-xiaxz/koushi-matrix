@@ -1740,19 +1740,16 @@ describe("desktop integration source guards", () => {
     expect(source.slice(openStart, openEnd)).toContain("previewJoinTarget(");
   });
 
-  test("room mark-as-read prefers the room latest event over stale markers", () => {
+  test("room mark-as-read never resends a stale read marker as its target", () => {
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
     const actionStart = source.indexOf('case "markRoomAsRead"');
     const actionEnd = source.indexOf('case "markRoomAsUnread"', actionStart);
     const actionSource = source.slice(actionStart, actionEnd);
 
     expect(actionStart).toBeGreaterThanOrEqual(0);
-    expect(actionSource).toContain("fully_read_event_id");
+    expect(actionSource).not.toContain("fully_read_event_id");
     expect(actionSource).toContain("roomLatestDisplayEventId(room?.latest_event)");
-    expect(actionSource.indexOf("roomLatestDisplayEventId(room?.latest_event)")).toBeLessThan(
-      actionSource.indexOf("fully_read_event_id")
-    );
-    expect(actionSource).toContain("eventId.trim().length > 0");
+    expect(actionSource).toContain("eventId && eventId.trim().length > 0");
     expect(actionSource).toContain("api.markRoomAsRead(target.roomId, eventId)");
   });
 

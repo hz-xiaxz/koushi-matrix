@@ -885,12 +885,14 @@ stateDiagram-v2
   per-room `room_activity_unread_count` over conversations that are not muted and
   not low-priority, plus pending invites. This is the existing Home aggregate
   policy, including unread content from a Mentions-only room with no highlight.
-  `AccountHomeItem.attention_count` is that value, and the Tauri account-tab
-  snapshot reads the same function for every tab, selected or background, so Home
-  and the tab cannot disagree and an invite-only account still badges. The native
+  `AccountHomeItem.attention_count` retains that value for consumers needing both
+  categories, while the Home rail and account-tab conversation badge display
+  `unread_count` and show pending invitations separately. The Tauri account-tab
+  snapshot reads the same function for every tab, selected or background. The native
   Dock/taskbar `badge_count` uses the same per-room `room_activity_unread_count`
-  for its conversation contribution; notification-only, mention-only and manual
-  unread state cannot disappear solely at the native surface. The native total
+  for its conversation contribution. Server-only notification counters,
+  highlights without an observed unread message, and manual unread markers do
+  not create numeric conversation badges. The native total
   deduplicates rooms, applies the same mute/low-priority exclusions and aggregates
   across accounts. Pending invites remain Home/tab attention, separate from the
   joined-conversation native badge. Disabling native badges or lacking platform
@@ -1259,6 +1261,10 @@ generation emission gate and ordered InitialItems/NavigationUpdated delivery;
 it does not infer receipt ordering or acknowledge reads.
 Only a current Room or Thread actor may admit an at-bottom, gap-free, latest
 attention-eligible event with exact position and actor-generation evidence.
+An actual visible latest reply in a Thread is read even when the client placed
+it in view while opening the pane; arrival method is not a substitute for
+viewport evidence. A reply outside the viewport, or behind a visible gap,
+remains unread.
 Room observations require the atomic fully-read/private-unthreaded key and, when
 receipt privacy permits, the room-wide public key. Resolving a displayed root's
 activity identity must not promote either receipt to an unseen thread reply.
@@ -2128,14 +2134,23 @@ stateDiagram-v2
   `RoomSummary.thread_highlight_count` carry the per-room sums of the per-root
   SDK thread-cache counters for the rooms the reducer currently holds; a thread
   count never enters `unread_count`.
-- `koushi_state::room_activity_unread_count` is the single Rust-owned badge
-  helper every surface reads (room list, Home total, Space rail, Activity
-  attention, native badge):
-  `max(unread_count + thread_unread_count, notification_count, highlight_count +
-  thread_highlight_count)`, with `marked_unread` still the zero-count fallback.
-  The homeserver's `notification_count` may already include thread replies, so it
-  is max'd in and never summed with a thread term; a server that reports dummy
-  zeros simply leaves the client decomposition in charge.
+- `koushi_state::room_activity_unread_count` is the single Rust-owned numeric
+  conversation badge helper for room rows, Home, Space, section, account tab and
+  native badge: `unread_count + thread_unread_count`. Both terms are SDK-local
+  observed unread counters. Server `notification_count`, highlight counts and
+  manual unread markers retain their separate attention purposes but never add
+  an unlocatable number to a conversation badge. An unmuted room row shows the
+  same numeric value as its contribution to the containing Space and section.
+  Muted and low-priority rooms retain their own local numbers but do not
+  contribute to those aggregates. Invitations have a separate badge.
+- The room's Threads button displays `thread_unread_count`; each projected
+  Threads list row displays its own root's unread count. An observed unread
+  root outside the current page receives a selectable temporary row identified
+  by its root event ID; loading its metadata replaces that row. Temporary rows
+  remain openable if metadata loading fails. Every displayed room thread total
+  is therefore the sum of rows users can open. Forced SDK refreshes include
+  tracked unread roots outside the room's current timeline window, so reading
+  an older thread can clear its room and native badges.
 - The reducer derives both thread fields from the per-root SDK thread-cache
   values its room timeline actors observed (`ThreadUnreadObserved`), so the values
   are session-scoped mirrors and are never persisted or computed in React. They
@@ -4975,59 +4990,28 @@ stateDiagram-v2
   unread/highlight flags, and low-priority exclusions from `AppState`; React
   must not infer Activity rows from timeline DOM, browser-local state, or IPC
   mock convenience data.
-- Activity Unread is a notification inbox, not a message inbox (#1072). A
-  room qualifies when `max(notification_count, highlight_count) > 0` or it is
-  manually marked unread; a Mentions-only room qualifies only with
-  `highlight_count > 0`. Existing muted and low-priority exclusions still
-  apply. A positive plain `unread_count` alone never qualifies. The sidebar's room attention intentionally also counts
-  plain unread messages, so a room can be unread in the sidebar and absent
-  from Activity Unread; Activity Recent still shows its latest activity. This
-  choice does not change native banners, sounds, mention handling, or read
-  receipts, and viewing Activity never marks anything read.
-- Unread membership is `RoomSummary`-authoritative. When a room has unread or
-  highlight state but no observed unread event row survives the fully-read
-  marker / cleared-event filter, `ActivityProjection` synthesizes a private-data-
-  minimized room-level placeholder row (`kind = RoomUnread`, `event_id = None`).
-  Observed event rows remain preferred for the same room, but only when the
-  newest surviving unread row reaches the room's known
-  `conversation_activity` timestamp: an older cached unread row is not proof
-  that newer activity was resolved, so such a room keeps its event rows and
-  also gets a placeholder (#1061). The placeholder is a
-  transient resolver input, never completed message content: `AccountActor`
-  consumes decrypted cache/live timeline items and bounded 50-event backward
-  pages (maximum 32 per room and 16 rooms per generation) through the shared
-  `/messages` gate, then feeds real event rows back through a generation-guarded
-  observation. Per-room successes are retained when another room fails; capped
-  batches rotate across retry generations to avoid starvation.
-- `ActivityStream.resolution` is Rust-owned `Idle | Resolving | Failed` state.
-  `OpenActivity` and `RetryActivityResolution` start a generation over every
-  current placeholder. After each action batch, `AppActor` also starts one
-  when open Activity has a placeholder whose room/activity timestamp no
-  generation attempted yet and no generation is `Resolving`; live updates never
-  preempt an in-flight generation, and a no-progress settlement stays `Failed`
-  (retryable) until newer activity or an explicit retry. Starting a generation
-  never waits for AccountActor mailbox capacity (#1060): a full mailbox defers
-  its request while the stream stays `Resolving`, and AppActor delivers it once
-  a slot frees; a closed mailbox settles it `Failed` (retryable). A deferred
-  request is dropped once a newer generation starts or Activity closes. Row refreshes,
-  including `PaginateActivity`, preserve the current resolution state.
-  Generation guards reject late completion after retry, close, logout, lock, or
-  account replacement. Failure exposes only a coarse `OperationFailureKind` and
-  unresolved count. React hides `RoomUnread` rows, renders resolving/failure
-  status, and may dispatch only `retry_activity_resolution`.
-- `ActivityRow` is typed, not string-sniffed:
-  - `kind = Event` rows carry a real Matrix `event_id` and support focused
-    context open and row-level mark-read.
-  - `kind = RoomUnread` placeholders carry no `event_id`; they are resolver
-    inputs and are not rendered as message rows. GUI code must branch on `kind`,
-    not on `event_id` shape or sentinel strings.
-- Recent and Unread are separate `ActivityStream`s. Changing tabs only updates
-  `active_tab`; viewing Unread does not mark rows read. Mark-read commands
-  transition the Rust `mark_read` substate to pending, then clear projection
-  rows only after a matching success action. `MarkActivityRead(All)` clears
-  event-backed rows through real event ids and room-level placeholders through
-  `RoomMarkedAsReadSucceeded` only; it never emits a synthetic event id or
-  `FullyReadMarkerUpdated` for a placeholder.
+- Activity Unread presents one room-level summary for every non-muted,
+  non-low-priority room with a positive SDK-local
+  `unread_count + thread_unread_count`. It never labels a particular event,
+  sender, preview, or mention as unread from a room count. Server-only
+  notification/highlight counters and manual unread markers add no summary.
+  The summary carries no event ID and opens the room; the room and Threads
+  views show the same count's main/thread breakdown. Recent is a separate
+  observed-history stream and its event rows carry no unread claim.
+- The resolver may hydrate Recent from SDK timeline history after a fully-read
+  marker, but its rows never become event-specific Unread items. Fully-read and
+  private read receipts can differ, so no count-to-event matching is assumed.
+  Request markers are captured before dispatch; an old result is discarded if
+  that marker changes. The resolver is bounded to 50-event pages, 32 pages per
+  room and 16 rooms per generation, with generation guards and retryable
+  failures. A room summary remaining after hydration is expected, not failure.
+- Activity's room summaries are navigational only. Activity does not expose
+  per-event or all-room mark-read controls and does not send guessed event IDs
+  as read receipts. Main-room context actions require a current known event;
+  thread receipts come from visible replies in their own timelines.
+- `ActivityRow.kind` distinguishes historical `Event` rows from `RoomUnread`
+  summaries. React displays only `RoomUnread` in Unread and only history in
+  Recent. Viewing either tab does not mark messages read.
 - QA tokens and logs must not print room IDs, event IDs, sender IDs, message
   previews, pagination tokens, or raw SDK errors.
 - Logout, lock, account switch, and session clearing close Activity and discard
@@ -5106,19 +5090,26 @@ stateDiagram-v2
   `overlay_icon` capability, separate from generic badge count capability.
 - The Phase A core projection is `native_attention_state_from_rooms`. Its
   persistent Dock badge uses `room_activity_unread_count`, shared with Home,
-  Space and account-tab conversation totals: the maximum of unread messages,
-  notifications and highlights, or one for an otherwise empty manually marked
-  unread room. Each unique non-muted, non-low-priority room contributes once.
+  Space and account-tab conversation totals: the sum of client-observed main
+  and threaded unread messages. Server-only notification/highlight counters and
+  manual unread markers do not invent numeric badges. Each unique non-muted,
+  non-low-priority room contributes once.
   Low-priority rooms are excluded from persistent badges, transient candidates
   and notification/highlight attention totals, matching "Sidebar Sections And
   Low Priority". Ignored-user DMs keep their persistent badge contribution and
   are excluded from candidates and notification attention totals only. Muted
   rooms are excluded from both persistent and transient native attention.
-  Mention-only rooms keep the shared persistent contribution while candidate
-  eligibility still requires a highlight. Native settings/capabilities and the
+  Mention-only rooms keep the shared persistent contribution but do not raise
+  a transient alert without event-specific mention proof. A room-list update
+  may produce a transient candidate only for the room whose SDK-local main
+  unread count increased. The alert states that verified room count and opens
+  the room; it never uses an unverified latest-event preview, event target, or
+  server-derived mention count. Missing room history or a server-only count
+  cannot produce a banner or sound. Thread-cache observations update persistent
+  badges without raising transient alerts. Native settings/capabilities and the
   invitation scope distinction described under Accounts remain output gates;
   they never select a different room counter.
-  The projection prefers `mention` over `dm` over `message` candidates,
+  The projection prefers `dm` over `message` candidates,
   suppresses initial sync/backfill/self/focused-room observations, suppresses
   duplicate candidates, and clears badge/candidate state when eligible unread
   attention reaches zero.
