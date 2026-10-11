@@ -446,8 +446,8 @@ async fn a_stale_persisted_cursor_restarts_the_walk_instead_of_completing() {
         ["$stale-newest"],
         "the restart indexes the newest stored event"
     );
-    assert_eq!(
-        checkpoint.crossed_store_gap, true,
+    assert!(
+        checkpoint.crossed_store_gap,
         "the restarted walk recomputes its gap evidence instead of trusting the stale one"
     );
     assert_ne!(

@@ -18,7 +18,7 @@ fn sample_progress() -> SearchProgress {
     room.latest_event_id = Some("$latest:example.invalid".to_owned());
     room.processed = 41;
     room.indexed = 39;
-    room.queue_pending_event("$late:example.invalid".to_owned());
+    room.mark_needs_reread();
     progress
 }
 
@@ -74,7 +74,11 @@ fn missing_progress_is_empty_and_an_empty_record_removes_the_file() {
         .save_search_progress(&key_id, &sample_progress())
         .expect("save");
     assert!(actor.account_search_progress_path(&key_id).exists());
-    actor.delete_search_progress(&key_id).expect("delete");
+
+    // An empty record removes the file rather than keeping an empty one.
+    actor
+        .save_search_progress(&key_id, &SearchProgress::new(sample_identity()))
+        .expect("save empty");
     assert_eq!(actor.load_search_progress(&key_id).expect("load"), None);
 }
 
@@ -131,25 +135,9 @@ fn pending_late_decryption_is_bounded_and_never_skipped() {
     };
     assert!(room.is_settled());
 
-    room.queue_pending_event("$one:example.invalid".to_owned());
+    room.mark_needs_reread();
     assert!(room.has_pending_work());
-    assert!(
-        !room.is_settled(),
-        "a queued late decryption must not be skipped"
-    );
-
-    for index in 0..SEARCH_PROGRESS_PENDING_EVENTS_MAX {
-        room.queue_pending_event(format!("$event{index}:example.invalid"));
-    }
-    assert!(
-        room.pending_overflow,
-        "the list must fall back to a whole-room re-read"
-    );
-    assert!(
-        room.pending_events.is_empty(),
-        "the overflow form stores no ids"
-    );
-    assert!(!room.is_settled());
+    assert!(!room.is_settled(), "a late decryption must not be skipped");
 }
 
 #[test]
@@ -183,14 +171,20 @@ fn an_identity_carries_the_contract_version_and_content_policy() {
     let key_id = make_key_id();
     let actor = file_store_actor(&data_dir, &cred_dir);
 
-    let identity = actor
-        .search_progress_identity(&key_id, 3, true, false)
-        .expect("identity");
-    assert_eq!(identity.index_contract_version, 3);
-    assert!(identity.include_media_captions);
-    assert!(!identity.include_filenames);
-    assert_eq!(
-        identity.index_instance,
-        actor.search_index_instance(&key_id).expect("instance")
+    let identity = SearchProgressIdentity {
+        index_contract_version: 3,
+        index_instance: actor.search_index_instance(&key_id).expect("instance"),
+        include_media_captions: true,
+        include_filenames: false,
+    };
+    let progress = SearchProgress::new(identity.clone());
+    assert_eq!(progress.rooms_for(&identity).len(), 0);
+    assert!(
+        progress
+            .rooms_for(&SearchProgressIdentity {
+                include_media_captions: false,
+                ..identity
+            })
+            .is_empty()
     );
 }

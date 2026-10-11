@@ -18,7 +18,7 @@ mod navigation;
 mod read_state;
 mod room_preferences;
 mod scheduled_sends;
-mod search_progress;
+pub(crate) mod search_progress;
 #[cfg(test)]
 mod test_support;
 

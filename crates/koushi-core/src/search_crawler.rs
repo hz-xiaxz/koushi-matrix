@@ -100,6 +100,36 @@ impl HistoryCrawlCheckpoint {
         }
     }
 
+    /// Resume an interrupted backfill from the state a previous session wrote
+    /// down, instead of walking the room from its newest event again.
+    ///
+    /// Counters, the traversal source, the committed cursor and the redaction
+    /// targets the walk already passed all come from the record: without the
+    /// redactions a resumed walk could index an older original whose redaction it
+    /// no longer remembers.
+    #[allow(clippy::too_many_arguments)]
+    pub fn resume(
+        room_id: String,
+        settings: SearchCrawlerSettings,
+        settings_generation: u64,
+        history_source: CrawlHistorySource,
+        persisted_cursor: Option<koushi_sdk::MatrixPersistedEventCursor>,
+        crossed_store_gap: bool,
+        pending_redactions: HashSet<String>,
+        processed: u64,
+        indexed: u64,
+    ) -> Self {
+        Self {
+            processed,
+            indexed,
+            pending_redactions,
+            history_source,
+            persisted_cursor,
+            crossed_store_gap,
+            ..Self::new(room_id, settings, settings_generation, false)
+        }
+    }
+
     /// Catch-up checkpoint for a completed room whose latest event changed
     /// (#996). Counts carry over so the room row keeps its totals.
     pub fn catch_up(

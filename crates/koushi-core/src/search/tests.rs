@@ -153,6 +153,7 @@ async fn search_actor_shutdown_waits_for_actor_task_settlement() {
         tx,
         index_tx,
         task: Some(task),
+        report_task: None,
     };
 
     handle
@@ -995,5 +996,211 @@ fn contiguous_pending_queries_coalesce_to_latest_without_crossing_non_query_mess
     assert_eq!(
         query_sequence(pending.get(1).expect("query after rebuild")),
         5
+    );
+}
+
+/// A fixture with a real search actor and observable reducer actions.
+async fn progress_fixture() -> (SearchActor, mpsc::Receiver<Vec<AppAction>>) {
+    let server = matrix_sdk::test_utils::mocks::MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    client.event_cache().subscribe().expect("event cache");
+    let session = MatrixClientSession::from_client_for_testing(
+        client.clone(),
+        koushi_state::SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client.user_id().expect("user id").to_string(),
+            device_id: client.device_id().expect("device id").to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        },
+    );
+    let (action_tx, action_rx) = mpsc::channel(32);
+    let (event_tx, _) = broadcast::channel(32);
+    let (_, msg_rx) = mpsc::channel(32);
+    let actor = SearchActor::new(
+        Arc::new(session),
+        action_tx,
+        event_tx,
+        msg_rx,
+        AccountWorkScheduler::default(),
+    );
+    (actor, action_rx)
+}
+
+fn progress_record(index_instance: &str, settings: &SearchCrawlerSettings) -> SearchProgress {
+    SearchProgress::new(SearchProgressIdentity {
+        index_contract_version: crate::store::SEARCH_INDEX_CONTRACT_VERSION,
+        index_instance: index_instance.to_owned(),
+        include_media_captions: settings.include_media_captions,
+        include_filenames: settings.include_filenames,
+    })
+}
+
+fn rooms_available(
+    room_ids: &[&str],
+    latest: &[(&str, &str)],
+    settings: &SearchCrawlerSettings,
+) -> CrawlerRoomsNotification {
+    CrawlerRoomsNotification {
+        room_ids: room_ids
+            .iter()
+            .map(|room_id| (*room_id).to_owned())
+            .collect(),
+        latest_event_ids: latest
+            .iter()
+            .map(|(room_id, event_id)| ((*room_id).to_owned(), (*event_id).to_owned()))
+            .collect(),
+        settings: settings.clone(),
+    }
+}
+
+/// A restart must not re-crawl a room whose backfill is committed, and it must
+/// re-crawl a room that still owes late-decryption work.
+#[tokio::test]
+async fn a_settled_room_is_not_crawled_again_but_queued_work_is() {
+    let (mut actor, mut action_rx) = progress_fixture().await;
+    let settings = SearchCrawlerSettings::default();
+    const SETTLED: &str = "!settled:example.invalid";
+    const PENDING: &str = "!pending:example.invalid";
+
+    let mut progress = progress_record("instance", &settings);
+    let settled = progress.room_mut(SETTLED);
+    settled.backfill_complete = true;
+    settled.latest_event_id = Some("$settled-latest".to_owned());
+    settled.processed = 7;
+    settled.indexed = 6;
+    let pending = progress.room_mut(PENDING);
+    pending.backfill_complete = true;
+    pending.latest_event_id = Some("$pending-latest".to_owned());
+    pending.mark_needs_reread();
+
+    actor.search_progress = Some(progress);
+    actor.search_progress_index_instance = "instance".to_owned();
+    actor
+        .handle_rooms_available(rooms_available(
+            &[SETTLED, PENDING],
+            &[(SETTLED, "$settled-latest"), (PENDING, "$pending-latest")],
+            &settings,
+        ))
+        .await;
+
+    assert!(
+        actor.completed_rooms.contains_key(SETTLED),
+        "a committed room is seeded from the record"
+    );
+    assert!(
+        !actor.completed_rooms.contains_key(PENDING),
+        "a room that owes late-decryption work is not treated as done"
+    );
+    assert!(
+        actor.queued_crawl_rooms.contains(PENDING),
+        "the owed work is queued"
+    );
+    assert!(!actor.queued_crawl_rooms.contains(SETTLED));
+
+    let mut started = Vec::new();
+    while let Ok(actions) = action_rx.try_recv() {
+        for action in actions {
+            if let AppAction::HistoryCrawlStarted { room_id, .. } = action {
+                started.push(room_id);
+            }
+        }
+    }
+    assert_eq!(
+        started,
+        [PENDING.to_owned()],
+        "only the room with owed work starts a crawl"
+    );
+}
+
+/// The record is only trusted for the index and content policy it was written
+/// under.
+#[tokio::test]
+async fn a_record_from_another_index_or_policy_is_not_seeded() {
+    let (mut actor, _action_rx) = progress_fixture().await;
+    let settings = SearchCrawlerSettings::default();
+    const ROOM: &str = "!recorded:example.invalid";
+
+    let mut progress = progress_record("another-instance", &settings);
+    progress.room_mut(ROOM).backfill_complete = true;
+    actor.search_progress = Some(progress);
+    actor.search_progress_index_instance = "instance".to_owned();
+    actor
+        .handle_rooms_available(rooms_available(&[ROOM], &[(ROOM, "$latest")], &settings))
+        .await;
+    assert!(
+        !actor.completed_rooms.contains_key(ROOM),
+        "a record from another index instance must not suppress the crawl"
+    );
+
+    // Same index, different content policy: also not trusted.
+    let (mut actor, _action_rx) = progress_fixture().await;
+    let recorded = SearchCrawlerSettings {
+        include_media_captions: true,
+        include_filenames: true,
+        ..settings.clone()
+    };
+    let running = SearchCrawlerSettings {
+        include_media_captions: false,
+        include_filenames: true,
+        ..settings.clone()
+    };
+    let mut progress = progress_record("instance", &recorded);
+    progress.room_mut(ROOM).backfill_complete = true;
+    actor.search_progress = Some(progress);
+    actor.search_progress_index_instance = "instance".to_owned();
+    actor
+        .handle_rooms_available(rooms_available(&[ROOM], &[(ROOM, "$latest")], &running))
+        .await;
+    assert!(
+        !actor.completed_rooms.contains_key(ROOM),
+        "a policy change must re-crawl instead of trusting the record"
+    );
+}
+
+/// A late decryption rewrites a stored event in place, so a settled room must be
+/// reopened for indexing rather than skipped: nothing newer appears to compare.
+#[tokio::test]
+async fn a_late_decryption_report_reopens_a_settled_room() {
+    let (mut actor, _action_rx) = progress_fixture().await;
+    let settings = SearchCrawlerSettings::default();
+    const ROOM: &str = "!late:example.invalid";
+
+    let mut progress = progress_record("instance", &settings);
+    let settled = progress.room_mut(ROOM);
+    settled.backfill_complete = true;
+    settled.latest_event_id = Some("$latest".to_owned());
+    actor.search_progress = Some(progress);
+    actor.search_progress_index_instance = "instance".to_owned();
+
+    actor
+        .handle_rooms_available(rooms_available(&[ROOM], &[(ROOM, "$latest")], &settings))
+        .await;
+    assert!(
+        actor.completed_rooms.contains_key(ROOM),
+        "the committed room starts settled"
+    );
+    assert!(!actor.queued_crawl_rooms.contains(ROOM));
+
+    actor
+        .handle_actor_message(SearchActorMessage::LateDecryptionResolved {
+            room_id: ROOM.to_owned(),
+        })
+        .await;
+
+    assert!(
+        !actor.completed_rooms.contains_key(ROOM),
+        "a late decryption must reopen the room"
+    );
+    assert!(
+        actor.queued_crawl_rooms.contains(ROOM),
+        "the reopened room is queued for a re-read"
+    );
+    assert!(
+        actor
+            .search_progress
+            .as_ref()
+            .and_then(|progress| progress.room(ROOM))
+            .is_some_and(|room| room.needs_reread),
+        "the reopen is durable"
     );
 }
