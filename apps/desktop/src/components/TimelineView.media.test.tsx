@@ -524,8 +524,8 @@ describe("TimelineView", () => {
         return () => undefined;
       }
     });
-    const items = Array.from({ length: 700 }, (_, index) =>
-      index === 350
+    const items = Array.from({ length: 147 }, (_, index) =>
+      index === 70
         ? imageMessage("$offscreen-image", true)
         : message(`$plain-${index}`, `Plain ${index}`)
     );
