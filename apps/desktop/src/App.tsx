@@ -149,6 +149,7 @@ import {
 } from "./domain/qaTitle";
 import {
   INITIAL_TIMELINE_DIAGNOSTICS,
+  qaRendererContextDiagnostics,
   qaRenderedDomDiagnostics,
   qaSecurityDiagnostics,
   timelineDiagnosticsEqual,
@@ -165,7 +166,8 @@ import {
   createDiagnosticLogBuffer,
   diagnosticReport,
   schemaMismatchDiagnosticEntry,
-  type DiagnosticLogSnapshot
+  type DiagnosticLogSnapshot,
+  type RendererContextDiagnostics
 } from "./domain/diagnostics";
 import { e2eeSendDiagnosticMessage } from "./domain/e2eeSendDiagnostics";
 import {
@@ -1541,6 +1543,10 @@ function AccountContent({
   const secureBackupInspectionRetryInFlightRef = useRef(false);
   const [runtimeDiagnosticSnapshot, setRuntimeDiagnosticSnapshot] =
     useState<DiagnosticLogSnapshot>({ entries: [], droppedEntries: 0 });
+  // Sampled once per accepted diagnostics-open request so the export reports the
+  // renderer context at the moment it was requested, not a per-render resample.
+  const [rendererContextDiagnostics, setRendererContextDiagnostics] =
+    useState<RendererContextDiagnostics | null>(null);
   const displayDensity: DisplayDensity =
     snapshot?.state.domain.settings.values.appearance.density ?? "comfortable";
   const viewportSyncReporter = useMemo(() => createViewportSyncReporter(api), []);
@@ -3357,12 +3363,14 @@ function AccountContent({
 
   async function openDiagnostics() {
     const requestGeneration = ++diagnosticsOpenIntentEpochRef.current;
+    const rendererContext = qaRendererContextDiagnostics();
     try {
       const nextSnapshot = await api.getDiagnosticSnapshot();
       if (requestGeneration !== diagnosticsOpenIntentEpochRef.current) {
         return;
       }
       setRuntimeDiagnosticSnapshot(nextSnapshot);
+      setRendererContextDiagnostics(rendererContext);
     } catch {
       if (requestGeneration !== diagnosticsOpenIntentEpochRef.current) {
         return;
@@ -3372,6 +3380,7 @@ function AccountContent({
         source: "diagnostics.fetch",
         message: "kind=unavailable"
       });
+      setRendererContextDiagnostics(rendererContext);
     }
     setDiagnosticsOpen(true);
   }
@@ -7062,7 +7071,8 @@ function AccountContent({
       logEntries: [...localDiagnosticSnapshot.entries, ...runtimeSnapshot.entries],
       droppedLogEntries: localDiagnosticSnapshot.droppedEntries + runtimeSnapshot.droppedEntries,
       slidingSyncDiagnostics: runtimeSnapshot.slidingSync,
-      securityDiagnostics: qaSecurityDiagnostics()
+      securityDiagnostics: qaSecurityDiagnostics(),
+      rendererContextDiagnostics: rendererContextDiagnostics ?? undefined
     });
   }
 
