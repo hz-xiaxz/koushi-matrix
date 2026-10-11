@@ -4025,7 +4025,6 @@ dependencies = [
  "ctr",
  "hkdf 0.13.0",
  "hmac 0.13.0",
- "once_cell",
  "pbkdf2",
  "rand 0.10.2",
  "ruma",
