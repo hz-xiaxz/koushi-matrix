@@ -309,6 +309,9 @@ jobs:
       # type-checks this macOS-only adapter.
       - name: macOS ImageIO decoder tests
         run: cargo test --profile ci -p koushi-desktop --test image_io_decoder --locked -- --nocapture
+      # #1344: exercise the macOS-only process/allocator sampler for real.
+      - name: macOS process memory audit tests
+        run: cargo test --profile ci -p koushi-desktop process_memory --lib --locked
 
   core-invites:
     # Prove invitation projection through the sole Simplified Sliding Sync
@@ -458,6 +461,9 @@ jobs:
           cargo test --profile ci -p koushi-desktop app_updates:: --lib
       - name: Prove Core cleanup precedes Windows installer launch
         run: cargo test --profile ci -p koushi-desktop windows_update_shutdown_tests --lib
+      # #1344: exercise the Windows-only process/allocator sampler for real.
+      - name: Prove Windows process memory audit sampling
+        run: cargo test --profile ci -p koushi-desktop process_memory --lib
       # Lint the Windows-only cfg paths Linux CI never compiles (#1035).
       - name: Clippy the Windows Tauri crate
         run: cargo clippy --profile ci -p koushi-desktop --all-targets --locked -- -D warnings

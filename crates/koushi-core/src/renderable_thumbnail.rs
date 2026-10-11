@@ -110,6 +110,11 @@ impl RenderableThumbnailLease {
 pub struct RenderableThumbnailCacheStats {
     pub entry_count: usize,
     pub retained_bytes: usize,
+    /// Bytes currently charged to independent leases. A lease charges its
+    /// entry's bytes once per lease, so this is a conservative budget charge,
+    /// not unique pinned memory: it can exceed `retained_bytes` and it overlaps
+    /// the same entries. Never add it to `retained_bytes`.
+    pub lease_charged_bytes: usize,
     pub high_water_entry_count: usize,
     pub high_water_bytes: usize,
     pub eviction_count: u64,
@@ -217,6 +222,10 @@ impl RenderableThumbnailCache {
         RenderableThumbnailCacheStats {
             entry_count: self.entries.len(),
             retained_bytes: self.retained_bytes,
+            lease_charged_bytes: *self
+                .lease_bytes
+                .lock()
+                .expect("thumbnail lease budget poisoned"),
             high_water_entry_count: self.high_water_entry_count,
             high_water_bytes: self.high_water_bytes,
             eviction_count: self.eviction_count,
@@ -479,6 +488,16 @@ pub fn renderable_thumbnail_summary_event(stats: RenderableThumbnailCacheStats) 
         "policy",
         "count_and_byte_bounded_lru",
     ))
+    // Named cache only: these counters cover this cache, not the native heap.
+    .field(DiagnosticField::token("cache_scope", "named_caches_only"))
+    .field(DiagnosticField::count(
+        "max_entry_count",
+        MAX_RENDERABLE_THUMBNAIL_ENTRIES as u64,
+    ))
+    .field(DiagnosticField::count(
+        "max_bytes",
+        MAX_RENDERABLE_THUMBNAIL_BYTES as u64,
+    ))
     .field(DiagnosticField::count(
         "entry_count",
         stats.entry_count as u64,
@@ -486,6 +505,18 @@ pub fn renderable_thumbnail_summary_event(stats: RenderableThumbnailCacheStats) 
     .field(DiagnosticField::count(
         "retained_bytes",
         stats.retained_bytes as u64,
+    ))
+    .field(DiagnosticField::count(
+        "lease_charged_bytes",
+        stats.lease_charged_bytes as u64,
+    ))
+    .field(DiagnosticField::count(
+        "max_lease_bytes",
+        MAX_THUMBNAIL_LEASE_BYTES as u64,
+    ))
+    .field(DiagnosticField::token(
+        "lease_accounting",
+        "charged_budget_overlaps_retained_bytes",
     ))
     .field(DiagnosticField::count(
         "high_water_entry_count",
