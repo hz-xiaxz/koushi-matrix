@@ -45,15 +45,111 @@ fn map_snapshot(
     }
 }
 
+fn record_search_retention_summaries(
+    rows: &[(
+        usize,
+        Option<koushi_core::search::AccountRetentionDiagnostics>,
+    )],
+) {
+    use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
+
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.search_retention", "summary")
+            .field(DiagnosticField::count("account_total", rows.len() as u64))
+            .field(DiagnosticField::count(
+                "account_available",
+                rows.iter()
+                    .filter(|(_, diagnostics)| diagnostics.is_some())
+                    .count() as u64,
+            )),
+    );
+    for (account_index, diagnostics) in rows {
+        let Some(diagnostics) = diagnostics else {
+            continue;
+        };
+        // Export-time sample; the record timestamp is the recording time, which
+        // can lag an early account's sample behind later timeout-bound waits.
+        koushi_diagnostics::record(
+            DiagnosticEvent::new(DiagnosticLevel::Info, "core.search_retention", "summary")
+                .field(DiagnosticField::count(
+                    "account_index",
+                    *account_index as u64,
+                ))
+                .field(DiagnosticField::token("status", "available"))
+                .field(DiagnosticField::token(
+                    "search_scope",
+                    "decrypted_index_allocations",
+                ))
+                .field(DiagnosticField::count(
+                    "search_rooms_total",
+                    diagnostics.search.rooms_total,
+                ))
+                .field(DiagnosticField::count(
+                    "search_rooms_with_active_reader",
+                    diagnostics.search.rooms_with_active_reader,
+                ))
+                .field(DiagnosticField::count(
+                    "search_opened_files_total",
+                    diagnostics.search.opened_files_total,
+                ))
+                .field(DiagnosticField::count(
+                    "search_decrypted_bytes_total",
+                    diagnostics.search.decrypted_bytes_total,
+                ))
+                .field(DiagnosticField::count(
+                    "search_live_decrypted_len_bytes",
+                    diagnostics.search.live_decrypted_len_bytes,
+                ))
+                .field(DiagnosticField::count(
+                    "search_live_decrypted_capacity_bytes",
+                    diagnostics.search.live_decrypted_capacity_bytes,
+                ))
+                .field(DiagnosticField::token(
+                    "event_cache_scope",
+                    "room_timeline_linked_chunk_only",
+                ))
+                .field(DiagnosticField::count(
+                    "event_cache_rooms",
+                    diagnostics.event_cache.rooms,
+                ))
+                .field(DiagnosticField::count(
+                    "event_cache_chunks",
+                    diagnostics.event_cache.chunks,
+                ))
+                .field(DiagnosticField::count(
+                    "event_cache_gap_chunks",
+                    diagnostics.event_cache.gap_chunks,
+                ))
+                .field(DiagnosticField::count(
+                    "event_cache_events",
+                    diagnostics.event_cache.events,
+                ))
+                .field(DiagnosticField::count(
+                    "event_cache_zero_subscriber_rooms",
+                    diagnostics.event_cache.zero_subscriber_rooms,
+                ))
+                .field(DiagnosticField::count(
+                    "event_cache_zero_subscriber_rooms_with_events",
+                    diagnostics.event_cache.zero_subscriber_rooms_with_events,
+                )),
+        );
+    }
+}
+
 fn snapshot_with_media_memory_summaries(
     thumbnail_stats: koushi_core::renderable_thumbnail::RenderableThumbnailCacheStats,
     media_stats: koushi_core::media_preparation::MediaPreparationStats,
     memory_audit: &MemoryAuditSample,
+    retention_rows: &[(
+        usize,
+        Option<koushi_core::search::AccountRetentionDiagnostics>,
+    )],
     sliding_sync: koushi_core::SlidingSyncDiagnosticsSnapshot,
 ) -> FrontendDiagnosticLogSnapshot {
     // #1344: the native process/allocator audit observes only. It never trims,
     // purges, evicts, or forces a collection while sampling.
     koushi_diagnostics::record(process_memory_audit_event(memory_audit));
+    record_search_retention_summaries(retention_rows);
     koushi_core::renderable_thumbnail::record_renderable_thumbnail_summary(thumbnail_stats);
     koushi_core::media_preparation::record_media_preparation_summary(media_stats);
     koushi_core::session_check_diagnostics::record_session_check_summary();
@@ -68,6 +164,7 @@ pub async fn get_diagnostic_snapshot(
         koushi_core::renderable_thumbnail::renderable_thumbnail_cache_stats(),
         state.runtime.media_preparation().stats().await,
         &sample_process_memory_audit(),
+        &state.runtime.search_retention_diagnostics().await,
         state.runtime.sliding_sync_diagnostics(),
     ))
 }

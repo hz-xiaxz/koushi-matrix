@@ -66,7 +66,7 @@ use koushi_state::{
     AppAction, AttachmentFilter, AttachmentScope, AttachmentSort, SearchCrawlerSettings,
     SearchCrawlerSpeed,
 };
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::account_work::AccountWorkScheduler;
 use crate::command_policy::{SEARCH_UNAVAILABLE_MESSAGE, search_scope_to_state};
@@ -88,6 +88,12 @@ const SEARCH_CANDIDATE_PAGE: usize = 50;
 const SEARCH_CANDIDATE_SCAN_BUDGET: usize = 500;
 /// Search index mutation queue capacity (canon, overview.md: 512).
 pub const SEARCH_INDEX_MUTATION_QUEUE: usize = 512;
+
+/// Send bound for the #1344 export-time retention sampling request.
+const SEND_RETENTION_DIAGNOSTICS_TIMEOUT_MS: u64 = 1_000;
+/// Reply bound for the #1344 export-time retention sampling: a stalled SDK
+/// read settles as unavailable instead of holding the actor mailbox.
+const REPLY_RETENTION_DIAGNOSTICS_TIMEOUT_MS: u64 = 2_000;
 const SEARCH_ACTOR_SHUTDOWN_SEND_TIMEOUT: Duration = Duration::from_secs(1);
 const SEARCH_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -324,6 +330,12 @@ pub(crate) enum SearchActorMessage {
     /// Clear the in-memory search document store and crawl queues so joined
     /// rooms can be indexed from scratch.
     RebuildIndex,
+    /// Content-free retention snapshot for the #1344 diagnostic export.
+    /// Sampled at export time and answered by the actor with the SDK's owner
+    /// counters; never cached between exports.
+    RetentionDiagnostics {
+        response: oneshot::Sender<Option<AccountRetentionDiagnostics>>,
+    },
     Shutdown,
 }
 
@@ -423,6 +435,9 @@ impl std::fmt::Debug for SearchActorMessage {
                 write!(f, "SearchActorMessage::InvalidateCrawlerCache")
             }
             Self::RebuildIndex => write!(f, "SearchActorMessage::RebuildIndex"),
+            Self::RetentionDiagnostics { .. } => {
+                write!(f, "SearchActorMessage::RetentionDiagnostics")
+            }
             Self::Shutdown => write!(f, "SearchActorMessage::Shutdown"),
         }
     }
@@ -436,6 +451,37 @@ struct CompletedHistoryCrawl {
     latest_event_id: Option<String>,
     processed: u64,
     indexed: u64,
+}
+
+/// Content-free search-index retention counters for the #1344 diagnostic
+/// export. Core-owned mirror of the SDK snapshot; no identifiers or content.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SearchRetentionCounters {
+    pub rooms_total: u64,
+    pub rooms_with_active_reader: u64,
+    pub opened_files_total: u64,
+    pub decrypted_bytes_total: u64,
+    pub live_decrypted_len_bytes: u64,
+    pub live_decrypted_capacity_bytes: u64,
+}
+
+/// Content-free event-cache retention counters (room-timeline linked-chunk
+/// scope) for the #1344 diagnostic export.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct EventCacheRetentionCounters {
+    pub rooms: u64,
+    pub chunks: u64,
+    pub gap_chunks: u64,
+    pub events: u64,
+    pub zero_subscriber_rooms: u64,
+    pub zero_subscriber_rooms_with_events: u64,
+}
+
+/// Per-account retention snapshot sampled at diagnostic export time.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AccountRetentionDiagnostics {
+    pub search: SearchRetentionCounters,
+    pub event_cache: EventCacheRetentionCounters,
 }
 
 /// Handle to the `SearchActor` background task.
@@ -459,6 +505,27 @@ impl SearchActorHandle {
                 task: None,
             },
             rx,
+        )
+    }
+
+    /// Forward the caller's reply channel to the actor for an export-time
+    /// retention sample (#1344).
+    ///
+    /// Bounded on the send only; the actor answers the given channel itself (a
+    /// stalled SDK read settles as unavailable), so the forwarding account
+    /// actor is never held by the measurement.
+    pub async fn retention_diagnostics_forward(
+        &self,
+        response: oneshot::Sender<Option<AccountRetentionDiagnostics>>,
+    ) -> bool {
+        matches!(
+            executor::timeout(
+                std::time::Duration::from_millis(SEND_RETENTION_DIAGNOSTICS_TIMEOUT_MS),
+                self.tx
+                    .send(SearchActorMessage::RetentionDiagnostics { response }),
+            )
+            .await,
+            Ok(Ok(()))
         )
     }
 
@@ -952,6 +1019,44 @@ impl SearchActor {
                 self.rebuild_search_index().await;
                 true
             }
+            SearchActorMessage::RetentionDiagnostics { response } => {
+                // Bounded SDK read: a long-held index lock settles as
+                // unavailable instead of stalling the actor mailbox.
+                let diagnostics = crate::executor::timeout(
+                    std::time::Duration::from_millis(REPLY_RETENTION_DIAGNOSTICS_TIMEOUT_MS),
+                    koushi_sdk::retention_diagnostics(&self.session),
+                )
+                .await
+                .ok()
+                .map(Self::map_retention_diagnostics);
+                let _ = response.send(diagnostics);
+                true
+            }
+        }
+    }
+
+    fn map_retention_diagnostics(
+        sdk: koushi_sdk::MatrixRetentionDiagnostics,
+    ) -> AccountRetentionDiagnostics {
+        AccountRetentionDiagnostics {
+            search: SearchRetentionCounters {
+                rooms_total: sdk.search.rooms_total,
+                rooms_with_active_reader: sdk.search.rooms_with_active_reader,
+                opened_files_total: sdk.search.opened_files_total,
+                decrypted_bytes_total: sdk.search.decrypted_bytes_total,
+                live_decrypted_len_bytes: sdk.search.live_decrypted_len_bytes,
+                live_decrypted_capacity_bytes: sdk.search.live_decrypted_capacity_bytes,
+            },
+            event_cache: EventCacheRetentionCounters {
+                rooms: sdk.event_cache.rooms,
+                chunks: sdk.event_cache.chunks,
+                gap_chunks: sdk.event_cache.gap_chunks,
+                events: sdk.event_cache.events,
+                zero_subscriber_rooms: sdk.event_cache.zero_subscriber_rooms,
+                zero_subscriber_rooms_with_events: sdk
+                    .event_cache
+                    .zero_subscriber_rooms_with_events,
+            },
         }
     }
 

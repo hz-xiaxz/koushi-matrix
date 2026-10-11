@@ -1341,6 +1341,7 @@ const sdkLibrarySourcePaths = [
   "src/login_store.rs",
   "src/profile.rs",
   "src/qa_reports.rs",
+  "src/retention.rs",
   "src/room_operations.rs",
   "src/room_projection.rs",
   "src/search.rs",
