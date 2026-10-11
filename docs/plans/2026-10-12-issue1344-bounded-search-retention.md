@@ -19,8 +19,12 @@ Implemented so far:
   [#22](https://github.com/shinaoka/matrix-rust-sdk-work/pull/22) (branch
   `fix/1344-release-search-readers`), pinned by this branch's gitlink.
 - **Stage A** — `koushi_sdk::persisted_room_event_page` and the crawler source
-  switch, with the crawler canon amended.
-- **Stage B** — not implemented. Its contract is the revision-2 section.
+  switch, with the crawler canon amended, a stale-cursor distinction, and the
+  acceptance test over history that is on disk but not resident.
+- **Stage B** — the durable record, its identity, resume, invalidation and
+  late-decryption reopen are implemented. Missing: Files reconstruction from the
+  persisted cursor, and the fault-injection tests around the commit/progress
+  writes.
 
 ## Review disposition (revision 1 → 2)
 
@@ -183,7 +187,7 @@ The reviewer rejected revision 2 as written and named these. All were verified.
 | --- | --- | --- |
 | 1 | The durable record would lose gap evidence and traversal mode, so a resume could reach the oldest stored chunk with `crossed_store_gap = false` and declare success over an unfilled gap; a post-switch resume would restart the store walk at the tail | **accepted** — the record persists the traversal mode and the cumulative gap evidence, not just a cursor |
 | 2 | Catch-up accepted a boundary found across a gap, skipping events inside it | **fixed in Stage A** (see below): the page reports where continuity breaks, and a boundary behind a gap hands the rest to back-pagination |
-| 3 | `store_revision` had no coverage invariant: a page could read a UTD event, skip it, and the revision sampled at completion would claim coverage of a resolution it never indexed | **accepted** — the record stores a *coverage* revision captured before the traversal, and a change to already-scanned chunks or during revalidation reopens the room; an active-session trigger is required, not only a restart comparison |
+| 3 | `store_revision` had no coverage invariant: a page could read a UTD event, skip it, and the revision sampled at completion would claim coverage of a resolution it never indexed | **accepted, and the counter is gone** — there is no revision to sample. The SDK's `RedecryptorReport::ResolvedUtds` names the room of every in-place resolution, so the actor reopens that room in the same session and durably; a lagged room-key stream reopens every joined room. Only a crash between the resolution and the reopen could be missed, and late decryption cannot happen while the app is closed, so the window is the record write itself |
 | 4 | A sibling marker does not identify a recreated index directory, and says nothing about one missing room index | **accepted** — identity is coupled to actual index creation and per-room index presence; a record whose rooms or directory do not match is invalid, not trusted |
 | 5 | Files reconstruction from persisted room chunks can delete a valid row admitted from a focused/thread projection, which is not persisted in room chunks; a concurrent tail re-insert can also be missed | **accepted** — reconstruction preserves verified non-store rows unless there is positive invalidation evidence, and publishes a replacement only with adequate scan coverage |
 | 6 | Awaiting a save in the Shutdown arm is not the session fence: `SearchActorHandle` aborts after its timeout and drops the actor, and an in-flight `spawn_blocking` save survives that | **accepted** — reuse the read-outbox fencing (session/save generations, per-path write serialization, timeout invalidation), not an await-only argument |
