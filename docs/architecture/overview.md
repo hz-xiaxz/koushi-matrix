@@ -1275,11 +1275,12 @@ greatest-SemVer choice) compile on every desktop target and are tested on Linux
 CI with a fake backend. A backend supplies only capability, feed access and
 signature verification, artifact installation, and the native relaunch
 request, behind the `Backend` trait. The `koushi_updater_backend` cfg, set by
-the desktop `build.rs`, marks targets that ship a backend (macOS today). Other
-targets compile against an uninhabited placeholder, so they report
-`unsupported` and never start update work. A future Linux backend implements
-the same trait and enables that cfg. It reuses the engine unchanged and must
-first settle which distribution formats it owns.
+the desktop `build.rs`, marks targets that ship an update backend: macOS is
+install-capable and Windows is currently notification-only. Linux compiles
+against an uninhabited placeholder, so it reports `unsupported` and never
+starts update work. A future Linux backend implements the same trait and
+enables that cfg. It reuses the engine unchanged and must first settle which
+distribution formats it owns.
 
 `unsupported` carries a reason: `build` (no install backend or no updater trust
 material in this build) or `package_managed`. The packager opt-out (#1063) is a

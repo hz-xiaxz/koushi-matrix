@@ -5523,13 +5523,13 @@ preferences.
 stateDiagram-v2
     [*] --> Unsupported: packager marker present (reason=package_managed)
     [*] --> Unsupported: no install backend or updater trust material (reason=build)
-    [*] --> Idle: platform enabled with an install backend
+    [*] --> Idle: platform enabled with an install or notification backend
     Idle --> Checking: startup/24h/setting enabled/manual check
     Checking --> UpToDate: check has no newer release
     Checking --> Idle: update channel changes
     Available --> Idle: update channel changes before download approval
-    Checking --> Available: newer release found
-    Available --> Downloading: DownloadUpdate confirmed
+    Checking --> Available: newer release found (install-capable or notification-only)
+    Available --> Downloading: DownloadUpdate confirmed (install-capable candidate)
     Checking --> Failed: check failed
     Downloading --> Ready: download and signature verification succeeded
     Downloading --> Failed: download or verification failed
