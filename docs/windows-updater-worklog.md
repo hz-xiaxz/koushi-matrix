@@ -46,3 +46,13 @@ installer with disposable keys, including tampering and wrong-key rejection,
 without production secrets, uploads, release writes or tag changes.
 Production-key packaging, old-to-new installation confirmation and SignPath
 approval remain separate release follow-ups.
+
+Packaging runner follow-up: run 38123063855 built the signed NSIS installer and
+passed valid-signature, tampered-package and wrong-key assertions, but GitHub's
+pwsh wrapper propagated the expected final rejection exit code as job failure.
+A process-level regression using that wrapper reproduced all success tokens
+with exit 1. Explicit success exit after assertions and finally cleanup repairs
+the entry-point contract. Five process tests cover success, build failure, valid
+signature rejection, erroneous tampered acceptance and erroneous wrong-key
+acceptance; every path checks cleanup and private-output suppression. Windows
+CI and the packaging workflow both run this regression before packaging.

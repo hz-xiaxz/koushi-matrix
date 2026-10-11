@@ -72,6 +72,10 @@ jobs:
 
       # Runs release preflight, tauri build --bundles nsis, then validates
       # exactly one fresh non-empty installer and prints its SHA-256.
+      - name: Test updater validation exit status and cleanup
+        if: inputs.updater_validation
+        run: node --test scripts/windows-updater-package-validation.test.mjs
+
       - name: Validate signed updater packaging with disposable keys
         if: inputs.updater_validation
         run: ./scripts/windows-updater-package-validation.ps1

@@ -57,3 +57,6 @@ try {
     Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY, Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD, Env:KOUSHI_UPDATER_PUBLIC_KEY -ErrorAction SilentlyContinue
     Remove-Item $validationRoot -Recurse -Force
 }
+# Wrong-key rejection intentionally leaves a native exit code of 1. Report
+# success only after every assertion and the finally cleanup have completed.
+exit 0
