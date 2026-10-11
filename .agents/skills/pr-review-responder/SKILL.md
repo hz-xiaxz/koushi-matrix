@@ -13,10 +13,11 @@ pull-request review comment.
 1. Identify the repository, pull request, review, and inline comment from the
    supplied URL. Prefer `gh api` over page scraping:
 
-   - `gh api repos/OWNER/REPO/pulls/NUMBER/reviews`
-   - `gh api repos/OWNER/REPO/pulls/NUMBER/comments?per_page=100`
-   - For thread state, query GraphQL `pullRequest.reviewThreads` and match the
-     comment's `databaseId`.
+   - `gh api --paginate repos/OWNER/REPO/pulls/NUMBER/reviews`
+   - `gh api --paginate repos/OWNER/REPO/pulls/NUMBER/comments?per_page=100`
+   - For thread state, query GraphQL `pullRequest.reviewThreads` with
+     `pageInfo { hasNextPage endCursor }`, repeat with `after: endCursor`, and
+     match the comment's `databaseId`.
 
 2. Read the cited code and the relevant repository contracts before editing.
    If the review identifies stale documentation or a state-machine contract,
@@ -47,8 +48,11 @@ pull-request review comment.
    status. Do not use `gh pr comment` as a substitute when the user asked for
    a threaded reply.
 
-7. Resolve the original review thread only after the fix is pushed and the
-   threaded reply succeeds. Obtain the actual GraphQL thread node ID; a
+7. Resolve the original review thread only when the user explicitly asks to
+   resolve it or explicitly confirms that resolution is wanted. A request to
+   reply alone authorizes only the reply; do not resolve the thread. When
+   resolution is authorized and the fix is pushed and the threaded reply
+   succeeds, obtain the actual GraphQL thread node ID; a
    review-comment node ID (`PRRC_...`) is not a review-thread ID (`PRRT_...`):
 
    ```powershell
