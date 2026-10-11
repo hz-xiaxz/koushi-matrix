@@ -161,7 +161,66 @@ impl SearchProgress {
 
 static EMPTY_ROOMS: BTreeMap<String, RoomCrawlProgress> = BTreeMap::new();
 
+/// Name of the marker file inside the account's index directory.
+///
+/// It lives inside the directory so that deleting the directory deletes it: a
+/// recreated empty index then produces a new instance id and every record
+/// written against the old one is not trusted.
+const SEARCH_INDEX_INSTANCE_FILE: &str = ".koushi-index-instance";
+
+/// The instance id of the account's index directory, created on first use.
+pub(crate) fn new_index_instance_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    format!("{nanos:x}-{}", std::process::id())
+}
+
 impl StoreActor {
+    /// The identity a record must carry to describe the running index.
+    pub(crate) fn search_progress_identity(
+        &self,
+        key_id: &SessionKeyId,
+        contract_version: u32,
+        include_media_captions: bool,
+        include_filenames: bool,
+    ) -> Result<SearchProgressIdentity, CoreFailure> {
+        Ok(SearchProgressIdentity {
+            index_contract_version: contract_version,
+            index_instance: self.search_index_instance(key_id)?,
+            include_media_captions,
+            include_filenames,
+        })
+    }
+
+    /// Read, or create once, the account's index-directory instance id.
+    pub(crate) fn search_index_instance(
+        &self,
+        key_id: &SessionKeyId,
+    ) -> Result<String, CoreFailure> {
+        let path = self
+            .account_search_index_dir(key_id)
+            .join(SEARCH_INDEX_INSTANCE_FILE);
+        match std::fs::read_to_string(&path) {
+            Ok(instance) => {
+                let instance = instance.trim();
+                if !instance.is_empty() {
+                    return Ok(instance.to_owned());
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(CoreFailure::StoreUnavailable),
+        }
+
+        let instance = new_index_instance_id();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|_| CoreFailure::StoreUnavailable)?;
+        }
+        std::fs::write(&path, &instance).map_err(|_| CoreFailure::StoreUnavailable)?;
+        Ok(instance)
+    }
+
     /// Load the account's crawl progress.
     ///
     /// A missing file is an account that has never crawled, which is empty

@@ -151,3 +151,46 @@ fn pending_late_decryption_is_bounded_and_never_skipped() {
     );
     assert!(!room.is_settled());
 }
+
+#[test]
+fn the_index_instance_marker_is_created_once_and_survives_reads() {
+    let data_dir = tempdir().expect("tempdir");
+    let cred_dir = tempdir().expect("tempdir");
+    let key_id = make_key_id();
+    let actor = file_store_actor(&data_dir, &cred_dir);
+
+    let first = actor.search_index_instance(&key_id).expect("instance");
+    assert!(!first.is_empty());
+    assert_eq!(
+        actor.search_index_instance(&key_id).expect("instance"),
+        first
+    );
+
+    // Deleting the index directory (and so the marker) produces a new instance,
+    // which is what invalidates a record written against the old index.
+    let index_dir = actor.account_search_index_dir(&key_id);
+    std::fs::remove_dir_all(&index_dir).expect("remove index directory");
+    assert_ne!(
+        actor.search_index_instance(&key_id).expect("instance"),
+        first
+    );
+}
+
+#[test]
+fn an_identity_carries_the_contract_version_and_content_policy() {
+    let data_dir = tempdir().expect("tempdir");
+    let cred_dir = tempdir().expect("tempdir");
+    let key_id = make_key_id();
+    let actor = file_store_actor(&data_dir, &cred_dir);
+
+    let identity = actor
+        .search_progress_identity(&key_id, 3, true, false)
+        .expect("identity");
+    assert_eq!(identity.index_contract_version, 3);
+    assert!(identity.include_media_captions);
+    assert!(!identity.include_filenames);
+    assert_eq!(
+        identity.index_instance,
+        actor.search_index_instance(&key_id).expect("instance")
+    );
+}
