@@ -288,7 +288,9 @@ Koushi before replacing its executable.
   export NVM_DIR="$HOME/.nvm"
   . "$NVM_DIR/nvm.sh"
   nvm use 24
-  . "$HOME/.cargo/env"
+  if [ -f "$HOME/.cargo/env" ]; then
+    . "$HOME/.cargo/env"
+  fi
 
   if [ ! -f scripts/check-sdk-submodule.mjs ]; then
     mkdir -p "$HOME/src"
@@ -404,7 +406,9 @@ the repository root:
   export NVM_DIR="$HOME/.nvm"
   . "$NVM_DIR/nvm.sh"
   nvm use 24
-  . "$HOME/.cargo/env"
+  if [ -f "$HOME/.cargo/env" ]; then
+    . "$HOME/.cargo/env"
+  fi
   unset CARGO_TARGET_DIR
 
   git submodule update --init --recursive vendor/matrix-rust-sdk
