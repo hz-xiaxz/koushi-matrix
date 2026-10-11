@@ -1204,3 +1204,192 @@ async fn a_late_decryption_report_reopens_a_settled_room() {
         "the reopen is durable"
     );
 }
+
+/// A room the restart skips has no attachment rows, so a Files query rebuilds
+/// them from persisted store — without replaying the room's whole history.
+#[tokio::test]
+async fn files_query_rebuilds_rows_for_a_room_the_restart_skipped() {
+    use matrix_sdk::ruma::{mxc_uri, room_id, user_id};
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+    let server = matrix_sdk::test_utils::mocks::MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    client.event_cache().subscribe().expect("event cache");
+    let room_id = room_id!("!files-rebuild:example.invalid");
+    let attachment_event_id = matrix_sdk::ruma::event_id!("$files-rebuild:example.invalid");
+    let f = EventFactory::new()
+        .room(room_id)
+        .sender(user_id!("@crawler:test.invalid"));
+    server
+        .mock_sync()
+        .ok_and_run(&client, |builder| {
+            builder.add_joined_room(
+                JoinedRoomBuilder::new(room_id).add_timeline_event(
+                    f.image(
+                        "report.png".to_owned(),
+                        mxc_uri!("mxc://example/files-rebuild").to_owned(),
+                    )
+                    .event_id(attachment_event_id),
+                ),
+            );
+        })
+        .await;
+
+    let session = MatrixClientSession::from_client_for_testing(
+        client.clone(),
+        koushi_state::SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client.user_id().expect("user id").to_string(),
+            device_id: client.device_id().expect("device id").to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        },
+    );
+    let (action_tx, _) = mpsc::channel(32);
+    let (event_tx, _) = broadcast::channel(32);
+    let (_, msg_rx) = mpsc::channel(32);
+    let mut actor = SearchActor::new(
+        Arc::new(session),
+        action_tx,
+        event_tx,
+        msg_rx,
+        AccountWorkScheduler::default(),
+    );
+    let settings = SearchCrawlerSettings::default();
+    let mut progress = progress_record("instance", &settings);
+    let settled = progress.room_mut(room_id.as_str());
+    settled.backfill_complete = true;
+    settled.latest_event_id = Some(attachment_event_id.to_string());
+    actor.search_progress = Some(progress);
+    actor.search_progress_index_instance = "instance".to_owned();
+    actor
+        .handle_rooms_available(rooms_available(
+            &[room_id.as_str()],
+            &[(room_id.as_str(), attachment_event_id.as_str())],
+            &settings,
+        ))
+        .await;
+    assert!(
+        actor.files_rebuild_pending.contains_key(room_id.as_str()),
+        "a skipped room owes an on-demand rebuild"
+    );
+    assert!(
+        actor
+            .document_store
+            .attachments(
+                &AttachmentScope::Account,
+                &AttachmentFilter::default(),
+                AttachmentSort::NewestFirst
+            )
+            .is_empty(),
+        "the skipped room starts with no rows"
+    );
+
+    actor
+        .handle_attachments(
+            RequestId {
+                connection_id: RuntimeConnectionId(1),
+                sequence: 1,
+            },
+            AttachmentScope::Room {
+                room_id: room_id.to_string(),
+            },
+            AttachmentFilter::default(),
+            AttachmentSort::NewestFirst,
+        )
+        .await;
+
+    let rows = actor.document_store.attachments(
+        &AttachmentScope::Account,
+        &AttachmentFilter::default(),
+        AttachmentSort::NewestFirst,
+    );
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.event_id.as_str())
+            .collect::<Vec<_>>(),
+        [attachment_event_id.as_str()],
+        "the rebuilt room exposes its stored attachment"
+    );
+    assert!(
+        !actor.files_rebuild_pending.contains_key(room_id.as_str()),
+        "one bounded rebuild finishes a small room"
+    );
+
+    // The rebuilt row survives a later query that finds nothing new: rows are
+    // refreshed, never blanket-replaced.
+    actor
+        .handle_attachments(
+            RequestId {
+                connection_id: RuntimeConnectionId(1),
+                sequence: 2,
+            },
+            AttachmentScope::Room {
+                room_id: room_id.to_string(),
+            },
+            AttachmentFilter::default(),
+            AttachmentSort::NewestFirst,
+        )
+        .await;
+    assert_eq!(
+        actor
+            .document_store
+            .attachments(
+                &AttachmentScope::Account,
+                &AttachmentFilter::default(),
+                AttachmentSort::NewestFirst
+            )
+            .len(),
+        1
+    );
+}
+
+/// A page whose index commit failed must not advance the durable record: the
+/// room has to be crawled again rather than marked done.
+#[tokio::test]
+async fn a_failed_page_leaves_the_durable_record_untouched() {
+    let (mut actor, _action_rx) = progress_fixture().await;
+    let settings = SearchCrawlerSettings::default();
+    const ROOM: &str = "!failed-page:example.invalid";
+
+    let mut progress = progress_record("instance", &settings);
+    let room = progress.room_mut(ROOM);
+    room.cursor = Some("41".to_owned());
+    room.crossed_gap = true;
+    room.processed = 10;
+    room.indexed = 9;
+    actor.search_progress = Some(progress);
+    actor.search_progress_index_instance = "instance".to_owned();
+    actor.crawler_settings = settings.clone();
+    actor.available_crawl_rooms.insert(ROOM.to_owned());
+    let recorded_before = actor.search_progress.clone();
+
+    let mut checkpoint = HistoryCrawlCheckpoint::new(
+        ROOM.to_owned(),
+        settings,
+        actor.crawl_settings_generation,
+        false,
+    );
+    checkpoint.processed = 20;
+    checkpoint.indexed = 18;
+    actor
+        .handle_history_crawl_page_result(HistoryCrawlPageResult::Failed {
+            checkpoint,
+            kind: koushi_state::SearchCrawlerFailureKind::IndexUnavailable,
+        })
+        .await;
+
+    assert_eq!(
+        actor.search_progress, recorded_before,
+        "a failed page must not advance the record"
+    );
+    let after = actor
+        .search_progress
+        .as_ref()
+        .and_then(|progress| progress.room(ROOM))
+        .cloned();
+    let before = recorded_before
+        .as_ref()
+        .and_then(|progress| progress.room(ROOM))
+        .cloned();
+    assert_eq!(after, before, "the room keeps its pre-failure state");
+}

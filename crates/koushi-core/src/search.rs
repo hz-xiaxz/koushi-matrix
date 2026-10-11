@@ -109,6 +109,16 @@ const SEARCH_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(2);
 /// queued. Manual `StartHistoryCrawl` checkpoints are not held.
 pub const CRAWLER_STARTUP_DELAY: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// How many skipped rooms and persisted pages one Files query rebuilds.
+///
+/// A room the restart skips has no attachment rows yet, and its history stays on
+/// disk, so the rows are rebuilt on demand. The query is bounded so opening the
+/// Files view never walks an account's whole history, and successive queries
+/// continue where the previous one stopped.
+const FILES_REBUILD_ROOMS_PER_QUERY: usize = 4;
+const FILES_REBUILD_PAGES_PER_QUERY: usize = 8;
+const FILES_REBUILD_PAGE_EVENTS: usize = 100;
+
 fn search_scope_trace_label(scope: &SearchScope) -> &'static str {
     match scope {
         SearchScope::AllRooms => "all_rooms",
@@ -802,6 +812,13 @@ pub(crate) struct SearchActor {
     /// Unfinished backfills the durable record describes, keyed by room, waiting
     /// to be enqueued when their room is known to be joined.
     resumable_crawls: HashMap<String, ResumableCrawl>,
+    /// Rooms whose attachment rows still have to be rebuilt from persisted store,
+    /// with the cursor each rebuild stopped at.
+    ///
+    /// A room the restart skipped has no rows in the body-free document store,
+    /// and rebuilding them from the store is what keeps the Files view honest
+    /// without replaying the room's history at startup.
+    files_rebuild_pending: HashMap<String, Option<koushi_sdk::MatrixPersistedEventCursor>>,
     /// The index-directory instance the loaded record must name to be trusted.
     search_progress_index_instance: String,
     /// Where to write the record. Absent for sessions without a store.
@@ -899,6 +916,7 @@ impl SearchActor {
             crawl_settings_generation: 0,
             search_progress: None,
             resumable_crawls: HashMap::new(),
+            files_rebuild_pending: HashMap::new(),
             search_progress_index_instance: String::new(),
             search_progress_writer: None,
             search_progress_identity: None,
@@ -1404,6 +1422,7 @@ impl SearchActor {
             return;
         }
         self.start_next_history_crawl_page();
+        self.rebuild_files_rows(&scope).await;
         let results = self.document_store.attachments(&scope, &filter, sort);
 
         let _ = self
@@ -1418,6 +1437,95 @@ impl SearchActor {
             request_id,
             results,
         }));
+    }
+
+    /// Rooms whose attachment rows this query may rebuild, bounded and scoped.
+    fn files_rebuild_rooms_for_scope(&self, scope: &AttachmentScope) -> Vec<String> {
+        let mut rooms = self
+            .files_rebuild_pending
+            .keys()
+            .filter(|room_id| match scope {
+                AttachmentScope::Room { room_id: scoped } => scoped == *room_id,
+                AttachmentScope::Space { child_room_ids, .. } => {
+                    child_room_ids.iter().any(|child| child == *room_id)
+                }
+                AttachmentScope::Account => true,
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        rooms.sort_unstable();
+        rooms.truncate(FILES_REBUILD_ROOMS_PER_QUERY);
+        rooms
+    }
+
+    /// Rebuild attachment rows from persisted store for the queried rooms.
+    ///
+    /// Rows are only ever added or refreshed: a focused or thread projection and
+    /// a concurrent tail insertion are not evidence that an existing row is
+    /// stale, so removing rows stays with the positive-redaction reconciliation
+    /// the Files query already runs.
+    async fn rebuild_files_rows(&mut self, scope: &AttachmentScope) {
+        let mut pages_left = FILES_REBUILD_PAGES_PER_QUERY;
+        for room_id in self.files_rebuild_rooms_for_scope(scope) {
+            while pages_left > 0 {
+                let cursor = self.files_rebuild_pending.get(&room_id).cloned().flatten();
+                let page = match koushi_sdk::persisted_room_event_page(
+                    &self.session,
+                    &room_id,
+                    cursor,
+                    FILES_REBUILD_PAGE_EVENTS,
+                )
+                .await
+                {
+                    // A cursor whose chunk is gone restarts the walk from the
+                    // newest chunk instead of ending it.
+                    Ok(page) if page.cursor_unknown => {
+                        self.files_rebuild_pending.insert(room_id.clone(), None);
+                        continue;
+                    }
+                    Ok(page) => page,
+                    // A failed read leaves the room pending; the next query retries.
+                    Err(_) => break,
+                };
+                pages_left -= 1;
+                self.apply_rebuilt_rows(&room_id, &page.events);
+                match page.next {
+                    Some(next) => {
+                        self.files_rebuild_pending
+                            .insert(room_id.clone(), Some(next));
+                    }
+                    None => {
+                        self.files_rebuild_pending.remove(&room_id);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Apply one rebuilt page to the body-free document store.
+    fn apply_rebuilt_rows(
+        &mut self,
+        room_id: &str,
+        events: &[matrix_sdk::deserialized_responses::TimelineEvent],
+    ) {
+        let settings = self.crawler_settings.clone();
+        let mut pending_redactions = HashSet::new();
+        for event in events {
+            if event.kind.is_utd() {
+                continue;
+            }
+            let json = event.kind.raw().json().get();
+            let Some(message) = crate::search_crawler::event_json_to_index_message(
+                room_id,
+                json,
+                &settings,
+                &mut pending_redactions,
+            ) else {
+                continue;
+            };
+            self.apply_index_message(message);
+        }
     }
 
     /// Ask the state to admit a result set and publish it.
@@ -1939,6 +2047,9 @@ impl SearchActor {
         }
         self.completed_rooms.remove(room_id);
         self.resumable_crawls.remove(room_id);
+        // The re-read rebuilds the room's rows as it goes, so the on-demand
+        // rebuild is no longer its owner.
+        self.files_rebuild_pending.remove(room_id);
         if self.history_crawl_room_is_known(room_id) {
             return;
         }
@@ -2038,6 +2149,11 @@ impl SearchActor {
             })
             .collect::<Vec<_>>();
         for (room_id, completed) in settled {
+            // A skipped room has no attachment rows in this session's body-free
+            // document store; they are rebuilt from persisted store on demand.
+            self.files_rebuild_pending
+                .entry(room_id.clone())
+                .or_insert(None);
             self.completed_rooms.insert(room_id, completed);
         }
 
@@ -2084,8 +2200,21 @@ impl SearchActor {
         let Some(progress) = self.search_progress.clone() else {
             return;
         };
-        let _ =
+        let saved =
             executor::spawn_blocking(move || store.save_search_progress(&key_id, &progress)).await;
+        if !matches!(saved, Ok(Ok(()))) {
+            // Losing the write costs a re-crawl of what it described, never a
+            // skipped room, because the file only ever names committed rooms.
+            record(
+                DiagnosticEvent::new(
+                    DiagnosticLevel::Debug,
+                    "core.search",
+                    "crawl_progress_save_failed",
+                )
+                .field(DiagnosticField::token("failure", "store_unavailable"))
+                .field(DiagnosticField::token("outcome", "crawl_again")),
+            );
+        }
     }
 
     fn set_crawler_settings(&mut self, settings: SearchCrawlerSettings) {
@@ -2142,6 +2271,7 @@ impl SearchActor {
             }
             for room_id in &stopped {
                 self.resumable_crawls.remove(room_id);
+                self.files_rebuild_pending.remove(room_id);
             }
             self.persist_search_progress().await;
         }
@@ -2176,6 +2306,7 @@ impl SearchActor {
                 progress.forget(room_id);
             }
             self.resumable_crawls.remove(room_id);
+            self.files_rebuild_pending.remove(room_id);
             self.persist_search_progress().await;
         }
         self.crawl_queue
