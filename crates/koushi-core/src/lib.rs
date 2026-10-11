@@ -34,6 +34,7 @@ pub mod media_save;
 pub mod media_staging;
 pub(crate) mod mention_candidates;
 pub mod native_artifact;
+pub mod native_image_decoder;
 pub(crate) mod read_state;
 pub mod renderable_thumbnail;
 mod report;
@@ -54,6 +55,8 @@ pub(crate) mod startup_trace;
 pub mod state_delta;
 pub mod store;
 pub mod sync;
+#[cfg(any(test, feature = "test-hooks"))]
+mod test_isolation;
 pub mod threads_list;
 mod time;
 pub mod timeline;
@@ -77,6 +80,7 @@ pub use media_save::{
 pub use native_artifact::{
     NativeArtifactError, NativeArtifactKind, NativeArtifactPort, NativeArtifactRegistry,
 };
+pub use native_image_decoder::{NativeImageDecodeError, NativeStillImageDecoder};
 pub use runtime::{
     COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandHandle, CoreConnection, CoreRuntime,
     CoreShutdownError, EVENT_QUEUE_CAPACITY, EventNavigationError, EventStreamLag,
@@ -94,6 +98,11 @@ pub use sliding_sync_diagnostics::{
     SlidingSyncRequestSchema, SlidingSyncSdkVersion,
 };
 pub use state_delta::build_state_delta;
+
+/// Effective media-prefetch admission bound for QA in-flight expectations.
+#[cfg(any(test, feature = "test-hooks"))]
+#[doc(hidden)]
+pub use account_work::MEDIA_PREFETCH_INFLIGHT_LIMIT;
 
 #[cfg(any(test, feature = "test-hooks"))]
 #[doc(hidden)]

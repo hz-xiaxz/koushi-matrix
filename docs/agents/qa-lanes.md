@@ -95,7 +95,7 @@ qa-bin`; plain `cargo test` does not compile that binary.
 | `session_status` | session state projection | — |
 | `credential_health` | credential-store health probe under the debug/test file credential-store guard; must refuse to touch the OS keychain | — |
 | `account_notifications` | #981 shared push-rule categories and email pusher guards: a second session for the same account customises rules (mixed group rules, custom DM sound, `@room` disabled); two Core loads leave the server ruleset unchanged; a group toggle writes only group rules and re-reads OFF/ON; an unencrypted mention still notifies with group OFF (encrypted-room behaviour is covered by `koushi-sdk` unit tests); the email flow reports an unsupported server and never creates a pusher for an unverified address; requires `--core`, separate from `all`. The local homeservers do not send email, so address verification and digest delivery are not covered | `account_notifications_load=ok`, `account_notifications_no_write_on_open=ok`, `account_notifications_category_write=ok`, `account_notifications_overlap=ok`, `account_notifications_category_restore=ok`, `account_notifications_email_unsupported=ok`, `account_notifications_email_requires_verified=ok`, `account_notifications=ok` |
-| `user_verification` | #1024 Verify user between two freshly bootstrapped users: both Tuwunel and Synapse use a new encrypted DM; QA waits for A's post-send verification-progress event before B joins, then requires B to receive and accept the in-room request; both Cores show the same seven SAS emoji and confirm; A's refreshed contact security reports B verified by A, no longer offered, and B's device confirmation unchanged; requires `--core`, separate from `all` | `user_verification_offered=ok`, `user_verification_request_sent=ok`, `user_verification_accepted=ok`, `user_verification_sas_match=ok`, `user_verification_done=ok`, `user_verification_identity_verified=ok`, `user_verification=ok` |
+| `user_verification` | #1024 Verify user between two freshly bootstrapped users: both Tuwunel and Synapse use a new encrypted DM; QA waits for A's own room-list projection of B's membership and then for the account actor's post-send verification-progress event — the command-acceptance projection already reports `Requested`, so it cannot stand in for the send — and only then requires B to receive and accept the in-room request; both Cores show the same seven SAS emoji and confirm; A's refreshed contact security reports B verified by A, no longer offered, and B's device confirmation unchanged; requires `--core`, separate from `all`. An open product gap keeps this scenario intermittently red: B decodes the in-room request only when its megolm room key arrives first, because the key and the room event travel on independent Sliding Sync connections (the `all_rooms` list and the `encryption` connection) and the SDK feeds an in-room verification event to the crypto machine only on a successful first-pass decryption, replaying it nowhere else. The scenario must not wait for B's room list before A may send: doing so removes the interleaving of the failures, where the room and the request arrive in one response | `user_verification_dm_joined=ok` (new-DM servers), `user_verification_offered=ok`, `user_verification_a_observed_join=ok`, `user_verification_request_sent=ok`, `user_verification_incoming_request=ok`, `user_verification_accepted=ok`, `user_verification_sas_match=ok`, `user_verification_done=ok`, `user_verification_identity_verified=ok`, `user_verification=ok` |
 | `native_attention` | notification/badge projection | `notification_candidate=ok`, `badge_state=ok`, `suppress_focus=ok`, `clear_badge=ok` |
 | `e2ee_trust` | cross-signing bootstrap, key-backup upload, wrong-secret restore failure, passphrase restore on a second device, SAS verification, identity reset | token-only |
 | `e2ee_login_store` | persistent-store-first fresh/saved/restore/restart/reauth identity continuity; stock forced rotation plus offline and online index-0 delivery in DM and three-user encrypted room | `e2ee_login_store_forced_rotation_index0=ok`, `e2ee_login_store_fresh_offline_index0=ok`, `e2ee_login_store_restore_offline_index0=ok`, `e2ee_login_store_restart_offline_index0=ok`, `e2ee_login_store_reauth_offline_index0=ok`, `e2ee_login_store_online_index0=ok`, `e2ee_login_store_group_index0=ok`, `e2ee_login_store_identity_stable=ok`, `e2ee_login_store=ok` |
@@ -104,7 +104,7 @@ qa-bin`; plain `cargo test` does not compile that binary.
 | `invites_dm` | invite receipt/accept/decline and DM start | `invite_recv=ok`, `invite_accept=ok`, `invite_decline=ok`, `dm_start=ok` |
 | `room_space` | room and space classification | — |
 | `directory` | public directory query, alias join, Rust address preview/create/share-link join and collision, the advisory availability check, the Space-prefixed default address (#1006), and public-Space rooms (#1023): the public default, an unnamed public room without an address (calculated name, Space link), an entered address naming an unnamed room, its conflict, renaming later, and the explicit private choice | `directory_query=ok`, `directory_join=ok`, `room_address_preview_create_share=ok`, `room_address_collision=ok`, `room_address_availability=ok`, `room_address_space_prefix=ok`, `room_public_space_default=ok`, `room_unnamed_public_space=ok`, `room_unnamed_alias_name=ok`, `room_unnamed_alias_conflict=ok`, `room_unnamed_rename=ok`, `room_public_space_private_choice=ok` |
-| `room_management` | settings edit, permission guard, moderation, a Space's join-rule change (#935), adding an existing (room version 12) room to a Space (#1007), and leaving a Space with a chosen subset of its rooms, using a disposable management room and Space so they cannot disturb other stages | `room_settings=ok`, `permission_guard=ok`, `moderation=ok`, `space_access=ok`, `space_add_existing=ok`, `space_leave_children=ok`, plus cleanup tokens |
+| `room_management` | settings edit, permission guard, moderation, a Space's join-rule change (#935), adding an existing (room version 12) room to a Space (#1007), leaving a Space with a chosen subset of its rooms, and the #1177 access/history editor: create with an explicit membership policy naming a Space the creator provably cannot edit, a server-side count that the explicit `history` initial-state event occurs exactly once, an independent read-back of the exact canonical allow content and all four history values (never the success snapshots), a second client's OPEN settings reconciling to that exact target set and to a history change without reload, a restricted restore, and a second parent attachment whose projection and server-side `m.space.child` are both established before the token, using disposable management rooms and Spaces so they cannot disturb other stages | `room_settings=ok`, `permission_guard=ok`, `moderation=ok`, `space_access_create_membership=ok`, `space_access_target_without_permission=ok`, `space_access_history=ok`, `space_access_history_values=ok`, `space_access_second_client=ok`, `space_access_restricted_restore=ok`, `space_access_two_parent=ok`, `space_access=ok`, `space_add_existing=ok`, `space_leave_children=ok`, plus cleanup tokens |
 | `room_people_projection` | member projection | — |
 | `timeline` | timeline projection and navigation | `timeline_nav=ok` |
 | `timeline_reconnect` | unsubscribes, sends 21 offline events past the room-subscription limit, reopens the room | `live_catchup_checkpoint=ok`, `live_catchup_gap_repaired=ok` |
@@ -125,10 +125,10 @@ qa-bin`; plain `cargo test` does not compile that binary.
 | `send_queue` | retry/cancel across injected offline failure (`--features qa-bin`) | — |
 | `restore_cleanup` | session restore and logout cleanup | — |
 | `link_preview` | link preview projection | — |
-| `cache_restore` | deep-history anchor restored from cache within a bounded number of backward-paginate cycles while the network is blocked | — |
+| `cache_restore` | every warmed deep room's anchor reaches `Found` (the only status Core publishes once the anchor is in the timeline items) while the network is blocked, within a bounded number of backward-paginate cycles; the shallow room proves the lazy in-memory reveal without a disk chunk | — |
 | `read_state_convergence` | local viewed boundary advances while receipt/read-marker writes are held or failed, then converges through the bounded Rust dispatcher | `read_state_convergence=ok` |
 | `hidden_state_acl` | one ordinary message followed by 125 real `m.room.server_acl` updates (#1110/#1117): every update stays a hidden item, a re-subscription replay of the Core-held timeline (more raw items than the 120-row live-edge capacity) still contains the message, and viewing only the message converges to a server-confirmed read boundary and a zero unread count; requires `--core`, separate from `all` | `hidden_state_acl=ok` |
-| `thread_late_joiner` | in a `joined`-history room, a member who joins after the thread root was sent sees a permanent not-visible root row (`NotFound`/`Forbidden`, never a retryable failure) and can still open the thread and read the reply sent after they joined | `thread_late_joiner_root_not_visible=ok`, `thread_late_joiner_thread_panel=ok`, `thread_late_joiner=ok` |
+| `thread_late_joiner` | in a `joined`-history room, a member who joins after the thread root was sent sees a permanent not-visible root row (`NotFound`/`Forbidden`, never a retryable failure, exported with `is_hidden == false` so its reply chip stays reachable, #1141) and can still open the thread and read the reply sent after they joined | `thread_late_joiner_root_not_visible=ok`, `thread_late_joiner_thread_panel=ok`, `thread_late_joiner=ok` |
 
 Key-backup scope: `joined_room_restore=ok` is the #30 MVP proof token for
 recovery-secret import plus currently joined-room key hydration. It is not proof
@@ -155,6 +155,26 @@ If `live_signals` reaches `fully_read=ok` and then times out at typing, the
 observer needs a bounded debug/test `SyncOnce` on the observer account after
 `SetTyping` is acknowledged, to wake the same Rust-owned typing observer. Do not
 replace this with React polling or local UI timers.
+
+### Automated scenario lanes
+
+[`scripts/lib/headless-qa-lanes.mjs`](../../scripts/lib/headless-qa-lanes.mjs)
+is the single source for which automation runs each scenario:
+
+- `COVERED_BY_ALL`: stages the nightly `--scenario=all` aggregate job runs.
+- `PR_CI_SCENARIOS`: short focused scenarios run on every PR by the
+  `core-invites` job on both servers.
+- `NIGHTLY_SCENARIOS`: focused scenarios outside `all`, run by the nightly
+  `focused` job one at a time; a failure does not stop the rest, and each
+  failing scenario files or comments on one open `nightly-qa` issue titled
+  `nightly-qa: <scenario> failed (<server>/<stage>)`.
+- `EXCLUDED_SCENARIOS`: scenarios in no lane, each with a written reason.
+
+`node scripts/headless-qa-lane.mjs --lane=pr|nightly --server=<server>` runs a
+lane locally the same way CI does. PR CI runs
+`node scripts/check-headless-qa-lanes.mjs`, which fails when a scenario
+registered in `registry.rs` is in none of these lists. When adding a scenario,
+place it in a lane or record why it is excluded.
 
 ### Multi-stage QA participant ownership
 
@@ -224,7 +244,8 @@ scenario run. See [environment.md](environment.md#reusing-a-debug-build) for the
 | `local-alias` | sets a local alias through `set_local_user_alias`, waits for Rust-projected timeline/member labels, clears it, waits for both surfaces to revert | `gui_local_alias_set=ok`, `gui_local_alias_clear=ok` |
 | `local-cjk` | long Japanese/CJK room name and message; verifies `line-break: strict`, `word-break: normal`, `hyphens: none`, room ellipsis, message wrapping, no horizontal document overflow | `gui_local_cjk=ok` |
 | `local-settings` | real Settings UI: composer shortcut and theme, E2EE trust section presence, waits for `aria-pressed="true"` / `data-theme="dark"` | — |
-| `local-e2ee-key-management` | room-key export, import, secure-backup setup with recovery-key artifact delivery | `gui_room_key_export=ok`, `gui_room_key_import=ok`, `gui_secure_backup_setup=ok` |
+| `local-e2ee-key-management` | room-key export and import through the adapter-owned file dialogs, then the `local-secure-backup` steps | `gui_room_key_export=ok`, `gui_room_key_import=ok`, `gui_secure_backup_setup=ok`, `gui_secure_backup_passphrase_change=ok` |
+| `local-secure-backup` | the login's new-identity gate reveal (Create, then **I saved the recovery key**) leaves Settings reporting the backup `Enabled`; a Settings passphrase change reveals a new key on screen and only **I saved the recovery key** dismisses it; the optional save is skipped and the key is never read | `gui_secure_backup_setup=ok`, `gui_secure_backup_passphrase_change=ok` |
 
 Lane scope notes:
 
@@ -260,11 +281,11 @@ Lane scope notes:
   export is resumed. Release builds compile the override out
   (`scripts/desktop-release-gate-check.mjs`). The lane prints only counts and
   booleans; the files hold synthetic local-homeserver data.
-- `local-e2ee-key-management` may legitimately finish in recovery state: after
-  secure-backup setup the SDK recovery observer can move the session to
-  `needsRecovery`, so the right panel is forced to Recovery by Rust-owned
-  session state. The lane accepts either the Settings secure-backup status or QA
-  title `panel=recovery session=needsRecovery` as setup evidence.
+- `local-e2ee-key-management` cannot drive the native room-key file dialogs.
+  Its run sets the debug-build-only `KOUSHI_QA_ROOM_KEY_FILE`, and the Tauri
+  adapter answers both the export and the import dialog with that ignored
+  run-directory file. Release builds compile the override out
+  (`scripts/desktop-release-gate-check.mjs`).
 
 ## Browser-headless (Playwright) lane
 
@@ -278,6 +299,14 @@ spreads FILES across workers, and the recorded flakes were all traced to those
 workers contending for the single shared Vite harness server. Do not raise the
 worker count to speed up a run: the whole suite finishes in about three minutes
 serialized, and the parallel-contention flakes come straight back.
+
+Specs run in headless Chromium. A spec whose defect is engine-native (search
+field decorations, form-control chrome) also runs in headless WebKit, the
+engine family of macOS WKWebView and Linux WebKitGTK, by adding it to the
+`webkit` project's `testMatch` in `playwright.config.ts`. Prove such a defect
+by behavior or pixels (for example, clicking the native control's hit target),
+not by DOM button counts. Install both engines once with
+`npm --prefix apps/desktop exec -- playwright install chromium webkit`.
 
 The full-app harness (`apps/desktop/src/test/appHarnessMain.tsx`) must import
 `../styles.css`, matching production `main.tsx`. Otherwise visibility/layout
@@ -460,3 +489,15 @@ npm --prefix apps/desktop run qa:real-homeserver -- --scenario=startup_latency
 - Both runs emit `startup_lat phase=… ms=N` macro-phase tokens and, when
   `KOUSHI_STARTUP_TRACE=1` (set by the runner), `koushi.startup phase=…` and
   `phase=origin origin=cache|network|sync` sub-phase tokens.
+
+## Windows updater packaging validation
+
+The optional `updater_validation` input on `build-windows.yml` builds an NSIS
+updater artifact using disposable keys. It requires no release environment,
+uses no production keys, uploads no artifacts, and writes no releases or tags.
+The script verifies the actual installer with pinned official minisign and
+requires `windows_updater_package_signature=ok`,
+`windows_updater_tampered_package=reject`, `windows_updater_wrong_key=reject`,
+and `windows_updater_validation=ok`. Private signer/build output and disposable
+keys are deleted in `finally`; failure output contains only the phase.
+See the [desktop release runbook](../releases/desktop-release.md) for dispatch.

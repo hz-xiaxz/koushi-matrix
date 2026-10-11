@@ -41,7 +41,10 @@ import {
 import type {
   ComposerDocument,
   ComposerDraftRevision,
+  CreateRoomAccessPreviewInput,
   OperationFailureKind,
+  RoomAccessDraft,
+  RoomAccessDraftScope,
   TimelinePaneState
 } from "./domain/types";
 import {
@@ -111,6 +114,8 @@ import {
   type TimelineStoreState
 } from "./domain/timelineStore";
 import { TimelineStoreContext } from "./components/timelineStoreContext";
+import { writeClipboardText } from "./components/timeline/TimelineMessageBody";
+import { webSearchUrl } from "./domain/externalLinks";
 import {
   type ContextMenuActionId,
   type ContextMenuItem
@@ -151,6 +156,10 @@ import {
 import { useDesktopAttentionEffects } from "./app/useDesktopAttentionEffects";
 import { useUiLatencyDiagnostics } from "./app/useUiLatencyDiagnostics";
 import { useRoomAddressPreview } from "./app/useRoomAddressPreview";
+import {
+  useCreateRoomAccessPreview,
+  useRoomAccessPreview
+} from "./app/useRoomAccessPreview";
 import {
   createDiagnosticLogBuffer,
   diagnosticReport,
@@ -196,12 +205,14 @@ import type {
   SearchScopeKind,
   SecureBackupSetupIntent,
   DisplayDensity,
+  DelegatedAuthMethod,
   HomeSelection,
   SpaceLocalPresentation,
   SettingsPatch,
   SpaceMemberRoleOption,
   ThreadOpenIntent,
-  ThreadsListScope
+  ThreadsListScope,
+  ScheduledSendsScope
 } from "./domain/types";
 import {
   attachmentTransferHasFiles,
@@ -280,6 +291,7 @@ import {
   type RuntimeAlert
 } from "./components/Shell";
 import { ContextualRightPanel } from "./components/rightPanel";
+import type { RoomInfoRevealRequest } from "./components/RoomInfoPanel";
 import { AppSettingsDialog } from "./components/UserSettingsPanel";
 import type { AccountNotificationActions } from "./components/user-settings/AccountNotificationsSections";
 import type { ContactSecurityActions } from "./components/ContactSecurityDetails";
@@ -421,12 +433,19 @@ function defaultCreateRoomDialogOptions(defaults?: CreateRoomDefaults | null): C
 /** Pause after the last address edit before the advisory lookup (#1006). */
 const ROOM_ADDRESS_CHECK_DEBOUNCE_MS = 400;
 
-function createRoomRequestFromDraft(
+export function createRoomRequestFromDraft(
   name: string,
   options: CreateRoomDialogOptions,
-  activeSpaceId: string | null
+  activeSpaceId: string | null,
+  accessDraft: RoomAccessDraft | null
 ): CreateRoomRequest {
   const visibility = options.visibility;
+  // #1177: the access/history selections are Rust-owned; the request carries
+  // the draft's rule with its canonical allow list only once the user has made
+  // an explicit choice. An untouched create draft keeps the legacy preset path
+  // (including its room-version pin). A public selection still strips encryption
+  // and invitation mode for the submitted values.
+  const rule = accessDraft?.touched ? (accessDraft.rule ?? null) : null;
   return {
     name,
     topic: options.topic.trim() || null,
@@ -434,6 +453,14 @@ function createRoomRequestFromDraft(
     encrypted: visibility === "private" ? options.encrypted : false,
     invitedOnly: visibility === "private" ? options.invitedOnly : false,
     visibility,
+    accessPolicy: rule
+      ? {
+          rule,
+          // A non-restricted rule carries no allow list; the writer rejects one.
+          allowTargets: rule === "restricted" ? accessDraft?.allowTargets ?? [] : []
+        }
+      : null,
+    history: accessDraft?.history ?? null,
     // Core derives the relationship routing (#1007); a room version 12 Space
     // ID has no server name to extract here.
     parentSpace: activeSpaceId ? { spaceId: activeSpaceId } : null
@@ -1305,8 +1332,15 @@ function AccountContent({
         .catch(() => undefined);
     }
   }, [snapshot]);
-  const [loginUsername, setLoginUsername] = useState("");
-  const [loginServerOverride, setLoginServerOverride] = useState<string | null>(null);
+  const loginAccount = accountTabs?.tabs.find((tab) => tab.id === accountTabId);
+  const [loginUsername, setLoginUsername] = useState(() => loginAccount?.accountKey ?? "");
+  const [loginServerOverride, setLoginServerOverride] = useState<string | null>(
+    () => loginAccount?.accountKey ? loginAccount.homeserver : null
+  );
+  // #1267: a browser (OAuth/SSO) attempt is retired when the user cancels or
+  // changes the Matrix ID / homeserver, so a stale authorization is never
+  // silently reused for a different target.
+  const [browserAttemptPending, setBrowserAttemptPending] = useState(false);
   const loginServer = effectiveLoginServer(loginUsername, loginServerOverride);
   const loginSessionKind = snapshot?.state.domain.session.kind;
   const loginAuth = snapshot?.state.domain.auth;
@@ -1329,9 +1363,49 @@ function AccountContent({
   const [loginDeviceName, setLoginDeviceName] = useState("");
   const [loginPasswordFilled, setLoginPasswordFilled] = useState(false);
   const [recoverySecretFilled, setRecoverySecretFilled] = useState(false);
-  const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>(
+  const [rightPanelMode, setRightPanelModeState] = useState<RightPanelMode>(
     settingsScope === "account" ? "userSettings" : "closed"
   );
+  // #1327: the conversation header's access pill opens Room Info at the property
+  // it summarizes. The request is one-shot presentation intent, scoped to the
+  // room it was made for, and cleared once the panel has revealed it.
+  const [roomInfoReveal, setRoomInfoReveal] = useState<RoomInfoRevealRequest | null>(null);
+  // #1160: the scheduled-messages projection is Rust-owned and body-bearing, so
+  // every transition away from its panel closes the Rust projection while this
+  // account still owns the bound API. `effectiveRightPanelModeForSnapshot` then
+  // drops the items, so a closed projection can never keep rendering them.
+  const rightPanelModeRef = useRef<RightPanelMode>(rightPanelMode);
+  rightPanelModeRef.current = rightPanelMode;
+  // Renderer-only right-panel transition intent. Every explicit mode change,
+  // every navigation invalidation and the before-account-switch drain bump it,
+  // so a delayed scheduled-messages open whose receipt lands after a newer
+  // intent retires the projection it created instead of resurrecting the panel.
+  const rightPanelIntentEpochRef = useRef(0);
+  // True while this renderer has an admitted `open_scheduled_sends_list` whose
+  // panel mode has not settled. The attach reconcile must not close a
+  // projection this renderer is legitimately opening.
+  const scheduledSendsOpenInFlightRef = useRef(false);
+  // The pending scheduled-panel open, so the before-account-switch drain can
+  // settle it (and the stale completion retires its projection) while the
+  // previous bound API is still selected.
+  const scheduledSendsOpenPromiseRef = useRef<Promise<void> | null>(null);
+  // True while an unattached `Open` projection is being retired; keeps the
+  // reconcile effect from re-dispatching if a rejected close returns `Open`.
+  const scheduledSendsReconcileInFlightRef = useRef(false);
+  function setRightPanelMode(nextMode: RightPanelMode): void {
+    rightPanelIntentEpochRef.current += 1;
+    if (
+      rightPanelModeRef.current === "scheduledMessages" &&
+      nextMode !== "scheduledMessages"
+    ) {
+      settleCommandInBackground(api.closeScheduledSendsList());
+    }
+    rightPanelModeRef.current = nextMode;
+    setRightPanelModeState(nextMode);
+  }
+  function updateRightPanelMode(updater: (mode: RightPanelMode) => RightPanelMode): void {
+    setRightPanelMode(updater(rightPanelModeRef.current));
+  }
   const shortcutHandler = useRef(createLatestShortcutHandler()).current;
   const [selectedProfileUserId, setSelectedProfileUserId] = useState<string | null>(null);
   const [peoplePanelScope, setPeoplePanelScope] = useState<PeoplePanelScope | null>(null);
@@ -1341,6 +1415,36 @@ function AccountContent({
   useEffect(() => {
     setRightPanelMode(settingsScope === "account" ? "userSettings" : "closed");
   }, [settingsScope]);
+  // #1160: a Rust projection can outlive the renderer that opened it. A fresh
+  // mount or reattach starts with the panel closed while the runtime still
+  // holds a body-bearing `Open` list, and a delayed open whose receipt lands
+  // after a newer panel intent must not adopt the panel. Whenever the
+  // projection is Open but this renderer does not own the scheduled panel, the
+  // account-bound close is submitted and the resulting `Closed` replacement
+  // drops the bodies; `effectiveRightPanelModeForSnapshot` additionally gates
+  // rendering on the projection itself. A legitimate in-flight open sets
+  // `scheduledSendsOpenInFlightRef` before its first await, so its own `Open`
+  // does not read as unattached.
+  useEffect(() => {
+    if (!snapshot) return;
+    if (snapshot.state.ui.scheduled_sends_list.kind !== "open") return;
+    if (rightPanelMode === "scheduledMessages") return;
+    if (scheduledSendsOpenInFlightRef.current) return;
+    if (scheduledSendsReconcileInFlightRef.current) return;
+    scheduledSendsReconcileInFlightRef.current = true;
+    runInBackground(
+      settleCommand(api.closeScheduledSendsList()).finally(() => {
+        scheduledSendsReconcileInFlightRef.current = false;
+      })
+    );
+  }, [api, rightPanelMode, settleCommand, snapshot]);
+  // Opening Account Settings awaits focused-context cleanup before it sets the
+  // panel mode. A later scope choice must invalidate that in-flight open, or a
+  // settled cleanup would resurrect `userSettings` over the destination the
+  // user actually selected. Track the latest requested scope, not the prop
+  // captured when the open started.
+  const settingsScopeIntentRef = useRef(settingsScope);
+  settingsScopeIntentRef.current = settingsScope;
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [qaSendStatus, setQaSendStatus] = useState<QaSendSmokeStatus>("idle");
   // Issue #450: transient localized notice for recognized-but-unavailable
@@ -1466,6 +1570,9 @@ function AccountContent({
   const [createDialog, setCreateDialog] = useState<"room" | "space" | null>(null);
   const [createDraftName, setCreateDraftName] = useState("");
   const createDialogEpochRef = useRef(0);
+  // A distinct access-editor lifetime per open create dialog (#1177); never 0.
+  const createAccessSessionRef = useRef(0);
+  const [createAccessSessionId, setCreateAccessSessionId] = useState(0);
   // The attempted address of a create that failed with AliasInUse (#1006),
   // kept with the localpart it applies to so an edit retires it.
   const [createRoomAliasCollision, setCreateRoomAliasCollision] = useState<
@@ -1534,6 +1641,53 @@ function AccountContent({
     ...createRoomDraftOptions,
     aliasLocalpart: createRoomManualAlias ?? createRoomAddressPreview?.localpart ?? ""
   };
+  // #1177: the create dialog's access/history choices live in the Rust-owned
+  // draft; the preview is the effective proposed tuple after Create's own
+  // normalization. `invitedOnly` is no longer a separate control: the private
+  // choices carry an explicit policy, so the effective submitted value is
+  // always not-invite-only.
+  const createRoomAccessScope = useMemo<RoomAccessDraftScope | null>(
+    () =>
+      createDialog === "room" && createAccessSessionId !== 0
+        ? { kind: "create", sessionId: createAccessSessionId }
+        : null,
+    [createDialog, createAccessSessionId]
+  );
+  const createRoomAccessInput = useMemo<CreateRoomAccessPreviewInput>(
+    () => ({
+      visibility: createRoomDraftOptions.visibility,
+      invitedOnly: false,
+      encrypted: createRoomDraftOptions.encrypted,
+      parentSpaceId: snapshot?.state.ui.navigation.active_space_id ?? null
+    }),
+    [
+      createRoomDraftOptions.visibility,
+      createRoomDraftOptions.encrypted,
+      snapshot?.state.ui.navigation.active_space_id
+    ]
+  );
+  const createRoomAccessPreview = useCreateRoomAccessPreview(
+    api,
+    createRoomAccessScope,
+    createRoomAccessInput,
+    snapshot?.state_generation,
+    createDialog === "room"
+  );
+  // #1177: only this open dialog's own create session may show or consume its
+  // draft; a stale draft from a previous lifetime is never rendered.
+  const createRoomAccessDraft = useMemo(() => {
+    const draft = snapshot?.state.domain.room_management.draft;
+    return draft?.scope.kind === "create" && draft.scope.sessionId === createAccessSessionId
+      ? draft
+      : null;
+  }, [snapshot?.state.domain.room_management.draft, createAccessSessionId]);
+  const createRoomJoinedSpaces = useMemo(
+    () => (snapshot?.state.domain.spaces ?? []).map((space) => ({
+      id: space.space_id,
+      name: space.display_name
+    })),
+    [snapshot?.state.domain.spaces]
+  );
   const [reportDialog, setReportDialog] = useState<ReportDialogState | null>(null);
   const [reportReasonDraft, setReportReasonDraft] = useState("");
   const [timelineStore, setTimelineStore] = useState<TimelineStoreState>(createTimelineStore);
@@ -2094,14 +2248,32 @@ function AccountContent({
     [accountTimelineTransport, acquireAvatarDemand, releaseAvatarDemand]
   );
 
+  function requestSettingsScope(scope: "account" | "app" | null): void {
+    settingsScopeIntentRef.current = scope;
+    onSettingsScopeChange(scope);
+  }
+
+  // The account surface closes the focused context asynchronously; guard the
+  // late panel-mode write so it cannot override a newer App Settings request.
+  function openAccountSettings(): void {
+    settingsScopeIntentRef.current = "account";
+    onSettingsScopeChange("account");
+    runInBackground(setRightPanelModeClosingFocusedContext(
+      "userSettings",
+      () => settingsScopeIntentRef.current === "account"
+    ));
+  }
+
   function handleShortcutAction(shortcutId: string): boolean {
     switch (shortcutId) {
       case "showHelp":
         onShowHelp();
         return true;
-      case "openUserSettings":
-        onSettingsScopeChange("account");
-        runInBackground(setRightPanelModeClosingFocusedContext("userSettings"));
+      case "openAccountSettings":
+        openAccountSettings();
+        return true;
+      case "openAppSettings":
+        requestSettingsScope("app");
         return true;
       case "logout":
         runInBackground(requestLogout());
@@ -2735,6 +2907,62 @@ function AccountContent({
     snapshot?.state.domain.room_management.settings
   ]);
 
+  // #1177: the Room Info access/history editor reads the Rust-owned draft and a
+  // stateless Rust preview for the current scope. The preview re-requests on
+  // every published generation (a draft mutation, a confirmed-property
+  // advance, an encryption toggle or a session reset) and drops any older
+  // response, so an out-of-order result never replaces newer details.
+  const roomAccessScope = useMemo<RoomAccessDraftScope | null>(
+    () =>
+      rightPanelMode === "roomInfo" && snapshot?.state.ui.navigation.active_room_id
+        ? { kind: "room", roomId: snapshot.state.ui.navigation.active_room_id }
+        : null,
+    [rightPanelMode, snapshot?.state.ui.navigation.active_room_id]
+  );
+  const roomAccessPreview = useRoomAccessPreview(
+    api,
+    roomAccessScope,
+    "access",
+    snapshot?.state_generation,
+    true
+  );
+  const roomHistoryPreview = useRoomAccessPreview(
+    api,
+    roomAccessScope,
+    "history",
+    snapshot?.state_generation,
+    true
+  );
+  const previousRoomAccessRoomRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (rightPanelMode !== "roomInfo") return;
+    if (!snapshot) return;
+    const roomId = snapshot.state.ui.navigation.active_room_id ?? null;
+    if (!roomId) return;
+    const roomManagement = snapshot.state.domain.room_management;
+    if (roomManagement.settings?.room_id !== roomId) return;
+    const draft = roomManagement.draft;
+    const hasRoomDraft = draft?.scope.kind === "room" && draft.scope.roomId === roomId;
+    // Admit a room editor lifetime whenever this room has no draft: Rust seeds
+    // it from the confirmed policy, so the editor restores the confirmed allow
+    // list instead of the renderer guessing it from a lagging scalar (#1177). A
+    // create dialog also owns the single draft slot, so never fight it; reseed
+    // the room only once that draft is gone.
+    const key = `${roomId}\u0000${hasRoomDraft ? "draft" : draft ? "other" : "none"}`;
+    if (previousRoomAccessRoomRef.current === key) return;
+    previousRoomAccessRoomRef.current = key;
+    if (draft) return;
+    void api
+      .setRoomAccessDraft({ kind: "open", scope: { kind: "room", roomId } })
+      .catch(() => undefined);
+  }, [
+    api,
+    rightPanelMode,
+    snapshot?.state.ui.navigation.active_room_id,
+    snapshot?.state.domain.room_management.settings,
+    snapshot?.state.domain.room_management.draft
+  ]);
+
   // Space info and Space Members both read the Space's permissions from the
   // single Rust room_management slot, which room-scoped loads (room invite
   // dialog, post-invite refresh, room People, RoomSettingUpdateSucceeded)
@@ -2863,7 +3091,7 @@ function AccountContent({
     try {
       await settleCommand(api.logout());
       if (!mountedRef.current) return;
-      onSettingsScopeChange(null);
+      requestSettingsScope(null);
       setRightPanelMode("thread");
     } finally {
       if (mountedRef.current) setIsBusy(false);
@@ -2926,7 +3154,7 @@ function AccountContent({
     }
   }
 
-  async function startOidcLogin() {
+  async function startOidcLogin(method: DelegatedAuthMethod) {
     setIsBusy(true);
     setLoginTransportError(null);
     try {
@@ -2934,8 +3162,9 @@ function AccountContent({
         snapshot?.state.domain.session.kind === "locked"
           ? snapshot.state.domain.session.homeserver
           : loginServer;
-      const launch = await api.startOidcLogin(activeHomeserver);
+      const launch = await api.startOidcLogin(activeHomeserver, method);
       await applyCommandReceipt(launch.settlement);
+      setBrowserAttemptPending(true);
       if (launch.outcome === "invalid_authorization_url") {
         setLoginTransportError(t("auth.ssoInvalidAuthorizationUrl"));
       } else if (launch.outcome === "browser_launch_failed") {
@@ -2945,6 +3174,28 @@ function AccountContent({
       setLoginTransportError(t("auth.ssoAuthorizationFailed"));
     } finally {
       setIsBusy(false);
+    }
+  }
+
+  /** Retire the pending browser attempt and clear the local pending hint. */
+  function cancelBrowserAttempt() {
+    setBrowserAttemptPending(false);
+    runInBackground(
+      api.cancelOidcLogin().catch(() => undefined)
+    );
+  }
+
+  function changeLoginUsername(value: string) {
+    setLoginUsername(value);
+    if (browserAttemptPending) {
+      cancelBrowserAttempt();
+    }
+  }
+
+  function changeLoginServerOverride(value: string | null) {
+    setLoginServerOverride(value);
+    if (browserAttemptPending) {
+      cancelBrowserAttempt();
     }
   }
 
@@ -2973,7 +3224,10 @@ function AccountContent({
   }
 
   async function updateSettings(patch: SettingsPatch) {
-    const scope = settingsScope === "app" ? "app" : "account";
+    // An explicit patch scope wins. The Settings dialog's open tab scopes its own
+    // patches; the composer Math switch (app-scoped) names its scope itself, so
+    // the reducer applies it even while the dialog is closed (#1244).
+    const scope = patch.scope ?? (settingsScope === "app" ? "app" : "account");
     await settleCommand(api.updateSettings({ ...patch, scope }));
   }
 
@@ -3191,16 +3445,13 @@ function AccountContent({
     await settleCommand(api.importRoomKeys(sourcePath, passphrase));
   }
 
+  // The adapter owns the room-key file dialogs so unattended GUI QA can answer
+  // them with a debug-only fixed file.
   async function chooseRoomKeyExportDestination(): Promise<string | null> {
     if (!isTauriRuntime()) {
       return null;
     }
-    const selected = await windowDialogPort.saveFile({
-      title: t("settings.roomKeyExport"),
-      defaultPath: "koushi-room-keys.txt",
-      filters: [{ name: t("settings.roomKeyExport"), extensions: ["txt", "json"] }]
-    });
-    return selected || null;
+    return api.chooseRoomKeyExportDestination(t("settings.roomKeyExport"));
   }
 
   async function chooseSecureBackupDestination(): Promise<string | null> {
@@ -3224,13 +3475,7 @@ function AccountContent({
     if (!isTauriRuntime()) {
       return null;
     }
-    const selected = await windowDialogPort.openFile({
-      title: t("settings.roomKeyImport"),
-      multiple: false,
-      filters: [{ name: t("settings.roomKeyImport"), extensions: ["txt", "json"] }],
-      fileAccessMode: "scoped"
-    });
-    return typeof selected === "string" ? selected : null;
+    return api.chooseRoomKeyImportSource(t("settings.roomKeyImport"));
   }
 
   async function bootstrapSecureBackup(
@@ -3444,10 +3689,11 @@ function AccountContent({
     includeMain: boolean,
     includeThread: boolean
   ): Promise<boolean> {
-    const account = readyComposerDraftAccountOwner(snapshot);
+    const currentSnapshot = snapshotRef.current;
+    const account = readyComposerDraftAccountOwner(currentSnapshot);
     if (!account) return true;
     const drains: Promise<boolean>[] = [];
-    const roomId = snapshot?.state.ui.timeline.room_id;
+    const roomId = currentSnapshot?.state.ui.timeline.room_id;
     if (includeMain && roomId) {
       drains.push(
         deactivateComposerScopeForNavigation(
@@ -3456,7 +3702,7 @@ function AccountContent({
         )
       );
     }
-    const thread = snapshot?.state.ui.thread;
+    const thread = currentSnapshot?.state.ui.thread;
     if (
       includeThread &&
       thread?.kind === "open" &&
@@ -3477,8 +3723,28 @@ function AccountContent({
     return (await Promise.all(drains)).every(Boolean);
   }
 
-  drainComposerForAccountSwitchRef.current = () =>
-    drainActiveComposerScopesForNavigation(true, true);
+  drainComposerForAccountSwitchRef.current = async () => {
+    // Fence any scheduled-panel open still awaiting its receipt so its stale
+    // completion retires the previous account's projection instead of
+    // resurrecting it after the switch. Settle it first: once the next tab is
+    // selected, this account's bound API rejects, and the projection would be
+    // left open.
+    rightPanelIntentEpochRef.current += 1;
+    await scheduledSendsOpenPromiseRef.current?.catch(() => undefined);
+    const drained = await drainActiveComposerScopesForNavigation(true, true);
+    // #1160: a backgrounded tab closes only the body-bearing scheduled-sends
+    // projection, never the reservation queue, while the previous account still
+    // owns the bound API. Close whenever the requested mode owns the panel OR
+    // the runtime still reports an Open projection, so a body-bearing list that
+    // a fresh renderer never claimed is retired too.
+    if (
+      rightPanelModeRef.current === "scheduledMessages" ||
+      snapshotRef.current?.state.ui.scheduled_sends_list.kind === "open"
+    ) {
+      await settleCommand(api.closeScheduledSendsList());
+    }
+    return drained;
+  };
   useEffect(() => {
     onRegisterBeforeAccountSwitch(() => drainComposerForAccountSwitchRef.current());
     return () => onRegisterBeforeAccountSwitch(null);
@@ -3498,7 +3764,7 @@ function AccountContent({
     setSpaceMembersRoleTransportFailure(null);
     setPeoplePanelScope(null);
     setSelectedProfileUserId(null);
-    setRightPanelMode((mode) =>
+    updateRightPanelMode((mode) =>
       mode === "people" || mode === "profile" ? "closed" : mode
     );
   }, []);
@@ -4005,9 +4271,29 @@ function AccountContent({
     setCreateRoomAliasCollision(null);
     setCreateRoomManualAlias(null);
     setCreateDraftName("");
-    setCreateRoomDraftOptions(
-      defaultCreateRoomDialogOptions(snapshotRef.current?.sidebar.create_room_defaults)
+    const defaults = defaultCreateRoomDialogOptions(
+      snapshotRef.current?.sidebar.create_room_defaults
     );
+    setCreateRoomDraftOptions(defaults);
+    if (kind === "room") {
+      // #1177: a fresh, distinct access-editor lifetime. Rust seeds its effective
+      // selection from the legacy preset before target editing.
+      const sessionId = ++createAccessSessionRef.current;
+      setCreateAccessSessionId(sessionId);
+      void api
+        .setRoomAccessDraft({
+          kind: "open",
+          scope: { kind: "create", sessionId },
+          create: {
+            visibility: defaults.visibility,
+            invitedOnly: defaults.invitedOnly,
+            parentSpaceId: snapshotRef.current?.state.ui.navigation.active_space_id ?? null
+          }
+        })
+        .catch(() => undefined);
+    } else {
+      setCreateAccessSessionId(0);
+    }
     setCreateDialog(kind);
   }
 
@@ -4018,6 +4304,16 @@ function AccountContent({
     setCreateDialog(null);
     setCreateDraftName("");
     setCreateRoomDraftOptions(defaultCreateRoomDialogOptions());
+    if (createAccessSessionId !== 0) {
+      // Retire exactly this session; an in-flight command from an older one is
+      // rejected by Rust rather than recreating its draft.
+      void api
+        .setRoomAccessDraft({
+          kind: "reset",
+          scope: { kind: "create", sessionId: createAccessSessionId }
+        })
+        .catch(() => undefined);
+    }
   }
 
   function openNewDmDialog() {
@@ -4370,9 +4666,22 @@ function AccountContent({
     }
     setIsBusy(true);
     try {
+      const createRoomDraftState = snapshotRef.current?.state.domain.room_management.draft ?? null;
+      // Only this create session's own draft may shape the submitted policy or
+      // history; a Room Info draft left open elsewhere must not leak into it.
+      const createRoomDraft =
+        createRoomDraftState?.scope.kind === "create" &&
+        createRoomDraftState.scope.sessionId === createAccessSessionId
+          ? createRoomDraftState
+          : null;
       const createRoomRequest =
         kind === "room"
-          ? createRoomRequestFromDraft(name, displayedCreateRoomOptions, activeSpaceIdForCreatedRoom)
+          ? createRoomRequestFromDraft(
+              name,
+              displayedCreateRoomOptions,
+              activeSpaceIdForCreatedRoom,
+              createRoomDraft
+            )
           : null;
       let spaceLinkFailure: OperationFailureKind | null = null;
       if (kind === "space") {
@@ -4454,11 +4763,16 @@ function AccountContent({
     );
   }
 
-  function settleComposerOperation(admitted: {
-    capture: ComposerDraftOperationCapture;
-  }): void {
+  function settleComposerOperation(
+    admitted: {
+      capture: ComposerDraftOperationCapture;
+    },
+    releaseAcceptedRevision = true
+  ): void {
     const { capture } = admitted;
-    composerDraftLifecycleRegistryRef.current!.settleOperation(capture);
+    composerDraftLifecycleRegistryRef.current!.settleOperation(capture, {
+      releaseAcceptedRevision
+    });
   }
 
   function reserveComposerAcceptedRevision(
@@ -4521,27 +4835,55 @@ function AccountContent({
     const scope = composerDraftScope(account, target);
     const admitted = beginComposerOperation(scope);
     if (!admitted) return;
-    // #1130: the send settles this revision without consuming the draft text, and
-    // nothing here clears the local overlay, so the typed text stays visible.
+    // #1130/#1204: Core decides whether this send consumes the draft — a single
+    // attachment whose caption is the text the renderer is showing. The text is
+    // captured before any await, and the acceptance is reserved so input typed right
+    // after the send receives a newer revision instead of racing the clear.
+    const capturedDraft = capturedComposerDocument(target);
+    // Captured before the send so a later, independently advanced command revision
+    // cannot masquerade as newer local input (the established text path does the
+    // same with `localRevisionAtSubmission`).
+    const localRevisionAtSubmission = mainComposerOverlayRef.current?.revision ?? null;
     const draftRevision = currentComposerDraftRevision(scope, admitted.lease);
+    if (!reserveComposerAcceptedRevision(admitted, draftRevision)) {
+      return;
+    }
     for (const item of uploads) {
       latestTextMutationQueueRef.current.invalidate(
         `caption:main:${roomId}:${item.staged_id}`
       );
     }
+    // #1208: a prepared send that returns is accepted — Core advances the draft
+    // revision whether or not the send consumes the content — so only a thrown
+    // command releases the speculative reservation. A receipt-reconciliation
+    // failure is presentation, not rejection.
+    let accepted = false;
     try {
-      const settlement = await api.sendPreparedUploads(
+      const response = await api.sendPreparedUploads(
         account,
         admitted.lease.leaseId,
         admitted.lease.rendererGeneration,
         target,
-        draftRevision
+        draftRevision,
+        capturedDraft
       );
-      await applyCommandReceipt(settlement);
+      accepted = true;
+      await applyCommandReceipt(response);
+      // Only Core's answer clears anything, and only through the established clear
+      // path: dropping the overlay reference here would make that path early-return
+      // and leave both the registry overlay and the mounted editor showing the text.
+      // Read the overlay at the clear point: input that arrived between the response
+      // and here has a different revision and keeps the text, and a command revision
+      // that advanced on its own is not mistaken for a local edit.
+      const overlay = mainComposerOverlayRef.current;
+      if (response.consumedDraft && overlay && overlay.revision === localRevisionAtSubmission) {
+        cancelComposerDraftPersist(scope);
+        clearLocalComposerDraft(scope);
+      }
     } catch {
       // Command failures are surfaced through the Rust-owned error/event path.
     } finally {
-      settleComposerOperation(admitted);
+      settleComposerOperation(admitted, !accepted);
     }
   }
 
@@ -4631,6 +4973,7 @@ function AccountContent({
       submissionController.reject(submissionId);
       return;
     }
+    let accepted = false;
     try {
       appendComposerSubmitDiagnostic(
         "main",
@@ -4658,16 +5001,21 @@ function AccountContent({
               captured.document,
               captured.draftRevision
             );
+      accepted =
+        nextSnapshot.submissionId === submissionId && nextSnapshot.outcome === "accepted";
       await applyCommandReceipt(nextSnapshot.settlement);
       const settledSnapshot = getAppStoreSnapshot();
+      if (!accepted) {
+        if (submissionAccountOwnerRef.current !== captured.accountOwner) {
+          return;
+        }
+        appendComposerSubmitDiagnostic("main", "settled", "outcome=rejected_by_backend");
+        submissionController.reject(submissionId);
+        return;
+      }
       const canApply = composerOperationCanApply(admitted, captured.draftRevision);
       if (!canApply || submissionAccountOwnerRef.current !== captured.accountOwner) {
         appendComposerSubmitDiagnostic("main", "settled", "outcome=stale_context_ignored");
-        return;
-      }
-      if (nextSnapshot.submissionId !== submissionId || nextSnapshot.outcome !== "accepted") {
-        appendComposerSubmitDiagnostic("main", "settled", "outcome=rejected_by_backend");
-        submissionController.reject(submissionId);
         return;
       }
       submissionController.accept(submissionId);
@@ -4689,8 +5037,14 @@ function AccountContent({
         setQaSendStatus(completionStatus);
       }
     } catch (error) {
-      settleComposerOperation(admitted);
       if (submissionAccountOwnerRef.current !== captured.accountOwner) {
+        return;
+      }
+      if (accepted) {
+        // Core accepted; only the receipt projection failed. Do not offer an
+        // unknown-retry that would reserve a revision Core already advanced.
+        submissionController.accept(submissionId);
+        appendComposerSubmitDiagnostic("main", "settled", "outcome=accepted_receipt_unreconciled");
         return;
       }
       const disposition = classifySubmissionFailure(error);
@@ -4707,6 +5061,10 @@ function AccountContent({
       qaSendPending.current = false;
       setQaSendStatus("failed");
       return;
+    } finally {
+      // #1208: release the reserved revision only when Core did not accept the
+      // submission, so an unchanged retry passes Core's revision fence.
+      settleComposerOperation(admitted, !accepted);
     }
   }
 
@@ -4735,6 +5093,7 @@ function AccountContent({
     const draftRevision = currentComposerDraftRevision(scope, admitted.lease);
     if (!reserveComposerAcceptedRevision(admitted, draftRevision)) return;
     const localRevisionAtSubmission = mainComposerOverlayRef.current?.revision ?? null;
+    let accepted = false;
     try {
       const response = await api.scheduleSend(
         account,
@@ -4745,19 +5104,23 @@ function AccountContent({
         sendAtMs,
         draftRevision
       );
+      accepted = compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
       await applyCommandReceipt(response.settlement);
+      if (!accepted) return;
       const canApply = composerOperationCanApply(admitted, draftRevision);
       if (!canApply || submissionAccountOwnerRef.current !== accountOwner) return;
-      const accepted = compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
       const hasNewerDraft = mainComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
-      if (accepted && !hasNewerDraft) {
+      if (!hasNewerDraft) {
         cancelComposerDraftPersist(scope);
         clearLocalComposerDraft(scope);
         updateComposerTypingSignal(roomId, "");
       }
     } catch {
-      settleComposerOperation(admitted);
       // Command failures are surfaced through the Rust-owned error/event path.
+    } finally {
+      // #1208: release the reserved revision only when Core did not accept the
+      // schedule, so an unchanged retry passes Core's revision fence.
+      settleComposerOperation(admitted, !accepted);
     }
   }
 
@@ -4830,6 +5193,36 @@ function AccountContent({
     clearComposerDraftPersistTimer(scope);
   }
 
+  /**
+   * The document the mounted editor is showing for `target`, captured synchronously.
+   *
+   * #1194: staging needs the text the user is looking at, and the composer draft is
+   * persisted on a 350 ms debounce, so the hydrated snapshot can lag it. The
+   * existing scoped overlay is that text — an accepted send clears it, so a sent
+   * message can never become a later attachment's caption. When no overlay exists
+   * yet the hydrated document is the honest fallback.
+   */
+  function capturedComposerDocument(target: ComposerTarget): ComposerDocument | undefined {
+    const account = currentComposerAccount;
+    if (!account) return undefined;
+    const scope = composerDraftScope(account, target);
+    const overlay =
+      target.kind === "main" ? mainComposerOverlayRef.current : threadComposerOverlayRef.current;
+    if (overlay && composerDraftScopesEqual(scope, overlay.scope)) {
+      return overlay.document;
+    }
+    const timeline = snapshot?.state.ui.timeline;
+    if (target.kind === "main") {
+      return timeline?.room_id === target.room_id ? timeline.composer.document : undefined;
+    }
+    const thread = snapshot?.state.ui.thread;
+    return thread?.kind === "open" &&
+      thread.room_id === target.room_id &&
+      thread.root_event_id === target.root_event_id
+      ? thread.composer.document
+      : undefined;
+  }
+
   function queueComposerDraftPersist(
     scope: ComposerDraftScope,
     document: ComposerDocument,
@@ -4883,13 +5276,21 @@ function AccountContent({
       return;
     }
     const target: ComposerTarget = { kind: "main", room_id: roomId };
+    // Captured before reading the files, so a slow read cannot capture a newer
+    // composer state than the one the user attached from.
+    const capturedDraft = capturedComposerDocument(target);
     await stageAttachmentFiles(
       target,
       files,
       stagedUploads.length,
       createStagedUploadId,
       async (capturedTarget, items) => {
-        await settleCommand(api.stageUploadBytes(capturedTarget, items));
+        // #1194: the renderer holds the text the user is looking at; the snapshot
+        // can lag it by the composer's persist debounce. Rust owns the decision to
+        // use it as a single attachment's caption.
+        await settleCommand(
+          api.stageUploadBytes(capturedTarget, items, capturedDraft)
+        );
       }
     );
   }
@@ -5171,6 +5572,48 @@ function AccountContent({
     setRightPanelMode("closed");
   }
 
+  async function openScheduledSendsPanel(scope: ScheduledSendsScope) {
+    const intent = ++rightPanelIntentEpochRef.current;
+    roomSettingsRequestRef.current += 1;
+    scheduledSendsOpenInFlightRef.current = true;
+    const operation = (async () => {
+      try {
+        await closeFocusedContextIfHiddenBy("scheduledMessages");
+        if (rightPanelIntentEpochRef.current !== intent) {
+          // A newer intent arrived while the focused context was closing; do not
+          // submit an open the user no longer wants.
+          return;
+        }
+        await settleCommand(api.openScheduledSendsList(scope));
+        if (rightPanelIntentEpochRef.current !== intent) {
+          // The receipt landed after a newer panel intent (Info, Threads, a
+          // navigation transition, or the account-switch drain). Retire the
+          // projection this open created; never resurrect the panel.
+          await settleCommand(api.closeScheduledSendsList()).catch(() => undefined);
+          return;
+        }
+        setRightPanelMode("scheduledMessages");
+      } finally {
+        scheduledSendsOpenInFlightRef.current = false;
+      }
+    })();
+    scheduledSendsOpenPromiseRef.current = operation;
+    try {
+      await operation;
+    } finally {
+      if (scheduledSendsOpenPromiseRef.current === operation) {
+        scheduledSendsOpenPromiseRef.current = null;
+      }
+    }
+  }
+
+  function closeScheduledSendsPanel() {
+    // The mode transition dispatches the Rust close while this account still
+    // owns the bound API; `effectiveRightPanelModeForSnapshot` then gates the
+    // items on the projected state.
+    setRightPanelMode("closed");
+  }
+
   async function paginateThreadsList(scope: ThreadsListScope) {
     await settleCommand(api.paginateThreadsList(scope));
   }
@@ -5233,13 +5676,16 @@ function AccountContent({
       return;
     }
     const target: ComposerTarget = { kind: "thread", room_id: roomId, root_event_id: rootEventId };
+    const capturedDraft = capturedComposerDocument(target);
     await stageAttachmentFiles(
       target,
       files,
       thread.staged_uploads?.length ?? 0,
       createStagedUploadId,
       async (capturedTarget, items) => {
-        await settleCommand(api.stageUploadBytes(capturedTarget, items));
+        await settleCommand(
+          api.stageUploadBytes(capturedTarget, items, capturedDraft)
+        );
       }
     );
   }
@@ -5276,26 +5722,44 @@ function AccountContent({
     const scope = composerDraftScope(account, target);
     const admitted = beginComposerOperation(scope);
     if (!admitted) return;
-    // #1130: as above; the thread draft is settled, never consumed.
+    // #1204: as above, for the thread composer.
+    const capturedDraft = capturedComposerDocument(target);
+    const localRevisionAtSubmission = threadComposerOverlayRef.current?.revision ?? null;
     const draftRevision = currentComposerDraftRevision(scope, admitted.lease);
+    if (!reserveComposerAcceptedRevision(admitted, draftRevision)) {
+      return;
+    }
     for (const item of uploads) {
       latestTextMutationQueueRef.current.invalidate(
         `caption:thread:${roomId}:${rootEventId}:${item.staged_id}`
       );
     }
+    // #1208: as above, for the thread composer.
+    let accepted = false;
     try {
-      const settlement = await api.sendPreparedUploads(
+      const response = await api.sendPreparedUploads(
         account,
         admitted.lease.leaseId,
         admitted.lease.rendererGeneration,
         target,
-        draftRevision
+        draftRevision,
+        capturedDraft
       );
-      await applyCommandReceipt(settlement);
+      accepted = true;
+      await applyCommandReceipt(response);
+      const threadOverlay = threadComposerOverlayRef.current;
+      if (
+        response.consumedDraft &&
+        threadOverlay &&
+        threadOverlay.revision === localRevisionAtSubmission
+      ) {
+        cancelThreadComposerDraftPersist(scope);
+        clearLocalThreadComposerDraft(scope);
+      }
     } catch {
       // Command failures are surfaced through the Rust-owned error/event path.
     } finally {
-      settleComposerOperation(admitted);
+      settleComposerOperation(admitted, !accepted);
     }
   }
 
@@ -5367,10 +5831,10 @@ function AccountContent({
       submissionController.reject(submissionId);
       return;
     }
-    let response;
+    let accepted = false;
     try {
       appendComposerSubmitDiagnostic("thread", "dispatch", "mode=thread_reply");
-      response = await api.sendThreadReply(
+      const response = await api.sendThreadReply(
         captured.account,
         admitted.lease.leaseId,
         admitted.lease.rendererGeneration,
@@ -5380,9 +5844,39 @@ function AccountContent({
         captured.document,
         captured.draftRevision
       );
+      accepted =
+        response.submissionId === submissionId && response.outcome === "accepted";
+      await applyCommandReceipt(response.settlement);
+      if (!accepted) {
+        if (submissionAccountOwnerRef.current !== captured.accountOwner) {
+          return;
+        }
+        appendComposerSubmitDiagnostic("thread", "settled", "outcome=rejected_by_backend");
+        submissionController.reject(submissionId);
+        return;
+      }
+      const canApply = composerOperationCanApply(admitted, captured.draftRevision);
+      if (!canApply || submissionAccountOwnerRef.current !== captured.accountOwner) {
+        appendComposerSubmitDiagnostic("thread", "settled", "outcome=stale_context_ignored");
+        return;
+      }
+      submissionController.accept(submissionId);
+      appendComposerSubmitDiagnostic("thread", "settled", "outcome=accepted");
+      const hasNewerDraft =
+        threadComposerOverlayRef.current?.revision !== captured.localRevisionAtSubmission;
+      if (!hasNewerDraft) {
+        cancelThreadComposerDraftPersist(captured.scope);
+        clearLocalThreadComposerDraft(captured.scope);
+      }
     } catch (error) {
-      settleComposerOperation(admitted);
       if (submissionAccountOwnerRef.current !== captured.accountOwner) {
+        return;
+      }
+      if (accepted) {
+        // Core accepted; only the receipt projection failed. Do not offer an
+        // unknown-retry that would reserve a revision Core already advanced.
+        submissionController.accept(submissionId);
+        appendComposerSubmitDiagnostic("thread", "settled", "outcome=accepted_receipt_unreconciled");
         return;
       }
       const disposition = classifySubmissionFailure(error);
@@ -5397,25 +5891,10 @@ function AccountContent({
         submissionController.reject(submissionId);
       }
       return;
-    }
-    await applyCommandReceipt(response.settlement);
-    const canApply = composerOperationCanApply(admitted, captured.draftRevision);
-    if (!canApply || submissionAccountOwnerRef.current !== captured.accountOwner) {
-      appendComposerSubmitDiagnostic("thread", "settled", "outcome=stale_context_ignored");
-      return;
-    }
-    if (response.submissionId !== submissionId || response.outcome !== "accepted") {
-      appendComposerSubmitDiagnostic("thread", "settled", "outcome=rejected_by_backend");
-      submissionController.reject(submissionId);
-      return;
-    }
-    submissionController.accept(submissionId);
-    appendComposerSubmitDiagnostic("thread", "settled", "outcome=accepted");
-    const hasNewerDraft =
-      threadComposerOverlayRef.current?.revision !== captured.localRevisionAtSubmission;
-    if (!hasNewerDraft) {
-      cancelThreadComposerDraftPersist(captured.scope);
-      clearLocalThreadComposerDraft(captured.scope);
+    } finally {
+      // #1208: release the reserved revision only when Core did not accept the
+      // submission, so an unchanged retry passes Core's revision fence.
+      settleComposerOperation(admitted, !accepted);
     }
   }
 
@@ -5545,9 +6024,9 @@ function AccountContent({
     const draftRevision = currentComposerDraftRevision(scope, admitted.lease);
     if (!reserveComposerAcceptedRevision(admitted, draftRevision)) return;
     const localRevisionAtSubmission = threadComposerOverlayRef.current?.revision ?? null;
-    let response;
+    let accepted = false;
     try {
-      response = await api.scheduleSend(
+      const response = await api.scheduleSend(
         account,
         admitted.lease.leaseId,
         admitted.lease.rendererGeneration,
@@ -5556,19 +6035,23 @@ function AccountContent({
         sendAtMs,
         draftRevision
       );
+      accepted = compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
+      await applyCommandReceipt(response.settlement);
+      if (!accepted) return;
+      const canApply = composerOperationCanApply(admitted, draftRevision);
+      if (!canApply || submissionAccountOwnerRef.current !== accountOwner) return;
+      const hasNewerDraft =
+        threadComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
+      if (!hasNewerDraft) {
+        cancelThreadComposerDraftPersist(scope);
+        clearLocalThreadComposerDraft(scope);
+      }
     } catch {
-      settleComposerOperation(admitted);
-      return;
-    }
-    await applyCommandReceipt(response.settlement);
-    const canApply = composerOperationCanApply(admitted, draftRevision);
-    if (!canApply || submissionAccountOwnerRef.current !== accountOwner) return;
-    const accepted = compareComposerDraftRevisions(response.acceptedRevision, draftRevision) > 0;
-    const hasNewerDraft =
-      threadComposerOverlayRef.current?.revision !== localRevisionAtSubmission;
-    if (accepted && !hasNewerDraft) {
-      cancelThreadComposerDraftPersist(scope);
-      clearLocalThreadComposerDraft(scope);
+      // Command failures are surfaced through the Rust-owned error/event path.
+    } finally {
+      // #1208: release the reserved revision only when Core did not accept the
+      // schedule, so an unchanged retry passes Core's revision fence.
+      settleComposerOperation(admitted, !accepted);
     }
   }
 
@@ -6081,6 +6564,10 @@ function AccountContent({
       await closeThreadsListPanel();
       return;
     }
+    if (rightPanelMode === "scheduledMessages") {
+      closeScheduledSendsPanel();
+      return;
+    }
     if (rightPanelMode === "search") {
       await closeSearchPanel();
       return;
@@ -6161,6 +6648,24 @@ function AccountContent({
           // a plain-text edit from the shell.
           target.onOpenEdit?.();
           return;
+        case "copySelectedText": {
+          // #1155: the exact captured selection, through the same clipboard
+          // helper every other copy action uses. Nothing is persisted.
+          const selected = target.selectedText;
+          if (selected) {
+            void writeClipboardText(selected).catch(() => undefined);
+          }
+          return;
+        }
+        case "searchWebForSelectedText": {
+          // #1155: transmitted only after the user picks this action, to the
+          // fixed provider named in the localized label.
+          const url = target.selectedText ? webSearchUrl(target.selectedText) : null;
+          if (url) {
+            runInBackground(openExternalHttpUrl(url));
+          }
+          return;
+        }
         case "redactMessage":
           runInBackground(redactMessage(target.message.room_id, target.message.event_id));
           return;
@@ -6309,6 +6814,9 @@ function AccountContent({
 
   const sessionKind = snapshot.state.domain.session.kind;
   const secureBackupGate = snapshot.state.domain.secure_backup_gate;
+  // Computed before the sign-in-gate early return: the diagnostics dialog must
+  // be renderable while the gate is active (#1265), and its report needs this.
+  const effectiveRightPanelMode = effectiveRightPanelModeForSnapshot(rightPanelMode, snapshot);
   const secureBackupStartupGateRequired =
     sessionKind === "ready" &&
     !secureBackupGateIsOperational &&
@@ -6340,24 +6848,32 @@ function AccountContent({
     secureBackupStartupGateRequired;
   if (verificationGate) {
     return (
-      <SessionVerificationGate
-        desktopApi={api}
-        snapshot={snapshot}
-        onReceipt={applyCommandReceipt}
-        onSignOut={() => runInBackground(requestLogout())}
-        operations={{
-          startOwnUserSas: () => api.startOwnUserSas(),
-          submitRecovery: (secret) => api.submitRecovery(secret),
-          recoverSecureBackup: api.recoverSecureBackup?.bind(api),
-          bootstrapSecureBackup: (passphrase, intent) =>
-            api.bootstrapSecureBackup(passphrase, intent),
-          saveSecureBackupRecoveryKey: requestSecureBackupRecoveryKeySave,
-          confirmSecureBackupRecoveryKeySaved: (revealRequestId) =>
-            api.confirmSecureBackupRecoveryKeySaved(revealRequestId),
-          retrySecureBackupInspection: api.retrySecureBackupInspection?.bind(api),
-          openSecureBackupDiagnostics: openDiagnostics
-        }}
-      />
+      <>
+        <SessionVerificationGate
+          desktopApi={api}
+          snapshot={snapshot}
+          onReceipt={applyCommandReceipt}
+          onSignOut={() => runInBackground(requestLogout())}
+          operations={{
+            startOwnUserSas: () => api.startOwnUserSas(),
+            submitRecovery: (secret) => api.submitRecovery(secret),
+            recoverSecureBackup: api.recoverSecureBackup?.bind(api),
+            bootstrapSecureBackup: (passphrase, intent) =>
+              api.bootstrapSecureBackup(passphrase, intent),
+            saveSecureBackupRecoveryKey: requestSecureBackupRecoveryKeySave,
+            confirmSecureBackupRecoveryKeySaved: (revealRequestId) =>
+              api.confirmSecureBackupRecoveryKeySaved(revealRequestId),
+            retrySecureBackupInspection: api.retrySecureBackupInspection?.bind(api),
+            openSecureBackupDiagnostics: openDiagnostics
+          }}
+        />
+        {diagnosticsOpen ? (
+          <DiagnosticDialog
+            report={diagnosticReportFor(snapshot, runtimeDiagnosticSnapshot)}
+            onClose={() => setDiagnosticsOpen(false)}
+          />
+        ) : null}
+      </>
     );
   }
 
@@ -6393,10 +6909,12 @@ function AccountContent({
         }
         onDiscoverLoginMethods={() => runInBackground(discoverLoginMethods())}
         onDeviceNameChange={setLoginDeviceName}
-        onMatrixIdChange={setLoginUsername}
+        onMatrixIdChange={changeLoginUsername}
         onPasswordPresenceChange={setLoginPasswordFilled}
-        onServerOverrideChange={setLoginServerOverride}
-        onStartOidcLogin={() => runInBackground(startOidcLogin())}
+        onServerOverrideChange={changeLoginServerOverride}
+        onStartOidcLogin={(method) => runInBackground(startOidcLogin(method))}
+        onCancelOidcLogin={cancelBrowserAttempt}
+        browserAttemptPending={browserAttemptPending}
         onSubmit={submitLogin}
       />
     );
@@ -6513,7 +7031,6 @@ function AccountContent({
     activeSearchState?.kind === "results" &&
     searchResults.length === 0 &&
     searchCrawlerHasPendingIndexing(snapshot.state.domain.search_crawler);
-  const effectiveRightPanelMode = effectiveRightPanelModeForSnapshot(rightPanelMode, snapshot);
   const rightPanelOpen = !["closed", "userSettings", "keyboardSettings"].includes(effectiveRightPanelMode);
   const fittedShellWidths = fitShellWidths(
     sidebarWidth,
@@ -6609,7 +7126,7 @@ function AccountContent({
           searchInputRef={searchInputRef}
           searchQuery={searchQuery}
           searchScope={searchScope}
-          onOpenAppSettings={() => onSettingsScopeChange("app")}
+          onOpenAppSettings={() => requestSettingsScope("app")}
           onOpenDiagnostics={() => {
             runInBackground(openDiagnostics());
           }}
@@ -6617,6 +7134,13 @@ function AccountContent({
           onSearchScopeChange={setSearchScope}
           onStartWindowDrag={startWindowDrag}
         />
+        {eventNavigation?.kind === "opening" ? (
+          // #1146: Rust publishes `opening` at click admission; show it until
+          // the bounded anchored/live-fallback/failed outcome replaces it.
+          <div className="navigation-pending" role="status">
+            <p className="navigation-pending-text">{t("navigation.opening")}</p>
+          </div>
+        ) : null}
         {eventNavigation?.kind === "failed" ? (
           <div className="navigation-failure" role="alert">
             <p className="navigation-failure-text">{t("navigation.failed")}</p>
@@ -6641,8 +7165,7 @@ function AccountContent({
           onCreateSpace={() => openCreateDialog("space")}
           onOpenContextMenu={openContextMenu}
           onOpenUserSettings={() => {
-            onSettingsScopeChange("account");
-            runInBackground(setRightPanelModeClosingFocusedContext("userSettings"));
+            openAccountSettings();
           }}
           onReorderSpaces={(spaceIds) => {
             runInBackground(reorderSpaces(spaceIds));
@@ -6671,6 +7194,12 @@ function AccountContent({
           }}
           onOpenThreads={() => {
             runInBackground(openThreadsListPanel(threadsListScope));
+          }}
+          onOpenScheduledMessages={() => {
+            const scope: ScheduledSendsScope = activeSpace
+              ? { kind: "space", space_id: activeSpace.space_id }
+              : { kind: "home" };
+            runInBackground(openScheduledSendsPanel(scope));
           }}
           onOpenSpaceInfo={() => {
             runInBackground(setRightPanelModeClosingFocusedContext("spaceInfo"));
@@ -6837,6 +7366,10 @@ function AccountContent({
             onComposerMathModeChange={(enabled) => {
               runInBackground(
                 updateSettings({
+                  // #1244: math mode is app-scoped while the same patch shape
+                  // carries account-scoped recent emojis; name the scope so the
+                  // reducer applies the math change.
+                  scope: "app",
                   composer: {
                     ...snapshot.state.domain.settings.values.composer,
                     math_mode: enabled
@@ -6900,6 +7433,12 @@ function AccountContent({
                 runInBackground(openThreadsListPanel({ kind: "room", room_id: roomId }));
               }
             }}
+            onOpenRoomInfoSetting={() => {
+              if (activeRoom) {
+                setRoomInfoReveal({ roomId: activeRoom.room_id, setting: "joinRule" });
+              }
+              setRightPanelMode("roomInfo");
+            }}
             onToggleRoomInfo={() => {
               if (rightPanelOpen) {
                 if (effectiveRightPanelMode === "thread") {
@@ -6944,7 +7483,7 @@ function AccountContent({
           }}
           settingsScope={settingsScope ?? "account"}
           sendingAccount={sendingAccount}
-          onSettingsScopeChange={onSettingsScopeChange}
+          onSettingsScopeChange={requestSettingsScope}
           displayDensity={displayDensity}
           encryptedComposerBlocked={encryptedComposerBlocked}
           isRecoveryBusy={isBusy}
@@ -6967,7 +7506,7 @@ function AccountContent({
           }}
           onClosePanel={() => {
             if (effectiveRightPanelMode === "userSettings" || effectiveRightPanelMode === "keyboardSettings") {
-              onSettingsScopeChange(null);
+              requestSettingsScope(null);
             }
             runInBackground(closeFocusedContextPanel());
           }}
@@ -7033,6 +7572,12 @@ function AccountContent({
           }}
           onPaginateThreadsList={(scope) => {
             runInBackground(paginateThreadsList(scope));
+          }}
+          onCancelScheduledSend={(scheduledId) => {
+            runInBackground(cancelScheduledSend(scheduledId));
+          }}
+          onRescheduleScheduledSend={(scheduledId, body, sendAtMs) => {
+            runInBackground(rescheduleScheduledSend(scheduledId, body, sendAtMs));
           }}
           onOpenRecovery={() => {
             runInBackground(setRightPanelModeClosingFocusedContext("recovery"));
@@ -7219,6 +7764,13 @@ function AccountContent({
           onUpdateRoomSetting={(roomId, change) => {
             runInBackground(updateRoomSetting(roomId, change));
           }}
+          roomAccessPreview={roomAccessPreview}
+          roomHistoryPreview={roomHistoryPreview}
+          onSetRoomAccessDraft={(command) => {
+            runInBackground(api.setRoomAccessDraft(command).then(() => undefined));
+          }}
+          roomInfoReveal={roomInfoReveal}
+          onRoomInfoRevealHandled={() => setRoomInfoReveal(null)}
           onUpdateSpaceJoinRule={(spaceId, joinRule) => updateRoomSetting(spaceId, { joinRule })}
           onIgnoreUser={(userId) => {
             runInBackground(ignoreUser(userId));
@@ -7282,6 +7834,13 @@ function AccountContent({
           onOpenAddressHelp={(url) => runInBackground(openExternalHttpUrl(url))}
           value={createDraftName}
           onCancel={closeCreateDialog}
+          roomAccessDraft={createRoomAccessDraft}
+          createAccessPreview={createRoomAccessPreview}
+          createAccessSessionId={createAccessSessionId}
+          joinedSpaces={createRoomJoinedSpaces}
+          onSetRoomAccessDraft={(command) => {
+            runInBackground(api.setRoomAccessDraft(command).then(() => undefined));
+          }}
           onRoomOptionsChange={(options) => {
             if (options.aliasLocalpart !== displayedCreateRoomOptions.aliasLocalpart) {
               setCreateRoomManualAlias(options.aliasLocalpart);

@@ -69,9 +69,10 @@ use super::super::test_support::{
 use super::super::thread_projection::ThreadAttentionTracker;
 use super::{
     InitialItemsRequestIdentity, NavigationProjectionCleanup, NavigationProjectionIngress,
-    NavigationProjectionIntent, ROOM_REPLAY_INITIAL_ITEMS_MAX, TimelineActorGenerationGate,
-    acquire_pagination_permit_and_emit_paginating, activity_row_from_timeline_item,
-    backward_pagination_changed_oldest_edge, derive_timeline_navigation_snapshot,
+    NavigationProjectionIntent, PaginationAttempt, ROOM_REPLAY_INITIAL_ITEMS_MAX,
+    TimelineActorGenerationGate, acquire_pagination_permit_and_emit_paginating,
+    activity_row_from_timeline_item, backward_pagination_changed_oldest_edge,
+    bounded_paginate_with, derive_timeline_navigation_snapshot,
     derive_timeline_navigation_snapshot_with_read_state, emit_initial_items_for_generation,
     receive_navigation_projection, replay_initial_items_window,
     should_hydrate_empty_initial_room_timeline, timeline_unread_consistency_diagnostic_event,
@@ -1904,7 +1905,8 @@ async fn timeline_actor_spawn_returns_before_authoritative_publish_waits_for_man
         Some(TimelineMessage::IgnoredUsersUpdated { .. })
     ));
     assert!(matches!(
-        executor::timeout(Duration::from_millis(100), manager_rx.recv())
+        // Liveness bound: a publish that never resumes leaves this pending.
+        executor::timeout(Duration::from_secs(60), manager_rx.recv())
             .await
             .expect("authoritative startup publish must resume after capacity opens"),
         Some(TimelineMessage::AuthoritativeReadStateObserved {
@@ -2305,6 +2307,7 @@ fn unread_consistency_diagnostic_correlates_thread_receipt_with_latest_reply_pro
     let mut root = timeline_item("$root:test", Some("root"), "@me:test", false);
     root.thread_summary = Some(ThreadSummaryDto {
         reply_count: 1,
+        unread_count: 0,
         latest_event_id: Some("$reply:test".to_owned()),
         latest_sender: Some("@alice:test".to_owned()),
         latest_sender_label: Some("Alice".to_owned()),
@@ -2369,7 +2372,7 @@ fn unread_consistency_diagnostic_correlates_thread_receipt_with_latest_reply_pro
 
 #[tokio::test]
 async fn forward_pagination_on_room_key_fails_invalid_direction() {
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
 
     // Inject a Ready session so commands are not gated.
@@ -2446,7 +2449,7 @@ async fn forward_pagination_on_room_key_fails_invalid_direction() {
 
 #[tokio::test]
 async fn forward_pagination_on_thread_key_not_subscribed() {
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
 
     runtime
@@ -2536,7 +2539,7 @@ fn backward_direction_never_invalid_for_any_kind() {
 
 #[tokio::test]
 async fn paginate_on_unsubscribed_key_returns_not_subscribed() {
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
 
     runtime
@@ -2732,7 +2735,10 @@ fn navigation_display_anchor_stays_at_marker_when_no_own_messages_after() {
     );
 
     assert_eq!(snapshot.first_unread_event_id, Some("$remote".to_owned()));
-    assert_eq!(snapshot.read_marker_display_event_id, None);
+    assert_eq!(
+        snapshot.read_marker_display_event_id.as_deref(),
+        Some("$other")
+    );
 }
 
 #[test]
@@ -2823,7 +2829,8 @@ fn room_navigation_preserves_hidden_receipt_position_and_thread_scope() {
         Some("@me:test"),
     );
     assert_eq!(
-        read_room.read_marker_display_event_id, None,
+        read_room.read_marker_display_event_id.as_deref(),
+        Some("$later:test"),
         "an own hidden reply must not move the room divider"
     );
     let thread = derive_timeline_navigation_snapshot(
@@ -3166,4 +3173,46 @@ async fn same_generation_room_readmission_reprojects_the_room() {
         .expect("stale demand wake");
     manager.handle_navigation_projection(demand).await;
     assert_eq!(manager.applied_room_projection, Some(2));
+}
+
+/// #1239: a pagination whose SDK await never returns must settle as a retryable
+/// timeout instead of leaving the pane in `Paginating`.
+#[tokio::test(start_paused = true)]
+async fn bounded_pagination_times_out_to_a_retryable_failure() {
+    assert_eq!(
+        PaginationAttempt::Failed(TimelineFailureKind::Timeout).trace_token(),
+        "timeout"
+    );
+
+    let timed_out = bounded_paginate_with(
+        Duration::from_secs(30),
+        std::future::pending::<Result<bool, matrix_sdk_ui::timeline::Error>>(),
+    )
+    .await;
+    assert!(matches!(
+        timed_out,
+        PaginationAttempt::Failed(TimelineFailureKind::Timeout)
+    ));
+    assert_eq!(
+        timed_out.into_state(),
+        PaginationState::Failed {
+            kind: TimelineFailureKind::Timeout
+        },
+        "the timeout must surface through the normal retryable pagination state"
+    );
+
+    assert!(matches!(
+        bounded_paginate_with(Duration::from_secs(30), async {
+            Ok::<bool, matrix_sdk_ui::timeline::Error>(true)
+        })
+        .await,
+        PaginationAttempt::ReachedEnd
+    ));
+    assert!(matches!(
+        bounded_paginate_with(Duration::from_secs(30), async {
+            Ok::<bool, matrix_sdk_ui::timeline::Error>(false)
+        })
+        .await,
+        PaginationAttempt::Idle
+    ));
 }

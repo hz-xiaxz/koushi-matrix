@@ -132,7 +132,6 @@ TimelineBottomArrival,
 TimelineItem,
 TimelineKey,
 TimelineMessageSource,
-TimelineNavigationSnapshot,
 TimelineReadStateSync
 } from "../domain/coreEvents";
 import {
@@ -476,8 +475,6 @@ export const TimelineView = memo(function TimelineView({
   const [messageSource, setMessageSource] = useState<TimelineMessageSource | null>(null);
   const [mediaViewerItem, setMediaViewerItem] = useState<TimelineMediaViewerItem | null>(null);
   const mediaViewerReturnFocusRef = useRef<HTMLElement | null>(null);
-  const [navigationSnapshot, setNavigationSnapshot] =
-    useState<TimelineNavigationSnapshot | null>(null);
   const [viewportAtBottom, setViewportAtBottom] = useState(false);
   const [aliasTarget, setAliasTarget] = useState<TimelineAliasTarget | null>(null);
   const [aliasDraft, setAliasDraft] = useState("");
@@ -635,6 +632,7 @@ export const TimelineView = memo(function TimelineView({
   const focusedTimelineTargetEventId =
     "Focused" in timelineKey.kind ? timelineKey.kind.Focused.event_id : null;
   const items = getItems(store, timelineKey);
+  const navigationSnapshot = store.keys.get(timelineKeyHash)?.navigation ?? null;
   // Issue #460: immediate acknowledgment on the user's "Request keys and
   // retry" click: a toast + a local pending marker, until Rust publishes a
   // terminal request state via the timeline DTO. Presentation-only.
@@ -1285,7 +1283,6 @@ export const TimelineView = memo(function TimelineView({
         resetActiveMeasurementDeferral({ clearMountedIds: true });
         lastPersistedViewportAnchorSignatureRef.current = null;
         restoredRoomScrollAnchorSignatureRef.current = null;
-        setNavigationSnapshot(null);
         if (!isAppLevelStore) {
           setStore((current) => applyGlobalResync(current));
         }
@@ -1535,7 +1532,6 @@ export const TimelineView = memo(function TimelineView({
         userScrollInputPendingRef.current = false;
         resetActiveMeasurementDeferral({ clearMountedIds: true });
         lastPersistedViewportAnchorSignatureRef.current = null;
-        setNavigationSnapshot(null);
       }
 
       if ("MessageSourceLoaded" in event) {
@@ -1544,11 +1540,6 @@ export const TimelineView = memo(function TimelineView({
       }
 
       if ("MessageForwarded" in event) {
-        return;
-      }
-
-      if ("NavigationUpdated" in event) {
-        setNavigationSnapshot(event.NavigationUpdated.snapshot);
         return;
       }
 
@@ -1656,7 +1647,6 @@ export const TimelineView = memo(function TimelineView({
       sessionViewport?.mode === "anchor" ? sessionViewport.anchor : null
     );
     roomReentryDiagnosticKeyRef.current = null;
-    setNavigationSnapshot(null);
     setViewportAtBottom(false);
     lastViewportObservationRef.current = null;
     downloadedEventIdsRef.current = new Set();
@@ -2051,10 +2041,24 @@ export const TimelineView = memo(function TimelineView({
     }
   }, [mediaDownloads, roomId, sideEffectItems, transport]);
   const roomSignals = liveSignals?.rooms[roomId] ?? null;
+  // Issue #1255: each timeline reads receipts from its own scope. The timeline
+  // key is authoritative, so a focused permalink on a thread reply reads its
+  // focused scope and never the thread root's.
+  const scopedReceiptsByEvent = roomSignals
+    ? "Thread" in timelineKey.kind
+      ? roomSignals.thread_receipts_by_event?.[timelineKey.kind.Thread.root_event_id] ?? {}
+      : "Focused" in timelineKey.kind
+        ? roomSignals.focused_receipts_by_event?.[timelineKey.kind.Focused.event_id] ?? {}
+        : roomSignals.receipts_by_event
+    : null;
   // Read receipts and fully-read state remain canonical timeline facts. A
   // moved root only changes presentation; it must not cause the root id to be
   // sent as the room's latest readable event.
   const latestReadableEventId = latestEventBackedItemId(items);
+  // Viewport observations name displayed activity identities. A moved thread
+  // root still has its original content id; comparing that id to the viewport
+  // would miss a visible live edge. Rust resolves the observation's read target.
+  const latestViewportEventId = visibleRows.at(-1)?.activity_event_id ?? null;
   useEffect(() => {
     const anchorEventId = focusedTimelineTargetEventId ?? initialTargetEventId ?? "anchored";
     const identityKey = [roomId, anchorEventId].join("\u0000");
@@ -2215,8 +2219,8 @@ export const TimelineView = memo(function TimelineView({
     }
     const atBottom = isScrolledToBottom(container);
     const latestVisible =
-      latestReadableEventId !== null &&
-      visible.lastVisibleEventId === latestReadableEventId;
+      latestViewportEventId !== null &&
+      visible.lastVisibleEventId === latestViewportEventId;
     const effectiveAtBottom = atBottom || latestVisible;
     setViewportAtBottom((current) =>
       current === effectiveAtBottom ? current : effectiveAtBottom
@@ -2255,7 +2259,7 @@ export const TimelineView = memo(function TimelineView({
   }, [
     focusedTimelineTargetEventId,
     isAnchored,
-    latestReadableEventId,
+    latestViewportEventId,
     onReturnToLive,
     roomId,
     transport,
@@ -3367,7 +3371,7 @@ export const TimelineView = memo(function TimelineView({
   const readMarkerDisplayEventId =
     navigationSnapshot?.read_marker_display_event_id ??
     navigationSnapshot?.read_marker_event_id ??
-    roomSignals?.fully_read_event_id ??
+    ("Thread" in timelineKey.kind ? null : roomSignals?.fully_read_event_id) ??
     null;
 
   return (
@@ -3504,17 +3508,19 @@ export const TimelineView = memo(function TimelineView({
           const contentEventId = row.content_event_id;
           const activityEventId = row.activity_event_id;
           const isUnreadMarker = Boolean(
-            activityEventId && unreadMarkerEventId === activityEventId
+            unreadMarkerEventId &&
+              (unreadMarkerEventId === contentEventId || unreadMarkerEventId === activityEventId)
           );
           const isReadMarker = Boolean(
-            activityEventId &&
-              readMarkerDisplayEventId === activityEventId &&
+            readMarkerDisplayEventId &&
+              (readMarkerDisplayEventId === contentEventId || readMarkerDisplayEventId === activityEventId) &&
               !unreadMarkerEventId
           );
           const previousRow = visibleRows[visibleIndex - 1];
           const previousIsReadMarker = Boolean(
-            previousRow?.activity_event_id &&
-              readMarkerDisplayEventId === previousRow.activity_event_id &&
+            previousRow && readMarkerDisplayEventId &&
+              (readMarkerDisplayEventId === previousRow.content_event_id ||
+                readMarkerDisplayEventId === previousRow.activity_event_id) &&
               !unreadMarkerEventId
           );
           const isContinuation = Boolean(
@@ -3630,7 +3636,7 @@ export const TimelineView = memo(function TimelineView({
                 mediaDownload={contentEventId ? mediaDownloads[contentEventId] : undefined}
                 receipts={
                   contentEventId
-                    ? roomSignals?.receipts_by_event[contentEventId]?.readers ?? []
+                    ? scopedReceiptsByEvent?.[contentEventId]?.readers ?? []
                     : []
                 }
                 receiptSource={
@@ -3648,12 +3654,12 @@ export const TimelineView = memo(function TimelineView({
                 }
                 receiptTotalCount={
                   contentEventId
-                    ? roomSignals?.receipts_by_event[contentEventId]?.total_count ?? 0
+                    ? scopedReceiptsByEvent?.[contentEventId]?.total_count ?? 0
                     : 0
                 }
                 receiptOverflowCount={
                   contentEventId
-                    ? roomSignals?.receipts_by_event[contentEventId]?.overflow_count ?? 0
+                    ? scopedReceiptsByEvent?.[contentEventId]?.overflow_count ?? 0
                     : 0
                 }
                 />

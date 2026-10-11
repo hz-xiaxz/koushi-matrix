@@ -116,6 +116,39 @@ test("main composer Tab focuses Send before auxiliary controls", async ({ page }
   await expect.poll(() => invocationCount(page, "send_text")).toBe(1);
 });
 
+test("a failed local scheduled-send save warns above the composer (#1159)", async ({ page }) => {
+  await gotoReadyShell(page);
+  const composer = page.getByRole("textbox", { name: t("composer.messageComposer") });
+  const warning = page.getByText(t("scheduled.persistenceFailed"));
+  await expect(warning).toHaveCount(0);
+
+  await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        ui: {
+          ...snapshot.state.ui,
+          errors: [
+            {
+              code: "scheduled_send_persistence_failed",
+              message: "scheduled sends could not be saved on this device",
+              recoverable: true
+            }
+          ]
+        }
+      }
+    });
+    window.__harness.pushStateUpdate();
+  });
+
+  // Core-owned state drives the notice; the composer stays usable.
+  await expect(warning).toBeVisible();
+  await composer.fill("still composable");
+  await expect(composer).toHaveText("still composable");
+});
+
 test("main composer focused Send activates once with Space", async ({ page }) => {
   await gotoReadyShell(page);
   await page.evaluate(() => window.__harness.clearInvocations());
@@ -420,6 +453,34 @@ test("markdown toolbar and slash composer input dispatch Rust-owned send bodies"
         inlines: [{ kind: "text", text: "/me waves" }]
       }
   });
+});
+
+test("composer Math switch names the app scope so the change is not dropped (#1244)", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await page.evaluate(() => window.__harness.clearInvocations());
+
+  const mathSwitch = page.getByRole("switch", { name: /math formatting on/i });
+  await expect(mathSwitch).toHaveAttribute("aria-checked", "true");
+  await mathSwitch.click();
+
+  // The patch must carry the app scope: an account-scoped patch drops
+  // composer.math_mode, so the switch would stay on in the real app.
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__harness.invocationsOf("update_settings").at(-1)?.args)
+    )
+    .toMatchObject({
+      patch: {
+        scope: "app",
+        composer: { math_mode: false }
+      }
+    });
+  await expect(page.getByRole("switch", { name: /math formatting off/i })).toHaveAttribute(
+    "aria-checked",
+    "false"
+  );
 });
 
 test("composer string revision stays exact above Number.MAX_SAFE_INTEGER", async ({ page }) => {
@@ -1015,6 +1076,16 @@ for (const failure of ["rejected", "timeout"] as const) {
     await expect
       .poll(async () =>
         page.evaluate(() => window.__harness.invocationsOf("send_text")[0]?.args.draftRevision)
+      )
+      .toBe("1");
+
+    // #1208: the failed reserving send must not leave the local revision ahead of
+    // Core, so the unchanged retry submits the revision Core still stores.
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await expect.poll(() => invocationCount(page, "send_text")).toBe(2);
+    await expect
+      .poll(async () =>
+        page.evaluate(() => window.__harness.invocationsOf("send_text")[1]?.args.draftRevision)
       )
       .toBe("1");
   });
@@ -1670,7 +1741,229 @@ test("sending staged attachments never wipes the typed composer draft (#1130)", 
   // draft was never dispatched, so it must still be in the composer.
   await expect.poll(() => invocationCount(page, "send_text")).toBe(0);
   await expect(composer).toHaveText("Here is the error:");
+  await expect(page.getByRole("dialog", { name: "Upload attachments" })).toHaveCount(0, {
+    timeout: 12000
+  });
+});
+
+test("a successful prepared send keeps the advanced draft revision (#1208)", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await page.evaluate(() => window.__harness.clearInvocations());
+  const composer = page.getByRole("textbox", { name: "Message composer" });
+
+  await composer.fill("first staged draft");
+  await attachFile(page, {
+    name: "rev-first.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("first revision fixture")
+  });
+  await page.getByRole("button", { name: "Send attachments" }).click();
+  await expect.poll(() => invocationCount(page, "send_prepared_uploads")).toBe(1);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.__harness.invocationsOf("send_prepared_uploads")[0]?.args.draftRevision
+      )
+    )
+    .toBe("1");
+
+  // Core settled that send without consuming the text, so the renderer stays on
+  // the settled revision; the next edit and send continue from it, not from "1".
+  await composer.fill("second staged draft");
+  await attachFile(page, {
+    name: "rev-second.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("second revision fixture")
+  });
+  await page.getByRole("button", { name: "Send attachments" }).click();
+  await expect.poll(() => invocationCount(page, "send_prepared_uploads")).toBe(2);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.__harness.invocationsOf("send_prepared_uploads")[1]?.args.draftRevision
+      )
+    )
+    .toBe("3");
+});
+
+test("staging hands Core the draft the composer is showing (#1194)", async ({ page }) => {
+  await gotoReadyShell(page);
+  await page.evaluate(() => window.__harness.clearInvocations());
+
+  const composer = page.getByRole("textbox", { name: "Message composer" });
+  await composer.fill("Here is the error:");
+  await attachFile(page, {
+    name: "caption-fixture.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("browser-headless caption fixture")
+  });
+
+  // Core decides whether this becomes a caption; the renderer's only job is to hand
+  // it the document the mounted editor is showing, which can be younger than the
+  // composer's persist debounce.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.__harness.invocationsOf("stage_upload_bytes").at(-1)?.args.composerDocument
+      )
+    )
+    .toMatchObject({ inlines: [{ kind: "text", text: "Here is the error:" }] });
+  await expect(page.getByText("caption-fixture.txt", { exact: true })).toBeVisible();
+  // #1130 still holds: staging never moves or clears the typed text.
+  await expect(composer).toHaveText("Here is the error:");
+  expect(await invocationCount(page, "send_prepared_uploads")).toBe(0);
+
+  // A sent message is not a draft: after the accepted text send clears the
+  // composer, a new attachment must carry no document at all.
+  await page.getByRole("button", { name: "Send attachments" }).click();
+  await expect.poll(() => invocationCount(page, "send_prepared_uploads")).toBe(1);
   await expect(page.getByRole("dialog", { name: "Upload attachments" })).toHaveCount(0);
+  await page.evaluate(() => window.__harness.clearInvocations());
+  await composer.fill("Second message");
+  await composer.press("Enter");
+  await expect.poll(() => invocationCount(page, "send_text")).toBe(1);
+  await expect(composer).toHaveText("");
+  await attachFile(page, {
+    name: "after-send-fixture.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("after send fixture")
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.__harness
+          .invocationsOf("stage_upload_bytes")
+          .at(-1)?.args.composerDocument?.inlines?.some(
+            (inline: { kind: string; text?: string }) =>
+              inline.kind === "text" && (inline.text ?? "").trim().length > 0
+          )
+      )
+    )
+    .toBe(false);
+});
+
+/// #1204: when Core reports that an accepted send moved the draft into the message
+/// caption, the mounted composer drops the text it still shows, and the send is not
+/// repeated. The flag is an explicit Rust-shaped fixture, so the browser lane never
+/// reimplements the policy that decides consumption.
+test("a consumed prepared send empties the mounted composer", async ({ page }) => {
+  await gotoReadyShell(page);
+  await page.evaluate(() => window.__harness.clearInvocations());
+
+  const composer = page.getByRole("textbox", { name: "Message composer" });
+  await composer.fill("Caption text");
+  await page.evaluate(() => {
+    const harness = window.__harness as any;
+    harness.setPreparedSendConsumesDraft(true);
+  });
+  await attachFile(page, {
+    name: "consumed-fixture.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("consumed fixture")
+  });
+  await page.getByRole("button", { name: "Send attachments" }).click();
+
+  await expect.poll(() => invocationCount(page, "send_prepared_uploads")).toBe(1);
+  await expect(composer).toHaveText("");
+  // The staged projection is what the send settled; the dialog's own closure is
+  // covered by the #1130 case below, which exercises the same send without a
+  // consuming answer.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.__harness.currentSnapshot().state.ui.timeline.staged_uploads.length
+      )
+    )
+    .toBe(0);
+});
+
+test("attach button stages the file and keeps the typed main draft (#1144)", async ({ page }) => {
+  await gotoReadyShell(page);
+  await page.evaluate(() => window.__harness.clearInvocations());
+
+  const composer = page.getByRole("textbox", { name: "Message composer" });
+  await composer.fill("Text typed before attaching");
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__harness.invocationsOf("set_composer_draft").at(-1)?.args)
+    )
+    .toMatchObject({
+      document: { inlines: [{ kind: "text", text: "Text typed before attaching" }] }
+    });
+  await attachFile(page, {
+    name: "attach-1144.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("browser-headless attach fixture")
+  });
+
+  // Attaching only stages: the file waits in the staging dialog for an
+  // explicit send, and neither the attachment nor the typed text is sent.
+  await expect(page.getByRole("dialog", { name: "Upload attachments" })).toBeVisible();
+  await expect(page.getByText("attach-1144.txt", { exact: true })).toBeVisible();
+  await expect.poll(() => invocationCount(page, "stage_upload_bytes")).toBe(1);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__harness.invocationsOf("stage_upload_bytes")[0]?.args.target)
+    )
+    .toEqual({ kind: "main", room_id: HARNESS_ROOM_ID });
+  expect(await invocationCount(page, "send_prepared_uploads")).toBe(0);
+  expect(await invocationCount(page, "send_text")).toBe(0);
+  // The staging settlement must not overwrite or clear the typed draft.
+  await expect(composer).toHaveText("Text typed before attaching");
+  const lastDraftWrite = await page.evaluate(
+    () => window.__harness.invocationsOf("set_composer_draft").at(-1)?.args
+  );
+  expect(lastDraftWrite).toMatchObject({
+    document: { inlines: [{ kind: "text", text: "Text typed before attaching" }] }
+  });
+});
+
+test("thread attach button stages the file and keeps the typed thread draft (#1144)", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await page.getByRole("button", { name: /2 replies/ }).click();
+  await expect(page.getByText(t("panel.thread"), { exact: true })).toBeVisible();
+  await page.evaluate(() => window.__harness.clearInvocations());
+
+  const contextPanel = page.locator('aside[aria-label="Context panel"]');
+  const threadComposer = page.getByRole("textbox", { name: t("timeline.threadComposer") });
+  await threadComposer.fill("Thread text typed before attaching");
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__harness.invocationsOf("set_thread_composer_draft").at(-1)?.args)
+    )
+    .toMatchObject({
+      document: { inlines: [{ kind: "text", text: "Thread text typed before attaching" }] }
+    });
+  await contextPanel.getByRole("button", { name: "Attach file", exact: true }).click();
+  await contextPanel
+    .locator('input[type="file"][aria-label="Attach file input"]')
+    .setInputFiles({
+      name: "thread-attach-1144.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("browser-headless thread attach fixture")
+    });
+
+  await expect(page.getByRole("dialog", { name: "Upload attachments" })).toBeVisible();
+  await expect(page.getByText("thread-attach-1144.txt", { exact: true })).toBeVisible();
+  await expect.poll(() => invocationCount(page, "stage_upload_bytes")).toBe(1);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__harness.invocationsOf("stage_upload_bytes")[0]?.args.target)
+    )
+    .toMatchObject({ kind: "thread", room_id: HARNESS_ROOM_ID });
+  expect(await invocationCount(page, "send_prepared_uploads")).toBe(0);
+  expect(await invocationCount(page, "send_thread_reply")).toBe(0);
+  await expect(threadComposer).toHaveText("Thread text typed before attaching");
+  const lastDraftWrite = await page.evaluate(
+    () => window.__harness.invocationsOf("set_thread_composer_draft").at(-1)?.args
+  );
+  expect(lastDraftWrite).toMatchObject({
+    document: { inlines: [{ kind: "text", text: "Thread text typed before attaching" }] }
+  });
 });
 
 test("paste/drop upload UX stages ordinary files for the captured main composer target", async ({
@@ -2185,5 +2478,5 @@ test("edit composer respects the Rust-owned composer shortcut resolver", async (
         version: 2,
         inlines: [{ kind: "text", text: editedBody }]
       }
-  });
+    });
 });

@@ -102,6 +102,8 @@ fn room_summary_serializes_projected_label_and_dm_identity_contract() {
         unread_count: 3,
         notification_count: 3,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
@@ -171,6 +173,8 @@ fn room_list_update_projects_dm_room_display_labels_from_aliases() {
                 unread_count: 3,
                 notification_count: 3,
                 highlight_count: 0,
+                thread_unread_count: 0,
+                thread_highlight_count: 0,
                 marked_unread: false,
                 recency_stamp: None,
                 conversation_activity: None,
@@ -227,6 +231,8 @@ fn room_list_update_projects_dm_room_avatar_from_counterpart_profile() {
                 unread_count: 3,
                 notification_count: 3,
                 highlight_count: 0,
+                thread_unread_count: 0,
+                thread_highlight_count: 0,
                 marked_unread: false,
                 recency_stamp: None,
                 conversation_activity: None,
@@ -278,6 +284,8 @@ fn avatar_thumbnail_update_refreshes_people_filter_room_avatar_surface() {
         unread_count: 3,
         notification_count: 3,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
@@ -341,6 +349,8 @@ fn local_alias_update_refreshes_open_dm_room_labels_and_notification_candidate()
         unread_count: 3,
         notification_count: 3,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
@@ -731,6 +741,8 @@ fn room_list_update_clears_missing_active_space_and_room() {
                 unread_count: 0,
                 notification_count: 0,
                 highlight_count: 0,
+                thread_unread_count: 0,
+                thread_highlight_count: 0,
                 marked_unread: false,
                 recency_stamp: None,
                 conversation_activity: None,
@@ -793,6 +805,8 @@ fn room_list_update_moves_active_room_when_it_leaves_selected_space() {
                 unread_count: 5,
                 notification_count: 5,
                 highlight_count: 0,
+                thread_unread_count: 0,
+                thread_highlight_count: 0,
                 marked_unread: false,
                 recency_stamp: None,
                 conversation_activity: None,
@@ -816,6 +830,8 @@ fn room_list_update_moves_active_room_when_it_leaves_selected_space() {
                 unread_count: 2,
                 notification_count: 2,
                 highlight_count: 0,
+                thread_unread_count: 0,
+                thread_highlight_count: 0,
                 marked_unread: false,
                 recency_stamp: None,
                 conversation_activity: None,
@@ -882,6 +898,8 @@ fn room_list_update_moves_active_room_when_it_leaves_selected_space() {
                     unread_count: 5,
                     notification_count: 5,
                     highlight_count: 0,
+                    thread_unread_count: 0,
+                    thread_highlight_count: 0,
                     marked_unread: false,
                     recency_stamp: None,
                     conversation_activity: None,
@@ -905,6 +923,8 @@ fn room_list_update_moves_active_room_when_it_leaves_selected_space() {
                     unread_count: 2,
                     notification_count: 2,
                     highlight_count: 0,
+                    thread_unread_count: 0,
+                    thread_highlight_count: 0,
                     marked_unread: false,
                     recency_stamp: None,
                     conversation_activity: None,
@@ -972,6 +992,8 @@ fn room_list_update_moves_active_room_when_it_disappears_from_selected_space() {
             unread_count: 5,
             notification_count: 5,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -1028,6 +1050,8 @@ fn room_list_update_moves_active_room_when_it_disappears_from_selected_space() {
                 unread_count: 2,
                 notification_count: 2,
                 highlight_count: 0,
+                thread_unread_count: 0,
+                thread_highlight_count: 0,
                 marked_unread: false,
                 recency_stamp: None,
                 conversation_activity: None,
@@ -1132,4 +1156,267 @@ fn room_list_update_keeps_active_dm_global_with_selected_space() {
             },
         ]
     );
+}
+
+/// #1166: the access slice rides its room-list snapshot's generation/source
+/// decision: an authoritative projection replaces it, a provisional one merges,
+/// a stale one is ignored, a local leave prunes the room, and the restricted
+/// allow-condition facts travel with the join rule.
+#[test]
+fn room_access_projection_follows_its_room_list_snapshot() {
+    use koushi_state::{RestrictedConditions, RoomAccessCondition};
+
+    fn condition(
+        join_rule: koushi_state::RoomJoinRule,
+        restricted: Option<RestrictedConditions>,
+    ) -> koushi_state::RoomAccessObservation {
+        koushi_state::RoomAccessObservation {
+            access: RoomAccessCondition {
+                join_rule: Some(join_rule),
+                restricted,
+                allow_targets: Vec::new(),
+            },
+            history_visibility: koushi_state::RoomHistoryVisibility::Shared,
+        }
+    }
+
+    let mut state = ready_state();
+    assert!(state.room_access.is_empty());
+
+    // The room-list service must be loading this generation/source before an
+    // authoritative snapshot for it is accepted.
+    state.room_list.readiness = koushi_state::RoomListReadiness::Loading {
+        source: koushi_state::RoomListSource::Live,
+        generation: 1,
+    };
+    reduce(
+        &mut state,
+        AppAction::RoomListSnapshotAuthoritative {
+            generation: 1,
+            source: koushi_state::RoomListSource::Live,
+            spaces: Vec::new(),
+            rooms: rooms(),
+            invites: Vec::new(),
+        },
+    );
+    let effects = reduce(
+        &mut state,
+        AppAction::RoomAccessUpdated {
+            generation: 1,
+            source: koushi_state::RoomListSource::Live,
+            authoritative: true,
+            observations: BTreeMap::from([
+                (
+                    "room-a".to_owned(),
+                    condition(
+                        koushi_state::RoomJoinRule::Restricted,
+                        Some(RestrictedConditions::ConfirmedEmpty),
+                    ),
+                ),
+                (
+                    "global-room".to_owned(),
+                    condition(koushi_state::RoomJoinRule::Knock, None),
+                ),
+            ]),
+        },
+    );
+    assert_eq!(
+        effects,
+        vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)]
+    );
+    assert_eq!(
+        state
+            .room_access
+            .get("room-a")
+            .and_then(|access| access.join_rule),
+        Some(koushi_state::RoomJoinRule::Restricted)
+    );
+    assert_eq!(
+        state
+            .room_access
+            .get("room-a")
+            .and_then(|access| access.restricted),
+        Some(RestrictedConditions::ConfirmedEmpty)
+    );
+    assert_eq!(
+        state
+            .room_access
+            .get("global-room")
+            .and_then(|access| access.restricted),
+        None,
+        "a non-restricted rule carries no allow-condition claim"
+    );
+
+    // The same observations are not an event.
+    let unchanged = state.room_access_observed.clone();
+    assert!(
+        reduce(
+            &mut state,
+            AppAction::RoomAccessUpdated {
+                generation: 1,
+                source: koushi_state::RoomListSource::Live,
+                authoritative: true,
+                observations: unchanged,
+            },
+        )
+        .is_empty()
+    );
+
+    // A stale snapshot (different generation) cannot overwrite it.
+    assert!(
+        reduce(
+            &mut state,
+            AppAction::RoomAccessUpdated {
+                generation: 0,
+                source: koushi_state::RoomListSource::Live,
+                authoritative: true,
+                observations: BTreeMap::from([(
+                    "room-a".to_owned(),
+                    condition(koushi_state::RoomJoinRule::Invite, None),
+                )]),
+            },
+        )
+        .is_empty()
+    );
+    assert_eq!(
+        state
+            .room_access
+            .get("room-a")
+            .and_then(|access| access.join_rule),
+        Some(koushi_state::RoomJoinRule::Restricted)
+    );
+
+    // A provisional projection merges instead of erasing the rest.
+    state.room_list.readiness = koushi_state::RoomListReadiness::Loading {
+        source: koushi_state::RoomListSource::Live,
+        generation: 2,
+    };
+    reduce(
+        &mut state,
+        AppAction::RoomListSnapshotProvisional {
+            generation: 2,
+            source: koushi_state::RoomListSource::Live,
+            spaces: Vec::new(),
+            rooms: rooms(),
+            invites: Vec::new(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::RoomAccessUpdated {
+            generation: 2,
+            source: koushi_state::RoomListSource::Live,
+            authoritative: false,
+            observations: BTreeMap::from([(
+                "room-a".to_owned(),
+                condition(
+                    koushi_state::RoomJoinRule::Restricted,
+                    Some(RestrictedConditions::MembershipOnly),
+                ),
+            )]),
+        },
+    );
+    assert_eq!(
+        state
+            .room_access
+            .get("room-a")
+            .and_then(|access| access.restricted),
+        Some(RestrictedConditions::MembershipOnly),
+        "a provisional projection updates the room it carries"
+    );
+    assert_eq!(
+        state
+            .room_access
+            .get("global-room")
+            .and_then(|access| access.join_rule),
+        Some(koushi_state::RoomJoinRule::Knock),
+        "a provisional projection keeps the rooms it does not carry"
+    );
+
+    // A local leave removes the room's condition with the room.
+    reduce(
+        &mut state,
+        AppAction::RoomLeftLocally {
+            room_id: "room-a".to_owned(),
+        },
+    );
+    assert!(!state.room_access.contains_key("room-a"));
+
+    // A later provisional snapshot that still carries the left room must not
+    // resurrect its condition: the room is filtered out of the accepted list, so
+    // its access entry is filtered out with it.
+    state.room_list.readiness = koushi_state::RoomListReadiness::Loading {
+        source: koushi_state::RoomListSource::Live,
+        generation: 3,
+    };
+    reduce(
+        &mut state,
+        AppAction::RoomListSnapshotProvisional {
+            generation: 3,
+            source: koushi_state::RoomListSource::Live,
+            spaces: Vec::new(),
+            rooms: rooms(),
+            invites: Vec::new(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::RoomAccessUpdated {
+            generation: 3,
+            source: koushi_state::RoomListSource::Live,
+            authoritative: false,
+            observations: BTreeMap::from([
+                (
+                    "room-a".to_owned(),
+                    condition(koushi_state::RoomJoinRule::Public, None),
+                ),
+                (
+                    "global-room".to_owned(),
+                    condition(koushi_state::RoomJoinRule::Invite, None),
+                ),
+            ]),
+        },
+    );
+    assert!(
+        !state.room_access.contains_key("room-a"),
+        "a stale provisional payload must not resurrect a left room's condition"
+    );
+    assert_eq!(
+        state
+            .room_access
+            .get("global-room")
+            .and_then(|access| access.join_rule),
+        Some(koushi_state::RoomJoinRule::Invite),
+        "a retained room still gains its projected condition"
+    );
+
+    // Retiring the session withdraws the whole slice.
+    reduce(&mut state, AppAction::LogoutRequested);
+    assert!(state.room_access.is_empty());
+}
+
+#[test]
+fn room_access_projection_is_ignored_without_a_ready_session() {
+    let mut state = AppState::default();
+    let effects = reduce(
+        &mut state,
+        AppAction::RoomAccessUpdated {
+            generation: 0,
+            source: koushi_state::RoomListSource::Cache,
+            authoritative: false,
+            observations: BTreeMap::from([(
+                "room-a".to_owned(),
+                koushi_state::RoomAccessObservation {
+                    access: koushi_state::RoomAccessCondition {
+                        join_rule: Some(koushi_state::RoomJoinRule::Public),
+                        restricted: None,
+                        allow_targets: Vec::new(),
+                    },
+                    history_visibility: koushi_state::RoomHistoryVisibility::Joined,
+                },
+            )]),
+        },
+    );
+    assert!(effects.is_empty());
+    assert!(state.room_access.is_empty());
 }

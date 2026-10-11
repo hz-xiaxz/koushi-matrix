@@ -5,9 +5,9 @@ use crate::{
         AccountManagementCapabilities, AccountManagementState, ActivityState, AppState,
         DirectoryState, E2eeKeyManagementState, E2eeTrustState, FilesViewState,
         FocusedContextState, InviteWorkflowState, LocalEncryptionState, NavigationState,
-        QrLoginState, SearchState, SessionState, SoftLogoutReauthState, SpaceConversationSurface,
-        SpaceNavigationSelection, ThreadAttentionState, ThreadPaneState, ThreadsListState,
-        TimelinePaneState, VerificationFlowState, compute_room_list_projection,
+        QrLoginState, ScheduledSendsListState, SearchState, SessionState, SoftLogoutReauthState,
+        SpaceConversationSurface, SpaceNavigationSelection, ThreadAttentionState, ThreadPaneState,
+        ThreadsListState, TimelinePaneState, VerificationFlowState, compute_room_list_projection,
     },
 };
 
@@ -31,6 +31,7 @@ mod navigation;
 mod profile;
 mod room;
 mod room_management;
+mod scheduled_sends;
 mod search;
 mod session;
 mod session_status;
@@ -89,6 +90,7 @@ pub(crate) fn clear_stale_verification_flow(state: &mut AppState) -> bool {
 pub fn reduce(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
     let mut effects = reduce_action(state, action);
     contact_security::sync_verification_busy(state, &mut effects);
+    scheduled_sends::reconcile_scheduled_sends_list(state);
     effects
 }
 
@@ -102,6 +104,18 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         | AppAction::SlidingSyncCapabilityRevalidationStarted { .. }
         | AppAction::SlidingSyncCapabilityRevalidationCompleted { .. }) => {
             sliding_sync::reduce(state, action)
+        }
+        AppAction::ThreadUnreadObserved {
+            room_id,
+            root_event_id,
+            unread,
+            highlight,
+        } => {
+            thread::handle_thread_unread_observed(state, room_id, root_event_id, unread, highlight)
+        }
+        AppAction::ThreadDeliveryDiagnosticRecorded { diagnostic } => {
+            state.thread_delivery = diagnostic;
+            Vec::new()
         }
         AppAction::RestoreSessionSucceeded(info) => {
             session::handle_restore_session_succeeded(state, info)
@@ -204,14 +218,18 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::VerificationSessionRejected { reason } => {
             session::handle_verification_session_rejected(state, reason)
         }
-        AppAction::BootstrapRecoveryKeyDelivered { flow_id } => {
-            session::handle_bootstrap_recovery_key_delivered(state, flow_id)
-        }
+        AppAction::BootstrapRecoveryKeyReady {
+            flow_id,
+            recovery_key,
+        } => session::handle_bootstrap_recovery_key_ready(state, flow_id, recovery_key),
         AppAction::BootstrapRecoveryKeyDeliveryFailed { flow_id, kind } => {
             session::handle_bootstrap_recovery_key_delivery_failed(state, flow_id, kind)
         }
         AppAction::BootstrapRecoverySavedConfirmed { flow_id } => {
             session::handle_bootstrap_recovery_saved_confirmed(state, flow_id)
+        }
+        AppAction::BootstrapRecoverySavedConfirmFailed { flow_id } => {
+            session::handle_bootstrap_recovery_saved_confirm_failed(state, flow_id)
         }
         AppAction::ProvisionalSessionDiscarded => {
             session_status::reset(state);
@@ -458,7 +476,8 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::LoginFailed {
             attempt_id,
             message,
-        } => session::handle_login_failed(state, attempt_id, message),
+            reason,
+        } => session::handle_login_failed(state, attempt_id, message, reason),
         AppAction::LoginDiscoveryRequested { homeserver } => {
             session::handle_login_discovery_requested(state, homeserver)
         }
@@ -941,6 +960,18 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             source,
             kind,
         } => room::handle_room_list_bootstrap_failed(state, generation, source, kind),
+        AppAction::RoomAccessUpdated {
+            generation,
+            source,
+            authoritative,
+            observations,
+        } => {
+            room::handle_room_access_updated(state, generation, source, authoritative, observations)
+        }
+        AppAction::RoomDirectoryVisibilityObserved {
+            room_id,
+            visibility,
+        } => room_management::handle_room_directory_visibility_observed(state, room_id, visibility),
         AppAction::RoomListFilterSelected { filter } => {
             room::handle_room_list_filter_selected(state, filter)
         }
@@ -1099,15 +1130,41 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::RoomSettingUpdateSucceeded {
             request_id,
             room_id,
+            change,
             settings,
         } => room_management::handle_room_setting_update_succeeded(
-            state, request_id, room_id, settings,
+            state, request_id, room_id, &change, settings,
         ),
         AppAction::RoomSettingUpdateFailed {
             request_id,
             room_id,
             kind,
         } => room_management::handle_room_setting_update_failed(state, request_id, room_id, kind),
+        AppAction::RoomAccessDraftRuleSet { scope, rule } => {
+            room_management::handle_room_access_draft_rule_set(state, scope, rule)
+        }
+        AppAction::RoomAccessDraftAllowTargetsSet {
+            scope,
+            allow_targets,
+        } => {
+            room_management::handle_room_access_draft_allow_targets_set(state, scope, allow_targets)
+        }
+        AppAction::RoomAccessDraftAllowTargetToggled {
+            scope,
+            target,
+            selected,
+        } => room_management::handle_room_access_draft_allow_target_toggled(
+            state, scope, target, selected,
+        ),
+        AppAction::RoomAccessDraftHistorySet { scope, history } => {
+            room_management::handle_room_access_draft_history_set(state, scope, history)
+        }
+        AppAction::RoomAccessDraftReset { scope } => {
+            room_management::handle_room_access_draft_reset(state, scope)
+        }
+        AppAction::RoomAccessDraftOpened { scope, create } => {
+            room_management::handle_room_access_draft_opened(state, scope, create)
+        }
         AppAction::RoomModerationRequested {
             request_id,
             room_id,
@@ -1425,6 +1482,10 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         | AppAction::ScheduledSendDispatched { scheduled_id } => {
             timeline::handle_scheduled_send_cancelled_or_dispatched(state, scheduled_id)
         }
+        AppAction::ScheduledSendPersistenceFailed { message } => {
+            timeline::handle_scheduled_send_persistence_failed(state, message)
+        }
+        AppAction::ScheduledSendPersisted => timeline::handle_scheduled_send_persisted(state),
         AppAction::UploadStagingChanged { target, items } => {
             timeline::handle_upload_staging_changed(state, target, items)
         }
@@ -1743,21 +1804,26 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         }
         AppAction::SearchSubmitted {
             request_id,
+            connection_id,
             query,
             scope,
-        } => search::handle_search_submitted(state, request_id, query, scope),
+        } => search::handle_search_submitted(state, request_id, connection_id, query, scope),
         AppAction::SearchSucceeded {
             request_id,
+            connection_id,
             query,
             scope,
             results,
-        } => search::handle_search_succeeded(state, request_id, query, scope, results),
+        } => {
+            search::handle_search_succeeded(state, request_id, connection_id, query, scope, results)
+        }
         AppAction::SearchFailed {
             request_id,
+            connection_id,
             query,
             scope,
             message,
-        } => search::handle_search_failed(state, request_id, query, scope, message),
+        } => search::handle_search_failed(state, request_id, connection_id, query, scope, message),
         AppAction::SearchClosed => search::handle_search_closed(state),
         AppAction::SearchIndexRebuildRequested { request_id: _ } => {
             search::handle_search_index_rebuild_requested(state)
@@ -1857,6 +1923,12 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             room_id,
         } => thread::handle_paginate_threads_list(state, request_id, room_id),
         AppAction::CloseThreadsList => thread::handle_close_threads_list(state),
+        AppAction::OpenScheduledSendsList { scope } => {
+            scheduled_sends::handle_open_scheduled_sends_list(state, scope)
+        }
+        AppAction::CloseScheduledSendsList => {
+            scheduled_sends::handle_close_scheduled_sends_list(state)
+        }
         AppAction::ThreadRootProjectionObserved {
             room_id,
             root_event_id,
@@ -1949,10 +2021,14 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         ),
         AppAction::LiveRoomReceiptSummariesUpdated {
             room_id,
+            scope,
+            scoped_event_ids,
             receipts_by_event,
         } => live_signals::handle_live_room_receipt_summaries_updated(
             state,
             room_id,
+            scope,
+            scoped_event_ids,
             receipts_by_event,
         ),
         AppAction::LiveRoomProfilesObserved { room_id, profiles } => {
@@ -1960,11 +2036,13 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         }
         AppAction::LiveRoomReceiptsWindowReconciled {
             room_id,
+            scope,
             scoped_event_ids,
             receipts_by_event,
         } => live_signals::handle_live_room_receipts_window_reconciled(
             state,
             room_id,
+            scope,
             scoped_event_ids,
             receipts_by_event,
         ),
@@ -2041,6 +2119,22 @@ pub(crate) fn current_session_info(state: &AppState) -> Option<crate::state::Ses
     }
 }
 
+/// Withdraws a local scheduled-send save failure (#1159).
+///
+/// The notice belongs to the account session that produced it, so every path
+/// that retires or replaces that session must withdraw it. Returns the effect to
+/// emit only when a notice was actually removed, so callers never emit a
+/// redundant `ErrorChanged`.
+pub(crate) fn withdraw_scheduled_send_persistence_failure(
+    state: &mut AppState,
+) -> Option<AppEffect> {
+    let previous_len = state.errors.len();
+    state
+        .errors
+        .retain(|error| error.code != timeline::SCHEDULED_SEND_PERSISTENCE_FAILED);
+    (state.errors.len() != previous_len).then_some(AppEffect::EmitUiEvent(UiEvent::ErrorChanged))
+}
+
 pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     let previous_room_id = state.timeline.room_id.clone();
     let had_invite_workflow = state.invite_workflow != InviteWorkflowState::default();
@@ -2078,11 +2172,15 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     let had_search_crawler = state.search_crawler != Default::default();
     let had_space_members = state.space_members != Default::default();
 
+    // #1159: the notice belongs to the session being retired.
+    let scheduled_send_persistence_effect = withdraw_scheduled_send_persistence_failure(state);
     state.navigation = NavigationState::default();
     state.link_preview_settings = Default::default();
     state.room_preferences = Default::default();
     state.spaces.clear();
     state.rooms.clear();
+    state.room_access.clear();
+    state.room_access_observed.clear();
     state.invites.clear();
     state.room_list = Default::default();
     state.room_interactions.clear();
@@ -2098,7 +2196,11 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     state.timeline = Default::default();
     state.thread = ThreadPaneState::Closed;
     state.thread_attention = ThreadAttentionState::Closed;
+    // #1238: the per-root thread-cache values feed room badges, so they must not
+    // survive the session that observed them.
+    state.thread_unread.clear();
     state.focused_context = FocusedContextState::Closed;
+    state.search_request_connection_id = None;
     state.search = SearchState::Closed;
     state.search_crawler = Default::default();
     state.files_view = FilesViewState::Closed;
@@ -2216,6 +2318,9 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     }
     if had_space_members {
         effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+    }
+    if let Some(effect) = scheduled_send_persistence_effect {
+        effects.push(effect);
     }
     effects
 }
@@ -2421,6 +2526,12 @@ pub(crate) fn retarget_active_room_for_selected_space(
             state.thread = ThreadPaneState::Closed;
             state.thread_attention = ThreadAttentionState::Closed;
             state.timeline = Default::default();
+            // #1160: the active room left the selected Space and no replacement
+            // room exists, so an automatic room clear is retiring the room
+            // context. Close the scoped scheduled-sends panel like the
+            // room-disappeared path in room.rs rather than keeping its
+            // body-bearing items open.
+            state.scheduled_sends_list = ScheduledSendsListState::Closed;
             effects.push(AppEffect::EmitUiEvent(UiEvent::TimelineChanged {
                 room_id: previous_room_id,
             }));

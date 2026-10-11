@@ -43,9 +43,7 @@ fn account_store_and_search_config_trace_unlock_secret_source() {
     let cred_dir = tempdir().expect("tempdir");
     let key_id = make_key_id();
     let actor = file_store_actor(&data_dir, &cred_dir);
-    let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .len();
+    let diagnostic_start = koushi_diagnostics::test_support::detail_cursor();
 
     actor
         .account_store_config(&key_id)
@@ -57,10 +55,9 @@ fn account_store_and_search_config_trace_unlock_secret_source() {
         .account_store_config(&key_id)
         .expect("second store config reuses the unlock secret");
 
-    let records = koushi_diagnostics::test_support::detail_snapshot().records;
+    let records = koushi_diagnostics::test_support::detail_records_since(diagnostic_start);
     let unlock_events = records
         .iter()
-        .skip(diagnostic_start)
         .filter(|record| {
             record.event.source == "core.store" && record.event.stage == "local_unlock_secret"
         })
@@ -98,6 +95,48 @@ fn delete_account_credentials_does_not_panic_when_absent() {
         .delete_account_credentials(&key_id)
         .expect("account credentials delete");
 }
+#[test]
+fn deleting_a_bound_unpromoted_account_releases_its_pending_login_record() {
+    let data_dir = tempdir().expect("tempdir");
+    let cred_dir = tempdir().expect("tempdir");
+    let actor = file_store_actor(&data_dir, &cred_dir);
+    let key_id = make_key_id();
+    let owner = actor.pending_login_owner();
+
+    // A password sign-in binds its pending allocation to the new device but
+    // stays in the verification gate, so promotion never completes the record.
+    let pending = owner
+        .resume_or_create(
+            &key_id.homeserver,
+            "password",
+            Some(&key_id.user_id),
+            "DEVICE1",
+        )
+        .expect("first pending allocation");
+    owner
+        .bind(
+            &pending.allocation_id,
+            pending.attempt_generation,
+            key_id.clone(),
+        )
+        .expect("bind allocation to the provisional device");
+
+    // Provisional device cleanup (or a local reset) deletes that account.
+    actor
+        .delete_account_credentials(&key_id)
+        .expect("account credentials deleted");
+
+    // The next sign-in on this install must not trip over the removed root.
+    owner
+        .resume_or_create(
+            &key_id.homeserver,
+            "password",
+            Some(&key_id.user_id),
+            "DEVICE2",
+        )
+        .expect("a later sign-in must get a pending allocation");
+}
+
 #[test]
 fn store_actor_probe_maps_credential_backend_health_without_raw_errors() {
     let data_dir = tempdir().expect("tempdir");
@@ -451,9 +490,7 @@ fn legacy_credentials_delete_failure_keeps_vault_authoritative() {
 #[test]
 fn credential_vault_concurrent_initialization_reads_keychain_once() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .len();
+    let diagnostic_start = koushi_diagnostics::test_support::detail_cursor();
     let data_dir = tempdir().expect("tempdir");
     let backend = koushi_key::InMemoryCredentialBackend::default();
     let key_store =
@@ -490,10 +527,8 @@ fn credential_vault_concurrent_initialization_reads_keychain_once() {
     }
 
     assert_eq!(backend.get_password_count(), 1);
-    let outcomes = koushi_diagnostics::test_support::detail_snapshot()
-        .records
+    let outcomes = koushi_diagnostics::test_support::detail_records_since(diagnostic_start)
         .into_iter()
-        .skip(diagnostic_start)
         .filter(|record| {
             record.event.source == "core.store" && record.event.stage == "credential_vault_access"
         })

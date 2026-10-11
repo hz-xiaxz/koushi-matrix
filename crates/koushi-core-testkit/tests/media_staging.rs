@@ -5,6 +5,7 @@ use koushi_core::media_preparation::StageUploadBytesInput;
 use koushi_core::media_staging::{
     MAX_MEDIA_STAGING_BATCH_BYTES, MAX_MEDIA_STAGING_BATCH_SIZE, MediaStagingError,
 };
+use koushi_core::runtime::IsolatedStores;
 use koushi_state::{
     AppAction, ComposerDocument, ComposerInline, ComposerTarget, ImageUploadCompressionMode,
     RoomSummary, StagedUploadCompressionChoice, StagedUploadFormatChoice, StagedUploadPreparation,
@@ -49,8 +50,8 @@ fn png_item(id: &str, position: u64) -> StageUploadBytesInput {
     }
 }
 
-async fn ready_runtime() -> (CoreRuntime, koushi_core::CoreConnection) {
-    let runtime = CoreRuntime::start_with_event_capacity(64);
+async fn ready_runtime() -> (CoreRuntime, koushi_core::CoreConnection, IsolatedStores) {
+    let (runtime, _stores) = CoreRuntime::start_isolated_with_event_capacity(64);
     let mut connection = runtime.attach();
     let mut actions = support::restore_ready_actions();
     actions.extend([
@@ -70,7 +71,7 @@ async fn ready_runtime() -> (CoreRuntime, koushi_core::CoreConnection) {
         state.timeline.room_id.as_deref() == Some(ROOM_ID)
     })
     .await;
-    (runtime, connection)
+    (runtime, connection, _stores)
 }
 
 #[test]
@@ -81,10 +82,10 @@ fn media_staging_limits_are_named_and_checked_before_preparation() {
 
 #[tokio::test]
 async fn staging_publishes_preparing_then_ready_and_normalizes_mime() {
-    let (_runtime, mut connection) = ready_runtime().await;
+    let (_runtime, mut connection, _stores) = ready_runtime().await;
     let before = connection.versioned_snapshot();
     let snapshot = connection
-        .stage_upload_bytes(target(), vec![item("one", b"bytes")])
+        .stage_upload_bytes(target(), vec![item("one", b"bytes")], None)
         .await
         .expect("staging should settle");
     let snapshot_generation = snapshot;
@@ -102,7 +103,7 @@ async fn staging_publishes_preparing_then_ready_and_normalizes_mime() {
 
 #[tokio::test]
 async fn duplicate_ids_and_overflow_are_rejected_without_state_change() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (runtime, mut connection, _stores) = ready_runtime().await;
     let before = connection.versioned_snapshot();
     let duplicate = runtime.media_staging().stage_upload_bytes(
         &mut connection,
@@ -128,7 +129,7 @@ async fn duplicate_ids_and_overflow_are_rejected_without_state_change() {
 
 #[tokio::test]
 async fn caption_survives_preparation_and_replacement() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (runtime, mut connection, _stores) = ready_runtime().await;
     let staged = runtime
         .media_staging()
         .stage_upload_bytes(&mut connection, target(), vec![item("one", b"bytes")])
@@ -162,7 +163,7 @@ async fn caption_survives_preparation_and_replacement() {
 
 #[tokio::test]
 async fn empty_preparation_is_a_typed_failure_and_clear_releases_bytes() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (runtime, mut connection, _stores) = ready_runtime().await;
     let snapshot = runtime
         .media_staging()
         .stage_upload_bytes(&mut connection, target(), vec![item("empty", b"")])
@@ -190,7 +191,7 @@ async fn empty_preparation_is_a_typed_failure_and_clear_releases_bytes() {
 
 #[tokio::test]
 async fn select_retry_original_and_compression_are_targeted_operations() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (runtime, mut connection, _stores) = ready_runtime().await;
     runtime
         .media_staging()
         .stage_upload_bytes(&mut connection, target(), vec![png_item("image", 1)])
@@ -251,7 +252,7 @@ async fn select_retry_original_and_compression_are_targeted_operations() {
     );
 
     let failed = connection
-        .stage_upload_bytes(target(), vec![item_at("failed", 2, b"")])
+        .stage_upload_bytes(target(), vec![item_at("failed", 2, b"")], None)
         .await;
     assert!(failed.is_ok());
     let retry = connection
@@ -282,7 +283,7 @@ async fn select_retry_original_and_compression_are_targeted_operations() {
 
 #[tokio::test]
 async fn thread_target_isolated_from_main_target() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (runtime, mut connection, _stores) = ready_runtime().await;
     let root_event_id = "$root:example.invalid";
     runtime
         .inject_actions(vec![
@@ -310,7 +311,7 @@ async fn thread_target_isolated_from_main_target() {
         root_event_id: root_event_id.to_owned(),
     };
     let snapshot = connection
-        .stage_upload_bytes(thread, vec![item("thread-item", b"thread")])
+        .stage_upload_bytes(thread, vec![item("thread-item", b"thread")], None)
         .await
         .expect("thread staging should settle");
     let snapshot_generation = snapshot;
@@ -326,16 +327,20 @@ async fn thread_target_isolated_from_main_target() {
 
 #[tokio::test]
 async fn positions_are_nonzero_unique_and_second_batches_settle_in_order() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (runtime, mut connection, _stores) = ready_runtime().await;
     assert!(matches!(
         connection
-            .stage_upload_bytes(target(), vec![item_at("zero", 0, b"x")])
+            .stage_upload_bytes(target(), vec![item_at("zero", 0, b"x")], None)
             .await,
         Err(MediaStagingError::InvalidPosition)
     ));
     assert!(matches!(
         connection
-            .stage_upload_bytes(target(), vec![item_at("a", 1, b"a"), item_at("b", 1, b"b")])
+            .stage_upload_bytes(
+                target(),
+                vec![item_at("a", 1, b"a"), item_at("b", 1, b"b")],
+                None
+            )
             .await,
         Err(MediaStagingError::InvalidPosition)
     ));
@@ -349,6 +354,7 @@ async fn positions_are_nonzero_unique_and_second_batches_settle_in_order() {
         .stage_upload_bytes(
             target(),
             vec![item_at("two", 2, b"two"), item_at("three", 3, b"three")],
+            None,
         )
         .await
         .expect("second batch should settle");
@@ -371,7 +377,7 @@ async fn positions_are_nonzero_unique_and_second_batches_settle_in_order() {
 
 #[tokio::test]
 async fn invalid_selection_is_immediate_and_missing_select_is_typed() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (runtime, mut connection, _stores) = ready_runtime().await;
     runtime
         .media_staging()
         .stage_upload_bytes(&mut connection, target(), vec![item("file", b"file")])
@@ -397,7 +403,7 @@ async fn invalid_selection_is_immediate_and_missing_select_is_typed() {
 
 #[tokio::test]
 async fn blocked_preparation_preserves_caption_and_releases_removed_bytes() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (runtime, mut connection, _stores) = ready_runtime().await;
     let mut barrier = runtime
         .media_staging()
         .install_preparation_barrier_for_testing();
@@ -470,7 +476,7 @@ async fn blocked_preparation_preserves_caption_and_releases_removed_bytes() {
 
 #[tokio::test]
 async fn stale_account_and_replaced_target_do_not_publish_prepared_items() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (runtime, mut connection, _stores) = ready_runtime().await;
     let mut barrier = runtime
         .media_staging()
         .install_preparation_barrier_for_testing();
@@ -500,7 +506,7 @@ async fn stale_account_and_replaced_target_do_not_publish_prepared_items() {
 
 #[tokio::test]
 async fn selection_generation_race_is_latest_wins_and_stale_is_explicit() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (runtime, mut connection, _stores) = ready_runtime().await;
     runtime
         .media_staging()
         .stage_upload_bytes(&mut connection, target(), vec![png_item("race", 1)])
@@ -562,7 +568,7 @@ async fn selection_generation_race_is_latest_wins_and_stale_is_explicit() {
 
 #[tokio::test]
 async fn settings_change_fences_blocked_preparation() {
-    let (runtime, connection) = ready_runtime().await;
+    let (runtime, connection, _stores) = ready_runtime().await;
     let mut barrier = runtime
         .media_staging()
         .install_preparation_barrier_for_testing();
@@ -588,4 +594,717 @@ async fn settings_change_fences_blocked_preparation() {
         .await;
     barrier.release();
     assert!(matches!(task.await.unwrap(), Err(MediaStagingError::Stale)));
+}
+
+/// Fake platform still-image decoder (#1147). Its 40x30 output differs from
+/// the 64x64 fixture, so state proves which decoder produced the pixels.
+struct FakeStillImageDecoder {
+    fail: std::sync::atomic::AtomicBool,
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl FakeStillImageDecoder {
+    fn new(fail: bool) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            fail: std::sync::atomic::AtomicBool::new(fail),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        })
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl koushi_core::NativeStillImageDecoder for FakeStillImageDecoder {
+    fn backend(&self) -> &'static str {
+        "fake"
+    }
+
+    fn decode(
+        &self,
+        _source: &[u8],
+        limits: koushi_core::native_image_decoder::DecodeLimits,
+    ) -> Result<
+        koushi_core::native_image_decoder::DecodedRgbaImage,
+        koushi_core::NativeImageDecodeError,
+    > {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(koushi_core::NativeImageDecodeError::Unsupported);
+        }
+        Ok(
+            koushi_core::native_image_decoder::DecodedRgbaImage::from_straight_rgba(
+                40,
+                30,
+                160,
+                vec![200; 40 * 30 * 4],
+                limits,
+            )?,
+        )
+    }
+}
+
+fn heic_item(id: &str, position: u64) -> StageUploadBytesInput {
+    StageUploadBytesInput {
+        staged_id: id.to_owned(),
+        position,
+        filename: "IMG_0001.HEIC".to_owned(),
+        // Browsers commonly report no MIME for HEIC; content detection decides.
+        mime_type: String::new(),
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../koushi-media/tests/fixtures/heif/opaque.heic"
+        ))
+        .to_vec(),
+    }
+}
+
+async fn ready_runtime_with_decoder(
+    decoder: &std::sync::Arc<FakeStillImageDecoder>,
+) -> (CoreRuntime, koushi_core::CoreConnection, IsolatedStores) {
+    let (runtime, stores) = CoreRuntime::start_isolated_with_native_image_decoder(
+        64,
+        std::sync::Arc::clone(decoder) as std::sync::Arc<dyn koushi_core::NativeStillImageDecoder>,
+    );
+    let mut connection = runtime.attach();
+    let mut actions = support::restore_ready_actions();
+    actions.extend([
+        AppAction::RoomListUpdated {
+            spaces: Vec::new(),
+            rooms: vec![RoomSummary {
+                room_id: ROOM_ID.to_owned(),
+                ..support::room_summary(ROOM_ID)
+            }],
+        },
+        AppAction::SelectRoom {
+            room_id: ROOM_ID.to_owned(),
+        },
+    ]);
+    runtime.inject_actions(actions).await;
+    support::wait_for_state_event(&mut connection, |state| {
+        state.timeline.room_id.as_deref() == Some(ROOM_ID)
+    })
+    .await;
+    (runtime, connection, stores)
+}
+
+#[tokio::test]
+async fn injected_native_decoder_prepares_heic_and_lazy_selection() {
+    let decoder = FakeStillImageDecoder::new(false);
+    let (runtime, mut connection, _stores) = ready_runtime_with_decoder(&decoder).await;
+    runtime
+        .media_staging()
+        .stage_upload_bytes(&mut connection, target(), vec![heic_item("heic", 1)])
+        .await
+        .expect("HEIC staging should settle");
+    let staged = connection.snapshot().timeline.staged_uploads[0].clone();
+    assert_eq!(
+        staged.kind,
+        koushi_state::StagedUploadKind::Image {
+            width: Some(40),
+            height: Some(30)
+        }
+    );
+    assert_eq!(staged.mime_type, "image/jpeg");
+    assert!(matches!(
+        staged.preparation,
+        StagedUploadPreparation::Ready { .. }
+    ));
+    assert_eq!(decoder.calls(), 1);
+
+    runtime
+        .media_staging()
+        .select_staged_upload_output(
+            &mut connection,
+            target(),
+            "heic".to_owned(),
+            koushi_state::StagedUploadOutputSelection {
+                resize: StagedUploadResizeChoice::Half,
+                format: StagedUploadFormatChoice::Png,
+            },
+        )
+        .await
+        .expect("lazy HEIC output should settle");
+    let selected = connection.snapshot().timeline.staged_uploads[0].clone();
+    assert_eq!(selected.mime_type, "image/png");
+    let StagedUploadPreparation::Ready { variants, .. } = &selected.preparation else {
+        panic!("selection keeps the item ready");
+    };
+    let half_png = variants
+        .iter()
+        .find(|variant| variant.variant_id == "half-png")
+        .expect("lazily encoded output");
+    assert_eq!((half_png.width, half_png.height), (Some(20), Some(15)));
+    assert_eq!(
+        decoder.calls(),
+        2,
+        "lazy selection uses the injected decoder"
+    );
+}
+
+#[tokio::test]
+async fn injected_native_decoder_failure_falls_back_and_retry_uses_it_again() {
+    let decoder = FakeStillImageDecoder::new(true);
+    let (runtime, mut connection, _stores) = ready_runtime_with_decoder(&decoder).await;
+    runtime
+        .media_staging()
+        .stage_upload_bytes(&mut connection, target(), vec![heic_item("heic", 1)])
+        .await
+        .expect("failed preparation still settles");
+    let failed = connection.snapshot().timeline.staged_uploads[0].clone();
+    assert_eq!(failed.kind, koushi_state::StagedUploadKind::File);
+    assert_eq!(
+        failed.preparation,
+        StagedUploadPreparation::Failed {
+            failure_kind: koushi_state::MediaPreparationFailureKind::Unsupported,
+            can_use_original: true,
+        }
+    );
+
+    decoder
+        .fail
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    runtime
+        .media_staging()
+        .retry_staged_upload_preparation(&mut connection, target(), "heic".to_owned())
+        .await
+        .expect("retry should settle");
+    let retried = connection.snapshot().timeline.staged_uploads[0].clone();
+    assert!(matches!(
+        retried.kind,
+        koushi_state::StagedUploadKind::Image {
+            width: Some(40),
+            height: Some(30)
+        }
+    ));
+    assert_eq!(decoder.calls(), 2);
+}
+
+#[tokio::test]
+async fn blocked_native_decode_is_fenced_by_clear_and_selection_generation() {
+    let decoder = FakeStillImageDecoder::new(false);
+    let (runtime, mut connection, _stores) = ready_runtime_with_decoder(&decoder).await;
+    let mut barrier = runtime
+        .media_staging()
+        .install_preparation_barrier_for_testing();
+    let service = runtime.media_staging().clone();
+    let mut staging_connection = runtime.attach();
+    let task = tokio::spawn(async move {
+        service
+            .stage_upload_bytes(
+                &mut staging_connection,
+                target(),
+                vec![heic_item("cleared", 1)],
+            )
+            .await
+    });
+    barrier.wait_started().await;
+    runtime
+        .inject_actions(vec![AppAction::UploadStagingCleared { target: target() }])
+        .await;
+    support::wait_for_state_event(&mut connection, |state| {
+        state.timeline.staged_uploads.is_empty()
+    })
+    .await;
+    barrier.release();
+    assert!(matches!(task.await.unwrap(), Err(MediaStagingError::Stale)));
+    assert_eq!(
+        decoder.calls(),
+        1,
+        "the decode ran but its result was fenced"
+    );
+    let stats = runtime.media_preparation().stats().await;
+    assert_eq!(
+        (stats.source_count, stats.variant_count, stats.source_bytes),
+        (0, 0, 0)
+    );
+
+    runtime
+        .media_staging()
+        .stage_upload_bytes(&mut connection, target(), vec![heic_item("race", 2)])
+        .await
+        .expect("HEIC staging should settle");
+    let mut barrier = runtime
+        .media_staging()
+        .install_preparation_barrier_for_testing();
+    let service = runtime.media_staging().clone();
+    let mut select_connection = runtime.attach();
+    let first = tokio::spawn(async move {
+        service
+            .select_staged_upload_output(
+                &mut select_connection,
+                target(),
+                "race".to_owned(),
+                koushi_state::StagedUploadOutputSelection {
+                    resize: StagedUploadResizeChoice::Half,
+                    format: StagedUploadFormatChoice::Webp,
+                },
+            )
+            .await
+    });
+    barrier.wait_started().await;
+    let latest_selection = koushi_state::StagedUploadOutputSelection {
+        resize: StagedUploadResizeChoice::Quarter,
+        format: StagedUploadFormatChoice::Png,
+    };
+    runtime
+        .inject_actions(vec![AppAction::UploadStagingOutputSelected {
+            target: target(),
+            staged_id: "race".to_owned(),
+            selection: latest_selection,
+        }])
+        .await;
+    support::wait_for_state_event(&mut connection, |state| {
+        matches!(
+            state.timeline.staged_uploads[0].preparation,
+            StagedUploadPreparation::Ready {
+                pending: Some(selection),
+                ..
+            } if selection == latest_selection
+        )
+    })
+    .await;
+    barrier.release();
+    assert!(matches!(
+        first.await.unwrap(),
+        Err(MediaStagingError::Stale)
+    ));
+    let StagedUploadPreparation::Ready { variants, .. } =
+        &connection.snapshot().timeline.staged_uploads[0].preparation
+    else {
+        panic!("item stays ready");
+    };
+    assert!(
+        variants
+            .iter()
+            .all(|variant| variant.variant_id != "half-webp"),
+        "a fenced native decode must not publish its output"
+    );
+}
+
+/// #1147: a lazily selected pair whose encode fails must settle to an actionable
+/// failure instead of leaving the item pending, which hides the failure and
+/// makes the item unsendable.
+#[tokio::test]
+async fn lazy_native_decode_failure_settles_the_pair_instead_of_leaving_it_pending() {
+    use std::sync::atomic::Ordering;
+
+    let decoder = FakeStillImageDecoder::new(false);
+    let (runtime, mut connection, _stores) = ready_runtime_with_decoder(&decoder).await;
+    runtime
+        .media_staging()
+        .stage_upload_bytes(&mut connection, target(), vec![heic_item("heic", 1)])
+        .await
+        .expect("HEIC staging should settle");
+    runtime
+        .media_staging()
+        .update_caption(
+            &mut connection,
+            target(),
+            "heic".to_owned(),
+            Some(ComposerDocument::from_plain_text("holiday".to_owned())),
+        )
+        .await
+        .expect("caption should settle");
+    let caption = connection.snapshot().timeline.staged_uploads[0]
+        .caption
+        .clone();
+    assert!(caption.is_some(), "fixture precondition: caption is set");
+
+    // The injected decoder succeeds for the initial preparation and fails for the
+    // lazily selected pair.
+    decoder.fail.store(true, Ordering::SeqCst);
+    let outcome = runtime
+        .media_staging()
+        .select_staged_upload_output(
+            &mut connection,
+            target(),
+            "heic".to_owned(),
+            koushi_state::StagedUploadOutputSelection {
+                resize: StagedUploadResizeChoice::Half,
+                format: StagedUploadFormatChoice::Png,
+            },
+        )
+        .await;
+    assert!(
+        matches!(outcome, Err(MediaStagingError::PreparationFailed)),
+        "a failed lazy encode must report the failure: {outcome:?}"
+    );
+
+    let failed = connection.snapshot().timeline.staged_uploads[0].clone();
+    assert_eq!(
+        failed.preparation,
+        StagedUploadPreparation::Failed {
+            failure_kind: koushi_state::MediaPreparationFailureKind::Unsupported,
+            can_use_original: true,
+        },
+        "the failed pair must settle with the original fallback, not stay pending"
+    );
+
+    // Both recovery affordances work from the settled failure.
+    decoder.fail.store(false, Ordering::SeqCst);
+    runtime
+        .media_staging()
+        .retry_staged_upload_preparation(&mut connection, target(), "heic".to_owned())
+        .await
+        .expect("retry should settle");
+    let retried = connection.snapshot().timeline.staged_uploads[0].clone();
+    assert!(matches!(
+        retried.preparation,
+        StagedUploadPreparation::Ready { .. }
+    ));
+    assert!(
+        koushi_state::staged_uploads_are_sendable(std::slice::from_ref(&retried)),
+        "retry must leave the item sendable"
+    );
+    assert_eq!(retried.caption, caption, "retry keeps the caption");
+    let retried_upload = runtime
+        .media_preparation()
+        .transition()
+        .await
+        .selected_upload(&target(), "heic")
+        .expect("retry keeps a selected upload");
+    assert_eq!(
+        retried_upload.bytes.len() as u64,
+        retried_upload.descriptor.byte_count
+    );
+}
+
+/// #1147: the original fallback after a lazy failure must not drop a caption the
+/// user already typed.
+#[tokio::test]
+async fn original_fallback_after_a_lazy_failure_keeps_the_caption() {
+    use std::sync::atomic::Ordering;
+
+    let decoder = FakeStillImageDecoder::new(false);
+    let (runtime, mut connection, _stores) = ready_runtime_with_decoder(&decoder).await;
+    runtime
+        .media_staging()
+        .stage_upload_bytes(&mut connection, target(), vec![heic_item("heic", 1)])
+        .await
+        .expect("HEIC staging should settle");
+    runtime
+        .media_staging()
+        .update_caption(
+            &mut connection,
+            target(),
+            "heic".to_owned(),
+            Some(ComposerDocument::from_plain_text("holiday".to_owned())),
+        )
+        .await
+        .expect("caption should settle");
+    let caption = connection.snapshot().timeline.staged_uploads[0]
+        .caption
+        .clone();
+
+    decoder.fail.store(true, Ordering::SeqCst);
+    let outcome = runtime
+        .media_staging()
+        .select_staged_upload_output(
+            &mut connection,
+            target(),
+            "heic".to_owned(),
+            koushi_state::StagedUploadOutputSelection {
+                resize: StagedUploadResizeChoice::Quarter,
+                format: StagedUploadFormatChoice::Webp,
+            },
+        )
+        .await;
+    assert!(outcome.is_err(), "fixture precondition: the pair fails");
+
+    runtime
+        .media_staging()
+        .use_original(&mut connection, target(), "heic".to_owned())
+        .await
+        .expect("the original fallback should settle");
+    let original = connection.snapshot().timeline.staged_uploads[0].clone();
+    assert!(matches!(
+        original.preparation,
+        StagedUploadPreparation::Ready { .. }
+    ));
+    assert!(
+        koushi_state::staged_uploads_are_sendable(std::slice::from_ref(&original)),
+        "the original fallback must be sendable"
+    );
+    assert_eq!(original.caption, caption, "the fallback keeps the caption");
+    let original_upload = runtime
+        .media_preparation()
+        .transition()
+        .await
+        .selected_upload(&target(), "heic")
+        .expect("the fallback keeps a selected upload");
+    assert_eq!(
+        original_upload.bytes,
+        heic_item("heic", 1).bytes,
+        "the original fallback uploads the exact source bytes"
+    );
+}
+
+/// #1147: a failure that arrives after the user moved to a cached pair is stale
+/// — a cached re-selection clears `pending` without bumping the generation, so
+/// the generation check alone would let the old failure replace a sendable
+/// selection.
+#[tokio::test]
+async fn lazy_failure_superseded_by_a_cached_selection_is_not_published() {
+    use std::sync::atomic::Ordering;
+
+    let decoder = FakeStillImageDecoder::new(false);
+    let (runtime, mut connection, _stores) = ready_runtime_with_decoder(&decoder).await;
+    runtime
+        .media_staging()
+        .stage_upload_bytes(&mut connection, target(), vec![heic_item("heic", 1)])
+        .await
+        .expect("HEIC staging should settle");
+    decoder.fail.store(true, Ordering::SeqCst);
+
+    let mut barrier = runtime
+        .media_staging()
+        .install_preparation_barrier_for_testing();
+    let service = runtime.media_staging().clone();
+    let mut select_connection = runtime.attach();
+    let failing = tokio::spawn(async move {
+        service
+            .select_staged_upload_output(
+                &mut select_connection,
+                target(),
+                "heic".to_owned(),
+                koushi_state::StagedUploadOutputSelection {
+                    resize: StagedUploadResizeChoice::Half,
+                    format: StagedUploadFormatChoice::Webp,
+                },
+            )
+            .await
+    });
+    barrier.wait_started().await;
+    let cached = koushi_state::StagedUploadOutputSelection {
+        resize: StagedUploadResizeChoice::Original,
+        format: StagedUploadFormatChoice::Jpeg,
+    };
+    runtime
+        .inject_actions(vec![AppAction::UploadStagingOutputSelected {
+            target: target(),
+            staged_id: "heic".to_owned(),
+            selection: cached,
+        }])
+        .await;
+    support::wait_for_state_event(&mut connection, |state| {
+        matches!(
+            state.timeline.staged_uploads[0].preparation,
+            StagedUploadPreparation::Ready { pending: None, selected, .. } if selected == cached
+        )
+    })
+    .await;
+    barrier.release();
+    assert!(
+        matches!(failing.await.unwrap(), Err(MediaStagingError::Stale)),
+        "a superseded failure must be rejected as stale"
+    );
+    let settled = connection.snapshot().timeline.staged_uploads[0].clone();
+    let StagedUploadPreparation::Ready {
+        selected: settled_selection,
+        pending,
+        ..
+    } = &settled.preparation
+    else {
+        panic!(
+            "the cached selection must survive the stale failure: {:?}",
+            settled.preparation
+        );
+    };
+    assert_eq!(*settled_selection, cached);
+    assert_eq!(*pending, None);
+}
+
+/// #1194: one attachment staged into an empty target starts with the composer's
+/// captured document as its caption, and the caption is visible while the
+/// attachment is still preparing.
+#[tokio::test]
+async fn single_attachment_takes_the_composer_document_as_its_caption() {
+    let (runtime, mut connection, _stores) = ready_runtime().await;
+    let document = ComposerDocument::from_plain_text("holiday photo");
+    let mut barrier = runtime
+        .media_staging()
+        .install_preparation_barrier_for_testing();
+    let service = runtime.media_staging().clone();
+    let mut staging_connection = runtime.attach();
+    let document_for_task = document.clone();
+    let task = tokio::spawn(async move {
+        service
+            .stage_upload_bytes_with_composer_document(
+                &mut staging_connection,
+                target(),
+                vec![item("seeded", b"bytes")],
+                Some(document_for_task),
+            )
+            .await
+    });
+    barrier.wait_started().await;
+    // The first publication already carries the caption, so the dialog shows it
+    // while preparation is still running.
+    support::wait_for_state_event(&mut connection, |state| {
+        state.timeline.staged_uploads[0].caption.as_ref() == Some(&document)
+    })
+    .await;
+    barrier.release();
+    task.await.unwrap().expect("staging should settle");
+    let staged = connection.snapshot().timeline.staged_uploads[0].clone();
+    assert_eq!(staged.caption, Some(document));
+}
+
+/// #1194: only one attachment staged into an empty target takes the draft. A batch
+/// of two, or a second attachment added later, never seeds a caption, and the first
+/// attachment keeps the one it already has.
+#[tokio::test]
+async fn only_a_single_new_attachment_takes_the_composer_document() {
+    let (runtime, mut connection, _stores) = ready_runtime().await;
+    let document = ComposerDocument::from_plain_text("holiday photo");
+    runtime
+        .media_staging()
+        .stage_upload_bytes_with_composer_document(
+            &mut connection,
+            target(),
+            vec![item("first", b"first bytes")],
+            Some(document.clone()),
+        )
+        .await
+        .expect("first attachment stages");
+    // A second attachment added later, with the same draft still in the composer.
+    runtime
+        .media_staging()
+        .stage_upload_bytes_with_composer_document(
+            &mut connection,
+            target(),
+            vec![item_at("second", 2, b"second bytes")],
+            Some(document.clone()),
+        )
+        .await
+        .expect("second attachment stages");
+    let staged = connection.snapshot().timeline.staged_uploads.clone();
+    assert_eq!(staged.len(), 2);
+    assert_eq!(staged[0].caption, Some(document.clone()));
+    assert_eq!(staged[1].caption, None, "a later attachment is not seeded");
+
+    // Two attachments in one batch are not seeded either.
+    let (batch_runtime, mut batch_connection, _stores) = ready_runtime().await;
+    batch_runtime
+        .media_staging()
+        .stage_upload_bytes_with_composer_document(
+            &mut batch_connection,
+            target(),
+            vec![item("a", b"a bytes"), item_at("b", 2, b"b bytes")],
+            Some(document),
+        )
+        .await
+        .expect("batch stages");
+    for item in batch_connection.snapshot().timeline.staged_uploads.iter() {
+        assert_eq!(item.caption, None, "a batch of two is not seeded");
+    }
+}
+
+/// #1194: a composer document without meaningful text is not a caption, matching
+/// what the upload conversion would drop anyway.
+#[tokio::test]
+async fn whitespace_only_composer_text_is_not_a_caption() {
+    let (runtime, mut connection, _stores) = ready_runtime().await;
+    runtime
+        .media_staging()
+        .stage_upload_bytes_with_composer_document(
+            &mut connection,
+            target(),
+            vec![item("blank", b"bytes")],
+            Some(ComposerDocument::from_plain_text("   ")),
+        )
+        .await
+        .expect("staging should settle");
+    assert_eq!(
+        connection.snapshot().timeline.staged_uploads[0].caption,
+        None
+    );
+}
+
+/// #1194: the seed never overwrites what the user does while the seeded attachment
+/// is still preparing — an edit and an explicit clear both win.
+#[tokio::test]
+async fn caption_edits_while_preparing_win_over_the_seed() {
+    for explicit_clear in [false, true] {
+        let (runtime, mut connection, _stores) = ready_runtime().await;
+        let seeded = ComposerDocument::from_plain_text("holiday photo");
+        let edited = ComposerDocument::from_plain_text("caption while preparing");
+        let mut barrier = runtime
+            .media_staging()
+            .install_preparation_barrier_for_testing();
+        let service = runtime.media_staging().clone();
+        let mut staging_connection = runtime.attach();
+        let seeded_for_task = seeded.clone();
+        let task = tokio::spawn(async move {
+            service
+                .stage_upload_bytes_with_composer_document(
+                    &mut staging_connection,
+                    target(),
+                    vec![item("seeded", b"bytes")],
+                    Some(seeded_for_task),
+                )
+                .await
+        });
+        barrier.wait_started().await;
+        support::wait_for_state_event(&mut connection, |state| {
+            state.timeline.staged_uploads[0].caption.as_ref() == Some(&seeded)
+        })
+        .await;
+        let expected = if explicit_clear {
+            None
+        } else {
+            Some(edited.clone())
+        };
+        runtime
+            .inject_actions(vec![AppAction::UploadStagingCaptionChanged {
+                target: target(),
+                staged_id: "seeded".to_owned(),
+                caption: if explicit_clear {
+                    None
+                } else {
+                    Some(edited.clone())
+                },
+            }])
+            .await;
+        support::wait_for_state_event(&mut connection, |state| {
+            state.timeline.staged_uploads[0].caption == expected
+        })
+        .await;
+        barrier.release();
+        task.await.unwrap().expect("staging should settle");
+        assert_eq!(
+            connection.snapshot().timeline.staged_uploads[0].caption,
+            expected,
+            "explicit_clear={explicit_clear}"
+        );
+    }
+}
+
+/// #1194: the seed uses the same meaningful-caption criterion as the upload
+/// conversion, so a document whose only text comes from a mention still counts.
+#[tokio::test]
+async fn a_mention_only_composer_document_is_still_a_caption() {
+    let (runtime, mut connection, _stores) = ready_runtime().await;
+    let document = ComposerDocument::new(vec![ComposerInline::Mention {
+        target: koushi_state::MentionTarget::RoomMention {
+            display_label: "@room".to_owned(),
+        },
+        display_label: "@room".to_owned(),
+    }]);
+    runtime
+        .media_staging()
+        .stage_upload_bytes_with_composer_document(
+            &mut connection,
+            target(),
+            vec![item("mention", b"bytes")],
+            Some(document.clone()),
+        )
+        .await
+        .expect("staging should settle");
+    assert_eq!(
+        connection.snapshot().timeline.staged_uploads[0].caption,
+        Some(document)
+    );
 }

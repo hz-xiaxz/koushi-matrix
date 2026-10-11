@@ -331,17 +331,12 @@ describe("ContextualRightPanel", () => {
     const importSource = source.slice(importStart, importEnd);
 
     expect(exportSource).toContain("if (!isTauriRuntime())");
-    expect(exportSource).toContain("windowDialogPort.saveFile");
-    expect(exportSource).toContain('defaultPath: "koushi-room-keys.txt"');
-    expect(exportSource).toContain("return selected || null");
+    expect(exportSource).toContain("api.chooseRoomKeyExportDestination(");
     expect(backupSource).toContain("if (!isTauriRuntime())");
     expect(backupSource).toContain("windowDialogPort.saveFile");
     expect(backupSource).toContain('defaultPath: "koushi-secure-backup-recovery-key.txt"');
     expect(importSource).toContain("if (!isTauriRuntime())");
-    expect(importSource).toContain("windowDialogPort.openFile");
-    expect(importSource).toContain("multiple: false");
-    expect(importSource).toContain('fileAccessMode: "scoped"');
-    expect(importSource).toContain('typeof selected === "string" ? selected : null');
+    expect(importSource).toContain("api.chooseRoomKeyImportSource(");
     expect(source).toContain("runInBackground(windowDialogPort.toggleFullscreen())");
     expect(source).toContain("windowDialogPort.startDragging().catch(() => undefined)");
   });
@@ -1567,7 +1562,7 @@ describe("ContextualRightPanel", () => {
     expect(source).toContain("leaseId");
     expect(source).toContain("beginOperation(scope)");
     expect(source).toContain("reserveComposerAcceptedRevision(");
-    expect(source).toContain("settleOperation(capture)");
+    expect(source).toContain("settleOperation(capture, {");
     expect(source).not.toContain("composerDraftRevisionForTarget");
   });
 
@@ -2835,5 +2830,45 @@ describe("Timeline item row rendering", () => {
   test("ready with non-running sync renders the normal shell", () => {
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
     expect(source).not.toContain('(sessionKind === "ready" && snapshot.state.domain.sync !== "running")');
+  });
+});
+
+describe("createRoomRequestFromDraft access selection (#1177)", () => {
+  const options = {
+    aliasLocalpart: "",
+    encrypted: true,
+    invitedOnly: false,
+    topic: "",
+    visibility: "private" as const
+  };
+
+  test("an untouched seeded draft keeps the legacy preset path", async () => {
+    vi.stubGlobal("window", { location: { search: "" } });
+    const { createRoomRequestFromDraft } = await import("./App");
+    const request = createRoomRequestFromDraft("Room", options, "!space:example.invalid", {
+      scope: { kind: "create", sessionId: 1 },
+      revision: 0,
+      rule: "restricted",
+      allowTargets: ["!space:example.invalid"],
+      touched: false
+    });
+    expect(request.accessPolicy).toBeNull();
+    expect(request.parentSpace).toEqual({ spaceId: "!space:example.invalid" });
+  });
+
+  test("a target edit submits the seeded rule with the full target set", async () => {
+    vi.stubGlobal("window", { location: { search: "" } });
+    const { createRoomRequestFromDraft } = await import("./App");
+    const request = createRoomRequestFromDraft("Room", options, "!space:example.invalid", {
+      scope: { kind: "create", sessionId: 1 },
+      revision: 1,
+      rule: "restricted",
+      allowTargets: ["!space-b:example.invalid", "!space:example.invalid"],
+      touched: true
+    });
+    expect(request.accessPolicy).toEqual({
+      rule: "restricted",
+      allowTargets: ["!space-b:example.invalid", "!space:example.invalid"]
+    });
   });
 });

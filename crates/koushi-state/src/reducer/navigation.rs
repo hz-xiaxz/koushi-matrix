@@ -2,7 +2,8 @@ use crate::{
     effect::{AppEffect, UiEvent},
     state::{
         AppState, EventNavigationFailureKind, EventNavigationSource, EventNavigationState,
-        NavigationState, RoomListFilter, SearchScope, SearchState, SpaceConversationSurface,
+        NavigationState, RoomListFilter, ScheduledSendsListState, SearchScope, SearchState,
+        SpaceConversationSurface,
     },
 };
 
@@ -290,6 +291,7 @@ fn close_current_room_search_for_room_change(
     };
 
     if should_close {
+        state.search_request_connection_id = None;
         state.search = SearchState::Closed;
         effects.push(AppEffect::EmitUiEvent(UiEvent::SearchChanged));
     }
@@ -302,6 +304,11 @@ pub(crate) fn handle_select_space(
     if !is_session_ready(state) {
         return Vec::new();
     }
+
+    // #1160: a Home/Space selection always closes the scoped scheduled-sends
+    // panel, including the no-room-change and Home-with-no-previous-room paths
+    // where the threads helpers below are skipped.
+    state.scheduled_sends_list = ScheduledSendsListState::Closed;
 
     remember_active_room_for_current_space(state);
     let previous_room_id = state.navigation.active_room_id.clone();
@@ -430,6 +437,11 @@ pub(crate) fn handle_select_room(state: &mut AppState, room_id: String) -> Vec<A
     else {
         return Vec::new();
     };
+
+    // #1160: a room selection always closes the scoped scheduled-sends panel,
+    // including a same-room selection that returns below without changing the
+    // timeline.
+    state.scheduled_sends_list = ScheduledSendsListState::Closed;
 
     remember_active_room_for_current_space(state);
     let previous_active_space_id = state.navigation.active_space_id.clone();

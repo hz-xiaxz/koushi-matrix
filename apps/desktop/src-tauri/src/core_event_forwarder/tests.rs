@@ -42,6 +42,93 @@ fn timeline_items_updated_forwarding_emits_core_event_name_and_all_diffs() {
     assert_eq!(diffs[999], json!({ "Remove": { "index": 999 } }));
 }
 #[test]
+fn scheduled_sends_list_forwarded_delta_covers_open_closed_and_omission() {
+    use koushi_core::build_state_delta;
+    use koushi_protocol::CoreEvent;
+    use koushi_state::{
+        AppState, ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem,
+        ScheduledSendsListState, ScheduledSendsScope,
+    };
+    use serde_json::json;
+
+    let timeline_items_count = AtomicUsize::new(0);
+    let item = ScheduledSendItem {
+        scheduled_id: "sched-1".to_owned(),
+        room_id: "!room:example.invalid".to_owned(),
+        thread_root_event_id: Some("$thread-root:example.invalid".to_owned()),
+        body: "synthetic scheduled body".to_owned(),
+        send_at_ms: 1_900_000_000_000,
+        handle: ScheduledSendHandle::Server {
+            delay_id: "delay-1".to_owned(),
+        },
+        is_dispatching: false,
+    };
+    let open = ScheduledSendsListState::Open {
+        scope: ScheduledSendsScope::Home,
+        capability: ScheduledSendCapability::ServerDelayedEvents,
+        items: vec![item.clone()],
+    };
+
+    // Closed -> Open replacement.
+    let previous = AppState::default();
+    let mut next = previous.clone();
+    next.scheduled_sends_list = open.clone();
+    let delta = build_state_delta(1, &previous, &next).expect("open delta");
+    let forwarded = forwarded_webview_events_for_core_event(
+        &CoreEvent::StateDelta(delta),
+        &timeline_items_count,
+    );
+    let open_slice = &forwarded[0].payload["changed"]["state"]["ui"]["scheduled_sends_list"];
+    assert_eq!(open_slice["kind"], json!("open"));
+    assert_eq!(open_slice["scope"]["kind"], json!("home"));
+    assert_eq!(open_slice["capability"], json!("serverDelayedEvents"));
+    assert_eq!(open_slice["items"][0]["scheduled_id"], json!("sched-1"));
+    assert_eq!(
+        open_slice["items"][0]["thread_root_event_id"],
+        json!("$thread-root:example.invalid")
+    );
+
+    // Open -> explicit Closed replacement.
+    let previous = next.clone();
+    let mut next = previous.clone();
+    next.scheduled_sends_list = ScheduledSendsListState::Closed;
+    let delta = build_state_delta(2, &previous, &next).expect("closed delta");
+    let forwarded = forwarded_webview_events_for_core_event(
+        &CoreEvent::StateDelta(delta),
+        &timeline_items_count,
+    );
+    assert!(
+        forwarded[0].payload["changed"]["state"]["ui"]
+            .get("scheduled_sends_list")
+            .is_some(),
+        "an explicit close must reach the forwarded delta"
+    );
+    assert_eq!(
+        forwarded[0].payload["changed"]["state"]["ui"]["scheduled_sends_list"],
+        json!({ "kind": "closed" })
+    );
+
+    // Unchanged slice stays out of the delta even when another UI field changes.
+    let previous = AppState {
+        scheduled_sends_list: open.clone(),
+        ..AppState::default()
+    };
+    let mut next = previous.clone();
+    next.navigation.active_room_id = Some("!other:example.invalid".to_owned());
+    let delta = build_state_delta(3, &previous, &next).expect("navigation delta");
+    let forwarded = forwarded_webview_events_for_core_event(
+        &CoreEvent::StateDelta(delta),
+        &timeline_items_count,
+    );
+    assert!(
+        forwarded[0].payload["changed"]["state"]["ui"]
+            .get("scheduled_sends_list")
+            .is_none(),
+        "an unchanged scheduled-sends slice must be omitted from the delta"
+    );
+}
+
+#[test]
 fn state_delta_forwarding_emits_core_event_changed_slices() {
     use koushi_core::build_state_delta;
     use koushi_protocol::CoreEvent;
@@ -250,6 +337,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
         thread_root: None,
         thread_summary: Some(ThreadSummaryDto {
             reply_count: 2,
+            unread_count: 0,
             latest_event_id: Some("$thread-reply:example.test".to_owned()),
             latest_sender: Some("@thread:example.test".to_owned()),
             latest_sender_label: None,
@@ -602,6 +690,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
                 "thread_root": null,
                 "thread_summary": {
                     "reply_count": 2,
+                    "unread_count": 0,
                     "latest_event_id": "$thread-reply:example.test",
                     "latest_sender": "@thread:example.test",
                     "latest_sender_label": null,
@@ -870,7 +959,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
         serialize_core_event(&CoreEvent::Timeline(TimelineEvent::MessageSourceLoaded {
             request_id,
             key: key.clone(),
-            source: TimelineMessageSource {
+            source: Box::new(TimelineMessageSource {
                 event_id: "$e1".to_owned(),
                 sender: Some("@u:example.test".to_owned()),
                 timestamp_ms: Some(123),
@@ -884,7 +973,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
                 megolm_message_index: Some(2),
                 megolm_session_rotation_reason: Some(TimelineMegolmSessionReason::ExpiredTime),
                 original_json: None,
-            },
+            }),
         }))
         .expect("serialize message source loaded");
     let message_forwarded =
@@ -940,7 +1029,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
     let navigation_updated =
         serialize_core_event(&CoreEvent::Timeline(TimelineEvent::NavigationUpdated {
             key: key.clone(),
-            snapshot: TimelineNavigationSnapshot {
+            snapshot: Box::new(TimelineNavigationSnapshot {
                 read_marker_event_id: Some("$read:example.test".to_owned()),
                 read_marker_display_event_id: Some("$read:example.test".to_owned()),
                 first_unread_event_id: Some("$unread:example.test".to_owned()),
@@ -951,7 +1040,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
                 unread_position: TimelineUnreadPosition::BelowViewport,
                 newer_event_count: 3,
                 can_jump_to_bottom: true,
-            },
+            }),
         }))
         .expect("serialize navigation update event");
     assert_eq!(
@@ -1179,6 +1268,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
         share_link: Some("https://matrix.to/#/%23private%3Aexample.test".to_owned()),
         join_rule: RoomJoinRule::Invite,
         history_visibility: RoomHistoryVisibility::Shared,
+        access: koushi_state::RoomAccessCondition::default(),
         permissions: RoomPermissionFacts {
             can_edit_settings: true,
             can_change_join_rule: true,

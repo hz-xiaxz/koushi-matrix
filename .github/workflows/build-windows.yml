@@ -13,6 +13,11 @@ name: Build Windows (unsigned trial NSIS)
 
 on:
   workflow_dispatch:
+    inputs:
+      updater_validation:
+        description: Validate updater signatures with disposable keys (no uploads)
+        type: boolean
+        default: false
 
 concurrency:
   group: build-windows-${{ github.ref }}
@@ -67,10 +72,16 @@ jobs:
 
       # Runs release preflight, tauri build --bundles nsis, then validates
       # exactly one fresh non-empty installer and prints its SHA-256.
+      - name: Validate signed updater packaging with disposable keys
+        if: inputs.updater_validation
+        run: ./scripts/windows-updater-package-validation.ps1
+
       - name: Windows build entry point
+        if: ${{ !inputs.updater_validation }}
         run: npm --prefix apps/desktop run build:windows
 
       - name: Write SHA-256 manifest
+        if: ${{ !inputs.updater_validation }}
         run: |
           $exe = Get-ChildItem "target/x86_64-pc-windows-msvc/release/bundle/nsis" -Filter *.exe | Select-Object -First 1
           if (-not $exe) { throw "No NSIS installer found" }
@@ -78,6 +89,7 @@ jobs:
           "$hash  $($exe.Name)" | Set-Content -Path "target/koushi-windows-nsis.sha256" -Encoding ascii
 
       - name: Upload installer + checksum (unsigned trial artifact)
+        if: ${{ !inputs.updater_validation }}
         uses: actions/upload-artifact@v4
         with:
           name: koushi-windows-x64-nsis-unsigned

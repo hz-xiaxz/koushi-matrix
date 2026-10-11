@@ -7,21 +7,26 @@
 A room contains a conversation. A Space groups rooms; joining a Space does not
 necessarily join every room it lists.
 
-Choose **Home** in the left rail to see your account-level navigation, including
-**Invites** and **Explore**. Choose a Space to see its rooms. If a conversation
-is absent from a Space view, return to Home before assuming it has disappeared.
+Choose **Home** in the left rail to see your account-level navigation. Home's
+header row carries **Activity**, **Explore**, and **Invites** at the start and
+**Threads**, **Scheduled messages**, and **Info** at the end. A Space replaces
+the start of that row with **Members** and keeps the same **Threads**,
+**Scheduled messages**, and **Info** actions at the end. Choose a Space to see
+its rooms. If a conversation is absent from a Space view, return to Home before
+assuming it has disappeared. The clock button opens the
+[scheduled messages panel](messaging.md#schedule-a-message).
 
 ## Join a room
 
 If you received an invitation:
 
-1. Open **Home → Invites**.
+1. Open **Home**, then choose **Invites** in the header.
 2. Select the invitation and check the room and inviter.
 3. Choose **Accept** to join, or **Decline** to reject it.
 
 If you have a room address:
 
-1. Open **Home → Explore**.
+1. Open **Home**, then choose **Explore** in the header.
 2. Enter the room address or Matrix link in the address field and choose
    **Preview**.
 3. Review the preview and choose the available join action. Invite-only rooms
@@ -129,6 +134,12 @@ when there is something unread, shows `99+` above 99, and disappears at zero. It
 stays on the Rust-reported total for the whole view, so filtering the list or
 collapsing the section does not change it.
 
+A conversation's own unread badge counts unread replies in its threads as well as
+messages in the main timeline, so a room can show unread while the main timeline
+has nothing new; reading the thread clears its share. Read markers, the
+first-unread position and event navigation stay on the main timeline and ignore
+thread replies.
+
 A **Low priority** section appears below **DMs** when any conversation in the
 current view carries the low-priority tag. Low-priority rooms and DMs are listed
 there instead of in **Rooms** or **DMs**. Set or clear the tag from a
@@ -141,6 +152,48 @@ badge, the Home and Space rail counts, and the **Rooms** and **DMs** heading
 badges, mentions included. The conversation's own row still shows its real
 unread count, nothing is marked as read, and removing the tag restores its
 contribution without replaying old notifications.
+
+## See who can join a room or Space
+
+Two separate facts are reported, and neither is used to mean the other: **who
+may join** and **whether the conversation is encrypted**. Every conversation
+row, the room header, the Space rail, the Space header, and **Room info** show
+the participation indicator; the conversation header and **Room info** also
+show the encryption indicator.
+
+The participation indicator is one icon with one label. Hover it, or reach it
+with the keyboard, to read what it means for that room or Space.
+
+- **Public** (globe): anyone can join without an invitation.
+- **Invite only** (person with a plus): an invitation is required to join.
+- **Space members can join** (two people): the members of the Space named in the
+  explanation can join without an invitation.
+- **Conditions apply** (two people): members of the listed Spaces or rooms can
+  join without an invitation, and everyone else needs one. When Koushi has read
+  their names, the explanation lists the Spaces or rooms.
+- **Can request** (raised hand): you can ask for an invitation, but joining
+  still requires one.
+- **Space / request** (raised hand): membership follows the Space named in the
+  explanation, and everyone else can ask for an invitation.
+- **Not joinable** (question mark): the room keeps a join rule with no ordinary
+  way in, and an invitation alone may not be enough.
+- **Checking** (spinner) or **Unknown** (question mark): Koushi has not read the
+  join conditions yet, or it does not recognize the rule the server reports.
+
+The encryption indicator is separate: **Encrypted** (closed padlock) or **Not
+encrypted** (open padlock), with its own explanation. A padlock never means that
+an invitation is required, and an invitation is never shown with a padlock.
+
+In the conversation list only the participation icon is shown, as the row's
+accessible name, because a list row has room for one. Direct messages show
+neither indicator in the list; the header and **Room info** report both facts for
+the open conversation.
+
+Neither indicator is a confidentiality or history-visibility signal: an
+invite-only room can still hold unencrypted messages, and a public room can be
+encrypted. History visibility and the other properties are shown and changed in
+**Change room details, access, and history** and in **Space names and access**
+below.
 
 ## Room information and notifications
 
@@ -162,13 +215,27 @@ Open **Room info**. Each property is shown, changed, and confirmed in one card:
   choose **Save** (or **Cancel**, or press **Esc**). Saving an empty value
   removes the topic or avatar. The avatar card shows the room's picture and its
   `mxc://` address.
-- **Access and history**: **Join rule** and **History visibility**. Choose
-  **Change**, pick a value, and choose **Save**. The explanation under the choice
-  describes the value you are about to save, including when history becomes
-  visible to anyone and that a change does not apply to messages already sent.
+- **Access and history**: **Join rule** and **History visibility** each show a
+  list of choices and, below it, what the current selection means: who can
+  join, who can read which history, whether the room is encrypted, and whether
+  it is listed in the public directory. The selected choice is marked, and the
+  details say whether they describe the saved values
+  or unsaved changes. Choose a value and then **Save** (or **Cancel**, or press
+  **Esc**) to restore the saved value. Changing the join rule needs permission
+  to change join rules, which is separate from permission to rename the room,
+  so an account that may change access but not the room name can still change
+  it. Choosing **Members of a Space** lists the Spaces you belong to; pick the
+  ones whose members may join. A restricted rule is summarised by its
+  people-facing access condition (**Conditions apply**, or **Space members can
+  join** when exactly one Space is verified) rather than as **Not joinable**, and a
+  rule the app cannot rewrite is shown disabled with the reason. The details
+  keep server eligibility and key availability separate, note when history
+  becomes visible to anyone, and state that a change does not apply to messages
+  already sent. The same editor is used while creating a room.
 
-The badges at the top of **Room info**, such as **Public** or **Anyone can see
-history**, move to the matching card. A card shows **Saving…** while the change
+The summary at the top of **Room info**, such as **Encrypted**, **Invite only**
+or **Anyone can see history**, moves to the matching card when chosen; the
+encryption summary is a statement of fact and does not open a card. A card shows **Saving…** while the change
 is sent and **Saved** once the room reports the new value; if the change fails,
 the reason is shown in the same card and the old value stays. If your role cannot
 change a property, its card shows the current value and says so. The room name is

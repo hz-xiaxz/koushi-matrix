@@ -5,10 +5,12 @@ import {
   type ReactNode,
   type RefObject,
   useEffect,
+  useId,
   useRef,
   useState
 } from "react";
 import {
+  Activity,
   AlertTriangle,
   Bell,
   Bug,
@@ -40,19 +42,33 @@ import type {
 } from "../domain/types";
 import { contextMenuItems } from "../domain/contextMenus";
 import { renderableThumbnailSourceUrl } from "../backend/linkMediaRuntime";
-import { Tooltip } from "./Tooltip";
+import {
+  ROOM_ACCESS_CHECKING,
+  roomAccessIndicator
+} from "../domain/accessCondition";
+import { RoomAccessGlyphIcon } from "./RoomAccessGlyph";
+import { Tooltip, type TooltipTriggerProps } from "./Tooltip";
 import { ImeTextField } from "./ImeTextControl";
 import { useRecoverableImageSource } from "./avatarImage";
 import {
   ICON_SIZE,
+  roomAccessTooltipLabel,
   type OpenContextMenu,
   type PrimaryView,
   avatarInitial,
   elementAvatarColorIndex,
+  graphemeCount,
   roomListItemLabel,
   EMPTY_ROOM_TAGS
 } from "../app/uiShared";
 const HOME_SCOPE_KEY = "__home__";
+
+// #1246: the Space reorder payload stays in the app. A `text/plain` item reaches
+// the system pasteboard, where macOS turns the bare room ID into a broken web
+// location when a drop leaves the window; an app-private type is opaque outside
+// the webview. The in-app reorder reads `draggedSpaceId` first and uses this only
+// as the cross-instance fallback.
+const SPACE_DRAG_TYPE = "application/x-koushi-space";
 
 export type RuntimeAlertKind = "secureBackup" | "sync" | "session";
 
@@ -416,7 +432,7 @@ export function WorkspaceRail({
 
   function dropSpaceOn(targetSpaceId: string, event: DragEvent<HTMLButtonElement>) {
     event.preventDefault();
-    const sourceSpaceId = draggedSpaceId ?? event.dataTransfer.getData("text/plain");
+    const sourceSpaceId = draggedSpaceId ?? event.dataTransfer.getData(SPACE_DRAG_TYPE);
     setDraggedSpaceId(null);
     setDragOverSpaceId(null);
 
@@ -450,6 +466,7 @@ export function WorkspaceRail({
             data-count={snapshot.sidebar.account_home.attention_count || undefined}
             type="button"
             aria-label={accountHomeLabel(snapshot.sidebar.account_home)}
+            aria-current={snapshot.sidebar.account_home.is_active ? "page" : undefined}
             onClick={() => onSelectSpace(null)}
           >
             <Home size={ICON_SIZE.rail} />
@@ -459,9 +476,36 @@ export function WorkspaceRail({
         <div className="workspace-list workspace-space-list">
           {snapshot.sidebar.space_rail.map((space) => {
             const localIcon = space.local_icon?.trim();
+            // #1217: an explicit local name is user text, so the generated tile
+            // renders the whole name. A Space with only a Matrix name keeps the
+            // Element/Compound single-grapheme fallback (#414).
+            const hasLocalName = Boolean(
+              snapshot.state.ui.navigation.space_local_presentations[space.space_id]?.name?.trim()
+            );
             const fallbackName = space.display_name.trim() || space.space_id || "?";
+            // #1166: the rail item keeps the Space name and explains its access
+            // condition, and a bounded overlay summarises it at the avatar.
+            // #1327: the overlay uses the same glyph vocabulary as every other
+            // surface, so a padlock here also means encryption and nothing else.
+            const spaceAccess =
+              roomAccessIndicator(
+                space.access_join_rule ?? null,
+                space.access_restricted_conditions,
+                {
+                  spaceMembersRoute: space.access_space_members_route,
+                  allowedRoomNames: space.access_allowed_room_names
+                }
+              ) ?? ROOM_ACCESS_CHECKING;
+            const railSummary = spaceAccess.glyph;
             return (
-            <Tooltip label={fallbackName} key={space.space_id}>
+            <Tooltip
+              label={`${fallbackName}${t("access.conditionSummarySeparator")}${roomAccessTooltipLabel(
+                spaceAccess.descriptionMessageId,
+                spaceAccess.descriptionAllowedRoomNames,
+                spaceAccess.descriptionSpaceName
+              )}`}
+              key={space.space_id}
+            >
               {(tooltipProps) => (
                 <button
                   className={`workspace-button workspace-space-button ${
@@ -473,11 +517,12 @@ export function WorkspaceRail({
                   draggable
                   type="button"
                   aria-label={fallbackName}
+                  aria-current={space.is_active ? "page" : undefined}
                   onClick={() => onSelectSpace(space.space_id)}
                   onDragStart={(event) => {
                     setDraggedSpaceId(space.space_id);
                     event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", space.space_id);
+                    event.dataTransfer.setData(SPACE_DRAG_TYPE, space.space_id);
                   }}
                   onDragOver={(event) => {
                     event.preventDefault();
@@ -507,10 +552,20 @@ export function WorkspaceRail({
                     avatar={space.avatar}
                     className="workspace-button-avatar is-space"
                     colorSeed={space.space_id}
-                    fallback={localIcon || avatarInitial(fallbackName)}
-                    fallbackMode={localIcon ? "compactLabel" : "elementSpace"}
+                    fallback={localIcon || (hasLocalName ? fallbackName : avatarInitial(fallbackName))}
+                    fallbackMode={localIcon || hasLocalName ? "compactLabel" : "elementSpace"}
                     onRequestAvatarThumbnail={onRequestAvatarThumbnail}
                   />
+                  {/* The overlay sits at the avatar's *upper* trailing corner: the
+                      unread/notification count owns the lower one, and the access
+                      overlay must never obscure it. */}
+                  <span
+                    className="workspace-access-overlay"
+                    data-space-access={railSummary}
+                    aria-hidden="true"
+                  >
+                    <RoomAccessGlyphIcon glyph={railSummary} size={ICON_SIZE.micro} />
+                  </span>
                 </button>
               )}
             </Tooltip>
@@ -553,6 +608,7 @@ export function Sidebar({
   onOpenExplore,
   onOpenInvites,
   onOpenThreads = () => undefined,
+  onOpenScheduledMessages = () => undefined,
   onOpenSpaceInfo,
   onOpenSpaceMembers = () => undefined,
   spaceMemberCounts,
@@ -573,6 +629,7 @@ export function Sidebar({
   onOpenExplore: () => void;
   onOpenInvites: () => void;
   onOpenThreads?: () => void;
+  onOpenScheduledMessages?: () => void;
   onOpenSpaceInfo: () => void;
   onOpenSpaceMembers?: () => void;
   spaceMemberCounts?: { joined: number; childOnly: number };
@@ -592,6 +649,18 @@ export function Sidebar({
   const collapsedSections = sidebarSettings.collapsed;
   const activeSpace = snapshot.sidebar.space_rail.find((space) => space.is_active);
   const activeSpaceName = activeSpace?.display_name ?? snapshot.sidebar.account_home.display_name;
+  // #1166: the active Space's access condition comes from the rail item Rust
+  // projected for it.
+  const activeSpaceAccess = activeSpace
+    ? roomAccessIndicator(
+        activeSpace.access_join_rule ?? null,
+        activeSpace.access_restricted_conditions,
+        {
+          spaceMembersRoute: activeSpace.access_space_members_route,
+          allowedRoomNames: activeSpace.access_allowed_room_names
+        }
+      ) ?? ROOM_ACCESS_CHECKING
+    : null;
   const accountHomeActive = snapshot.sidebar.account_home.is_active && !activeSpace;
   const roomById = new Map(snapshot.state.domain.rooms.map((room) => [room.room_id, room]));
   const presence = snapshot.state.domain.live_signals.presence;
@@ -630,64 +699,103 @@ export function Sidebar({
     <aside className="sidebar" aria-label={t("workspace.rooms")}>
       <div className="workspace-header">
         <div className="workspace-header-title">
+          {activeSpaceAccess ? (
+            <Tooltip
+              label={roomAccessTooltipLabel(
+                activeSpaceAccess.descriptionMessageId,
+                activeSpaceAccess.descriptionAllowedRoomNames,
+                activeSpaceAccess.descriptionSpaceName
+              )}
+            >
+              {(triggerProps) => (
+                <span
+                  className="workspace-access-icon"
+                  data-space-access={activeSpaceAccess.glyph}
+                  tabIndex={0}
+                  {...triggerProps}
+                >
+                  <RoomAccessGlyphIcon glyph={activeSpaceAccess.glyph} size={ICON_SIZE.small} />
+                </span>
+              )}
+            </Tooltip>
+          ) : null}
           <div className="workspace-name" dir="auto">
             {activeSpaceName}
           </div>
+          {activeSpaceAccess ? (
+            <Tooltip
+              label={roomAccessTooltipLabel(
+                activeSpaceAccess.descriptionMessageId,
+                activeSpaceAccess.descriptionAllowedRoomNames,
+                activeSpaceAccess.descriptionSpaceName
+              )}
+            >
+              {(triggerProps) => (
+                <span className="workspace-access-badge" tabIndex={0} {...triggerProps}>
+                  {t(activeSpaceAccess.labelMessageId)}
+                </span>
+              )}
+            </Tooltip>
+          ) : null}
         </div>
         <div className="workspace-header-actions no-wrap">
-          {activeSpace ? (
-            <SpaceMembersNavButton
-              childOnlyCount={resolvedSpaceMemberCounts.childOnly}
-              joinedCount={resolvedSpaceMemberCounts.joined}
-              onClick={onOpenSpaceMembers}
+          <div className="workspace-header-context-actions" data-toolbar-group="context">
+            {activeSpace ? (
+              <SpaceMembersNavButton
+                childOnlyCount={resolvedSpaceMemberCounts.childOnly}
+                joinedCount={resolvedSpaceMemberCounts.joined}
+                onClick={onOpenSpaceMembers}
+              />
+            ) : accountHomeActive ? (
+              <>
+                <HeaderActionButton
+                  action="activity"
+                  icon={<Activity size={ICON_SIZE.control} />}
+                  label={t("workspace.activity")}
+                  onClick={onOpenActivity}
+                  pressed={activeView === "activity"}
+                />
+                <HeaderActionButton
+                  action="explore"
+                  icon={<Compass size={ICON_SIZE.control} />}
+                  label={t("workspace.explore")}
+                  onClick={onOpenExplore}
+                  pressed={activeView === "explore"}
+                />
+                <HeaderActionButton
+                  action="invites"
+                  count={snapshot.state.domain.invites.length}
+                  icon={<Bell size={ICON_SIZE.control} />}
+                  label={t("workspace.invites")}
+                  onClick={onOpenInvites}
+                  pressed={activeView === "invites"}
+                />
+              </>
+            ) : null}
+          </div>
+          <div className="workspace-header-end-actions" data-toolbar-group="end">
+            <HeaderActionButton
+              action="threads"
+              icon={<MessageSquare size={ICON_SIZE.control} />}
+              label={t("threads.title")}
+              onClick={onOpenThreads}
             />
-          ) : null}
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("threads.title")}
-            onClick={onOpenThreads}
-          >
-            <MessageSquare size={ICON_SIZE.control} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("workspace.spaceInfoSettings")}
-            onClick={onOpenSpaceInfo}
-          >
-            <Settings size={ICON_SIZE.control} />
-          </button>
+            <HeaderActionButton
+              action="scheduled"
+              icon={<Clock3 size={ICON_SIZE.control} />}
+              label={t("workspace.scheduledMessages")}
+              onClick={onOpenScheduledMessages}
+            />
+            <HeaderActionButton
+              action="info"
+              icon={<Settings size={ICON_SIZE.control} />}
+              label={t("workspace.spaceInfoSettings")}
+              onClick={onOpenSpaceInfo}
+            />
+          </div>
         </div>
       </div>
       <div className="sidebar-scroll">
-        {/* #330: Activity, Explore, and Invites are account-global, so they live
-            under Home only. A space sidebar is the room list for that space; its
-            space-scoped actions are the header icons above. Room threads are
-            reached from the room header, where "this room" is already implied. */}
-        {accountHomeActive ? (
-          <>
-            <NavButton
-              active={activeView === "activity"}
-              icon={<Clock3 size={ICON_SIZE.control} />}
-              label={t("workspace.activity")}
-              onClick={onOpenActivity}
-            />
-            <NavButton
-              active={activeView === "explore"}
-              icon={<Compass size={ICON_SIZE.control} />}
-              label={t("workspace.explore")}
-              onClick={onOpenExplore}
-            />
-            <NavButton
-              active={activeView === "invites"}
-              count={snapshot.state.domain.invites.length}
-              icon={<Bell size={ICON_SIZE.control} />}
-              label={t("workspace.invites")}
-              onClick={onOpenInvites}
-            />
-          </>
-        ) : null}
         {!roomListReady ? (
           <div className="room-list-status" role="status">
             {roomListReadiness.kind === "failed" ? t("roomList.failed") : t("roomList.loading")}
@@ -951,36 +1059,43 @@ function RoomSection({
   );
 }
 
-function NavButton({
-  active = false,
+function HeaderActionButton({
+  action,
   count = 0,
   icon,
   label,
-  liveCount = 0,
-  mentionCount = 0,
+  pressed,
   onClick
 }: {
-  active?: boolean;
+  action: string;
   count?: number;
   icon: ReactNode;
   label: string;
-  liveCount?: number;
-  mentionCount?: number;
-  onClick?: () => void;
+  pressed?: boolean;
+  onClick: () => void;
 }) {
   return (
-    <button
-      className={`nav-item ${active ? "is-active" : ""}`}
-      data-count={count || undefined}
-      data-live-count={liveCount || undefined}
-      data-mention-count={mentionCount || undefined}
-      type="button"
-      aria-label={label}
-      onClick={onClick}
-    >
-      {icon}
-      <span className="nav-label">{label}</span>
-    </button>
+    <Tooltip label={label}>
+      {(triggerProps) => (
+        <button
+          {...triggerProps}
+          className={`icon-button ${pressed ? "is-active" : ""}`}
+          data-count={count || undefined}
+          data-header-action={action}
+          type="button"
+          aria-label={label}
+          aria-pressed={pressed}
+          onClick={onClick}
+        >
+          {icon}
+          {count > 0 ? (
+            <span className="workspace-header-badge" aria-hidden="true">
+              {count}
+            </span>
+          ) : null}
+        </button>
+      )}
+    </Tooltip>
   );
 }
 
@@ -993,24 +1108,31 @@ function SpaceMembersNavButton({
   joinedCount: number;
   onClick: () => void;
 }) {
+  const label = t("spaceMembers.navAccessible", {
+    joined: joinedCount,
+    childOnly: childOnlyCount
+  });
   return (
-    <button
-      className="icon-button space-members-nav"
-      type="button"
-      aria-label={t("spaceMembers.navAccessible", {
-        joined: joinedCount,
-        childOnly: childOnlyCount
-      })}
-      onClick={onClick}
-    >
-      <Users size={ICON_SIZE.control} aria-hidden="true" />
-      <span className="space-members-nav-count">
-        {joinedCount}
-        {childOnlyCount > 0 ? (
-          <span className="space-members-nav-warning"> · +{childOnlyCount}</span>
-        ) : null}
-      </span>
-    </button>
+    <Tooltip label={label}>
+      {(triggerProps) => (
+        <button
+          {...triggerProps}
+          className="icon-button space-members-nav"
+          data-header-action="members"
+          type="button"
+          aria-label={label}
+          onClick={onClick}
+        >
+          <Users size={ICON_SIZE.control} aria-hidden="true" />
+          <span className="space-members-nav-count">
+            {joinedCount}
+            {childOnlyCount > 0 ? (
+              <span className="space-members-nav-warning"> · +{childOnlyCount}</span>
+            ) : null}
+          </span>
+        </button>
+      )}
+    </Tooltip>
   );
 }
 
@@ -1192,10 +1314,38 @@ function RoomButton({
   const displayCount = room.display_count ?? room.unread_count;
   const mentionCount = room.highlight_count ?? (room.has_unread_mention ? 1 : 0);
   const attentionHighlighted = room.is_attention_highlighted ?? mentionCount;
-  return (
+  // #1327: a joined ordinary room row shows its own access condition; while it
+  // has not been projected the row says so instead of guessing. A DM row shows
+  // neither an encryption nor an access indicator, and lanes without a joined
+  // condition (invitations, not-joined) render none. (#1166)
+  const access =
+    kind === "room"
+      ? roomAccessIndicator(room.access_join_rule, room.access_restricted_conditions, {
+          spaceMembersRoute: room.access_space_members_route,
+          allowedRoomNames: room.access_allowed_room_names
+        }) ?? ROOM_ACCESS_CHECKING
+      : null;
+  const roomLabel = roomListItemLabel(room);
+  // #1166: the condition is announced as the row's *description*, so the row's
+  // accessible name stays exactly the room label other surfaces and tests match
+  // on. The visible icon stays the sighted affordance.
+  // #1327: the row is the one tab stop, so its own hover and focus reveal the
+  // popup and no extra tab stop is added inside it.
+  const accessDescriptionId = useId();
+  const accessDescription = access
+    ? roomAccessTooltipLabel(
+        access.descriptionMessageId,
+        access.descriptionAllowedRoomNames,
+        access.descriptionSpaceName
+      )
+    : null;
+
+  function renderRow(triggerProps?: TooltipTriggerProps) {
+    return (
     <button
       className={`room-item ${room.room_id === activeRoomId ? "is-active" : ""}`}
-      aria-label={roomListItemLabel(room)}
+      aria-label={roomLabel}
+      data-access={access?.glyph ?? undefined}
       data-mention-count={mentionCount || undefined}
       data-room-kind={kind}
       data-testid="room-item"
@@ -1238,6 +1388,10 @@ function RoomButton({
           })
         );
       }}
+      {...triggerProps}
+      // Always the full condition text: an open tooltip renders the same
+      // sentence, and the description stays reachable after the popup closes.
+      aria-describedby={access ? accessDescriptionId : undefined}
     >
       <span className="room-avatar-shell">
         <EntityAvatar
@@ -1249,7 +1403,31 @@ function RoomButton({
         />
         {isOnlineDm ? <span className="room-presence-dot" aria-hidden="true" /> : null}
       </span>
-      <span className="room-name" dir="auto">{roomListItemLabel(room)}</span>
+      {access ? (
+        <span className="sr-only" id={accessDescriptionId}>
+          {accessDescription}
+        </span>
+      ) : null}
+      {/* #1166: the name and the access icon share the grid's name cell so the
+          avatar and the trailing unread area keep their columns.
+          #1247: the access icon follows the name so every name keeps one left
+          edge regardless of whether an indicator is present.
+          #1327: the row shows exactly one compact access glyph after the name;
+          the full localized label stays its accessible name, and the popup and
+          the row description carry the explanation. */}
+      <span className="room-name-shell">
+        <span className="room-name" dir="auto">{roomLabel}</span>
+        {access ? (
+          <span
+            className="room-access-icon"
+            data-room-access={access.glyph}
+            role="img"
+            aria-label={t(access.labelMessageId)}
+          >
+            <RoomAccessGlyphIcon glyph={access.glyph} />
+          </span>
+        ) : null}
+      </span>
       <span className="room-trailing">
         {/*
           Issue #961: a room outside the account's joined rooms says which
@@ -1272,6 +1450,16 @@ function RoomButton({
         ) : null}
       </span>
     </button>
+    );
+  }
+
+  if (!access || !accessDescription) {
+    return renderRow();
+  }
+  return (
+    <Tooltip className="room-item-host" label={accessDescription}>
+      {(triggerProps) => renderRow(triggerProps)}
+    </Tooltip>
   );
 }
 
@@ -1395,7 +1583,7 @@ export function EntityAvatar({
   const fallbackStyle =
     fallbackMode === "compactLabel"
       ? ({
-          "--avatar-label-length": Math.max(fallback.length, 1)
+          "--avatar-label-length": Math.max(graphemeCount(fallback), 1)
         } as CSSProperties)
       : undefined;
   const elementColor =

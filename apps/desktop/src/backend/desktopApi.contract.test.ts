@@ -62,6 +62,8 @@ describe("DesktopApi command contract", () => {
         "loadSpaceChildren",
         "dismissEventNavigationFailure",
         "historyExportTimeZone",
+        "chooseRoomKeyExportDestination",
+        "chooseRoomKeyImportSource",
         "exportHistory",
         "stopHistoryExport",
         "retryHistoryExport",
@@ -83,7 +85,12 @@ describe("DesktopApi command contract", () => {
         "cancelAddAccountTab",
         "listAccountTabs",
         "removeSignedOutAccountTab",
-        "selectAccountTab"
+        "selectAccountTab",
+        "setRoomAccessDraft",
+        "previewRoomAccess",
+        "previewCreateRoomAccess",
+        "ignoreDesktopUpdate",
+        "cancelOidcLogin"
       )
       .sort();
     expect(new Set(current).size).toBe(current.length);

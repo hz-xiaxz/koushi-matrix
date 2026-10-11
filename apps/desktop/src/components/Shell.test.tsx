@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EntityAvatar, Sidebar, WorkspaceRail, composerSendingAccount } from "./Shell";
 import { readyDesktopSnapshotFixture } from "../test/desktopApiFixture";
-import type { AccountTabSummary, RoomListItem } from "../domain/types";
+import type { AccountTabSummary, DesktopSnapshot, RoomListItem } from "../domain/types";
 import { setActiveLocaleProfile, t } from "../i18n/messages";
 
 function room(room_id: string, display_name: string): RoomListItem {
@@ -65,6 +65,34 @@ function sidebarProps() {
   };
 }
 
+function railProps(overrides: Partial<Parameters<typeof WorkspaceRail>[0]> = {}) {
+  return {
+    onCreateSpace: vi.fn(),
+    onOpenContextMenu: vi.fn(),
+    onOpenUserSettings: vi.fn(),
+    onReorderSpaces: vi.fn(),
+    onSelectSpace: vi.fn(),
+    ...overrides
+  };
+}
+
+function railSpace(
+  space_id: string,
+  display_name: string,
+  is_active: boolean
+): DesktopSnapshot["sidebar"]["space_rail"][number] {
+  return {
+    space_id,
+    display_name,
+    local_icon: null,
+    avatar: null,
+    unread_count: 0,
+    highlight_count: 0,
+    is_active,
+    leave_candidates: []
+  };
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -72,6 +100,29 @@ afterEach(() => {
 });
 
 describe("Rust-projected workspace shell", () => {
+  // #1246: the reorder drag must not put the bare room ID on the system text
+  // pasteboard, where macOS turns it into a broken web location.
+  it("carries the Space drag payload under an app-private type", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    snapshot.sidebar.space_rail = [railSpace("!lab:example.invalid", "Lab", true)];
+
+    render(<WorkspaceRail snapshot={snapshot} {...railProps()} />);
+
+    const dataTransfer = {
+      setData: vi.fn(),
+      getData: vi.fn(() => ""),
+      effectAllowed: "",
+      dropEffect: "none"
+    };
+    fireEvent.dragStart(screen.getByRole("button", { name: "Lab" }), { dataTransfer });
+
+    expect(dataTransfer.setData).toHaveBeenCalledWith(
+      "application/x-koushi-space",
+      "!lab:example.invalid"
+    );
+    expect(dataTransfer.setData).not.toHaveBeenCalledWith("text/plain", expect.anything());
+  });
+
   it("requests an icon only after its rendered avatar intersects", () => {
     vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
     const request = vi.fn();
@@ -116,6 +167,195 @@ describe("Rust-projected workspace shell", () => {
 
     expect(within(screen.getByRole("button", { name: "Local laboratory" })).getByText("LAB"))
       .toBeTruthy();
+  });
+
+  // #1217: an explicit local name is user text and renders in full.
+  it("renders multiple graphemes of a local Space name without an icon or image", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    snapshot.sidebar.space_rail = [railSpace("!lab:example.invalid", "研究室", false)];
+    snapshot.state.ui.navigation.space_local_presentations = {
+      "!lab:example.invalid": { name: "研究室" }
+    };
+
+    render(<WorkspaceRail snapshot={snapshot} {...railProps()} />);
+
+    const button = screen.getByRole("button", { name: "研究室" });
+    const fallback = within(button).getByText("研究室");
+    expect(fallback.classList.contains("compact-label")).toBe(true);
+    expect(fallback.classList.contains("element-space")).toBe(false);
+  });
+
+  // #1217: a Matrix-only name keeps the #414 Element single-grapheme fallback.
+  it("keeps the single-grapheme Element fallback for a Space without a local name (#414)", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+
+    render(<WorkspaceRail snapshot={snapshot} {...railProps()} />);
+
+    const button = screen.getByRole("button", { name: "Synthetic Workspace" });
+    const fallback = within(button).getByText("S");
+    expect(fallback.classList.contains("element-space")).toBe(true);
+    expect(within(button).queryByText("Synthetic Workspace")).toBeNull();
+  });
+
+  // #1217: a long local name scales the whole name instead of one grapheme.
+  it("renders a longer local Space name within the tile instead of only its initial", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    const name = "Research Laboratory Annex";
+    snapshot.sidebar.space_rail = [railSpace("!lab:example.invalid", name, false)];
+    snapshot.state.ui.navigation.space_local_presentations = {
+      "!lab:example.invalid": { name }
+    };
+
+    render(<WorkspaceRail snapshot={snapshot} {...railProps()} />);
+
+    const fallback = within(screen.getByRole("button", { name })).getByText(name);
+    expect(fallback.classList.contains("compact-label")).toBe(true);
+  });
+
+  // #1217: the label length counts graphemes, so a decomposed name is not sized
+  // as twice as long; the stored name is never normalised.
+  it("sizes precomposed and decomposed local names to the same tile label length", () => {
+    const precomposed = render(
+      <EntityAvatar
+        avatar={null}
+        className="workspace-button-avatar is-space"
+        fallback={"é"}
+        fallbackMode="compactLabel"
+      />
+    );
+    const precomposedTile = precomposed.container.querySelector<HTMLElement>(".avatar-fallback");
+    precomposed.unmount();
+
+    const decomposed = render(
+      <EntityAvatar
+        avatar={null}
+        className="workspace-button-avatar is-space"
+        fallback={"e\u0301"}
+        fallbackMode="compactLabel"
+      />
+    );
+    const decomposedTile = decomposed.container.querySelector<HTMLElement>(".avatar-fallback");
+
+    expect(precomposedTile?.style.getPropertyValue("--avatar-label-length")).toBe("1");
+    expect(decomposedTile?.style.getPropertyValue("--avatar-label-length")).toBe("1");
+    expect(decomposedTile?.textContent).toBe("e\u0301");
+  });
+
+  // #1218: selection is the button itself, so the menu keeps only its own actions.
+  it("offers only Space info and Leave Space in the Space context menu (#1218)", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    const onOpenContextMenu = vi.fn();
+
+    render(<WorkspaceRail snapshot={snapshot} {...railProps({ onOpenContextMenu })} />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Synthetic Workspace" }));
+
+    expect(onOpenContextMenu).toHaveBeenCalledTimes(1);
+    const items = onOpenContextMenu.mock.calls[0]?.[2] as Array<{ id: string }>;
+    expect(items.map((item) => item.id)).toEqual(["openSpaceInfo", "leaveSpace"]);
+  });
+
+  // #1206: selection is exposed as `aria-current`; the browser tier in e2e/
+  // asserts the rendered light/dark indicator.
+  it("exposes the active Space, and Home, as the current rail item (#1206)", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    snapshot.sidebar.account_home.is_active = false;
+    snapshot.sidebar.space_rail = [
+      railSpace("!alpha:example.invalid", "Alpha Space", true),
+      railSpace("!beta:example.invalid", "Beta Space", false)
+    ];
+    const { unmount } = render(<WorkspaceRail snapshot={snapshot} {...railProps()} />);
+
+    const active = screen.getByRole("button", { name: "Alpha Space" });
+    const inactive = screen.getByRole("button", { name: "Beta Space" });
+    expect(active.classList.contains("is-active")).toBe(true);
+    expect(active.getAttribute("aria-current")).toBe("page");
+    expect(inactive.classList.contains("is-active")).toBe(false);
+    expect(inactive.getAttribute("aria-current")).toBeNull();
+    unmount();
+
+    snapshot.sidebar.account_home.is_active = true;
+    snapshot.sidebar.space_rail = snapshot.sidebar.space_rail.map((space) => ({
+      ...space,
+      is_active: false
+    }));
+    render(<WorkspaceRail snapshot={snapshot} {...railProps()} />);
+
+    const home = screen.getByRole("button", { name: "Home" });
+    expect(home.classList.contains("is-active")).toBe(true);
+    expect(home.getAttribute("aria-current")).toBe("page");
+  });
+
+  // #1247: the access icon follows the name so every room name keeps one left
+  // edge, whether or not an indicator is present.
+  it("renders the room access indicator after the display name", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    const visible: RoomListItem = { ...room("!public:example.invalid", "Public Room"), access_join_rule: "public" };
+    snapshot.sidebar.sections.rooms = [visible];
+    snapshot.sidebar.space_rooms = [visible];
+
+    render(<Sidebar snapshot={snapshot} {...sidebarProps()} />);
+
+    const name = screen.getByText("Public Room");
+    const shell = name.closest(".room-name-shell")!;
+    const icon = shell.querySelector(".room-access-icon");
+    expect(icon).toBeTruthy();
+    expect(name.compareDocumentPosition(icon!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The name is the first thing in the shell, so its left edge is the row's.
+    expect(shell.firstElementChild).toBe(name);
+  });
+
+  // #1327: the room list shows access only, and a DM row shows neither an
+  // encryption nor an access indicator.
+  it("shows no access or encryption indicator on a DM row (#1327)", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    snapshot.sidebar.active_space_id = null;
+    snapshot.sidebar.account_home.is_active = true;
+    snapshot.sidebar.space_rail = [];
+    snapshot.sidebar.space_rooms = [];
+    const dm: RoomListItem = {
+      ...room("!dm:example.invalid", "Synthetic Person"),
+      access_join_rule: "invite"
+    };
+    snapshot.sidebar.global_dms = [dm];
+    snapshot.sidebar.sections = {
+      favourites: [],
+      rooms: [],
+      people: [dm],
+      low_priority: [],
+      not_joined: []
+    };
+
+    render(<Sidebar snapshot={snapshot} {...sidebarProps()} />);
+
+    const row = screen.getByRole("button", { name: "Synthetic Person" });
+    expect(row.querySelector("[data-room-access]")).toBeNull();
+    expect(row.querySelector("[data-room-encryption]")).toBeNull();
+    expect(row.getAttribute("aria-describedby")).toBeNull();
+    expect(row.getAttribute("data-room-kind")).toBe("dm");
+  });
+
+  // #1327: a padlock is the encryption indicator, so an invite-only Space never
+  // shows one in the rail or the Space header, whichever lane renders it.
+  it("uses the participation vocabulary for an invite-only Space, never a padlock (#1327)", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    snapshot.sidebar.space_rail = [
+      {
+        ...railSpace("!invite-space:example.invalid", "Invite Space", true),
+        access_join_rule: "invite"
+      }
+    ];
+    const { unmount } = render(<WorkspaceRail snapshot={snapshot} {...railProps()} />);
+
+    const railItem = screen.getByRole("button", { name: "Invite Space" });
+    expect(railItem.querySelector('[data-space-access="userRoundPlus"]')).toBeTruthy();
+    expect(railItem.querySelector('[data-space-access="padlock"]')).toBeNull();
+    unmount();
+
+    render(<Sidebar snapshot={snapshot} {...sidebarProps()} />);
+    const header = screen.getByText("Invite Space").closest(".workspace-header-title") as HTMLElement;
+    expect(header.querySelector('[data-space-access="userRoundPlus"]')).toBeTruthy();
+    expect(header.querySelector('[data-space-access="padlock"]')).toBeNull();
+    expect(within(header).getByText(t("access.inviteOnly"))).toBeTruthy();
   });
 
   it("preserves Rust section order and performs only text filtering", () => {

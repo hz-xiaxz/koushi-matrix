@@ -5,6 +5,8 @@
 
 #![allow(dead_code)]
 
+pub mod oauth_fixture;
+
 use std::time::Duration;
 
 use koushi_core::executor;
@@ -97,6 +99,8 @@ pub fn room_summary(room_id: &str) -> RoomSummary {
         unread_count: 0,
         notification_count: 0,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,

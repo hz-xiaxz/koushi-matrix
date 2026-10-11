@@ -46,8 +46,8 @@ pub enum ThreadsListEvent {
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TimelineEvent {
     InitialItems {
-        /// Stable projection identity retained until the WebView acknowledges
-        /// this actor generation's initial projection.
+        /// Stable actor-owned projection identity retained across replay for
+        /// this actor generation.
         request_id: Option<RequestId>,
         /// Exact command that caused this delivery. Recovery projections have
         /// no command cause and therefore use `None`.
@@ -83,7 +83,9 @@ pub enum TimelineEvent {
     },
     NavigationUpdated {
         key: TimelineKey,
-        snapshot: TimelineNavigationSnapshot,
+        /// Boxed so the ~144 B snapshot stays out of the inline `TimelineEvent`
+        /// (and therefore `CoreEvent`) representation (#1150).
+        snapshot: Box<TimelineNavigationSnapshot>,
     },
     GapPositionsUpdated {
         key: TimelineKey,
@@ -133,7 +135,9 @@ pub enum TimelineEvent {
     MessageSourceLoaded {
         request_id: RequestId,
         key: TimelineKey,
-        source: TimelineMessageSource,
+        /// Boxed so the ~208 B source stays out of the inline `TimelineEvent`
+        /// (and therefore `CoreEvent`) representation (#1150).
+        source: Box<TimelineMessageSource>,
     },
     MediaUploadProgress {
         request_id: Option<RequestId>,
@@ -1139,6 +1143,12 @@ pub struct ThreadSummaryDto {
     pub latest_sender_label: Option<String>,
     pub latest_body_preview: Option<String>,
     pub latest_timestamp_ms: Option<u64>,
+    /// #1259: replies posted since this client last read the thread, derived from the
+    /// bundled summary's `reply_count` and a session-scoped read marker. `0` when the
+    /// thread is read or has no new remote replies. It is not the homeserver's own
+    /// unread count and carries no mention information.
+    #[serde(default)]
+    pub unread_count: u32,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]

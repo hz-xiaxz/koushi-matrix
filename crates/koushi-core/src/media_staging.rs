@@ -16,8 +16,8 @@ use tokio::sync::oneshot;
 
 use koushi_state::{
     ComposerDocument, ComposerDraftRevision, ComposerTarget, ImageUploadCompressionPolicy,
-    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind, StagedUploadOutputSelection,
-    StagedUploadPreparation,
+    MediaPreparationFailureKind, StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
+    StagedUploadOutputSelection, StagedUploadPreparation,
 };
 
 use koushi_protocol::{
@@ -114,8 +114,12 @@ pub enum PreparedUploadSendError {
 }
 
 pub struct PreparedUploadSendResult {
-    /// Revision the composer draft settled to. The draft content is preserved.
+    /// Revision the composer draft settled to. The draft content is preserved unless
+    /// `consumed_draft` is set.
     pub settled_revision: ComposerDraftRevision,
+    /// Whether this send moved the composer draft into the message caption, so the
+    /// renderer drops the text it still shows (#1204).
+    pub consumed_draft: bool,
     /// Published generation after the attachments were enqueued; state is
     /// inspected separately.
     ///
@@ -228,6 +232,23 @@ impl MediaStagingService {
         target: ComposerTarget,
         items: Vec<StageUploadBytesInput>,
     ) -> Result<u64, MediaStagingError> {
+        self.stage_upload_bytes_with_composer_document(connection, target, items, None)
+            .await
+    }
+
+    /// Stage a batch, taking the renderer's captured composer document so a single
+    /// new attachment can start with that text as its caption (#1194).
+    ///
+    /// The document is supplied by the caller rather than read from the snapshot:
+    /// the composer persists on a debounce, so the snapshot can lag the text the
+    /// user is looking at. The caption decision stays here.
+    pub async fn stage_upload_bytes_with_composer_document(
+        &self,
+        connection: &mut CoreConnection,
+        target: ComposerTarget,
+        items: Vec<StageUploadBytesInput>,
+        composer_document: Option<ComposerDocument>,
+    ) -> Result<u64, MediaStagingError> {
         let _admission = self.admit_target(&target).await;
         validate_batch(&items)?;
         let initial = connection.snapshot();
@@ -254,10 +275,29 @@ impl MediaStagingService {
             }
         }
 
+        // #1194: one new attachment staged into an empty target starts with the
+        // composer text as its caption, so the user does not have to copy it by
+        // hand. Seeded before the first publication: the preparation merge keeps
+        // whatever caption the state already holds, so a caption edited while
+        // preparation was blocked is never overwritten by this seed.
+        let caption_seed = (existing.is_empty() && items.len() == 1)
+            .then(|| {
+                composer_document
+                    .as_ref()
+                    .filter(|document| meaningful_caption_document(document))
+                    .cloned()
+            })
+            .flatten();
         let mut preparing_items = existing
             .iter()
             .cloned()
-            .chain(items.iter().map(|item| preparing_item(&target, item)))
+            .chain(items.iter().map(|item| {
+                let mut preparing = preparing_item(&target, item);
+                if let Some(document) = &caption_seed {
+                    preparing.caption = Some(document.clone());
+                }
+                preparing
+            }))
             .collect::<Vec<_>>();
         preparing_items.sort_by(|left, right| {
             left.position
@@ -277,12 +317,14 @@ impl MediaStagingService {
 
         let preparation_target = target.clone();
         let prepared_inputs = items;
+        let native_image_decoder = self.preparation.native_image_decoder();
         #[cfg(any(test, feature = "test-hooks"))]
         let preparation_service = self.clone();
         let prepared = executor::spawn_blocking(move || {
             #[cfg(any(test, feature = "test-hooks"))]
             preparation_service.pause_preparation_for_testing();
-            let mut registry = MediaPreparationRegistry::default();
+            let mut registry =
+                MediaPreparationRegistry::with_native_image_decoder(native_image_decoder);
             let items = registry.prepare_items(&preparation_target, prepared_inputs, policy);
             (registry, items)
         })
@@ -392,17 +434,41 @@ impl MediaStagingService {
                 .source_input(&target, &staged_id)
                 .ok_or(MediaStagingError::PreparedBytesUnavailable)?
         };
+        let native_image_decoder = self.preparation.native_image_decoder();
         #[cfg(any(test, feature = "test-hooks"))]
         let preparation_service = self.clone();
         let encoded = executor::spawn_blocking(move || {
             #[cfg(any(test, feature = "test-hooks"))]
             preparation_service.pause_preparation_for_testing();
-            MediaPreparationRegistry::encode_output(&source, selection, policy)
+            MediaPreparationRegistry::encode_output(
+                &source,
+                selection,
+                policy,
+                native_image_decoder.as_deref(),
+            )
         })
         .await
-        .map_err(|_| MediaStagingError::PreparationTask)?
-        .ok_or(MediaStagingError::PreparationFailed)?;
-        let (descriptor, bytes) = encoded;
+        .map_err(|_| MediaStagingError::PreparationTask)?;
+        let (descriptor, bytes) = match encoded {
+            Ok(encoded) => encoded,
+            Err(failure_kind) => {
+                // Settle the failed pair instead of leaving it pending: a pending
+                // selection has no prepared output, which makes the item
+                // unsendable and offers the user no retry or original fallback.
+                self.publish_lazy_preparation_failure(
+                    connection,
+                    account,
+                    policy,
+                    target,
+                    staged_id,
+                    generation,
+                    selection,
+                    failure_kind,
+                )
+                .await?;
+                return Err(MediaStagingError::PreparationFailed);
+            }
+        };
 
         let current = connection.snapshot();
         let item = staged_item(&current, &target, &staged_id).ok_or(MediaStagingError::Stale)?;
@@ -427,6 +493,60 @@ impl MediaStagingService {
             let mut transition = self.preparation.transition().await;
             transition.insert_prepared_output(&target, &staged_id, descriptor, bytes);
         }
+        self.replace_staged_upload_item(connection, account, target, staged_id, replacement)
+            .await
+    }
+
+    /// Settle a lazily selected pair whose encode failed.
+    ///
+    /// A cached re-selection clears `pending` without bumping the generation
+    /// (`staged_upload_item_with_output_selection`), so the generation check the
+    /// success path uses is not enough here: the requested pair must still be the
+    /// selected pending one, otherwise the state has already moved to a newer
+    /// sendable selection and this failure is stale.
+    ///
+    /// Together with the per-target admission this method holds for its whole
+    /// body, the check is what makes the settlement race-free: the only producer
+    /// of `AppCommand::SelectStagedUploadOutput` is this service under that same
+    /// admission, so no selection can be applied between the validation below and
+    /// the publication.
+    #[allow(clippy::too_many_arguments)]
+    async fn publish_lazy_preparation_failure(
+        &self,
+        connection: &mut CoreConnection,
+        account: AccountKey,
+        policy: ImageUploadCompressionPolicy,
+        target: ComposerTarget,
+        staged_id: String,
+        generation: u64,
+        selection: StagedUploadOutputSelection,
+        failure_kind: MediaPreparationFailureKind,
+    ) -> Result<u64, MediaStagingError> {
+        let current = connection.snapshot();
+        let item = staged_item(&current, &target, &staged_id).ok_or(MediaStagingError::Stale)?;
+        let still_pending = matches!(
+            &item.preparation,
+            StagedUploadPreparation::Ready { selected, pending, generation: current_generation, .. }
+                if *current_generation == generation
+                    && *selected == selection
+                    && pending.as_ref() == Some(&selection)
+        );
+        if account_key(&current) != account
+            || authoritative_policy(&current) != policy
+            || !target_is_active(&current, &target)
+            || !still_pending
+        {
+            return Err(MediaStagingError::Stale);
+        }
+        let can_use_original = {
+            let transition = self.preparation.transition().await;
+            transition.source_input(&target, &staged_id).is_some()
+        };
+        let mut replacement = item.clone();
+        replacement.preparation = StagedUploadPreparation::Failed {
+            failure_kind,
+            can_use_original,
+        };
         self.replace_staged_upload_item(connection, account, target, staged_id, replacement)
             .await
     }
@@ -457,12 +577,14 @@ impl MediaStagingService {
                 .ok_or(MediaStagingError::PreparedBytesUnavailable)?
         };
         let retry_target = target.clone();
+        let native_image_decoder = self.preparation.native_image_decoder();
         #[cfg(any(test, feature = "test-hooks"))]
         let preparation_service = self.clone();
         let (prepared_registry, replacement) = executor::spawn_blocking(move || {
             #[cfg(any(test, feature = "test-hooks"))]
             preparation_service.pause_preparation_for_testing();
-            let mut registry = MediaPreparationRegistry::default();
+            let mut registry =
+                MediaPreparationRegistry::with_native_image_decoder(native_image_decoder);
             let replacement = registry
                 .prepare_items(&retry_target, vec![source], policy)
                 .into_iter()
@@ -513,12 +635,17 @@ impl MediaStagingService {
         if staged_item(&snapshot, &target, &staged_id).is_none() {
             return Err(MediaStagingError::MissingStagedItem);
         }
-        let replacement = {
+        let caption =
+            staged_item(&snapshot, &target, &staged_id).and_then(|item| item.caption.clone());
+        let mut replacement = {
             let mut transition = self.preparation.transition().await;
             transition
                 .use_original(&target, &staged_id)
                 .ok_or(MediaStagingError::PreparedBytesUnavailable)?
         };
+        // The registry rebuilds the item from the retained source and knows
+        // nothing about the caption the user already typed, so carry it over.
+        replacement.caption = caption;
         self.replace_staged_upload_item(connection, account, target, staged_id, replacement)
             .await
     }
@@ -676,7 +803,7 @@ impl MediaStagingService {
             .preparation
             .transition()
             .await
-            .variant_bytes(&target, &staged_id, &variant_id)
+            .variant_preview_bytes(&target, &staged_id, &variant_id)
             .ok_or(MediaStagingError::PreparedBytesUnavailable)?;
         let current = connection.snapshot();
         let current_item = staged_item(&current, &target, &staged_id);
@@ -705,6 +832,10 @@ impl MediaStagingService {
     /// revision, the tombstones and the #1037 return-to-live transition stay
     /// exactly as an accepted send leaves them. The renderer lease still fences
     /// a stale renderer.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one Core-owned send boundary: account, renderer fence, target, revision and the submitted draft"
+    )]
     pub async fn send_prepared_uploads(
         &self,
         connection: &mut CoreConnection,
@@ -713,6 +844,7 @@ impl MediaStagingService {
         lease: crate::composer_draft_lifecycle::ComposerDraftLeaseId,
         target: ComposerTarget,
         draft_revision: ComposerDraftRevision,
+        draft_document: Option<ComposerDocument>,
     ) -> Result<PreparedUploadSendResult, PreparedUploadSendError> {
         let _admission = self.admit_target(&target).await;
         let initial = connection.snapshot();
@@ -722,10 +854,18 @@ impl MediaStagingService {
         if !target_is_active(&initial, &target) {
             return Err(PreparedUploadSendError::TargetInactive);
         }
-        let staged_ids = active_items(&initial, &target)
+        let sendable_items = active_items(&initial, &target)
             .filter(|items| !items.is_empty() && koushi_state::staged_uploads_are_sendable(items))
-            .map(ids)
             .ok_or(PreparedUploadSendError::NotSendable)?;
+        let staged_ids = ids(sendable_items);
+        // #1204: a single attachment whose caption is the submitted draft carries that
+        // text as the message caption, so the accepted send consumes the draft instead
+        // of leaving the same text behind. Decided here because the staging projection
+        // is empty by the time the acceptance is dispatched below.
+        let consumes_draft = koushi_state::staged_upload_send_consumes_composer_draft(
+            sendable_items,
+            draft_document.as_ref(),
+        );
         let expected_revision = next_acceptance_revision(&initial, &target, draft_revision)
             .ok_or(PreparedUploadSendError::DraftRevision)?;
         let _permit = connection
@@ -855,7 +995,7 @@ impl MediaStagingService {
                     expected_account: expected_account.clone(),
                     target: target.clone(),
                     submitted_revision: draft_revision,
-                    consumes_draft: false,
+                    consumes_draft,
                 }),
             )
             .await
@@ -876,6 +1016,7 @@ impl MediaStagingService {
             .map_err(PreparedUploadSendError::Outcome)?;
         Ok(PreparedUploadSendResult {
             settled_revision: expected_revision,
+            consumed_draft: consumes_draft,
             generation: connection.state_generation(),
         })
     }
@@ -1106,6 +1247,14 @@ fn timeline_key(
             },
         },
     }
+}
+
+/// Whether a composer document carries text worth using as an attachment caption.
+///
+/// The upload conversion drops whitespace-only bodies, so the caption seed uses
+/// the same criterion instead of "the document has inline nodes".
+fn meaningful_caption_document(document: &ComposerDocument) -> bool {
+    !document.plain_body().trim().is_empty()
 }
 
 fn media_caption_from_composer_document(

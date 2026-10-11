@@ -17,7 +17,6 @@ use super::{
 pub(super) async fn complete_new_identity_gate_for_qa(
     conn: &mut CoreConnection,
     password: &str,
-    destination_suffix: &str,
 ) -> Result<Option<AuthSecret>, String> {
     let deadline = tokio::time::Instant::now() + EVENT_TIMEOUT;
     loop {
@@ -43,46 +42,40 @@ pub(super) async fn complete_new_identity_gate_for_qa(
     }
     let request_id = conn.next_request_id();
     let flow_id = request_id.sequence;
-    let bootstrap_dir = qa_data_dir(destination_suffix);
-    std::fs::create_dir_all(&bootstrap_dir)
-        .map_err(|_| "prepare private bootstrap delivery directory".to_owned())?;
-    let recovery_key_path = bootstrap_dir.join("recovery-key.txt");
-    conn.register_native_artifact(
-        request_id,
-        koushi_core::NativeArtifactKind::RecoveryKeyDestination,
-        recovery_key_path.clone(),
-    )
-    .map_err(|_| "register private bootstrap delivery path".to_owned())?;
-    if let Err(error) = conn
-        .command(CoreCommand::Account(
-            AccountCommand::StartSessionBootstrap {
-                request_id,
-                flow_id,
-                auth: Some(AuthSecret::new(password.to_owned())),
-                request: koushi_core::SecureBackupSetupRequest {
-                    passphrase: Some(AuthSecret::new(password.to_owned())),
-                    recovery_key_destination_requested: true,
-                    intent: koushi_state::SecureBackupSetupIntent::InitialSetup,
-                },
-            },
-        ))
-        .await
-    {
-        conn.unregister_native_artifact(
+    // #1049: the bootstrap reveals its recovery key on screen; no file
+    // destination is registered.
+    conn.command(CoreCommand::Account(
+        AccountCommand::StartSessionBootstrap {
             request_id,
-            koushi_core::NativeArtifactKind::RecoveryKeyDestination,
-        );
-        return Err(format!("submit new identity bootstrap: {error}"));
-    }
-    let delivery_deadline = tokio::time::Instant::now() + EVENT_TIMEOUT;
-    loop {
-        match &conn.snapshot().session {
-            SessionState::AwaitingBootstrapConfirmation {
-                flow_id: active,
-                destination_written: true,
-                ..
-            } if *active == flow_id => break,
-            SessionState::AwaitingVerification { gate, .. } if gate.failure.is_some() => {
+            flow_id,
+            auth: Some(AuthSecret::new(password.to_owned())),
+            passphrase: Some(AuthSecret::new(password.to_owned())),
+        },
+    ))
+    .await
+    .map_err(|error| format!("submit new identity bootstrap: {error}"))?;
+    let reveal_deadline = tokio::time::Instant::now() + EVENT_TIMEOUT;
+    // Read the disposable account's key from the live reveal state, the same
+    // snapshot projection the WebView renders. It is never printed.
+    let recovery_secret = loop {
+        let snapshot = conn.snapshot();
+        match (
+            &snapshot.session,
+            &snapshot.e2ee_trust.key_management.secure_backup_setup,
+        ) {
+            (
+                SessionState::AwaitingBootstrapConfirmation {
+                    flow_id: active, ..
+                },
+                koushi_state::SecureBackupSetupState::RecoveryKeyReady {
+                    request_id: reveal_id,
+                    recovery_key,
+                    ..
+                },
+            ) if *active == flow_id && *reveal_id == flow_id => {
+                break AuthSecret::new(recovery_key.expose_secret().to_owned());
+            }
+            (SessionState::AwaitingVerification { gate, .. }, _) if gate.failure.is_some() => {
                 return Err(format!(
                     "new identity bootstrap failed; kind={:?}",
                     gate.failure.expect("failure checked above")
@@ -90,17 +83,11 @@ pub(super) async fn complete_new_identity_gate_for_qa(
             }
             _ => {}
         }
-        tokio::time::timeout_at(delivery_deadline, conn.recv_event())
+        tokio::time::timeout_at(reveal_deadline, conn.recv_event())
             .await
-            .map_err(|_| "timed out waiting for bootstrap delivery".to_owned())?
-            .map_err(|_| "event stream closed during bootstrap delivery".to_owned())?;
-    }
-    let recovery_secret = AuthSecret::new(
-        std::fs::read_to_string(&recovery_key_path)
-            .map_err(|_| "read disposable bootstrap recovery key".to_owned())?
-            .trim()
-            .to_owned(),
-    );
+            .map_err(|_| "timed out waiting for bootstrap recovery key reveal".to_owned())?
+            .map_err(|_| "event stream closed during bootstrap recovery key reveal".to_owned())?;
+    };
     let confirm_id = conn.next_request_id();
     conn.command(CoreCommand::Account(
         AccountCommand::ConfirmSessionBootstrapSaved {
@@ -110,10 +97,6 @@ pub(super) async fn complete_new_identity_gate_for_qa(
     ))
     .await
     .map_err(|error| format!("submit bootstrap saved confirmation: {error}"))?;
-    std::fs::remove_file(&recovery_key_path)
-        .map_err(|_| "remove disposable bootstrap recovery key".to_owned())?;
-    std::fs::remove_dir(&bootstrap_dir)
-        .map_err(|_| "remove disposable bootstrap delivery directory".to_owned())?;
 
     // Observe the confirmation's own outcome instead of firing and forgetting
     // it (#375). A failed confirmation leaves the session unpromoted, so
@@ -782,8 +765,7 @@ pub(super) async fn login_synced_participant_for_qa(
         participant.mark_login_submitted();
         let bootstrap_recovery_secret = match gate {
             QaParticipantLoginGate::BootstrapNewIdentity => {
-                complete_new_identity_gate_for_qa(&mut participant.conn, password, gate_label)
-                    .await?
+                complete_new_identity_gate_for_qa(&mut participant.conn, password).await?
             }
             QaParticipantLoginGate::RecoverExistingIdentity(recovery_secret) => {
                 wait_for_recovery_gate(&mut participant.conn, gate_label).await?;
@@ -982,6 +964,38 @@ fn verification_state_matches_target(
     expected_target: Option<&VerificationTarget>,
 ) -> bool {
     expected_target.is_none_or(|target| verification_state_target(state) == Some(target))
+}
+
+/// #1279: token-only description of the receiver's own projection, so that a
+/// request the SDK never surfaced and a request the waiter rejects as belonging to
+/// the wrong target can be told apart in the next failing run. State kinds, one
+/// boolean, and the sync lifecycle only — never ids, request ids, or error text
+/// (the sync variants carry a free-form reason, so they are not formatted).
+pub(super) fn incoming_request_timeout_context(
+    state: &VerificationFlowState,
+    expected_target: Option<&VerificationTarget>,
+    sync: &koushi_state::SyncState,
+) -> String {
+    let flow = match state {
+        VerificationFlowState::Idle => "idle",
+        VerificationFlowState::Requested { .. } => "requested",
+        VerificationFlowState::Accepted { .. } => "accepted",
+        VerificationFlowState::SasPresented { .. } => "sas_presented",
+        VerificationFlowState::Confirming { .. } => "confirming",
+        VerificationFlowState::Done { .. } => "done",
+        VerificationFlowState::Failed { .. } => "failed",
+    };
+    let sync = match sync {
+        koushi_state::SyncState::Stopped => "stopped",
+        koushi_state::SyncState::Starting => "starting",
+        koushi_state::SyncState::Running => "running",
+        koushi_state::SyncState::Failed { .. } => "failed",
+        koushi_state::SyncState::Reconnecting { .. } => "reconnecting",
+    };
+    format!(
+        "b_flow={flow} b_target_matched={} b_sync={sync}",
+        verification_state_matches_target(state, expected_target)
+    )
 }
 
 /// Data directory for QA runs.

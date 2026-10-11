@@ -560,8 +560,42 @@
         },
         "rooms": {
           "!room:example.invalid": {
+            "focused_receipts_by_event": {
+              "$target:example.invalid": {
+                "$focused-reply:example.invalid": {
+                  "overflow_count": 0,
+                  "readers": [
+                    {
+                      "avatar": null,
+                      "display_name": "Focused Reader",
+                      "original_display_label": "Focused Reader",
+                      "timestamp_ms": 7,
+                      "user_id": "@focused-reader:example.invalid"
+                    }
+                  ],
+                  "total_count": 1
+                }
+              }
+            },
             "fully_read_event_id": "$read:example.invalid",
             "receipts_by_event": {},
+            "thread_receipts_by_event": {
+              "$root:example.invalid": {
+                "$thread-reply:example.invalid": {
+                  "overflow_count": 0,
+                  "readers": [
+                    {
+                      "avatar": null,
+                      "display_name": "Thread Reader",
+                      "original_display_label": "Thread Reader",
+                      "timestamp_ms": 9,
+                      "user_id": "@thread-reader:example.invalid"
+                    }
+                  ],
+                  "total_count": 1
+                }
+              }
+            },
             "typing_user_ids": [
               "@other:example.invalid"
             ],
@@ -830,6 +864,8 @@
             "favourite": null,
             "low_priority": null
           },
+          "thread_highlight_count": 0,
+          "thread_unread_count": 0,
           "unread_count": 3
         },
         {
@@ -858,6 +894,8 @@
               "order": "0.25"
             }
           },
+          "thread_highlight_count": 0,
+          "thread_unread_count": 0,
           "unread_count": 7
         },
         {
@@ -901,6 +939,8 @@
             "favourite": null,
             "low_priority": null
           },
+          "thread_highlight_count": 0,
+          "thread_unread_count": 0,
           "unread_count": 0
         }
       ],
@@ -1127,7 +1167,7 @@
         "platform": "linux"
       }
     },
-    "schema_version": 7,
+    "schema_version": 8,
     "ui": {
       "basic_operation": {
         "kind": "creatingRoom",
@@ -1294,6 +1334,36 @@
           "kind": "activity"
         }
       },
+      "scheduled_sends_list": {
+        "capability": "serverDelayedEvents",
+        "items": [
+          {
+            "body": "Scheduled room body",
+            "handle": {
+              "kind": "local"
+            },
+            "room_id": "!low-priority-room:example.invalid",
+            "scheduled_id": "sched-contract-room",
+            "send_at_ms": 1800000000000
+          },
+          {
+            "body": "Scheduled thread reply body",
+            "handle": {
+              "delay_id": "delay-contract",
+              "kind": "server"
+            },
+            "room_id": "!room:example.invalid",
+            "scheduled_id": "sched-contract-thread",
+            "send_at_ms": 1900000000000,
+            "thread_root_event_id": "$scheduled-thread-root:example.invalid"
+          }
+        ],
+        "kind": "open",
+        "scope": {
+          "kind": "space",
+          "space_id": "!space:example.invalid"
+        }
+      },
       "thread": {
         "composer": {
           "accepted_submission_ids": [],
@@ -1343,7 +1413,8 @@
             "root_event_id": "$thread-root:example.invalid",
             "root_sender": "@fixture:example.invalid",
             "root_sender_label": "Fixture User",
-            "root_timestamp_ms": 800000
+            "root_timestamp_ms": 800000,
+            "unread_count": 0
           }
         ],
         "kind": "open",

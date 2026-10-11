@@ -16,6 +16,7 @@ import type {
   CreateRoomSettlement,
   ComposerDocument,
   ComposerDraftAcceptanceResponse,
+  PreparedUploadSendResponse,
   ComposerDraftRevision,
   ComposerKeyEvent,
   ComposerResolvedAction,
@@ -31,6 +32,7 @@ import type {
   AccountTabsSnapshot,
   DesktopSnapshot,
   DesktopUpdateState,
+  DelegatedAuthMethod,
   DirectoryQuery,
   DisplayPlatform,
   FilesViewScope,
@@ -43,6 +45,12 @@ import type {
   RoomModerationAction,
   RoomNotificationMode,
   RoomSettingChange,
+  RoomAccessDraftCommand,
+  RoomAccessDraftScope,
+  RoomAccessPreview,
+  RoomAccessPreviewContext,
+  CreateRoomAccessPreviewInput,
+  CreateRoomAccessPreview,
   RoomTagKind,
   SavedSessionInfo,
   SearchScopeKind,
@@ -52,6 +60,7 @@ import type {
   StageUploadBytesRequestItem,
   StagedUploadCompressionChoice,
   StagedUploadOutputSelection,
+  ScheduledSendsScope,
   SubmissionResponse,
   ThreadOpenIntent,
   ThreadsListScope,
@@ -129,12 +138,17 @@ export interface DesktopApi {
   checkForDesktopUpdate(): Promise<void>;
   downloadDesktopUpdate(expectedGeneration: number): Promise<void>;
   restartToInstallDesktopUpdate(): Promise<void>;
+  ignoreDesktopUpdate(version: string): Promise<void>;
   settlementSnapshot(accountTabId?: string): Promise<DesktopSnapshot>;
   resyncSnapshot(accountTabId?: string): Promise<DesktopSnapshot>;
   getDiagnosticSnapshot(): Promise<DiagnosticLogSnapshot>;
   observeViewportSync(observation: ViewportSyncObservation): Promise<ViewportSyncReceipt>;
   discoverLoginMethods(homeserver: string): Promise<CommandSettlement>;
-  startOidcLogin(homeserver: string): Promise<OidcBrowserLaunchResponse>;
+  startOidcLogin(
+    homeserver: string,
+    method: DelegatedAuthMethod
+  ): Promise<OidcBrowserLaunchResponse>;
+  cancelOidcLogin(): Promise<CommandAdmission>;
   completeOidcLogin(homeserver: string, callbackUrl: string): Promise<CommandSettlement>;
   submitLogin(
     homeserver: string,
@@ -194,6 +208,8 @@ export interface DesktopApi {
   enableKeyBackup(): Promise<CommandAdmission>;
   exportRoomKeys(destinationPath: string, passphrase: string): Promise<CommandAdmission>;
   importRoomKeys(sourcePath: string, passphrase: string): Promise<CommandAdmission>;
+  chooseRoomKeyExportDestination(dialogTitle: string): Promise<string | null>;
+  chooseRoomKeyImportSource(dialogTitle: string): Promise<string | null>;
   historyExportTimeZone(): Promise<string>;
   exportHistory(
     scope: HistoryExportScopeInput,
@@ -223,7 +239,8 @@ export interface DesktopApi {
   startOwnUserSas(): Promise<CommandAdmission>;
   retryCurrentDeviceTrustDiscovery(): Promise<CommandAdmission>;
   mismatchSasVerification(flowId: number): Promise<CommandAdmission>;
-  startSessionBootstrap(passphrase: string | null, recoveryKeyDestinationPath: string): Promise<CommandAdmission>;
+  /** Identity bootstrap (#1049); the recovery key is revealed on screen. */
+  startSessionBootstrap(passphrase: string | null): Promise<CommandAdmission>;
   confirmSessionBootstrapSaved(flowId: number): Promise<CommandAdmission>;
   confirmSasVerification(flowId: number): Promise<CommandAdmission>;
   cancelVerification(flowId: number): Promise<CommandAdmission>;
@@ -273,7 +290,8 @@ export interface DesktopApi {
   ): Promise<ComposerDraftAcceptanceResponse>;
   stageUploadBytes(
     target: ComposerTarget,
-    items: StageUploadBytesRequestItem[]
+    items: StageUploadBytesRequestItem[],
+    composerDocument?: ComposerDocument
   ): Promise<CommandSettlement>;
   selectStagedUploadOutput(
     target: ComposerTarget,
@@ -292,8 +310,9 @@ export interface DesktopApi {
     leaseId: string,
     rendererGeneration: string,
     target: ComposerTarget,
-    draftRevision: ComposerDraftRevision
-  ): Promise<CommandSettlement>;
+    draftRevision: ComposerDraftRevision,
+    draftDocument?: ComposerDocument
+  ): Promise<PreparedUploadSendResponse>;
   updateStagedUploadCaption(
     target: ComposerTarget,
     stagedId: string,
@@ -386,6 +405,8 @@ export interface DesktopApi {
   openThreadsList(scope: ThreadsListScope): Promise<CommandAdmission>;
   closeThreadsList(): Promise<CommandAdmission>;
   paginateThreadsList(scope: ThreadsListScope): Promise<CommandAdmission>;
+  openScheduledSendsList(scope: ScheduledSendsScope): Promise<CommandAdmission>;
+  closeScheduledSendsList(): Promise<CommandAdmission>;
   openFilesView(scope: FilesViewScope, filter: AttachmentFilter, sort: AttachmentSort): Promise<CommandAdmission>;
   closeFilesView(): Promise<CommandAdmission>;
   subscribeReceiptReader(
@@ -469,6 +490,15 @@ export interface DesktopApi {
     confirmed: boolean
   ): Promise<CommandSettlement>;
   previewRoomAddress(name: string, aliasLocalpart: string | null): Promise<RoomAddressPreview>;
+  setRoomAccessDraft(command: RoomAccessDraftCommand): Promise<CommandAdmission>;
+  previewRoomAccess(
+    scope: RoomAccessDraftScope,
+    context: RoomAccessPreviewContext
+  ): Promise<RoomAccessPreview>;
+  previewCreateRoomAccess(
+    scope: RoomAccessDraftScope,
+    input: CreateRoomAccessPreviewInput
+  ): Promise<CreateRoomAccessPreview>;
   createRoom(request: CreateRoomRequest): Promise<CreateRoomSettlement>;
   createSpace(name: string): Promise<CommandSettlement>;
   setSpaceChild(spaceId: string, childRoomId: string): Promise<CommandAdmission>;

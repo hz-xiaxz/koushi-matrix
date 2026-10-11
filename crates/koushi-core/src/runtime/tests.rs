@@ -10,7 +10,7 @@ use koushi_state::{
 
 #[tokio::test]
 async fn space_invite_explicit_id_search_settles_after_publishing_candidate() {
-    let runtime = CoreRuntime::start_with_event_capacity(64);
+    let (runtime, _stores) = CoreRuntime::start_isolated_with_event_capacity(64);
     let mut connection = runtime.attach();
     let space_id = "!invite-space:example.invalid";
     runtime
@@ -244,12 +244,16 @@ fn closed_forward_space_member_fixture(
     ]
 }
 
+/// Deadlock watchdog for waits that must succeed: scheduler load alone must
+/// never reach it.
+const RUNTIME_LIVENESS: Duration = Duration::from_secs(60);
+
 async fn wait_for_runtime_snapshot(
     connection: &mut CoreConnection,
     predicate: impl Fn(&AppState) -> bool,
 ) -> AppState {
     // Content/events are the causal barrier; this timeout is only a deadlock watchdog.
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(RUNTIME_LIVENESS, async {
         loop {
             let snapshot = connection.snapshot();
             if predicate(&snapshot) {
@@ -324,7 +328,10 @@ async fn run_closed_space_member_forwarding_case(
     command: impl FnOnce(RequestId) -> koushi_protocol::command::RoomCommand,
 ) -> (AppState, CoreFailure, u64) {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
-    let runtime = CoreRuntime::start_with_event_capacity(64);
+    // The post-commit navigation load reads this session's persisted view; a
+    // data dir shared with concurrent test processes can replace the fixture
+    // Space selection and clear its member projection.
+    let (runtime, _stores) = CoreRuntime::start_isolated_with_event_capacity(64);
     let mut connection = runtime.attach();
     let space_id = "!closed-forward-space:example.invalid";
     let user_id = "@closed-forward-user:example.invalid";
@@ -376,7 +383,7 @@ async fn run_closed_space_member_forwarding_case(
         .await
         .expect("closed-channel command should enter AppActor");
 
-    let failure = tokio::time::timeout(Duration::from_secs(1), async {
+    let failure = tokio::time::timeout(RUNTIME_LIVENESS, async {
         loop {
             match connection
                 .recv_event()
@@ -584,6 +591,8 @@ pub(super) fn unread_diagnostic_room(room_id: &str) -> RoomSummary {
         unread_count: 3,
         notification_count: 2,
         highlight_count: 1,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: true,
         recency_stamp: Some(42),
         conversation_activity: None,
@@ -598,52 +607,37 @@ pub(super) fn unread_diagnostic_room(room_id: &str) -> RoomSummary {
 #[test]
 fn app_loop_trace_ignores_subthreshold_iterations() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let before = koushi_diagnostics::snapshot();
+    let before = koushi_diagnostics::test_support::detail_cursor();
     app_loop_trace("test_boundary", 1, 2, Duration::from_millis(99));
-    let after = koushi_diagnostics::snapshot();
-    assert_eq!(
-        after
-            .records
+    assert!(
+        !koushi_diagnostics::test_support::detail_records_since(before)
             .iter()
-            .filter(
-                |record| record.event.source == "core.runtime" && record.event.stage == "app_loop"
-            )
-            .count(),
-        before
-            .records
-            .iter()
-            .filter(
-                |record| record.event.source == "core.runtime" && record.event.stage == "app_loop"
-            )
-            .count()
+            .any(is_test_boundary_app_loop_record)
     );
+}
+
+/// This test's own `app_loop` record: real AppActors in concurrent tests emit
+/// `core.runtime/app_loop` too, but never with the `test_boundary` arm.
+fn is_test_boundary_app_loop_record(record: &koushi_diagnostics::DiagnosticRecord) -> bool {
+    record.event.source == "core.runtime"
+        && record.event.stage == "app_loop"
+        && record.event.fields.iter().any(|field| {
+            field.key == "arm"
+                && field.value == koushi_diagnostics::DiagnosticValue::Token("test_boundary")
+        })
 }
 
 #[test]
 fn app_loop_trace_records_at_threshold_without_environment_switch() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let before = koushi_diagnostics::snapshot();
+    let before = koushi_diagnostics::test_support::detail_cursor();
     app_loop_trace("test_boundary", 3, 4, Duration::from_millis(100));
-    let after = koushi_diagnostics::snapshot();
-    assert!(after.records.len() > before.records.len());
-    let record = after
-        .records
+    let records = koushi_diagnostics::test_support::detail_records_since(before);
+    let record = records
         .iter()
-        .rev()
-        .find(|record| record.event.source == "core.runtime" && record.event.stage == "app_loop")
+        .find(|record| is_test_boundary_app_loop_record(record))
         .expect("threshold iteration should be collected");
     assert!(record.event.fields.iter().any(|field| field.key == "count"));
-}
-
-#[test]
-fn default_data_dir_requires_home() {
-    assert!(default_data_dir_from_home(None).is_err());
-}
-
-#[test]
-fn default_data_dir_uses_xdg_like_user_data_path() {
-    let dir = default_data_dir_from_home(Some("/tmp/synthetic-home".into())).unwrap();
-    assert!(dir.ends_with(".local/share/koushi-desktop"));
 }
 
 #[test]
@@ -668,7 +662,7 @@ fn search_scope_round_trips_non_all_scope_kinds() {
 
 #[tokio::test]
 async fn versioned_snapshot_generation_matches_state_delta_generation() {
-    let runtime = CoreRuntime::start_with_event_capacity(8);
+    let (runtime, _stores) = CoreRuntime::start_isolated_with_event_capacity(8);
     let mut connection = runtime.attach();
 
     runtime
@@ -850,7 +844,7 @@ async fn rejected_space_invites_are_fenced_before_room_actor_route() {
 
 #[tokio::test]
 async fn projection_rejected_restore_emits_one_correlated_failure_without_routing() {
-    let runtime = CoreRuntime::start_with_event_capacity(16);
+    let (runtime, _stores) = CoreRuntime::start_isolated_with_event_capacity(16);
     let mut connection = runtime.attach();
     runtime
         .inject_actions(vec![AppAction::LogoutRequested])
@@ -929,7 +923,7 @@ async fn projection_rejected_restore_emits_one_correlated_failure_without_routin
 
 #[tokio::test]
 async fn actor_profile_changes_emit_timeline_display_label_updates() {
-    let runtime = CoreRuntime::start_with_event_capacity(8);
+    let (runtime, _stores) = CoreRuntime::start_isolated_with_event_capacity(8);
     let mut connection = runtime.attach();
 
     runtime
@@ -987,7 +981,7 @@ async fn actor_profile_changes_emit_timeline_display_label_updates() {
 
 #[tokio::test]
 async fn settings_update_emits_timeline_display_policy_update() {
-    let runtime = CoreRuntime::start_with_event_capacity(16);
+    let (runtime, _stores) = CoreRuntime::start_isolated_with_event_capacity(16);
     let mut connection = runtime.attach();
 
     let request_id = connection.next_request_id();
@@ -1032,7 +1026,7 @@ async fn settings_update_emits_timeline_display_policy_update() {
 
 #[tokio::test]
 async fn local_alias_clear_command_emits_target_display_label_update() {
-    let runtime = CoreRuntime::start_with_event_capacity(16);
+    let (runtime, _stores) = CoreRuntime::start_isolated_with_event_capacity(16);
     let mut connection = runtime.attach();
     let user_id = "@unknown:example.invalid";
 
@@ -1309,6 +1303,7 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         room_preferences_loaded_for: Some(session_key),
         account_settings_loaded_for: None,
         state_generation: 0,
+        active_search_request: None,
         pending_composer_draft_persist: None,
         pending_navigation_persist: None,
         composer_draft_leases,
@@ -1396,6 +1391,247 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
     assert!(
         saturated_account_rx.try_recv().is_ok(),
         "ordinary mailbox remained saturated throughout the selection"
+    );
+}
+
+#[tokio::test]
+async fn a_superseded_search_request_settles_as_a_benign_no_op() {
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let session = SessionInfo {
+        homeserver: "https://example.invalid".to_owned(),
+        user_id: "@synthetic:example.invalid".to_owned(),
+        device_id: "SYNTHETIC".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    };
+    let state = AppState {
+        session: SessionState::Ready(session),
+        ..AppState::default()
+    };
+    let (
+        mut actor,
+        _command_tx,
+        _action_tx,
+        _account_rx,
+        mut event_rx,
+        _snapshot_rx,
+        _navigation_projection_rx,
+        _event_navigation_prepared_tx,
+        _focused_projection_tx,
+    ) = app_actor_event_navigation_fixture(data_dir.path(), state);
+
+    let superseded = RequestId {
+        connection_id: RuntimeConnectionId(41),
+        sequence: 11,
+    };
+    let latest = RequestId {
+        connection_id: RuntimeConnectionId(41),
+        sequence: 12,
+    };
+    // The first query is the state's own: production sets this when the
+    // `SearchMessages` effect dispatches it.
+    actor.active_search_request = Some(ActiveSearchRequest::dispatched(superseded));
+
+    // A newer query replaces it. The reducer ignores any late outcome for the
+    // old request, and `SearchActor` aborts it without emitting one, so the
+    // transition itself must settle it.
+    actor
+        .reduce_app_action(AppAction::SearchSubmitted {
+            request_id: latest.sequence,
+            connection_id: latest.connection_id.0,
+            query: "second".to_owned(),
+            scope: koushi_state::SearchScope::AllRooms,
+        })
+        .await;
+
+    let settled = event_rx
+        .try_recv()
+        .expect("the superseded query must settle");
+    assert!(
+        matches!(
+            settled,
+            CoreEvent::IntentLifecycle {
+                request_id,
+                outcome: IntentOutcome::BenignNoOp(IntentNoOpReason::Superseded),
+                ..
+            } if request_id == superseded
+        ),
+        "unexpected settlement: {settled:?}"
+    );
+    assert!(
+        event_rx.try_recv().is_err(),
+        "a superseded request settles exactly once"
+    );
+
+    // A query that completed is no longer outstanding: its result settled the
+    // request, so a later transition must not report it as superseded.
+    actor.active_search_request = Some(ActiveSearchRequest::dispatched(latest));
+    actor
+        .reduce_app_action(AppAction::SearchSucceeded {
+            request_id: latest.sequence,
+            connection_id: latest.connection_id.0,
+            query: "second".to_owned(),
+            scope: koushi_state::SearchScope::AllRooms,
+            results: Vec::new(),
+        })
+        .await;
+    assert!(
+        event_rx.try_recv().is_err(),
+        "a completed query must not emit a supersession outcome"
+    );
+    actor.reduce_app_action(AppAction::SearchClosed).await;
+    assert!(
+        event_rx.try_recv().is_err(),
+        "closing search after a completed query settles nothing"
+    );
+
+    // Closing search supersedes whatever is still in flight.
+    actor.active_search_request = Some(ActiveSearchRequest::dispatched(latest));
+    actor.reduce_app_action(AppAction::SearchClosed).await;
+    let settled = event_rx
+        .try_recv()
+        .expect("closing search must settle the in-flight query");
+    assert!(
+        matches!(
+            settled,
+            CoreEvent::IntentLifecycle {
+                request_id,
+                outcome: IntentOutcome::BenignNoOp(IntentNoOpReason::Superseded),
+                ..
+            } if request_id == latest
+        ),
+        "unexpected settlement: {settled:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_second_connection_with_the_same_sequence_settles_the_first_request() {
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let session = SessionInfo {
+        homeserver: "https://example.invalid".to_owned(),
+        user_id: "@synthetic:example.invalid".to_owned(),
+        device_id: "SYNTHETIC".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    };
+    let state = AppState {
+        session: SessionState::Ready(session),
+        ..AppState::default()
+    };
+    let (mut actor, _command_tx, _action_tx, _account_rx, mut event_rx, ..) =
+        app_actor_event_navigation_fixture(data_dir.path(), state);
+    let first = RequestId {
+        connection_id: RuntimeConnectionId(1),
+        sequence: 1,
+    };
+    let second = RequestId {
+        connection_id: RuntimeConnectionId(2),
+        sequence: 1,
+    };
+
+    // Both connections start at sequence one. Dispatching the second replaces
+    // the owner of the first, which can then never settle through the reducer.
+    actor.active_search_request = Some(ActiveSearchRequest::dispatched(first));
+    actor
+        .handle_app_effects(
+            first,
+            vec![AppEffect::SearchMessages {
+                request_id: first.sequence,
+                query: "needle".to_owned(),
+                scope: koushi_state::SearchScope::AllRooms,
+                room_filter: koushi_state::SearchRoomFilter::AllRooms,
+                content_policy: koushi_state::SearchCrawlerSettings::default(),
+            }],
+        )
+        .await;
+    actor
+        .handle_app_effects(
+            second,
+            vec![AppEffect::SearchMessages {
+                request_id: second.sequence,
+                query: "needle".to_owned(),
+                scope: koushi_state::SearchScope::AllRooms,
+                room_filter: koushi_state::SearchRoomFilter::AllRooms,
+                content_policy: koushi_state::SearchCrawlerSettings::default(),
+            }],
+        )
+        .await;
+
+    // The first connection's request must have been settled when it was replaced.
+    let settled = event_rx
+        .try_recv()
+        .expect("the replaced request must settle");
+    assert!(
+        matches!(
+            settled,
+            CoreEvent::IntentLifecycle {
+                request_id,
+                outcome: IntentOutcome::BenignNoOp(IntentNoOpReason::Superseded),
+                ..
+            } if request_id == first
+        ),
+        "unexpected settlement: {settled:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_admitted_search_result_publishes_one_terminal_event() {
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let session = SessionInfo {
+        homeserver: "https://example.invalid".to_owned(),
+        user_id: "@synthetic:example.invalid".to_owned(),
+        device_id: "SYNTHETIC".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    };
+    let state = AppState {
+        session: SessionState::Ready(session),
+        ..AppState::default()
+    };
+    let (mut actor, _command_tx, _action_tx, _account_rx, mut event_rx, ..) =
+        app_actor_event_navigation_fixture(data_dir.path(), state);
+    let request = RequestId {
+        connection_id: RuntimeConnectionId(5),
+        sequence: 7,
+    };
+    actor.active_search_request = Some(ActiveSearchRequest::dispatched(request));
+    actor.reduce_app_action_state(AppAction::SearchSubmitted {
+        request_id: request.sequence,
+        connection_id: request.connection_id.0,
+        query: "needle".to_owned(),
+        scope: koushi_state::SearchScope::AllRooms,
+    });
+
+    // The state admits the result: the owner is marked settled but kept, because
+    // publication of that very result still needs the request identity.
+    let (effects, _) = actor.reduce_app_action_state(AppAction::SearchSucceeded {
+        request_id: request.sequence,
+        connection_id: request.connection_id.0,
+        query: "needle".to_owned(),
+        scope: koushi_state::SearchScope::AllRooms,
+        results: Vec::new(),
+    });
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, AppEffect::PublishSearchResults { .. })),
+        "an admitted result asks for publication"
+    );
+    actor.publish_admitted_search_results(request.sequence, &[]);
+
+    let published = event_rx
+        .try_recv()
+        .expect("an admitted result must publish");
+    assert!(
+        matches!(
+            published,
+            CoreEvent::Search(koushi_protocol::event::SearchEvent::Results {
+                request_id: published_request,
+                ..
+            }) if published_request == request
+        ),
+        "unexpected event: {published:?}"
+    );
+    assert!(
+        event_rx.try_recv().is_err(),
+        "an admitted result publishes exactly once"
     );
 }
 
@@ -1493,6 +1729,7 @@ async fn same_batch_select_room_settles_only_final_selection() {
         room_preferences_loaded_for: Some(session_key),
         account_settings_loaded_for: None,
         state_generation: 0,
+        active_search_request: None,
         pending_composer_draft_persist: None,
         pending_navigation_persist: None,
         composer_draft_leases,
@@ -1763,6 +2000,7 @@ fn oidc_authorization_start_only_projects_discovery() {
         account_command_projected_action(&AccountCommand::StartOidcLogin {
             request_id,
             homeserver: "https://matrix.example.org".to_owned(),
+            method: koushi_state::DelegatedAuthMethod::OAuth,
         }),
         Some(AppAction::LoginDiscoveryRequested {
             homeserver: "https://matrix.example.org".to_owned(),
@@ -2117,13 +2355,6 @@ fn gate_sas_and_bootstrap_commands_project_only_opaque_flow_state() {
             flow_id: 31,
         })
     );
-    assert_eq!(
-        account_command_projected_action(&AccountCommand::ConfirmSessionBootstrapSaved {
-            request_id,
-            flow_id: 32,
-        }),
-        Some(AppAction::BootstrapRecoverySavedConfirmed { flow_id: 32 })
-    );
     let debug = format!(
         "{:?}",
         AccountCommand::StartOwnUserSas {
@@ -2139,11 +2370,7 @@ fn gate_sas_and_bootstrap_commands_project_only_opaque_flow_state() {
             request_id,
             flow_id: 32,
             auth: Some(koushi_state::AuthSecret::new("private-auth")),
-            request: koushi_protocol::command::SecureBackupSetupRequest {
-                passphrase: Some(koushi_state::AuthSecret::new("private-passphrase")),
-                recovery_key_destination_requested: true,
-                intent: koushi_state::SecureBackupSetupIntent::InitialSetup,
-            },
+            passphrase: Some(koushi_state::AuthSecret::new("private-passphrase")),
         }
     );
     for forbidden in ["private-auth", "private-passphrase", "/private/"] {
@@ -2849,6 +3076,7 @@ async fn receipt_resolution_borrows_current_alias_without_publishing_global_stat
         let (receipt_effects, _) =
             actor.reduce_app_action_state(AppAction::LiveRoomReceiptsWindowReconciled {
                 room_id: "!room:example.org".into(),
+                scope: koushi_state::ReceiptScope::Main,
                 scoped_event_ids: vec!["$event".into()],
                 receipts_by_event: Vec::new(),
             });
@@ -3174,6 +3402,7 @@ fn app_actor_fixture_with_account_capacity(
         room_preferences_loaded_for: Some(session_key),
         account_settings_loaded_for: None,
         state_generation: 0,
+        active_search_request: None,
         pending_composer_draft_persist: None,
         pending_navigation_persist: None,
         composer_draft_leases,
@@ -4633,6 +4862,134 @@ async fn current_event_navigation_deadline_failure_clears_focused_owner_and_fenc
     ));
 }
 
+#[tokio::test]
+async fn focused_subscription_failure_settles_the_current_event_navigation_promptly() {
+    // #1146: a bounded TimelineManager build failure/timeout must leave the
+    // pending state immediately, not only at the 15 s navigation deadline.
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let room_id = "!focused-room:example.invalid".to_owned();
+    let event_id = "$focused-event:example.invalid".to_owned();
+    let account_key = AccountKey("@synthetic:example.invalid".to_owned());
+    let generation = 9;
+    let request_id = RequestId {
+        connection_id: RuntimeConnectionId(1146),
+        sequence: 1,
+    };
+    let focused_key = TimelineKey {
+        account_key: account_key.clone(),
+        kind: TimelineKind::Focused {
+            room_id: room_id.clone(),
+            event_id: event_id.clone(),
+        },
+    };
+    let mut state = AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://example.invalid".to_owned(),
+            user_id: account_key.0.clone(),
+            device_id: "SYNTHETIC".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        }),
+        focused_context: koushi_state::FocusedContextState::Opening {
+            room_id: room_id.clone(),
+            event_id: event_id.clone(),
+        },
+        ..AppState::default()
+    };
+    state.navigation.active_room_id = Some(room_id.clone());
+    state.navigation.event_navigation = koushi_state::EventNavigationState::Opening {
+        generation,
+        source: koushi_state::EventNavigationSource::Activity,
+    };
+    let (
+        mut actor,
+        _command_tx,
+        _action_tx,
+        _account_rx,
+        mut event_rx,
+        _snapshot_rx,
+        mut navigation_projection_rx,
+        _event_navigation_prepared_tx,
+        _focused_projection_tx,
+    ) = app_actor_event_navigation_fixture(data_dir.path(), state);
+    actor.pending_event_navigation = Some(PendingEventNavigation {
+        request_id,
+        select_request_id: RequestId {
+            connection_id: request_id.connection_id,
+            sequence: 2,
+        },
+        room_id: room_id.clone(),
+        event_id: event_id.clone(),
+        source: koushi_state::EventNavigationSource::Activity,
+        generation,
+    });
+    actor.pending_focused_navigation = Some(PendingFocusedNavigation {
+        projection_request_id: request_id,
+        key: focused_key.clone(),
+        room_id: room_id.clone(),
+        event_id: event_id.clone(),
+        allow_live_fallback: true,
+        generation: Some(TimelineGeneration(generation)),
+    });
+
+    // A stale failure for another focused target is not this navigation's.
+    actor
+        .commit_action_batch(
+            vec![AppAction::FocusedContextSubscriptionFailed {
+                room_id: room_id.clone(),
+                event_id: "$stale-event:example.invalid".to_owned(),
+                message: "timeline subscription failed".to_owned(),
+            }],
+            ActionBatchOrigin::Actor,
+        )
+        .await;
+    assert!(actor.pending_event_navigation.is_some());
+    assert!(matches!(
+        actor.state.navigation.event_navigation,
+        koushi_state::EventNavigationState::Opening { .. }
+    ));
+
+    actor
+        .commit_action_batch(
+            vec![AppAction::FocusedContextSubscriptionFailed {
+                room_id: room_id.clone(),
+                event_id: event_id.clone(),
+                message: "timeline subscription failed".to_owned(),
+            }],
+            ActionBatchOrigin::Actor,
+        )
+        .await;
+
+    assert!(matches!(
+        actor.state.navigation.event_navigation,
+        koushi_state::EventNavigationState::Failed {
+            generation: current_generation,
+            source: koushi_state::EventNavigationSource::Activity,
+            failure_kind: koushi_state::EventNavigationFailureKind::Timeline,
+        } if current_generation == generation
+    ));
+    assert!(actor.pending_event_navigation.is_none());
+    assert!(actor.pending_focused_navigation.is_none());
+    assert!(actor.event_navigation_deadline_task.is_none());
+    let mut lifecycle = None;
+    while let Ok(event) = event_rx.try_recv() {
+        if let CoreEvent::IntentLifecycle {
+            request_id: lifecycle_request_id,
+            outcome,
+            ..
+        } = event
+            && lifecycle_request_id == request_id
+        {
+            assert!(lifecycle.is_none(), "exactly one terminal");
+            lifecycle = Some(outcome);
+        }
+    }
+    assert_eq!(
+        lifecycle,
+        Some(IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState))
+    );
+    assert_eq!(navigation_projection_rx.borrow_and_update().focused, None);
+}
+
 async fn wait_for_runtime_sync_running(runtime: &CoreRuntime, stage: &'static str) {
     let mut snapshot_rx = runtime.snapshot_rx.clone();
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -4906,6 +5263,132 @@ async fn account_settings_load_failure_is_retryable_and_never_persists_defaults(
     actor.load_account_settings_for_current_session().await;
     assert_eq!(actor.account_settings_loaded_for, Some(key_id));
     assert!(!actor.state.settings.values.notifications.send_read_receipts);
+}
+
+/// #1150: the per-account event queue must not pre-allocate hundreds of MiB.
+#[test]
+fn event_queue_slots_stay_within_the_documented_budget() {
+    let slot_bytes = std::mem::size_of::<koushi_protocol::event::CoreEvent>();
+    let ring_bytes =
+        EVENT_QUEUE_CAPACITY.next_power_of_two() * (slot_bytes + EVENT_QUEUE_SLOT_OVERHEAD_BYTES);
+    assert!(
+        ring_bytes <= EVENT_QUEUE_SLOT_BUDGET_BYTES,
+        "event-queue ring {ring_bytes} B exceeds the {EVENT_QUEUE_SLOT_BUDGET_BYTES} B budget"
+    );
+}
+
+/// #1160: the open command and its projection must be observable through the
+/// production `CoreConnection` command lane and emitted `CoreEvent` stream, not
+/// only by calling `reduce` and `build_state_delta` directly.
+#[tokio::test]
+async fn scheduled_sends_open_command_emits_the_projection_through_the_runtime() {
+    let (runtime, _stores) = CoreRuntime::start_isolated_with_event_capacity(64);
+    let mut connection = runtime.attach();
+
+    let mut store = koushi_state::ScheduledSendStore {
+        capability: koushi_state::ScheduledSendCapability::LocalFallback,
+        items: Default::default(),
+    };
+    store.insert(koushi_state::ScheduledSendItem {
+        scheduled_id: "sched-runtime".to_owned(),
+        room_id: "!room:example.invalid".to_owned(),
+        thread_root_event_id: None,
+        body: "runtime body".to_owned(),
+        send_at_ms: 1_900_000_000_000,
+        handle: koushi_state::ScheduledSendHandle::Local,
+        is_dispatching: false,
+    });
+    let room = RoomSummary {
+        display_name_placeholder: None,
+        display_label_placeholder: None,
+        room_id: "!room:example.invalid".to_owned(),
+        display_name: "Room".to_owned(),
+        display_label: "Room".to_owned(),
+        original_display_label: "Room".to_owned(),
+        avatar: None,
+        is_dm: false,
+        dm_user_ids: Vec::new(),
+        tags: RoomTags::default(),
+        unread_count: 0,
+        notification_count: 0,
+        highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
+        marked_unread: false,
+        recency_stamp: None,
+        conversation_activity: None,
+        latest_event: None,
+        parent_space_ids: Vec::new(),
+        dm_space_ids: Vec::new(),
+        is_encrypted: false,
+        joined_members: 0,
+    };
+
+    runtime
+        .inject_actions(vec![
+            AppAction::AppStarted,
+            AppAction::RestoreSessionSucceeded(SessionInfo {
+                homeserver: "https://example.invalid".to_owned(),
+                user_id: "@me:example.invalid".to_owned(),
+                device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            }),
+            AppAction::CurrentDeviceTrustChanged(koushi_state::CurrentDeviceTrustState::Verified),
+            AppAction::RoomListUpdated {
+                rooms: vec![room],
+                spaces: Vec::new(),
+            },
+            AppAction::ScheduledSendsLoaded {
+                scheduled_sends: store,
+            },
+        ])
+        .await;
+    wait_for_runtime_snapshot(&mut connection, |state| {
+        matches!(state.session, koushi_state::SessionState::Ready(_))
+            && state.scheduled_sends.items.contains_key("sched-runtime")
+    })
+    .await;
+
+    let request_id = connection.next_request_id();
+    connection
+        .command(CoreCommand::App(AppCommand::OpenScheduledSendsList {
+            request_id,
+            scope: koushi_state::ScheduledSendsScope::Home,
+        }))
+        .await
+        .expect("open command must be admitted");
+
+    let delta = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match connection
+                .recv_event()
+                .await
+                .expect("event stream stays open")
+            {
+                CoreEvent::StateDelta(delta)
+                    if matches!(
+                        delta.changed.scheduled_sends_list,
+                        Some(koushi_state::ScheduledSendsListState::Open { .. })
+                    ) =>
+                {
+                    return delta;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("the open command must emit its projection through a production StateDelta");
+    let Some(koushi_state::ScheduledSendsListState::Open { items, .. }) =
+        delta.changed.scheduled_sends_list
+    else {
+        unreachable!("the guarded delta slice is the open projection");
+    };
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].scheduled_id, "sched-runtime");
+    assert_eq!(items[0].body, "runtime body");
+
+    runtime.shutdown_handle().abort();
 }
 
 mod activity_renderer_states;

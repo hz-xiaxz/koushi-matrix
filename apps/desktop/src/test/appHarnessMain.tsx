@@ -115,6 +115,8 @@ interface AppHarnessControl {
   resolveDeferredCommand(command: string, index: number, value: unknown): void;
   rejectDeferredCommand(command: string, index: number): void;
   setNextTextSendPendingBody(body: string): void;
+  /** Test-only: report `consumedDraft: true` for the next prepared send (#1204). */
+  setPreparedSendConsumesDraft(value: boolean): void;
   setSnapshot(snapshot: DesktopSnapshot): void;
   pushCoreEvent(event: CoreEventPayload): Promise<void>;
   pushDesktopMenu(action: string): Promise<void>;
@@ -272,7 +274,7 @@ function readySnapshot(
   return {
     state_generation: 0,
     state: {
-        schema_version: 7,
+        schema_version: SNAPSHOT_SCHEMA_VERSION,
         domain: {
           session: { kind: "ready", homeserver: HOMESERVER, user_id: USER_ID, device_id: DEVICE_ID },
           session_lock_reason: null,
@@ -343,7 +345,7 @@ function readySnapshot(
             items: [{ room_id: ROOM_ID, kind: "room" }]
           },
           timeline: { room_id: ROOM_ID, is_subscribed: true, is_paginating_backwards: false, composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", document: { version: 2, inlines: [] }, mode: composerMode }, submission_registry: { accepted_submission_ids: [], settled_submission_ids: [] }, scheduled_send_capability: "unknown", scheduled_sends: [], staged_uploads: [], media_gallery: [], media_downloads: {}, continuity: { kind: "unknown" } },
-          thread: { kind: "closed" }, threads_list: { kind: "closed" }, focused_context: { kind: "closed" },
+          thread: { kind: "closed" }, threads_list: { kind: "closed" }, scheduled_sends_list: { kind: "closed" }, focused_context: { kind: "closed" },
           files_view: { kind: "closed" }, history_export: { kind: "idle" }, errors: [], basic_operation: basicOperation,
           room_address_availability: { kind: "idle" }
         }
@@ -816,9 +818,16 @@ function receiptReaderRows(source: ReceiptSourceRef): {
   rows: ReaderRow[];
   totalCount: number;
 } {
+  const roomSignals =
+    currentSnapshot.state.domain.live_signals.rooms[receiptSourceRoomId(source)];
+  // Issue #1255: read the summary for this source's own scope.
+  const kind = source.key.kind;
   const summary =
-    currentSnapshot.state.domain.live_signals.rooms[receiptSourceRoomId(source)]
-      ?.receipts_by_event[source.event_id];
+    "Thread" in kind
+      ? roomSignals?.thread_receipts_by_event?.[kind.Thread.root_event_id]?.[source.event_id]
+      : "Focused" in kind
+        ? roomSignals?.focused_receipts_by_event?.[kind.Focused.event_id]?.[source.event_id]
+        : roomSignals?.receipts_by_event[source.event_id];
   const locale = currentSnapshot.state.domain.locale_profile.catalog_locale === "ja" ? "ja" : "en";
   const rows = (summary?.readers ?? []).map((reader): ReaderRow => {
     const displayLabel = (reader.display_name ?? reader.original_display_label) || reader.user_id;
@@ -939,12 +948,39 @@ function replaceStagedUploadsForTarget(
   };
 }
 
+/// Stands in for the converted bytes the Rust pipeline produces for an
+/// Original+Keep HEIC selection: the selection still uploads the exact HEIC
+/// payload, but the preview must be an image the WebView can render (#1147).
+/// The production pipeline caches a JPEG, so the harness fabricates a real
+/// JPEG rather than an arbitrary renderable image.
+const HEIC_ORIGINAL_PREVIEW_FALLBACK_BYTES = [
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0,
+  0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 240, 31, 0,
+  5, 0, 1, 255, 137, 153, 61, 29, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130
+];
+
+function heicOriginalPreviewBytes(): number[] {
+  const canvas = document.createElement("canvas");
+  canvas.width = 2;
+  canvas.height = 2;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    // jsdom has no 2d context; the WebKit/Chromium lanes always do.
+    return HEIC_ORIGINAL_PREVIEW_FALLBACK_BYTES;
+  }
+  context.fillStyle = "#2d6fef";
+  context.fillRect(0, 0, 2, 2);
+  const encoded = canvas.toDataURL("image/jpeg", 0.9).split(",")[1] ?? "";
+  return Array.from(atob(encoded), (character) => character.charCodeAt(0));
+}
+
 function preparedHarnessItem(
   target: ComposerTarget,
   item: StageUploadBytesRequestItem
 ): StagedUploadItem {
   const originalMime = item.mimeType.trim() || "application/octet-stream";
   const image = originalMime.startsWith("image/");
+  const heicOriginal = image && (originalMime === "image/heic" || originalMime === "image/heif");
   const original = {
     variant_id: "original-keep",
     resize: "original" as const,
@@ -979,10 +1015,14 @@ function preparedHarnessItem(
       ]
     : [original];
   for (const variant of variants) {
+    const originalKeep =
+      variant.resize === "original" && variant.format_choice === "keep";
     preparedUploadBytes.set(
       preparedUploadKey(target, item.stagedId, variant.variant_id),
-      variant.resize === "original" && variant.format_choice === "keep"
-        ? [...item.bytes]
+      originalKeep
+        ? heicOriginal
+          ? heicOriginalPreviewBytes()
+          : [...item.bytes]
         : item.bytes.slice(0, variant.byte_count)
     );
   }
@@ -1290,9 +1330,47 @@ function rejectDeferredCommand(command: string, index: number): void {
   if (entry) entry.reject(new Error("synthetic deferred rejection"));
 }
 
+/** A well-formed access outcome for the harness previews (#1177). */
+function harnessAccessOutcome() {
+  return {
+    join: { messageId: "room.accessOutcomeJoinInvite" },
+    history: { messageId: "room.accessOutcomeHistoryShared" },
+    encryption: { messageId: "room.accessOutcomeNotEncrypted" },
+    directory: { messageId: "room.accessOutcomeDirectoryPrivate" },
+    nonRetroactive: { messageId: "room.historyNonRetroactive" }
+  };
+}
+
 // Snapshot-returning commands the App calls. Default snapshot stays ready so
 // any unanticipated snapshot read still renders the shell.
 mock.setCommandResponse("get_snapshot", () => currentSnapshot);
+// #1177 fixture-only browser contract: the harness must not reimplement the
+// Rust draft reducer, its canonicalization or Create's normalization. A spec
+// seeds the Rust-shaped snapshot/result fixture for the transition it tests and
+// asserts on the dispatched command; these defaults only keep an unrelated
+// snapshot read rendering a well-formed editor.
+mock.setCommandResponse("set_room_access_draft", () => ({
+  kind: "admitted",
+  request_id: 0
+}));
+mock.setCommandResponse(
+  "preview_room_access",
+  ({ scope, context }: { scope: unknown; context: unknown }) => ({
+    scope,
+    context,
+    confirmed: true,
+    outcome: harnessAccessOutcome()
+  })
+);
+mock.setCommandResponse("preview_create_room_access", ({ scope }: { scope: unknown }) => ({
+  scope,
+  confirmed: false,
+  outcome: harnessAccessOutcome(),
+  effectiveRule: "invite",
+  effectiveHistory: "shared",
+  rejection: null,
+  roomVersionPinned: false
+}));
 mock.setCommandResponse("list_account_tabs", harnessAccountTabsSnapshot);
 mock.setCommandResponse("select_account_tab", harnessAccountTabsSnapshot);
 // Explicit adapter projections: tests publish later states rather than emulate the updater.
@@ -1300,6 +1378,7 @@ mock.setCommandResponse("get_desktop_update_state", () => ({ kind: "idle" }));
 mock.setCommandResponse("check_for_desktop_update", () => null);
 mock.setCommandResponse("download_desktop_update", () => null);
 mock.setCommandResponse("restart_to_install_desktop_update", () => null);
+mock.setCommandResponse("ignore_desktop_update", () => null);
 mock.setCommandResponse("subscribe_receipt_reader", ({
   source,
 }: {
@@ -1579,6 +1658,7 @@ mock.setCommandResponse("select_room", ({ roomId }: { roomId: string }) => {
         },
         thread: { kind: "closed" },
         threads_list: { kind: "closed" },
+        scheduled_sends_list: { kind: "closed" },
         focused_context: { kind: "closed" }
       }
     },
@@ -2398,17 +2478,26 @@ mock.setCommandResponse("mismatch_sas_verification", ({ flowId }: { flowId: numb
   if (session.kind === "verifying" && session.flow_id === flowId) next.state.domain.session = { kind: "awaitingVerification", homeserver: session.homeserver, user_id: session.user_id, device_id: session.device_id, gate: { ...session.gate, failureKind: "mismatch" } };
   return setCurrentSnapshot(next);
 });
-mock.setCommandResponse("start_session_bootstrap", ({ recoveryKeyDestinationPath }: { recoveryKeyDestinationPath: string }) => {
+// #1049: the identity bootstrap reveals its key through the #927 reveal slot
+// keyed by the flow id; it never takes a destination.
+mock.setCommandResponse("start_session_bootstrap", () => {
   const flowId = nextGateFlowId++;
   const next = structuredClone(currentSnapshot);
   const session = next.state.domain.session;
-  if (session.kind === "awaitingVerification" && recoveryKeyDestinationPath.trim()) next.state.domain.session = { kind: "awaitingBootstrapConfirmation", homeserver: session.homeserver, user_id: session.user_id, device_id: session.device_id, gate: { ...session.gate, failureKind: null }, flow_id: flowId, destination_written: true };
+  if (session.kind === "awaitingVerification") {
+    next.state.domain.session = { kind: "awaitingBootstrapConfirmation", homeserver: session.homeserver, user_id: session.user_id, device_id: session.device_id, gate: { ...session.gate, failureKind: null }, flow_id: flowId };
+    next.state.domain.e2ee_trust.key_management.secure_backup_setup = { kind: "recoveryKeyReady", request_id: flowId, recovery_key: HARNESS_RECOVERY_KEY, delivery: { kind: "notWritten" }, confirmation_failed: false };
+  }
   return setCurrentSnapshot(next);
 });
 mock.setCommandResponse("confirm_session_bootstrap_saved", ({ flowId }: { flowId: number }) => {
   const next = structuredClone(currentSnapshot);
   const session = next.state.domain.session;
-  if (session.kind === "awaitingBootstrapConfirmation" && session.flow_id === flowId) next.state.domain.session = { kind: "provisional", homeserver: session.homeserver, user_id: session.user_id, device_id: session.device_id, phase: { recheckingTrust: {} } };
+  const setup = next.state.domain.e2ee_trust.key_management.secure_backup_setup;
+  if (session.kind === "awaitingBootstrapConfirmation" && session.flow_id === flowId) {
+    next.state.domain.session = { kind: "provisional", homeserver: session.homeserver, user_id: session.user_id, device_id: session.device_id, phase: { recheckingTrust: {} } };
+    if (setup.kind === "recoveryKeyReady" && setup.request_id === flowId) next.state.domain.e2ee_trust.key_management.secure_backup_setup = { kind: "enabled", request_id: flowId };
+  }
   return setCurrentSnapshot(next);
 });
 mock.setCommandResponse("confirm_sas_verification", ({ flowId }: { flowId: number }) => {
@@ -2717,6 +2806,8 @@ mock.setCommandResponse("cancel_composer_reply", () => setCurrentSnapshot(readyS
 // send_reply / send_text return a correlated accepted response with the
 // Rust-shaped revision tombstone.
 let nextTextSendPendingBody: string | null = null;
+/// Test-only: makes the next prepared send report `consumedDraft: true` (#1204).
+let preparedSendConsumesDraftForTesting = false;
 for (const command of ["send_reply", "send_text"] as const) {
   mock.setCommandResponse(command, async ({
     accountHomeserver,
@@ -2933,14 +3024,14 @@ mock.setCommandResponse(
 );
 mock.setCommandResponse(
   "send_thread_reply",
-  ({ accountHomeserver, accountUserId, accountDeviceId, submissionId, roomId, rootEventId, body, draftRevision }: {
+  ({ accountHomeserver, accountUserId, accountDeviceId, submissionId, roomId, rootEventId, document, draftRevision }: {
     accountHomeserver: string;
     accountUserId: string;
     accountDeviceId: string;
     submissionId: string;
     roomId: string;
     rootEventId: string;
-    body: string;
+    document: ComposerDocument;
     draftRevision: ComposerDraftRevision;
   }) => {
     if (!composerCommandAccountMatches({
@@ -2957,7 +3048,7 @@ mock.setCommandResponse(
       thread.root_event_id !== rootEventId ||
       !thread.composer ||
       thread.composer.pending_transaction_id ||
-      body.trim().length === 0
+      plainBodyFromDocument(document).trim().length === 0
     ) {
       return { submissionId, outcome: "rejected", snapshot: currentSnapshot };
     }
@@ -3492,6 +3583,8 @@ mock.setCommandResponse("stage_upload_bytes", ({ target, items }: {
 }) => {
   const existing = stagedUploadsForTarget(currentSnapshot, target);
   if (existing === null) return currentSnapshot;
+  // Caption seeding is Core's decision (#1194); this fake only stages, so the
+  // harness never grows a second implementation of that policy.
   const next = replaceStagedUploadsForTarget(currentSnapshot, target, [
     ...existing,
     ...items.map((item) => preparedHarnessItem(target, item))
@@ -3624,7 +3717,42 @@ mock.setCommandResponse("send_prepared_uploads", ({
           }
         }
       : withoutUploads;
-  return setCurrentSnapshot(settled);
+  // #1130/#1204: Core owns whether a send consumed the draft; this fake reports the
+  // switch below — never a policy of its own. A consuming send is modelled as the
+  // Rust-shaped settlement it is: the composer draft is empty and the accepted clear
+  // token has advanced, so the renderer's fallback agrees with the cleared overlay.
+  const settledSnapshot =
+    preparedSendConsumesDraftForTesting && target.kind === "main"
+      ? {
+          ...settled,
+          state: {
+            ...settled.state,
+            ui: {
+              ...settled.state.ui,
+              timeline: {
+                ...settled.state.ui.timeline,
+                composer: {
+                  ...settled.state.ui.timeline.composer,
+                  draft: "",
+                  document: { version: 2 as const, inlines: [] },
+                  last_accepted_clear_revision:
+                    settled.state.ui.timeline.composer.draft_revision
+                }
+              }
+            }
+          }
+        }
+      : settled;
+  setCurrentSnapshot(settledSnapshot);
+  // Publish the settled snapshot through the harness's own state update (which bumps
+  // the generation the receipt must carry), so the renderer applies it through the
+  // real receipt reconciliation path.
+  harnessControl.pushStateUpdate();
+  return {
+    protocolVersion: 1,
+    publishedGeneration: currentSnapshot.state_generation ?? 0,
+    consumedDraft: preparedSendConsumesDraftForTesting
+  };
 });
 mock.setCommandResponse("update_staged_upload_caption", ({ target, stagedId, document }: {
   target: ComposerTarget;
@@ -3904,6 +4032,9 @@ const harnessControl: AppHarnessControl = {
   rejectDeferredCommand,
   setNextTextSendPendingBody: (body) => {
     nextTextSendPendingBody = body;
+  },
+  setPreparedSendConsumesDraft: (value) => {
+    preparedSendConsumesDraftForTesting = value;
   },
   setSnapshot: (snapshot) => {
     setCurrentSnapshot(snapshot);

@@ -18,7 +18,7 @@ import type {
   TimelineMessage
 } from "../domain/types";
 import type { ContextMenuItem } from "../domain/contextMenus";
-import { getActiveLocale, t } from "../i18n/messages";
+import { getActiveLocale, t, type MessageId } from "../i18n/messages";
 import { roomDisplayLabel } from "../domain/roomDisplayLabel";
 
 export { roomDisplayLabel, roomListItemLabel } from "../domain/roomDisplayLabel";
@@ -52,6 +52,12 @@ export type ContextMenuTarget =
        * instead of the shell synthesizing an edit from the menu.
        */
       onOpenEdit?: () => void;
+      /**
+       * Visible message-text selection captured by the row before the menu took
+       * focus (#1155). Renderer-local and ephemeral: it never enters Rust state,
+       * a log, or persisted storage.
+       */
+      selectedText?: string;
     }
   | { kind: "room"; roomId: string; dmUserId?: string | null }
   | { kind: "space"; spaceId: string }
@@ -159,6 +165,8 @@ export const EMPTY_ROOM_TAGS: RoomTags = { favourite: null, low_priority: null }
 
 export const ICON_SIZE = {
   micro: 14,
+  /** #1249: the compact room-list access glyphs. */
+  access: 12,
   compact: 15,
   small: 16,
   input: 17,
@@ -280,6 +288,15 @@ function syncReasonLabel(reason: string | null | undefined): string | null {
 const avatarGraphemeSegmenter = new Intl.Segmenter();
 
 /**
+ * Counts user-visible characters (#1217): a decomposed name (base letter plus a
+ * combining mark) is one grapheme, so its generated tile is not sized as if it
+ * were twice as long. The stored name is never normalised or rewritten.
+ */
+export function graphemeCount(value: string): number {
+  return [...avatarGraphemeSegmenter.segment(value)].length;
+}
+
+/**
  * The one placeholder-avatar initial for people, rooms, and Spaces (#1055).
  *
  * Element/Compound's rule (#414): drop one leading Matrix sigil (`@`, `#`,
@@ -314,7 +331,39 @@ export function operationFailureLabel(kind: OperationFailureKind): string {
       return t("directory.failureInvalid");
     case "sdk":
       return t("directory.failureSdk");
+    // Policy-edit failure kinds are shown on the Room Info property card, not
+    // in the directory lane; the directory label uses the generic SDK failure.
+    case "unsupportedPolicyCondition":
+    case "policyNotVerified":
+      return t("directory.failureSdk");
   }
+}
+
+/**
+ * The tooltip text for an access condition (#1166, #1220): its explanation, plus
+ * the membership routes a restricted rule names.
+ *
+ * A verified single-Space route substitutes its Space name into the specific
+ * message (#1220); otherwise only resolved names are listed, so an unknown or
+ * invisible entry adds nothing rather than a guessed label or a raw id.
+ */
+export function roomAccessTooltipLabel(
+  descriptionMessageId: MessageId,
+  allowedRoomNames?: readonly string[] | null,
+  spaceName?: string | null
+): string {
+  const trimmedSpaceName = spaceName?.trim();
+  if (trimmedSpaceName) {
+    return t(descriptionMessageId, { space: trimmedSpaceName });
+  }
+  const explanation = t(descriptionMessageId);
+  const names = (allowedRoomNames ?? []).filter((name) => name.trim().length > 0);
+  if (names.length === 0) {
+    return explanation;
+  }
+  return `${explanation} ${t("access.allowedRooms", {
+    rooms: names.join(t("access.labelSeparator"))
+  })}`;
 }
 
 export function serverNameFromRoomId(roomId: string): string | null {
@@ -378,6 +427,28 @@ export function shiftScheduledSendValue(value: string, deltaMinutes: number): st
     return value;
   }
   return datetimeLocalValueFromTimestamp(timestampMs + deltaMinutes * 60_000);
+}
+
+/**
+ * Error code Core publishes when a local scheduled-send save failed (#1159).
+ * Mirrors `SCHEDULED_SEND_PERSISTENCE_FAILED` in
+ * `crates/koushi-state/src/reducer/timeline.rs`.
+ */
+export const SCHEDULED_SEND_PERSISTENCE_FAILED_CODE = "scheduled_send_persistence_failed";
+
+/**
+ * Whether the composer must warn that scheduled-send changes are not durable.
+ * Acceptance is not durability: the reservation exists in this session's memory
+ * but not on disk, so it may not survive a restart.
+ */
+export function hasScheduledSendPersistenceFailure(
+  errors: readonly { code: string }[] | undefined
+): boolean {
+  // Harness and hand-built snapshots can omit the list entirely; reading it must
+  // not throw during render (a component test renders a partial snapshot).
+  return (
+    errors?.some((error) => error.code === SCHEDULED_SEND_PERSISTENCE_FAILED_CODE) ?? false
+  );
 }
 
 export function scheduledSendTimestampFromInput(value: string): number | null {

@@ -36,6 +36,17 @@ pub(super) enum RecoveryKeyRevealSource {
     Setup,
     /// Passphrase change: confirmation only dismisses the reveal.
     PassphraseChange,
+    /// Verification-gate identity bootstrap (#1049), keyed by its flow id:
+    /// confirmation clears the persisted delivery marker and re-checks trust.
+    SessionBootstrap,
+}
+
+/// Which command family is confirming a held key. A Secure Backup
+/// confirmation never settles the identity-bootstrap reveal, or vice versa.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RecoveryKeyConfirmation {
+    SecureBackup,
+    SessionBootstrap,
 }
 
 /// The actor-held copy of a revealed recovery key (#927), used only by the
@@ -78,6 +89,30 @@ pub(super) fn hold_created_setup_recovery_key(
     ]
 }
 
+/// Holds the recovery key the verification-gate identity bootstrap just
+/// created (#1049) and projects its reveal. Like setup, the persisted
+/// delivery marker stays set until the saved confirmation, so an interrupted
+/// reveal re-enters `RecoveryKeyDeliveryRequired` after restart.
+pub(super) fn hold_session_bootstrap_recovery_key(
+    slot: &mut Option<RevealedRecoveryKey>,
+    delivery_pending: &mut bool,
+    flow_id: u64,
+    created_key: &str,
+) -> Vec<AppAction> {
+    *delivery_pending = true;
+    let recovery_key = koushi_state::RecoveryKeyMaterial::new(created_key);
+    *slot = Some(RevealedRecoveryKey {
+        reveal_request_id: flow_id,
+        source: RecoveryKeyRevealSource::SessionBootstrap,
+        key: recovery_key.clone(),
+        delivery: koushi_state::RecoveryKeyDeliveryState::NotWritten,
+    });
+    vec![AppAction::BootstrapRecoveryKeyReady {
+        flow_id,
+        recovery_key,
+    }]
+}
+
 /// A failed setup, re-enable, or reset must not leave the gate in
 /// `CreatingBackup` (which offers no controls): it returns to `Checking` and
 /// the caller re-inspects, so the gate re-projects a recoverable state.
@@ -108,20 +143,23 @@ pub(super) enum RecoveryKeyConfirmOutcome {
     },
 }
 
-/// Applies the saved confirmation to the held key. For setup the persisted
-/// delivery marker is cleared (`clear_marker`) BEFORE the key is dropped.
+/// Applies the saved confirmation to the held key. For setup and the
+/// identity bootstrap the persisted delivery marker is cleared
+/// (`clear_marker`) BEFORE the key is dropped.
 pub(super) async fn confirm_revealed_recovery_key<F>(
     slot: &mut Option<RevealedRecoveryKey>,
     reveal_request_id: u64,
+    confirmation: RecoveryKeyConfirmation,
     clear_marker: F,
 ) -> RecoveryKeyConfirmOutcome
 where
     F: std::future::Future<Output = Result<(), koushi_sdk::E2eeTrustError>>,
 {
-    let Some(revealed) = slot
-        .as_ref()
-        .filter(|revealed| revealed.reveal_request_id == reveal_request_id)
-    else {
+    let Some(revealed) = slot.as_ref().filter(|revealed| {
+        revealed.reveal_request_id == reveal_request_id
+            && (revealed.source == RecoveryKeyRevealSource::SessionBootstrap)
+                == (confirmation == RecoveryKeyConfirmation::SessionBootstrap)
+    }) else {
         return RecoveryKeyConfirmOutcome::Stale;
     };
     if revealed.source == RecoveryKeyRevealSource::PassphraseChange {
@@ -132,6 +170,16 @@ where
         Ok(()) => {
             *slot = None;
             RecoveryKeyConfirmOutcome::MarkerCleared
+        }
+        // The bootstrap reveal never left reducer state (its confirmation is
+        // not projected ahead of the actor), so only the failure is flagged.
+        Err(error) if revealed.source == RecoveryKeyRevealSource::SessionBootstrap => {
+            RecoveryKeyConfirmOutcome::MarkerClearFailed {
+                restore: Box::new(AppAction::BootstrapRecoverySavedConfirmFailed {
+                    flow_id: reveal_request_id,
+                }),
+                error,
+            }
         }
         Err(error) => RecoveryKeyConfirmOutcome::MarkerClearFailed {
             restore: Box::new(AppAction::SecureBackupRecoveryKeyConfirmFailed {
@@ -276,6 +324,43 @@ pub(super) fn record_recovery_verification_event(event: DiagnosticEvent) {
     koushi_diagnostics::record_and_stderr(event);
 }
 
+/// Whether retrying an inspection that produced this failure could succeed.
+/// The structured detail is authoritative; the coarse kind is the fallback for
+/// failures that carry no structured cause.
+fn secure_backup_failure_is_retryable(
+    kind: koushi_state::SecureBackupGateFailureKind,
+    detail: Option<koushi_state::SecureBackupFailureDetail>,
+) -> bool {
+    use koushi_state::SecureBackupGateFailureKind;
+    detail.is_some_and(|detail| detail.retryable)
+        || matches!(
+            kind,
+            SecureBackupGateFailureKind::Network
+                | SecureBackupGateFailureKind::RateLimited
+                | SecureBackupGateFailureKind::Timeout
+        )
+}
+
+/// The bounded deadline for a deferred or in-flight inspection expired before
+/// the server answered.
+pub(super) fn secure_backup_inspection_deadline_failure()
+-> koushi_state::SecureBackupInspectionFailure {
+    use koushi_state::{
+        SecureBackupFailureDetail, SecureBackupFailureStage, SecureBackupFailureTransport,
+        SecureBackupGateFailureKind, SecureBackupInspectionFailure,
+    };
+    SecureBackupInspectionFailure {
+        kind: SecureBackupGateFailureKind::Timeout,
+        detail: Some(SecureBackupFailureDetail {
+            stage: SecureBackupFailureStage::InspectionDeadline,
+            transport: SecureBackupFailureTransport::Timeout,
+            http_status: None,
+            matrix_error_kind: None,
+            retryable: true,
+        }),
+    }
+}
+
 fn secure_backup_inspection_completion_action(
     current_generation: u64,
     session_promoted: bool,
@@ -283,36 +368,39 @@ fn secure_backup_inspection_completion_action(
     generation: u64,
     result: Result<
         koushi_sdk::MatrixSecureBackupInspection,
-        koushi_state::SecureBackupGateFailureKind,
+        koushi_state::SecureBackupInspectionFailure,
     >,
 ) -> Option<AppAction> {
+    use koushi_state::{
+        SecureBackupGateFailureKind, SecureBackupGateState, SecureBackupInspectionFailure,
+    };
+
     if generation != current_generation || !session_promoted {
         return None;
     }
-    let gate = match result {
+    let (kind, detail) = match result {
         Ok(inspection) => {
             let gate = inspection.recommended_gate_state();
-            if was_admitted && matches!(gate, koushi_state::SecureBackupGateState::Checking) {
+            if matches!(gate, SecureBackupGateState::Checking) {
                 // A server observation without authority is not evidence that
                 // the previously verified backup has become unsafe.
-                koushi_state::SecureBackupGateState::DegradedRetrying {
-                    failure: koushi_state::SecureBackupGateFailureKind::Network,
-                }
-            } else if !was_admitted && matches!(gate, koushi_state::SecureBackupGateState::Checking)
-            {
-                koushi_state::SecureBackupGateState::BlockedFailed {
-                    failure: koushi_state::SecureBackupGateFailureKind::Network,
-                }
+                (SecureBackupGateFailureKind::Network, None)
             } else {
-                gate
+                return Some(AppAction::SecureBackupGateChanged(gate));
             }
         }
-        Err(
-            failure @ (koushi_state::SecureBackupGateFailureKind::Network
-            | koushi_state::SecureBackupGateFailureKind::RateLimited
-            | koushi_state::SecureBackupGateFailureKind::Timeout),
-        ) if was_admitted => koushi_state::SecureBackupGateState::DegradedRetrying { failure },
-        Err(failure) => koushi_state::SecureBackupGateState::BlockedFailed { failure },
+        Err(SecureBackupInspectionFailure { kind, detail }) => (kind, detail),
+    };
+    let gate = if was_admitted && secure_backup_failure_is_retryable(kind, detail) {
+        SecureBackupGateState::DegradedRetrying {
+            failure: kind,
+            detail,
+        }
+    } else {
+        SecureBackupGateState::BlockedFailed {
+            failure: kind,
+            detail,
+        }
     };
     Some(AppAction::SecureBackupGateChanged(gate))
 }
@@ -355,6 +443,122 @@ fn secure_backup_gate_token(gate: &koushi_state::SecureBackupGateState) -> &'sta
         SecureBackupGateState::BlockedFailed { .. } => "blocked_failed",
         SecureBackupGateState::Ready => "ready",
     }
+}
+
+fn secure_backup_failure_kind_token(
+    kind: koushi_state::SecureBackupGateFailureKind,
+) -> &'static str {
+    use koushi_state::SecureBackupGateFailureKind;
+    match kind {
+        SecureBackupGateFailureKind::Network => "network",
+        SecureBackupGateFailureKind::RateLimited => "rate_limited",
+        SecureBackupGateFailureKind::InvalidRecoveryKey => "invalid_recovery_key",
+        SecureBackupGateFailureKind::BackupKeyMismatch => "backup_key_mismatch",
+        SecureBackupGateFailureKind::SecretStorageIncomplete => "secret_storage_incomplete",
+        SecureBackupGateFailureKind::ArtifactDelivery => "artifact_delivery",
+        SecureBackupGateFailureKind::Forbidden => "forbidden",
+        SecureBackupGateFailureKind::Timeout => "timeout",
+        SecureBackupGateFailureKind::Sdk => "sdk",
+        SecureBackupGateFailureKind::ServerResponse => "server_response",
+        SecureBackupGateFailureKind::Unauthorized => "unauthorized",
+    }
+}
+
+fn secure_backup_failure_stage_token(
+    stage: koushi_state::SecureBackupFailureStage,
+) -> &'static str {
+    use koushi_state::SecureBackupFailureStage;
+    match stage {
+        SecureBackupFailureStage::InspectServerTrust => "inspect_server_trust",
+        SecureBackupFailureStage::RoomKeyCounts => "room_key_counts",
+        SecureBackupFailureStage::RecoveryKeyDelivery => "recovery_key_delivery",
+        SecureBackupFailureStage::CrossSigningStatus => "cross_signing_status",
+        SecureBackupFailureStage::InspectionDeadline => "inspection_deadline",
+        SecureBackupFailureStage::Unknown => "unknown",
+    }
+}
+
+fn secure_backup_failure_transport_token(
+    transport: koushi_state::SecureBackupFailureTransport,
+) -> &'static str {
+    use koushi_state::SecureBackupFailureTransport;
+    match transport {
+        SecureBackupFailureTransport::NoResponse => "no_response",
+        SecureBackupFailureTransport::HttpResponse => "http_response",
+        SecureBackupFailureTransport::Timeout => "timeout",
+        SecureBackupFailureTransport::Local => "local",
+    }
+}
+
+fn secure_backup_matrix_error_kind_token(
+    kind: koushi_state::SecureBackupMatrixErrorKind,
+) -> &'static str {
+    use koushi_state::SecureBackupMatrixErrorKind;
+    match kind {
+        SecureBackupMatrixErrorKind::Forbidden => "forbidden",
+        SecureBackupMatrixErrorKind::UnknownToken => "unknown_token",
+        SecureBackupMatrixErrorKind::MissingToken => "missing_token",
+        SecureBackupMatrixErrorKind::LimitExceeded => "limit_exceeded",
+        SecureBackupMatrixErrorKind::Unrecognized => "unrecognized",
+        SecureBackupMatrixErrorKind::BadJson => "bad_json",
+        SecureBackupMatrixErrorKind::NotFound => "not_found",
+        SecureBackupMatrixErrorKind::Unknown => "unknown",
+    }
+}
+
+/// The bounded `inspection_settled` diagnostic record. It carries only the
+/// published failure vocabulary and its structured, privacy-safe detail: gate
+/// token, elapsed time, failure kind, stage, transport class, HTTP status,
+/// allowlisted Matrix error kind, and retryability. No SDK error text, URLs,
+/// identifiers, response bodies, or recovery material.
+pub(super) fn secure_backup_inspection_settled_event(
+    gate: &koushi_state::SecureBackupGateState,
+    elapsed_ms: u128,
+) -> DiagnosticEvent {
+    let mut event = DiagnosticEvent::new(
+        DiagnosticLevel::Info,
+        "core.secure_backup",
+        "inspection_settled",
+    )
+    .field(DiagnosticField::token(
+        "gate",
+        secure_backup_gate_token(gate),
+    ))
+    .field(DiagnosticField::milliseconds("elapsed_ms", elapsed_ms));
+    if let Some((kind, detail)) = gate.failure() {
+        event = event
+            .field(DiagnosticField::token(
+                "failure",
+                secure_backup_failure_kind_token(kind),
+            ))
+            .field(DiagnosticField::token(
+                "failure_stage",
+                detail.map_or("none", |detail| {
+                    secure_backup_failure_stage_token(detail.stage)
+                }),
+            ))
+            .field(DiagnosticField::token(
+                "failure_transport",
+                detail.map_or("none", |detail| {
+                    secure_backup_failure_transport_token(detail.transport)
+                }),
+            ))
+            .field(DiagnosticField::optional_count(
+                "http_status",
+                detail.and_then(|detail| detail.http_status).map(u32::from),
+            ))
+            .field(DiagnosticField::token(
+                "matrix_error_kind",
+                detail
+                    .and_then(|detail| detail.matrix_error_kind)
+                    .map_or("none", secure_backup_matrix_error_kind_token),
+            ))
+            .field(DiagnosticField::boolean(
+                "retryable",
+                detail.is_some_and(|detail| detail.retryable),
+            ));
+    }
+    event
 }
 
 fn recovery_result_is_current(
@@ -417,6 +621,23 @@ pub(super) fn classify_e2ee_trust_error(
             koushi_sdk::E2eeTrustFailureKind::Timeout => TrustOperationFailureKind::Timeout,
             koushi_sdk::E2eeTrustFailureKind::Sdk => TrustOperationFailureKind::Sdk,
         },
+        // Only the coarse kind is available here; the structured detail is
+        // consumed by the Secure Backup gate directly.
+        koushi_sdk::E2eeTrustError::SecureBackupInspection(failure) => match failure.kind {
+            koushi_state::SecureBackupGateFailureKind::Network => {
+                TrustOperationFailureKind::Network
+            }
+            koushi_state::SecureBackupGateFailureKind::Forbidden => {
+                TrustOperationFailureKind::Forbidden
+            }
+            koushi_state::SecureBackupGateFailureKind::Timeout => {
+                TrustOperationFailureKind::Timeout
+            }
+            koushi_state::SecureBackupGateFailureKind::BackupKeyMismatch => {
+                TrustOperationFailureKind::Mismatch
+            }
+            _ => TrustOperationFailureKind::Sdk,
+        },
         koushi_sdk::E2eeTrustError::NoOlmMachine
         | koushi_sdk::E2eeTrustError::SecureBackupInspectionInconclusive
         | koushi_sdk::E2eeTrustError::SecureBackupAlreadyExists
@@ -456,11 +677,15 @@ pub(super) fn classify_e2ee_trust_error(
 
 fn classify_secure_backup_gate_failure(
     error: &koushi_sdk::E2eeTrustError,
-) -> koushi_state::SecureBackupGateFailureKind {
+) -> koushi_state::SecureBackupInspectionFailure {
     use koushi_sdk::E2eeTrustError;
-    use koushi_state::SecureBackupGateFailureKind;
+    use koushi_state::{SecureBackupGateFailureKind, SecureBackupInspectionFailure};
 
-    match error {
+    let kind = match error {
+        // The inspection path already carries the structured, privacy-safe
+        // cause (operation/stage, transport class, status, Matrix error kind,
+        // retryability); never re-derive it from the coarse kind here.
+        E2eeTrustError::SecureBackupInspection(failure) => return *failure,
         E2eeTrustError::SecureBackupUploadFailed => SecureBackupGateFailureKind::Network,
         E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed => {
             SecureBackupGateFailureKind::ArtifactDelivery
@@ -489,7 +714,8 @@ fn classify_secure_backup_gate_failure(
                 SecureBackupGateFailureKind::Sdk
             }
         },
-    }
+    };
+    SecureBackupInspectionFailure { kind, detail: None }
 }
 
 pub(super) fn classify_e2ee_trust_auth_failure(
@@ -1058,7 +1284,7 @@ impl AccountActor {
             Err(error) => {
                 self.send_actions(vec![AppAction::SecureBackupGateChanged(
                     koushi_state::SecureBackupGateState::ExistingBackupNeedsRecovery {
-                        failure: Some(classify_secure_backup_gate_failure(&error)),
+                        failure: Some(classify_secure_backup_gate_failure(&error).kind),
                     },
                 )])
                 .await;
@@ -1198,6 +1424,7 @@ impl AccountActor {
         match confirm_revealed_recovery_key(
             &mut self.revealed_recovery_key,
             reveal_request_id,
+            RecoveryKeyConfirmation::SecureBackup,
             clear_marker,
         )
         .await
@@ -1271,33 +1498,23 @@ impl AccountActor {
         }
     }
 
+    /// Verification-gate identity bootstrap (#1049): bootstraps
+    /// cross-signing, creates the Secure Backup, and reveals the recovery key
+    /// on screen exactly like Secure Backup setup (#927). No file destination
+    /// is required; the gate holds until the explicit saved confirmation.
     pub(super) async fn handle_start_session_bootstrap(
         &mut self,
         request_id: RequestId,
         flow_id: u64,
         auth: Option<koushi_state::AuthSecret>,
-        request: SecureBackupSetupRequest,
+        passphrase: Option<koushi_state::AuthSecret>,
     ) {
         let Some(session) = self.session.clone() else {
-            self.native_artifacts
-                .unregister(request_id, NativeArtifactKind::RecoveryKeyDestination);
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         };
-        if !request.recovery_key_destination_requested {
-            self.native_artifacts
-                .unregister(request_id, NativeArtifactKind::RecoveryKeyDestination);
-            self.send_actions(vec![AppAction::BootstrapRecoveryKeyDeliveryFailed {
-                flow_id,
-                kind: koushi_state::VerificationGateFailureKind::Sdk,
-            }])
-            .await;
-            return;
-        }
         if let Err(error) = koushi_sdk::bootstrap_cross_signing(&session, auth.as_ref()).await {
             drop(auth);
-            self.native_artifacts
-                .unregister(request_id, NativeArtifactKind::RecoveryKeyDestination);
             self.send_actions(vec![AppAction::BootstrapRecoveryKeyDeliveryFailed {
                 flow_id,
                 kind: verification_gate_failure_kind(&error),
@@ -1306,47 +1523,20 @@ impl AccountActor {
             return;
         }
         drop(auth);
-        let SecureBackupSetupRequest {
-            passphrase,
-            recovery_key_destination_requested: _,
-            intent: _,
-        } = request;
-        let recovery_key_destination_path = match self
-            .native_artifacts
-            .take(request_id, NativeArtifactKind::RecoveryKeyDestination)
-        {
-            Ok(path) => path,
-            Err(_) => {
-                self.send_actions(vec![AppAction::BootstrapRecoveryKeyDeliveryFailed {
-                    flow_id,
-                    kind: koushi_state::VerificationGateFailureKind::Sdk,
-                }])
-                .await;
-                return;
-            }
-        };
-        let result = koushi_sdk::bootstrap_secure_backup(&session, passphrase.as_ref()).await;
+        let result = session
+            .bootstrap_identity_secure_backup(passphrase.as_ref())
+            .await;
         drop(passphrase);
-        // Session bootstrap keeps its native-destination delivery; only the
-        // Secure Backup gate reveals the key on screen (#927).
-        let delivered = result.map(|summary| {
-            koushi_sdk::write_recovery_key_material(
-                summary.recovery_key.as_str(),
-                recovery_key_destination_path,
-            )
-            .is_ok()
-        });
-        match delivered {
-            Ok(true) => {
-                self.send_actions(vec![AppAction::BootstrapRecoveryKeyDelivered { flow_id }])
-                    .await;
-            }
-            Ok(false) => {
-                self.send_actions(vec![AppAction::BootstrapRecoveryKeyDeliveryFailed {
+        match result {
+            Ok(summary) => {
+                let actions = hold_session_bootstrap_recovery_key(
+                    &mut self.revealed_recovery_key,
+                    &mut self.recovery_key_delivery_pending,
                     flow_id,
-                    kind: koushi_state::VerificationGateFailureKind::Sdk,
-                }])
-                .await;
+                    summary.recovery_key.as_str(),
+                );
+                drop(summary);
+                self.send_actions(actions).await;
             }
             Err(error) => {
                 self.send_actions(vec![AppAction::BootstrapRecoveryKeyDeliveryFailed {
@@ -1354,6 +1544,53 @@ impl AccountActor {
                     kind: verification_gate_failure_kind(&error),
                 }])
                 .await;
+            }
+        }
+    }
+
+    /// The explicit "I saved the recovery key" confirmation for the identity
+    /// bootstrap (#1049). The persisted delivery marker is cleared first; only
+    /// then is the held key dropped and the reveal settled, so a failed clear
+    /// never strands a saved key behind a forced reset.
+    pub(super) async fn handle_confirm_session_bootstrap_saved(
+        &mut self,
+        request_id: RequestId,
+        flow_id: u64,
+    ) {
+        let session = self.session.clone();
+        let clear_marker = async move {
+            match session {
+                Some(session) => session.confirm_recovery_key_delivered().await,
+                None => Err(koushi_sdk::E2eeTrustError::SecureBackupInspectionInconclusive),
+            }
+        };
+        match confirm_revealed_recovery_key(
+            &mut self.revealed_recovery_key,
+            flow_id,
+            RecoveryKeyConfirmation::SessionBootstrap,
+            clear_marker,
+        )
+        .await
+        {
+            RecoveryKeyConfirmOutcome::MarkerCleared => {
+                self.recovery_key_delivery_pending = false;
+                self.send_actions(vec![AppAction::BootstrapRecoverySavedConfirmed { flow_id }])
+                    .await;
+                self.request_authoritative_trust_recheck();
+            }
+            RecoveryKeyConfirmOutcome::MarkerClearFailed { restore, error } => {
+                self.send_actions(vec![*restore]).await;
+                self.emit_failure(
+                    request_id,
+                    CoreFailure::AccountOperationFailed {
+                        kind: classify_e2ee_trust_auth_failure(&error),
+                    },
+                );
+            }
+            // No matching bootstrap reveal is held (stale or forged flow id,
+            // or a racing teardown).
+            RecoveryKeyConfirmOutcome::Stale | RecoveryKeyConfirmOutcome::Dismissed => {
+                self.emit_failure(request_id, CoreFailure::SecureBackupSetupFailedNoOp);
             }
         }
     }
@@ -1792,7 +2029,7 @@ impl AccountActor {
             {
                 Ok(Ok(inspection)) => Ok(inspection),
                 Ok(Err(error)) => Err(classify_secure_backup_gate_failure(&error)),
-                Err(_) => Err(koushi_state::SecureBackupGateFailureKind::Timeout),
+                Err(_) => Err(secure_backup_inspection_deadline_failure()),
             };
             let _ = tx
                 .send(AccountMessage::SecureBackupInspectionFinished {
@@ -1810,7 +2047,7 @@ impl AccountActor {
         started_at: Instant,
         result: Result<
             koushi_sdk::MatrixSecureBackupInspection,
-            koushi_state::SecureBackupGateFailureKind,
+            koushi_state::SecureBackupInspectionFailure,
         >,
     ) {
         self.secure_backup_inspection_task = None;
@@ -1833,10 +2070,12 @@ impl AccountActor {
         // While a setup reveal is held the gate stays in
         // `RecoveryKeyDeliveryRequired` whatever a background inspection
         // reports, so the reveal is never replaced before the confirmation.
-        let setup_key_held = self
-            .revealed_recovery_key
-            .as_ref()
-            .is_some_and(|revealed| revealed.source == RecoveryKeyRevealSource::Setup);
+        let setup_key_held = self.revealed_recovery_key.as_ref().is_some_and(|revealed| {
+            matches!(
+                revealed.source,
+                RecoveryKeyRevealSource::Setup | RecoveryKeyRevealSource::SessionBootstrap
+            )
+        });
         if setup_key_held
             || (self.recovery_key_delivery_pending
                 && matches!(
@@ -1855,21 +2094,10 @@ impl AccountActor {
                 gate,
                 koushi_state::SecureBackupGateState::DegradedRetrying { .. }
             );
-            record(
-                DiagnosticEvent::new(
-                    DiagnosticLevel::Info,
-                    "core.secure_backup",
-                    "inspection_settled",
-                )
-                .field(DiagnosticField::token(
-                    "gate",
-                    secure_backup_gate_token(gate),
-                ))
-                .field(DiagnosticField::milliseconds(
-                    "elapsed_ms",
-                    started_at.elapsed().as_millis(),
-                )),
-            );
+            record(secure_backup_inspection_settled_event(
+                gate,
+                started_at.elapsed().as_millis(),
+            ));
             if retrying {
                 self.schedule_secure_backup_monitor(generation, true);
             } else if !matches!(
@@ -2049,7 +2277,7 @@ impl AccountActor {
             self.session_promoted,
             false,
             generation,
-            Err(koushi_state::SecureBackupGateFailureKind::Timeout),
+            Err(secure_backup_inspection_deadline_failure()),
         ) else {
             return;
         };

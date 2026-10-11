@@ -11,6 +11,8 @@ import type {
   DesktopSnapshot,
   ProvisionalPhase,
   RecoveryKeyDeliveryState,
+  SecureBackupFailureDetail,
+  SecureBackupGateFailureKind,
   SecureBackupGateState,
   SecureBackupSetupIntent
 } from "./domain/types";
@@ -713,7 +715,11 @@ describe("SessionVerificationGate interactions", () => {
     );
 
     expect(screen.getByRole("main", { name: "Secure backup required" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Checking secure backup…" })).toBeTruthy();
+    expect(
+      screen.getByRole("heading", {
+        name: "Checking the backup of your decryption keys on the homeserver…"
+      })
+    ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Create room" })).toBeNull();
   });
 
@@ -1042,6 +1048,104 @@ describe("SessionVerificationGate interactions", () => {
     expect(bootstrapSecureBackup).toHaveBeenCalledTimes(1);
   });
 
+  function bootstrapSnapshot(
+    snapshot: DesktopSnapshot,
+    phase: "awaiting" | "revealed",
+    confirmationFailed = false
+  ): DesktopSnapshot {
+    const identity = {
+      homeserver: "https://example.invalid",
+      user_id: "@new:example.invalid",
+      device_id: "NEWDEVICE",
+      gate: { methods: ["bootstrap" as const], account_kind: "newIdentity" as const, failureKind: null }
+    };
+    if (phase === "awaiting") {
+      snapshot.state.domain.session = { kind: "awaitingVerification", ...identity };
+      return snapshot;
+    }
+    snapshot.state.domain.session = { kind: "awaitingBootstrapConfirmation", ...identity, flow_id: 41 };
+    snapshot.state.domain.e2ee_trust.key_management.secure_backup_setup = {
+      kind: "recoveryKeyReady",
+      request_id: 41,
+      recovery_key: SYNTHETIC_RECOVERY_KEY,
+      delivery: { kind: "notWritten" },
+      confirmation_failed: confirmationFailed
+    };
+    return snapshot;
+  }
+
+  test("identity bootstrap needs no file destination and reveals the key until confirmed", async () => {
+    const fixture = createDesktopApiFixture();
+    const base = await fixture.getSnapshot();
+    const copyRecoveryKey = vi.fn(async () => undefined);
+    const saveSecureBackupRecoveryKey = vi.fn(async () => commandReceipt);
+    const renderGate = (nextSnapshot: DesktopSnapshot) => (
+      <SessionVerificationGate
+        desktopApi={fixture}
+        snapshot={nextSnapshot}
+        onReceipt={async () => undefined}
+        onSignOut={() => undefined}
+        operations={secureBackupOperations(nextSnapshot, {
+          copyRecoveryKey,
+          saveSecureBackupRecoveryKey
+        })}
+      />
+    );
+    const { rerender } = render(renderGate(bootstrapSnapshot(structuredClone(base), "awaiting")));
+
+    expect(screen.queryByLabelText(/destination/i)).toBeNull();
+    const passphrase = screen.getByLabelText("Backup passphrase") as HTMLInputElement;
+    fireEvent.change(passphrase, { target: { value: "synthetic-passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create secure backup" }));
+    await vi.waitFor(() =>
+      expect(fixture.ipc.invocationsOf("start_session_bootstrap")[0]?.args).toEqual({
+        passphrase: "[REDACTED]"
+      })
+    );
+    expect(passphrase.value).toBe("");
+
+    rerender(renderGate(bootstrapSnapshot(structuredClone(base), "revealed")));
+    expect(screen.getByRole("heading", { name: "Save your recovery key" })).toBeTruthy();
+    const reveal = screen.getByRole("region", { name: "Your recovery key" });
+    expect(within(reveal).getByText(SYNTHETIC_RECOVERY_KEY).tagName).toBe("CODE");
+    expect(screen.queryByRole("button", { name: "Create secure backup" })).toBeNull();
+
+    fireEvent.click(within(reveal).getByRole("button", { name: "Copy" }));
+    await vi.waitFor(() => expect(copyRecoveryKey).toHaveBeenCalledWith(SYNTHETIC_RECOVERY_KEY));
+    fireEvent.click(within(reveal).getByRole("button", { name: "Save to file…" }));
+    await vi.waitFor(() => expect(saveSecureBackupRecoveryKey).toHaveBeenCalledWith(41));
+    expect(fixture.ipc.invocationsOf("confirm_session_bootstrap_saved")).toHaveLength(0);
+    expect(fixture.ipc.invocationsOf("confirm_secure_backup_recovery_key_saved")).toHaveLength(0);
+
+    const confirm = within(reveal).getByRole("button", {
+      name: "I saved the recovery key"
+    }) as HTMLButtonElement;
+    await vi.waitFor(() => expect(confirm.disabled).toBe(false));
+    fireEvent.click(confirm);
+    await vi.waitFor(() =>
+      expect(fixture.ipc.invocationsOf("confirm_session_bootstrap_saved")[0]?.args).toEqual({
+        flowId: 41
+      })
+    );
+    expect(fixture.ipc.invocationsOf("confirm_secure_backup_recovery_key_saved")).toHaveLength(0);
+  });
+
+  test("explains a failed bootstrap confirmation while keeping the key revealed", async () => {
+    const base = await createDesktopApiFixture().getSnapshot();
+    render(
+      <SessionVerificationGate
+        snapshot={bootstrapSnapshot(base, "revealed", true)}
+        onReceipt={async () => undefined}
+        onSignOut={() => undefined}
+        operations={secureBackupOperations(base)}
+      />
+    );
+    expect(screen.getByText(SYNTHETIC_RECOVERY_KEY)).toBeTruthy();
+    expect(
+      screen.getByText(/Your confirmation could not be saved/)
+    ).toBeTruthy();
+  });
+
   test("renders typed upload progress without exposing a raw count or error", async () => {
     const snapshot = secureBackupSnapshot(
       await createDesktopApiFixture().getSnapshot(),
@@ -1059,6 +1163,150 @@ describe("SessionVerificationGate interactions", () => {
 
     expect(screen.getByText("Uploading existing encrypted keys: 11–100 remaining.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Retry secure backup" })).toBeNull();
+  });
+
+  test("explains a structured secure backup failure without raw DTO or SDK text", async () => {
+    const cases: Array<{
+      label: string;
+      failure: SecureBackupGateFailureKind;
+      detail: SecureBackupFailureDetail;
+      explanation: string;
+      action: string;
+    }> = [
+      {
+        label: "no response",
+        failure: "network",
+        detail: { stage: "inspectServerTrust", transport: "noResponse", retryable: true },
+        explanation:
+          "The homeserver could not be reached, so this secure backup request never received a response.",
+        action: "Check your connection, then retry."
+      },
+      {
+        label: "timeout",
+        failure: "timeout",
+        detail: { stage: "inspectionDeadline", transport: "timeout", retryable: true },
+        explanation: "The homeserver did not answer this secure backup request in time.",
+        action: "Check your connection, then retry."
+      },
+      {
+        label: "unauthorized 401",
+        failure: "unauthorized",
+        detail: {
+          stage: "inspectServerTrust",
+          transport: "httpResponse",
+          httpStatus: 401,
+          matrixErrorKind: "unknownToken",
+          retryable: false
+        },
+        explanation: "The homeserver rejected the sign-in for secure backup.",
+        action: "Sign out and sign in again."
+      },
+      {
+        label: "forbidden 403",
+        failure: "forbidden",
+        detail: {
+          stage: "inspectServerTrust",
+          transport: "httpResponse",
+          httpStatus: 403,
+          matrixErrorKind: "forbidden",
+          retryable: false
+        },
+        explanation: "This account is not allowed to use secure backup.",
+        action: "Ask your homeserver administrator to check secure backup."
+      },
+      {
+        label: "not found 404",
+        failure: "serverResponse",
+        detail: {
+          stage: "inspectServerTrust",
+          transport: "httpResponse",
+          httpStatus: 404,
+          matrixErrorKind: "notFound",
+          retryable: false
+        },
+        explanation: "The homeserver answered this secure backup request with an error (HTTP 404).",
+        action: "Ask your homeserver administrator to check secure backup."
+      },
+      {
+        label: "rate limited 429",
+        failure: "rateLimited",
+        detail: {
+          stage: "inspectServerTrust",
+          transport: "httpResponse",
+          httpStatus: 429,
+          matrixErrorKind: "limitExceeded",
+          retryable: true
+        },
+        explanation: "Secure backup requests are being limited. Try again later.",
+        action: "Wait a few minutes, then retry."
+      },
+      {
+        label: "server error 503",
+        failure: "serverResponse",
+        detail: {
+          stage: "inspectServerTrust",
+          transport: "httpResponse",
+          httpStatus: 503,
+          matrixErrorKind: "unknown",
+          retryable: true
+        },
+        explanation: "The homeserver answered this secure backup request with an error (HTTP 503).",
+        action: "Try again in a few minutes."
+      },
+      {
+        label: "local preparation",
+        failure: "sdk",
+        detail: { stage: "crossSigningStatus", transport: "local", retryable: false },
+        explanation: "Secure backup could not be prepared on this device.",
+        action: "Retry; if it keeps failing, sign out and sign in again."
+      }
+    ];
+
+    for (const { label, failure, detail, explanation, action } of cases) {
+      const snapshot = secureBackupSnapshot(await createDesktopApiFixture().getSnapshot(), {
+        kind: "blockedFailed",
+        failure,
+        detail
+      });
+      const { unmount } = render(
+        <SessionVerificationGate
+          snapshot={snapshot}
+          onReceipt={async () => undefined}
+          onSignOut={() => undefined}
+        />
+      );
+      expect(screen.getByRole("alert").textContent, label).toBe(explanation);
+      expect(screen.getByText(action), label).toBeTruthy();
+      const rendered = document.body.textContent ?? "";
+      for (const raw of [
+        "synthetic",
+        "inspectServerTrust",
+        "httpResponse",
+        "unknownToken",
+        "matrixErrorKind",
+        "httpStatus",
+        "retryable",
+        "blockedFailed"
+      ]) {
+        expect(rendered, `${label} leaked ${raw}`).not.toContain(raw);
+      }
+      unmount();
+    }
+  });
+
+  test("falls back to the coarse failure copy when Rust records no detail", async () => {
+    const snapshot = secureBackupSnapshot(await createDesktopApiFixture().getSnapshot(), {
+      kind: "blockedFailed",
+      failure: "rateLimited"
+    });
+    render(
+      <SessionVerificationGate
+        snapshot={snapshot}
+        onReceipt={async () => undefined}
+        onSignOut={() => undefined}
+      />
+    );
+    expect(screen.getByRole("alert").textContent).toContain("limited");
   });
 
   test("shows typed failure, supports retry, and exposes diagnostics without raw errors", async () => {

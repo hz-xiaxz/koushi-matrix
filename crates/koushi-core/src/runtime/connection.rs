@@ -845,9 +845,12 @@ impl CoreConnection {
         &mut self,
         target: koushi_state::ComposerTarget,
         items: Vec<crate::media_preparation::StageUploadBytesInput>,
+        composer_document: Option<koushi_state::ComposerDocument>,
     ) -> Result<u64, crate::media_staging::MediaStagingError> {
         let service = Arc::clone(&self.media_staging);
-        service.stage_upload_bytes(self, target, items).await
+        service
+            .stage_upload_bytes_with_composer_document(self, target, items, composer_document)
+            .await
     }
 
     /// Return the published generation after this operation settles.
@@ -939,6 +942,7 @@ impl CoreConnection {
         lease: crate::composer_draft_lifecycle::ComposerDraftLeaseId,
         target: koushi_state::ComposerTarget,
         draft_revision: koushi_state::ComposerDraftRevision,
+        draft_document: Option<koushi_state::ComposerDocument>,
     ) -> Result<
         crate::media_staging::PreparedUploadSendResult,
         crate::media_staging::PreparedUploadSendError,
@@ -952,6 +956,7 @@ impl CoreConnection {
                 lease,
                 target,
                 draft_revision,
+                draft_document,
             )
             .await
     }
@@ -1143,6 +1148,32 @@ impl CoreConnection {
                     .map(|space| space.raw_name.as_deref().unwrap_or(&space.display_name))
             });
         koushi_sdk::preview_room_address(name, alias_localpart, space_name, user_id)
+    }
+
+    /// A stateless preview of one Room Info access/history panel (#1177).
+    ///
+    /// It borrows the current published snapshot, applies the Rust-owned draft
+    /// only when its scope matches, and never supplies a trusted verified-Space
+    /// or confirmed-publication assertion. The returned identity lets the
+    /// caller fence an older result.
+    pub fn preview_room_access(
+        &self,
+        scope: &koushi_state::RoomAccessDraftScope,
+        context: koushi_state::RoomAccessPreviewContext,
+    ) -> koushi_state::RoomAccessPreview {
+        let snapshot = self.snapshot_rx.borrow();
+        koushi_state::preview_room_access_draft(&snapshot.state, scope, context)
+    }
+
+    /// A stateless preview of the create dialog's effective proposed access
+    /// tuple (#1177), normalized with the same rules Create applies.
+    pub fn preview_create_room_access(
+        &self,
+        scope: &koushi_state::RoomAccessDraftScope,
+        input: koushi_state::CreateRoomAccessPreviewInput,
+    ) -> koushi_state::CreateRoomAccessPreview {
+        let snapshot = self.snapshot_rx.borrow();
+        koushi_state::preview_create_room_access(&snapshot.state, scope, input)
     }
 
     /// Latest state snapshot (latest-wins watch semantics).

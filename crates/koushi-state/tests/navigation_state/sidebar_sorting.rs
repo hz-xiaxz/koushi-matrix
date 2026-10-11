@@ -6,7 +6,7 @@ use koushi_state::{
     compose_sidebar, compose_sidebar_with_account_facts, compute_room_list_projection, reduce,
 };
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 fn active_sort_room(
     room_id: &str,
@@ -29,6 +29,8 @@ fn active_sort_room(
         unread_count: 0,
         notification_count: 0,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: activity_timestamp_ms,
         conversation_activity: activity_timestamp_ms.map(|timestamp_ms| ConversationActivity {
@@ -68,6 +70,8 @@ fn dm_room_for_activity(
         unread_count: 0,
         notification_count: 0,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: Some(999),
         conversation_activity,
@@ -233,6 +237,8 @@ fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
             unread_count: 1,
             notification_count: 0,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -256,6 +262,8 @@ fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
             unread_count: 4,
             notification_count: 2,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -279,6 +287,8 @@ fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
             unread_count: 0,
             notification_count: 0,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: true,
             recency_stamp: None,
             conversation_activity: None,
@@ -380,6 +390,8 @@ fn active_space_lists_only_dms_belonging_to_that_space() {
         unread_count: 9,
         notification_count: 9,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
@@ -440,6 +452,8 @@ fn dm_in_multiple_spaces_appears_under_each() {
             unread_count: 5,
             notification_count: 5,
             highlight_count: 1,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -463,6 +477,8 @@ fn dm_in_multiple_spaces_appears_under_each() {
             unread_count: 2,
             notification_count: 2,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -540,6 +556,8 @@ fn sidebar_items_carry_rust_owned_room_and_space_avatars() {
             unread_count: 5,
             notification_count: 5,
             highlight_count: 1,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -563,6 +581,8 @@ fn sidebar_items_carry_rust_owned_room_and_space_avatars() {
             unread_count: 3,
             notification_count: 3,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -618,6 +638,8 @@ fn room_list_sort_supports_recent_and_locale_modes() {
                 unread_count: 0,
                 notification_count: 0,
                 highlight_count: 0,
+                thread_unread_count: 0,
+                thread_highlight_count: 0,
                 marked_unread: false,
                 recency_stamp: Some(2000),
                 conversation_activity: Some(ConversationActivity {
@@ -644,6 +666,8 @@ fn room_list_sort_supports_recent_and_locale_modes() {
                 unread_count: 0,
                 notification_count: 0,
                 highlight_count: 0,
+                thread_unread_count: 0,
+                thread_highlight_count: 0,
                 marked_unread: false,
                 recency_stamp: Some(1000),
                 conversation_activity: Some(ConversationActivity {
@@ -767,6 +791,8 @@ fn room_list_activity_sort_uses_latest_message_timestamp_before_status_activity(
             unread_count: 0,
             notification_count: 0,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: Some(300),
             conversation_activity: Some(ConversationActivity {
@@ -793,6 +819,8 @@ fn room_list_activity_sort_uses_latest_message_timestamp_before_status_activity(
             unread_count: 0,
             notification_count: 0,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: Some(200),
             conversation_activity: Some(ConversationActivity {
@@ -843,6 +871,8 @@ fn room_list_activity_sort_keeps_a_messaged_dm_ahead_of_a_newer_join_only_dm() {
             unread_count: 0,
             notification_count: 0,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: Some(300),
             conversation_activity: None,
@@ -866,6 +896,8 @@ fn room_list_activity_sort_keeps_a_messaged_dm_ahead_of_a_newer_join_only_dm() {
             unread_count: 0,
             notification_count: 0,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: Some(200),
             conversation_activity: Some(ConversationActivity {
@@ -1248,4 +1280,173 @@ fn sidebar_global_dms_uses_the_authoritative_conversation_activity_order() {
             .collect::<Vec<_>>(),
         vec!["messaged", "join-only"]
     );
+}
+
+/// #1166: the room rows the sidebar renders carry their room's own access
+/// condition, and a room with no projected condition stays unknown.
+#[test]
+fn sidebar_room_rows_carry_the_projected_access_condition() {
+    let mut state = ready_state();
+    state.rooms = {
+        let mut room_list = rooms();
+        room_list.push(active_sort_room("unprojected", false, &[], &[], None));
+        room_list.push(active_sort_room("mixed-unnamed", false, &[], &[], None));
+        room_list
+    };
+    state.spaces = spaces();
+    state.room_access = BTreeMap::from([
+        (
+            "room-a".to_owned(),
+            koushi_state::RoomAccessCondition {
+                join_rule: Some(koushi_state::RoomJoinRule::Public),
+                restricted: None,
+                allow_targets: Vec::new(),
+            },
+        ),
+        (
+            "dm-a".to_owned(),
+            koushi_state::RoomAccessCondition {
+                join_rule: Some(koushi_state::RoomJoinRule::KnockRestricted),
+                restricted: Some(koushi_state::RestrictedConditions::ConfirmedEmpty),
+                // One resolvable route and one this projection cannot name.
+                allow_targets: vec![
+                    koushi_state::RoomAllowTarget {
+                        kind: koushi_state::RoomAllowTargetKind::Room,
+                        room_id: "room-a".to_owned(),
+                    },
+                    koushi_state::RoomAllowTarget {
+                        kind: koushi_state::RoomAllowTargetKind::Unknown,
+                        room_id: "!invisible:example.invalid".to_owned(),
+                    },
+                ],
+            },
+        ),
+        (
+            "global-room".to_owned(),
+            koushi_state::RoomAccessCondition {
+                join_rule: Some(koushi_state::RoomJoinRule::Restricted),
+                restricted: Some(koushi_state::RestrictedConditions::MembershipOnly),
+                // Exactly one distinct target, verified a Space in the local
+                // room's create event, with a name this projection carries.
+                allow_targets: vec![koushi_state::RoomAllowTarget {
+                    kind: koushi_state::RoomAllowTargetKind::Space,
+                    room_id: "space-a".to_owned(),
+                }],
+            },
+        ),
+        (
+            "mixed-unnamed".to_owned(),
+            koushi_state::RoomAccessCondition {
+                join_rule: Some(koushi_state::RoomJoinRule::Restricted),
+                restricted: Some(koushi_state::RestrictedConditions::MembershipOnly),
+                // One named Space beside one target this projection cannot name:
+                // both count, so a regression that filtered unnamed targets
+                // before deciding cardinality would wrongly claim the route.
+                allow_targets: vec![
+                    koushi_state::RoomAllowTarget {
+                        kind: koushi_state::RoomAllowTargetKind::Space,
+                        room_id: "space-a".to_owned(),
+                    },
+                    koushi_state::RoomAllowTarget {
+                        kind: koushi_state::RoomAllowTargetKind::Unknown,
+                        room_id: "!invisible:example.invalid".to_owned(),
+                    },
+                ],
+            },
+        ),
+        (
+            "space-a".to_owned(),
+            koushi_state::RoomAccessCondition {
+                join_rule: Some(koushi_state::RoomJoinRule::Restricted),
+                restricted: Some(koushi_state::RestrictedConditions::MembershipPlusUnsupported),
+                // A membership route beside an unmodelled entry is never the
+                // verified single-Space route.
+                allow_targets: vec![
+                    koushi_state::RoomAllowTarget {
+                        kind: koushi_state::RoomAllowTargetKind::Space,
+                        room_id: "space-a".to_owned(),
+                    },
+                    koushi_state::RoomAllowTarget {
+                        kind: koushi_state::RoomAllowTargetKind::Unknown,
+                        room_id: "!unsupported:example.invalid".to_owned(),
+                    },
+                ],
+            },
+        ),
+    ]);
+
+    let sidebar = koushi_state::compose_sidebar_for_state(&state);
+
+    let public_room = sidebar
+        .space_rooms
+        .iter()
+        .find(|room| room.room_id == "room-a")
+        .expect("room-a should be in the room list");
+    assert_eq!(
+        public_room.access_join_rule,
+        Some(koushi_state::RoomJoinRule::Public)
+    );
+    let direct_message = sidebar
+        .global_dms
+        .iter()
+        .find(|room| room.room_id == "dm-a")
+        .expect("dm-a should be in the DM list");
+    assert_eq!(
+        direct_message.access_join_rule,
+        Some(koushi_state::RoomJoinRule::KnockRestricted)
+    );
+    assert_eq!(
+        direct_message.access_restricted_conditions,
+        Some(koushi_state::RestrictedConditions::ConfirmedEmpty),
+        "the restricted-rule facts travel to the row"
+    );
+    assert_eq!(
+        public_room.access_restricted_conditions, None,
+        "a non-restricted rule carries no allow-condition claim"
+    );
+    assert_eq!(
+        direct_message.access_allowed_room_names,
+        vec!["Room A".to_owned()],
+        "a named route becomes a label this projection already carries, and an          entry it cannot name is omitted rather than exposed by id"
+    );
+    assert!(public_room.access_allowed_room_names.is_empty());
+    assert_eq!(
+        direct_message.access_space_members_route, None,
+        "a rule that is not membership-only is never the verified Space route"
+    );
+    let space_route_room = sidebar
+        .space_rooms
+        .iter()
+        .find(|room| room.room_id == "global-room")
+        .expect("global-room should be in the room list");
+    assert_eq!(
+        space_route_room.access_space_members_route.as_deref(),
+        Some("Space A"),
+        "the single verified Space route names the Space for the specific sentence"
+    );
+    let mixed_unnamed = sidebar
+        .space_rooms
+        .iter()
+        .find(|room| room.room_id == "mixed-unnamed")
+        .expect("mixed-unnamed should be in the room list");
+    assert_eq!(
+        mixed_unnamed.access_space_members_route, None,
+        "an unnamed target still counts, so a named-plus-unnamed pair is not the verified single-Space route"
+    );
+    let space_row = sidebar
+        .space_rail
+        .iter()
+        .find(|space| space.space_id == "space-a")
+        .expect("space-a should be on the rail");
+    assert_eq!(
+        space_row.access_space_members_route, None,
+        "a membership-plus-unsupported rule keeps the generic sentence"
+    );
+    // A room with no projected condition is unknown, never a guessed rule.
+    let unknown = sidebar
+        .space_rooms
+        .iter()
+        .find(|room| room.room_id == "unprojected")
+        .expect("unprojected should be in the room list");
+    assert_eq!(unknown.access_join_rule, None);
 }

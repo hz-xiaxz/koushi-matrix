@@ -289,6 +289,7 @@ pub fn build_state_delta(
     changed_slice!(thread);
     changed_slice!(thread_attention);
     changed_slice!(threads_list);
+    changed_slice!(scheduled_sends_list);
     changed_slice!(focused_context);
     changed_slice!(search);
     if previous.search_crawler.last_active != next.search_crawler.last_active {
@@ -350,6 +351,8 @@ pub fn build_state_delta(
             .collect::<BTreeSet<_>>();
         let mut room_changes = BTreeMap::new();
         let mut receipt_changes = BTreeMap::new();
+        let mut focused_receipt_changes = BTreeMap::new();
+        let mut thread_receipt_changes = BTreeMap::new();
         let mut metadata_changes = BTreeMap::new();
         for room_id in room_ids {
             match (
@@ -395,8 +398,22 @@ pub fn build_state_delta(
                             }
                         }
                         if !events.is_empty() {
-                            receipt_changes.insert(room_id, events);
+                            receipt_changes.insert(room_id.clone(), events);
                         }
+                    }
+                    let focused_changes = scoped_receipt_changes(
+                        &previous.focused_receipts_by_event,
+                        &next.focused_receipts_by_event,
+                    );
+                    if !focused_changes.is_empty() {
+                        focused_receipt_changes.insert(room_id.clone(), focused_changes);
+                    }
+                    let thread_changes = scoped_receipt_changes(
+                        &previous.thread_receipts_by_event,
+                        &next.thread_receipts_by_event,
+                    );
+                    if !thread_changes.is_empty() {
+                        thread_receipt_changes.insert(room_id.clone(), thread_changes);
                     }
                 }
                 (None, None) => {}
@@ -405,6 +422,10 @@ pub fn build_state_delta(
         changed.live_signals_rooms = (!room_changes.is_empty()).then_some(room_changes);
         changed.live_signals_receipts_by_room_event =
             (!receipt_changes.is_empty()).then_some(receipt_changes);
+        changed.live_signals_focused_receipts_by_room_event =
+            (!focused_receipt_changes.is_empty()).then_some(focused_receipt_changes);
+        changed.live_signals_thread_receipts_by_room_event =
+            (!thread_receipt_changes.is_empty()).then_some(thread_receipt_changes);
         changed.live_signals_room_metadata_by_id =
             (!metadata_changes.is_empty()).then_some(metadata_changes);
     }
@@ -425,6 +446,9 @@ pub fn build_state_delta(
         || previous.rooms != next.rooms
         || previous.invites != next.invites
         || previous.room_notification_settings != next.room_notification_settings
+        // #1166: a room's access condition is visible on its sidebar row, so a
+        // change to it alone must publish a sidebar delta.
+        || previous.room_access != next.room_access
         || previous.space_children != next.space_children
         || previous.basic_operation != next.basic_operation
         || previous.space_child_links != next.space_child_links
@@ -442,8 +466,55 @@ pub fn build_state_delta(
 
     Some(StateDelta {
         generation,
-        changed,
+        changed: Box::new(changed),
     })
+}
+
+/// Per-scope receipt-summary changes for one room, keyed by the scope key
+/// (focused target or thread root) and then by event ID. `None` removes an
+/// event entry; a removed scope is expressed by removing each of its events.
+fn scoped_receipt_changes(
+    previous: &BTreeMap<String, BTreeMap<String, koushi_state::LiveEventReceiptSummary>>,
+    next: &BTreeMap<String, BTreeMap<String, koushi_state::LiveEventReceiptSummary>>,
+) -> BTreeMap<String, BTreeMap<String, Option<koushi_state::LiveEventReceiptSummary>>> {
+    let mut changes = BTreeMap::new();
+    let scope_keys = previous
+        .keys()
+        .chain(next.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for scope_key in scope_keys {
+        let events = match (previous.get(&scope_key), next.get(&scope_key)) {
+            (Some(previous_scope), Some(next_scope)) => {
+                let event_ids = previous_scope
+                    .keys()
+                    .chain(next_scope.keys())
+                    .cloned()
+                    .collect::<BTreeSet<_>>();
+                event_ids
+                    .into_iter()
+                    .filter(|event_id| previous_scope.get(event_id) != next_scope.get(event_id))
+                    .map(|event_id| {
+                        let replacement = next_scope.get(&event_id).cloned();
+                        (event_id, replacement)
+                    })
+                    .collect()
+            }
+            (None, Some(next_scope)) => next_scope
+                .iter()
+                .map(|(event_id, summary)| (event_id.clone(), Some(summary.clone())))
+                .collect(),
+            (Some(previous_scope), None) => previous_scope
+                .keys()
+                .map(|event_id| (event_id.clone(), None))
+                .collect(),
+            (None, None) => BTreeMap::new(),
+        };
+        if !events.is_empty() {
+            changes.insert(scope_key, events);
+        }
+    }
+    changes
 }
 
 fn ordered_ids_are_subsequence<'a>(
@@ -543,6 +614,8 @@ fn audit_app_state_delta_slices(state: &AppState) {
         secure_backup_gate: _,
         sliding_sync_account_epoch: _,
         sliding_sync_capability: _,
+        thread_delivery: _,
+        thread_unread: _,
         current_session_status: _,
         current_session_status_schedule: _,
         auth: _,
@@ -570,6 +643,10 @@ fn audit_app_state_delta_slices(state: &AppState) {
         room_notification_awaiting_echo: _,
         room_notification_settings: _,
         room_interactions: _,
+        room_access: _,
+        room_access_observed: _,
+        room_access_pre_send: _,
+        create_access_session_watermark: _,
         composer_drafts: _,
         scheduled_sends: _,
         upload_staging: _,
@@ -582,9 +659,11 @@ fn audit_app_state_delta_slices(state: &AppState) {
         thread: _,
         thread_attention: _,
         threads_list: _,
+        scheduled_sends_list: _,
         thread_root_projections: _,
         focused_context: _,
         search: _,
+        search_request_connection_id: _,
         search_crawler: _,
         files_view: _,
         history_export: _,
@@ -603,6 +682,9 @@ fn audit_app_state_delta_slices(state: &AppState) {
         device_cleanup: _,
     } = state;
 }
+
+#[cfg(test)]
+mod receipt_scope_tests;
 
 #[cfg(test)]
 mod tests;

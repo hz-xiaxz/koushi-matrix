@@ -29,6 +29,8 @@ fn room(room_id: &str) -> RoomSummary {
         unread_count: 0,
         notification_count: 0,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
@@ -2617,6 +2619,7 @@ fn thread_item(root_event_id: &str, root_ts: u64, latest_ts: Option<u64>) -> Thr
         latest_body_preview: None,
         latest_timestamp_ms: latest_ts,
         reply_count: 0,
+        unread_count: 0,
     }
 }
 

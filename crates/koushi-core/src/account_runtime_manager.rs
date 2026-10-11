@@ -1,11 +1,10 @@
 use std::{
-    collections::HashMap,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 
 use crate::{
-    NativeArtifactPort,
+    NativeArtifactPort, NativeStillImageDecoder,
     account_work::AccountWorkScheduler,
     executor,
     runtime::{CoreConnection, CoreRuntime, CoreShutdownError},
@@ -15,6 +14,10 @@ use crate::{
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticLevel, record};
 use koushi_protocol::{AccountKey, CoreCommand, SessionKeyId, command::AccountCommand};
 use koushi_state::{SessionInfo, SessionState};
+
+mod sign_in_attempts;
+
+pub use sign_in_attempts::{OidcCallbackCorrelation, PendingSignInAttempts};
 
 #[derive(
     Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
@@ -74,11 +77,12 @@ struct ManagerState {
 pub struct AccountRuntimeManager {
     state: Mutex<ManagerState>,
     operation_gate: tokio::sync::Mutex<()>,
-    oidc_attempts: Mutex<HashMap<String, AccountTabId>>,
+    sign_in_attempts: Mutex<PendingSignInAttempts>,
     store: StoreActor,
     settings: SettingsStore,
     account_work: AccountWorkScheduler,
     native_artifact_factory: Arc<dyn Fn() -> Arc<dyn NativeArtifactPort> + Send + Sync>,
+    native_image_decoder: Option<Arc<dyn NativeStillImageDecoder>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -97,6 +101,17 @@ impl AccountRuntimeManager {
         settings: SettingsStore,
         native_artifact_factory: Arc<dyn Fn() -> Arc<dyn NativeArtifactPort> + Send + Sync>,
     ) -> Self {
+        Self::new_with_native_image_decoder(store, settings, native_artifact_factory, None)
+    }
+
+    /// Like [`Self::new`], with a platform still-image decoder shared by every
+    /// account runtime's media preparation.
+    pub fn new_with_native_image_decoder(
+        store: StoreActor,
+        settings: SettingsStore,
+        native_artifact_factory: Arc<dyn Fn() -> Arc<dyn NativeArtifactPort> + Send + Sync>,
+        native_image_decoder: Option<Arc<dyn NativeStillImageDecoder>>,
+    ) -> Self {
         let first_add = AccountTabId::add(1);
         let account_work = AccountWorkScheduler::default();
         account_work.set_selected_account(Some(first_add.as_str()));
@@ -104,6 +119,7 @@ impl AccountRuntimeManager {
             &store,
             &settings,
             &native_artifact_factory,
+            &native_image_decoder,
             &account_work,
             &first_add,
         );
@@ -125,11 +141,12 @@ impl AccountRuntimeManager {
                 shutdown_result: None,
             }),
             operation_gate: tokio::sync::Mutex::new(()),
-            oidc_attempts: Mutex::new(HashMap::new()),
+            sign_in_attempts: Mutex::new(PendingSignInAttempts::default()),
             store,
             settings,
             account_work,
             native_artifact_factory,
+            native_image_decoder,
         }
     }
 
@@ -224,6 +241,7 @@ impl AccountRuntimeManager {
                 &self.store,
                 &self.settings,
                 &self.native_artifact_factory,
+                &self.native_image_decoder,
                 &self.account_work,
                 &descriptor.id,
             );
@@ -279,6 +297,7 @@ impl AccountRuntimeManager {
                     &self.store,
                     &self.settings,
                     &self.native_artifact_factory,
+                    &self.native_image_decoder,
                     &self.account_work,
                     &id,
                 );
@@ -418,25 +437,44 @@ impl AccountRuntimeManager {
             .collect()
     }
 
+    /// Register the pending sign-in attempt a browser callback for this tab must
+    /// repeat. `state` is the SDK-minted OAuth CSRF state, or empty on the
+    /// legacy `m.login.sso` fallback that carries no state (#1266).
     pub fn register_oidc_attempt(&self, id: &AccountTabId, state: String) {
-        let mut attempts = self.oidc_attempts.lock().expect("OIDC attempt mutex");
-        attempts.retain(|_, tab_id| tab_id != id);
-        attempts.insert(state, id.clone());
+        self.sign_in_attempts
+            .lock()
+            .expect("sign-in attempt mutex")
+            .register(id, state);
     }
 
-    pub fn oidc_attempt_tab(&self, state: &str) -> Option<AccountTabId> {
-        self.oidc_attempts
+    /// The tab a callback with this correlation belongs to, without consuming
+    /// the attempt. Returns `None` for a mismatch, an unsolicited callback, or
+    /// an ambiguous legacy callback with more than one pending attempt.
+    pub fn oidc_attempt_tab(&self, correlation: &OidcCallbackCorrelation) -> Option<AccountTabId> {
+        self.sign_in_attempts
             .lock()
-            .expect("OIDC attempt mutex")
-            .get(state)
-            .cloned()
+            .expect("sign-in attempt mutex")
+            .tab(correlation)
     }
 
-    pub fn take_oidc_attempt(&self, state: &str) -> Option<AccountTabId> {
-        self.oidc_attempts
+    /// Consume the attempt a callback with this correlation belongs to, so a
+    /// replayed callback is rejected.
+    pub fn take_oidc_attempt(&self, correlation: OidcCallbackCorrelation) -> Option<AccountTabId> {
+        self.sign_in_attempts
             .lock()
-            .expect("OIDC attempt mutex")
-            .remove(state)
+            .expect("sign-in attempt mutex")
+            .take(&correlation)
+    }
+
+    /// Forget the adapter's one-shot mapping for a tab (#1267). After an
+    /// explicit cancel, a late callback for the retired attempt no longer
+    /// matches a pending login on any tab, so it is rejected instead of
+    /// completing a replaced attempt.
+    pub fn forget_oidc_attempts_for_tab(&self, id: &AccountTabId) {
+        self.sign_in_attempts
+            .lock()
+            .expect("sign-in attempt mutex")
+            .forget(id);
     }
 
     pub fn media_cache_dir_for_tab(&self, id: &AccountTabId) -> Option<PathBuf> {
@@ -532,6 +570,7 @@ impl AccountRuntimeManager {
             &self.store,
             &self.settings,
             &self.native_artifact_factory,
+            &self.native_image_decoder,
             &self.account_work,
             &id,
         );
@@ -591,10 +630,10 @@ impl AccountRuntimeManager {
         };
         self.account_work
             .set_selected_account(Some(selected_tab_id.as_str()));
-        self.oidc_attempts
+        self.sign_in_attempts
             .lock()
-            .expect("OIDC attempt mutex")
-            .retain(|_, tab_id| tab_id != id);
+            .expect("sign-in attempt mutex")
+            .forget(id);
         Ok(true)
     }
 
@@ -734,10 +773,10 @@ impl AccountRuntimeManager {
         };
         self.account_work
             .set_selected_account(Some(selected_tab_id.as_str()));
-        self.oidc_attempts
+        self.sign_in_attempts
             .lock()
-            .expect("OIDC attempt mutex")
-            .retain(|_, tab_id| tab_id != id);
+            .expect("sign-in attempt mutex")
+            .forget(id);
         if self.tab_descriptors().is_empty() {
             self.add_account_tab_locked()?;
         }
@@ -795,6 +834,7 @@ fn start_runtime(
     store: &StoreActor,
     settings: &SettingsStore,
     native_artifact_factory: &Arc<dyn Fn() -> Arc<dyn NativeArtifactPort> + Send + Sync>,
+    native_image_decoder: &Option<Arc<dyn NativeStillImageDecoder>>,
     account_work: &AccountWorkScheduler,
     account_tab_id: &AccountTabId,
 ) -> CoreRuntime {
@@ -803,6 +843,7 @@ fn start_runtime(
         settings.clone(),
         native_artifact_factory(),
         account_work.for_account(account_tab_id.as_str()),
+        native_image_decoder.clone(),
     )
 }
 

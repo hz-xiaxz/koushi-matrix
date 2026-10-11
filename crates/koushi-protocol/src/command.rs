@@ -69,6 +69,8 @@ impl CoreCommand {
                 | AppCommand::CloseFilesView { request_id }
                 | AppCommand::OpenThreadsList { request_id, .. }
                 | AppCommand::CloseThreadsList { request_id }
+                | AppCommand::OpenScheduledSendsList { request_id, .. }
+                | AppCommand::CloseScheduledSendsList { request_id }
                 | AppCommand::PaginateThreadsList { request_id, .. }
                 | AppCommand::RecordLocalEncryptionHealth { request_id, .. }
                 | AppCommand::UpdateNativeAttentionState { request_id, .. }
@@ -82,6 +84,7 @@ impl CoreCommand {
                 AccountCommand::LoginPassword { request_id, .. }
                 | AccountCommand::DiscoverLogin { request_id, .. }
                 | AccountCommand::StartOidcLogin { request_id, .. }
+                | AccountCommand::CancelOidcLogin { request_id }
                 | AccountCommand::CompleteOidcLogin { request_id, .. }
                 | AccountCommand::RestoreSession { request_id, .. }
                 | AccountCommand::RestoreLastSession { request_id }
@@ -174,6 +177,7 @@ impl CoreCommand {
                 | RoomCommand::DismissDirectoryPreview { request_id }
                 | RoomCommand::JoinDirectoryRoom { request_id, .. }
                 | RoomCommand::LoadRoomSettings { request_id, .. }
+                | RoomCommand::SetRoomAccessDraft { request_id, .. }
                 | RoomCommand::QueryMentionCandidates { request_id, .. }
                 | RoomCommand::UpdateRoomSetting { request_id, .. }
                 | RoomCommand::ModerateRoomMember { request_id, .. }
@@ -258,7 +262,10 @@ pub use account::{
     SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
 };
 pub use app::{AppCommand, EventNavigationMissingTargetPolicy};
-pub use room::{CreateRoomOptions, CreateRoomParentSpace, CreateRoomVisibility, RoomCommand};
+pub use room::{
+    CreateRoomOptions, CreateRoomParentSpace, CreateRoomVisibility, RoomAccessDraftCommand,
+    RoomCommand,
+};
 pub use search::{SearchCommand, SearchScope, ThreadsListCommand};
 pub use timeline::{
     ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,

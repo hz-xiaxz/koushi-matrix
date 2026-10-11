@@ -16,8 +16,13 @@ use super::{
     SubscriptionTasks, THREAD_SUMMARY_PROJECTION_MAX_ROOTS, ThreadRootProjectionActivity,
     ThreadRootProjectionCompletion, ThreadRootProjectionDecision,
     ThreadRootProjectionRefreshResult, ThreadRootProjectionService,
-    authoritative_thread_aggregate_from_sdk,
+    authoritative_thread_aggregate_from_sdk, window_thread_roots,
 };
+use koushi_state::ThreadRootAttention;
+
+fn attention(unread: u32, highlight: u32) -> ThreadRootAttention {
+    ThreadRootAttention { unread, highlight }
+}
 
 fn pending_task(settled: oneshot::Sender<()>) -> crate::executor::JoinHandle<()> {
     crate::executor::spawn(async move {
@@ -49,7 +54,8 @@ fn pending_subscription() -> (ActiveSubscription, [oneshot::Receiver<()>; 3]) {
 
 async fn assert_tasks_settled(tasks: [oneshot::Receiver<()>; 3]) {
     for settled in tasks {
-        let _ = crate::executor::timeout(Duration::from_millis(100), settled)
+        // Liveness bound: an owned task that is never settled stays pending.
+        let _ = crate::executor::timeout(Duration::from_secs(60), settled)
             .await
             .expect("every owned subscription task must settle");
     }
@@ -443,6 +449,7 @@ fn canonical_sdk_summary_is_provisional_until_live_observation_or_refresh() {
             "$root:example.invalid",
             ThreadSummaryDto {
                 reply_count: 1,
+                unread_count: 0,
                 latest_event_id: Some("$reply-a:example.invalid".to_owned()),
                 latest_sender: Some("@a:example.invalid".to_owned()),
                 latest_sender_label: Some("A".to_owned()),
@@ -466,6 +473,7 @@ fn canonical_sdk_summary_is_provisional_until_live_observation_or_refresh() {
             "$root:example.invalid",
             ThreadSummaryDto {
                 reply_count: 1,
+                unread_count: 0,
                 latest_event_id: Some(activity_b.activity_event_id.clone()),
                 latest_sender: activity_b.activity_sender.clone(),
                 latest_sender_label: activity_b.activity_sender_label.clone(),
@@ -675,6 +683,7 @@ fn older_bundled_summary_rolls_back_only_after_event_cache_confirmation() {
     let mut service = ThreadRootProjectionService::default();
     let summary_a = ThreadSummaryDto {
         reply_count: 1,
+        unread_count: 0,
         latest_event_id: Some("$reply-a:example.invalid".to_owned()),
         latest_sender: Some("@a:example.invalid".to_owned()),
         latest_sender_label: Some("A".to_owned()),
@@ -700,6 +709,7 @@ fn older_bundled_summary_rolls_back_only_after_event_cache_confirmation() {
             "$root:example.invalid",
             ThreadSummaryDto {
                 reply_count: 1,
+                unread_count: 0,
                 latest_event_id: Some(activity_b.activity_event_id.clone()),
                 latest_sender: activity_b.activity_sender.clone(),
                 latest_sender_label: activity_b.activity_sender_label.clone(),
@@ -1331,4 +1341,67 @@ fn ready_snapshot_remains_reemittable_after_temporary_canonical_root_overlap() {
         service.observe(activity),
         ThreadRootProjectionDecision::Existing(record) if record.item().is_some()
     ));
+}
+
+/// #1259: the SDK thread cache's unread value is stored per root and only re-read
+/// when the room-side summary identity changes.
+#[test]
+fn thread_unread_is_gated_on_the_room_side_summary_identity() {
+    let mut service = ThreadRootProjectionService::default();
+    let room = "!room:test";
+    let summary_item = |latest: &str, replies: u32| {
+        canonical_timeline_item(
+            "$root:test",
+            ThreadSummaryDto {
+                reply_count: replies,
+                unread_count: 0,
+                latest_event_id: Some(latest.to_owned()),
+                latest_sender: None,
+                latest_sender_label: None,
+                latest_body_preview: None,
+                latest_timestamp_ms: Some(1),
+            },
+        )
+    };
+
+    // First sight of the root: its thread cache is read once.
+    let stale = service.roots_needing_unread_refresh(room, &[summary_item("$reply:test", 1)]);
+    assert_eq!(stale.len(), 1);
+    assert_eq!(stale[0].0, "$root:test");
+    service.apply_thread_unread(room, "$root:test", stale[0].1.clone(), attention(1, 0));
+    assert_eq!(
+        service.thread_unread_for(room, "$root:test"),
+        attention(1, 0)
+    );
+
+    // An unchanged summary never re-reads the cache...
+    assert!(
+        service
+            .roots_needing_unread_refresh(room, &[summary_item("$reply:test", 1)])
+            .is_empty()
+    );
+    // ...while a newer summary does.
+    assert_eq!(
+        service
+            .roots_needing_unread_refresh(room, &[summary_item("$newer:test", 2)])
+            .len(),
+        1
+    );
+
+    // A read clears the stored value.
+    service.apply_thread_unread(
+        room,
+        "$root:test",
+        "$newer:test:2".to_owned(),
+        attention(0, 0),
+    );
+    assert_eq!(
+        service.thread_unread_for(room, "$root:test"),
+        attention(0, 0)
+    );
+    // The window enumerates exactly the roots a refresh would read.
+    assert_eq!(
+        window_thread_roots(&[summary_item("$newer:test", 2)]).len(),
+        1
+    );
 }

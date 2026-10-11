@@ -40,6 +40,7 @@ import { ModalDialog } from "./ModalDialog";
 import type {
   AccountManagementCapabilities,
   AccountManagementState,
+  CatalogLocale,
   DesktopSnapshot,
   AccountNotificationsState,
   CurrentSessionStatusState,
@@ -54,6 +55,7 @@ import type {
   SettingsPatch,
   SettingsState,
   SessionStatusRefreshCommandTrigger,
+  SecureBackupGateState,
   SecureBackupSetupIntent,
   ProfileState,
   TimelineSettings,
@@ -71,6 +73,7 @@ export function UserSettingsPanel({
   searchCrawlerState,
   profile,
   e2eeTrust,
+  secureBackupGate,
   localEncryption,
   platform,
   accountManagement,
@@ -109,6 +112,7 @@ export function UserSettingsPanel({
   runtimeAlerts = [],
   runtimeAlertRetrying = false,
   onRetryRuntimeAlert = () => undefined,
+  catalogLocale = "en",
   onChangePassword,
   onDeactivateAccount,
   onSubmitAccountManagementUia,
@@ -133,8 +137,16 @@ export function UserSettingsPanel({
   searchCrawlerState?: SearchCrawlerState;
   profile: ProfileState;
   e2eeTrust: E2eeTrustState;
+  /** Account-level secure-backup gate for the row's account truth (#1201). */
+  secureBackupGate?: SecureBackupGateState;
   localEncryption: LocalEncryptionState;
   platform: DisplayPlatform;
+  /**
+   * Rust-resolved effective catalog locale from the current snapshot. Production
+   * callers pass `domain.locale_profile.catalog_locale`; the fallback only keeps
+   * direct component tests simple. Never read the global catalog here.
+   */
+  catalogLocale?: CatalogLocale;
   accountManagement: AccountManagementState;
   accountManagementCapabilities: AccountManagementCapabilities;
   keyboardLabelProfile?: ShortcutLabelProfile;
@@ -519,7 +531,7 @@ export function UserSettingsPanel({
         </div>
         <div id="settings-page-appearance" role="tabpanel" aria-labelledby="settings-tab-appearance" className="settings-category" hidden={activeCategory !== "appearance"} tabIndex={0}>
           <section className="settings-section" aria-label={t("settings.language")}>
-            <LanguageControls selectedLocale={selectedLocale} onUpdateSettings={onUpdateSettings} />
+            <LanguageControls catalogLocale={catalogLocale} selectedLocale={selectedLocale} onUpdateSettings={onUpdateSettings} />
           </section>
           <section id="settings-appearance" className="settings-section" aria-label={t("settings.appearance")}>
             <div className="settings-section-heading">
@@ -737,6 +749,7 @@ export function UserSettingsPanel({
             <h3>{t("settings.security")}</h3>
             <SecuritySection
               keyManagement={e2eeTrust.key_management}
+              secureBackupGate={secureBackupGate}
               localEncryption={localEncryption}
               platform={platform}
               onBootstrapSecureBackup={onBootstrapSecureBackup}
@@ -814,8 +827,10 @@ export function AppSettingsDialog({
         })}
         profile={domain.profile}
         e2eeTrust={domain.e2ee_trust}
+        secureBackupGate={domain.secure_backup_gate}
         localEncryption={domain.local_encryption}
         platform={domain.locale_profile.platform}
+        catalogLocale={domain.locale_profile.catalog_locale}
         accountManagement={domain.account_management}
         accountManagementCapabilities={domain.account_management_capabilities}
         onUpdateSettings={onUpdateSettings}

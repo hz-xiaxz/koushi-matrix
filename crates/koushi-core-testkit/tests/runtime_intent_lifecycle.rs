@@ -56,9 +56,9 @@ async fn recv_intent_lifecycle_within(
         if remaining.is_zero() {
             return None;
         }
-        match tokio::time::timeout(remaining.min(Duration::from_millis(20)), conn.recv_event())
-            .await
-        {
+        // A quiet event stream is not a terminal outcome. Only the caller's
+        // absolute deadline can expire this wait (#1229).
+        match tokio::time::timeout(remaining, conn.recv_event()).await {
             Ok(Ok(CoreEvent::IntentLifecycle {
                 request_id: rid,
                 outcome,
@@ -70,6 +70,44 @@ async fn recv_intent_lifecycle_within(
             Err(_) => return None,
         }
     }
+}
+
+#[tokio::test]
+async fn intent_lifecycle_waiter_keeps_waiting_across_a_quiet_stream_interval() {
+    use koushi_protocol::event::{IntentNoOpReason, IntentOutcome};
+
+    let (runtime, _stores) = CoreRuntime::start_isolated();
+    let mut command_conn = runtime.attach();
+    runtime.inject_actions(restore_ready_actions![]).await;
+    wait_for_state(&mut command_conn, |state| {
+        matches!(state.session, SessionState::Ready(_))
+    })
+    .await;
+    let mut observer = runtime.attach();
+    let request_id = command_conn.next_request_id();
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let waiting = tokio::spawn(async move {
+        started_tx
+            .send(())
+            .expect("test should retain the start receiver");
+        recv_intent_lifecycle_within(&mut observer, request_id, Duration::from_secs(1)).await
+    });
+    started_rx.await.expect("observer should start");
+
+    // Exercise a quiet interval longer than the old 20ms polling slice, but
+    // well inside the unchanged one-second contract deadline.
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    command_conn
+        .command(CoreCommand::Room(RoomCommand::SelectRoom {
+            request_id,
+            room_id: "!waiter-missing-room:example.invalid".to_owned(),
+        }))
+        .await
+        .expect("command should submit");
+    assert_eq!(
+        waiting.await.expect("observer should complete"),
+        Some(IntentOutcome::FailedNoOp(IntentNoOpReason::RoomNotInState))
+    );
 }
 
 fn background_flood_batch(batch_index: usize, kept_room_ids: &[&str]) -> Vec<AppAction> {
@@ -93,6 +131,8 @@ fn background_flood_batch(batch_index: usize, kept_room_ids: &[&str]) -> Vec<App
             unread_count: 0,
             notification_count: 0,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: Some(timestamp_ms),
             conversation_activity: None,
@@ -117,6 +157,8 @@ fn background_flood_batch(batch_index: usize, kept_room_ids: &[&str]) -> Vec<App
         unread_count: 0,
         notification_count: 0,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: Some(timestamp_ms),
         conversation_activity: None,
@@ -163,7 +205,7 @@ fn background_flood_batch(batch_index: usize, kept_room_ids: &[&str]) -> Vec<App
 /// emit `IntentLifecycle { outcome: Committed }` for the matching request_id.
 #[tokio::test]
 async fn injected_select_room_projection_is_allowed_for_test_hooks() {
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
     let initial_room = "!injected-initial:example.test";
     let injected_room = "!injected-target:example.test";
@@ -199,7 +241,7 @@ async fn injected_select_room_projection_is_allowed_for_test_hooks() {
 async fn select_room_present_emits_committed() {
     use koushi_protocol::event::IntentOutcome;
 
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
 
     let room_a = "!room-a:example.test";
@@ -241,7 +283,7 @@ async fn select_room_present_emits_committed() {
 
 #[tokio::test]
 async fn select_room_and_wait_returns_the_authoritative_published_snapshot() {
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
     let room_a = "!wait-room-a:example.test";
     let room_b = "!wait-room-b:example.test";
@@ -279,7 +321,7 @@ async fn select_room_and_wait_returns_the_authoritative_published_snapshot() {
 
 #[tokio::test]
 async fn select_room_and_wait_accepts_the_already_active_snapshot_without_new_generation() {
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
     let room_id = "!already-active-wait-room:example.test";
     runtime
@@ -335,7 +377,7 @@ async fn select_room_and_wait_accepts_the_already_active_snapshot_without_new_ge
 
 #[tokio::test]
 async fn select_room_and_wait_returns_typed_missing_room_failure() {
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
     runtime.inject_actions(restore_ready_actions![]).await;
     wait_for_state(&mut conn, |state| {
@@ -361,7 +403,7 @@ async fn select_room_and_wait_returns_typed_missing_room_failure() {
 async fn select_room_commits_within_one_second_during_background_action_flood() {
     use koushi_protocol::event::IntentOutcome;
 
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
 
     let primary_room = "!active-room:example.test";
@@ -441,7 +483,7 @@ async fn select_room_commits_within_one_second_during_background_action_flood() 
 async fn select_room_missing_from_state_emits_failed_noop_room_not_in_state() {
     use koushi_protocol::event::{IntentNoOpReason, IntentOutcome};
 
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
 
     // Seed a Ready session with a known room list that does NOT contain the
@@ -493,7 +535,7 @@ async fn two_concurrent_select_room_for_same_room_both_receive_terminal_outcome(
     use koushi_protocol::event::{IntentNoOpReason, IntentOutcome};
     use std::collections::HashMap;
 
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
 
     let known_room = "!known:example.test";

@@ -448,10 +448,21 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   stale non-null summary. Replay/restart rehydrates the same Core projection
   from the SDK event cache; no frontend or first-party plaintext summary store
   exists.
+- Thread unread per root is Rust-owned: the room timeline actor reads the SDK thread
+  cache for every root whose room-side summary changed and mirrors the value to
+  state (`ThreadUnreadObserved`), so the Threads-list rows show the same count as
+  the room-timeline chip. The same per-root values feed the reducer-derived
+  `RoomSummary.thread_unread_count` / `thread_highlight_count` room totals under
+  the proven SDK event-cache decomposition (canon "Threads and attention"); a
+  thread count never enters the main-only `RoomSummary.unread_count`.
 - Thread-root lifecycle and placement are also Rust-owned. The session-scoped
   `ThreadRootProjectionService` retains canonical/hydrated root snapshots until
   authoritative aggregate/redaction clear, Room unsubscribe, or session teardown;
-  a bounded display omission is dormant, never deletion. Rust State mirrors only
+  a bounded display omission is dormant, never deletion. Thread summaries describe
+  aggregate presentation state, not complete per-thread unread state: capability
+  advertisement and a room-badge change do not prove thread-event delivery, so the
+  thread contribution to a room badge rests on the named SDK event-cache filters,
+  not on a badge. Rust State mirrors only
   explicit Core lifecycle actions. The Room actor's `DisplayProjectionState`
   applies root-event/latest-reply order, standalone-reply suppression, stable row
   identity and display-relative diffs. `TimelineItem` display metadata is a
@@ -1078,8 +1089,13 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   Rust-owned Upload attachments staging dialog. Send invokes
   `send_prepared_uploads`; there is no direct renderer upload command. Each staged caption is a nullable
   `ComposerDocument`, edited through the staging dialog
-  (`TimelinePaneState.staged_uploads[*].caption`), not inferred from the
-  ordinary Composer draft. The staged-attachment send settles the composer draft
+  (`TimelinePaneState.staged_uploads[*].caption`). A single attachment staged into
+  a target that had none is seeded once from the renderer's captured Composer
+  document (#1194) and is edited like any other caption afterwards; no other
+  staging infers a caption. That caption is the one prepared send that consumes the
+  draft rather than settling it (#1204): a single attachment whose caption is still
+  the submitted text moves it into the message, so the composer is cleared. Any
+  other prepared send settles the composer draft
   revision without consuming its content (#1130): it dispatches only the staged
   items and their captions, so text typed before pasting an image survives the
   send while the revision, tombstones and accepted-send navigation stay exactly
@@ -1213,8 +1229,15 @@ normal QA-title mode and cannot change product title semantics.
 - Scheduled/send-later state follows the same boundary. The full queue and local
   fallback timer are Rust/core-owned; React may render only
   `snapshot.state.timeline.scheduled_sends` for the selected room and
-  `scheduled_send_capability`, then dispatch typed schedule/cancel/reschedule
-  commands. MSC4140 delayed-event capability detection and
+  `scheduled_send_capability` — plus, while the explicitly opened scheduled-sends
+  panel is `Open` (#1160), the Rust-projected
+  `snapshot.state.ui.scheduled_sends_list` — then dispatch typed
+  schedule/cancel/reschedule commands. That panel slice is the one deliberate
+  exception that carries future message bodies for non-visible rooms: it is
+  admitted only in a `Ready` session, closed by Rust when the session leaves
+  `Ready` or the captured Space is gone/inactive, and React must keep no copy of
+  its contents beyond rendering the slice. MSC4140 delayed-event capability
+  detection and
   create/cancel/reschedule requests live in `AccountActor` through SDK/Ruma APIs.
   The local fallback timer must consider only `ScheduledSendHandle::Local` items;
   server handles are owned by the homeserver and must not be fired by the local
@@ -1282,7 +1305,8 @@ normal QA-title mode and cannot change product title semantics.
   password), `EnableKeyBackup` (optional recovery passphrase), and
   `RestoreKeyBackup` (recovery secret). Their reducer actions, effects, events,
   snapshots, logs, and `Debug` output must remain secret-free.
-- Secure-backup setup/recovery-key reset/passphrase-change reveal the SDK-produced
+- Secure-backup setup/recovery-key reset/passphrase-change and the
+  verification-gate identity bootstrap (#1049) reveal the SDK-produced
   recovery key on screen (#927). The reducer owns it only as
   `RecoveryKeyMaterial` inside `SecureBackupSetupState::RecoveryKeyReady` /
   `SecureBackupPassphraseChangeState::Changed`; AccountActor holds the one
@@ -1292,7 +1316,11 @@ normal QA-title mode and cannot change product title semantics.
   `ConfirmSecureBackupRecoveryKeySaved` does. If AccountActor cannot then
   clear the persisted delivery marker it keeps its copy and
   `SecureBackupRecoveryKeyConfirmFailed` restores the setup reveal with
-  `confirmation_failed: true` (TS mirror `confirmation_failed: boolean`). The privacy contract is
+  `confirmation_failed: true` (TS mirror `confirmation_failed: boolean`).
+  The identity bootstrap keys the same slot by its flow id; its exit is
+  `ConfirmSessionBootstrapSaved`, settled by AccountActor (marker clear
+  first), and `SessionState::AwaitingBootstrapConfirmation` and its TS mirror
+  carry only `flow_id` and coarse gate state. The privacy contract is
   [engineering rule 11](../policies/engineering-rules.md); the gate
   transitions are in the [state machines](../architecture/state-machine.md).
 - Secure-backup setup/re-enable confirmation policy is Rust-owned. The closed
@@ -1341,6 +1369,14 @@ normal QA-title mode and cannot change product title semantics.
   WebView Core-event projection contains only `request_id`, and React receives
   only coarse launch outcome plus settlement. Never return the provider URL or
   OAuth state to React or add an SSO `window.open` fallback.
+- Browser callback correlation is Rust-owned as well. `AccountRuntimeManager`
+  keeps at most one pending sign-in attempt per account tab and decides which tab
+  a callback may complete. Tauri only classifies the callback URL shape: an
+  OAuth/MAS CSRF `state`, or the stateless legacy `m.login.sso` `loginToken`
+  callback, which completes a tab only while exactly one legacy attempt is
+  pending (#1266). A legacy callback never completes an OAuth attempt. The login
+  token stays inside the callback URL string handed to the core command and is
+  never projected, logged, or persisted.
 - Trust GUI controls are transport clients only. Add Tauri commands as thin
   `CoreCommand::Account` submitters and keep SDK calls, UIAA/OAuth continuation
   handles, and verification handles inside Rust actors. React must render

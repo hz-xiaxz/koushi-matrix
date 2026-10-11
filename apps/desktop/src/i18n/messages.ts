@@ -1,6 +1,31 @@
 export type Locale = "en" | "ja" | "pseudo";
 
 export type MessageId =
+  | "access.public"
+  | "access.inviteOnly"
+  | "access.conditionsApply"
+  | "access.spaceMembersCanJoin"
+  | "access.canRequest"
+  | "access.knockRestrictedLabel"
+  | "access.privateReserved"
+  | "access.unknown"
+  | "access.checking"
+  | "access.publicDescription"
+  | "access.inviteOnlyDescription"
+  | "access.inviteOnlyDmDescription"
+  | "access.conditionsDescription"
+  | "access.spaceMembersCanJoinDescription"
+  | "access.requestDescription"
+  | "access.knockRestrictedDescription"
+  | "access.knockRestrictedSpaceDescription"
+  | "access.privateReservedDescription"
+  | "access.unknownDescription"
+  | "access.checkingDescription"
+  | "access.labelSeparator"
+  | "access.conditionSummarySeparator"
+  | "access.allowedRooms"
+  | "access.restrictedNoUsableConditionsDescription"
+  | "access.restrictedNoUsableConditionsCanRequestDescription"
   | "help.title"
   | "help.askAi"
   | "help.copyRepositoryUrl"
@@ -69,8 +94,9 @@ export type MessageId =
   | "app.title"
   | "app.versionMismatch.title"
   | "app.versionMismatch.detail"
+  | "menu.accountSettings"
+  | "menu.appSettings"
   | "menu.aboutKoushi"
-  | "menu.settings"
   | "menu.signOut"
   | "menu.toggleRightPanel"
   | "menu.koushiHelp"
@@ -92,10 +118,14 @@ export type MessageId =
   | "menu.closeWindow"
   | "menu.quit"
   | "auth.failureForbidden"
+  | "auth.failureInvalidCredentials"
   | "auth.failureNetwork"
+  | "auth.failureRateLimited"
   | "auth.failureSdk"
+  | "auth.failureStore"
   | "auth.failureTimeout"
   | "auth.failureUnsupported"
+  | "auth.cancelBrowserSignIn"
   | "auth.flowOidc"
   | "auth.flowPassword"
   | "auth.flowSso"
@@ -195,6 +225,7 @@ export type MessageId =
   | "window.title"
   | "navigation.failed"
   | "navigation.failedDismiss"
+  | "navigation.opening"
   | "context.editMessage"
   | "context.addToFavourites"
   | "context.addToLowPriority"
@@ -219,6 +250,7 @@ export type MessageId =
   | "space.leaveRoomInOtherSpace"
   | "space.leaveConfirmAction"
   | "space.leaveConfirmActionWithRooms"
+  | "context.copySelectedText"
   | "context.openKeyboardSettings"
   | "context.openRoomInfo"
   | "context.openSpaceInfo"
@@ -229,11 +261,11 @@ export type MessageId =
   | "context.removeFromFavourites"
   | "context.removeFromLowPriority"
   | "context.searchInRoom"
+  | "context.searchWebForSelectedText"
   | "context.reportContent"
   | "context.reportRoom"
   | "context.reportUser"
   | "context.selectRoom"
-  | "context.selectSpace"
   | "context.switchAccount"
   | "context.unignoreUser"
   | "dialog.cancel"
@@ -510,6 +542,54 @@ export type MessageId =
   | "room.editAvatar"
   | "room.accessAndHistory"
   | "room.accessAndHistoryHint"
+  | "room.accessChooseLabel"
+  | "room.accessChooseHistory"
+  | "room.accessDetailsLabel"
+  | "room.accessDetailsConfirmed"
+  | "room.accessDetailsUnsaved"
+  | "room.accessChoiceSpaceMembers"
+  | "room.accessChoiceSpaceMembersPinned"
+  | "room.accessChoicePublicSummary"
+  | "room.accessChoiceInviteSummary"
+  | "room.accessChoiceKnockSummary"
+  | "room.accessChoiceSpaceMembersSummary"
+  | "room.accessChoiceConditionsSummary"
+  | "room.accessAllowTargets"
+  | "room.accessAllowTargetsHint"
+  | "room.accessNoJoinedSpaces"
+  | "room.accessUnavailableUnsupported"
+  | "room.accessUnavailableNotInspected"
+  | "room.accessUnavailableNotSettable"
+  | "room.accessRejectionPublicWithRestrictedAccess"
+  | "room.accessRejectionExplicitPolicyWithInvitedOnly"
+  | "room.accessRejectionEmptyAccessTargets"
+  | "room.accessRejectionPublicWithInvitedOnly"
+  | "room.accessRoomVersionPinned"
+  | "room.accessOutcomeJoinNotVerified"
+  | "room.accessOutcomeJoinPublic"
+  | "room.accessOutcomeJoinInvite"
+  | "room.accessOutcomeJoinPrivate"
+  | "room.accessOutcomeJoinKnock"
+  | "room.accessOutcomeJoinUnknown"
+  | "room.accessOutcomeJoinSpaceMembers"
+  | "room.accessOutcomeJoinMembershipRoute"
+  | "room.accessOutcomeJoinNoRoute"
+  | "room.accessOutcomeJoinConditionsUnverifiedContent"
+  | "room.accessOutcomeJoinUnsupportedContent"
+  | "room.accessOutcomeJoinCanRequest"
+  | "room.accessOutcomeHistoryWorldReadable"
+  | "room.accessOutcomeHistoryShared"
+  | "room.accessOutcomeHistoryInvited"
+  | "room.accessOutcomeHistoryJoined"
+  | "room.accessOutcomeEncrypted"
+  | "room.accessOutcomeNotEncrypted"
+  | "room.accessOutcomeDirectoryPublic"
+  | "room.accessOutcomeDirectoryPrivate"
+  | "room.accessOutcomeDirectoryUnavailable"
+  | "room.accessOutcomeDirectoryFailed"
+  | "room.accessOutcomeDirectoryLoading"
+  | "room.accessOutcomeDirectoryWillBePublic"
+  | "room.accessOutcomeDirectoryWillBePrivate"
   | "room.copyShareLink"
   | "room.directMessage"
   | "room.dmList"
@@ -531,6 +611,11 @@ export type MessageId =
   | "room.historyNonRetroactive"
   | "room.historyRecoveryRequired"
   | "room.historyWorldReadableDescription"
+  | "room.statusHistoryLimitedDescription"
+  | "room.statusHistorySharedDescription"
+  | "room.statusHistoryWorldReadableDescription"
+  | "room.encryptedDescription"
+  | "room.notEncryptedDescription"
   | "room.historyWorldReadableWarning"
   | "room.historyWorldReadable"
   | "room.joinRule"
@@ -575,6 +660,8 @@ export type MessageId =
   | "room.operationFailed"
   | "room.settingForbidden"
   | "room.settingNoPermission"
+  | "room.settingUnsupportedPolicyCondition"
+  | "room.settingPolicyNotVerified"
   | "room.people"
   | "room.rolePermissions"
   | "room.memberRole"
@@ -596,8 +683,6 @@ export type MessageId =
   | "room.statusHistoryShared"
   | "room.statusHistoryWorldReadable"
   | "room.statusNotEncrypted"
-  | "room.statusPrivate"
-  | "room.statusPublic"
   | "room.statusShowSetting"
   | "room.saveAccess"
   | "room.saveHistoryVisibility"
@@ -729,7 +814,6 @@ export type MessageId =
   | "settings.accounts"
   | "settings.appearance"
   | "settings.language"
-  | "settings.languageDefault"
   | "settings.languageEnglish"
   | "settings.languageJapanese"
   | "settings.accountSwitcher"
@@ -779,6 +863,8 @@ export type MessageId =
   | "settings.updateAvailableTitle"
   | "settings.updateAvailableConfirm"
   | "settings.updateDownload"
+  | "settings.updateIgnore"
+  | "settings.updateIgnored"
   | "settings.updateDownloading"
   | "settings.updateReady"
   | "settings.updateRestart"
@@ -963,10 +1049,13 @@ export type MessageId =
   | "scheduled.edit"
   | "scheduled.localFallback"
   | "scheduled.localFallbackNotice"
+  | "scheduled.panelEmpty"
+  | "scheduled.persistenceFailed"
   | "scheduled.save"
   | "scheduled.schedule"
   | "scheduled.sendLater"
   | "scheduled.serverDelayedEvents"
+  | "scheduled.threadReply"
   | "scheduled.timeInput"
   | "scheduled.timeEarlierHour"
   | "scheduled.timeEarlierTenMinutes"
@@ -1057,7 +1146,6 @@ export type MessageId =
   | "gate.mismatch"
   | "gate.recoverySecret"
   | "gate.recover"
-  | "gate.destination"
   | "gate.passphrase"
   | "gate.bootstrap"
   | "gate.saved"
@@ -1131,6 +1219,19 @@ export type MessageId =
   | "gate.secureBackupFailureForbidden"
   | "gate.secureBackupFailureTimeout"
   | "gate.secureBackupFailureSdk"
+  | "gate.secureBackupFailureServerResponse"
+  | "gate.secureBackupFailureUnauthorized"
+  | "gate.secureBackupDetailNoResponse"
+  | "gate.secureBackupDetailTimeout"
+  | "gate.secureBackupDetailHttpStatus"
+  | "gate.secureBackupDetailHttpResponse"
+  | "gate.secureBackupDetailLocal"
+  | "gate.secureBackupActionRetry"
+  | "gate.secureBackupActionWaitAndRetry"
+  | "gate.secureBackupActionRetryLater"
+  | "gate.secureBackupActionSignInAgain"
+  | "gate.secureBackupActionContactAdmin"
+  | "gate.secureBackupActionLocalRetry"
   | "gate.secureBackupRetry"
   | "gate.secureBackupDiagnostics"
   | "gate.secureBackupCommandFailed"
@@ -1239,7 +1340,7 @@ export type MessageId =
   | "shortcut.noteCallsDeferred"
   | "shortcut.noteGoHomeAdapted"
   | "shortcut.noteUploadUiDeferred"
-  | "shortcut.openUserSettings"
+  | "shortcut.openAppSettings"
   | "shortcut.parityAdapted"
   | "shortcut.parityDeferred"
   | "shortcut.parityNotApplicable"
@@ -1473,6 +1574,7 @@ export type MessageId =
   | "workspace.rooms"
   | "workspace.resizeRoomList"
   | "workspace.resizeRightPanel"
+  | "workspace.scheduledMessages"
   | "workspace.search"
   | "workspace.searchEverywhere"
   | "workspace.searchInRoom"
@@ -1752,6 +1854,43 @@ export function pseudoLocalize(input: string, mode: PseudoLocaleMode = "accented
 }
 
 const en: Catalog = {
+  // #1327: one access-condition vocabulary for rooms and Spaces. A padlock means
+  // encryption only, so participation uses its own icons and labels.
+  "access.public": "Public",
+  "access.inviteOnly": "Invite only",
+  "access.conditionsApply": "Conditions apply",
+  "access.spaceMembersCanJoin": "Space members can join",
+  "access.canRequest": "Can request",
+  "access.knockRestrictedLabel": "Space / request",
+  "access.privateReserved": "Not joinable",
+  "access.unknown": "Unknown",
+  "access.checking": "Checking",
+  "access.publicDescription":
+    "Public. Anyone can join. Who can read message history is a separate setting.",
+  "access.inviteOnlyDescription":
+    "Invite only. Only invited people can join. Being a member of the Space is not enough.",
+  "access.inviteOnlyDmDescription": "Invite only. Only invited people can join.",
+  "access.conditionsDescription":
+    "Conditions apply. People who meet the room's join conditions, or who are invited, can join.",
+  "access.spaceMembersCanJoinDescription":
+    "Space members can join. Members of {space}, or invited people, can join. Joining the Space does not join this room automatically.",
+  "access.requestDescription":
+    "Join request. You can ask to join, and you join once a member approves the request.",
+  "access.knockRestrictedDescription":
+    "Space / request. People who meet the room's join conditions, or whose join request is approved, can join.",
+  "access.knockRestrictedSpaceDescription":
+    "Space / request. Members of {space}, or people whose join request is approved, can join. Joining the Space does not join this room automatically.",
+  "access.privateReservedDescription":
+    "Not joinable. There is no ordinary way to join this room, and an invitation alone may not be enough.",
+  "access.unknownDescription": "Unknown. This app does not recognize these join conditions.",
+  "access.checkingDescription": "Checking. The join conditions are not available yet.",
+  "access.labelSeparator": ", ",
+  "access.conditionSummarySeparator": " — ",
+  "access.allowedRooms": "Allowed: {rooms}",
+  "access.restrictedNoUsableConditionsDescription":
+    "Conditions apply. No usable join condition is configured. Only invited people can join.",
+  "access.restrictedNoUsableConditionsCanRequestDescription":
+    "Space / request. No usable join condition is configured, but you can ask to join.",
   "help.title": "Koushi Help",
   "help.askAi": "Copy this GitHub URL and ask ChatGPT or another AI assistant how to use Koushi. Include your Koushi version, operating system, and question.",
   "help.copyRepositoryUrl": "Copy GitHub URL",
@@ -1824,7 +1963,8 @@ const en: Catalog = {
   // Native menu bar. Title Case matches the platform menu convention, so these
   // are separate from the sentence-case shortcut sheet labels.
   "menu.aboutKoushi": "About Koushi",
-  "menu.settings": "Settings…",
+  "menu.accountSettings": "Account Settings…",
+  "menu.appSettings": "App Settings…",
   "menu.signOut": "Sign Out",
   "menu.toggleRightPanel": "Toggle Right Panel",
   "menu.koushiHelp": "Koushi Help",
@@ -1846,10 +1986,14 @@ const en: Catalog = {
   "menu.closeWindow": "Close Window",
   "menu.quit": "Quit Koushi",
   "auth.failureForbidden": "Login methods are not available for this account",
+  "auth.failureInvalidCredentials": "Incorrect Matrix ID or password",
   "auth.failureNetwork": "Could not reach the homeserver",
+  "auth.failureRateLimited": "Too many sign-in attempts. Wait a moment and try again",
   "auth.failureSdk": "Could not check login methods",
+  "auth.failureStore": "Could not open the local encryption store",
   "auth.failureTimeout": "Login method check timed out",
   "auth.failureUnsupported": "Unsupported homeserver",
+  "auth.cancelBrowserSignIn": "Cancel browser sign-in",
   "auth.flowOidc": "OIDC",
   "auth.flowPassword": "Password",
   "auth.flowSso": "Single sign-on",
@@ -1951,6 +2095,7 @@ const en: Catalog = {
   "window.title": "Koushi",
   "navigation.failed": "Navigation failed. Please try again.",
   "navigation.failedDismiss": "Dismiss the navigation failure message",
+  "navigation.opening": "Opening message…",
   "context.editMessage": "Edit",
   "context.addToFavourites": "Add to Favourites",
   "context.addToLowPriority": "Move to Low priority",
@@ -1981,6 +2126,8 @@ const en: Catalog = {
   "context.openRoomInfo": "Room info",
   "context.openSpaceInfo": "Space info",
   "context.openThread": "Reply in thread",
+  "context.copySelectedText": "Copy selected text",
+  "context.searchWebForSelectedText": "Search selected text on DuckDuckGo",
   "context.openUserInfo": "User info",
   "context.openUserSettings": "Account Settings",
   "context.redactMessage": "Redact",
@@ -1988,7 +2135,6 @@ const en: Catalog = {
   "context.removeFromLowPriority": "Remove from Low priority",
   "context.searchInRoom": "Search in room",
   "context.selectRoom": "Open",
-  "context.selectSpace": "Open Space",
   "context.switchAccount": "Switch account",
   "context.reportContent": "Report content",
   "context.reportRoom": "Report room",
@@ -2276,6 +2422,54 @@ const en: Catalog = {
   "room.directMessage": "Direct message",
   "room.accessAndHistory": "Access and history",
   "room.accessAndHistoryHint": "Join rules decide who may enter; history visibility decides what they can see. These settings are independent.",
+  "room.accessChooseLabel": "Choose who can join",
+  "room.accessChooseHistory": "Choose who can read history",
+  "room.accessDetailsLabel": "What this means",
+  "room.accessDetailsConfirmed": "These details describe the saved values.",
+  "room.accessDetailsUnsaved": "These details describe unsaved changes.",
+  "room.accessChoiceSpaceMembers": "Members of a Space",
+  "room.accessChoiceSpaceMembersPinned": "Members of {space}",
+  "room.accessChoicePublicSummary": "Anyone with the address can join.",
+  "room.accessChoiceInviteSummary": "Only invited people can join.",
+  "room.accessChoiceKnockSummary": "People can ask to join; a member must approve.",
+  "room.accessChoiceSpaceMembersSummary": "Members of a Space you choose can join.",
+  "room.accessChoiceConditionsSummary": "This room uses join conditions this app cannot edit as one rule.",
+  "room.accessAllowTargets": "Spaces whose members can join",
+  "room.accessAllowTargetsHint": "Choose the Spaces whose members may join. The attachment Space is independent.",
+  "room.accessNoJoinedSpaces": "You are not in any Space yet.",
+  "room.accessUnavailableUnsupported": "This room's current conditions include content this app does not model, so it cannot rewrite them safely.",
+  "room.accessUnavailableNotInspected": "This room's current conditions could not be verified.",
+  "room.accessUnavailableNotSettable": "This rule cannot be set from this app.",
+  "room.accessRejectionPublicWithRestrictedAccess": "A public room cannot also be limited to members of a Space.",
+  "room.accessRejectionExplicitPolicyWithInvitedOnly": "Turn off invite-only before choosing an explicit access rule.",
+  "room.accessRejectionEmptyAccessTargets": "Choose at least one Space for this rule.",
+  "room.accessRejectionPublicWithInvitedOnly": "A public room cannot be invite-only.",
+  "room.accessRoomVersionPinned": "This rule creates the room with room version 9.",
+  "room.accessOutcomeJoinNotVerified": "Join rule not verified",
+  "room.accessOutcomeJoinPublic": "Anyone can join",
+  "room.accessOutcomeJoinInvite": "Invite only",
+  "room.accessOutcomeJoinPrivate": "Private",
+  "room.accessOutcomeJoinKnock": "Anyone can request to join",
+  "room.accessOutcomeJoinUnknown": "Join rule not recognised",
+  "room.accessOutcomeJoinSpaceMembers": "Members of {space} can join",
+  "room.accessOutcomeJoinMembershipRoute": "Members of the listed rooms or Spaces can join",
+  "room.accessOutcomeJoinNoRoute": "No join route is defined",
+  "room.accessOutcomeJoinConditionsUnverifiedContent": "Join conditions include content this app cannot verify",
+  "room.accessOutcomeJoinUnsupportedContent": "Join conditions use content this app does not support",
+  "room.accessOutcomeJoinCanRequest": "You can request to join",
+  "room.accessOutcomeHistoryWorldReadable": "Anyone can read history, including before they joined",
+  "room.accessOutcomeHistoryShared": "Members can read all history, including before they joined",
+  "room.accessOutcomeHistoryInvited": "Members can read history from the point they were invited",
+  "room.accessOutcomeHistoryJoined": "Members can read history from the point they joined",
+  "room.accessOutcomeEncrypted": "Encrypted",
+  "room.accessOutcomeNotEncrypted": "Not encrypted",
+  "room.accessOutcomeDirectoryPublic": "Listed in the public directory",
+  "room.accessOutcomeDirectoryPrivate": "Not listed in the directory",
+  "room.accessOutcomeDirectoryUnavailable": "Directory listing unavailable",
+  "room.accessOutcomeDirectoryFailed": "Could not check the directory listing",
+  "room.accessOutcomeDirectoryLoading": "Checking the directory listing",
+  "room.accessOutcomeDirectoryWillBePublic": "Will be listed in the public directory",
+  "room.accessOutcomeDirectoryWillBePrivate": "Will not be listed in the directory",
   "room.dmList": "DM list",
   "room.editRoles": "Edit roles",
   "room.editSettings": "Edit settings",
@@ -2334,6 +2528,8 @@ const en: Catalog = {
   "room.notifyModeMute": "Mute",
   "room.operationFailed": "Operation failed",
   "room.settingForbidden": "You no longer have permission to change this setting.",
+  "room.settingUnsupportedPolicyCondition": "This room's current conditions include content this app does not model, so it cannot rewrite them safely.",
+  "room.settingPolicyNotVerified": "This room's current conditions could not be verified, so the change was not attempted.",
   "room.settingNoPermission": "Your role in this room cannot change this setting.",
   "room.people": "People",
   "room.roleAdministrator": "Administrator",
@@ -2356,12 +2552,20 @@ const en: Catalog = {
   "room.repairTimelineHint": "Detect and repair missing timeline ranges without deleting existing messages.",
   "room.status": "Room status",
   "room.statusEncrypted": "Encrypted",
+  "room.statusNotEncrypted": "Not encrypted",
+  "room.encryptedDescription":
+    "End-to-end encryption is on for this conversation. Decryption keys are required to read encrypted messages.",
+  "room.notEncryptedDescription":
+    "End-to-end encryption is not on for this conversation.",
   "room.statusHistoryLimited": "New members do not see history",
   "room.statusHistoryShared": "New members see history",
   "room.statusHistoryWorldReadable": "Anyone can see history",
-  "room.statusNotEncrypted": "Not encrypted",
-  "room.statusPrivate": "Private",
-  "room.statusPublic": "Public",
+  "room.statusHistoryLimitedDescription":
+    "New members cannot read message history from before they joined.",
+  "room.statusHistorySharedDescription":
+    "New members can read message history from before they joined. Decryption keys are required to read encrypted messages.",
+  "room.statusHistoryWorldReadableDescription":
+    "Anyone who can reach this room can read its history, including people who are not members.",
   "room.statusShowSetting": "{status}: show setting",
   "room.saveAccess": "Save access",
   "room.saveHistoryVisibility": "Save history visibility",
@@ -2494,9 +2698,8 @@ const en: Catalog = {
   "settings.accounts": "Accounts",
   "settings.appearance": "Appearance",
   "settings.language": "Language",
-  "settings.languageDefault": "Default (English)",
   "settings.languageEnglish": "English",
-  "settings.languageJapanese": "Japanese",
+  "settings.languageJapanese": "日本語",
   "settings.accountSwitcher": "Account switcher",
   "settings.current": "Current",
   "settings.autoLoadOlderMessages": "Automatically load older messages",
@@ -2529,7 +2732,7 @@ const en: Catalog = {
     "Keep Koushi running in the tray when the window is closed. Quit from the tray menu to exit.",
   "settings.autoUpdate": "Automatically check for updates",
   "settings.autoUpdateDescription":
-    "Notify you when a newer Koushi release is available. Windows opens the Release page; macOS can download and restart after verification.",
+    "Notify you when a newer Koushi release is available.",
   "settings.includePrereleases": "Include pre-release versions",
   "settings.includePrereleasesDescription":
     "Also check releases whose SemVer contains a pre-release identifier such as -beta.1 or -rc.1.",
@@ -2547,6 +2750,9 @@ const en: Catalog = {
   "settings.updateAvailableTitle": "Update available",
   "settings.updateAvailableConfirm": "Download and install Koushi {version}?",
   "settings.updateDownload": "Download update",
+  "settings.updateIgnore": "Ignore this version",
+  "settings.updateIgnored":
+    "Automatic reminders are off for this version until Koushi restarts. You can still download it.",
   "settings.updateDownloading": "Downloading and verifying Koushi {version}…",
   "settings.updateReady": "Koushi {version} is ready to install.",
   "settings.updateRestart": "Restart to install",
@@ -2743,11 +2949,15 @@ const en: Catalog = {
   "scheduled.bodyInput": "Scheduled message",
   "scheduled.edit": "Edit scheduled send",
   "scheduled.localFallback": "Local fallback",
+  "scheduled.persistenceFailed":
+    "Local scheduled-send changes could not be saved; they may not survive restarting the app.",
   "scheduled.localFallbackNotice": "Will send only while this app is running.",
+  "scheduled.panelEmpty": "No scheduled messages",
   "scheduled.save": "Save scheduled send",
   "scheduled.schedule": "Schedule send",
   "scheduled.sendLater": "Send later",
   "scheduled.serverDelayedEvents": "Server scheduled",
+  "scheduled.threadReply": "Thread reply",
   "scheduled.timeInput": "Scheduled send time",
   // #1124: mouse-driven adjustments for the native scheduled-send time field.
   "scheduled.timeEarlierHour": "1 hour earlier",
@@ -2840,7 +3050,6 @@ const en: Catalog = {
   "gate.mismatch": "They do not match",
   "gate.recoverySecret": "Recovery secret",
   "gate.recover": "Recover",
-  "gate.destination": "Recovery key destination",
   "gate.passphrase": "Backup passphrase",
   "gate.bootstrap": "Create secure backup",
   "gate.saved": "I saved the recovery key",
@@ -2868,7 +3077,7 @@ const en: Catalog = {
   "gate.resetForNewDeviceConfirm": "Reset this session's local data and sign in again with a new device ID? This removes the local encrypted store, cached history, and saved credentials on this computer. It does not remove messages from the homeserver. This cannot be undone.",
   "gate.signOut": "Sign out",
   "gate.secureBackupTitle": "Secure backup required",
-  "gate.secureBackupChecking": "Checking secure backup…",
+  "gate.secureBackupChecking": "Checking the backup of your decryption keys on the homeserver…",
   "gate.secureBackupInactive": "Secure backup status is unavailable. Encrypted messaging stays locked until it can be checked.",
   "gate.secureBackupNeedsRecovery": "Recover your existing secure backup to continue.",
   "gate.secureBackupRecoveryKey": "Secure backup recovery key",
@@ -2916,6 +3125,19 @@ const en: Catalog = {
   "gate.secureBackupFailureForbidden": "This account is not allowed to use secure backup.",
   "gate.secureBackupFailureTimeout": "Secure backup took too long to respond.",
   "gate.secureBackupFailureSdk": "Secure backup failed.",
+  "gate.secureBackupFailureServerResponse": "The homeserver reported a problem with secure backup.",
+  "gate.secureBackupFailureUnauthorized": "The homeserver rejected the sign-in for secure backup.",
+  "gate.secureBackupDetailNoResponse": "The homeserver could not be reached, so this secure backup request never received a response.",
+  "gate.secureBackupDetailTimeout": "The homeserver did not answer this secure backup request in time.",
+  "gate.secureBackupDetailHttpStatus": "The homeserver answered this secure backup request with an error (HTTP {status}).",
+  "gate.secureBackupDetailHttpResponse": "The homeserver answered this secure backup request with an error.",
+  "gate.secureBackupDetailLocal": "Secure backup could not be prepared on this device.",
+  "gate.secureBackupActionRetry": "Check your connection, then retry.",
+  "gate.secureBackupActionWaitAndRetry": "Wait a few minutes, then retry.",
+  "gate.secureBackupActionRetryLater": "Try again in a few minutes.",
+  "gate.secureBackupActionSignInAgain": "Sign out and sign in again.",
+  "gate.secureBackupActionContactAdmin": "Ask your homeserver administrator to check secure backup.",
+  "gate.secureBackupActionLocalRetry": "Retry; if it keeps failing, sign out and sign in again.",
   "gate.secureBackupRetry": "Retry secure backup",
   "gate.secureBackupDiagnostics": "Open secure backup diagnostics",
   "gate.secureBackupCommandFailed": "Secure backup action failed. Try again.",
@@ -3024,7 +3246,7 @@ const en: Catalog = {
   "shortcut.noteCallsDeferred": "Calls are out of scope for this milestone.",
   "shortcut.noteGoHomeAdapted": "macOS uses Ctrl+Shift+H in some Matrix clients; this prototype keeps one cross-platform row.",
   "shortcut.noteUploadUiDeferred": "Upload UI is not implemented yet.",
-  "shortcut.openUserSettings": "Account Settings",
+  "shortcut.openAppSettings": "App Settings",
   "shortcut.parityAdapted": "adapted",
   "shortcut.parityDeferred": "deferred",
   "shortcut.parityNotApplicable": "not applicable",
@@ -3262,6 +3484,7 @@ const en: Catalog = {
   "workspace.rooms": "Rooms",
   "workspace.resizeRoomList": "Resize room list",
   "workspace.resizeRightPanel": "Resize right panel",
+  "workspace.scheduledMessages": "Scheduled messages",
   "workspace.search": "Search",
   "workspace.searchEverywhere": "Search everywhere",
   "workspace.searchInRoom": "Search in {roomName}",
@@ -3436,6 +3659,43 @@ const en: Catalog = {
 
 const ja: Catalog = {
   ...en,
+  // #1327: 参加条件の表示語彙。錠前は暗号化だけを意味するため、参加条件は
+  // 専用のアイコンとラベルで示す。
+  "access.public": "公開",
+  "access.inviteOnly": "招待制",
+  "access.conditionsApply": "参加条件有",
+  "access.spaceMembersCanJoin": "Space参加可",
+  "access.canRequest": "参加申請",
+  "access.knockRestrictedLabel": "Space/申請",
+  "access.privateReserved": "非公開",
+  "access.unknown": "不明",
+  "access.checking": "確認中",
+  "access.publicDescription":
+    "公開。誰でも参加できます。メッセージ履歴の閲覧範囲は別の設定です。",
+  "access.inviteOnlyDescription":
+    "招待制。招待された人のみ参加できます。Space のメンバーでも招待が必要です。",
+  "access.inviteOnlyDmDescription": "招待制。招待された人のみ参加できます。",
+  "access.conditionsDescription":
+    "参加条件有。このルームが定めた参加条件を満たす人、または招待された人が参加できます。",
+  "access.spaceMembersCanJoinDescription":
+    "Space 参加可。指定 Space のメンバー、または招待された人が参加できます。Space への参加だけではルームに自動参加しません。",
+  "access.requestDescription":
+    "参加申請。参加を申請でき、メンバーが承認すると参加できます。",
+  "access.knockRestrictedDescription":
+    "Space/申請。このルームが定めた参加条件を満たす人、または参加申請が承認された人が参加できます。",
+  "access.knockRestrictedSpaceDescription":
+    "Space/申請。指定 Space のメンバー、または参加申請が承認された人が参加できます。Space への参加だけではルームに自動参加しません。",
+  "access.privateReservedDescription":
+    "非公開。通常の方法では参加できません。招待があっても参加できない場合があります。",
+  "access.unknownDescription": "不明。この参加条件はこのアプリでは認識できません。",
+  "access.checkingDescription": "確認中。参加条件をまだ取得できていません。",
+  "access.labelSeparator": "、",
+  "access.conditionSummarySeparator": " — ",
+  "access.allowedRooms": "指定: {rooms}",
+  "access.restrictedNoUsableConditionsDescription":
+    "参加条件有。有効な参加条件が設定されていません。招待された人のみ参加できます。",
+  "access.restrictedNoUsableConditionsCanRequestDescription":
+    "Space/申請。有効な参加条件は設定されていませんが、参加申請はできます。",
   "help.title": "Koushiのヘルプ",
   "help.askAi": "このGitHub URLをコピーして、ChatGPTなどのAIにKoushiの使い方を質問してください。利用バージョン、OS、知りたいことを添えてください。",
   "help.copyRepositoryUrl": "GitHub URLをコピー",
@@ -3501,10 +3761,14 @@ const ja: Catalog = {
   "auth.deviceName": "デバイス名",
   "auth.encryptionRecovery": "暗号化リカバリ",
   "auth.failureForbidden": "このアカウントではログイン方法を利用できません",
+  "auth.failureInvalidCredentials": "Matrix ID またはパスワードが正しくありません",
   "auth.failureNetwork": "ホームサーバーに接続できませんでした",
+  "auth.failureRateLimited": "サインインの試行が多すぎます。しばらく待って再試行してください",
   "auth.failureSdk": "ログイン方法を確認できませんでした",
+  "auth.failureStore": "ローカルの暗号化ストアを開けませんでした",
   "auth.failureTimeout": "ログイン方法の確認がタイムアウトしました",
   "auth.failureUnsupported": "対応していないホームサーバーです",
+  "auth.cancelBrowserSignIn": "ブラウザーでのサインインを中止",
   "auth.flowPassword": "パスワード",
   "auth.flowSso": "シングルサインオン",
   "auth.flowUnknown": "不明な方法",
@@ -3514,7 +3778,8 @@ const ja: Catalog = {
   "app.versionMismatch.detail":
     "コンポーネントの同期が取れていないため、このセッションを読み込めませんでした。Koushi を完全に終了してから、もう一度開いてください。",
   "menu.aboutKoushi": "Koushi について",
-  "menu.settings": "設定…",
+  "menu.accountSettings": "アカウント設定…",
+  "menu.appSettings": "アプリ設定…",
   "menu.signOut": "サインアウト",
   "menu.toggleRightPanel": "右パネルを切り替え",
   "menu.koushiHelp": "Koushi ヘルプ",
@@ -3631,6 +3896,7 @@ const ja: Catalog = {
   "window.title": "Koushi（光子・格子）",
   "navigation.failed": "移動に失敗しました。もう一度お試しください。",
   "navigation.failedDismiss": "移動失敗のメッセージを閉じる",
+  "navigation.opening": "メッセージを開いています…",
   "context.editMessage": "編集",
   "context.addToFavourites": "お気に入りに追加",
   "context.addToLowPriority": "低優先度に移動",
@@ -3661,6 +3927,8 @@ const ja: Catalog = {
   "context.openRoomInfo": "ルーム情報",
   "context.openSpaceInfo": "スペース情報",
   "context.openThread": "スレッドで返信",
+  "context.copySelectedText": "選択したテキストをコピー",
+  "context.searchWebForSelectedText": "選択したテキストをDuckDuckGoで検索",
   "context.openUserInfo": "ユーザー情報",
   "context.openUserSettings": "アカウント設定",
   "context.redactMessage": "削除",
@@ -3668,7 +3936,6 @@ const ja: Catalog = {
   "context.removeFromLowPriority": "低優先度から削除",
   "context.searchInRoom": "ルーム内を検索",
   "context.selectRoom": "開く",
-  "context.selectSpace": "スペースを開く",
   "context.switchAccount": "アカウントを切り替え",
   "context.reportContent": "コンテンツを報告",
   "context.reportRoom": "ルームを報告",
@@ -3956,6 +4223,54 @@ const ja: Catalog = {
   "room.directMessage": "ダイレクトメッセージ",
   "room.accessAndHistory": "アクセスと履歴",
   "room.accessAndHistoryHint": "参加ルールは入室できる人を、履歴の表示範囲は見える内容を決めます。両者は独立しています。",
+  "room.accessChooseLabel": "参加できる人を選ぶ",
+  "room.accessChooseHistory": "履歴を読める人を選ぶ",
+  "room.accessDetailsLabel": "この設定の意味",
+  "room.accessDetailsConfirmed": "この内容は保存済みの値を示しています。",
+  "room.accessDetailsUnsaved": "この内容は未保存の変更を示しています。",
+  "room.accessChoiceSpaceMembers": "スペースのメンバー",
+  "room.accessChoiceSpaceMembersPinned": "{space} のメンバー",
+  "room.accessChoicePublicSummary": "アドレスを知っている人は誰でも参加できます。",
+  "room.accessChoiceInviteSummary": "招待された人だけが参加できます。",
+  "room.accessChoiceKnockSummary": "参加をリクエストでき、メンバーが承認します。",
+  "room.accessChoiceSpaceMembersSummary": "選んだスペースのメンバーが参加できます。",
+  "room.accessChoiceConditionsSummary": "このルームは、このアプリでは一つのルールとして編集できない参加条件を使っています。",
+  "room.accessAllowTargets": "メンバーの参加を許可するスペース",
+  "room.accessAllowTargetsHint": "参加を許可するスペースを選びます。添付先のスペースとは独立しています。",
+  "room.accessNoJoinedSpaces": "まだどのスペースにも参加していません。",
+  "room.accessUnavailableUnsupported": "現在の参加条件にこのアプリが扱えない内容が含まれるため、安全に書き換えられません。",
+  "room.accessUnavailableNotInspected": "現在の参加条件を確認できませんでした。",
+  "room.accessUnavailableNotSettable": "このルールはこのアプリから設定できません。",
+  "room.accessRejectionPublicWithRestrictedAccess": "公開ルームをスペースのメンバー限定にすることはできません。",
+  "room.accessRejectionExplicitPolicyWithInvitedOnly": "明示的な参加ルールを選ぶ前に、招待制をオフにしてください。",
+  "room.accessRejectionEmptyAccessTargets": "このルールには少なくとも一つのスペースを選んでください。",
+  "room.accessRejectionPublicWithInvitedOnly": "公開ルームを招待制にすることはできません。",
+  "room.accessRoomVersionPinned": "このルールではルームバージョン 9 でルームが作成されます。",
+  "room.accessOutcomeJoinNotVerified": "参加ルールは未確認",
+  "room.accessOutcomeJoinPublic": "誰でも参加できます",
+  "room.accessOutcomeJoinInvite": "招待制",
+  "room.accessOutcomeJoinPrivate": "プライベート",
+  "room.accessOutcomeJoinKnock": "誰でも参加をリクエストできます",
+  "room.accessOutcomeJoinUnknown": "参加ルールを認識できません",
+  "room.accessOutcomeJoinSpaceMembers": "{space} のメンバーが参加できます",
+  "room.accessOutcomeJoinMembershipRoute": "一覧のルームまたはスペースのメンバーが参加できます",
+  "room.accessOutcomeJoinNoRoute": "参加ルートが定義されていません",
+  "room.accessOutcomeJoinConditionsUnverifiedContent": "参加条件にこのアプリでは確認できない内容が含まれます",
+  "room.accessOutcomeJoinUnsupportedContent": "参加条件にこのアプリが対応していない内容が使われています",
+  "room.accessOutcomeJoinCanRequest": "参加をリクエストできます",
+  "room.accessOutcomeHistoryWorldReadable": "参加前を含め、誰でも履歴を読めます",
+  "room.accessOutcomeHistoryShared": "参加前を含め、メンバーはすべての履歴を読めます",
+  "room.accessOutcomeHistoryInvited": "メンバーは招待された時点以降の履歴を読めます",
+  "room.accessOutcomeHistoryJoined": "メンバーは参加した時点以降の履歴を読めます",
+  "room.accessOutcomeEncrypted": "暗号化",
+  "room.accessOutcomeNotEncrypted": "暗号化なし",
+  "room.accessOutcomeDirectoryPublic": "公開ディレクトリに掲載",
+  "room.accessOutcomeDirectoryPrivate": "ディレクトリに未掲載",
+  "room.accessOutcomeDirectoryUnavailable": "ディレクトリ掲載状況は不明",
+  "room.accessOutcomeDirectoryFailed": "ディレクトリ掲載状況を確認できませんでした",
+  "room.accessOutcomeDirectoryLoading": "ディレクトリ掲載状況を確認中",
+  "room.accessOutcomeDirectoryWillBePublic": "公開ディレクトリに掲載予定",
+  "room.accessOutcomeDirectoryWillBePrivate": "ディレクトリに未掲載予定",
   "room.dmList": "DM一覧",
   "room.editRoles": "ロールを編集",
   "room.editSettings": "設定を編集",
@@ -4014,6 +4329,8 @@ const ja: Catalog = {
   "room.notifyModeMute": "ミュート",
   "room.operationFailed": "操作に失敗しました",
   "room.settingForbidden": "この設定を変更する権限がありません。",
+  "room.settingUnsupportedPolicyCondition": "現在の参加条件にこのアプリが扱えない内容が含まれるため、安全に書き換えられません。",
+  "room.settingPolicyNotVerified": "現在の参加条件を確認できなかったため、変更は行われませんでした。",
   "room.settingNoPermission": "このルームでのあなたの役割では、この設定を変更できません。",
   "room.people": "ユーザー",
   "room.roleAdministrator": "管理者",
@@ -4035,13 +4352,21 @@ const ja: Catalog = {
   "room.repairTimeline": "ルームのタイムラインを修復",
   "room.repairTimelineHint": "既存のメッセージを削除せず、欠けている範囲を検出して修復します。",
   "room.status": "ルーム状態",
-  "room.statusEncrypted": "暗号化済み",
+  "room.statusEncrypted": "暗号化",
+  "room.statusNotEncrypted": "未暗号化",
+  "room.encryptedDescription":
+    "この会話ではエンドツーエンド暗号化が有効です。暗号化されたメッセージを読むには復号鍵が必要です。",
+  "room.notEncryptedDescription":
+    "この会話ではエンドツーエンド暗号化が有効ではありません。",
   "room.statusHistoryLimited": "新規メンバーは履歴を閲覧不可",
   "room.statusHistoryShared": "新規メンバーも履歴を閲覧可",
   "room.statusHistoryWorldReadable": "誰でも履歴を閲覧可",
-  "room.statusNotEncrypted": "未暗号化",
-  "room.statusPrivate": "非公開",
-  "room.statusPublic": "公開",
+  "room.statusHistoryLimitedDescription":
+    "新規メンバーは、参加前のメッセージ履歴を閲覧できません。",
+  "room.statusHistorySharedDescription":
+    "新規メンバーも参加前のメッセージ履歴を閲覧できます。暗号化されたメッセージを読むには復号鍵が必要です。",
+  "room.statusHistoryWorldReadableDescription":
+    "このルームに到達できる人は、メンバーでなくても履歴を閲覧できます。",
   "room.statusShowSetting": "{status}：設定を表示",
   "room.saveAccess": "アクセス設定を保存",
   "room.saveHistoryVisibility": "履歴の表示範囲を保存",
@@ -4174,8 +4499,7 @@ const ja: Catalog = {
   "settings.accounts": "アカウント",
   "settings.appearance": "外観",
   "settings.language": "言語",
-  "settings.languageDefault": "標準（英語）",
-  "settings.languageEnglish": "英語",
+  "settings.languageEnglish": "English",
   "settings.languageJapanese": "日本語",
   "settings.accountSwitcher": "アカウント切り替え",
   "settings.current": "現在",
@@ -4208,7 +4532,7 @@ const ja: Catalog = {
     "ウィンドウを閉じても Koushi をトレイで実行し続けます。終了するにはトレイメニューの終了を使います。",
   "settings.autoUpdate": "アップデートを自動確認",
   "settings.autoUpdateDescription":
-    "Koushiの新しいリリースを通知します。WindowsではReleaseページを開き、macOSでは検証後にダウンロードと再起動を選択できます。",
+    "Koushiの新しいリリースを通知します。",
   "settings.includePrereleases": "プレリリース版を含める",
   "settings.includePrereleasesDescription":
     "-beta.1 や -rc.1 など、SemVerのプレリリース識別子を含むリリースも確認します。",
@@ -4226,6 +4550,9 @@ const ja: Catalog = {
   "settings.updateAvailableTitle": "アップデートがあります",
   "settings.updateAvailableConfirm": "Koushi {version}をダウンロードしてインストールしますか？",
   "settings.updateDownload": "アップデートをダウンロード",
+  "settings.updateIgnore": "このバージョンを無視",
+  "settings.updateIgnored":
+    "Koushiを再起動するまで、このバージョンの自動通知はオフになります。ダウンロードは引き続き可能です。",
   "settings.updateDownloading": "Koushi {version}をダウンロードして検証しています…",
   "settings.updateReady": "Koushi {version}をインストールできます。",
   "settings.updateRestart": "再起動してインストール",
@@ -4426,10 +4753,14 @@ const ja: Catalog = {
   "scheduled.edit": "予約送信を編集",
   "scheduled.localFallback": "ローカルフォールバック",
   "scheduled.localFallbackNotice": "このアプリが起動中のときだけ送信されます。",
+  "scheduled.panelEmpty": "予約メッセージはありません",
+  "scheduled.persistenceFailed":
+    "予約送信の変更をこの端末に保存できませんでした。アプリを再起動すると失われる可能性があります。",
   "scheduled.save": "予約送信を保存",
   "scheduled.schedule": "予約送信",
   "scheduled.sendLater": "あとで送信",
   "scheduled.serverDelayedEvents": "サーバー予約",
+  "scheduled.threadReply": "スレッド返信",
   "scheduled.timeInput": "予約送信日時",
   "scheduled.timeEarlierHour": "1 時間前",
   "scheduled.timeEarlierTenMinutes": "10 分前",
@@ -4521,7 +4852,6 @@ const ja: Catalog = {
   "gate.mismatch": "一致していません",
   "gate.recoverySecret": "リカバリーシークレット",
   "gate.recover": "復旧",
-  "gate.destination": "リカバリーキーの保存先",
   "gate.passphrase": "バックアップ用パスフレーズ",
   "gate.bootstrap": "安全なバックアップを作成",
   "gate.saved": "リカバリーキーを保存しました",
@@ -4547,7 +4877,7 @@ const ja: Catalog = {
   "gate.cleanupCommandFailed": "デバイスのクリーンアップに失敗しました。もう一度お試しください。",
   "gate.signOut": "サインアウト",
   "gate.secureBackupTitle": "安全なバックアップが必要です",
-  "gate.secureBackupChecking": "安全なバックアップを確認中…",
+  "gate.secureBackupChecking": "ホームサーバー上の復号鍵のバックアップを確認中…",
   "gate.secureBackupInactive": "安全なバックアップの状態を確認できません。確認が完了するまで暗号化メッセージはロックされます。",
   "gate.secureBackupNeedsRecovery": "続行するには既存の安全なバックアップを復旧してください。",
   "gate.secureBackupRecoveryKey": "安全なバックアップのリカバリーキー",
@@ -4595,6 +4925,19 @@ const ja: Catalog = {
   "gate.secureBackupFailureForbidden": "このアカウントでは安全なバックアップを使用できません。",
   "gate.secureBackupFailureTimeout": "安全なバックアップの応答がタイムアウトしました。",
   "gate.secureBackupFailureSdk": "安全なバックアップに失敗しました。",
+  "gate.secureBackupFailureServerResponse": "ホームサーバーが安全なバックアップの問題を報告しました。",
+  "gate.secureBackupFailureUnauthorized": "ホームサーバーが安全なバックアップのサインインを拒否しました。",
+  "gate.secureBackupDetailNoResponse": "ホームサーバーに到達できなかったため、この安全なバックアップの要求は応答を受け取りませんでした。",
+  "gate.secureBackupDetailTimeout": "ホームサーバーがこの安全なバックアップの要求に時間内に応答しませんでした。",
+  "gate.secureBackupDetailHttpStatus": "ホームサーバーがこの安全なバックアップの要求にエラーで応答しました（HTTP {status}）。",
+  "gate.secureBackupDetailHttpResponse": "ホームサーバーがこの安全なバックアップの要求にエラーで応答しました。",
+  "gate.secureBackupDetailLocal": "この端末で安全なバックアップを準備できませんでした。",
+  "gate.secureBackupActionRetry": "接続を確認してから再試行してください。",
+  "gate.secureBackupActionWaitAndRetry": "数分待ってから再試行してください。",
+  "gate.secureBackupActionRetryLater": "数分後に再試行してください。",
+  "gate.secureBackupActionSignInAgain": "サインアウトして、もう一度サインインしてください。",
+  "gate.secureBackupActionContactAdmin": "ホームサーバーの管理者に安全なバックアップの確認を依頼してください。",
+  "gate.secureBackupActionLocalRetry": "再試行してください。失敗が続く場合は、サインアウトして再度サインインしてください。",
   "gate.secureBackupRetry": "安全なバックアップを再試行",
   "gate.secureBackupDiagnostics": "安全なバックアップの診断を開く",
   "gate.secureBackupCommandFailed": "安全なバックアップの操作に失敗しました。もう一度お試しください。",
@@ -4703,7 +5046,7 @@ const ja: Catalog = {
   "shortcut.noteCallsDeferred": "通話はこのマイルストーンの範囲外です。",
   "shortcut.noteGoHomeAdapted": "一部のMatrixクライアントのmacOS版ではCtrl+Shift+Hですが、この試作ではクロスプラットフォームの1行に統一しています。",
   "shortcut.noteUploadUiDeferred": "アップロードUIはまだ実装されていません。",
-  "shortcut.openUserSettings": "アカウント設定",
+  "shortcut.openAppSettings": "アプリ設定",
   "shortcut.parityAdapted": "調整済み",
   "shortcut.parityDeferred": "延期",
   "shortcut.parityNotApplicable": "対象外",
@@ -4937,6 +5280,7 @@ const ja: Catalog = {
   "workspace.rooms": "ルーム",
   "workspace.resizeRoomList": "ルームリストの幅を変更",
   "workspace.resizeRightPanel": "右パネルの幅を変更",
+  "workspace.scheduledMessages": "予約メッセージ",
   "workspace.search": "検索",
   "workspace.searchEverywhere": "すべてを検索",
   "workspace.searchInRoom": "{roomName}内を検索",

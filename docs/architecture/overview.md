@@ -215,6 +215,12 @@ Crate responsibilities:
   browser handoff, but access tokens, refresh tokens, PKCE verifiers, raw OAuth
   errors, and provider callback details never enter reducer state or normal
   diagnostics.
+  The delegated start selection is the user's bounded method (OAuth or legacy
+  SSO). OAuth falls back to legacy SSO only for the classified
+  unsupported-method condition; every other start failure crosses the boundary
+  as a bounded `AuthFailureDetail` (method, stage, transport, HTTP status,
+  allowlisted Matrix error kind, retryable), so Core and the UI never classify
+  by error text (#1267, #1268).
   E2EE key-backup restore wrappers consume recovery secrets internally and
   return private-data-free restore summaries whose scope is explicitly
   `JoinedRooms`; they do not expose SDK backup keys, room keys, or raw backup
@@ -256,8 +262,9 @@ Crate responsibilities:
 - `koushi-key` — platform-neutral credential-store port, key derivation (HKDF
   from the local unlock secret), and zeroizing secret wrappers. The OS keyring
   backend lives in Tauri.
-- `koushi-search` — candidate verification, document store, index
-  maintenance queue.
+- `koushi-search` — pure candidate verification for the persistent ngram
+  index, attachment metadata for the Files view, and the index maintenance
+  queue.
 - `koushi-media` — pure image decode-limit, resize/format, encoding and byte-kind
   classification helpers. Core owns media/cache lifecycle and state projection;
   adapters own platform delivery.
@@ -330,7 +337,10 @@ It adds no `AppState`, `AppAction`, reducer or reducer transition and does not y
 remove the watch or complete the full scoped-publication migration. Room-local
 live-signal metadata changes use the `live_signals_rooms` state-delta slice,
 while receipt-only changes use nested `live_signals_receipts_by_room_event`
-replacements so moving one receipt does not clone other events in that room.
+replacements (main scope) plus its `live_signals_focused_receipts_by_room_event`
+and `live_signals_thread_receipts_by_room_event` siblings for the focused and
+thread scopes, so moving one receipt does not clone other events in that room
+and the scopes are never merged together.
 Room additions/removals and typing/fully-read metadata retain the full room
 fallback; account-level presence changes use `live_signals_presence_by_user`.
 All replacement maps carry explicit removals. The frontend merges these slices
@@ -373,6 +383,23 @@ lookup and prepared-send admission/correlation. Tauri handlers only deserialize
 inputs, convert opaque composer tokens, call these Core methods, and serialize
 the settled published generation or preview bytes; they contain no batch, MIME,
 preparation, selection-generation, registry-merge, replacement, or send policy.
+
+The preview byte lookup is deliberately separate from the upload payload (#1147).
+`MediaPreparationRegistry::variant_bytes` stays the exact bytes the send path
+uploads — for an Original+Keep HEIF selection that is the untouched source —
+while `variant_preview_bytes` returns what the WebView may render and resolves an
+Original+Keep HEIF selection to the converted variant the same item already
+caches. An Original+Keep selection therefore previews `image/jpeg`-class bytes
+while its descriptor keeps the original filename, byte count and dimensions.
+
+A lazily selected pair whose encode fails settles instead of staying pending
+(#1147): `encode_output` returns the typed `MediaPreparationFailureKind`, and
+`MediaStagingService` publishes `StagedUploadPreparation::Failed` with
+`can_use_original` taken from the retained source. Because a cached re-selection
+clears `pending` without advancing the generation, the failure is published only
+while the current item still has the captured generation, the same `selected`,
+and that pair as `pending`; any other state is `Stale`. The two recovery actions —
+retry, and use-original which carries the caption over — work from `Failed`.
 
 ### Core-owned composer transport identities (Phase D, issue #755)
 
@@ -432,8 +459,8 @@ rewriting the runtime.
    adapters.** OS credential store (`keyring`), filesystem paths, SQLite
    store config, media-save filesystem operations, history export folders,
    and process/OS APIs appear only behind traits with platform backends
-   (today: OS keychain + SQLite, the native media-save port, and the native
-   `HistoryExportFilesystem`; browser later: WebCrypto-derived keys +
+   (today: OS keychain + SQLite, the native media-save port, the native
+   `HistoryExportFilesystem`, and the optional `NativeStillImageDecoder`; browser later: WebCrypto-derived keys +
    IndexedDB). `koushi-store` may implement native credential/encrypted-file
    mechanics behind those ports, but `StoreActor` is the only actor allowed
    platform-conditional policy and remains the account/path/key/migration
@@ -696,9 +723,11 @@ Each account remains an in-process actor system in `koushi-core`:
   current `SyncService` builder in the vendored SDK has no direct presence
   setter. Do not move presence semantics into React while that SDK/API decision
   remains open.
-- `SearchActor` — ngram candidates, canonical-text verification,
-  document-level index mutations for edits/redactions/late decryptions, and
-  Element-style background history crawling. Historical `/messages` requests
+- `SearchActor` — literal, offset-free paging over the persistent ngram index,
+  cache-only resolution of each candidate's current content for
+  canonical-text verification, attachment-metadata maintenance for the Files
+  view, and Element-style background history crawling. Historical `/messages`
+  requests
   are account-wide backpressured: `TimelineActor` pagination and
   `SearchActor` crawler pages share one gate per account, and user-visible
   timeline pagination has priority over background crawler work.
@@ -757,6 +786,25 @@ plaintext thumbnail directories remain cleanup-only. After Rust resolves scoped
 visibility observations into avatar resources, `AccountActor` owns single-flight deduplication, bounded
 concurrency, two network attempts, terminal Ready/Failed caching and session-
 generation teardown; React owns no retry classifier or attempt counter.
+
+**Native still-image decoding (#1147).** HEIF/HEIC sources are recognized from
+content, never from the declared MIME or extension. An adapter may inject a
+`NativeStillImageDecoder` into the runtime (`AccountRuntimeManager::new_with_native_image_decoder`);
+the desktop adapter injects an ImageIO/Core Graphics decoder on macOS only.
+When one is injected, Core uses it for the initial HEIF preparation and every
+lazily selected Resize/Format output, on the same preparation worker and under
+the same revalidation fences. It returns owned SDR sRGB straight-alpha RGBA8
+pixels with orientation applied, or a typed `Unsupported`, `Unavailable`,
+`Malformed`, or `TooLarge` category; it never returns native handles, and it
+checks `koushi_media::DecodeLimits` before allocating pixels. A failed native
+decode becomes the existing Failed/original-file fallback and is not retried
+with the pure decoder. Without an injected decoder (Windows, Linux) the pure
+`heif-oxide` path, including its HDR and gain-map rejection, is unchanged. The
+unscaled Original+Keep output stays the exact source bytes either way. The
+macOS decoder resolves the macOS 14 SDR decode request at run time and reports
+`Unsupported` for gain-map or PQ/HLG sources on macOS 12 and 13, where that
+request does not exist. Diagnostics record the fixed backend, detected type,
+outcome category, and elapsed time only.
 
 **Prepared-upload retention invariant.** `MediaPreparationService` owns staged
 upload source bytes for the lifetime of the corresponding composer item.
@@ -946,6 +994,24 @@ identity, sender/body/timestamp fields, `in_reply_to_event_id`,
 `ThreadSummaryDto` contains `reply_count`, `latest_sender`,
 `latest_body_preview`, and `latest_timestamp_ms`; the `latest_*` fields are
 `None` when the SDK has not loaded the latest event details.
+
+`ThreadSummaryDto.unread_count` is the SDK thread cache's own unread value for that
+root, projected by Core for the room-timeline chip: it is not derived from the
+bundled summary. The same per-root cache value is mirrored into Rust state as
+`RoomSummary.thread_unread_count`, which feeds the shared badge helper below.
+
+Thread summaries describe aggregate presentation state, not complete per-thread
+unread state. Capability advertisement and room-badge changes do not prove
+thread-event delivery. The non-overlapping decomposition that lets a thread
+contribution join a room badge is proven at the SDK event-cache boundary: the room
+cache's `RoomReadReceiptEventFilter` excludes thread replies while each thread
+cache's `ThreadReadReceiptEventFilter` counts exactly one thread's replies, so the
+client counters partition into `unread_count` (main timeline, also the navigation
+value) plus `thread_unread_count` (threads). A homeserver's own room counters may
+already include thread replies, so the server `notification_count` is max'd in,
+never summed: the badge is
+`max(unread_count + thread_unread_count, notification_count, highlight_count +
+thread_highlight_count)`.
 
 A session-scoped Core thread-summary projection reconciles SDK/event-cache
 aggregates with accepted live reply activity once per `(room_id,
@@ -1255,7 +1321,8 @@ the macOS updater signing secret.
 
 When automatic checks are enabled, the adapter checks after startup and at most
 once per 24-hour interval, and checks once when the setting changes from off to
-on. A manual check is available directly from **Koushi → Check for Updates…**
+on, unless an undownloaded candidate is already presented, which it preserves
+rather than discarding. A manual check is available directly from **Koushi → Check for Updates…**
 regardless of `auto_check`, including before sign-in. It opens one application-level
 update dialog, separate from account settings and contextual panes. That same
 dialog shows automatic discoveries, update policy controls, and explicit download
@@ -1271,6 +1338,25 @@ becomes `ready`; installation and relaunch occur only after an explicit user
 action so in-progress composer work is not discarded. Public failure state is coarse and never includes response
 bodies, release URLs, local paths, signatures, key material, or raw library
 errors.
+
+An existing, undownloaded `available` candidate never freezes discovery: the
+next manual or scheduled check queries the feeds again and replaces the offer
+with the newest eligible release. Replacing an offer advances the candidate
+generation and clears its pending artifact, so a stale dialog cannot authorize
+the replacement. A refresh that fails with a transient feed/network error
+instead retains the previous offer, keeps it downloadable under the refreshed
+generation, and reports the failure through the candidate's `check_failed`
+flag; an eligible feed response that legitimately carries no release withdraws
+the retained offer. Closing the dialog, pressing Escape, choosing deferral, or
+leaving the offer unanswered is temporary dismissal, not a decision: the next
+fresh offer generation presents it again. The only explicit opt-out is
+**Ignore this version**, which records that exact version for the rest of the
+process and suppresses its automatic reminders while background checks
+continue; a newer eligible release is still announced, and a manual check
+still reports the ignored version. An ignore request is honored only for the
+version currently offered, so a stale request cannot overwrite the live
+decision. The `available` projection carries the `ignored` and `check_failed`
+flags for the renderer.
 
 The updater separates a platform-neutral engine from install backends. The
 engine (`app_updates.rs`: projection, policy watermarks, lifecycle transitions,
@@ -1507,9 +1593,18 @@ or `(room, thread-root)` target carries a monotonic causal draft revision.
 `ComposerDraftRevision` is a checked `u128` in Rust and an opaque canonical
 decimal string on every snapshot, Tauri, and IPC boundary. JavaScript
 `number` conversion, wrapping, and saturation are forbidden.
-Draft writes apply only above the stored revision. An accepted plain/reply
-send, scheduled send, or prepared-upload send advances and persists an
-empty-draft revision tombstone when the accepted submission is still current.
+Draft writes apply only above the stored revision. An accepted plain or reply
+send, or a scheduled send, advances and persists an empty-draft revision
+tombstone when the accepted submission is still current. A prepared-upload
+(staged-attachment) send settles the same revision, LRU, and tombstone accounting
+without consuming the store entry, so text typed before pasting an attachment
+survives the send (#1130; state-machine.md and state-ownership.md describe the
+same contract). The matching seed goes the other way: a single attachment staged
+into a target that had none starts with the captured composer document as its
+caption (#1194), so text and file go out as one message without the user copying
+it by hand. When that caption is still the submitted draft text and it is the only
+attachment, the accepted send consumes the draft with the ordinary clear (#1204);
+any other prepared send keeps the text.
 If newer input was already persisted, acceptance preserves that content while
 rolling it forward to the advanced revision. Delayed pre-acceptance commands,
 responses, or projections therefore cannot restore sent content or erase the
@@ -1574,7 +1669,15 @@ fails on real accounts:
   `ACTOR_MESSAGE_QUEUE_CAPACITY`
 - AppActor action-projection inbox (actors project `Vec<AppAction>` here at high
   volume during sync): `ACTION_QUEUE_CAPACITY`
-- discrete core events per consumer: `EVENT_QUEUE_CAPACITY`
+- discrete core events per consumer: `EVENT_QUEUE_CAPACITY`, whose per-account
+  ring allocation (capacity, rounded up to a power of two, times the slot size
+  plus a documented per-slot overhead) is held under
+  `EVENT_QUEUE_SLOT_BUDGET_BYTES` by a compile-time assertion. Large event
+  payloads stay boxed out of the inline `CoreEvent` representation so one slot
+  never inherits a whole `StateDelta` (#1150, 1-5 MiB/account slot budget for
+  event buffering). Retained heap payloads beyond those slots are NOT yet
+  byte-budgeted; a lagging consumer can still hold boxed payloads, and bounding
+  them is an open follow-up on #1150.
 - timeline diff batches per subscribed timeline: 128
 - search index mutation queue: 512
 
@@ -1811,6 +1914,18 @@ architectural invariants:
   canonical visible text and indexing the replacement text, a redaction removes
   only the redacted document from the searchable corpus, and an unresolved
   replacement event is not indexed as a standalone message.
+  Files metadata retains no historical message bodies or edit text. Its sole
+  mutation owner, SearchActor, admits attachment-affecting updates and Files
+  reads against explicit SDK cache redactions, including redactions whose
+  targets are not loaded. An older timeline observation is not redaction proof.
+  Missing/UTD focused or bundled events are unknown, not invalid. Known cached
+  replacements use the SDK's complete validity rules (including encrypted-root
+  protection), scoped per target before pending-edit consumption. Ordinary
+  sender/room/type and edit-order guards still apply when cache coverage is absent.
+  Body-free text provenance survives media retirement and queued-root admission. Search and Files requests carry the account's
+  submission policy rather than waiting for deferred crawler notifications.
+  Content and relation lookup errors preserve body-free retry state and fail the
+  Files request rather than deleting rows or publishing unchecked content.
 - **Device verification, cross-signing, key backup, and identity reset** are
   release-blocking E2EE trust work. Issue #13 Phase A establishes the
   Rust-owned reducer state and typed `CoreCommand`/`CoreEvent` surface.

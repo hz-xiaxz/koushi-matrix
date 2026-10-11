@@ -65,6 +65,14 @@ describe("TauriDesktopApi", () => {
     expect(invoke).toHaveBeenCalledWith("check_for_desktop_update");
   });
 
+  test("ignores an exact desktop update version on request", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+
+    await new TauriDesktopApi().ignoreDesktopUpdate("1.2.4");
+
+    expect(invoke).toHaveBeenCalledWith("ignore_desktop_update", { version: "1.2.4" });
+  });
+
   test("uses distinct state-only and state-plus-timeline resync commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
@@ -93,6 +101,23 @@ describe("TauriDesktopApi", () => {
     });
   });
 
+  test("passes the captured scheduled-sends scope to Rust and closes it by request", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+
+    const api = new TauriDesktopApi();
+    await api.openScheduledSendsList({ kind: "space", space_id: "!space:example.invalid" });
+    await api.openScheduledSendsList({ kind: "home" });
+    await api.closeScheduledSendsList();
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "open_scheduled_sends_list", {
+      scope: { kind: "space", space_id: "!space:example.invalid" }
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "open_scheduled_sends_list", {
+      scope: { kind: "home" }
+    });
+    expect(invoke).toHaveBeenNthCalledWith(3, "close_scheduled_sends_list");
+  });
+
   test("discovers login methods through typed Tauri command", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
@@ -119,14 +144,15 @@ describe("TauriDesktopApi", () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
     const api = new TauriDesktopApi();
-    await api.startOidcLogin("https://example.test");
+    await api.startOidcLogin("https://example.test", "oauth");
     await api.completeOidcLogin(
       "https://example.test",
       "koushi-desktop://auth/callback?code=synthetic"
     );
 
     expect(invoke).toHaveBeenCalledWith("start_oidc_login", {
-      homeserver: "https://example.test"
+      homeserver: "https://example.test",
+      method: "oauth"
     });
     expect(invoke).toHaveBeenCalledWith("complete_oidc_login", {
       homeserver: "https://example.test",
@@ -139,15 +165,16 @@ describe("TauriDesktopApi", () => {
     setRendererSelectedAccountTabId("add:2");
 
     const api = new TauriDesktopApi().forAccountTab("add:2");
-    await api.startOidcLogin("https://example.test");
+    await api.startOidcLogin("https://example.test", "oauth");
 
     expect(invoke).toHaveBeenCalledWith("start_oidc_login", {
       homeserver: "https://example.test",
+      method: "oauth",
       accountTabId: "add:2"
     });
 
     setRendererSelectedAccountTabId("account:other");
-    await expect(api.startOidcLogin("https://example.test")).rejects.toThrow(
+    await expect(api.startOidcLogin("https://example.test", "oauth")).rejects.toThrow(
       "account tab is no longer selected"
     );
     expect(invoke).toHaveBeenCalledTimes(1);
@@ -512,6 +539,8 @@ describe("TauriDesktopApi", () => {
     const api = new TauriDesktopApi();
     await api.exportRoomKeys("/tmp/export.txt", "room-key-passphrase");
     await api.importRoomKeys("/tmp/import.txt", "room-key-passphrase");
+    await api.chooseRoomKeyExportDestination("Room key export");
+    await api.chooseRoomKeyImportSource("Room key import");
     await api.bootstrapSecureBackup("secure-backup-passphrase", { kind: "initialSetup" });
     await api.changeSecureBackupPassphrase(
       "old-secure-backup-passphrase",
@@ -520,6 +549,13 @@ describe("TauriDesktopApi", () => {
     await api.saveSecureBackupRecoveryKey(41, "/tmp/recovery.txt");
     await api.confirmSecureBackupRecoveryKeySaved(41);
 
+    // The adapter owns the room-key file dialogs (debug QA can answer them).
+    expect(invoke).toHaveBeenCalledWith("choose_room_key_export_destination", {
+      dialogTitle: "Room key export"
+    });
+    expect(invoke).toHaveBeenCalledWith("choose_room_key_import_source", {
+      dialogTitle: "Room key import"
+    });
     expect(invoke).toHaveBeenCalledWith("export_room_keys", {
       destinationPath: "/tmp/export.txt",
       passphrase: "room-key-passphrase"

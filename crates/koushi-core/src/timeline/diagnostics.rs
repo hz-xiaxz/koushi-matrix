@@ -219,6 +219,7 @@ pub(super) fn decrypt_retry_backup_result_for_error(
         | koushi_sdk::E2eeTrustError::SecureBackupReenableConfirmationRequired
         | koushi_sdk::E2eeTrustError::SecureBackupUploadFailed
         | koushi_sdk::E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed
+        | koushi_sdk::E2eeTrustError::SecureBackupInspection(_)
         | koushi_sdk::E2eeTrustError::Sdk(_) => DecryptRetryBackupResult::Sdk,
     }
 }
@@ -1769,6 +1770,15 @@ fn event_cache_item_diagnostic_event(
         event_id_present,
     ))
     .field(DiagnosticField::boolean("sender_present", sender_present))
+    .field(DiagnosticField::boolean(
+        "redaction_event",
+        item.raw()
+            .get_field::<String>("type")
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("m.room.redaction"),
+    ))
     .field(DiagnosticField::boolean(
         "redacted",
         item.raw()

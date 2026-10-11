@@ -749,6 +749,8 @@ fn test_room(room_id: &str, display_name: &str, activity_timestamp_ms: u64) -> R
         unread_count: 0,
         notification_count: 0,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: Some(activity_timestamp_ms),
         conversation_activity: Some(koushi_state::ConversationActivity {
@@ -787,6 +789,7 @@ fn settings_loaded_recomputes_room_list_projection_and_sorts_open_threads() {
                     latest_body_preview: None,
                     latest_timestamp_ms: Some(200),
                     reply_count: 0,
+                    unread_count: 0,
                 },
                 koushi_state::ThreadsListItem {
                     room_id: "room-a".to_owned(),
@@ -801,6 +804,7 @@ fn settings_loaded_recomputes_room_list_projection_and_sorts_open_threads() {
                     latest_body_preview: None,
                     latest_timestamp_ms: Some(100),
                     reply_count: 0,
+                    unread_count: 0,
                 },
             ],
             is_paginating: false,
@@ -874,6 +878,7 @@ fn settings_update_recomputes_room_list_projection_and_resorts_open_threads() {
                     latest_body_preview: None,
                     latest_timestamp_ms: Some(200),
                     reply_count: 0,
+                    unread_count: 0,
                 },
                 koushi_state::ThreadsListItem {
                     room_id: "room-a".to_owned(),
@@ -888,6 +893,7 @@ fn settings_update_recomputes_room_list_projection_and_resorts_open_threads() {
                     latest_body_preview: None,
                     latest_timestamp_ms: Some(100),
                     reply_count: 0,
+                    unread_count: 0,
                 },
             ],
             is_paginating: false,

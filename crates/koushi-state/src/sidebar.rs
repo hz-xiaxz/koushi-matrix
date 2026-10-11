@@ -1,12 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
 use crate::state::{
-    AppState, AvatarImage, InvitePreview, RoomListSort, RoomNotificationMode,
-    RoomNotificationSettings, RoomSummary, RoomTags, SidebarScopeSettings, SpaceChildMembership,
-    SpaceChildSummary, SpaceChildrenState, SpaceLocalPresentations, SpaceSummary,
-    compare_conversation_activity, room_activity_unread_count, room_attention_projection,
+    AppState, AvatarImage, InvitePreview, RestrictedConditions, RoomAccessCondition, RoomJoinRule,
+    RoomListSort, RoomNotificationMode, RoomNotificationSettings, RoomSummary, RoomTags,
+    SidebarScopeSettings, SpaceChildMembership, SpaceChildSummary, SpaceChildrenState,
+    SpaceLocalPresentations, SpaceSummary, compare_conversation_activity,
+    room_activity_unread_count, room_attention_projection,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -86,6 +87,26 @@ pub struct SpaceRailItem {
     pub unread_count: u64,
     pub highlight_count: u64,
     pub is_active: bool,
+    /// The Space's own authoritative access condition (#1166), from the same
+    /// projected slice the room rows use. `None` means it has not been projected
+    /// yet, never a guessed rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_join_rule: Option<RoomJoinRule>,
+    /// Restricted-rule allow-condition facts; `None` when the rule is not
+    /// restricted or has not been projected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_restricted_conditions: Option<RestrictedConditions>,
+    /// Display labels of the rooms/Spaces a restricted rule names, resolved from
+    /// the projected room list (#1166). An entry with no label is omitted rather
+    /// than guessed at or exposed by id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub access_allowed_room_names: Vec<String>,
+    /// The verified single-Space membership route (#1220): `Some(name)` only
+    /// when the rule names exactly one distinct target, the target's create
+    /// event proves it is a Space, and its name resolves. This is the one fact
+    /// that lets the people-facing surface say the specific sentence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_space_members_route: Option<String>,
     /// The joined child rooms the Space-leave confirmation offers to leave
     /// with this Space.
     #[serde(default)]
@@ -104,6 +125,26 @@ pub struct RoomListItem {
     /// not-joined lane is the only producer of a true.
     #[serde(default)]
     pub can_join: bool,
+    /// The room's authoritative access condition (#1166), from its own
+    /// `m.room.join_rules`. `None` means it has not been projected yet, never a
+    /// guessed rule; it is independent of encryption, DM status, the viewer's
+    /// membership and `can_join`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_join_rule: Option<RoomJoinRule>,
+    /// Whether a restricted rule has a usable allow condition (#1166). `None`
+    /// when the room's rule is not restricted or has not been projected, so a
+    /// reader never claims anything it did not inspect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_restricted_conditions: Option<RestrictedConditions>,
+    /// Display labels of the rooms/Spaces a restricted rule names, resolved from
+    /// the projected room list (#1166). An entry with no label is omitted rather
+    /// than guessed at or exposed by id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub access_allowed_room_names: Vec<String>,
+    /// The verified single-Space membership route (#1220), or `None` for every
+    /// other restricted shape. See [`SpaceRailItem::access_space_members_route`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_space_members_route: Option<String>,
     pub display_name: String,
     /// Mirrors `RoomSummary.display_label_placeholder` for `display_name`
     /// (#1050): the GUI renders it through the message catalog.
@@ -159,6 +200,8 @@ pub fn compose_sidebar_with_account_facts(
         &SpaceLocalPresentations::default(),
         &SpaceChildrenState::default(),
         &[],
+        // No projected access conditions without room-list state (#1166).
+        &BTreeMap::new(),
     )
 }
 
@@ -179,6 +222,7 @@ pub fn compose_sidebar_for_state(state: &AppState) -> SidebarModel {
         &state.navigation.space_local_presentations,
         &state.space_children,
         &state.invites,
+        &state.room_access,
     );
     let preferred_positions: HashMap<&str, usize> = state
         .navigation
@@ -214,16 +258,31 @@ fn compose_sidebar_with_preferences(
     local_presentations: &SpaceLocalPresentations,
     space_children: &SpaceChildrenState,
     invites: &[InvitePreview],
+    // #1166: the projected per-room access conditions; empty means not yet known.
+    room_access: &BTreeMap<String, RoomAccessCondition>,
 ) -> SidebarModel {
     let rooms_by_id: HashMap<&str, &RoomSummary> = rooms
         .iter()
         .map(|room| (room.room_id.as_str(), room))
+        .collect();
+    // #1166: restricted-rule entries are resolved to the labels this projection
+    // already carries; an id without a label here is omitted, never guessed at.
+    let access_names_by_room: HashMap<&str, &str> = rooms
+        .iter()
+        .map(|room| (room.room_id.as_str(), room.display_label.as_str()))
+        .chain(
+            spaces
+                .iter()
+                .map(|space| (space.space_id.as_str(), space.display_name.as_str())),
+        )
         .collect();
 
     let space_rail = spaces
         .iter()
         .map(|space| {
             let local = local_presentations.0.get(&space.space_id);
+            let (access_allowed_room_names, access_space_members_route) =
+                access_allow_names(room_access.get(&space.space_id), &access_names_by_room);
             SpaceRailItem {
                 space_id: space.space_id.clone(),
                 display_name: local
@@ -239,6 +298,14 @@ fn compose_sidebar_with_preferences(
                     room_notification_settings,
                 ),
                 is_active: active_space_id == Some(space.space_id.as_str()),
+                access_join_rule: room_access
+                    .get(&space.space_id)
+                    .and_then(|condition| condition.join_rule),
+                access_restricted_conditions: room_access
+                    .get(&space.space_id)
+                    .and_then(|condition| condition.restricted),
+                access_allowed_room_names,
+                access_space_members_route,
                 leave_candidates: crate::space_leave::space_leave_candidates(
                     space,
                     spaces,
@@ -248,21 +315,14 @@ fn compose_sidebar_with_preferences(
         })
         .collect();
 
-    let home_unread_count: u64 = rooms
-        .iter()
-        .filter(|room| contributes_attention(room, room_notification_settings))
-        .map(room_activity_unread_count)
-        .sum();
+    let account_attention =
+        account_attention_summary(rooms, room_notification_settings, pending_invite_count);
     let account_home = AccountHomeItem {
         display_name: "Home".to_owned(),
-        unread_count: home_unread_count,
-        highlight_count: rooms
-            .iter()
-            .filter(|room| contributes_attention(room, room_notification_settings))
-            .map(|room| room.highlight_count)
-            .sum(),
-        invite_count: pending_invite_count,
-        attention_count: home_unread_count + pending_invite_count,
+        unread_count: account_attention.unread_count,
+        highlight_count: account_attention.highlight_count,
+        invite_count: account_attention.invite_count,
+        attention_count: account_attention.attention_count,
         is_active: active_space_id.is_none(),
     };
 
@@ -284,7 +344,14 @@ fn compose_sidebar_with_preferences(
     );
     let space_rooms: Vec<_> = space_room_summaries
         .iter()
-        .map(|room| room_list_item(room, room_notification_settings))
+        .map(|room| {
+            room_list_item(
+                room,
+                room_notification_settings,
+                room_access,
+                &access_names_by_room,
+            )
+        })
         .collect();
 
     // Issue #961: the Space's advertised children the account is not in. The
@@ -342,7 +409,14 @@ fn compose_sidebar_with_preferences(
     );
     let global_dms: Vec<_> = global_dm_summaries
         .iter()
-        .map(|room| room_list_item(room, room_notification_settings))
+        .map(|room| {
+            room_list_item(
+                room,
+                room_notification_settings,
+                room_access,
+                &access_names_by_room,
+            )
+        })
         .collect();
     // Low priority spans both scope lists and is shown once, in the Rooms
     // order, so a low-priority DM and room interleave by the same comparator.
@@ -376,7 +450,14 @@ fn compose_sidebar_with_preferences(
             .collect(),
         low_priority: low_priority_summaries
             .into_iter()
-            .map(|room| room_list_item(room, room_notification_settings))
+            .map(|room| {
+                room_list_item(
+                    room,
+                    room_notification_settings,
+                    room_access,
+                    &access_names_by_room,
+                )
+            })
             .collect(),
         not_joined: not_joined_space_rooms.clone(),
     };
@@ -482,6 +563,11 @@ fn not_joined_room_list_item(
         // Accepting an invitation this account holds is always available; for
         // everything else the server's join rule decides.
         can_join: invited || child.can_join,
+        // #1166: the not-joined lane projects no access condition yet.
+        access_join_rule: None,
+        access_restricted_conditions: None,
+        access_allowed_room_names: Vec::new(),
+        access_space_members_route: None,
         display_name: child.display_name.clone(),
         avatar: child.avatar.clone(),
         tags: RoomTags::default(),
@@ -523,16 +609,28 @@ fn space_child_is_visible(child: &SpaceChildSummary, invited_room_ids: &HashSet<
 fn room_list_item(
     room: &RoomSummary,
     room_notification_settings: &HashMap<String, RoomNotificationSettings>,
+    room_access: &BTreeMap<String, RoomAccessCondition>,
+    access_names_by_room: &HashMap<&str, &str>,
 ) -> RoomListItem {
     let mode = room_notification_settings
         .get(&room.room_id)
         .map(|settings| settings.mode);
     let projection = room_attention_projection(room, mode);
+    let (access_allowed_room_names, access_space_members_route) =
+        access_allow_names(room_access.get(&room.room_id), access_names_by_room);
     RoomListItem {
         display_name_placeholder: room.display_label_placeholder.clone(),
         room_id: room.room_id.clone(),
         membership: SpaceChildMembership::Joined,
         can_join: false,
+        access_join_rule: room_access
+            .get(&room.room_id)
+            .and_then(|condition| condition.join_rule),
+        access_restricted_conditions: room_access
+            .get(&room.room_id)
+            .and_then(|condition| condition.restricted),
+        access_allowed_room_names,
+        access_space_members_route,
         display_name: room.display_label.clone(),
         avatar: room.avatar.clone(),
         tags: room.tags.clone(),
@@ -545,6 +643,47 @@ fn room_list_item(
         has_unread_mention: projection.has_unread_mention,
         is_muted: projection.is_muted,
     }
+}
+
+/// Display labels for a restricted rule's named membership routes (#1166) and
+/// the verified single-Space route (#1220).
+///
+/// Only ids this projection can name become text: an unknown, invisible or
+/// id-shaped entry stays out rather than being guessed at or shown as a raw id.
+/// The specific Space route additionally requires exactly one distinct target
+/// whose create event proved it a Space, so an ordinary-room target, several
+/// targets or an unknown type never claims it.
+fn access_allow_names(
+    condition: Option<&RoomAccessCondition>,
+    names_by_room: &HashMap<&str, &str>,
+) -> (Vec<String>, Option<String>) {
+    let Some(condition) = condition else {
+        return (Vec::new(), None);
+    };
+    let resolved = |target: &crate::state::RoomAllowTarget| -> Option<&str> {
+        let name = *names_by_room.get(target.room_id.as_str())?;
+        let name = name.trim();
+        if name.is_empty() || name == target.room_id {
+            None
+        } else {
+            Some(name)
+        }
+    };
+    let names = condition
+        .allow_targets
+        .iter()
+        .filter_map(|target| resolved(target).map(str::to_owned))
+        .collect();
+    let space_members_route = match condition.restricted {
+        Some(RestrictedConditions::MembershipOnly) if condition.allow_targets.len() == 1 => {
+            let target = &condition.allow_targets[0];
+            (target.kind == crate::state::RoomAllowTargetKind::Space)
+                .then(|| resolved(target).map(str::to_owned))
+                .flatten()
+        }
+        _ => None,
+    };
+    (names, space_members_route)
 }
 
 fn unread_count(
@@ -573,12 +712,58 @@ fn highlight_count(
 ///
 /// Muted and low-priority conversations keep their own raw counts but never
 /// contribute to an aggregate badge (state-machine.md, "Sidebar Sections And
-/// Low Priority").
+/// Low Priority"). The room's notification mode is not an aggregate exclusion:
+/// a Mentions-only room keeps contributing its raw unread, exactly as before
+/// #1219.
 fn contributes_attention(
     room: &RoomSummary,
     room_notification_settings: &HashMap<String, RoomNotificationSettings>,
 ) -> bool {
     room.tags.low_priority.is_none() && !room_is_muted(&room.room_id, room_notification_settings)
+}
+
+/// One Rust-owned per-account attention policy (#1219).
+///
+/// The account tab badge and that account's Home aggregate read this same
+/// value, so this account's Home aggregate and its tab badge cannot disagree.
+/// `unread_count` is the sum of [`room_activity_unread_count`] over the rooms
+/// that [`contributes_attention`]; pending invites are counted separately and
+/// added into `attention_count`, which is the badge both surfaces render.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AccountAttentionSummary {
+    pub unread_count: u64,
+    pub highlight_count: u64,
+    pub invite_count: u64,
+    pub attention_count: u64,
+}
+
+pub fn account_attention_summary(
+    rooms: &[RoomSummary],
+    room_notification_settings: &HashMap<String, RoomNotificationSettings>,
+    pending_invite_count: u64,
+) -> AccountAttentionSummary {
+    let mut summary = AccountAttentionSummary {
+        invite_count: pending_invite_count,
+        ..AccountAttentionSummary::default()
+    };
+    for room in rooms {
+        if !contributes_attention(room, room_notification_settings) {
+            continue;
+        }
+        summary.unread_count += room_activity_unread_count(room);
+        summary.highlight_count += room.highlight_count;
+    }
+    summary.attention_count = summary.unread_count + summary.invite_count;
+    summary
+}
+
+/// Per-account attention for one runtime, as the account-tab snapshot reads it.
+pub fn account_attention_summary_for_state(state: &AppState) -> AccountAttentionSummary {
+    account_attention_summary(
+        &state.rooms,
+        &state.room_notification_settings,
+        state.invites.len() as u64,
+    )
 }
 
 fn room_is_muted(

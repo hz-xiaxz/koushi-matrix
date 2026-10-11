@@ -79,7 +79,8 @@ use super::trust_gate::{
 use super::verification::{
     INCOMING_VERIFICATION_FLOW_ID_BASE, IncomingVerificationObservation, PendingSasVerification,
     PendingVerificationRequest, SasVerificationWaitState, VerificationObservation,
-    VerificationTerminal, incoming_verification_request_is_current, record_sas_verification_event,
+    VerificationTerminal, incoming_verification_request_dropped_event,
+    incoming_verification_request_is_current, record_sas_verification_event,
     sas_verification_event,
 };
 #[cfg(test)]
@@ -265,12 +266,23 @@ pub(crate) enum AccountMessage {
     ConfigureEventCacheFetchForTesting {
         fetch: oneshot::Receiver<super::RoomEventLookupResult>,
     },
+    #[cfg(test)]
+    ConfigureSearchActorForTesting {
+        handle: Option<SearchActorHandle>,
+        acknowledged: oneshot::Sender<()>,
+    },
     RepairRoomTimeline {
         request_id: RequestId,
         account_key: AccountKey,
         room_id: String,
     },
     SearchCommand(SearchCommand),
+    /// A Search or Files request with the account's content policy at submission,
+    /// instead of waiting for a crawler notification behind a busy mailbox.
+    SearchWithPolicy {
+        command: SearchCommand,
+        content_policy: koushi_state::SearchCrawlerSettings,
+    },
     /// Record `AppEffect::NotifySearchCrawlerRoomsAvailable` as a latest-wins
     /// background crawler notification and try to flush it to SearchActor.
     NotifySearchCrawlerRoomsAvailable {
@@ -319,7 +331,7 @@ pub(crate) enum AccountMessage {
         started_at: Instant,
         result: Result<
             koushi_sdk::MatrixSecureBackupInspection,
-            koushi_state::SecureBackupGateFailureKind,
+            koushi_state::SecureBackupInspectionFailure,
         >,
     },
     RetrySecureBackupInspection {
@@ -353,6 +365,11 @@ pub(crate) enum AccountMessage {
     #[cfg(test)]
     InspectSessionCheckTimer {
         response: oneshot::Sender<Option<u64>>,
+    },
+    /// Whether a trust-recheck demand has joined the in-flight inspection.
+    #[cfg(test)]
+    InspectTrustRecheckJoined {
+        response: oneshot::Sender<bool>,
     },
     CurrentSessionStatusRefreshFinished {
         request_id: u64,
@@ -585,7 +602,10 @@ pub(crate) enum AccountMessage {
         flow_id: u64,
     },
     IncomingVerificationRequest {
-        generation: u64,
+        /// The session this request was observed for. Admission is fenced by
+        /// pointer identity against the actor's current session, so restarting
+        /// the same session's observer does not retire an observed request.
+        session: Arc<MatrixClientSession>,
         target: VerificationTarget,
         handle: koushi_sdk::MatrixVerificationRequestHandle,
     },
@@ -1175,8 +1195,6 @@ pub struct AccountActor {
     pub(super) pending_contact_verification_send:
         Option<super::contact_security::PendingContactVerificationSend>,
     pub(super) contact_verification_send_generation: u64,
-    /// Epoch attached to incoming verification messages from the active SDK client.
-    pub(super) incoming_verification_session_generation: u64,
     /// SDK session-change observer for auth invalidation / soft logout.
     pub(super) session_change_observer: Option<SessionChangeObservation>,
     /// Optional profile/account-data hydration task for the active session.
@@ -1444,7 +1462,6 @@ impl AccountActor {
             contact_security_load_task: None,
             pending_contact_verification_send: None,
             contact_verification_send_generation: 0,
-            incoming_verification_session_generation: 0,
             session_change_observer: None,
             account_hydration_task: None,
             account_management_discovery_task: None,
@@ -1864,6 +1881,16 @@ impl AccountActor {
                 AccountMessage::ConfigureEventCacheFetchForTesting { fetch } => {
                     self.event_cache_fetch_override = Some(fetch);
                 }
+                #[cfg(test)]
+                AccountMessage::ConfigureSearchActorForTesting {
+                    handle,
+                    acknowledged,
+                } => {
+                    if let Some(handle) = handle {
+                        self.search_actor = Some(handle);
+                    }
+                    let _ = acknowledged.send(());
+                }
                 AccountMessage::EnsureRoomEventCached {
                     request_id,
                     room_id,
@@ -1888,6 +1915,18 @@ impl AccountActor {
                         },
                     })
                     .await;
+                }
+                AccountMessage::SearchWithPolicy {
+                    command,
+                    content_policy,
+                } => {
+                    // A buffered roster must not restore an older policy after
+                    // this authoritative submission crosses mailbox pressure.
+                    if let Some(notification) = self.pending_crawler_notification.as_mut() {
+                        notification.settings = content_policy.clone();
+                    }
+                    self.route_search_command_with_policy(command, Some(content_policy))
+                        .await;
                 }
                 AccountMessage::SearchCommand(search_command) => {
                     self.route_search_command(search_command).await;
@@ -1954,6 +1993,10 @@ impl AccountActor {
                 AccountMessage::InspectSessionCheckTimer { response } => {
                     let _ =
                         response.send(self.session_check.timer.as_ref().map(|(token, _)| *token));
+                }
+                #[cfg(test)]
+                AccountMessage::InspectTrustRecheckJoined { response } => {
+                    let _ = response.send(self.session_check.trust_joined_inspection);
                 }
                 #[cfg(test)]
                 AccountMessage::ConfigureSessionCheckClock { base_epoch_ms } => {
@@ -2554,9 +2597,6 @@ impl AccountActor {
                     self.pending_oidc_login = Some(PendingOidcAttempt {
                         start_request_id,
                         flow: PendingOidcFlow::Synthetic { homeserver },
-                        authorization_url: "https://synthetic.invalid/authorize?opaque=fixture"
-                            .to_owned(),
-                        state: "synthetic-state".to_owned(),
                     });
                     self.oidc_completion_override = Some(session);
                 }
@@ -2568,9 +2608,6 @@ impl AccountActor {
                     self.pending_oidc_login = Some(PendingOidcAttempt {
                         start_request_id,
                         flow: PendingOidcFlow::Synthetic { homeserver },
-                        authorization_url: "https://synthetic.invalid/authorize?opaque=fixture"
-                            .to_owned(),
-                        state: "synthetic-state".to_owned(),
                     });
                 }
                 #[cfg(test)]
@@ -2669,18 +2706,18 @@ impl AccountActor {
                     }
                 }
                 AccountMessage::IncomingVerificationRequest {
-                    generation,
+                    session,
                     target,
                     handle,
                 } => {
-                    if incoming_verification_request_is_current(
-                        generation,
-                        self.incoming_verification_session_generation,
-                        self.session.is_some(),
-                    ) {
+                    if incoming_verification_request_is_current(self.session.as_ref(), &session) {
                         let request_id = self.next_incoming_verification_request_id();
                         self.handle_incoming_verification_request(request_id, target, handle)
                             .await;
+                    } else {
+                        record(incoming_verification_request_dropped_event(
+                            self.session.is_some(),
+                        ));
                     }
                 }
                 AccountMessage::SessionInvalidated { reason } => {
@@ -2747,8 +2784,13 @@ impl AccountActor {
             AccountCommand::StartOidcLogin {
                 request_id,
                 homeserver,
+                method,
             } => {
-                self.handle_start_oidc_login(request_id, homeserver).await;
+                self.handle_start_oidc_login(request_id, homeserver, method)
+                    .await;
+            }
+            AccountCommand::CancelOidcLogin { .. } => {
+                self.handle_cancel_oidc_login();
             }
             AccountCommand::CompleteOidcLogin {
                 request_id,
@@ -2958,16 +3000,17 @@ impl AccountActor {
                 request_id,
                 flow_id,
                 auth,
-                request,
+                passphrase,
             } => {
-                self.handle_start_session_bootstrap(request_id, flow_id, auth, request)
+                self.handle_start_session_bootstrap(request_id, flow_id, auth, passphrase)
                     .await;
             }
             AccountCommand::ConfirmSessionBootstrapSaved {
-                request_id: _,
-                flow_id: _,
+                request_id,
+                flow_id,
             } => {
-                self.request_authoritative_trust_recheck();
+                self.handle_confirm_session_bootstrap_saved(request_id, flow_id)
+                    .await;
             }
             AccountCommand::BootstrapCrossSigning { request_id, auth } => {
                 self.handle_bootstrap_cross_signing(request_id, auth).await;

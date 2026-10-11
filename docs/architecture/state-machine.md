@@ -120,10 +120,15 @@ stateDiagram-v2
     Provisional --> Provisional: TrustUnknown / remain retryable without method discovery or cleanup
     Provisional --> Ready: AuthoritativeDeviceTrustChanged(Verified)
     AwaitingVerification --> Verifying: VerificationMethodSubmitted / clear prior failure
-    AwaitingVerification --> Rejecting: RejectSession / no proof
+    AwaitingVerification --> Rejecting: RejectSession
     Verifying --> AwaitingVerification: Cancelled / failed / timeout
     Verifying --> Ready: AuthoritativeDeviceTrustChanged(Verified)
     Verifying --> Rejecting: RejectSession
+    Verifying --> AwaitingBootstrapConfirmation: BootstrapRecoveryKeyReady(flow_id) / reveal key in reveal slot
+    Verifying --> AwaitingVerification: BootstrapRecoveryKeyDeliveryFailed(flow_id) / gate failure kind
+    AwaitingBootstrapConfirmation --> AwaitingBootstrapConfirmation: copy, save to file, or BootstrapRecoverySavedConfirmFailed(flow_id) / reveal stays
+    AwaitingBootstrapConfirmation --> Provisional: BootstrapRecoverySavedConfirmed(flow_id) [RecheckingTrust] / drop key
+    AwaitingBootstrapConfirmation --> Rejecting: RejectSession / drop key
     Rejecting --> SignedOut: ProvisionalSessionDiscarded
     Ready --> Provisional: CurrentDeviceTrustChanged(Unverified) / SessionLocked [DiscoveringMethods]
     Ready --> Provisional: CurrentDeviceTrustChanged(Unknown) [RecheckingTrust]
@@ -385,6 +390,26 @@ stateDiagram-v2
 - Recovery completion, SAS `Done`, cross-signing bootstrap, or save confirmation
   requests a fresh current-device trust probe; none directly transitions to
   `Ready`.
+- The new-identity bootstrap (#1049) needs no file destination.
+  `StartSessionBootstrap { passphrase }` bootstraps cross-signing, sets the
+  persisted recovery-key delivery-pending marker, and creates the Secure
+  Backup; if creation fails no key was revealed, so the marker is cleared
+  (best effort). `BootstrapRecoveryKeyReady { flow_id }` enters the coarse
+  `AwaitingBootstrapConfirmation { flow_id }` and puts the key only in the
+  #927 reveal slot `SecureBackupSetupState::RecoveryKeyReady { request_id:
+  flow_id }`; the session state never carries it. Copy and the optional
+  `SaveSecureBackupRecoveryKey { reveal_request_id: flow_id }` (admitted only
+  in this gate state) never leave the gate. `ConfirmSessionBootstrapSaved` is
+  not projected ahead of AccountActor: the actor clears the marker first, then
+  drops its copy and sends `BootstrapRecoverySavedConfirmed`, which drops the
+  key (`Enabled { request_id: flow_id }`) and enters
+  `Provisional { RecheckingTrust }`. If the marker cannot be cleared the actor
+  keeps its copy and `BootstrapRecoverySavedConfirmFailed` keeps the reveal
+  with `confirmation_failed: true`. A stale confirmation is a typed failed
+  no-op. Rejection, logout, and account switch drop the key. After an
+  interrupted reveal (restart) the device is already cross-signed, so it
+  promotes to `Ready` and the persisted marker re-enters the Secure Backup
+  gate's `RecoveryKeyDeliveryRequired` reset path below.
 - A verification failure is scoped to the completed attempt. It remains on
   `AwaitingVerification` for user feedback, and an accepted
   `VerificationMethodSubmitted` clears it while preserving the gate's methods
@@ -424,6 +449,24 @@ stateDiagram-v2
   terminal blocking failure, and ready. Server existence, local enablement,
   recovery completeness, and upload health remain distinct SDK inspection
   facts and are not collapsed into a boolean.
+- **Canon amendment (#1265).** `DegradedRetrying` and `BlockedFailed` carry an
+  optional structured, privacy-safe failure detail alongside the coarse
+  `SecureBackupGateFailureKind`: `stage` (which operation
+  produced the failure), `transport` (`noResponse`, `httpResponse`, `timeout`,
+  `local`), `httpStatus` when a response arrived, an allowlisted
+  `matrixErrorKind` (`errcode`), and `retryable`. The coarse vocabulary gains
+  `ServerResponse` and `Unauthorized` so a received server response is never
+  published as `Network`; `Network`/`Timeout` now mean specifically "no
+  response" and "the deadline expired". The detail is a closed vocabulary
+  owned by Rust: it never carries an SDK error string, URL, response body,
+  token, or account/room identifier, and the same bounded facts (never the raw
+  error) are recorded in the `inspection_settled` diagnostic.
+  Retryability is authoritative from `detail.retryable` with the coarse kind
+  as fallback: an already-admitted gate degrades and schedules bounded backoff
+  for a retryable failure (including 429/5xx responses and timeouts) and
+  blocks otherwise, so a 401/403/404 response closes admission. Diagnostics
+  for the Secure Backup gate must remain reachable while the gate is active,
+  including when the diagnostic-snapshot fetch fails.
 - A transition from an operational backup state to recovery/setup, mismatch,
   or incomplete storage closes encrypted admission immediately but does not
   clear composer drafts or stop sync. Upload progress and transient runtime
@@ -440,13 +483,17 @@ stateDiagram-v2
   epoch admits one inspection. A deferred inspection always owns a bounded
   connectivity-wait deadline (30 seconds from the first defer; repeated
   defers coalesce onto the armed deadline instead of extending it): expiry
-  projects `BlockedFailed` (retryable, no automatic monitor) even when no
+  projects `BlockedFailed` with the structured deadline failure
+  (`stage: inspectionDeadline`, `transport: timeout`, `retryable: true`) and
+  no automatic monitor, even when no
   proven edge ever arrives, so `Checking` cannot wait forever. Proven
   connectivity before the expiry disarms the deadline and admits the
   inspection. The explicit typed retry re-enters inspection admission and,
   while connectivity is still unproven, also asks the sync owner to
   re-project its current status, so a missed `Running` projection cannot make
-  retry a permanent no-op. Post-authority recoverable failures use bounded
+  retry a permanent no-op. Post-authority recoverable failures — as decided by
+  the structured `detail.retryable` (or the coarse retryable kinds when no
+  detail exists) — use bounded
   exponential backoff with jitter (5 seconds through 5 minutes), preserving the
   attempt across connectivity flaps until a successful backup inspection resets
   the epoch. A pre-authority inconclusive inspection is `BlockedFailed`, has no
@@ -528,7 +575,9 @@ stateDiagram-v2
 ```
 - A genuine missing cross-signing identity may enter mandatory bootstrap. An
   existing identity without a verified other device or usable recovery method
-  enters `Rejecting`; identity reset, skip, and verify-later are not gate exits.
+  stays in `AwaitingVerification` with a `NoProofMethod` failure and the
+  provisional-device cleanup offered; identity reset, skip, and verify-later
+  are not gate exits.
 - Current-device strictness does not create a peer-device send gate. Eligible
   unverified peer devices remain non-blocking; blocked devices and cryptographic
   integrity/key-mismatch failures remain failures.
@@ -745,6 +794,23 @@ CSRF state are command/event artifacts only: they may be returned to the WebView
 so it can open the provider and correlate the callback, but they never enter
 `AppState`, normal `Debug`, QA title tokens, or persisted settings.
 
+A started interactive sign-in attempt is held by the account-tab manager as
+pending callback-correlation state, at most one attempt per tab. An OAuth/MAS
+attempt is correlated only by the exact nonempty CSRF state the SDK minted: a
+callback with a missing, blank, duplicated, or different state, an unsolicited
+callback, and an already-consumed attempt are all rejected. The legacy
+`m.login.sso` fallback has no CSRF state — the SDK authorization carries an empty
+state and the homeserver callback carries only `loginToken` — so such a callback
+is correlated by the stricter-of-one rule: it completes a tab only while exactly
+one legacy attempt is pending. A legacy callback never completes an OAuth
+attempt, two pending legacy tabs make the callback ambiguous and it is rejected
+rather than misrouted, and consuming the correlation makes a replay inert.
+Registering a new attempt for a tab retires that tab's previous attempt, and
+removing the tab drops its pending attempts. Classifying the callback URL shape
+belongs to the Tauri platform adapter; the account-tab manager, not the adapter,
+owns which tab a callback may complete. The login token and the callback URL
+never enter diagnostics, snapshots, QA artifacts, or persisted settings.
+
 ## Account Tabs And Concurrent Sessions
 
 The outer Rust-owned account-tab machine is independent from each account's
@@ -814,6 +880,22 @@ stateDiagram-v2
   outer owner aggregates native delivery and badges. Search crawling and media
   prefetch share one app-wide single-flight budget, with selected-account work
   preferred.
+- The account-tab badge and that account's Home rail badge render one Rust-owned
+  per-account attention policy (`AccountAttentionSummary`): the sum of the
+  per-room `room_activity_unread_count` over conversations that are not muted and
+  not low-priority, plus pending invites. This is the existing Home aggregate
+  policy, including unread content from a Mentions-only room with no highlight.
+  `AccountHomeItem.attention_count` is that value, and the Tauri account-tab
+  snapshot reads the same function for every tab, selected or background, so Home
+  and the tab cannot disagree and an invite-only account still badges. The native
+  Dock/taskbar `badge_count` uses the same per-room `room_activity_unread_count`
+  for its conversation contribution; notification-only, mention-only and manual
+  unread state cannot disappear solely at the native surface. The native total
+  deduplicates rooms, applies the same mute/low-priority exclusions and aggregates
+  across accounts. Pending invites remain Home/tab attention, separate from the
+  joined-conversation native badge. Disabling native badges or lacking platform
+  capability suppresses the native output, without changing in-app attention.
+  Transient notification candidates retain their own notification policy.
 
 ## Room List Filter
 
@@ -938,14 +1020,49 @@ stateDiagram-v2
 Unread state crosses three Matrix concepts that must not be collapsed into one
 local flag:
 
-- `RoomSummary.unread_count` is the raw unread-message count; notification and
-  mention counts are separate SDK client-side observations, as is `marked_unread`.
-  Both full room projection and attention updates use SDK
-  `num_unread_notifications` / `num_unread_mentions`, not the server-computed
-  `unread_notification_counts`: Synapse 1.157.0 Sliding Sync returns zero dummy
-  counts, and servers cannot classify encrypted mentions. This follows Element X
-  iOS room-summary use of the SDK client-side counters; do not replace notification
-  counts with plain unread-message counts. These observations can arrive later than a
+- `RoomSummary.unread_count` is the main-timeline unread-message count; thread
+  replies are a separate field (see "Threads and attention"), notification and
+  mention counts are separate observations, as is `marked_unread`, and no badge
+  surface reads this field directly: it reads
+  `koushi_state::room_activity_unread_count`. The primary
+  source is the SDK's client-side `read_receipts` counters
+  (`num_unread_messages` / `num_unread_notifications` / `num_unread_mentions`),
+  because servers cannot classify encrypted mentions and Synapse 1.157.0 Sliding
+  Sync returns zero dummy `unread_notification_counts`. This follows Element X iOS
+  room-summary use of the SDK client-side counters; do not replace notification
+  counts with plain unread-message counts.
+  Those client counters are computed over the room's cached events only, and the
+  room list keeps one timeline event per room, so for a room the client has never
+  read they are a lower bound (a never-read room with several unread messages
+  reports 1) until something paginates the room. While no own read receipt is
+  anchored in the loaded timeline (`read_receipts().latest_active.is_none()`), the
+  room-list projection therefore tops the notification and mention counters up
+  with the server's `unread_notification_counts` (per-counter maximum). The
+  standalone attention summary (`room_attention_summary_from_room`) applies the
+  same counter top-up for the same room state, but not the room list's
+  read-marker suppression, so the room list can still report less when a read
+  marker covers the projected latest event. A nonempty
+  `pending` is deliberately not part of that condition: an unmatched receipt does
+  not make the client counters a lower bound, because they are counted from the
+  newest boundary the SDK did find. The top-up must stay before the read-marker
+  suppression below, so a stale server count is still zeroed when the fully-read
+  marker or the unthreaded private receipt covers the projected latest event and
+  the room is not manually marked unread. On homeservers that report dummy zero
+  server counts the top-up is a no-op.
+  The unread-message counter is not topped up: `notification_count` is the total
+  number of unread *notifications* and not an unread-message count, so
+  `RoomSummary.unread_count` keeps the SDK value. Two cold-start residuals follow
+  and are accepted for now: a stored receipt can be recorded as active while its
+  target is absent from the loaded chunk (undercount this projection cannot
+  detect), and a muted room — whose `RoomAttentionProjection.display_count` is
+  its raw unread messages, `RoomSummary.unread_count` plus
+  `RoomSummary.thread_unread_count`, never the notification counter — still
+  shows the SDK's lower bound until the room is paginated. Fixing either needs
+  more loaded history, not a different counter.
+  The vendored SDK keeps the counts already known for a room when a sync response
+  carries no `unread_notifications` pair at all (an empty pair means "no count
+  update", not "none"), so a later sync cannot silently zero the top-up.
+  These observations can arrive later than a
   local command response, and historical Matrix Rust SDK releases have had
   unread-count/read-receipt convergence bugs (for example
   matrix-rust-sdk#6211, fixed upstream by matrix-rust-sdk#6406). Koushi must
@@ -961,6 +1078,10 @@ local flag:
 - `m.marked_unread` is separate from read receipts/read markers. Marking a room
   read must also clear the explicit unread marker, while marking unread must not
   move the fully-read marker.
+- Redacted events and the `m.room.redaction` events that delete them do not
+  contribute unread notifications or mentions, even when cached push actions
+  still say notify/highlight. Both remain valid receipt ordering boundaries;
+  later unread messages retain their own counts.
 
 Activity may temporarily suppress rows to keep the panel responsive, but that
 suppression is not an authoritative read state. Any reducer action that clears
@@ -1119,12 +1240,23 @@ Rust keeps the local viewed boundary separate from server-confirmed read state.
 For the displayed read divider, comparable local and confirmed boundaries in the
 same canonical window use the newer position, mapped to a visible event at or
 before that position. A stale local boundary cannot override a newer confirmed
-one. Missing positions retain conservative fallback behavior. This display
-choice does not acknowledge unsent receipts or change server-based unread counts.
+one. Every loaded boundary (including a hidden local or confirmed event) maps
+to the nearest visible in-scope event at or before it, even when unread events
+follow. Without a loaded local boundary and with no remote unread events, the
+existing own-message-tail display advancement remains valid. The receipt itself
+is unchanged. Missing positions retain conservative fallback behavior. This display choice does not acknowledge unsent receipts or change
+server-based unread counts.
 Replaying `InitialItems` for a new or returning subscriber also republishes the
 current `NavigationUpdated` snapshot, even when it is unchanged within the actor.
 An earlier consumer having received that snapshot is not evidence that the new
 consumer has it; room-level fallback must not substitute for thread read state.
+The renderer retains the Rust navigation snapshot alongside rows by TimelineKey,
+so mounting after a replay does not lose the snapshot. Same-owner/same-generation
+row replays preserve it; resync or changed actor/timeline generation clears it.
+Navigation is accepted only after rows initialize, and is never reconstructed
+from room read state for a Thread. This mirror relies on the existing Core actor
+generation emission gate and ordered InitialItems/NavigationUpdated delivery;
+it does not infer receipt ordering or acknowledge reads.
 Only a current Room or Thread actor may admit an at-bottom, gap-free, latest
 attention-eligible event with exact position and actor-generation evidence.
 Room observations require the atomic fully-read/private-unthreaded key and, when
@@ -1211,6 +1343,13 @@ Low priority is an attention-suppression tag, not a mute and not a read action:
   totals, or the Rooms/DMs section unread/highlight aggregates, including their
   mentions. The existing Activity recent/unread exclusion is unchanged. Pending
   invites are counted separately and stay unaffected.
+- The Home rail's `AccountHomeItem.attention_count` and the account-tab badge are
+  the shared per-account attention policy ("Account Tabs And Concurrent
+  Sessions"). It applies the same muted and low-priority exclusions as the Home
+  aggregate; a room's notification mode (Mentions-only or otherwise) is not an
+  aggregate exclusion, so a non-muted, non-low-priority Mentions-only room keeps
+  contributing its shared conversation attention to Home, its Space rail and
+  section totals, the account tab and the native persistent badge.
 - The room's own raw `unread_count`, notification/highlight counts, and read
   receipts are preserved, so the low-priority row still shows real unread state.
   Setting the tag never marks the room read and never writes a server push-rule
@@ -1610,7 +1749,14 @@ stateDiagram-v2
   encrypted tombstone. A prepared-upload (staged attachment) send settles the
   draft the same way — same revision successor, same accepted-send navigation —
   but keeps the content, because its payload is built from the staged items and
-  their own captions and never dispatched the typed text (#1130). A captured draft write may
+  their own captions and never dispatched the typed text (#1130). One exception
+  seeds instead of clearing: the single attachment staged into a target that had
+  none takes the renderer's captured draft document as its caption (#1194), and
+  the dialog owns that caption afterwards. That caption is also the one case where
+  the send consumes instead of settles: when it is still the submitted draft text
+  and it is the only attachment, the acceptance clears the draft so the text is not
+  left in two places (#1204); every other prepared send keeps the content. A
+  captured draft write may
   still persist after its room/thread is no longer visible, but it never
   mutates another active composer. Each write and draft-accepting operation also
   captures its complete account owner (homeserver, user, and device);
@@ -1693,6 +1839,22 @@ tokens, paths, or raw errors.
   rooms. `TimelinePaneState.scheduled_sends` is the selected-room projection
   only, and `TimelinePaneState.scheduled_send_capability` advertises whether
   server delayed events or the local fallback is active.
+- #1160 amends that boundary with exactly one explicit exception: the scheduled-
+  sends panel projection `AppState.scheduled_sends_list` (transport slice
+  `StateDeltaChangedSlices.scheduled_sends_list`, Tauri
+  `ui.scheduled_sends_list`). It deliberately carries the same future message
+  bodies, including for rooms the webview is not showing. It is admitted only in
+  a `Ready` session, and it is derived synchronously in the reducer from the
+  backing store for the Home account or for the Space captured when the panel
+  opened (the sidebar's `space_rooms ∪ global_dms` membership, immediate children
+  only). A narrow post-reducer invariant closes it whenever the session is no
+  longer `Ready` — which covers `sync_failed_auth` and unsupported sliding-sync
+  revalidation — or when the captured Space no longer exists or is no longer the
+  active scope, before membership is derived. Room selection/clearing, Home/Space
+  selection, a successful directory join, and an automatic room clear — including
+  the active room losing its last child edge in the captured Space with no
+  replacement room — close it explicitly. The renderer keeps no copy and the
+  backing queue itself is still never serialized.
 - Each scheduled item carries its room plus an optional thread root. A room
   item clears only the captured room draft; a thread item clears only the
   captured `(room_id, root_event_id)` draft and open thread composer. Both the
@@ -1704,6 +1866,17 @@ tokens, paths, or raw errors.
   `ScheduledSendCancelled` and `ScheduledSendDispatched` remove the item. Room
   pruning, logout, lock, and account switch clear or retain the backing store by
   joined-room account context.
+- Acceptance is not durability (#1159). A failed local store write dispatches
+  `ScheduledSendPersistenceFailed`, which publishes exactly one coarse,
+  identifier-free `scheduled_send_persistence_failed` error and never appends a
+  second copy for a repeated failure; a later successful write dispatches
+  `ScheduledSendPersisted`, which clears that code only and emits nothing when
+  there was nothing to clear. Both actions require a `Ready` session and never
+  change the queue. The composer renders the notice from `ui.errors` alongside
+  the main and thread composers' other notices. The notice belongs to the
+  session that produced it: every path that retires or replaces that `Ready`
+  session withdraws it (`clear_session_views`, logout, sync failure, and
+  sliding-sync capability retirement).
 - `AppActor` owns the local fallback timer. When an item is due, it dispatches
   only `ScheduledSendHandle::Local` items through the account actor with the
   captured room/thread target and deterministic transaction id. Server
@@ -1734,6 +1907,10 @@ stateDiagram-v2
     Queued --> Empty: ScheduledSendDispatched [known Local handle] / route SendText
     Queued --> Empty: RoomListUpdated [room pruned] / retain joined rooms
     Queued --> Empty: LogoutRequested/SessionCleared
+    Empty --> Empty: ScheduledSendPersistenceFailed [Ready] / publish local-save failure
+    Queued --> Queued: ScheduledSendPersistenceFailed [Ready] / publish local-save failure
+    Empty --> Empty: ScheduledSendPersisted [Ready] / clear local-save failure
+    Queued --> Queued: ScheduledSendPersisted [Ready] / clear local-save failure
 ```
 
 - **Issue #450 guards**: `ScheduleSend` and `RescheduleScheduledSend` validate
@@ -1926,6 +2103,48 @@ stateDiagram-v2
   open room/root event pair, and is cleared when the thread closes or navigation
   selects another room. React may render the DTO but must not scan timeline rows
   or thread chips to invent pane-level notification counts.
+- Thread summaries describe aggregate presentation state, not complete per-thread
+  unread state. Capability advertisement (a server advertising the thread
+  subscription extension) and a room-badge change do not prove that a thread
+  event reached the client: a homeserver may already include thread replies in
+  its own room counts. A per-thread unread contribution may therefore be added to
+  room totals only with a proven non-overlapping decomposition, and the evidence
+  for delivery must name the boundary (advertisement, subscription outcome, event
+  arrival, cache counters) rather than infer it from a badge.
+- That decomposition is now proven at the SDK event-cache boundary, so
+  per-thread unread contributes to room badges. The room event cache's
+  `RoomReadReceiptEventFilter` excludes thread replies (and edits/reactions that
+  target a reply) and matches only `Unthreaded`/`Main` receipts, while the
+  per-thread cache's `ThreadReadReceiptEventFilter` counts exactly one thread's
+  replies and matches only that thread's own receipt. The two scopes are therefore
+  complete and disjoint, so summing them double counts nothing:
+  `unread_count + thread_unread_count`. The per-root values are mirrors of the
+  SDK's own counters, so a mirror that has not been refreshed yet can only
+  undercount a thread; it can never invent or duplicate a reply.
+- Badge counts and navigation counts are separate fields, never one overloaded
+  number. `RoomSummary.unread_count` stays the main-only value: read markers,
+  "Read up to here", the first-unread position and event navigation keep
+  excluding thread replies. `RoomSummary.thread_unread_count` and
+  `RoomSummary.thread_highlight_count` carry the per-room sums of the per-root
+  SDK thread-cache counters for the rooms the reducer currently holds; a thread
+  count never enters `unread_count`.
+- `koushi_state::room_activity_unread_count` is the single Rust-owned badge
+  helper every surface reads (room list, Home total, Space rail, Activity
+  attention, native badge):
+  `max(unread_count + thread_unread_count, notification_count, highlight_count +
+  thread_highlight_count)`, with `marked_unread` still the zero-count fallback.
+  The homeserver's `notification_count` may already include thread replies, so it
+  is max'd in and never summed with a thread term; a server that reports dummy
+  zeros simply leaves the client decomposition in charge.
+- The reducer derives both thread fields from the per-root SDK thread-cache
+  values its room timeline actors observed (`ThreadUnreadObserved`), so the values
+  are session-scoped mirrors and are never persisted or computed in React. They
+  survive a room-list snapshot (which does not carry them) and are cleared with
+  the session. `RoomAttentionProjection.has_unread_content` and
+  `has_unread_mention` include them, so a thread-only unread room renders its dot
+  or mention affordance instead of looking read. A successful main-timeline read
+  clears only `unread_count`, `notification_count` and `highlight_count`: it
+  never moves a threaded receipt and must not clear the thread fields.
 
 ```mermaid
 stateDiagram-v2
@@ -2032,6 +2251,23 @@ stateDiagram-v2
   `EnterAnchoredTimeline` only for the matching request/key/actor/timeline
   generation and target-presence result. WebView application and DOM paint are
   not part of this transition. These paths do not open the right panel.
+- TimelineManager never awaits the SDK `TimelineFocus::Event` build inline
+  (#1146). The build is manager-owned preparation fenced by its actor
+  generation; the manager keeps polling commands, navigation demand, and other
+  completions meanwhile. A repeated subscribe for the same key adopts the
+  newest request id; unsubscribe, demand retirement (supersession, Home, room
+  change, navigation deadline), shutdown, and the 10 s build timeout release
+  the lease and activation, and a late completion can never install an actor.
+  SDK event-focused initialization is transactional: initial `/context`
+  loading succeeds before cache state and the reusable handle are published,
+  so cancelling or failing construction leaves no orphaned state that poisons
+  retry. Core retains each preparation task; timeout drops its SDK future,
+  and cancellation aborts and awaits the task before releasing its lease or
+  acknowledging cleanup. Ordered shutdown aborts all preparation tasks and
+  awaits their settlement; unexpected Drop aborts as a fallback, not as an
+  orderly-shutdown acknowledgement. A focused-build failure or timeout settles
+  the owning event navigation as `Failed` immediately instead of at the
+  AppActor deadline.
 - `EnsureSubscribed` may reproject actor-owned InitialItems after transport loss,
   but the internal focused-projection commit is independently reliable. There is
   no sleep, fixed retry count, visibility heuristic, renderer acknowledgement,
@@ -2629,6 +2865,13 @@ stateDiagram-v2
   in-flight `request_id` while the state is `Loading`. Stale successes, stale
   failures, duplicate completions, and completions when no query is in flight
   are ignored.
+- Before a Files success, SearchActor obtains SDK redaction and target-scoped
+  replacement-validity proofs, then retries body-free attachment mutations under
+  one bounded deadline. Invalid versions are selectively refused; missing/UTD
+  events are unknown rather than invalid. Media roots are seeded before queued
+  text provenance is consumed. Cache errors or deadline expiry preserve
+  metadata/retry state and emit `FilesViewQueryFailed` plus the correlated
+  `AttachmentsFailed` event. No resident row is returned on proof failure.
 - `FilesViewSelectionChanged { event_id }` updates `selected_event_id` only when
   the view is `Open`. Equal updates are a no-op. Selection changes when the view
   is `Closed`, `Loading`, or `Failed` are ignored.
@@ -2838,6 +3081,10 @@ sanitizes it before exposing it through `TimelineItem.formatted`.
   stored preference, not a request for the renderer to recompute visibility.
   The same policy sizes the bounded display projection, so a row that renders
   nothing never consumes a displayed-row slot.
+  The policy applies to SDK event rows only. Synthetic display rows, such as
+  the not-visible or pending thread-root slot that carries a reply chip, are
+  not content and are never content-suppressed, neither by the actor nor by
+  the consumer export (#1141).
 - The React timeline renderer is a presentation adapter over this DTO. It may
   map sanitized tags into React nodes, attach copy-code controls using the
   Rust-provided code-block body, and highlight search terms over rendered text.
@@ -3121,15 +3368,38 @@ stateDiagram-v2
 - `LiveRoomSignalsUpdated { room_id, update }` replaces the room's full
   live-signal snapshot. The reducer normalizes duplicate receipts by user,
   sorts receipt event entries, and sorts/deduplicates typing user ids.
-- `LiveRoomReceiptSummariesUpdated { room_id, receipts_by_event }` merges
-  bounded live summaries into the room receipt map. Each entry contains at most
-  the compact reader cap and an exact total; it does not clear typing users or
-  the fully-read marker.
-- `LiveRoomReceiptsWindowReconciled { room_id, scoped_event_ids,
+- Receipt summaries are scoped by the timeline that observed them, because the
+  SDK resolves each timeline's receipt thread independently. The room main scope
+  (`ReceiptScope::Main`) is published by the Room timeline, whose receipts are
+  unthreaded. A focused scope (`ReceiptScope::Focused { event_id }`) is published
+  by the permalink/context timeline for that target, and a thread scope
+  (`ReceiptScope::Thread { root_event_id }`) by that root's Thread timeline.
+  A focused timeline cannot share the main scope unconditionally: the SDK
+  resolves `TimelineFocus::Event` to unthreaded receipts only when the target is
+  not part of a thread, and to that thread's threaded receipts when it is. The
+  scopes are stored separately: `RoomLiveSignals.receipts_by_event` holds the
+  main scope, `RoomLiveSignals.focused_receipts_by_event[event_id]` holds one
+  focused scope, and `RoomLiveSignals.thread_receipts_by_event[root_event_id]`
+  holds one thread scope. Two actors that observe the same event ID in different
+  scopes therefore cannot overwrite each other's readers, and a pane reads only
+  the scope of its own timeline key. GUI code must not merge or fall back across
+  scopes.
+- `LiveRoomReceiptSummariesUpdated { room_id, scope, scoped_event_ids,
+  receipts_by_event }` first removes the entries named by `scoped_event_ids` in
+  `scope`, then merges the bounded live summaries into that scope. Each entry
+  contains at most the compact reader cap and an exact total; it does not clear
+  typing users or the fully-read marker. A live diff that observed only
+  incremental changes passes an empty `scoped_event_ids` and therefore only
+  merges.
+- `LiveRoomReceiptsWindowReconciled { room_id, scope, scoped_event_ids,
   receipts_by_event }` is an authoritative replacement only for the stable
-  event-ID union of the actor's old and replacement timeline windows. It first
-  removes receipt entries in that scope, then inserts the replacement snapshot;
-  receipt state outside the scope is preserved.
+  event-ID union of the actor's old and replacement timeline windows, within
+  `scope`. It first removes receipt entries in that scope, then inserts the
+  replacement snapshot; receipt state outside the scope is preserved.
+- A timeline actor's initial receipt observation is a reconcile of its own scope
+  over its own initial window, not a merge. When a reader moved while no actor
+  observed the room, the new actor's reconcile removes the retired actor's
+  summary on the old event instead of leaving stale readers behind.
 - Receipt reader display data is resolved in Rust before it reaches the GUI.
   `AvatarThumbnailUpdated` also settles already-enriched reader avatar copies by
   exact MXC URI and emits `LiveSignalsChanged` when at least one copy changes, so
@@ -3358,11 +3628,11 @@ stateDiagram-v2
 | Command / update | Accepted states | Rejected states | Notes |
 | --- | --- | --- | --- |
 | accepted text/reply | below the bounded pending cap with a subscribed timeline enqueue context | cap full, not subscribed, registration activation or reducer acceptance delivery failed | Actor publication is best-effort and never waited on; the row appears when the actor catches up. Publishes one client-transaction `sending` row, retaining the persisted draft until SDK enqueue succeeds. Replies construct their relation from known event IDs, and plain thread sends use the known root as fallback, without a network fetch before enqueue. `ComposerSubmissionQueued` then clears the submitted draft revision and releases only that composer while the submission registry retains its remote terminal. A failed pre-enqueue attempt leaves the draft intact. |
-| `NewLocalEvent` | any | none | Exact SDK binding merges the canonical local echo into the pending row and stores the SDK `SendHandle`; it never inserts a duplicate. Restored local echoes from `RoomSendQueue::subscribe()` initialize the same actor table before commands. |
+| `NewLocalEvent` | any | none | Exact SDK binding merges the canonical local echo into the pending row and stores the SDK `SendHandle`; it never inserts a duplicate. Restored local echoes from `RoomSendQueue::subscribe()` initialize the same actor table before commands. The send-queue update is not a rendered row: only a canonical Timeline transaction row lets a later `SentEvent` retire the fallback. |
 | `SendError` | `sending` | none | Records `not_sent { reason }` using only the SDK recoverable flag. Release diagnostics may record a closed app-owned failure class plus that recoverable flag, but raw SDK errors stay out of DTOs, logs, QA tokens, and React state. The matching composer pending state is failed once if enqueue never succeeded. A recoverable SDK failure after enqueue schedules room-queue re-enablement with bounded backoff and server Retry-After; later success can still emit `SendCompleted`. |
 | `RetrySend { room_id, transaction_id }` | `not_sent` with a stored `SendHandle` | `sending`, `sent`, `cancelled`, unknown transaction | Re-enables the SDK room queue with `room.send_queue().set_enabled(true)`, then calls `SendHandle::unwedge()`. FIFO order remains the SDK send queue's responsibility; React never reorders or manually marks successors sent. |
 | `CancelSend { room_id, transaction_id }` | `sending`, `not_sent` with a stored `SendHandle` | `sent`, `cancelled`, unknown transaction | Calls `SendHandle::abort()`. A successful cancel records `cancelled`, drops the handle, re-enables the SDK room queue so successors are not stranded, and clears matching composer pending state without creating a send-failure error. |
-| `SentEvent` | any | none | The manager-owned observer records `sent`, maps the composite SDK correlation to the original request, reliably enqueues the matching reducer action, then emits `SendCompleted`. Without a local echo, the same row changes atomically to the event ID and remains visible until canonical remote convergence or exact-event hydration. Settled correlations are bounded tombstones so duplicate SDK terminals cannot complete twice. |
+| `SentEvent` | any | none | The manager-owned observer records `sent`, maps the composite SDK correlation to the original request, reliably enqueues the matching reducer action, then emits `SendCompleted`. Without a local echo, the same row changes atomically to the event ID and remains visible until canonical remote convergence or exact-event hydration. Settled correlations are bounded tombstones so duplicate SDK terminals cannot complete twice. A delivered send's SDK transaction row is hidden only once its remote event has a canonical row, so the hand-off never leaves the message without a row. |
 
 An explicit timeline `Unsubscribe`, room switch, resubscribe, or actor crash
 removes only the presentation actor; active send correlation remains at
@@ -3377,7 +3647,12 @@ Ordered shutdown gives the complete manager-owned enqueue-worker set one
 absolute, count-independent five-second graceful deadline while the global SDK
 terminal observer can still admit their results. Enqueue futures and the global
 observer are boxed futures directly polled by the manager; enqueue panic is
-caught at a fail-closed boundary. Graceful drain polls both worker and observer,
+caught at a fail-closed boundary. Because the manager is their only poller, every inline
+manager await that can block on an SDK lock (live timeline build, actor
+spawn, initial thread hydration) keeps polling all manager-owned worker sets
+(enqueue, focused-build, read, observer) and applies their completions
+afterwards; a parked worker can otherwise own the lock permit the inline
+await is queued behind. Graceful drain polls both worker and observer,
 then gives the observer one final non-blocking poll after worker quiescence or
 deadline cancellation so a queued exact terminal can be admitted. At the
 deadline the manager synchronously drops remaining cooperative enqueue futures,
@@ -3569,12 +3844,18 @@ stateDiagram-v2
     [*] --> Idle
     Idle --> Idle: RoomSettingsSnapshotLoaded
     Idle --> PendingSettings: RoomSettingUpdateRequested [Ready + can_edit_settings]
+    Idle --> FailedSettings: RoomSettingUpdateRequested [raw pre-send access rejection]
     Idle --> PendingModeration: RoomModerationRequested [Ready + matching permission fact]
     Idle --> PendingRoles: RoomMemberRoleUpdateRequested [Ready + can_edit_roles]
     Idle --> FailedPermissions: RoomSettingUpdateRequested [permission denied]
     Idle --> FailedPermissions: RoomModerationRequested [permission denied]
     Idle --> FailedPermissions: RoomMemberRoleUpdateRequested [permission denied]
-    PendingSettings --> PendingSettings: RoomSettingsSnapshotLoaded [same room]
+    Idle --> Idle: RoomAccessUpdated [advancing property]
+    Idle --> Idle: RoomAccessDraftOpened/Reset/TargetMutation [admitted lifetime+scope]
+    Idle --> Idle: RoomDirectoryVisibilityObserved [selected room]
+    PendingSettings --> PendingSettings: RoomSettingsSnapshotLoaded [same room, preserve accepted-vs-observed]
+    PendingSettings --> FailedSettings: RoomSettingUpdateRequested [raw pre-send access rejection]
+    PendingSettings --> FailedSettings: RoomSettingUpdateFailed [pre-send rejection settles]
     PendingModeration --> PendingModeration: RoomSettingsSnapshotLoaded [same room]
     PendingRoles --> PendingRoles: RoomSettingsSnapshotLoaded [same room]
     PendingSettings --> Idle: RoomSettingUpdateSucceeded [matching request_id]
@@ -3650,22 +3931,141 @@ stateDiagram-v2
   active membership.
 - Join rules are projected as the server holds them: `knockRestricted` and
   rules the client does not model (`unknown`) are distinct values, never folded
-  into `restricted` or `invite`. A missing `m.room.join_rules` event is
-  `invite`. Only `public`, `invite`, `knock`, and `private` can be sent back
-  (`RoomJoinRule::is_settable`); the others fail as an invalid setting.
-- `SpaceSummary.join_rule` carries each Space's join rule from every room-list
-  update. When it changes between two synced values for the Space whose
-  settings are open, the reducer copies it into
-  `room_management.settings.join_rule`, so a change made by another client
-  reaches Space Info without a reload. A level-wise copy would revert a
-  just-saved change while the room list still carries the old rule, so only a
-  synced transition counts; permissions are left for Core to re-read (#935).
+  into `restricted` or `invite`. The ordinary scalar `RoomSettingChange::JoinRule`
+  can carry `public`, `invite`, `knock`, and `private` (`RoomJoinRule::is_settable`);
+  the others fail as an invalid setting. A `restricted` rule is settable only
+  through `RoomSettingChange::AccessPolicy(RoomAccessPolicy { rule, allow_targets })`
+  (#1177): the allow list is canonical (sorted, deduplicated), must hold at
+  least one target for `restricted`, must be empty for a non-restricted rule,
+  and `knock_restricted`/`private`/`unknown` are not produced by that path.
+  `private` stays reserved and is never presented as the Space route.
+- Each joined room's own access condition (#1166, #1220) is projected from its
+  `m.room.join_rules` as `RoomAccessCondition { join_rule, restricted,
+  allow_targets }`. `join_rule` is `None` when the rule content is unavailable,
+  so an unsynced rule is never defaulted to `invite` and reported as inspected;
+  the room-settings snapshot keeps the SDK's own `invite` default. `restricted`
+  is the five-way completeness (not inspected / confirmed empty / membership
+  only / membership plus unsupported / unsupported only) and must be carried to
+  the pre-send settings read before a restricted rule is written. `allow_targets`
+  keeps every distinct target with the kind its local `m.room.create` proves
+  (`Space` / `Room` / `Unknown`); only an available, unredacted create event
+  with no other type proves an ordinary room, because a redacted pre-v11 create
+  event keeps its defaulted fields. The target id stays inside Rust. The sidebar
+  resolves ids to display labels and derives `access_space_members_route`, the
+  one fact that admits the specific "Space members can join" sentence: exactly
+  one distinct target, verified a Space, with a resolvable non-id name. `private`
+  is never that route and no raw room id reaches a renderer.
+- The access observation (`RoomAccessUpdated`, #1177) reconciles the open
+  settings snapshot through one owner, `AppState.room_access_observed`.
+  `room_access` is the immediately displayed value (it may hold a local accepted
+  change); the observed tuple is the last authoritative/provisional read. Access
+  and history advance **independently**: a new observation is compared
+  property-by-property against the ledger, and only the property whose own
+  observed value moved may overwrite a locally accepted value for that property.
+  So an access echo carrying an unchanged old history does not roll back an
+  accepted history save, and a history echo carrying an unchanged old access does
+  not roll back an accepted access save, in either order. A property that did not
+  advance is dropped, and a metadata/order-only access advance (a target-kind or
+  completeness change at the same editable policy) never releases an unrelated
+  old history value. When the access property advances, the change test uses the
+  full canonical policy (rule plus sorted, deduplicated allow targets): an equal
+  editable policy advances the authoritative metadata in place instead of
+  replacing the locally held order, while a genuine policy change replaces the
+  condition. Ordinary rooms reconcile too, not only Spaces. This observation is
+  the single installer of the open settings join-rule fact; `SpaceSummary.join_rule`
+  is only a room-list carrier (sidebar and address fallbacks) and never installs
+  it on its own.
+- The pre-send settings read is presentation-preserving but admission is not
+  (#1177). `RoomSettingsSnapshotLoaded` keeps a locally accepted access/history
+  value that its own observation has not yet advanced, while
+  `AppState.room_access_pre_send` records the RAW access condition that read
+  actually found. A requested access-policy edit is admitted against the raw
+  facts, never the presentation-preserved value, so the reducer's guard agrees
+  with Core's own pre-send verdict. When Core rejects a pre-send access policy it
+  emits `RoomSettingUpdateRequested` followed by `RoomSettingUpdateFailed`, so the
+  operation settles rather than staying pending behind a preserved snapshot.
+- A confirmed room's directory publication is read with the SDK
+  `get_room_visibility` and installed as `RoomDirectoryVisibilityObserved`
+  (#1177) for the open room only: confirmed `Public`/`Private`, and `Failed`
+  when the read cannot make a confirmed claim. `Unavailable` is claimed only
+  when no room is loaded, and `Loading` is the state before the read lands. The
+  field enters `Loading` when the open room changes, while a same-room pre-send
+  `RoomSettingsSnapshotLoaded` preserves the publication already read instead
+  of resetting it, so the panel does not flicker back to "checking" while a
+  setting change re-reads the snapshot. A join-rule write never changes it
+  implicitly.
+- The create-room access is an explicit optional contract (#1177).
+  `CreateRoomOptions.access_policy` (rule plus selected allow Space ids) and
+  `history` are optional; omitting both reproduces the legacy presets
+  byte-for-byte, including the private-in-Space restricted rule naming the
+  attached Space, the V9 room-version pin and the `invited` history default. An
+  explicit policy controls the join content and its selected allow Spaces
+  independently of the attachment: a selected allow Space need not be the
+  attachment, requires no permission on it, and never writes `m.space.child`
+  (the separate link command owns that and keeps its own failure report). A
+  `public` create with an explicit restricted policy, an explicit policy with
+  `invitedOnly`, and an explicitly empty restricted allow list are each rejected
+  with a typed `RoomFailureKind` (`PublicRoomWithRestrictedAccess`,
+  `ExplicitAccessPolicyWithInvitedOnly`, `EmptyAccessPolicyTargets`) before any
+  request is sent. A restricted policy pins a room version that supports it
+  (>= 8, today V9). Supplying `history` sends exactly one initial-state event;
+  omitting it keeps the legacy default. The private option keeps its
+  encryption/invitation draft while public is selected; only the effective
+  submitted values are stripped. Membership selection is offered wherever the
+  viewer is joined to at least one Space; this is a product choice, not a Matrix
+  restriction, and the picker lists the viewer's joined Spaces.
+- A successful local settings change installs its accepted value as a delta, not
+  a level copy (#1177). The pre-send read may still lag the SDK echo of the other
+  locally editable property, so an access change keeps the locally held history
+  value and a history change keeps the locally held access value until the shared
+  observation agrees with the read. A successful access change (restricted policy
+  or scalar join rule) also reaches `room_access` immediately, so the sidebar and
+  header badges update without waiting for the echo; the next authoritative
+  observation replaces it.
 - SDK state-event mutation calls can return before the SDK room cache reflects
   the sent state event. The SDK adapter must project the submitted setting
   change or member power-level change into the success snapshot or otherwise
   wait for a refreshed cache before emitting `RoomSettingUpdated` /
   `RoomMemberRoleUpdated`; React must not patch the visible settings or role
   state locally.
+- The access/history editor owns its selection in Rust, not React (#1177).
+  `RoomManagementState.draft` is a serializable `RoomAccessDraft { scope,
+  revision, rule, history, touched }`. The complete selected allow set stays in
+  an internal, serde-skipped `allow_targets`; only its renderable subset, the
+  joined Spaces the picker offers, is serialized as `allowTargets`, so an
+  ordinary-room, unknown or unnamed confirmed target never reaches the
+  renderer. `revision` increments on every accepted mutation and `touched`
+  records a real user choice (the seeded legacy create preset is not touched).
+  Typed `RoomAccessDraftRuleSet`, `RoomAccessDraftAllowTargetsSet`,
+  `RoomAccessDraftToggleAllowTarget`, `RoomAccessDraftHistorySet`,
+  `RoomAccessDraftReset`, and `RoomAccessDraftOpened` actions mutate it. A
+  target edit is applied against the draft's CURRENT set, so two rapid edits
+  cannot drop one another. `RoomAccessDraftOpened` admits an editor lifetime: a
+  room scope only for the loaded room (and another room's load invalidates the
+  previous draft synchronously), and a create scope only for a distinct,
+  monotonic per-open session id — a retired session's mutation or reset, and a
+  stale `Open` at or below the process watermark, are ignored rather than
+  recreating or replacing a draft. Outcome notes are derived for the current
+  draft by the pure `resolve_room_access_outcome`, never stored in the draft. An
+  unchanged draft resolves from the confirmed completeness and target facts, so
+  a membership-only guess never replaces an uneditable confirmed condition; a
+  proposed membership policy does not erase those facts either. `RoomAccessPreview`
+  carries Rust's opaque `canonical_policy_key`, a stable token over the full
+  canonical policy that carries no room id, so React attributes a save to that
+  policy without re-implementing canonicalization or exposing a preserved
+  target identity.
+- An access-policy edit is re-validated against the pre-send settings read
+  (#1177). `RoomSettingsSnapshot.access` carries the verified facts and is
+  serde-skipped from the IPC wire shape. `RoomAccessCondition::access_policy_rejection`
+  admits the edit only when the current restricted allow content is
+  `MembershipOnly`/`ConfirmedEmpty` (or the rule is not restricted). It rejects a
+  mixed or unsupported-only current condition with
+  `RoomFailureKind::UnsupportedPolicyCondition` and an unavailable/uninspected
+  condition with `RoomFailureKind::PolicyNotVerified`, mapped to the matching
+  `OperationFailureKind`; either rejection writes no state event. Every newly
+  selected allow target must additionally be a joined, verified Space
+  (`RoomAccessCondition::access_target_rejection`); an existing non-Space
+  condition is preserved or its removal is rejected explicitly.
 - Failure state stores only coarse `RoomFailureKind` values. Room IDs, user IDs,
   room names/topics, avatar URLs, moderation reasons, raw SDK errors, and event
   identifiers must not appear in `Debug` output or QA stdout.
@@ -3678,7 +4078,13 @@ stateDiagram-v2
   room so timeline and room/space stages are not disrupted. `space_access=ok`
   proves a disposable Space's join rule switches invite ↔ public for its
   creator, reaches a second member's open settings through sync, is refused for
-  that member, and leaves the child room's join rule unchanged.
+  that member, and leaves the child room's join rule unchanged; its #1177
+  extensions prove an explicit membership create whose target Space the creator
+  cannot edit, exactly one server-side `m.room.history_visibility` initial-state
+  event, the exact canonical allow set and all four history values read back
+  independently, a second client's OPEN settings reconciling to that exact
+  target set and to a history change without reload, a restricted restore, and a
+  second parent attachment both projected and persisted on the homeserver.
   `space_add_existing=ok` proves a room version 12 (domainless) room with only a
   child-side `m.space.parent` is offered, added through `SetSpaceChild`, and
   projected as added, and that the homeserver then holds a routed
@@ -3867,19 +4273,42 @@ stateDiagram-v2
   compatibility, optional display labels, and a delegated registration link.
   It never owns the authenticated session's account-management destination and
   does not carry access tokens, refresh tokens, or OAuth authorization artifacts.
-- `StartOidcLogin` creates an SDK-owned authorization-code flow with PKCE. The
-  internal Tauri waiter receives the full authorization event and opens its exact
-  HTTP(S), userinfo-free URL with the native opener; the WebView event projection
+- `StartOidcLogin` carries the user's bounded `DelegatedAuthMethod` (`OAuth` or
+  `Sso`) and creates the selected delegated flow through the SDK: an
+  authorization-code flow with PKCE, or the legacy SSO redirect. The internal
+  Tauri waiter receives the full authorization event and opens its exact HTTP(S),
+  userinfo-free URL with the native opener; the WebView event projection
   contains only `request_id`, and the command response contains only settlement
   plus `launched`, `invalid_authorization_url`, or `browser_launch_failed`.
-  Repeating the same homeserver replays the retained authorization; a different
-  homeserver is rejected without replacing it. `CompleteOidcLogin` consumes the
-  callback in `AccountActor`, persists the OAuth session in the credential
-  store, restores it into the encrypted per-account SDK store, and then emits
-  `LoginSucceeded`. Logout/change-homeserver retires the pending flow with
-  `BrowserCancellation` cleanup evidence.
+  `OAuth` falls back to the legacy SSO redirect **only** for the classified
+  unsupported-method condition (the authorization-server metadata endpoint
+  reports the endpoint is not implemented); transport, timeout,
+  metadata-validation, client-registration, and server-response failures are
+  surfaced as a typed, privacy-safe failure and never switch the method
+  silently. A new start always replaces a retained attempt: it retires the old
+  one with `BrowserCancellation` cleanup evidence and creates fresh SDK
+  authorization state, so an expired URL is never replayed. `CancelOidcLogin`
+  retires the pending attempt explicitly and idempotently, and a callback for a
+  retired attempt is fenced to `AuthFailureKind::Cancelled`. Changing the typed
+  Matrix ID / homeserver retires the pending attempt the same way.
+  `CompleteOidcLogin` consumes the callback in `AccountActor`, persists the
+  session in the credential store, restores it into the encrypted per-account
+  SDK store, and then emits `LoginSucceeded`. Logout/change-homeserver retires
+  the pending flow with `BrowserCancellation` cleanup evidence.
 - `LoginDiscoveryFailed` stores only `AuthFailureKind`; raw discovery responses,
   homeserver error bodies, and SDK errors do not enter snapshots.
+- Login failure classification (#1268): the SDK boundary classifies a password /
+  OAuth / SSO failure into a bounded `AuthFailureDetail` (authentication method,
+  stage, transport vs received response, optional HTTP status, optional
+  allowlisted Matrix error kind, retryable) instead of matching error text.
+  Core derives the coarse `LoginFailureKind`, the UI `AuthFailureKind`, the
+  cleanup evidence, and the diagnostic fields from that value; no substring of
+  an SDK error, response body, token, callback URL, account identifier, or server
+  URL is ever inspected, stored, or recorded. Visible guidance comes from the
+  bounded `reason` on the `login_failed` `AppError`, which React maps to
+  localized copy. The diagnostic event reuses the #1265 bounded vocabulary
+  (`method`, `stage`, `transport`, `httpStatus`, `matrixErrorKind`,
+  `retryable`).
 - Discovery completion actions are accepted only while the reducer is still
   `Discovering` the same homeserver. Late completions from older discovery
   requests are ignored.
@@ -4021,7 +4450,8 @@ stateDiagram-v2
   only to derive UI metadata.
 - Secure-backup setup and passphrase-change state report recovery-key
   delivery status. Recovery-key material reaches reducer state and the live DTO
-  snapshot only in the reveal states (`RecoveryKeyReady`/`Changed`, #927);
+  snapshot only in the reveal states (`RecoveryKeyReady`/`Changed`, #927; the
+  identity bootstrap reuses `RecoveryKeyReady`, #1049);
   it never reaches React component state, logs, QA tokens, or issue comments.
 
 QR login:
@@ -4206,6 +4636,15 @@ stateDiagram-v2
   own-user verification also counts as active and owns the shared request
   observer/continuation slots; because it exposes no incoming replay identity,
   every incoming request conflicts and is cancelled before adoption.
+- Incoming SDK-originated verification request admission is fenced by session
+  identity, not by observer-instance generation. A request is admitted exactly
+  while it was observed for the current session; restarting that session's
+  verification observer does not retire a request already observed for the same
+  session. A request observed for a session that is no longer current, or
+  observed with no current session, is discarded and never adopted. A discard
+  records a token-only diagnostic (event `core.verification`, action
+  `incoming_request_dropped`) with a bounded reason token and a `has_session`
+  boolean; it records no room, user, device, event, target, or handle value.
 - A valid to-device verification request whose sender device is not yet in the
   crypto store is not terminally discarded. The crypto machine retains it in a
   bounded FIFO pending set, deduplicated by sender and flow and governed by the
@@ -4286,8 +4725,9 @@ stateDiagram-v2
   handler is removed to prevent new dispatch. Any handler future already
   dispatched remains owned and awaited by the SDK sync dispatcher; stopping and
   joining the old `SyncActor` is that callback's settlement barrier.
-  Observer-to-actor messages carry a dedicated session generation and are
-  ignored before adoption when stale or when no session is active. A blocked
+  Observer-to-actor messages are fenced before adoption, by a dedicated session
+  generation or, for incoming verification requests, by the observed session
+  identity, and are ignored when stale or when no session is active. A blocked
   actor-mailbox send is stop-aware with stop priority, and join uses a bounded
   timeout followed by abort and owned settlement. Eventual task exit after
   dropping the owner is insufficient because it permits stale old-client
@@ -4665,16 +5105,19 @@ stateDiagram-v2
 - Windows taskbar overlay icon routing is represented by the
   `overlay_icon` capability, separate from generic badge count capability.
 - The Phase A core projection is `native_attention_state_from_rooms`. Its
-  persistent Dock badge sums raw unread messages once per unique non-muted,
-  non-low-priority room; a manual marked-unread flag without raw unread does not
-  fabricate a native count. Low-priority rooms are excluded from the persistent
-  raw account count as well as from transient candidates and
-  notification/highlight attention totals, matching the Home and Space
-  aggregates in "Sidebar Sections And Low Priority". Ignored-user DMs stay in
-  the persistent raw count and are excluded from candidates and attention totals
-  only. Muted rooms are excluded from both persistent and transient native
-  attention. Mention-only rooms retain their raw Dock contribution while
-  candidate eligibility still requires a highlight.
+  persistent Dock badge uses `room_activity_unread_count`, shared with Home,
+  Space and account-tab conversation totals: the maximum of unread messages,
+  notifications and highlights, or one for an otherwise empty manually marked
+  unread room. Each unique non-muted, non-low-priority room contributes once.
+  Low-priority rooms are excluded from persistent badges, transient candidates
+  and notification/highlight attention totals, matching "Sidebar Sections And
+  Low Priority". Ignored-user DMs keep their persistent badge contribution and
+  are excluded from candidates and notification attention totals only. Muted
+  rooms are excluded from both persistent and transient native attention.
+  Mention-only rooms keep the shared persistent contribution while candidate
+  eligibility still requires a highlight. Native settings/capabilities and the
+  invitation scope distinction described under Accounts remain output gates;
+  they never select a different room counter.
   The projection prefers `mention` over `dm` over `message` candidates,
   suppresses initial sync/backfill/self/focused-room observations, suppresses
   duplicate candidates, and clears badge/candidate state when eligible unread
@@ -4892,11 +5335,14 @@ stateDiagram-v2
 - Responses whose `request_id`, `query`, or `scope` does not match the active
   searching/results state are ignored. This prevents results from a previous
   transient command connection from settling the current search if
-  connection-local sequence numbers collide, while allowing a matching SDK
-  supplement to replace the local-first result snapshot.
+  connection-local sequence numbers collide. A matching response replaces the
+  searching state exactly once; there is no local-first snapshot to supplement.
 - If the user edits the query while a search is in flight, the in-flight response
   is ignored because the state is no longer the matching `Searching`/`Results`
   state.
+- A change to the account's content-indexing policy closes the search view: the
+  results it showed were verified under the old policy, and an in-flight query
+  may still be verifying under it.
 - Submitting a valid search emits both the backend search request and
   `SearchChanged` so the UI can display the loading state immediately. The
   reducer resolves `SearchScope` into the authoritative room filter before the
@@ -4907,10 +5353,14 @@ stateDiagram-v2
 - Search result context labels are Rust-owned projections. They may include a
   space label plus room label for disambiguation, but the frontend only renders
   the DTO and must not recompute cross-space context.
-- The search actor returns local index results first and may later supplement
-  them with SDK search results for the same request/query/scope. New search
-  messages preempt older SDK supplement work: the actor aborts or drops stale SDK
-  completions and must not make a newer query wait for an older remote search.
+- Search is index-first: the persistent encrypted ngram index is the only
+  candidate source, and a query emits exactly one `Results` (or a typed failure).
+  A newer query preempts an older one: the actor aborts the in-flight SDK work and
+  the superseded request is settled with `IntentLifecycle` `BenignNoOp`/`Superseded`
+  at the transition that replaced it, so its caller stops waiting.
+- A query verifies candidates with the account's content policy captured when it
+  started. A policy change invalidates a result verified under the previous policy,
+  and the actor re-verifies the same query under the current one.
 
 The ngram index is a candidate generator, not the source of display truth. Before
 returning a result, the search adapter must run a second-pass verification over
@@ -5011,9 +5461,12 @@ stateDiagram-v2
   re-checks the newest known latest event id so an event that arrived during
   the catch-up is not missed.
 
-- **Auto-start (idempotent)**: `RoomListUpdated` emits
-  `AppEffect::NotifySearchCrawlerRoomsAvailable` with all current joined rooms
-  whenever `speed != Paused`. The `SearchActor` owns an Element-style
+- **Auto-start (idempotent)**: every authoritative room list emits
+  `AppEffect::NotifySearchCrawlerRoomsAvailable` with all current joined rooms and
+  the account's content policy, whatever `speed` is and even when the room list is
+  empty: the notification is also how the actor learns the content policy (which
+  governs queries while crawling is paused) and how commitments for rooms that are
+  gone are pruned. Paused settings only mean the actor starts no crawls. The `SearchActor` owns an Element-style
   checkpoint queue: it skips rooms already queued, actively paging, or
   completed (unless a catch-up is due, above), fetches one bounded `/messages` page at a time, and pushes an
   unfinished checkpoint to the back of the queue. This round-robin shape avoids
@@ -5022,6 +5475,22 @@ stateDiagram-v2
   `TimelineActor` pagination. The gate allows only one `/messages` page fetch
   per account at a time, and timeline pagination has priority over background
   crawler work.
+- **Pump scheduling and pending-index ownership (#1276)**: The `SearchActor`
+  starts the next checkpoint only at explicit pump points: a crawl page result,
+  the startup-delay timer, the internal completed-page index queue drain, an
+  index message received from the timeline, an explicit `StartHistoryCrawl`, and
+  a `RoomsAvailable` notification. The pump holds on the crawler's own work
+  only: at most one page in flight, and no next page while the completed page's
+  body-free index queue (`queued_crawl_index`) is unapplied. Pending body-free
+  Files-admission retries (`attachment_retries`) are a separate concern: they
+  are bounded by the mutation queue and settled by a Files query, so they hold
+  the Files read, never the background crawl. An unresolved retry must not leave
+  every queued room `Queued` with no page running. Whenever the pump is
+  consulted and the backlog changed, the actor records a token-only
+  `core.search` / `crawl_pump_held` diagnostic with `queued_index`,
+  `pending_retries`, and `queued_rooms` counts only (never room, event, user,
+  body, or query data); the headless crawl waiter reports it in its
+  `crawl_backfill_timeout` token.
 - **Paused → active**: When `SettingsUpdateRequested` changes speed from
   `Paused` to any active value, the reducer emits
   `NotifySearchCrawlerRoomsAvailable` with all known rooms so previously-paused
@@ -5528,9 +5997,10 @@ stateDiagram-v2
     Checking --> UpToDate: check has no newer release
     Checking --> Idle: update channel changes
     Available --> Idle: update channel changes before download approval
-    Checking --> Available: newer release found (install-capable or notification-only)
+    Available --> Checking: manual/scheduled check refreshes candidate
+    Checking --> Available: newer release found or refresh failed (previous offer retained)
     Available --> Downloading: DownloadUpdate confirmed (install-capable candidate)
-    Checking --> Failed: check failed
+    Checking --> Failed: check failed with no retained offer
     Downloading --> Ready: download and signature verification succeeded
     Downloading --> Failed: download or verification failed
     Ready --> Installing: RestartToInstall
@@ -5541,7 +6011,9 @@ stateDiagram-v2
   manual checks. It does not automatically open the update dialog. A manual
   request joining an active automatic check observes that check's completion.
 - A disabled `auto_check` preference issues no network request. Turning it off
-  suppresses later scheduled checks; turning it on triggers one check.
+  suppresses later scheduled checks; turning it on triggers one check unless an
+  undownloaded candidate is already presented, which it preserves rather than
+  discarding.
 - `include_prereleases` is independent of `auto_check`. When enabled, stable
   and pre-release feeds are both checked and the greatest SemVer candidate is
   selected. A pre-release identifier such as `-alpha.1`, `-beta.1`, or `-rc.1`
@@ -5551,14 +6023,28 @@ stateDiagram-v2
   process-wide Software update dialog, containing status, preferences, explicit
   download, and explicit restart actions. Updates are not buried in account
   settings and do not open a second native confirmation dialog.
+- Closing the dialog, pressing Escape, deferring, or leaving the offer
+  unanswered is temporary: the next fresh offer generation (a scheduled or
+  manual check) presents it again. **Ignore this version** stores the exact
+  version until Koushi exits and suppresses its automatic reminders while
+  background checks continue; a newer eligible release is still announced, and
+  a manual check still reports the ignored version. Ignore is honored only for
+  the version currently offered, so a stale request for a replaced version is
+  rejected and cannot desynchronize the stored decision from the projection.
 - Changing the release channel invalidates unapproved candidates and in-flight
   results. When automatic checks are disabled this performs no network request;
   otherwise the new channel is checked. Explicitly approved downloads and
   verified artifacts remain fixed; the channel control is disabled while
   downloading, ready, or installing, and any external policy change applies to
   future checks only.
-- Duplicate triggers while checking, available, downloading, ready, or installing are
-  coalesced. There is one verified pending artifact slot. Admission, lifecycle,
+- Duplicate triggers while checking, downloading, ready, or installing are
+  coalesced. A startup, 24-hour, or manual check while an undownloaded
+  `available` candidate is presented instead refreshes the feeds, replaces the
+  offer with the newest eligible release, and invalidates the previous
+  candidate generation. A transient refresh failure retains the previous offer
+  under the refreshed generation (still downloadable) and reports
+  `check_failed`; an eligible response with no release withdraws it. There is
+  one verified pending artifact slot. Admission, lifecycle,
   artifact ownership, policies, and operation generation share one serialized
   transition boundary. Stale settings revisions and late operation completions
   cannot replace newer state. Events preserve transition order; network,
@@ -5566,10 +6052,11 @@ stateDiagram-v2
 - Download approval identifies the displayed candidate generation; stale clicks
   cannot approve a replacement candidate. Updater-owned work is canceled and
   joined on owner shutdown rather than detached.
-- `available` exposes the release version, an opaque candidate generation, and
-  whether the candidate is notification-only. Notification-only candidates
-  also expose the selected public release URL; they cannot enter download or
-  install. `ready` exposes the release version. `failed` exposes only a coarse
+- `available` exposes the release version, an opaque candidate generation, the
+  `ignored` and `check_failed` flags, and whether the candidate is notification-only.
+  Notification-only candidates also expose the selected public release URL and
+  cannot enter download or install. `ready` exposes the release version.
+  `failed` exposes only a coarse
   stage/kind and is recoverable; it never blocks startup or login.
 - Installation and relaunch require explicit user intent. Windows builds with
   an embedded updater key use signed NSIS updates; no-key builds remain

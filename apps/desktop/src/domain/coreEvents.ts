@@ -403,6 +403,8 @@ export interface ThreadSummaryDto {
   latest_sender_label?: string | null;
   latest_body_preview: string | null;
   latest_timestamp_ms: number | null;
+  /** #1259: replies since this client last read the thread; 0 when read. */
+  unread_count?: number;
 }
 
 export type TimelineDisplayKind =
@@ -1313,6 +1315,14 @@ type StateDeltaDomainChangedSlices = Partial<AppDomainState> & {
   live_signals_receipts_by_room_event?: Record<
     string,
     Record<string, LiveEventReceiptSummary | null>
+  >;
+  live_signals_focused_receipts_by_room_event?: Record<
+    string,
+    Record<string, Record<string, LiveEventReceiptSummary | null>>
+  >;
+  live_signals_thread_receipts_by_room_event?: Record<
+    string,
+    Record<string, Record<string, LiveEventReceiptSummary | null>>
   >;
   live_signals_room_metadata_by_id?: Record<string, RoomLiveSignalMetadata | null>;
   live_signals_presence_by_user?: Record<string, PresenceKind | null>;

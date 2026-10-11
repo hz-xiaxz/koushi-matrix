@@ -6,6 +6,40 @@ use super::{
     TimelineEvent, TimelineKey,
 };
 
+/// Per-state crawler counts for the timeout diagnostic (#1198/#1199):
+/// `[idle, queued, running, completed, failed]`. No room identifiers.
+fn crawler_state_counts(
+    rooms: &std::collections::BTreeMap<String, SearchCrawlerRoomState>,
+) -> [u64; 5] {
+    let mut counts = [0u64; 5];
+    for state in rooms.values() {
+        match state {
+            SearchCrawlerRoomState::Idle => counts[0] += 1,
+            SearchCrawlerRoomState::Queued => counts[1] += 1,
+            SearchCrawlerRoomState::Running { .. } => counts[2] += 1,
+            SearchCrawlerRoomState::Completed { .. } => counts[3] += 1,
+            SearchCrawlerRoomState::Failed { .. } => counts[4] += 1,
+        }
+    }
+    counts
+}
+
+/// Per-room crawl budget the stage leaves the crawler after the product's
+/// automatic-crawl startup hold. Measured: the focused tuwunel and synapse lanes
+/// reach `crawl_backfill=ok` well inside this budget once the hold has elapsed,
+/// while the previous 60s deadline expired with 20 rooms still queued (#1198).
+const CRAWL_BUDGET_SECS: u64 = 60;
+
+/// Deadline for one automatic crawl of the target room, measured from the
+/// moment the stage starts. The product starts no automatic crawl until
+/// [`koushi_core::search::CRAWLER_STARTUP_DELAY`] has elapsed, so the deadline
+/// is that published hold plus [`CRAWL_BUDGET_SECS`]; the sum is structurally
+/// never smaller than the hold it waits out. Deriving it from the product
+/// constant keeps the waiter and the product from drifting apart (#1198): a
+/// deadline inside the hold expires with every room still queued.
+const CRAWL_TIMEOUT_SECS: u64 =
+    koushi_core::search::CRAWLER_STARTUP_DELAY.as_secs() + CRAWL_BUDGET_SECS;
+
 /// Prove the search-history crawler contract through token-only stdout.
 ///
 /// Proofs:
@@ -28,19 +62,38 @@ pub(super) async fn run_search_crawler_stage(
     _account_key: &AccountKey,
     room_id: &str,
 ) -> Result<(), String> {
-    const CRAWL_TIMEOUT_SECS: u64 = 60;
-
     // 1. crawl_backfill — wait for the room to reach Completed in the snapshot.
     //    The auto-start fires when sync/room-list runs after login; we just poll.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(CRAWL_TIMEOUT_SECS);
     loop {
+        let snap = conn.snapshot();
         if tokio::time::Instant::now() >= deadline {
+            let [idle, queued, running, completed, failed] =
+                crawler_state_counts(&snap.search_crawler.rooms);
+            let target = match snap.search_crawler.rooms.get(room_id) {
+                Some(SearchCrawlerRoomState::Idle) => "idle",
+                Some(SearchCrawlerRoomState::Queued) => "queued",
+                Some(SearchCrawlerRoomState::Running { .. }) => "running",
+                Some(SearchCrawlerRoomState::Completed { .. }) => "completed",
+                Some(SearchCrawlerRoomState::Failed { .. }) => "failed",
+                None => "absent",
+            };
+            // The crawler records its pending body-free index backlog token-only
+            // (#1276); reporting it here makes a stall decidable from this token
+            // alone. Counts only — never room, event, user, or body data.
+            let (index_pending, retry_pending) =
+                super::diagnostics::search_crawl_backlog_summary(&koushi_diagnostics::snapshot())
+                    .unwrap_or((0, 0));
+            println!(
+                "crawl_backfill_timeout target={target} rooms={} idle={idle} queued={queued} running={running} completed={completed} failed={failed} last_active={} index_pending={index_pending} retry_pending={retry_pending}",
+                snap.search_crawler.rooms.len(),
+                snap.search_crawler.last_active.is_some(),
+            );
             return Err(
                 "crawl_backfill: timed out waiting for crawler to complete room".to_owned(),
             );
         }
 
-        let snap = conn.snapshot();
         match snap.search_crawler.rooms.get(room_id) {
             Some(SearchCrawlerRoomState::Completed { .. }) => break,
             Some(SearchCrawlerRoomState::Failed { kind }) => {
@@ -164,6 +217,10 @@ pub(super) async fn run_search_crawler_stage(
     Ok(())
 }
 
+#[cfg(test)]
+#[path = "search_tests.rs"]
+mod tests;
+
 pub(super) async fn run_hide_redacted_stage(
     conn: &mut CoreConnection,
     key: &TimelineKey,
@@ -260,8 +317,7 @@ fn assert_hide_redacted_projection() -> Result<(), String> {
     Ok(())
 }
 
-#[path = "../../common/pagination_waiter.rs"]
-mod pagination_waiter;
+use super::pagination_waiter;
 
 /// Paginate backward to `EndReached` with correlated admission and one deadline.
 pub(super) async fn wait_for_paginate_end_reached(

@@ -17,6 +17,7 @@ describe("DesktopUpdateControls", () => {
         onSelect={onSelect}
         onCheck={() => undefined}
         onDownload={() => undefined}
+        onIgnore={() => undefined}
         onRestart={() => undefined}
       />
     );
@@ -35,6 +36,7 @@ describe("DesktopUpdateControls", () => {
         onSelect={onSelect}
         onCheck={() => undefined}
         onDownload={() => undefined}
+        onIgnore={() => undefined}
         onRestart={() => undefined}
       />
     );
@@ -54,6 +56,7 @@ describe("DesktopUpdateControls", () => {
         onSelect={() => undefined}
         onCheck={() => undefined}
         onDownload={() => undefined}
+        onIgnore={() => undefined}
         onRestart={onRestart}
       />
     );
@@ -66,6 +69,7 @@ describe("DesktopUpdateControls", () => {
         onSelect={() => undefined}
         onCheck={() => undefined}
         onDownload={() => undefined}
+        onIgnore={() => undefined}
         onRestart={onRestart}
       />
     );
@@ -82,6 +86,7 @@ describe("DesktopUpdateControls", () => {
         onSelect={onSelect}
         onCheck={() => undefined}
         onDownload={() => undefined}
+        onIgnore={() => undefined}
         onRestart={() => undefined}
       />
     );
@@ -97,10 +102,11 @@ describe("DesktopUpdateControls", () => {
     render(
       <DesktopUpdateControls
         current={{ auto_check: true, include_prereleases: false }}
-        state={{ kind: "available", version: "1.2.3", generation: 7, notification_only: false, release_url: null }}
+        state={{ kind: "available", version: "1.2.3", generation: 7, ignored: false, check_failed: false, notification_only: false, release_url: null }}
         onSelect={() => undefined}
         onCheck={() => undefined}
         onDownload={onDownload}
+        onIgnore={() => undefined}
         onRestart={() => undefined}
       />
     );
@@ -115,12 +121,13 @@ describe("DesktopUpdateControls", () => {
     render(
       <DesktopUpdateControls
         current={{ auto_check: true, include_prereleases: false }}
-        state={{ kind: "available", version: "1.2.3", generation: 7, notification_only: true, release_url: "https://github.com/shinaoka/koushi-matrix/releases/tag/v1.2.3" }}
+        state={{ kind: "available", version: "1.2.3", generation: 7, notification_only: true, release_url: "https://github.com/shinaoka/koushi-matrix/releases/tag/v1.2.3" , ignored: false, check_failed: false }}
         onSelect={() => undefined}
         onCheck={() => undefined}
         onDownload={onDownload}
         onRestart={() => undefined}
         notificationOnly
+        onIgnore={() => undefined}
         onOpenReleasePage={onOpenReleasePage}
       />
     );
@@ -140,6 +147,7 @@ describe("DesktopUpdateControls", () => {
         onSelect={() => undefined}
         onCheck={onCheck}
         onDownload={() => undefined}
+        onIgnore={() => undefined}
         onRestart={() => undefined}
       />
     );

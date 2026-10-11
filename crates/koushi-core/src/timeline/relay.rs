@@ -466,7 +466,7 @@ impl TimelineActor {
         // coordinator: known SDK ids atomically replace their client fallback;
         // while a registration is still unbound, hide the overtaking SDK row
         // for this batch and keep the already-visible client fallback.
-        let incoming_transaction_ids = core_diffs
+        let incoming_items = core_diffs
             .iter()
             .flat_map(|diff| match diff {
                 TimelineDiff::PushFront { item }
@@ -476,6 +476,9 @@ impl TimelineActor {
                 TimelineDiff::Reset { items } => items.iter().collect(),
                 _ => Vec::new(),
             })
+            .collect::<Vec<_>>();
+        let incoming_transaction_ids = incoming_items
+            .iter()
             .filter_map(|item| match &item.id {
                 koushi_protocol::event::TimelineItemId::Transaction { transaction_id } => {
                     Some(transaction_id.clone())
@@ -493,7 +496,14 @@ impl TimelineActor {
                 pending_display_inputs_for_incoming_transactions(
                     &projections,
                     &incoming_transaction_ids,
-                    coordinator.settled_transaction_ids(self.key.room_id()),
+                    coordinator.settled_transaction_ids(
+                        self.key.room_id(),
+                        &super::outbound_send::canonical_event_ids(
+                            self.navigation_items
+                                .iter()
+                                .chain(incoming_items.iter().copied()),
+                        ),
+                    ),
                 )
             };
             self.overlay_reply_quotes_on_pending(&mut pending_items, &batch.originals);
@@ -621,6 +631,9 @@ impl TimelineActor {
             return;
         };
         drop(thread_summary_commit_lease);
+        // #1259: the batch committed; if a root's room-side summary changed, read the
+        // SDK thread cache for it and repaint the chip dot. Bounded to changed roots.
+        self.refresh_thread_unread_counts(false).await;
         if matches!(self.key.kind, TimelineKind::Room { .. })
             && sdk_diffs
                 .iter()
@@ -693,7 +706,10 @@ impl TimelineActor {
                 self.send_completion
                     .lock()
                     .expect("send completion coordinator lock must not be poisoned")
-                    .settled_transaction_ids(self.key.room_id()),
+                    .settled_transaction_ids(
+                        self.key.room_id(),
+                        &super::outbound_send::canonical_event_ids(&self.navigation_items),
+                    ),
             );
             self.display_projection
                 .set_pending_inputs(pending_items, suppressed);
@@ -766,12 +782,69 @@ impl TimelineActor {
             &self.navigation_items,
             &thread_attention_provenance,
         );
+        // #1238 diagnostic (temporary): measure where an unopened thread's replies
+        // stop being delivered, instead of inferring it from a room badge. Runs once
+        // per room actor, for the first root the room window exposes.
+        let thread_delivery_diagnostic = match &self.key.kind {
+            TimelineKind::Room { room_id } if !self.thread_delivery_diagnosed => {
+                match room_thread_diagnostic_candidate(&self.navigation_items) {
+                    Some((root_event_id, latest_reply_id)) => {
+                        self.thread_delivery_diagnosed = true;
+                        let capability_advertised = self
+                            .session
+                            .client()
+                            .enabled_thread_subscriptions()
+                            .await
+                            .unwrap_or(false);
+                        let mut subscribe_attempted = false;
+                        let mut subscribe_succeeded = None;
+                        if let Some(room) = matrix_sdk::ruma::RoomId::parse(room_id.as_str())
+                            .ok()
+                            .and_then(|room_id| self.session.client().get_room(&room_id))
+                            && let Ok(root) =
+                                matrix_sdk::ruma::EventId::parse(root_event_id.as_str())
+                            && let Ok(latest) =
+                                matrix_sdk::ruma::EventId::parse(latest_reply_id.as_str())
+                        {
+                            subscribe_attempted = true;
+                            subscribe_succeeded = Some(
+                                room.subscribe_thread_if_needed(&root, Some(latest))
+                                    .await
+                                    .is_ok(),
+                            );
+                        }
+                        let (thread_cache_read, counts) =
+                            sdk_thread_cache_counts(&self.session, room_id, &root_event_id).await;
+                        Some(koushi_state::ThreadDeliveryDiagnostic {
+                            capability_advertised: Some(capability_advertised),
+                            subscribe_attempted,
+                            subscribe_succeeded,
+                            thread_cache_read,
+                            thread_cache_unread: counts.0,
+                            thread_cache_notifications: counts.1,
+                            thread_cache_mentions: counts.2,
+                        })
+                    }
+                    None => None,
+                }
+            }
+            _ => None,
+        };
         self.republish_reply_quote_dependents();
         self.maybe_hydrate_reply_quotes();
         drop(continuation_lease);
 
         if let Some(action) = thread_activity_action
             && !self.emit_action_reliable(action).await
+        {
+            return;
+        }
+        if let Some(diagnostic) = thread_delivery_diagnostic
+            && !self
+                .emit_action_reliable(koushi_state::AppAction::ThreadDeliveryDiagnosticRecorded {
+                    diagnostic,
+                })
+                .await
         {
             return;
         }
@@ -975,6 +1048,7 @@ impl TimelineActor {
                 room_id,
                 receipts_by_event: live_event_receipts_from_sdk_items(items.iter()),
                 target: ReceiptObservationTarget::Authoritative {
+                    scope: super::item_projection::receipt_scope_for_timeline_kind(&self.key.kind),
                     scoped_event_ids: reconciliation.scoped_event_ids.clone(),
                 },
             });
@@ -1276,6 +1350,61 @@ impl TimelineActor {
     }
 }
 
+use koushi_sdk::MatrixClientSession;
+
+/// #1238 diagnostic (temporary): the first root the room window exposes with a live
+/// thread summary, as `(root event id, latest reply event id)`.
+fn room_thread_diagnostic_candidate(
+    items: &[koushi_protocol::event::TimelineItem],
+) -> Option<(String, String)> {
+    items.iter().find_map(|item| {
+        if item.thread_root.is_some() {
+            return None;
+        }
+        let koushi_protocol::event::TimelineItemId::Event { event_id } = &item.id else {
+            return None;
+        };
+        let summary = item.thread_summary.as_ref()?;
+        if summary.reply_count == 0 {
+            return None;
+        }
+        Some((event_id.clone(), summary.latest_event_id.clone()?))
+    })
+}
+
+/// #1238 diagnostic (temporary): read the SDK thread cache's own threaded receipts.
+async fn sdk_thread_cache_counts(
+    session: &MatrixClientSession,
+    room_id: &str,
+    root_event_id: &str,
+) -> (bool, (u64, u64, u64)) {
+    let Ok(room_id) = matrix_sdk::ruma::RoomId::parse(room_id) else {
+        return (false, (0, 0, 0));
+    };
+    let Ok(root_event_id) = matrix_sdk::ruma::EventId::parse(root_event_id) else {
+        return (false, (0, 0, 0));
+    };
+    let Ok((cache, _drop_handles)) = session
+        .client()
+        .event_cache()
+        .thread(&room_id, &root_event_id)
+        .await
+    else {
+        return (false, (0, 0, 0));
+    };
+    match cache.read_receipts().await {
+        Ok(receipts) => (
+            true,
+            (
+                receipts.num_unread,
+                receipts.num_notifications,
+                receipts.num_mentions,
+            ),
+        ),
+        Err(_) => (false, (0, 0, 0)),
+    }
+}
+
 pub(super) fn koushi_timeline_builder(
     room: &matrix_sdk::Room,
     focus: TimelineFocus,
@@ -1341,6 +1470,7 @@ fn authoritative_receipts_action(
 ) -> AppAction {
     AppAction::LiveRoomReceiptsWindowReconciled {
         room_id: room_id.to_owned(),
+        scope: koushi_state::ReceiptScope::Main,
         scoped_event_ids: reconciliation.scoped_event_ids.clone(),
         receipts_by_event,
     }

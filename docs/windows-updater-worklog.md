@@ -30,12 +30,19 @@ tests, manifest tests, configuration preflight and SDK synchronization passed.
 The source-map-js high advisory was repaired to 1.2.2. Windows secret scanning
 required fileURLToPath to resolve the repository root and now passes.
 
-Existing validation limitations: the Rust structure checker reports eight
-findings outside updater surfaces; the Windows agents-docs checker reports
-path normalization/retired-scenario failures; user-help --check reports a
-missing Using Koushi index. Protected signing environment provisioning,
-signed packaging, old-to-new installation confirmation and SignPath approval
-remain pending. Do not merge or publish based only on the focused checks.
-The final Windows Rust library run passed 214/216 tests, including all eight
-new updater checks. Two existing native-attention tests failed because their
-runtime setup requires HOME, which is absent on this Windows host.
+Integration validation (2026-10-11): main was integrated, preserving ignored
+updates, refresh failure state, and notification-only release links together.
+A failing lifecycle regression reproduced loss of the notification capability
+and link after refresh failure; the corrected projection passes. All 242 Linux
+Rust library tests, 42 focused frontend/config tests, typecheck, lint, Rust
+structure, SDK synchronization, agents docs, user-help and release configuration
+checks pass. Windows CI now exercises updater and shutdown ordering tests.
+
+The protected release-windows environment is provisioned, as recorded in
+issue #1339 comment 6105903661. Its public key matches release-macos and its
+secrets were loaded from the offline backup. Presence is separate from actual
+signed packaging evidence. The optional Windows trial workflow validates an
+installer with disposable keys, including tampering and wrong-key rejection,
+without production secrets, uploads, release writes or tag changes.
+Production-key packaging, old-to-new installation confirmation and SignPath
+approval remain separate release follow-ups.

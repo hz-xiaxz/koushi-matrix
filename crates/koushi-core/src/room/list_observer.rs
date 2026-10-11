@@ -398,6 +398,7 @@ async fn project_room_list_snapshot(
     generation: u64,
     source: RoomListSource,
     authoritative: bool,
+    room_access: std::collections::BTreeMap<String, koushi_state::RoomAccessObservation>,
 ) -> bool {
     let spaces = normalize_spaces(snapshot);
     let previous_dm_rooms = known_dm_rooms
@@ -466,6 +467,12 @@ async fn project_room_list_snapshot(
             snapshot_action,
             AppAction::UserProfilesUpdated {
                 profiles: user_profiles,
+            },
+            AppAction::RoomAccessUpdated {
+                generation,
+                source,
+                authoritative,
+                observations: room_access,
             },
         ])
         .await
@@ -1521,11 +1528,55 @@ async fn normalize_and_project_entries(
     }
     let joined_count = joined_rooms.len();
     let invited_count = invited_rooms.len();
+    // #1166: each joined room's own access condition. Collected from the SDK
+    // rooms, then restricted to the rooms the completed snapshot actually
+    // projects, so an action never describes a room normalization dropped.
+    let mut joined_access = std::collections::BTreeMap::new();
+    for room in &joined_rooms {
+        let facts = koushi_sdk::matrix_room_access_facts(room).await;
+        joined_access.insert(
+            room.room_id().to_string(),
+            koushi_state::RoomAccessObservation {
+                access: koushi_state::RoomAccessCondition {
+                    join_rule: facts
+                        .join_rule
+                        .map(super::management::room_join_rule_from_sdk),
+                    restricted: facts
+                        .restricted
+                        .map(super::management::restricted_conditions_from_sdk),
+                    allow_targets: facts
+                        .allow_targets
+                        .into_iter()
+                        .map(|target| koushi_state::RoomAllowTarget {
+                            kind: super::management::allow_target_kind_from_sdk(target.kind),
+                            room_id: target.room_id,
+                        })
+                        .collect(),
+                },
+                history_visibility: super::management::room_history_visibility_from_sdk(
+                    facts.history_visibility,
+                ),
+            },
+        );
+    }
     let mut snapshot = koushi_sdk::room_list_snapshot_from_sdk_rooms_with_direct_targets(
         joined_rooms,
         direct_targets_by_room,
     )
     .await;
+    // Spaces carry their own condition on the rail, so their facts are projected
+    // alongside the joined rooms (#1166); anything the snapshot dropped is not.
+    let room_access = snapshot
+        .rooms
+        .iter()
+        .map(|room| room.room_id.as_str())
+        .chain(snapshot.spaces.iter().map(|space| space.space_id.as_str()))
+        .filter_map(|room_id| {
+            joined_access
+                .get(room_id)
+                .map(|condition| (room_id.to_owned(), condition.clone()))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
     snapshot.invites = koushi_sdk::matrix_invite_previews_from_rooms(invited_rooms).await;
     if let (Some(direct_state), Some(diagnostics)) = (direct_state, sliding_sync_diagnostics) {
         let projected_dms = snapshot.rooms.iter().filter(|room| room.is_dm).count();
@@ -1610,6 +1661,7 @@ async fn normalize_and_project_entries(
         generation,
         source,
         authoritative.load(Ordering::Acquire),
+        room_access,
     )
     .await
 }

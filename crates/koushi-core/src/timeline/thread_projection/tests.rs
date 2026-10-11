@@ -119,6 +119,7 @@ fn thread_and_focused_items_do_not_claim_room_canonical_summary_ownership() {
     let mut root = timeline_item("$root:test", Some("root"), "@root:test", false);
     root.thread_summary = Some(ThreadSummaryDto {
         reply_count: 1,
+        unread_count: 0,
         latest_event_id: Some("$reply:test".to_owned()),
         latest_sender: None,
         latest_sender_label: None,
@@ -142,6 +143,7 @@ fn newer_sdk_summary_is_detected_before_overlay_and_repaired_by_exact_aggregate(
     let mut root_a = timeline_item("$root:test", Some("root"), "@root:test", false);
     root_a.thread_summary = Some(ThreadSummaryDto {
         reply_count: 1,
+        unread_count: 0,
         latest_event_id: Some("$reply-a:test".to_owned()),
         latest_sender: Some("@a:test".to_owned()),
         latest_sender_label: Some("A".to_owned()),
@@ -153,6 +155,7 @@ fn newer_sdk_summary_is_detected_before_overlay_and_repaired_by_exact_aggregate(
     let mut root_b = root_a.clone();
     root_b.thread_summary = Some(ThreadSummaryDto {
         reply_count: 2,
+        unread_count: 0,
         latest_event_id: Some("$reply-b:test".to_owned()),
         latest_sender: Some("@b:test".to_owned()),
         latest_sender_label: Some("B".to_owned()),
@@ -1440,6 +1443,7 @@ fn thread_attention_acknowledgement_clears_without_changing_total_reply_count() 
     let mut root = timeline_message_item("$root:test", "@alice:test");
     root.thread_summary = Some(ThreadSummaryDto {
         reply_count: 2,
+        unread_count: 0,
         latest_event_id: Some("$live:test".to_owned()),
         latest_sender: Some("@bob:test".to_owned()),
         latest_sender_label: Some("Bob".to_owned()),
@@ -1660,4 +1664,61 @@ async fn thread_root_fetch_classifies_invisible_root_errors() {
         .await;
         assert_eq!(result.err(), Some(expected));
     }
+}
+
+/// #1237: a raw thread reply whose `m.thread` relation carries the
+/// `is_falling_back` compatibility target must not project that target as a
+/// reply in the thread pane; a genuine in-thread reply keeps its own quote.
+#[test]
+fn raw_thread_projection_drops_a_falling_back_reply_target() {
+    let key = thread_key();
+
+    let falling_back = serde_json::json!({
+        "type": "m.room.message",
+        "event_id": "$own-reply:test",
+        "sender": "@me:test",
+        "origin_server_ts": 1_700_000_000_000_u64,
+        "content": {
+            "msgtype": "m.text",
+            "body": "> <@alice:test> root body\n\nmy reply",
+            "m.relates_to": {
+                "rel_type": "m.thread",
+                "event_id": "$root:test",
+                "is_falling_back": true,
+                "m.in_reply_to": { "event_id": "$root:test" }
+            }
+        }
+    });
+    let activity = ThreadRootProjectionActivity {
+        room_id: "!r:test".to_owned(),
+        root_event_id: "$own-reply:test".to_owned(),
+        activity_event_id: "$own-reply:test".to_owned(),
+        activity_timestamp_ms: None,
+        activity_sender: None,
+        activity_sender_label: None,
+        activity_body_preview: None,
+    };
+    let item = thread_root_projection_item_from_raw(&key, None, &activity, falling_back.clone())
+        .expect("the projected event must render");
+    assert_eq!(
+        item.in_reply_to_event_id, None,
+        "the thread fallback target is not a reply in the thread pane"
+    );
+
+    // A genuine in-thread reply (is_falling_back false/absent) keeps its target.
+    let mut genuine = falling_back.clone();
+    genuine["content"]["m.relates_to"]["is_falling_back"] = serde_json::json!(false);
+    genuine["content"]["m.relates_to"]["m.in_reply_to"] =
+        serde_json::json!({ "event_id": "$other-reply:test" });
+    let item = thread_root_projection_item_from_raw(&key, None, &activity, genuine)
+        .expect("the projected event must render");
+    assert_eq!(
+        item.in_reply_to_event_id.as_deref(),
+        Some("$other-reply:test")
+    );
+
+    // The main timeline is unchanged: it keeps every `m.in_reply_to` target.
+    let item = thread_root_projection_item_from_raw(&room_key(), None, &activity, falling_back)
+        .expect("the projected event must render");
+    assert_eq!(item.in_reply_to_event_id.as_deref(), Some("$root:test"));
 }

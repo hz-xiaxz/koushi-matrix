@@ -457,13 +457,6 @@ fn next_timeline_actor_generation(_state: &mut TimelineActorGenerationGateState)
     NEXT_TIMELINE_ACTOR_GENERATION.fetch_add(1, Ordering::Relaxed)
 }
 
-pub(super) fn replay_projection_request_id(
-    projection_request_id: RequestId,
-    initial_projection_committed: bool,
-) -> Option<RequestId> {
-    (!initial_projection_committed).then_some(projection_request_id)
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct InitialItemsRequestIdentity {
     projection_request_id: Option<RequestId>,
@@ -480,14 +473,12 @@ impl InitialItemsRequestIdentity {
 
     pub(super) fn replay(
         projection_request_id: RequestId,
-        initial_projection_committed: bool,
         cause_request_id: Option<RequestId>,
     ) -> Self {
         Self {
-            projection_request_id: replay_projection_request_id(
-                projection_request_id,
-                initial_projection_committed,
-            ),
+            // This is the actor-owned view-source identity. The command that
+            // requested this replay is correlated separately below.
+            projection_request_id: Some(projection_request_id),
             cause_request_id,
         }
     }
@@ -693,7 +684,7 @@ pub(super) fn publish_restore_settlement_for_generation(
     if let Some(snapshot) = settlement.navigation_snapshot {
         terminal_events.push(TimelineEvent::NavigationUpdated {
             key: key.clone(),
-            snapshot,
+            snapshot: Box::new(snapshot),
         });
     }
     if let Some((request_id, status)) = settlement.terminal {
@@ -1235,15 +1226,15 @@ impl TimelineActor {
             );
             let paginate_started = Some(startup_trace::now());
             let trace_started = Some(std::time::Instant::now());
-            let outcome = match direction {
-                PaginationDirection::Backward => timeline.paginate_backwards(event_count).await,
-                PaginationDirection::Forward => timeline.paginate_forwards(event_count).await,
-            };
-            let outcome_token = match &outcome {
-                Ok(true) => "end_reached",
-                Ok(false) => "idle",
-                Err(_) => "failed",
-            };
+            // #1239: bound the SDK await so a stalled relationship request can
+            // never leave the pane in `Paginating` for the life of the timeline.
+            let outcome = bounded_paginate_with(TIMELINE_PAGINATION_TIMEOUT, async {
+                match direction {
+                    PaginationDirection::Backward => timeline.paginate_backwards(event_count).await,
+                    PaginationDirection::Forward => timeline.paginate_forwards(event_count).await,
+                }
+            })
+            .await;
             trace_timeline_paginate(
                 "sdk_finish",
                 request_id,
@@ -1252,9 +1243,13 @@ impl TimelineActor {
                 event_count,
                 trace_started.map(|started| started.elapsed().as_millis()),
                 gate_ms,
-                Some(outcome_token),
+                Some(outcome.trace_token()),
             );
-            startup_trace::trace_paginate(paginate_started, gate_wait, matches!(outcome, Ok(true)));
+            startup_trace::trace_paginate(
+                paginate_started,
+                gate_wait,
+                matches!(&outcome, PaginationAttempt::ReachedEnd),
+            );
             outcome
         };
         drop(permit);
@@ -1268,14 +1263,7 @@ impl TimelineActor {
             None
         };
 
-        let next_state = match result {
-            Ok(true) => PaginationState::EndReached,
-            Ok(false) => PaginationState::Idle,
-            Err(err) => {
-                let kind = classify_pagination_error(&err);
-                PaginationState::Failed { kind }
-            }
-        };
+        let next_state = result.into_state();
 
         PaginationCompletion {
             state: next_state,
@@ -1433,6 +1421,23 @@ impl TimelineActor {
             }
             // Backstop: relay genuinely stuck. EndReached is the safest
             // fallback (anchor not confirmed in items; the caller can retry).
+            //
+            // #1170/#1167: this is the one path where the cache load DID report
+            // `anchor_present == true` and Core still never received the anchor,
+            // so `EndReached` here would otherwise look like a quiet fallback.
+            // Mirror it to stderr, identifier-free; the cache_load record above
+            // already holds the load facts for this request.
+            koushi_diagnostics::record_and_stderr(
+                koushi_diagnostics::DiagnosticEvent::new(
+                    koushi_diagnostics::DiagnosticLevel::Debug,
+                    "core.timeline_anchor_restore",
+                    "relay_backstop",
+                )
+                .field(koushi_diagnostics::DiagnosticField::count(
+                    "ticks",
+                    u64::from(RESTORE_ANCHOR_RELAY_WAIT_TICKS),
+                )),
+            );
             self.finish_anchor_restore(restore.request_id, TimelineAnchorRestoreStatus::EndReached);
             return;
         }
@@ -1473,6 +1478,45 @@ impl TimelineActor {
 
         match cache_result {
             Ok(outcome) => {
+                // #1167: coarse, identifier-free record of what the cache load
+                // actually found. A homeserver-dependent restore failure can then
+                // be told apart from a missing persisted chunk: zero loaded chunks
+                // with no anchor means the warmed history never reached the store,
+                // while loaded chunks that report a gap point at chunk topology.
+                let cache_load_event = koushi_diagnostics::DiagnosticEvent::new(
+                    koushi_diagnostics::DiagnosticLevel::Debug,
+                    "core.timeline_anchor_restore",
+                    "cache_load",
+                )
+                .field(koushi_diagnostics::DiagnosticField::count(
+                    "chunks_loaded",
+                    outcome.chunks_loaded as u64,
+                ))
+                .field(koushi_diagnostics::DiagnosticField::count(
+                    "events_loaded",
+                    outcome.events_loaded as u64,
+                ))
+                .field(koushi_diagnostics::DiagnosticField::count(
+                    "lazy_reveal_batches",
+                    outcome.lazy_reveal_batches as u64,
+                ))
+                .field(koushi_diagnostics::DiagnosticField::boolean(
+                    "anchor_present",
+                    outcome.anchor_present,
+                ))
+                .field(koushi_diagnostics::DiagnosticField::boolean(
+                    "hit_gap",
+                    outcome.hit_gap,
+                ));
+                if outcome.anchor_present {
+                    koushi_diagnostics::record(cache_load_event);
+                } else {
+                    // Only the failure-adjacent case is mirrored to stderr: a load
+                    // that cannot serve the anchor is what the deep-anchor restore
+                    // then has to resolve over the network (#1167), and a
+                    // successful load must not add noise to every room entry.
+                    koushi_diagnostics::record_and_stderr(cache_load_event);
+                }
                 // The bulk load fired `RoomEventCacheUpdate::UpdateTimelineEvents`
                 // broadcasts for every disk chunk, which are ingested by the
                 // live Timeline's tasks loop and arrive as actor `DiffBatch`
@@ -1712,11 +1756,7 @@ impl TimelineActor {
             &self.timeline_actor_generations,
             &self.key,
             self.actor_generation,
-            InitialItemsRequestIdentity::replay(
-                self.projection_request_id,
-                self.initial_projection_committed,
-                cause_request_id,
-            ),
+            InitialItemsRequestIdentity::replay(self.projection_request_id, cause_request_id),
             self.generation,
             Vec::new(),
             PreparedInitialWindow {
@@ -1774,7 +1814,7 @@ impl TimelineActor {
         self.last_navigation_snapshot = Some(snapshot.clone());
         self.emit(CoreEvent::Timeline(TimelineEvent::NavigationUpdated {
             key: self.key.clone(),
-            snapshot,
+            snapshot: Box::new(snapshot),
         }));
     }
     fn emit_anchor_restore_finished(
@@ -2028,25 +2068,20 @@ pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
     let confirmed_position = server_confirmed_read_event_id
         .as_deref()
         .and_then(|event_id| item_index_for_event_id(items, event_id));
-    let display_marker = match (local_position, confirmed_position) {
-        (Some(local), Some(confirmed)) if confirmed > local => {
-            // A stored local observation may predate a successful receipt from
-            // this or another view. Never place the divider behind that receipt.
-            // Hidden edits remain boundaries but are not rendered divider rows.
-            items[local..=confirmed]
-                .iter()
-                .rev()
-                .find(|item| {
-                    !item.is_hidden
-                        && navigation_item_in_scope(kind, item)
-                        && timeline_item_event_id(item).is_some()
-                })
-                .and_then(timeline_item_event_id)
-                .map(ToOwned::to_owned)
-        }
-        (Some(_), _) => local_viewed_event_id.clone(),
-        _ => None,
-    };
+    // Resolve all loaded boundaries once, before unread processing can return.
+    // Hidden edits and out-of-scope replies are ordering facts, not divider rows.
+    let display_marker = local_position.max(confirmed_position).and_then(|position| {
+        items[..=position]
+            .iter()
+            .rev()
+            .find(|item| {
+                !item.is_hidden
+                    && navigation_item_in_scope(kind, item)
+                    && timeline_item_event_id(item).is_some()
+            })
+            .and_then(timeline_item_event_id)
+            .map(ToOwned::to_owned)
+    });
     let mut snapshot = TimelineNavigationSnapshot {
         read_marker_event_id: server_confirmed_read_event_id.clone(),
         read_marker_display_event_id: display_marker,
@@ -2092,15 +2127,16 @@ pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
     // No remote unread events after the marker. Advance the display anchor to the
     // current user's latest visible own message at or after the marker so the
     // "Read up to here" separator is rendered after it, not before.
-    if snapshot.read_marker_display_event_id.is_none() {
-        snapshot.read_marker_display_event_id = items
+    if local_position.is_none()
+        && let Some(own_event_id) = items
             .iter()
-            .enumerate()
             .skip(read_marker_index)
-            .rfind(|(_, item)| {
+            .rfind(|item| {
                 navigation_item_in_scope(kind, item) && is_own_visible_event(item, own_user_id)
             })
-            .and_then(|(_, item)| timeline_item_event_id(item).map(ToOwned::to_owned));
+            .and_then(timeline_item_event_id)
+    {
+        snapshot.read_marker_display_event_id = Some(own_event_id.to_owned());
     }
     snapshot
 }
@@ -2399,6 +2435,58 @@ fn unread_position_for_index(
     }
 }
 
+/// #1239: the upper bound for one SDK pagination. A thread backfill must reach a
+/// terminal state (Idle / EndReached / Failed) within this window even when the
+/// SDK request never returns; the timeout surfaces as a retryable failure.
+const TIMELINE_PAGINATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// One bounded SDK pagination outcome (#1239).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PaginationAttempt {
+    ReachedEnd,
+    Idle,
+    Failed(TimelineFailureKind),
+}
+
+impl PaginationAttempt {
+    /// A terminal-state token for the pagination diagnostics.
+    fn trace_token(self) -> &'static str {
+        match self {
+            PaginationAttempt::ReachedEnd => "end_reached",
+            PaginationAttempt::Idle => "idle",
+            PaginationAttempt::Failed(TimelineFailureKind::Timeout) => "timeout",
+            PaginationAttempt::Failed(_) => "failed",
+        }
+    }
+
+    fn is_ok(self) -> bool {
+        !matches!(self, PaginationAttempt::Failed(_))
+    }
+
+    fn into_state(self) -> PaginationState {
+        match self {
+            PaginationAttempt::ReachedEnd => PaginationState::EndReached,
+            PaginationAttempt::Idle => PaginationState::Idle,
+            PaginationAttempt::Failed(kind) => PaginationState::Failed { kind },
+        }
+    }
+}
+
+/// The timeout/classification half of one bounded pagination (#1239). The SDK
+/// call itself stays at the `paginate_once_for` call site, after scheduler
+/// admission; this wraps it in the deadline and classifies the outcome.
+async fn bounded_paginate_with<F>(deadline: std::time::Duration, paginate: F) -> PaginationAttempt
+where
+    F: std::future::Future<Output = Result<bool, matrix_sdk_ui::timeline::Error>>,
+{
+    match executor::timeout(deadline, paginate).await {
+        Ok(Ok(true)) => PaginationAttempt::ReachedEnd,
+        Ok(Ok(false)) => PaginationAttempt::Idle,
+        Ok(Err(err)) => PaginationAttempt::Failed(classify_pagination_error(&err)),
+        Err(_) => PaginationAttempt::Failed(TimelineFailureKind::Timeout),
+    }
+}
+
 fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFailureKind {
     use matrix_sdk_ui::timeline::{Error, PaginationError};
     match err {
@@ -2412,3 +2500,11 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "navigation/read_marker_reentry_tests.rs"]
+mod read_marker_reentry_tests;
+
+#[cfg(test)]
+#[path = "navigation/replay_identity_tests.rs"]
+mod replay_identity_tests;

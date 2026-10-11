@@ -21,13 +21,14 @@ use super::{
     SasVerificationWaitState, SyntheticVerificationTerminal,
     VERIFICATION_PROTECTION_SUMMARY_TRIGGER_RESTORE, VerificationTerminal,
     classify_incoming_verification_request, classify_sas_adoption,
-    incoming_verification_request_id, incoming_verification_request_is_current,
-    record_incoming_verification_protection_summary, record_sas_verification_event,
-    recovery_failure_token, resolve_sas_adoption, run_own_user_sas_start, sas_projection_action,
-    sas_settled_event, sas_state_changed_event, sas_state_token, sas_timeout_fired_event,
-    sas_verification_event, sas_waiting_for_token, send_observer_output_until_stopped,
-    stop_incoming_verification_observation_with_timeout, trust_failure_token,
-    verification_cancel_kind_token, verification_request_state_token, verification_terminal_token,
+    incoming_verification_request_dropped_event, incoming_verification_request_id,
+    incoming_verification_request_is_current, record_incoming_verification_protection_summary,
+    record_sas_verification_event, recovery_failure_token, resolve_sas_adoption,
+    run_own_user_sas_start, sas_projection_action, sas_settled_event, sas_state_changed_event,
+    sas_state_token, sas_timeout_fired_event, sas_verification_event, sas_waiting_for_token,
+    send_observer_output_until_stopped, stop_incoming_verification_observation_with_timeout,
+    trust_failure_token, verification_cancel_kind_token, verification_request_state_token,
+    verification_terminal_token,
 };
 use crate::account::actor::{AccountActor, AccountMessage};
 use crate::account::recovery_backup::recovery_verification_event;
@@ -219,11 +220,73 @@ fn active_own_user_verification_conflicts_with_incoming_request() {
     );
 }
 
+#[tokio::test]
+async fn incoming_verification_request_fence_is_session_identity_not_observer_generation() {
+    // Session promotion starts this session's incoming-verification observer
+    // and the login/start path starts it again. Each start replaces the
+    // observer instance. A request the SDK had already delivered to the first
+    // instance is still a request for the same, still-current session, so it
+    // must not be dropped merely because a later observer instance now owns
+    // the subscription.
+    let current = Arc::new(synthetic_verification_session("ALICE").await);
+    let observed_for_current = Arc::clone(&current);
+    let replaced_session = Arc::new(synthetic_verification_session("ALICE-REPLACED").await);
+
+    // Observed for the current session, even though the observing instance was
+    // superseded: admitted.
+    assert!(
+        incoming_verification_request_is_current(Some(&current), &observed_for_current),
+        "restarting the observer for the same session must not retire a request observed for the current session"
+    );
+
+    // Observed for a session that is no longer current: still discarded.
+    assert!(
+        !incoming_verification_request_is_current(Some(&current), &replaced_session),
+        "a request observed for a replaced session must be discarded"
+    );
+
+    // No current session at all: still discarded.
+    assert!(
+        !incoming_verification_request_is_current(None, &observed_for_current),
+        "a request observed with no current session must be discarded"
+    );
+}
+
+async fn synthetic_verification_session(device_id: &str) -> koushi_sdk::MatrixClientSession {
+    let client = matrix_sdk::Client::builder()
+        .homeserver_url("https://matrix.example.invalid")
+        .build()
+        .await
+        .expect("offline synthetic verification client");
+    koushi_sdk::MatrixClientSession::from_client_for_testing(
+        client,
+        koushi_state::SessionInfo {
+            homeserver: "https://matrix.example.invalid".to_owned(),
+            user_id: "@alice:example.invalid".to_owned(),
+            device_id: device_id.to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        },
+    )
+}
+
 #[test]
-fn incoming_verification_transport_rejects_stale_or_sessionless_messages() {
-    assert!(incoming_verification_request_is_current(7, 7, true));
-    assert!(!incoming_verification_request_is_current(6, 7, true));
-    assert!(!incoming_verification_request_is_current(7, 7, false));
+fn incoming_verification_drop_diagnostic_is_token_only() {
+    for (has_session, reason) in [(true, "stale_session"), (false, "no_session")] {
+        let event = incoming_verification_request_dropped_event(has_session);
+        assert_eq!(event.source, "core.verification");
+        assert_eq!(event.stage, "incoming_request_dropped");
+        assert_eq!(event.fields.len(), 2, "only the bounded reason and boolean");
+        assert_eq!(event.fields[0].key, "reason");
+        assert_eq!(
+            event.fields[0].value,
+            koushi_diagnostics::DiagnosticValue::Token(reason)
+        );
+        assert_eq!(event.fields[1].key, "has_session");
+        assert_eq!(
+            event.fields[1].value,
+            koushi_diagnostics::DiagnosticValue::Boolean(has_session)
+        );
+    }
 }
 
 #[tokio::test]
@@ -241,7 +304,8 @@ async fn incoming_verification_mailbox_send_is_stop_aware_when_full() {
     tokio::task::yield_now().await;
 
     stop_tx.send(()).expect("request observer stop");
-    let delivered = executor::timeout(Duration::from_millis(20), blocked_send)
+    // Liveness bound: without the stop, the full-mailbox send never returns.
+    let delivered = executor::timeout(Duration::from_secs(60), blocked_send)
         .await
         .expect("a stop request must interrupt the full-mailbox send")
         .expect("send task");
@@ -282,7 +346,8 @@ async fn incoming_verification_observer_join_has_a_bounded_abort_fallback() {
         Duration::from_millis(1),
     ));
 
-    let result = executor::timeout(Duration::from_millis(20), &mut stop).await;
+    // Liveness bound: without the abort, the nonresponsive child never ends.
+    let result = executor::timeout(Duration::from_secs(60), &mut stop).await;
     if result.is_err() {
         stop.abort();
         child_abort.abort();
@@ -296,9 +361,7 @@ async fn incoming_verification_observer_join_has_a_bounded_abort_fallback() {
 #[tokio::test]
 async fn actor_sas_settlement_emits_exactly_one_terminal_and_clears_runtime() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
-    let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .len();
+    let diagnostic_start = koushi_diagnostics::test_support::detail_cursor();
     let cred_dir = tempdir().expect("credential tempdir");
     let data_dir = tempdir().expect("data tempdir");
     let store = StoreActor::with_backend(
@@ -380,8 +443,7 @@ async fn actor_sas_settlement_emits_exactly_one_terminal_and_clears_runtime() {
             "stale terminal duplicated flow {flow_id}"
         );
     }
-    let settled_flow_ids = koushi_diagnostics::test_support::detail_snapshot().records
-        [diagnostic_start..]
+    let settled_flow_ids = koushi_diagnostics::test_support::detail_records_since(diagnostic_start)
         .iter()
         .filter(|record| {
             record.event.source == "core.sas_verification" && record.event.stage == "settled"
@@ -618,9 +680,7 @@ fn sas_cancel_diagnostic_contains_only_closed_private_safe_fields() {
 #[tokio::test]
 async fn own_user_sas_start_helper_traces_started_pending_and_failed_results() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
-    let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .len();
+    let diagnostic_start = koushi_diagnostics::test_support::detail_cursor();
 
     assert_eq!(
         run_own_user_sas_start(211, "request_ready", async {
@@ -648,8 +708,8 @@ async fn own_user_sas_start_helper_traces_started_pending_and_failed_results() {
         .is_err()
     );
 
-    let records = koushi_diagnostics::test_support::detail_snapshot().records;
-    let events = records[diagnostic_start..]
+    let records = koushi_diagnostics::test_support::detail_records_since(diagnostic_start);
+    let events = records
         .iter()
         .filter(|record| record.event.source == "core.sas_verification")
         .map(|record| koushi_diagnostics::format_event(&record.event))

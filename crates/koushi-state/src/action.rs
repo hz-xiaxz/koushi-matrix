@@ -19,13 +19,14 @@ use crate::state::{
     MentionCandidatesCompleteness, MentionCandidatesFailureKind, MentionSurface,
     NativeAttentionDispatchId, NativeAttentionSoundOutcome, NativeAttentionState,
     NavigationPreferenceUpdate, NavigationState, OperationFailureKind, OwnProfile, PinnedEvent,
-    PresenceKind, ProfileUpdateRequest, RecoveryMethod, RoomListFailureKind, RoomListFilter,
-    RoomListProjection, RoomListSource, RoomMentionPermission, RoomModerationAction,
-    RoomPreferencesState, RoomSettingChange, RoomSettingsSnapshot, RoomSummary, RoomTagInfo,
-    RoomTagKind, RoomTags, SasEmoji, ScheduledSendCapability, ScheduledSendHandle,
-    ScheduledSendItem, SearchResult, SearchScope, SessionInfo, SessionStatusRefreshTrigger,
-    SettingsPatch, SettingsValues, SpaceChildLinkOutcome, SpaceChildSummary,
-    SpaceMemberInviteOutcome, SpaceMemberRoleUpdateOutcome, SpaceMembersProjection, SpaceSummary,
+    PresenceKind, ProfileUpdateRequest, RecoveryMethod, RoomAccessDraftScope,
+    RoomHistoryVisibility, RoomJoinRule, RoomListFailureKind, RoomListFilter, RoomListProjection,
+    RoomListSource, RoomMentionPermission, RoomModerationAction, RoomPreferencesState,
+    RoomSettingChange, RoomSettingsSnapshot, RoomSummary, RoomTagInfo, RoomTagKind, RoomTags,
+    SasEmoji, ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem, SearchResult,
+    SearchScope, SessionInfo, SessionStatusRefreshTrigger, SettingsPatch, SettingsValues,
+    SpaceChildLinkOutcome, SpaceChildSummary, SpaceMemberInviteOutcome,
+    SpaceMemberRoleUpdateOutcome, SpaceMembersProjection, SpaceSummary,
     StagedUploadCompressionChoice, StagedUploadItem, StagedUploadOutputSelection,
     SyncLifecycleStatus, TimelineContinuityInspection, TimelineGapRepairFailureKind,
     TimelineMediaDownloadState, TimelineMediaGalleryItem, TimelineScrollAnchor,
@@ -62,6 +63,22 @@ pub enum AppAction {
         account_epoch: u64,
         blocked_request_id: u64,
         request_id: u64,
+    },
+    /// #1238 diagnostic (temporary): the measured boundary of unopened-thread
+    /// delivery for one room.
+    ThreadDeliveryDiagnosticRecorded {
+        diagnostic: crate::state::ThreadDeliveryDiagnostic,
+    },
+    /// #1259/#1238: the SDK thread cache's attention for one thread root: `unread` is
+    /// the same dot the room timeline chip shows, and `highlight` is its unread
+    /// mention count. The reducer mirrors both into the Threads list and sums them
+    /// into the room's thread badge fields under the proven event-cache
+    /// decomposition; neither is ever added to the main-only `unread_count`.
+    ThreadUnreadObserved {
+        room_id: String,
+        root_event_id: String,
+        unread: u32,
+        highlight: u32,
     },
     SlidingSyncCapabilityRevalidationStarted {
         account_epoch: u64,
@@ -540,14 +557,22 @@ pub enum AppAction {
     VerificationSessionRejected {
         reason: crate::state::VerificationGateRejectReason,
     },
-    BootstrapRecoveryKeyDelivered {
+    /// The identity bootstrap created a recovery key for on-screen reveal
+    /// (#1049). `Debug` falls back to the redacted `AppAction(..)`.
+    BootstrapRecoveryKeyReady {
         flow_id: u64,
+        recovery_key: crate::state::RecoveryKeyMaterial,
     },
     BootstrapRecoveryKeyDeliveryFailed {
         flow_id: u64,
         kind: crate::state::VerificationGateFailureKind,
     },
     BootstrapRecoverySavedConfirmed {
+        flow_id: u64,
+    },
+    /// The saved confirmation could not clear the persisted delivery marker;
+    /// the reveal stays and asks the user to confirm again.
+    BootstrapRecoverySavedConfirmFailed {
         flow_id: u64,
     },
     ProvisionalSessionDiscarded,
@@ -784,6 +809,8 @@ pub enum AppAction {
     LoginFailed {
         attempt_id: LoginAttemptId,
         message: String,
+        /// Bounded Rust-classified reason for visible guidance (#1268).
+        reason: Option<AuthFailureKind>,
     },
     SessionPersistenceFailed {
         message: String,
@@ -982,12 +1009,42 @@ pub enum AppAction {
     RoomSettingUpdateSucceeded {
         request_id: u64,
         room_id: String,
+        change: RoomSettingChange,
         settings: RoomSettingsSnapshot,
     },
     RoomSettingUpdateFailed {
         request_id: u64,
         room_id: String,
         kind: OperationFailureKind,
+    },
+    /// #1177: set the Rust-owned draft rule for one scope.
+    RoomAccessDraftRuleSet {
+        scope: RoomAccessDraftScope,
+        rule: Option<RoomJoinRule>,
+    },
+    RoomAccessDraftAllowTargetsSet {
+        scope: RoomAccessDraftScope,
+        allow_targets: Vec<String>,
+    },
+    /// #1177: apply one target edit against the draft's current set.
+    RoomAccessDraftAllowTargetToggled {
+        scope: RoomAccessDraftScope,
+        target: String,
+        selected: bool,
+    },
+    RoomAccessDraftHistorySet {
+        scope: RoomAccessDraftScope,
+        history: Option<RoomHistoryVisibility>,
+    },
+    RoomAccessDraftReset {
+        scope: RoomAccessDraftScope,
+    },
+    /// Admit a new access/history editor lifetime (#1177). A mutation or reset
+    /// from any other scope is rejected, so a retired editor's command can never
+    /// recreate its draft. `create` seeds the effective creation selection.
+    RoomAccessDraftOpened {
+        scope: RoomAccessDraftScope,
+        create: Option<crate::state::CreateRoomAccessSeed>,
     },
     RoomModerationRequested {
         request_id: u64,
@@ -1251,6 +1308,23 @@ pub enum AppAction {
     ScheduledSendCapabilityChanged {
         capability: ScheduledSendCapability,
     },
+    /// Each joined room's authoritative access/history observation (#1166,
+    /// #1177). Sent in the same batch as the room-list snapshot it describes
+    /// and fenced by the same generation/source decision, so a rejected
+    /// snapshot cannot overwrite it. An absent room means "not yet known".
+    RoomAccessUpdated {
+        generation: u64,
+        source: RoomListSource,
+        authoritative: bool,
+        observations: std::collections::BTreeMap<String, crate::state::RoomAccessObservation>,
+    },
+    /// A confirmed room's directory publication, read with `get_room_visibility`
+    /// (#1177). Only the open room's value is kept, and a join-rule write never
+    /// changes it implicitly.
+    RoomDirectoryVisibilityObserved {
+        room_id: String,
+        visibility: crate::RoomDirectoryVisibility,
+    },
     ScheduledSendsLoaded {
         scheduled_sends: crate::state::ScheduledSendStore,
     },
@@ -1280,6 +1354,16 @@ pub enum AppAction {
     ScheduledSendDispatched {
         scheduled_id: String,
     },
+    /// The account's scheduled-send store could not be written locally (#1159).
+    /// Acceptance and durable local persistence are different facts, so the
+    /// reservation must not look saved on this device until a later save
+    /// succeeds. `message` is a coarse, identifier-free description.
+    ScheduledSendPersistenceFailed {
+        message: String,
+    },
+    /// A scheduled-send store write succeeded, so an earlier local-persistence
+    /// failure is no longer true (#1159).
+    ScheduledSendPersisted,
     UploadStagingChanged {
         target: crate::ComposerTarget,
         items: Vec<StagedUploadItem>,
@@ -1471,6 +1555,7 @@ pub enum AppAction {
         message: String,
     },
     CloseFocusedContext,
+    /// The user opened a search result at `(room_id, event_id)`.
     SearchClosed,
     SearchEdited {
         query: String,
@@ -1478,17 +1563,25 @@ pub enum AppAction {
     },
     SearchSubmitted {
         request_id: u64,
+        /// Connection that submitted the query. See `SearchSucceeded`.
+        connection_id: u64,
         query: String,
         scope: SearchScope,
     },
     SearchSucceeded {
         request_id: u64,
+        /// Connection that submitted the query.
+        ///
+        /// Sequences are connection-local and every connection starts at one, so
+        /// the sequence alone cannot tell two callers' requests apart.
+        connection_id: u64,
         query: String,
         scope: SearchScope,
         results: Vec<SearchResult>,
     },
     SearchFailed {
         request_id: u64,
+        connection_id: u64,
         query: String,
         scope: SearchScope,
         message: String,
@@ -1577,6 +1670,14 @@ pub enum AppAction {
         room_id: String,
     },
     CloseThreadsList,
+    /// #1160: open the Home/Space scheduled-sends projection. The scope is
+    /// captured here and validated against the Ready session and the active
+    /// Home/Space; there is no request id because the projection is derived
+    /// synchronously and has no asynchronous completion to correlate.
+    OpenScheduledSendsList {
+        scope: crate::state::ScheduledSendsScope,
+    },
+    CloseScheduledSendsList,
     /// A Room timeline observed thread reply activity whose root is outside
     /// its canonical loaded items. This is not a pagination request.
     ThreadRootProjectionObserved {
@@ -1646,10 +1747,18 @@ pub enum AppAction {
     },
     LiveRoomReceiptSummariesUpdated {
         room_id: String,
+        /// Receipt scope of the observing timeline. Room and Thread actors send
+        /// only their own scope; the reducer never merges scopes.
+        scope: crate::state::ReceiptScope,
+        /// Event IDs in `scope` whose summaries this observation replaces before
+        /// merging. A live diff passes an empty list.
+        scoped_event_ids: Vec<String>,
         receipts_by_event: Vec<LiveEventReceiptSummaryUpdate>,
     },
     LiveRoomReceiptsWindowReconciled {
         room_id: String,
+        /// Receipt scope of the observing timeline.
+        scope: crate::state::ReceiptScope,
         scoped_event_ids: Vec<String>,
         receipts_by_event: Vec<LiveEventReceipts>,
     },
@@ -1833,10 +1942,13 @@ impl fmt::Debug for AppAction {
                 .field("room_id", &"RoomId(..)")
                 .field("change", change)
                 .finish(),
-            Self::RoomSettingUpdateSucceeded { request_id, .. } => formatter
+            Self::RoomSettingUpdateSucceeded {
+                request_id, change, ..
+            } => formatter
                 .debug_struct("RoomSettingUpdateSucceeded")
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
+                .field("change", change)
                 .field("settings", &"RoomSettingsSnapshot(..)")
                 .finish(),
             Self::RoomSettingUpdateFailed {
@@ -1846,6 +1958,40 @@ impl fmt::Debug for AppAction {
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
                 .field("kind", kind)
+                .finish(),
+            Self::RoomAccessDraftRuleSet { scope, rule } => formatter
+                .debug_struct("RoomAccessDraftRuleSet")
+                .field("scope", scope)
+                .field("rule", rule)
+                .finish(),
+            Self::RoomAccessDraftAllowTargetsSet {
+                scope,
+                allow_targets,
+            } => formatter
+                .debug_struct("RoomAccessDraftAllowTargetsSet")
+                .field("scope", scope)
+                .field("allow_target_count", &allow_targets.len())
+                .finish(),
+            Self::RoomAccessDraftAllowTargetToggled {
+                scope, selected, ..
+            } => formatter
+                .debug_struct("RoomAccessDraftAllowTargetToggled")
+                .field("scope", scope)
+                .field("selected", selected)
+                .finish(),
+            Self::RoomAccessDraftHistorySet { scope, history } => formatter
+                .debug_struct("RoomAccessDraftHistorySet")
+                .field("scope", scope)
+                .field("history", history)
+                .finish(),
+            Self::RoomAccessDraftReset { scope } => formatter
+                .debug_struct("RoomAccessDraftReset")
+                .field("scope", scope)
+                .finish(),
+            Self::RoomAccessDraftOpened { scope, create } => formatter
+                .debug_struct("RoomAccessDraftOpened")
+                .field("scope", scope)
+                .field("create", &create.is_some())
                 .finish(),
             Self::RoomModerationRequested {
                 request_id, action, ..

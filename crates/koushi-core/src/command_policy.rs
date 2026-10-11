@@ -6,6 +6,10 @@ use koushi_protocol::command::{
 use koushi_protocol::ids::{RequestId, TimelineKind};
 use koushi_state::{AppAction, AppState, OperationFailureKind, admit_space_leave_room_ids};
 
+/// Protocol message accompanying a failed search, shared by the routing layer
+/// and the search actor so both settle the UI the same way.
+pub(crate) const SEARCH_UNAVAILABLE_MESSAGE: &str = "search unavailable";
+
 /// Narrow a `LeaveSpace` command's child rooms to the Space's current leave
 /// candidates, so a stale or forged ID never leaves a room outside the Space.
 /// Every other command passes through unchanged.
@@ -135,15 +139,9 @@ pub(crate) fn native_artifact_for_account_command(
         AccountCommand::ExportHistory { request_id, .. } => {
             Some((*request_id, NativeArtifactKind::HistoryExportDirectory))
         }
-        AccountCommand::StartSessionBootstrap {
-            request_id,
-            request,
-            ..
-        } if request.recovery_key_destination_requested => {
-            Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
-        }
-        // Secure Backup setup and passphrase change reveal the key on screen
-        // (#927); only the optional save command consumes a destination.
+        // Secure Backup setup, passphrase change (#927), and the identity
+        // bootstrap (#1049) reveal the key on screen; only the optional save
+        // command consumes a destination.
         AccountCommand::SaveSecureBackupRecoveryKey { request_id, .. } => {
             Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
         }
@@ -270,6 +268,8 @@ impl CoreCommandPolicy for CoreCommand {
                         | AppCommand::OpenThreadsList { .. }
                         | AppCommand::CloseThreadsList { .. }
                         | AppCommand::PaginateThreadsList { .. }
+                        | AppCommand::OpenScheduledSendsList { .. }
+                        | AppCommand::CloseScheduledSendsList { .. }
                         | AppCommand::TimelineScrollAnchorUpdated { .. }
                 )
             )
@@ -415,6 +415,11 @@ mod tests {
                     room_id: "!room:example.invalid".to_owned(),
                 },
             }),
+            CoreCommand::App(AppCommand::OpenScheduledSendsList {
+                request_id: id,
+                scope: koushi_state::ScheduledSendsScope::Home,
+            }),
+            CoreCommand::App(AppCommand::CloseScheduledSendsList { request_id: id }),
         ] {
             assert!(command.requires_ready_session());
         }
@@ -470,6 +475,8 @@ mod tests {
             unread_count: 0,
             notification_count: 0,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,

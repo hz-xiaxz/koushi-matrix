@@ -11,7 +11,8 @@ use koushi_state::UserProfile;
 use koushi_state::{
     AppAction, AttachmentKind, AvatarImage, AvatarThumbnailState, ComposerDocument, ComposerInline,
     LiveEventReceiptSummaryUpdate, LiveEventReceipts, LiveReadReceipt, MentionIntent,
-    MentionTarget, ReplyQuote, ReplyQuoteCodeBlock, ReplyQuoteFormattedBody, ReplyQuoteState,
+    MentionTarget, ReceiptScope, ReplyQuote, ReplyQuoteCodeBlock, ReplyQuoteFormattedBody,
+    ReplyQuoteState,
 };
 
 use matrix_sdk::attachment::{AttachmentInfo, BaseFileInfo, BaseImageInfo, Thumbnail};
@@ -30,7 +31,7 @@ use matrix_sdk::send_queue::{LocalEcho, LocalEchoContent, SendHandle};
 use matrix_sdk_ui::timeline::{
     AnyOtherStateEventContentChange, EmbeddedEvent, EncryptedMessage,
     EventSendState as SdkEventSendState, EventTimelineItem, InReplyToDetails, MembershipChange,
-    Profile, ReactionStatus, ReactionsByKeyBySender, TimelineDetails, TimelineEventItemId,
+    Profile, ReactionsByKeyBySender, TimelineDetails, TimelineEventItemId,
     TimelineItem as SdkTimelineItem, TimelineItemContent, TimelineItemKind,
 };
 use tokio::sync::mpsc;
@@ -154,7 +155,7 @@ impl TimelineActor {
         self.emit(CoreEvent::Timeline(TimelineEvent::MessageSourceLoaded {
             request_id,
             key: self.key.clone(),
-            source,
+            source: Box::new(source),
         }));
     }
     pub(super) async fn handle_edit_text(
@@ -947,10 +948,10 @@ impl TimelineActor {
             VectorDiff::PushFront { value }
             | VectorDiff::PushBack { value }
             | VectorDiff::Insert { value, .. }
-            | VectorDiff::Set { value, .. } => self.search_index_messages_for_item(room_id, value),
+            | VectorDiff::Set { value, .. } => Self::search_index_messages_for_item(room_id, value),
             VectorDiff::Append { values } | VectorDiff::Reset { values } => values
                 .iter()
-                .flat_map(|item| self.search_index_messages_for_item(room_id, item))
+                .flat_map(|item| Self::search_index_messages_for_item(room_id, item))
                 .collect(),
             VectorDiff::Remove { .. }
             | VectorDiff::Truncate { .. }
@@ -965,7 +966,6 @@ impl TimelineActor {
         }
     }
     fn search_index_messages_for_item(
-        &self,
         room_id: &str,
         item: &Arc<SdkTimelineItem>,
     ) -> Vec<SearchIndexMessage> {
@@ -989,13 +989,13 @@ impl TimelineActor {
             return vec![SearchIndexMessage::Redact { event_id }];
         }
 
-        let (body, attachment_filename, attachment, edit_event_id) =
+        let (body, attachment_filename, attachment, edit) =
             if let Some(sticker) = event_item.content().as_sticker() {
                 (
                     None,
                     Some(sticker.content().body.clone()),
                     Some(Self::attachment_document_from_sticker(sticker)),
-                    None,
+                    (None, None),
                 )
             } else if let Some(message) = event_item.content().as_message() {
                 let projection = message_projection_from_msgtype(message.msgtype(), message.body());
@@ -1003,19 +1003,26 @@ impl TimelineActor {
                 // Detect edits: when is_edited() is true, the SDK ngram index will
                 // index the edit event under the edit event_id (not the original).
                 // We must register an alias so verify_candidate can resolve it back.
-                // Extract the edit event_id from latest_edit_json if available.
-                let edit_event_id = if message.is_edited() {
-                    event_item
-                        .latest_edit_json()
-                        .and_then(|raw| {
-                            raw.get_field::<matrix_sdk::ruma::OwnedEventId>("event_id")
-                                .ok()
-                                .flatten()
-                        })
-                        .map(|id| id.to_string())
-                } else {
-                    None
-                };
+                // Extract the edit event_id (and its own timestamp) from
+                // latest_edit_json if available. The edit's time orders it
+                // against a history crawl's edits of the same message, which
+                // report the edit event's time as well; the display timestamp
+                // stays the message's own.
+                let latest_edit = message
+                    .is_edited()
+                    .then(|| event_item.latest_edit_json())
+                    .flatten();
+                let edit_event_id = latest_edit
+                    .as_ref()
+                    .and_then(|raw| {
+                        raw.get_field::<matrix_sdk::ruma::OwnedEventId>("event_id")
+                            .ok()
+                            .flatten()
+                    })
+                    .map(|id| id.to_string());
+                let edit_timestamp_ms = latest_edit
+                    .as_ref()
+                    .and_then(|raw| raw.get_field::<u64>("origin_server_ts").ok().flatten());
 
                 (
                     projection.body,
@@ -1026,7 +1033,7 @@ impl TimelineActor {
                     projection.media.as_ref().and_then(|media| {
                         Self::attachment_document_from_timeline_media(media, event_item, message)
                     }),
-                    edit_event_id,
+                    (edit_event_id, edit_timestamp_ms),
                 )
             } else {
                 return Vec::new();
@@ -1036,10 +1043,8 @@ impl TimelineActor {
             return Vec::new();
         }
 
-        if let Some(edit_event_id) = edit_event_id {
-            // Edited message: Upsert original with new canonical body, AND
-            // forward Edit so the document store registers the alias
-            // (edit_event_id → original_event_id) used by verify_candidate.
+        if let (Some(edit_event_id), edit_timestamp_ms) = edit {
+            // Carry the visible attachment and its edit identity as one guarded pair.
             vec![
                 SearchIndexMessage::Upsert {
                     room_id: room_id.to_owned(),
@@ -1049,15 +1054,25 @@ impl TimelineActor {
                     body: body.clone(),
                     attachment_filename: attachment_filename.clone(),
                     attachment: attachment.clone(),
+                    // The timeline projection carries the current visible state.
+                    canonical: true,
+                    edit: Some(koushi_search::SearchEditKey {
+                        edit_event_id: edit_event_id.to_string(),
+                        timestamp_ms: edit_timestamp_ms.unwrap_or(timestamp_ms),
+                    }),
                 },
                 SearchIndexMessage::Edit {
+                    room_id: room_id.to_owned(),
                     edit_event_id,
                     target_event_id: event_id,
                     sender,
-                    timestamp_ms,
+                    // Both producers key an edit by the edit event's own time,
+                    // so a history replay cannot outrank the current content.
+                    timestamp_ms: edit_timestamp_ms.unwrap_or(timestamp_ms),
                     body,
                     attachment_filename,
                     attachment,
+                    canonical: true,
                 },
             ]
         } else {
@@ -1070,9 +1085,12 @@ impl TimelineActor {
                 body,
                 attachment_filename,
                 attachment,
+                canonical: true,
+                edit: None,
             }]
         }
     }
+
     pub(super) async fn forward_initial_items_to_search(
         &self,
         items: impl IntoIterator<Item = Arc<SdkTimelineItem>>,
@@ -1838,10 +1856,54 @@ pub(super) fn live_event_receipts_from_sdk_items<'a>(
         .collect()
 }
 
+/// Receipt observation target. Both arms carry the observing timeline's receipt
+/// scope and the event IDs the observation replaces in that scope.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum ReceiptObservationTarget {
-    Live,
-    Authoritative { scoped_event_ids: Vec<String> },
+    /// Bounded compact summaries. A live diff passes an empty `scoped_event_ids`;
+    /// an actor start names its initial window.
+    Live {
+        scope: ReceiptScope,
+        scoped_event_ids: Vec<String>,
+    },
+    /// Authoritative window replacement.
+    Authoritative {
+        scope: ReceiptScope,
+        scoped_event_ids: Vec<String>,
+    },
+}
+
+/// The receipt scope owned by a timeline key. Room timelines publish the main
+/// scope, a permalink/context timeline its own focused scope, and a thread
+/// timeline its root's thread scope. The timeline key — not the SDK's resolved
+/// receipt thread — is the authority, so a focused permalink whose target is a
+/// thread reply still writes only its focused scope.
+pub(super) fn receipt_scope_for_timeline_kind(kind: &TimelineKind) -> ReceiptScope {
+    match kind {
+        TimelineKind::Room { .. } => ReceiptScope::Main,
+        TimelineKind::Focused { event_id, .. } => ReceiptScope::Focused {
+            event_id: event_id.clone(),
+        },
+        TimelineKind::Thread { root_event_id, .. } => ReceiptScope::Thread {
+            root_event_id: root_event_id.clone(),
+        },
+    }
+}
+
+/// Event IDs of an SDK timeline window, used as the reconcile scope of an
+/// actor's initial receipt observation.
+pub(super) fn live_event_window_ids_from_sdk_items<'a>(
+    items: impl IntoIterator<Item = &'a Arc<SdkTimelineItem>>,
+) -> Vec<String> {
+    items
+        .into_iter()
+        .filter_map(|item| match item.kind() {
+            TimelineItemKind::Event(event) => event.event_id().map(ToString::to_string),
+            TimelineItemKind::Virtual(_) => None,
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 fn profile_actions(profiles: Vec<MatrixUserProfile>) -> Vec<UserProfile> {
@@ -1891,6 +1953,7 @@ fn profile_actions_to_actions(
 
 fn build_receipt_observation_actions(
     room_id: &str,
+    scope: ReceiptScope,
     receipts_by_event: Vec<LiveEventReceipts>,
     profiles: Vec<MatrixUserProfile>,
     scoped_event_ids: Vec<String>,
@@ -1899,6 +1962,7 @@ fn build_receipt_observation_actions(
     actions.reserve(usize::from(has_profiles) + 1);
     actions.push(AppAction::LiveRoomReceiptsWindowReconciled {
         room_id: room_id.to_owned(),
+        scope,
         scoped_event_ids,
         receipts_by_event,
     });
@@ -1949,6 +2013,8 @@ fn compact_live_receipt_summaries(
 
 fn build_live_receipt_summary_actions(
     room_id: &str,
+    scope: ReceiptScope,
+    scoped_event_ids: Vec<String>,
     receipts_by_event: Vec<LiveEventReceiptSummaryUpdate>,
     profiles: Vec<MatrixUserProfile>,
 ) -> Vec<AppAction> {
@@ -1956,6 +2022,8 @@ fn build_live_receipt_summary_actions(
     actions.reserve(usize::from(has_profiles) + 1);
     actions.push(AppAction::LiveRoomReceiptSummariesUpdated {
         room_id: room_id.to_owned(),
+        scope,
+        scoped_event_ids,
         receipts_by_event,
     });
     actions
@@ -1969,6 +2037,8 @@ pub(super) fn build_live_receipt_observation_actions(
 ) -> Vec<AppAction> {
     build_live_receipt_summary_actions(
         room_id,
+        ReceiptScope::Main,
+        Vec::new(),
         compact_live_receipt_summaries(receipts_by_event, None),
         profiles,
     )
@@ -1984,7 +2054,10 @@ pub(super) async fn live_receipt_observation_actions_from_sdk_receipts(
         session,
         room_id,
         receipts_by_event,
-        ReceiptObservationTarget::Live,
+        ReceiptObservationTarget::Live {
+            scope: ReceiptScope::Main,
+            scoped_event_ids: Vec::new(),
+        },
     )
     .await
 }
@@ -1995,40 +2068,59 @@ async fn receipt_observation_actions_from_sdk_receipts(
     receipts_by_event: Vec<LiveEventReceipts>,
     target: ReceiptObservationTarget,
 ) -> Vec<AppAction> {
-    if matches!(&target, ReceiptObservationTarget::Live) {
-        let own_user_id = session.client().user_id().map(|user_id| user_id.to_owned());
-        let summaries = compact_live_receipt_summaries(
-            receipts_by_event,
-            own_user_id.as_ref().map(|user_id| user_id.as_str()),
-        );
-        let lookup_user_ids = summaries
-            .iter()
-            .flat_map(|entry| entry.readers.iter())
-            .map(|receipt| receipt.user_id.clone())
-            .collect::<Vec<_>>();
-        let receipt_count = summaries
-            .iter()
-            .map(|entry| entry.total_count as usize)
-            .sum();
-        let profiles =
-            receipt_profiles_for_users(session, room_id, &lookup_user_ids, receipt_count).await;
-        return build_live_receipt_summary_actions(room_id, summaries, profiles);
+    match target {
+        ReceiptObservationTarget::Live {
+            scope,
+            scoped_event_ids,
+        } => {
+            let own_user_id = session.client().user_id().map(|user_id| user_id.to_owned());
+            let summaries = compact_live_receipt_summaries(
+                receipts_by_event,
+                own_user_id.as_ref().map(|user_id| user_id.as_str()),
+            );
+            let lookup_user_ids = summaries
+                .iter()
+                .flat_map(|entry| entry.readers.iter())
+                .map(|receipt| receipt.user_id.clone())
+                .collect::<Vec<_>>();
+            let receipt_count = summaries
+                .iter()
+                .map(|entry| entry.total_count as usize)
+                .sum();
+            let profiles =
+                receipt_profiles_for_users(session, room_id, &lookup_user_ids, receipt_count).await;
+            build_live_receipt_summary_actions(
+                room_id,
+                scope,
+                scoped_event_ids,
+                summaries,
+                profiles,
+            )
+        }
+        ReceiptObservationTarget::Authoritative {
+            scope,
+            scoped_event_ids,
+        } => {
+            let user_ids = receipts_by_event
+                .iter()
+                .flat_map(|entry| entry.receipts.iter())
+                .map(|receipt| receipt.user_id.clone())
+                .collect::<Vec<_>>();
+            let receipt_count = receipts_by_event
+                .iter()
+                .map(|entry| entry.receipts.len())
+                .sum();
+            let profiles =
+                receipt_profiles_for_users(session, room_id, &user_ids, receipt_count).await;
+            build_receipt_observation_actions(
+                room_id,
+                scope,
+                receipts_by_event,
+                profiles,
+                scoped_event_ids,
+            )
+        }
     }
-
-    let user_ids = receipts_by_event
-        .iter()
-        .flat_map(|entry| entry.receipts.iter())
-        .map(|receipt| receipt.user_id.clone())
-        .collect::<Vec<_>>();
-    let receipt_count = receipts_by_event
-        .iter()
-        .map(|entry| entry.receipts.len())
-        .sum();
-    let profiles = receipt_profiles_for_users(session, room_id, &user_ids, receipt_count).await;
-    let ReceiptObservationTarget::Authoritative { scoped_event_ids } = target else {
-        unreachable!("live receipt observation returns through the bounded branch");
-    };
-    build_receipt_observation_actions(room_id, receipts_by_event, profiles, scoped_event_ids)
 }
 
 pub(super) async fn prepare_receipt_window_profiles(
@@ -2120,7 +2212,11 @@ pub(super) async fn emit_live_receipt_observation_actions(
         actor_generation,
         room_id,
         receipts_by_event,
-        ReceiptObservationTarget::Live,
+        ReceiptObservationTarget::Live {
+            scope: receipt_scope_for_timeline_kind(&key.kind),
+            // An incremental live diff observed only changes, so it merges.
+            scoped_event_ids: Vec::new(),
+        },
     )
     .await
 }
@@ -2605,6 +2701,7 @@ pub(super) fn thread_summary_from_sdk(
 ) -> ThreadSummaryDto {
     let mut dto = ThreadSummaryDto {
         reply_count: summary.num_replies,
+        unread_count: 0,
         latest_event_id: None,
         latest_sender: None,
         latest_sender_label: None,
@@ -4168,12 +4265,10 @@ pub(crate) fn reaction_groups_from_sdk(
             my_reaction_event_id: own_user_id.and_then(|user_id| {
                 senders.iter().find_map(|(sender, info)| {
                     if sender.as_str() == user_id.as_str() {
-                        match &info.status {
-                            ReactionStatus::RemoteToRemote(event_id) => Some(event_id.to_string()),
-                            ReactionStatus::LocalToLocal(_) | ReactionStatus::LocalToRemote(_) => {
-                                None
-                            }
-                        }
+                        // 0.19: the SDK reports the reaction's own event ID only
+                        // once it is known; a local echo has none yet, exactly as
+                        // the previous `LocalTo*` reaction statuses did.
+                        info.event_id.as_ref().map(ToString::to_string)
                     } else {
                         None
                     }
@@ -4344,3 +4439,6 @@ mod tests;
 
 #[cfg(test)]
 mod content_policy_tests;
+
+#[cfg(test)]
+mod receipt_scope_tests;

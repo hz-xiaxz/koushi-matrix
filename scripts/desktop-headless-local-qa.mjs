@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   cpSync,
   createWriteStream,
   existsSync,
@@ -35,7 +36,11 @@ import {
 } from "./lib/qa-token-contract.mjs";
 import { writeValidatedQaOutputFiles } from "./lib/qa-output-artifacts.mjs";
 import { assertSdkSubmoduleSynced } from "./lib/sdk-submodule-status.mjs";
-import { setFixtureAvatar, seedAvatarDemandFixture } from "./lib/avatar-demand-fixture.mjs";
+import {
+  classifyAvatarReceiptReadback,
+  setFixtureAvatar,
+  seedAvatarDemandFixture
+} from "./lib/avatar-demand-fixture.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const localSecretsRoot = join(repoRoot, ".local-secrets", "headless-local-qa");
@@ -271,6 +276,21 @@ async function runForServer(serverKind, scenario) {
 
     if (runCoreQa) {
       const coreUsers = fixture ?? (await registerQaUsers(homeserver, "core", scenario));
+      if (coreUsers.avatarFixture) {
+        // A declared server limitation is re-verified against the measured
+        // readback before it is honored, so neither an unreadable population nor
+        // a server that starts reporting it can pass silently (#1168).
+        const classification = classifyAvatarReceiptReadback({
+          serverKind,
+          capability: fixtureCapabilities.multiReaderReceipts,
+          readback: coreUsers.avatarFixture.receiptReadback,
+          expected: coreUsers.avatarFixture.readerCount
+        });
+        if (classification.limited) {
+          console.log(classification.token);
+          return;
+        }
+      }
       if (!fixture && serverKind === "synapse") {
         writeQaFixture(runDir, {
           serverKind,
@@ -421,6 +441,8 @@ function runCoreHeadlessQa({
     env.KOUSHI_QA_AVATAR_FIXTURE = JSON.stringify(avatarFixture);
   }
   for (const name of [
+    "KOUSHI_QA_CACHE_RESTORE_ROOMS",
+    "KOUSHI_QA_CACHE_RESTORE_DEPTH",
     "KOUSHI_QA_STRESS_SPACES",
     "KOUSHI_QA_STRESS_ROOMS_PER_SPACE",
     "KOUSHI_QA_STRESS_MESSAGES_PER_ROOM",
@@ -483,6 +505,13 @@ function runCoreHeadlessQa({
   appendQaOutput(logPath, result.stdout, result.stderr);
   if (result.status !== 0) {
     if (result.error?.code === "ETIMEDOUT") {
+      // #1191: the outer runner deadline killed the scenario before it could
+      // report its own stage. Record a validated, identifier-free coordinate so
+      // the lane can tell a stalled scenario from the outer deadline.
+      appendFileSync(
+        join(dirname(logPath), `core-${qaLabel}-stderr.log`),
+        `Headless core QA failed: timeout ${scenario}: ${lastQaProgressToken(result.stdout)}\n`
+      );
       throw new Error(
         `headless core QA (${qaLabel}) timed out for ${serverKind}; child output omitted after private-data validation`
       );
@@ -510,6 +539,16 @@ function assertQaOutputIsPrivate(label, result, secrets) {
   assertNoMatrixIdentifiers(output, label);
   assertNoLocalPaths(output, label);
   assertNoRawSdkErrors(output, label);
+}
+
+/**
+ * #1191: the last validated `<name>=ok` scenario token, so an outer-timeout
+ * failure line carries a private-data-free progress coordinate.
+ */
+function lastQaProgressToken(stdout) {
+  const matches = [...String(stdout ?? "").matchAll(/^([a-z0-9_]+)=ok\b/gm)];
+  const last = matches.at(-1)?.[1];
+  return last === undefined ? "progress=none" : `last=${last}=ok`;
 }
 
 function appendQaOutput(logPath, stdout, stderr) {
