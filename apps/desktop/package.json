@@ -47,15 +47,15 @@
   "dependencies": {
     "@fontsource/inter": "5.2.8",
     "@matrix-org/emojibase-bindings": "^1.5.0",
+    "@sableclient/twemoji-font": "1.0.4",
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-opener": "^2.5.4",
-    "katex": "^0.18.1",
+    "katex": "0.18.10",
     "lucide-react": "^1.17.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "twemoji-colr-font": "15.0.3",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
@@ -73,10 +73,20 @@
     "typescript-eslint": "^8.61.1",
     "vite": "^8.0.16",
     "vitest": "^4.1.8",
-    "webdriverio": "9.28.0"
+    "webdriverio": "9.32.0"
   },
   "overrides": {
     "@puppeteer/browsers": "$@puppeteer/browsers",
-    "deepmerge-ts": "8.0.1"
+    "deepmerge-ts": "8.0.1",
+    "cheerio": {
+      "encoding-sniffer": "1.0.2"
+    },
+    "@wdio/config": {
+      "glob": "13.0.6"
+    }
+  },
+  "allowScripts": {
+    "edgedriver": false,
+    "geckodriver": false
   }
 }
