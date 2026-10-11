@@ -1,15 +1,26 @@
 # #1344: bounded search/history residency and durable crawl progress
 
-Status: **revision 2 — design only, nothing implemented.** Parent:
+Status: **revision 3 — Stage A and Stage C implemented; Stage B is not.** Parent:
 [#1344](https://github.com/shinaoka/koushi-matrix/issues/1344); authority is the
 maintainer's 2026-10-12 direction comment on that issue. Precedents:
 [#1150 index-first search](2026-10-06-issue1150-search-index-first.md),
 [#1150 resident retention](2026-10-09-issue1150-resident-retention.md),
 [#1344 owner counters](2026-10-11-issue1344-owner-counters.md).
 
-Revision 1 was reviewed by an independent `gpt-6.1-sol` pre-implementation
-review. Every finding was re-verified against the source and is dispositioned
-below; revision 2 changes the staging and the progress model accordingly.
+Two independent `gpt-6.1-sol` pre-implementation reviews ran. Revision 1's 12
+findings are dispositioned below and produced revision 2's staging. Revision 2
+was then reviewed; its findings are dispositioned in the revision-2 section,
+which is also the contract Stage B must satisfy. Every finding was re-verified
+against the source before acting.
+
+Implemented so far:
+
+- **Stage C** — operation-scoped search readers, in fork PR
+  [#22](https://github.com/shinaoka/matrix-rust-sdk-work/pull/22) (branch
+  `fix/1344-release-search-readers`), pinned by this branch's gitlink.
+- **Stage A** — `koushi_sdk::persisted_room_event_page` and the crawler source
+  switch, with the crawler canon amended.
+- **Stage B** — not implemented. Its contract is the revision-2 section.
 
 ## Review disposition (revision 1 → 2)
 
@@ -163,6 +174,47 @@ for zero-subscriber rooms. Requirements if it is picked up: use
 `pagination_operation_lock` rather than an observable status, define the diff
 publication rule, and define non-destructive behavior when the last-chunk load
 fails instead of clearing persistent storage.
+
+## Revision-2 review disposition (Stage B contract)
+
+The reviewer rejected revision 2 as written and named these. All were verified.
+
+| # | Finding | Disposition |
+| --- | --- | --- |
+| 1 | The durable record would lose gap evidence and traversal mode, so a resume could reach the oldest stored chunk with `crossed_store_gap = false` and declare success over an unfilled gap; a post-switch resume would restart the store walk at the tail | **accepted** — the record persists the traversal mode and the cumulative gap evidence, not just a cursor |
+| 2 | Catch-up accepted a boundary found across a gap, skipping events inside it | **fixed in Stage A** (see below): the page reports where continuity breaks, and a boundary behind a gap hands the rest to back-pagination |
+| 3 | `store_revision` had no coverage invariant: a page could read a UTD event, skip it, and the revision sampled at completion would claim coverage of a resolution it never indexed | **accepted** — the record stores a *coverage* revision captured before the traversal, and a change to already-scanned chunks or during revalidation reopens the room; an active-session trigger is required, not only a restart comparison |
+| 4 | A sibling marker does not identify a recreated index directory, and says nothing about one missing room index | **accepted** — identity is coupled to actual index creation and per-room index presence; a record whose rooms or directory do not match is invalid, not trusted |
+| 5 | Files reconstruction from persisted room chunks can delete a valid row admitted from a focused/thread projection, which is not persisted in room chunks; a concurrent tail re-insert can also be missed | **accepted** — reconstruction preserves verified non-store rows unless there is positive invalidation evidence, and publishes a replacement only with adequate scan coverage |
+| 6 | Awaiting a save in the Shutdown arm is not the session fence: `SearchActorHandle` aborts after its timeout and drops the actor, and an in-flight `spawn_blocking` save survives that | **accepted** — reuse the read-outbox fencing (session/save generations, per-path write serialization, timeout invalidation), not an await-only argument |
+| 7 | Switching to the network does not position SDK pagination at the gap the walk found: it starts from the resident position, may re-read and hydrate already-scanned disk chunks, and the preserved empty-page rule can stop before older gaps are repaired | **accepted, recorded as a Stage A limit** — the switch repairs gaps but is not gap-targeted. Stage B's honest completion rule stops the empty-page shortcut from marking completion; gap-targeted continuation is deferred with the store cursor work |
+| 8 | The increment has no byte bound at all, not even per account, and the first-page resident read clones the whole resident window | **open maintainer decision** (below). Stage C gives a zero idle-reader allowance by construction; no history byte bound is claimed |
+| 9 | A batch reloaded the reader it was about to drop | **fixed** — `commit_batch` commits without reloading |
+| 10 | The non-hydration test exercised only resident history, so a reader that also hydrated would pass | **accepted** — the deciding crawl must run over history that is on disk but out of the resident window, and must assert the resident counters and the retrieval of those documents. Not yet implemented; it is the acceptance test for Stage A |
+| 11 | The crawler canon still described `CrawlFinished`, per-room cancel flags and drain-while-await | **partly accepted** — the history-source, catch-up, preemption and shutdown-history text was corrected in place; the older `CrawlFinished`/cancel-flag text is a pre-existing inaccuracy outside this change and is left for its own correction |
+
+Delete list: `newest_scanned` is dropped (a chunk cursor is not a newest-event
+boundary); `index_instance` is non-optional in a valid record; the disposable
+reload is gone; the cloned rollback snapshots stay (they are the correct rollback
+and the batch is bounded); the standalone shutdown-drain test and the unused
+session construction in the non-hydration test are pre-existing/in-test scope and
+are handled with the Stage A acceptance test.
+
+### Stage A as implemented
+
+`koushi_sdk::persisted_room_event_page` walks a room's persisted chunks newest
+chunk first under the store lock, releases the lock between pages, returns a
+resumable numeric chunk cursor, reverses each chunk's items so a page is newest
+first, and reports `gap_at`: the position at which continuity with the previous
+page breaks. A crawl starts in the store, and switches its checkpoint to SDK
+back-pagination when the walk ends on a gap, or when the catch-up boundary sits
+behind one. Catch-ups ignore the resident read (it flattens the linked chunk and
+cannot see a gap) and decide from pages only; full crawls still merge it for
+#996. Diagnostics name the source.
+
+Known limits, recorded rather than claimed away: the network switch is not
+gap-targeted (finding 7), the first-page resident read is unbounded in size
+(finding 8), and no history byte bound exists.
 
 ## Rejected variants
 
