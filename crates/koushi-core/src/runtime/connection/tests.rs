@@ -959,6 +959,7 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
                 sender_label: None,
                 body_preview: Some("quoted".to_owned()),
                 formatted: None,
+                mentioned_user_ids: Vec::new(),
                 state: koushi_state::ReplyQuoteState::Ready,
             }),
             thread_root: None,

@@ -1645,6 +1645,9 @@
                 "html": "<p>quoted <strong>preview</strong></p><pre><code class=\"language-rust\">fn main() {}</code></pre>",
                 "plain_text": "quoted previewfn main() {}"
               },
+              "mentioned_user_ids": [
+                "@quoted:example.test"
+              ],
               "sender": "@other:example.test",
               "sender_label": null,
               "state": "ready"

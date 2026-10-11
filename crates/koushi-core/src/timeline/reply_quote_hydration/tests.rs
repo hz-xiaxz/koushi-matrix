@@ -103,6 +103,21 @@ fn redacted_original_projects_redacted_quote() {
     let quote = reply_quote_from_timeline_item(ORIGINAL, &original).expect("quote");
     assert_eq!(quote.state, ReplyQuoteState::Redacted);
     assert_eq!(quote.body_preview, None);
+    // A redacted original has no pills to preview either.
+    assert!(quote.mentioned_user_ids.is_empty());
+}
+
+#[test]
+fn quote_carries_the_original_mentions_so_the_preview_pills_them() {
+    // #1328: the quote preview renders its own anchor from the formatted body,
+    // so the mention facts have to travel with the quote.
+    let mut original = original_item(ORIGINAL, "harness ada please look");
+    original.mentioned_user_ids = vec!["@ada:example.invalid".to_owned()];
+
+    let quote = reply_quote_from_timeline_item(ORIGINAL, &original).expect("quote");
+
+    assert_eq!(quote.state, ReplyQuoteState::Ready);
+    assert_eq!(quote.mentioned_user_ids, ["@ada:example.invalid"]);
 }
 
 #[test]
