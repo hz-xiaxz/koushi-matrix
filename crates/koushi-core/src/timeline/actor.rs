@@ -10,7 +10,8 @@ use koushi_sdk::{
     MatrixTimelineGapInspection, MatrixTimelineGapRepairResult,
 };
 use koushi_state::{
-    AppAction, ComposerDocument, TimelineMediaGalleryItem, TimelineThreadRootOrder,
+    AppAction, ComposerDocument, ComposerFormattingOptions, TimelineMediaGalleryItem,
+    TimelineThreadRootOrder,
 };
 
 use matrix_sdk::send_queue::{RoomSendQueueUpdate, SendHandle};
@@ -364,6 +365,7 @@ pub(super) enum TimelineActorMessage {
         request_id: RequestId,
         event_id: String,
         document: ComposerDocument,
+        formatting_options: ComposerFormattingOptions,
     },
     Redact {
         request_id: RequestId,
@@ -2816,8 +2818,10 @@ impl TimelineActor {
                 request_id,
                 event_id,
                 document,
+                formatting_options,
             } => {
-                self.handle_edit_text(request_id, event_id, document).await;
+                self.handle_edit_text(request_id, event_id, document, formatting_options)
+                    .await;
             }
             TimelineActorMessage::Redact {
                 request_id,

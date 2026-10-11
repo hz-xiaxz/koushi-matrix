@@ -1552,6 +1552,10 @@ impl TimelineManagerActor {
                 event_id,
                 document,
             } => {
+                // Edits format their replacement body, so they must carry the
+                // same composer formatting options the send path uses. Without
+                // this an edit re-formatted the body with the defaults and math
+                // mode OFF was silently ignored.
                 self.route_to_actor_or_fail(
                     request_id,
                     &key,
@@ -1559,6 +1563,7 @@ impl TimelineManagerActor {
                         request_id,
                         event_id,
                         document,
+                        formatting_options: self.composer_formatting_options,
                     },
                 )
                 .await;
@@ -2502,6 +2507,9 @@ pub(super) fn internal_timeline_request_id() -> RequestId {
         sequence: 0,
     }
 }
+
+#[cfg(test)]
+mod edit_text_formatting_tests;
 
 #[cfg(test)]
 mod tests {
