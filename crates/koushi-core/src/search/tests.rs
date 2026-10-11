@@ -1393,3 +1393,107 @@ async fn a_failed_page_leaves_the_durable_record_untouched() {
         .cloned();
     assert_eq!(after, before, "the room keeps its pre-failure state");
 }
+
+/// The record written by one session is what the next session loads: a saved,
+/// unchanged account crawls nothing.
+#[tokio::test]
+async fn a_saved_record_is_loaded_and_skips_the_crawl() {
+    use crate::store::test_support::{file_store_actor, make_key_id};
+
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let cred_dir = tempfile::tempdir().expect("tempdir");
+    let key_id = make_key_id();
+    let store = file_store_actor(&data_dir, &cred_dir);
+    let settings = SearchCrawlerSettings::default();
+    const ROOM: &str = "!restart:example.invalid";
+    const LATEST: &str = "$restart-latest";
+
+    let instance = store.search_index_instance(&key_id).expect("instance");
+    let mut progress = progress_record(&instance, &settings);
+    let room = progress.room_mut(ROOM);
+    room.backfill_complete = true;
+    room.latest_event_id = Some(LATEST.to_owned());
+    room.processed = 12;
+    room.indexed = 11;
+    store
+        .save_search_progress(&key_id, &progress)
+        .expect("save");
+
+    // A new session loads what the previous one committed.
+    let loaded = store
+        .load_search_progress(&key_id)
+        .expect("load")
+        .expect("a saved record");
+    let (mut actor, mut action_rx) = progress_fixture().await;
+    actor.adopt_loaded_progress(loaded, instance);
+    actor
+        .handle_rooms_available(rooms_available(&[ROOM], &[(ROOM, LATEST)], &settings))
+        .await;
+
+    assert!(
+        actor.completed_rooms.contains_key(ROOM),
+        "the loaded record seeds the completed set"
+    );
+    assert!(actor.queued_crawl_rooms.is_empty());
+    assert!(
+        actor.crawl_queue.is_empty(),
+        "an unchanged committed room is not crawled again"
+    );
+    let mut started = Vec::new();
+    while let Ok(actions) = action_rx.try_recv() {
+        for action in actions {
+            if let AppAction::HistoryCrawlStarted { room_id, .. } = action {
+                started.push(room_id);
+            }
+        }
+    }
+    assert!(started.is_empty(), "no crawl starts: {started:?}");
+}
+
+/// An interrupted backfill resumes at the cursor it committed, with the source
+/// and the redaction targets the walk had already passed.
+#[tokio::test]
+async fn an_interrupted_backfill_resumes_from_its_recorded_cursor() {
+    let (mut actor, _action_rx) = progress_fixture().await;
+    let settings = SearchCrawlerSettings::default();
+    const ROOM: &str = "!resume:example.invalid";
+
+    let mut progress = progress_record("instance", &settings);
+    let room = progress.room_mut(ROOM);
+    room.backfill_complete = false;
+    room.cursor = Some("77".to_owned());
+    room.crossed_gap = false;
+    room.network_source = true;
+    room.queue_pending_redaction("$already-redacted".to_owned());
+    room.processed = 30;
+    room.indexed = 25;
+    actor.search_progress = Some(progress);
+    actor.search_progress_index_instance = "instance".to_owned();
+
+    actor
+        .handle_rooms_available(rooms_available(&[ROOM], &[(ROOM, "$latest")], &settings))
+        .await;
+
+    let checkpoint = actor
+        .active_crawl_checkpoint
+        .clone()
+        .or_else(|| actor.crawl_queue.front().cloned())
+        .expect("the interrupted room is queued or active");
+    assert_eq!(
+        checkpoint.history_source,
+        CrawlHistorySource::Network,
+        "the resumed crawl keeps reading where it stopped"
+    );
+    assert_eq!(
+        checkpoint
+            .persisted_cursor
+            .as_ref()
+            .map(koushi_sdk::MatrixPersistedEventCursor::as_stable_id),
+        Some("77".to_owned())
+    );
+    assert!(
+        checkpoint.pending_redactions.contains("$already-redacted"),
+        "a resumed walk must not re-index an original whose redaction it passed"
+    );
+    assert_eq!((checkpoint.processed, checkpoint.indexed), (30, 25));
+}

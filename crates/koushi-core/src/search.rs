@@ -2066,6 +2066,18 @@ impl SearchActor {
         self.start_next_history_crawl_page();
     }
 
+    /// Apply a record a previous session loaded, without the store round trip.
+    #[cfg(test)]
+    pub(crate) fn adopt_loaded_progress(
+        &mut self,
+        progress: SearchProgress,
+        index_instance: String,
+    ) {
+        self.search_progress = Some(progress);
+        self.search_progress_index_instance = index_instance;
+        self.search_progress_identity = None;
+    }
+
     /// Record what a committed crawl page means for the durable record.
     ///
     /// Only automatic crawls are recorded: a manual probe may name a room
