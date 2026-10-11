@@ -12,6 +12,32 @@ import {
 } from "./TimelineViewportVirtualization";
 
 describe("timeline viewport virtualization", () => {
+  it("bounds mounted rows for a room with 147 visible timeline items", () => {
+    const rows = Array.from({ length: 147 }, (_, index) => ({
+      row_id: `row-${index}`,
+      item: {} as TimelineItem,
+      content_event_id: null,
+      activity_event_id: null,
+      gap_id: null,
+      content_timestamp_ms: null,
+      display_timestamp_ms: null,
+      kind: "event" as const
+    }));
+    const model = buildTimelineHeightModel(
+      rows,
+      new Map(),
+      TIMELINE_ESTIMATED_ITEM_HEIGHT_PX
+    );
+    const range = calculateTimelineVirtualRange({
+      visibleItemsLength: rows.length,
+      metrics: { scrollTop: model.totalHeight - 500, clientHeight: 500, listOffsetTop: 0 },
+      model
+    });
+
+    expect(range.virtualized).toBe(true);
+    expect(range.endIndex - range.startIndex).toBeLessThanOrEqual(80);
+  });
+
   it("keeps a 100,000-event history bounded to one rendered window", () => {
     const rows = Array.from({ length: 100_000 }, (_, index) => ({
       row_id: `row-${index}`,

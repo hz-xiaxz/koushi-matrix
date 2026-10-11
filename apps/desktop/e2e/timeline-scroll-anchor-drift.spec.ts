@@ -216,6 +216,20 @@ test("Koushi-owned anchoring keeps virtualized free-scroll viewport stable", asy
   await expectAnchorStayedPut(page, anchorEventId, originalOffset);
 });
 
+test("a 147-row room keeps mounting bounded while scrolling and measuring rows", async ({
+  page
+}) => {
+  await gotoReadyApp(page);
+  await seedTimeline(page, 147);
+
+  const timeline = page.locator("[data-testid=timeline-view]");
+  await expect(timeline).toHaveAttribute("data-virtualized", "true");
+  const { anchorEventId, originalOffset } = await placeAnchorInViewport(page, 70);
+  expect(await timeline.locator("[data-item-id]").count()).toBeLessThanOrEqual(80);
+  await growRenderedRowAboveViewport(page);
+  await expectAnchorStayedPut(page, anchorEventId, originalOffset);
+});
+
 test("virtualized free-scroll viewport stays stable while row measurements settle", async ({
   page
 }) => {
