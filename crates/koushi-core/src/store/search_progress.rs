@@ -3,27 +3,26 @@
 //! A restart used to forget which rooms had already been indexed, so every launch
 //! began the same full-history crawl. This module persists one small encrypted
 //! file per account holding, for each crawled room, the committed boundary, the
-//! counters the room row reports, the traversal state of an unfinished backfill,
-//! and the late-decryption work that still has to be indexed.
+//! counters the room row reports, and whether a late decryption has since changed
+//! the room in place.
 //!
-//! Only identifiers, cursors and counters are stored — room ids, event ids, chunk
-//! cursors and counts, never message text.
+//! Only identifiers and counters are stored — room ids, event ids and counts,
+//! never message text.
+//!
+//! An *unfinished* backfill is deliberately not recorded. Its position would be a
+//! persisted chunk cursor, and resuming from one cannot be made sound: events
+//! that arrived while the app was closed sit above that cursor behind a gap the
+//! resumed walk never crosses, so the room could be marked complete with that gap
+//! unindexed. An interrupted room is therefore crawled again from its newest
+//! event, which is idempotent and bounded by one page per replay.
 
 use super::{CoreFailure, StoreActor};
 use koushi_protocol::SessionKeyId;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 const SEARCH_PROGRESS_FILE_MAGIC: &[u8] = b"KOUSHI-SEARCH-PROGRESS-V1\0";
-
-/// How many redaction targets one room's unfinished backfill may carry durably
-/// before the room falls back to re-reading from the newest event.
-///
-/// A resumed crawl walks on from its cursor, so the redactions it already saw in
-/// the events above that cursor must survive: without them a resumed walk could
-/// index an older original whose redaction it no longer remembers.
-pub(crate) const SEARCH_PROGRESS_PENDING_REDACTIONS_MAX: usize = 512;
 
 /// Everything that decides whether a persisted record still describes the index
 /// it was written against.
@@ -41,7 +40,8 @@ pub(crate) struct SearchProgressIdentity {
     /// The value is a marker written inside the account's index directory, so
     /// deleting and recreating that directory invalidates the record: a fresh
     /// empty index would otherwise look like an index that already holds these
-    /// rooms.
+    /// rooms. The marker identifies the directory, not each room's subdirectory;
+    /// the residual is recorded in the plan.
     pub index_instance: String,
     pub include_media_captions: bool,
     pub include_filenames: bool,
@@ -58,68 +58,20 @@ pub(crate) struct RoomCrawlProgress {
     pub latest_event_id: Option<String>,
     pub processed: u64,
     pub indexed: u64,
-    /// Traversal state of an unfinished backfill: the committed cursor of the
-    /// next persisted page to read.
-    ///
-    /// A cursor whose chunk no longer exists is not silently treated as the end
-    /// of the store; the reader reports it, and the caller re-crawls the room from
-    /// the tail.
-    pub cursor: Option<String>,
-    /// Whether the persisted walk had already crossed a gap chunk, so completion
-    /// cannot be claimed from the local store alone.
-    pub crossed_gap: bool,
-    /// Whether the traversal had switched to SDK back-pagination.
-    pub network_source: bool,
     /// Whether a late decryption changed events of this room in place since the
     /// backfill committed.
     ///
     /// A resolution rewrites the stored event without adding anything newer, so
     /// no tail comparison can notice it: the room is re-read from its persisted
     /// chunks instead of being skipped. The flag is per room, so no per-event
-    /// bookkeeping can grow with a long session's decryption traffic.
+    /// bookkeeping can grow with a session's decryption traffic.
     pub needs_reread: bool,
-    /// Redaction targets an unfinished backfill has seen in the events it has
-    /// already walked past.
-    pub pending_redactions: BTreeSet<String>,
-    /// Whether `pending_redactions` overflowed, so the unfinished backfill must
-    /// restart from the newest event instead of resuming at its cursor.
-    pub pending_redactions_overflow: bool,
 }
 
 impl RoomCrawlProgress {
-    /// Whether anything here still needs index work.
-    pub(crate) fn has_pending_work(&self) -> bool {
-        self.needs_reread
-    }
-
     /// Whether the room can be skipped on the next session.
     pub(crate) fn is_settled(&self) -> bool {
-        self.backfill_complete && !self.has_pending_work()
-    }
-
-    /// Whether an unfinished backfill has state worth resuming from.
-    pub(crate) fn is_resumable(&self) -> bool {
-        !self.backfill_complete
-            && !self.pending_redactions_overflow
-            && (self.cursor.is_some() || self.crossed_gap || self.network_source)
-    }
-
-    /// Remember one redaction target, falling back to a restart from the newest
-    /// event once the bounded list is full.
-    pub(crate) fn queue_pending_redaction(&mut self, event_id: String) {
-        if self.pending_redactions_overflow
-            || self.pending_redactions.len() >= SEARCH_PROGRESS_PENDING_REDACTIONS_MAX
-        {
-            self.pending_redactions_overflow = true;
-            self.pending_redactions.clear();
-            return;
-        }
-        self.pending_redactions.insert(event_id);
-    }
-
-    /// Record that a late decryption changed this room in place.
-    pub(crate) fn mark_needs_reread(&mut self) {
-        self.needs_reread = true;
+        self.backfill_complete && !self.needs_reread
     }
 }
 
@@ -131,12 +83,8 @@ pub(crate) struct SearchProgress {
 }
 
 impl SearchProgress {
-    #[cfg(test)]
     pub(crate) fn new(identity: SearchProgressIdentity) -> Self {
-        Self {
-            identity,
-            rooms: BTreeMap::new(),
-        }
+        Self { identity, rooms: BTreeMap::new() }
     }
 
     /// The rooms this record describes, when it still describes the running
@@ -145,11 +93,7 @@ impl SearchProgress {
         &self,
         identity: &SearchProgressIdentity,
     ) -> &BTreeMap<String, RoomCrawlProgress> {
-        if &self.identity == identity {
-            &self.rooms
-        } else {
-            &EMPTY_ROOMS
-        }
+        if &self.identity == identity { &self.rooms } else { &EMPTY_ROOMS }
     }
 
     pub(crate) fn room(&self, room_id: &str) -> Option<&RoomCrawlProgress> {
@@ -162,6 +106,12 @@ impl SearchProgress {
 
     pub(crate) fn forget(&mut self, room_id: &str) {
         self.rooms.remove(room_id);
+    }
+
+    /// Drop every room, keeping the identity: an explicit invalidation says the
+    /// recorded completions no longer describe the index.
+    pub(crate) fn clear_rooms(&mut self) {
+        self.rooms.clear();
     }
 
     /// Adopt a new identity, dropping what was recorded under the old one.
@@ -186,7 +136,7 @@ static EMPTY_ROOMS: BTreeMap<String, RoomCrawlProgress> = BTreeMap::new();
 /// written against the old one is not trusted.
 const SEARCH_INDEX_INSTANCE_FILE: &str = ".koushi-index-instance";
 
-/// The instance id of the account's index directory, created on first use.
+/// A fresh index-directory instance id.
 pub(crate) fn new_index_instance_id() -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -201,9 +151,7 @@ impl StoreActor {
         &self,
         key_id: &SessionKeyId,
     ) -> Result<String, CoreFailure> {
-        let path = self
-            .account_search_index_dir(key_id)
-            .join(SEARCH_INDEX_INSTANCE_FILE);
+        let path = self.account_search_index_dir(key_id).join(SEARCH_INDEX_INSTANCE_FILE);
         match std::fs::read_to_string(&path) {
             Ok(instance) => {
                 let instance = instance.trim();
@@ -243,6 +191,9 @@ impl StoreActor {
     }
 
     /// Write the account's crawl progress, replacing the previous record.
+    ///
+    /// An empty record removes the file, so an account with nothing committed
+    /// leaves no stale commitment behind.
     pub(crate) fn save_search_progress(
         &self,
         key_id: &SessionKeyId,
@@ -265,9 +216,7 @@ impl StoreActor {
 
     /// Path of the account's crawl-progress file.
     pub(crate) fn account_search_progress_path(&self, key_id: &SessionKeyId) -> PathBuf {
-        self.account_root_dir(key_id)
-            .join("search")
-            .join("progress.v1.enc")
+        self.account_root_dir(key_id).join("search").join("progress.v1.enc")
     }
 }
 

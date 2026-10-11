@@ -1,6 +1,6 @@
 # #1344: bounded search/history residency and durable crawl progress
 
-Status: **revision 3 — Stage A and Stage C implemented; Stage B is not.** Parent:
+Status: **revision 4 — Stage A, B and C implemented; the app PR is next.** Parent:
 [#1344](https://github.com/shinaoka/koushi-matrix/issues/1344); authority is the
 maintainer's 2026-10-12 direction comment on that issue. Precedents:
 [#1150 index-first search](2026-10-06-issue1150-search-index-first.md),
@@ -21,10 +21,9 @@ Implemented so far:
 - **Stage A** — `koushi_sdk::persisted_room_event_page` and the crawler source
   switch, with the crawler canon amended, a stale-cursor distinction, and the
   acceptance test over history that is on disk but not resident.
-- **Stage B** — the durable record, its identity, resume, invalidation and
-  late-decryption reopen are implemented. Missing: Files reconstruction from the
-  persisted cursor, and the fault-injection tests around the commit/progress
-  writes.
+- **Stage B** — the durable record, its identity, invalidation, late-decryption
+  reopen and the on-demand Files rebuild are implemented. Mid-traversal resume is
+  deliberately **not** implemented (see the residual below).
 
 ## Review disposition (revision 1 → 2)
 
@@ -185,13 +184,13 @@ The reviewer rejected revision 2 as written and named these. All were verified.
 
 | # | Finding | Disposition |
 | --- | --- | --- |
-| 1 | The durable record would lose gap evidence and traversal mode, so a resume could reach the oldest stored chunk with `crossed_store_gap = false` and declare success over an unfilled gap; a post-switch resume would restart the store walk at the tail | **accepted** — the record persists the traversal mode and the cumulative gap evidence, not just a cursor |
+| 1 | The durable record would lose gap evidence and traversal mode, so a resume could reach the oldest stored chunk with `crossed_store_gap = false` and declare success over an unfilled gap; a post-switch resume would restart the store walk at the tail | **accepted, and resume is dropped instead** — the first post-implementation review showed a second, worse case: events that arrive while the app is closed sit *above* the persisted cursor behind a gap a resumed walk never crosses, so the room could be completed with that gap unindexed. Resuming soundly means re-reading the tail first, which is the crawl itself, so an interrupted backfill is crawled again from its newest event |
 | 2 | Catch-up accepted a boundary found across a gap, skipping events inside it | **fixed in Stage A** (see below): the page reports where continuity breaks, and a boundary behind a gap hands the rest to back-pagination |
 | 3 | `store_revision` had no coverage invariant: a page could read a UTD event, skip it, and the revision sampled at completion would claim coverage of a resolution it never indexed | **accepted, and the counter is gone** — there is no revision to sample. The SDK's `RedecryptorReport::ResolvedUtds` names the room of every in-place resolution, so the actor reopens that room in the same session and durably; a lagged room-key stream reopens every joined room. Only a crash between the resolution and the reopen could be missed, and late decryption cannot happen while the app is closed, so the window is the record write itself |
-| 4 | A sibling marker does not identify a recreated index directory, and says nothing about one missing room index | **accepted** — identity is coupled to actual index creation and per-room index presence; a record whose rooms or directory do not match is invalid, not trusted |
-| 5 | Files reconstruction from persisted room chunks can delete a valid row admitted from a focused/thread projection, which is not persisted in room chunks; a concurrent tail re-insert can also be missed | **accepted** — reconstruction preserves verified non-store rows unless there is positive invalidation evidence, and publishes a replacement only with adequate scan coverage |
-| 6 | Awaiting a save in the Shutdown arm is not the session fence: `SearchActorHandle` aborts after its timeout and drops the actor, and an in-flight `spawn_blocking` save survives that | **accepted** — reuse the read-outbox fencing (session/save generations, per-path write serialization, timeout invalidation), not an await-only argument |
-| 7 | Switching to the network does not position SDK pagination at the gap the walk found: it starts from the resident position, may re-read and hydrate already-scanned disk chunks, and the preserved empty-page rule can stop before older gaps are repaired | **accepted, recorded as a Stage A limit** — the switch repairs gaps but is not gap-targeted. Stage B's honest completion rule stops the empty-page shortcut from marking completion; gap-targeted continuation is deferred with the store cursor work |
+| 4 | A sibling marker does not identify a recreated index directory, and says nothing about one missing room index | **partly accepted, with a recorded residual** — the marker lives *inside* the index directory, so deleting and recreating that directory invalidates the record. Deleting one room's subdirectory does not move the marker; that room keeps its completion and its search stays empty until its next message queues a catch-up. Closing that needs a per-room index-presence check through an SDK surface that does not exist today |
+| 5 | Files reconstruction from persisted room chunks can delete a valid row admitted from a focused/thread projection, which is not persisted in room chunks; a concurrent tail re-insert can also be missed | **fixed** — reconstruction only adds or refreshes rows (never removes), and each rebuilt page goes through the ordinary admission path, so replacement validity, redaction proofs and cached text replacements are resolved by the SDK before a row is published. Removal stays with the positive-redaction reconciliation the Files query already runs |
+| 6 | Awaiting a save in the Shutdown arm is not the session fence: `SearchActorHandle` aborts after its timeout and drops the actor, and an in-flight `spawn_blocking` save survives that | **accepted as a residual** — saves are serialized inside the actor but a save that survives a forced shutdown can still overwrite a newer record. The record is a snapshot of committed rooms, so the damage is bounded: the writer's identity must match the running one, and a record that loses a room only causes that room to be crawled again. The read-outbox generation fence is the fix if this ever matters |
+| 7 | Switching to the network does not position SDK pagination at the gap the walk found: it starts from the resident position, may re-read and hydrate already-scanned disk chunks, and the preserved empty-page rule can stop before older gaps are repaired | **fixed for the completion half, recorded as a limit for the rest** — a fetched page with no events and no start-of-room report now fails the page instead of completing the room, so a lost page can no longer be recorded as done. The switch still is not gap-targeted and can re-read disk chunks through the SDK; making it gap-targeted needs the store-cursor read path and is deferred |
 | 8 | The increment has no byte bound at all, not even per account, and the first-page resident read clones the whole resident window | **open maintainer decision** (below). Stage C gives a zero idle-reader allowance by construction; no history byte bound is claimed |
 | 9 | A batch reloaded the reader it was about to drop | **fixed** — `commit_batch` commits without reloading |
 | 10 | The non-hydration test exercised only resident history, so a reader that also hydrated would pass | **fixed** — `crawler_page_indexes_history_that_is_not_resident` backfills 300 events across several linked chunks, releases the resident window through the public subscriber path, and then requires the deciding crawl to reach every stored document with no network and no growth of the resident counters |
@@ -203,6 +202,27 @@ reload is gone; the cloned rollback snapshots stay (they are the correct rollbac
 and the batch is bounded); the standalone shutdown-drain test and the unused
 session construction in the non-hydration test are pre-existing/in-test scope and
 are handled with the Stage A acceptance test.
+
+### Revision-3 review disposition (post-implementation)
+
+The finished diff was reviewed independently. Its findings and what happened:
+
+| # | Finding | Disposition |
+| --- | --- | --- |
+| 1 | Production never created the first record: a missing file loaded as `None`, and every recording path returned early, so an existing installation never wrote one | **fixed** — the first settings resolution builds a record under the running identity, so a later committed page writes one |
+| 2 | Resume could certify a new tail it never traversed | **fixed** — resume is dropped (see the revision-2 table) |
+| 3 | Explicit invalidation did not invalidate the durable record (`adopt_identity` clears only on a mismatch) | **fixed** — invalidation clears the rooms durably and drops the pending rebuilds |
+| 4 | A mismatched identity was detected but never adopted, so later saves carried the old identity and every restart re-crawled | **fixed** — resolution adopts the running identity, clearing what the old one described |
+| 5 | A late-decryption flag was never settled, and a resolution during an in-flight crawl was ignored | **fixed** — a completed crawl settles the flag, and a report for a room already being read restarts that room's crawl |
+| 6 | A nonterminal empty pagination was still recorded as completion | **fixed** — such a page fails instead of completing the room |
+| 7 | Late-decryption detection was lossy: report-stream lag was discarded, and reports for rooms not yet in the room list were dropped | **fixed** — a lagged report stream reopens every joined room, and a recorded room is reopened even before the room list names it |
+| 8 | Saves have no shutdown fence; a failed invalidation save can leave a false commitment | **residual** — saves are serialized in the actor and the identity must match; the surviving-save case is bounded to extra crawling for the rooms the newer record had. The read-outbox generation fence is the fix if it matters |
+| 9 | The instance marker does not validate individual room indexes | **residual**, as in the revision-2 table |
+| 10 | Files reconstruction bypassed admission and proof | **fixed** — rebuilt pages go through `handle_index` |
+| 11 | Resumed rooms did not rebuild rows for already-committed pages | **moot** — resume is dropped |
+| 12 | The per-query bound was not a real work bound: every cursor validation scanned the whole room's chunk metadata | **fixed** — the reader no longer validates a cursor against chunk metadata. Nothing persists a cursor across sessions now, so this was paying a whole-room scan per page for a case that cannot occur; a future persisted cursor must be validated by its owner |
+| 13 | Network preemption can advance SDK pagination without an acknowledged crawl page | **residual, pre-existing** — recorded in the state machine. The crawler never relied on the SDK's indexing task before this change either |
+| 14 | Canon and plan text described mechanisms that were absent or that have since changed | **fixed** — the state machine, the crawler module doc and this record were corrected |
 
 ### Stage A as implemented
 

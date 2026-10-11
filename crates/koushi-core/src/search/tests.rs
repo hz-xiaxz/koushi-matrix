@@ -1071,7 +1071,7 @@ async fn a_settled_room_is_not_crawled_again_but_queued_work_is() {
     let pending = progress.room_mut(PENDING);
     pending.backfill_complete = true;
     pending.latest_event_id = Some("$pending-latest".to_owned());
-    pending.mark_needs_reread();
+    pending.needs_reread = true;
 
     actor.search_progress = Some(progress);
     actor.search_progress_index_instance = "instance".to_owned();
@@ -1353,8 +1353,6 @@ async fn a_failed_page_leaves_the_durable_record_untouched() {
 
     let mut progress = progress_record("instance", &settings);
     let room = progress.room_mut(ROOM);
-    room.cursor = Some("41".to_owned());
-    room.crossed_gap = true;
     room.processed = 10;
     room.indexed = 9;
     actor.search_progress = Some(progress);
@@ -1450,50 +1448,3 @@ async fn a_saved_record_is_loaded_and_skips_the_crawl() {
     assert!(started.is_empty(), "no crawl starts: {started:?}");
 }
 
-/// An interrupted backfill resumes at the cursor it committed, with the source
-/// and the redaction targets the walk had already passed.
-#[tokio::test]
-async fn an_interrupted_backfill_resumes_from_its_recorded_cursor() {
-    let (mut actor, _action_rx) = progress_fixture().await;
-    let settings = SearchCrawlerSettings::default();
-    const ROOM: &str = "!resume:example.invalid";
-
-    let mut progress = progress_record("instance", &settings);
-    let room = progress.room_mut(ROOM);
-    room.backfill_complete = false;
-    room.cursor = Some("77".to_owned());
-    room.crossed_gap = false;
-    room.network_source = true;
-    room.queue_pending_redaction("$already-redacted".to_owned());
-    room.processed = 30;
-    room.indexed = 25;
-    actor.search_progress = Some(progress);
-    actor.search_progress_index_instance = "instance".to_owned();
-
-    actor
-        .handle_rooms_available(rooms_available(&[ROOM], &[(ROOM, "$latest")], &settings))
-        .await;
-
-    let checkpoint = actor
-        .active_crawl_checkpoint
-        .clone()
-        .or_else(|| actor.crawl_queue.front().cloned())
-        .expect("the interrupted room is queued or active");
-    assert_eq!(
-        checkpoint.history_source,
-        CrawlHistorySource::Network,
-        "the resumed crawl keeps reading where it stopped"
-    );
-    assert_eq!(
-        checkpoint
-            .persisted_cursor
-            .as_ref()
-            .map(koushi_sdk::MatrixPersistedEventCursor::as_stable_id),
-        Some("77".to_owned())
-    );
-    assert!(
-        checkpoint.pending_redactions.contains("$already-redacted"),
-        "a resumed walk must not re-index an original whose redaction it passed"
-    );
-    assert_eq!((checkpoint.processed, checkpoint.indexed), (30, 25));
-}

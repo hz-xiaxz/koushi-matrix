@@ -9,8 +9,10 @@
 //! gap still falls back to SDK back-pagination, which is the path that reaches
 //! `/messages`, because that history is not local yet.
 //!
-//! Each page awaits its index commit before being reported successful. Crawl
-//! checkpoints are in-session only; no durable crawl commitments are retained.
+//! Each page awaits its index commit before being reported successful. A crawl
+//! checkpoint is in-session only: what survives a restart is the committed
+//! *completion* of a room (see `crate::store::search_progress`), not an
+//! interrupted walk's position.
 //!
 //! Media file bytes are never fetched; only MXC URIs, filenames, captions and
 //! metadata are indexed. This keeps the crawler a text-only backfill worker.
@@ -100,36 +102,6 @@ impl HistoryCrawlCheckpoint {
         }
     }
 
-    /// Resume an interrupted backfill from the state a previous session wrote
-    /// down, instead of walking the room from its newest event again.
-    ///
-    /// Counters, the traversal source, the committed cursor and the redaction
-    /// targets the walk already passed all come from the record: without the
-    /// redactions a resumed walk could index an older original whose redaction it
-    /// no longer remembers.
-    #[allow(clippy::too_many_arguments)]
-    pub fn resume(
-        room_id: String,
-        settings: SearchCrawlerSettings,
-        settings_generation: u64,
-        history_source: CrawlHistorySource,
-        persisted_cursor: Option<koushi_sdk::MatrixPersistedEventCursor>,
-        crossed_store_gap: bool,
-        pending_redactions: HashSet<String>,
-        processed: u64,
-        indexed: u64,
-    ) -> Self {
-        Self {
-            processed,
-            indexed,
-            pending_redactions,
-            history_source,
-            persisted_cursor,
-            crossed_store_gap,
-            ..Self::new(room_id, settings, settings_generation, false)
-        }
-    }
-
     /// Catch-up checkpoint for a completed room whose latest event changed
     /// (#996). Counts carry over so the room row keeps its totals.
     pub fn catch_up(
@@ -177,9 +149,6 @@ struct CrawlPage {
     /// Position in `events` at which the persisted walk crossed a gap chunk,
     /// i.e. where the page stops being contiguous with the previous one.
     gap_at: Option<usize>,
-    /// Whether the walk had to restart from the newest chunk because the
-    /// caller's cursor named a chunk the store no longer holds.
-    restarted: bool,
     /// Whether the source reached the start of the room's known history.
     reached_start: bool,
 }
@@ -308,12 +277,11 @@ async fn run_history_crawl_page(
                             events: page.events,
                             next: None,
                             gap_at: None,
-                            restarted: false,
                             reached_start: page.reached_start,
                         })
                     }
                     CrawlHistorySource::Store => {
-                        let mut page = koushi_sdk::persisted_room_event_page(
+                        let page = koushi_sdk::persisted_room_event_page(
                             &session,
                             &checkpoint.room_id,
                             persisted_cursor,
@@ -321,33 +289,17 @@ async fn run_history_crawl_page(
                         )
                         .await
                         .map_err(|_| ())?;
-                        // A cursor whose chunk the store no longer holds cannot
-                        // resume a walk. Reading it as the end of the store would
-                        // let a stale cursor claim the room is fully indexed, so
-                        // the walk restarts from the newest chunk instead.
-                        let restarted = page.cursor_unknown;
-                        if restarted {
-                            page = koushi_sdk::persisted_room_event_page(
-                                &session,
-                                &checkpoint.room_id,
-                                None,
-                                batch_size as usize,
-                            )
-                            .await
-                            .map_err(|_| ())?;
-                        }
                         // The persisted walk is complete only when it reaches
                         // the oldest stored chunk without crossing a gap. A gap
                         // proves the store does not hold the history in between,
                         // so the crawl must continue through the network.
-                        let gap_seen = (crossed_store_gap && !restarted) || page.gap_at.is_some();
+                        let gap_seen = crossed_store_gap || page.gap_at.is_some();
                         let reached_start = page.next.is_none() && !gap_seen;
                         Ok::<_, ()>(CrawlPage {
                             cached,
                             events: page.events,
                             next: page.next,
                             gap_at: page.gap_at,
-                            restarted,
                             reached_start,
                         })
                     }
@@ -379,17 +331,12 @@ async fn run_history_crawl_page(
         events: page_events_owned,
         next,
         gap_at,
-        restarted,
         reached_start,
     } = page;
     checkpoint.first_page = false;
     if checkpoint.history_source == CrawlHistorySource::Store {
         checkpoint.persisted_cursor = next;
-        checkpoint.crossed_store_gap = if restarted {
-            gap_at.is_some()
-        } else {
-            crossed_store_gap || gap_at.is_some()
-        };
+        checkpoint.crossed_store_gap = crossed_store_gap || gap_at.is_some();
     }
     let page_events = page_events_owned.as_slice();
     let chunk_len = page_events.len() as u64;
@@ -422,12 +369,25 @@ async fn run_history_crawl_page(
         Some(position) => &page_events[..position],
         None => page_events,
     };
-    let completed = reached_catch_up_boundary
-        || reached_start
-        // Preserved from the back-pagination path, which ends a crawl on an
-        // empty page the way it always did. The persisted walk must not use it:
-        // an empty page there can be a gap, not the start of the room.
-        || (checkpoint.history_source == CrawlHistorySource::Network && chunk_len == 0);
+    let completed = reached_catch_up_boundary || reached_start;
+    if !completed && checkpoint.history_source == CrawlHistorySource::Network && chunk_len == 0 {
+        // A fetched page with no events that did not report the start of the
+        // room is not evidence of completion: the SDK can hold that token and
+        // still have older history behind it. Marking the room done here would
+        // skip that history durably.
+        trace_crawler_page(
+            DiagnosticLevel::Warn,
+            "empty_page",
+            checkpoint.history_source,
+            checkpoint.processed,
+            checkpoint.indexed,
+            chunk_len,
+        );
+        return HistoryCrawlPageResult::Failed {
+            checkpoint,
+            kind: SearchCrawlerFailureKind::Sdk,
+        };
+    }
     let boundary_blocks_completion =
         catch_up_after.is_some() && boundary_in_page.is_some() && !reached_catch_up_boundary;
     if !completed

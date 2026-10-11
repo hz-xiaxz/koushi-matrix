@@ -72,7 +72,7 @@ use crate::account_work::AccountWorkScheduler;
 use crate::command_policy::{SEARCH_UNAVAILABLE_MESSAGE, search_scope_to_state};
 
 use crate::executor;
-use crate::search_crawler::{CrawlHistorySource, HistoryCrawlCheckpoint, HistoryCrawlPageResult};
+use crate::search_crawler::{HistoryCrawlCheckpoint, HistoryCrawlPageResult};
 use crate::store::search_progress::{SearchProgress, SearchProgressIdentity};
 use koushi_protocol::command::{SearchCommand, SearchScope};
 use koushi_protocol::event::{CoreEvent, SearchEvent, SearchResultItem};
@@ -483,17 +483,6 @@ impl std::fmt::Debug for SearchActorMessage {
     }
 }
 
-/// State a previous session left behind for an unfinished backfill.
-#[derive(Clone)]
-struct ResumableCrawl {
-    history_source: CrawlHistorySource,
-    cursor: Option<koushi_sdk::MatrixPersistedEventCursor>,
-    crossed_gap: bool,
-    pending_redactions: HashSet<String>,
-    processed: u64,
-    indexed: u64,
-}
-
 /// What the actor remembers about a room whose crawl completed this session.
 #[derive(Clone)]
 struct CompletedHistoryCrawl {
@@ -809,9 +798,6 @@ pub(crate) struct SearchActor {
     crawl_settings_generation: u64,
     /// Durable crawl progress for this account, when one was loaded.
     search_progress: Option<SearchProgress>,
-    /// Unfinished backfills the durable record describes, keyed by room, waiting
-    /// to be enqueued when their room is known to be joined.
-    resumable_crawls: HashMap<String, ResumableCrawl>,
     /// Rooms whose attachment rows still have to be rebuilt from persisted store,
     /// with the cursor each rebuild stopped at.
     ///
@@ -915,7 +901,6 @@ impl SearchActor {
             latest_event_ids: std::collections::BTreeMap::new(),
             crawl_settings_generation: 0,
             search_progress: None,
-            resumable_crawls: HashMap::new(),
             files_rebuild_pending: HashMap::new(),
             search_progress_index_instance: String::new(),
             search_progress_writer: None,
@@ -954,15 +939,18 @@ impl SearchActor {
             use matrix_sdk::event_cache::RedecryptorReport;
             let mut reports = koushi_sdk::late_decryption_report_stream(&report_session);
             while let Some(report) = reports.next().await {
-                let Ok(report) = report else { continue };
                 let message = match report {
-                    RedecryptorReport::ResolvedUtds { room_id, .. } => {
+                    // The stream lagging means reports were dropped, which is
+                    // exactly the case where a room's resolved UTD could go
+                    // unnoticed: reopen every joined room rather than ignore it.
+                    Err(_) => SearchActorMessage::LateDecryptionLagging,
+                    Ok(RedecryptorReport::ResolvedUtds { room_id, .. }) => {
                         SearchActorMessage::LateDecryptionResolved {
                             room_id: room_id.to_string(),
                         }
                     }
-                    RedecryptorReport::Lagging => SearchActorMessage::LateDecryptionLagging,
-                    RedecryptorReport::BackupAvailable => continue,
+                    Ok(RedecryptorReport::Lagging) => SearchActorMessage::LateDecryptionLagging,
+                    Ok(RedecryptorReport::BackupAvailable) => continue,
                 };
                 if report_tx.send(message).await.is_err() {
                     break;
@@ -1477,18 +1465,12 @@ impl SearchActor {
                 )
                 .await
                 {
-                    // A cursor whose chunk is gone restarts the walk from the
-                    // newest chunk instead of ending it.
-                    Ok(page) if page.cursor_unknown => {
-                        self.files_rebuild_pending.insert(room_id.clone(), None);
-                        continue;
-                    }
                     Ok(page) => page,
                     // A failed read leaves the room pending; the next query retries.
                     Err(_) => break,
                 };
                 pages_left -= 1;
-                self.apply_rebuilt_rows(&room_id, &page.events);
+                self.apply_rebuilt_rows(&room_id, &page.events).await;
                 match page.next {
                     Some(next) => {
                         self.files_rebuild_pending
@@ -1504,7 +1486,7 @@ impl SearchActor {
     }
 
     /// Apply one rebuilt page to the body-free document store.
-    fn apply_rebuilt_rows(
+    async fn apply_rebuilt_rows(
         &mut self,
         room_id: &str,
         events: &[matrix_sdk::deserialized_responses::TimelineEvent],
@@ -1524,7 +1506,7 @@ impl SearchActor {
             ) else {
                 continue;
             };
-            self.apply_index_message(message);
+            self.handle_index(message).await;
         }
     }
 
@@ -1746,26 +1728,16 @@ impl SearchActor {
             if self.history_crawl_room_is_known(&room_id) {
                 continue;
             }
-            let checkpoint = match self.resumable_crawls.remove(&room_id) {
-                Some(resumed) => HistoryCrawlCheckpoint::resume(
-                    room_id,
-                    settings.clone(),
-                    self.crawl_settings_generation,
-                    resumed.history_source,
-                    resumed.cursor,
-                    resumed.crossed_gap,
-                    resumed.pending_redactions,
-                    resumed.processed,
-                    resumed.indexed,
-                ),
-                None => HistoryCrawlCheckpoint::new(
+            self.enqueue_history_crawl(
+                HistoryCrawlCheckpoint::new(
                     room_id,
                     settings.clone(),
                     self.crawl_settings_generation,
                     false,
                 ),
-            };
-            self.enqueue_history_crawl(checkpoint, 0).await;
+                0,
+            )
+            .await;
         }
         self.start_next_history_crawl_page();
     }
@@ -2032,7 +2004,12 @@ impl SearchActor {
     /// next launch. Only joined rooms are recorded, so an unknown room cannot
     /// grow the durable record.
     async fn mark_room_needs_reread(&mut self, room_id: &str) {
-        if !self.available_crawl_rooms.contains(room_id) {
+        let known = self.available_crawl_rooms.contains(room_id)
+            || self
+                .search_progress
+                .as_ref()
+                .is_some_and(|progress| progress.room(room_id).is_some());
+        if !known {
             return;
         }
         let recorded = self
@@ -2040,18 +2017,25 @@ impl SearchActor {
             .as_ref()
             .is_some_and(|progress| progress.room(room_id).is_some());
         if let Some(progress) = self.search_progress.as_mut() {
-            progress.room_mut(room_id).mark_needs_reread();
+            progress.room_mut(room_id).needs_reread = true;
         }
         if recorded {
             self.persist_search_progress().await;
         }
         self.completed_rooms.remove(room_id);
-        self.resumable_crawls.remove(room_id);
         // The re-read rebuilds the room's rows as it goes, so the on-demand
         // rebuild is no longer its owner.
         self.files_rebuild_pending.remove(room_id);
-        if self.history_crawl_room_is_known(room_id) {
+        if !self.available_crawl_rooms.contains(room_id) {
+            // The room list does not know this room yet. Its reopen is durable,
+            // and the next notification queues the read.
             return;
+        }
+        // A crawl already reading this room started before the resolution, so it
+        // may have passed the changed event; restart it from the newest event
+        // rather than let its completion settle the room.
+        if self.history_crawl_room_is_known(room_id) {
+            self.remove_history_crawl_room(room_id).await;
         }
         self.enqueue_history_crawl(
             HistoryCrawlCheckpoint::new(
@@ -2094,26 +2078,12 @@ impl SearchActor {
             let room = progress.room_mut(&checkpoint.room_id);
             room.processed = checkpoint.processed;
             room.indexed = checkpoint.indexed;
-            room.cursor = checkpoint
-                .persisted_cursor
-                .as_ref()
-                .map(koushi_sdk::MatrixPersistedEventCursor::as_stable_id);
-            room.crossed_gap = checkpoint.crossed_store_gap;
-            room.network_source = checkpoint.history_source == CrawlHistorySource::Network;
-            room.pending_redactions.clear();
-            room.pending_redactions_overflow = false;
-            for event_id in &checkpoint.pending_redactions {
-                room.queue_pending_redaction(event_id.clone());
-            }
             if completed {
                 room.backfill_complete = true;
                 room.latest_event_id = checkpoint.latest_event_id_at_start.clone();
-                // Nothing is left to resume from a completed backfill.
-                room.cursor = None;
-                room.crossed_gap = false;
-                room.network_source = false;
-                room.pending_redactions.clear();
-                room.pending_redactions_overflow = false;
+                // A completed crawl has just read the whole room, so a late
+                // decryption that reopened it is settled by this pass.
+                room.needs_reread = false;
             }
         }
         self.persist_search_progress().await;
@@ -2136,14 +2106,22 @@ impl SearchActor {
     /// different index, so nothing from it is trusted. A room with queued
     /// late-decryption work is deliberately not seeded, so it is re-crawled.
     fn resolve_crawl_progress_identity(&mut self, settings: &SearchCrawlerSettings) {
-        let Some(progress) = self.search_progress.as_ref() else {
-            return;
-        };
         let identity = self.crawl_progress_identity(settings);
         if self.search_progress_identity.as_ref() == Some(&identity) {
             return;
         }
         self.search_progress_identity = Some(identity.clone());
+        // A record the running index and content policy do not describe is a
+        // migration, and an account that has never crawled has no file at all.
+        // Either way the session holds a record under the running identity, so a
+        // later page writes one instead of nothing.
+        let mut progress = self
+            .search_progress
+            .take()
+            .unwrap_or_else(|| SearchProgress::new(identity.clone()));
+        progress.adopt_identity(identity.clone());
+        self.search_progress = Some(progress);
+        let progress = self.search_progress.as_ref().expect("progress just set");
 
         let settled = progress
             .rooms_for(&identity)
@@ -2169,36 +2147,10 @@ impl SearchActor {
             self.completed_rooms.insert(room_id, completed);
         }
 
-        // An unfinished backfill resumes where it stopped instead of walking the
-        // room from its newest event again.
-        let resumable = progress
-            .rooms_for(&identity)
-            .iter()
-            .filter(|(_, room)| room.is_resumable())
-            .map(|(room_id, room)| {
-                (
-                    room_id.clone(),
-                    ResumableCrawl {
-                        history_source: if room.network_source {
-                            CrawlHistorySource::Network
-                        } else {
-                            CrawlHistorySource::Store
-                        },
-                        cursor: room
-                            .cursor
-                            .as_deref()
-                            .and_then(koushi_sdk::MatrixPersistedEventCursor::from_stable_id),
-                        crossed_gap: room.crossed_gap,
-                        pending_redactions: room.pending_redactions.iter().cloned().collect(),
-                        processed: room.processed,
-                        indexed: room.indexed,
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
-        for (room_id, resumable) in resumable {
-            self.resumable_crawls.insert(room_id, resumable);
-        }
+        // An unfinished backfill is not resumed: its position would be a
+        // persisted chunk cursor, and events that arrived while the app was
+        // closed sit above that cursor behind a gap the resumed walk never
+        // crosses. The room is crawled again from its newest event instead.
     }
 
     /// Write the durable record.
@@ -2282,7 +2234,6 @@ impl SearchActor {
                 }
             }
             for room_id in &stopped {
-                self.resumable_crawls.remove(room_id);
                 self.files_rebuild_pending.remove(room_id);
             }
             self.persist_search_progress().await;
@@ -2317,7 +2268,6 @@ impl SearchActor {
             if let Some(progress) = self.search_progress.as_mut() {
                 progress.forget(room_id);
             }
-            self.resumable_crawls.remove(room_id);
             self.files_rebuild_pending.remove(room_id);
             self.persist_search_progress().await;
         }
@@ -2364,15 +2314,12 @@ impl SearchActor {
         self.document_store.clear();
         self.attachment_retries.clear();
         self.queued_crawl_index.clear();
-        // A settings change that could
-        // not be saved is still detected on the next start.
-        if let (Some(progress), Some(identity)) = (
-            self.search_progress.as_mut(),
-            self.search_progress_identity.clone(),
-        ) {
-            // Adopting the identity the actor already holds clears the rooms it
-            // describes, which is what makes an explicit invalidation durable.
-            progress.adopt_identity(identity);
+        self.files_rebuild_pending.clear();
+        if let Some(progress) = self.search_progress.as_mut() {
+            // An explicit invalidation says the recorded completions no longer
+            // describe the index, so they go durably, not only in memory: a
+            // restart before the recrawl finishes must not trust them again.
+            progress.clear_rooms();
             self.persist_search_progress().await;
         }
         self.stop_all_history_crawls().await;
