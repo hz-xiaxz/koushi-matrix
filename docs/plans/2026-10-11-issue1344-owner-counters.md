@@ -1,6 +1,6 @@
 # #1344: SDK owner-side retention counters (measurement milestone)
 
-Status: implemented and under review. Parent issue:
+Status: delivered (fork PR #21 merged to the fork's `main` at `7572e53c9`; app PR open). Parent issue:
 [#1344](https://github.com/shinaoka/koushi-matrix/issues/1344) (Reduce v0.21.0
 resident memory). Predecessor: PR #1349 shipped the native process/allocator
 audit. Precedent record: the #1150 resident-retention record
