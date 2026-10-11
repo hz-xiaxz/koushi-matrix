@@ -47,6 +47,14 @@ engineering rules "Async and Runtime" 2. The first record also corrects a factua
 error: Room retirement already has a quiescence fence inside
 `clear_thread_root_projections_for_room`.
 
+[#1344 bounded search/history residency](../plans/2026-10-12-issue1344-bounded-search-retention.md)
+is the design record for the maintainer's 2026-10-12 direction: durable crawl
+progress, bounded history traversal, and operation-scoped search readers. Its
+revision 1 was rejected by an independent pre-implementation review; revision 2
+dispositions every verified finding, puts the non-hydrating persisted-store
+cursor first, and leaves one scope decision open (per-account vs cross-account
+byte allowances).
+
 - Rooms / DMs collapsible sidebar sections (design and implementation record):
   [2026-09-19-sidebar-sections-design.md](../superpowers/specs/2026-09-19-sidebar-sections-design.md)
   — its Low priority removal is superseded by #955 below.
