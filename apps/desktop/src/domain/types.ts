@@ -373,7 +373,7 @@ export type DesktopUpdateState =
   | { kind: "idle" }
   | { kind: "up_to_date"; version: string }
   | { kind: "checking" }
-  | { kind: "available"; version: string; generation: number; ignored: boolean; check_failed: boolean }
+  | { kind: "available"; version: string; generation: number; notification_only: boolean; release_url: string | null; ignored: boolean; check_failed: boolean }
   | { kind: "downloading"; version: string }
   | { kind: "ready"; version: string }
   | { kind: "failed"; stage: "check" | "download_or_verify" | "install" }

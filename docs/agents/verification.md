@@ -114,7 +114,7 @@ for merging into `main`:
 | `macOS Tauri cargo check` | `cargo check --profile ci -p koushi-desktop` plus `cargo clippy ... -- -D warnings` on macOS, including `#[cfg(target_os = "macos")]` paths excluded by Linux CI, and runs the native ImageIO decoder tests (`--test image_io_decoder`) |
 | `Core invitations (tuwunel)` / `Core invitations (synapse)` | real homeserver `--core --scenario=invites_dm` per server |
 | `Core QA binary tests` | `cargo test -p koushi-qa --features qa-bin --bin headless-core-qa` |
-| `Windows overlay ACL IPC` | `cargo test -p koushi-windows-overlay-acl windows_overlay_ipc_is_authorized`, OIDC launch tests, and desktop clippy with `-D warnings` for Windows-only cfg paths |
+| `Windows overlay ACL IPC` | `cargo test -p koushi-windows-overlay-acl windows_overlay_ipc_is_authorized`, OIDC launch tests, updater lifecycle/artifact-transfer and Core-before-installer shutdown tests, and desktop clippy with `-D warnings` for Windows-only cfg paths |
 
 Do not assume a green PR means a homeserver job passed — check the job
 explicitly, and confirm whether it is a required check before treating it as a

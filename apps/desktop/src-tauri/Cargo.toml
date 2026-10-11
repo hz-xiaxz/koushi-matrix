@@ -62,6 +62,10 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = ["
 objc2-image-io = { version = "0.3", default-features = false, features = ["std", "CGImageProperties", "CGImageSource", "objc2-core-graphics"] }
 tauri-plugin-updater = "2.11.0"
 
+[target.'cfg(windows)'.dependencies]
+reqwest = { version = "0.13.1", default-features = false, features = ["json", "query", "rustls"] }
+tauri-plugin-updater = "2.11.0"
+
 [dev-dependencies]
 koushi-core = { path = "../../../crates/koushi-core", features = ["test-hooks"] }
 tempfile = "3"

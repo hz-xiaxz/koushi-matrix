@@ -22,6 +22,10 @@ mod channel_policy;
 mod macos_backend;
 #[cfg(target_os = "macos")]
 use macos_backend::{Candidate, MacosBackend as PlatformBackend};
+#[cfg(windows)]
+mod windows_backend;
+#[cfg(windows)]
+use windows_backend::{Candidate, WindowsBackend as PlatformBackend};
 
 pub const DESKTOP_UPDATE_EVENT_NAME: &str = "koushi-desktop://update";
 const UPDATE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
@@ -40,6 +44,8 @@ pub enum DesktopUpdateState {
     Available {
         version: String,
         generation: u64,
+        notification_only: bool,
+        release_url: Option<String>,
         /// The user explicitly chose to ignore this exact version, so automatic
         /// reminders stay suppressed while the offer remains available.
         ignored: bool,
@@ -88,6 +94,8 @@ pub enum DesktopUpdateFailureStage {
 
 struct PendingUpdate<C> {
     version: String,
+    notification_only: bool,
+    release_url: Option<String>,
     // Read only by an install backend; unused where no backend is compiled.
     #[cfg_attr(not(koushi_updater_backend), allow(dead_code))]
     update: C,
@@ -305,7 +313,12 @@ impl<C> Lifecycle<C> {
         else {
             return Err(());
         };
-        if *generation != expected_generation || self.pending.is_none() {
+        if *generation != expected_generation
+            || self
+                .pending
+                .as_ref()
+                .is_none_or(|pending| pending.notification_only)
+        {
             return Err(());
         }
         let version = version.clone();
@@ -333,6 +346,29 @@ impl<C> Lifecycle<C> {
         self.advance();
         self.state = DesktopUpdateState::Installing { version };
         Ok(())
+    }
+
+    #[cfg(any(windows, test))]
+    fn take_install_for_shutdown(
+        &mut self,
+        claim_shutdown: impl FnOnce() -> bool,
+    ) -> Result<PendingUpdate<C>, ()> {
+        if self.stopping
+            || !matches!(self.state, DesktopUpdateState::Ready { .. })
+            || !self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| !pending.notification_only && pending.bytes.is_some())
+        {
+            return Err(());
+        }
+        if !claim_shutdown() {
+            return Err(());
+        }
+        self.begin_install()?;
+        let pending = self.pending.take().ok_or(())?;
+        self.stop();
+        Ok(pending)
     }
 
     fn claim_work(&mut self) -> Option<(Operation, Work<C>)> {
@@ -373,6 +409,8 @@ impl<C> Lifecycle<C> {
                 self.state = DesktopUpdateState::Available {
                     version: pending.version.clone(),
                     generation: operation.generation,
+                    notification_only: pending.notification_only,
+                    release_url: pending.release_url.clone(),
                     ignored,
                     check_failed: false,
                 };
@@ -399,6 +437,8 @@ impl<C> Lifecycle<C> {
                             generation: operation.generation,
                             ignored,
                             check_failed: true,
+                            notification_only: pending.notification_only,
+                            release_url: pending.release_url.clone(),
                         };
                     }
                     None => {
@@ -548,12 +588,16 @@ impl Backend<Candidate> for PlatformBackend {
 
 pub struct DesktopUpdateManager {
     shared: Arc<Shared<Candidate>>,
+    #[cfg(windows)]
+    install_owner: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
 }
 
 impl DesktopUpdateManager {
     pub fn new() -> Self {
         Self {
             shared: Arc::new(Shared::new(initial_state())),
+            #[cfg(windows)]
+            install_owner: Mutex::new(None),
         }
     }
 
@@ -718,7 +762,9 @@ fn initial_state_for(marker: Option<&Path>) -> DesktopUpdateState {
         DesktopUpdateState::Unsupported {
             reason: DesktopUpdateUnsupportedReason::PackageManaged,
         }
-    } else if cfg!(koushi_updater_backend) && configured_updater_public_key().is_some() {
+    } else if cfg!(target_os = "windows")
+        || (cfg!(koushi_updater_backend) && configured_updater_public_key().is_some())
+    {
         DesktopUpdateState::Idle
     } else {
         DesktopUpdateState::Unsupported {
@@ -747,7 +793,7 @@ pub fn spawn_auto_update_loop(
     app: AppHandle,
     mut settings_updates: watch::Receiver<AppSettingsValues>,
 ) {
-    if configured_updater_public_key().is_none() {
+    if configured_updater_public_key().is_none() && !cfg!(target_os = "windows") {
         return;
     }
     let shared = app.state::<DesktopUpdateManager>().shared.clone();
@@ -823,6 +869,9 @@ pub async fn download_and_prepare(
     snapshot: koushi_protocol::state_update::VersionedAppStateSnapshot,
     expected_generation: u64,
 ) -> Result<(), ()> {
+    if cfg!(target_os = "windows") && configured_updater_public_key().is_none() {
+        return Err(());
+    }
     app.state::<DesktopUpdateManager>().shared.transition(
         |state| {
             let _ = app.emit(DESKTOP_UPDATE_EVENT_NAME, state);
@@ -840,6 +889,35 @@ pub async fn download_and_prepare(
 }
 
 pub fn install_and_restart(app: &AppHandle) -> Result<(), ()> {
+    #[cfg(windows)]
+    {
+        if configured_updater_public_key().is_none() {
+            return Err(());
+        }
+        let shared = app.state::<DesktopUpdateManager>().shared.clone();
+        let pending = shared.transition(
+            |state| {
+                let _ = app.emit(DESKTOP_UPDATE_EVENT_NAME, state);
+            },
+            |lifecycle| {
+                lifecycle.take_install_for_shutdown(|| crate::claim_windows_update_shutdown(app))
+            },
+        )?;
+        let app = app.clone();
+        let owner = crate::begin_windows_update_shutdown(
+            app.clone(),
+            async move {
+                shared.shutdown().await;
+            },
+            move || windows_backend::install_verified(pending),
+        );
+        *app.state::<DesktopUpdateManager>()
+            .install_owner
+            .lock()
+            .expect("Windows install owner mutex") = Some(owner);
+        Ok(())
+    }
+    #[cfg(not(windows))]
     app.state::<DesktopUpdateManager>().shared.transition(
         |state| {
             let _ = app.emit(DESKTOP_UPDATE_EVENT_NAME, state);
@@ -852,3 +930,5 @@ pub fn install_and_restart(app: &AppHandle) -> Result<(), ()> {
 mod package_managed_tests;
 #[cfg(test)]
 mod regression_tests;
+#[cfg(test)]
+mod windows_install_tests;

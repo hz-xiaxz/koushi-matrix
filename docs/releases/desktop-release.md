@@ -77,7 +77,20 @@ The protected `release-macos` Environment also owns the updater trust material:
 
 Generate this keypair offline with the Tauri signer. Never commit or print the
 private key or password. A normal local build without the public key keeps the
-update adapter in `unsupported` and does not make update requests.
+macOS update adapter in `unsupported`. Windows no-key builds retain public
+Release notifications without download/install capability.
+
+Before enabling this workflow, create a protected `release-windows` Environment
+with required maintainer review and release-branch restrictions. Configure
+`KOUSHI_UPDATER_PUBLIC_KEY` as a variable and `TAURI_SIGNING_PRIVATE_KEY` plus
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as secrets from the existing offline
+updater keypair. Do not extract keys from another GitHub Environment. The
+Windows build uses `build:windows -- --updater`, rejects missing trust material,
+and requires the NSIS `.exe` and matching `.exe.sig`. Tauri 2 uses the installer
+directly, not a legacy ZIP. Updater signing is distinct from Authenticode:
+`Koushi-windows-x64-unsigned.exe` remains code-unsigned pending SignPath approval.
+Both `latest.json` and `latest-beta.json` contain `darwin-aarch64` and
+`windows-x86_64`; the moving beta Release carries both platform assets.
 
 Distribution packagers who repackage the Linux artifacts (for example an AUR
 package built from the `.deb`) install the empty marker file
@@ -182,6 +195,7 @@ file:
 - `Koushi-macos-arm64.app.tar.gz.sig`
 - `latest.json`
 - `Koushi-windows-x64-unsigned.exe`
+- `Koushi-windows-x64-unsigned.exe.sig`
 - `Koushi-linux-x64.AppImage`
 - `Koushi-linux-x64.deb`
 - `Koushi-linux-x64.rpm`
@@ -228,3 +242,20 @@ gh run view <run-id> --log-failed
   all-platform gate merely to obtain an installer.
 - Never replace a published artifact in place. Correct a released defect with a
   newer patch version.
+
+## Pre-merge Windows updater packaging trial
+
+To validate updater packaging on a branch without production keys or publishing:
+
+```bash
+gh workflow run build-windows.yml --repo shinaoka/koushi-matrix --ref YOUR_BRANCH -f updater_validation=true
+```
+
+This optional mode creates disposable signing keys, builds the NSIS updater,
+verifies its signature using pinned official minisign, and rejects a tampered
+installer and a different public key. It uploads no artifacts and never changes
+a release or tag. Success requires all tokens documented in the
+[QA lane contract](../agents/qa-lanes.md#windows-updater-packaging-validation).
+Signer/build output is withheld and temporary keys/logs are deleted even on
+failure. This proves the packaging path; production-key matching remains part
+of the protected release workflow.

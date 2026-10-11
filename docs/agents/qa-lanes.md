@@ -489,3 +489,17 @@ npm --prefix apps/desktop run qa:real-homeserver -- --scenario=startup_latency
 - Both runs emit `startup_lat phase=… ms=N` macro-phase tokens and, when
   `KOUSHI_STARTUP_TRACE=1` (set by the runner), `koushi.startup phase=…` and
   `phase=origin origin=cache|network|sync` sub-phase tokens.
+
+## Windows updater packaging validation
+
+The optional `updater_validation` input on `build-windows.yml` builds an NSIS
+updater artifact using disposable keys. It requires no release environment,
+uses no production keys, uploads no artifacts, and writes no releases or tags.
+The script verifies the actual installer with pinned official minisign and
+requires `windows_updater_package_signature=ok`,
+`windows_updater_tampered_package=reject`, `windows_updater_wrong_key=reject`,
+and `windows_updater_validation=ok`, followed by process exit 0. Expected
+verifier rejection exits must not become the overall process exit. Private
+signer/build output and disposable
+keys are deleted in `finally`; failure output contains only the phase.
+See the [desktop release runbook](../releases/desktop-release.md) for dispatch.

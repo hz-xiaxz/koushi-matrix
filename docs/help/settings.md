@@ -93,6 +93,14 @@ already offered release or stop a manually requested check. An undownloaded
 offer does not block later checks: when a newer eligible release exists, the
 next check replaces the old offer with the newest one.
 
+On Windows, release builds with updater trust material offer separate download
+and restart-to-install actions. Downloads are signature-verified before they
+become ready. Koushi closes its sessions before launching the installer, which
+reopens the updated app. Builds without updater trust material show a
+notification and open that specific Release page instead. Windows installers
+remain Authenticode-unsigned pending code-signing approval, so Windows may
+still show publisher warnings. Linux builds remain unsupported by the in-app updater.
+
 On macOS, dialogs and viewers leave space above their contents for the standard
 window buttons. Small windows scroll within the dialog. Escape closes the
 topmost dismissible dialog and returns focus to its opener.

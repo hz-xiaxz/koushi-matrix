@@ -54,7 +54,7 @@ test("live updater events win over an older initial read and listeners are relea
   fixture.getState.mockImplementation(() => new Promise(resolve => { resolveInitial = resolve; }));
   const view = render(<DesktopUpdates />);
   await waitFor(() => expect(fixture.getState).toHaveBeenCalledOnce());
-  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: false, check_failed: false })));
+  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: false, check_failed: false, notification_only: false, release_url: null })));
   await act(async () => resolveInitial({ kind: "idle" }));
   expect(screen.getByText("Koushi 1.2.4 is available.")).toBeTruthy();
   expect(fixture.download).not.toHaveBeenCalled();
@@ -68,20 +68,20 @@ test("live updater events win over an older initial read and listeners are relea
 test("a dismissed offer is presented again when a later check re-offers it", async () => {
   render(<DesktopUpdates />);
   await waitFor(() => expect(fixture.getState).toHaveBeenCalledOnce());
-  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: false, check_failed: false })));
+  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: false, check_failed: false , notification_only: false, release_url: null })));
   expect(screen.getByRole("dialog", { name: "Software update" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Close Software update" }));
   expect(screen.queryByRole("dialog", { name: "Software update" })).toBeNull();
-  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 8, ignored: false, check_failed: false })));
+  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 8, ignored: false, check_failed: false , notification_only: false, release_url: null })));
   expect(screen.getByRole("dialog", { name: "Software update" })).toBeTruthy();
 });
 
 test("an explicitly ignored version stays dismissed while a newer one is presented", async () => {
   render(<DesktopUpdates />);
   await waitFor(() => expect(fixture.getState).toHaveBeenCalledOnce());
-  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: true, check_failed: false })));
+  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: true, check_failed: false , notification_only: false, release_url: null })));
   expect(screen.queryByRole("dialog", { name: "Software update" })).toBeNull();
-  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.3.0", generation: 8, ignored: false, check_failed: false })));
+  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.3.0", generation: 8, ignored: false, check_failed: false , notification_only: false, release_url: null })));
   expect(screen.getByRole("dialog", { name: "Software update" })).toBeTruthy();
 });
 
@@ -90,7 +90,7 @@ test("an ignored offer shows reminders are off and keeps Download available", as
   await waitFor(() => expect(fixture.getState).toHaveBeenCalledOnce());
   // Revisit the ignored offer through the manual menu action.
   await act(async () => fixture.menuListeners.forEach(listener => listener("checkForUpdates")));
-  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: true, check_failed: false })));
+  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: true, check_failed: false , notification_only: false, release_url: null })));
   expect(screen.getByText("Automatic reminders are off for this version until Koushi restarts. You can still download it.")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Download update" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Ignore this version" })).toBeNull();
@@ -99,9 +99,9 @@ test("an ignored offer shows reminders are off and keeps Download available", as
 test("a retained offer after a failed refresh reports the failure and stays downloadable", async () => {
   render(<DesktopUpdates />);
   await waitFor(() => expect(fixture.getState).toHaveBeenCalledOnce());
-  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: false, check_failed: false })));
+  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: false, check_failed: false , notification_only: false, release_url: null })));
   fireEvent.click(screen.getByRole("button", { name: "Close Software update" }));
-  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 8, ignored: false, check_failed: true })));
+  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 8, ignored: false, check_failed: true , notification_only: false, release_url: null })));
   expect(screen.getByRole("dialog", { name: "Software update" })).toBeTruthy();
   expect(screen.getByRole("alert").textContent).toContain("could not check");
   fireEvent.click(screen.getByRole("button", { name: "Download update" }));
@@ -111,7 +111,7 @@ test("a retained offer after a failed refresh reports the failure and stays down
 test("the ignore action dispatches the exact offered version and closes the dialog", async () => {
   render(<DesktopUpdates />);
   await waitFor(() => expect(fixture.getState).toHaveBeenCalledOnce());
-  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: false, check_failed: false })));
+  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: false, check_failed: false , notification_only: false, release_url: null })));
   fireEvent.click(screen.getByRole("button", { name: "Ignore this version" }));
   expect(fixture.ignore).toHaveBeenCalledWith("1.2.4");
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "Software update" })).toBeNull());
@@ -120,7 +120,7 @@ test("the ignore action dispatches the exact offered version and closes the dial
 test("a failed ignore keeps the dialog open with the transport failure", async () => {
   render(<DesktopUpdates />);
   await waitFor(() => expect(fixture.getState).toHaveBeenCalledOnce());
-  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: false, check_failed: false })));
+  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: false, check_failed: false , notification_only: false, release_url: null })));
   fixture.ignore.mockRejectedValueOnce(new Error("synthetic transport failure"));
   fireEvent.click(screen.getByRole("button", { name: "Ignore this version" }));
   await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("could not be completed"));
@@ -132,10 +132,10 @@ test("a stale ignore completion does not dismiss a newer offer", async () => {
   fixture.ignore.mockImplementationOnce(() => new Promise<void>(resolve => { resolveIgnore = resolve; }));
   render(<DesktopUpdates />);
   await waitFor(() => expect(fixture.getState).toHaveBeenCalledOnce());
-  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: false, check_failed: false })));
+  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.2.4", generation: 7, ignored: false, check_failed: false , notification_only: false, release_url: null })));
   fireEvent.click(screen.getByRole("button", { name: "Ignore this version" }));
   // A newer offer replaces the dialog while the ignore IPC is still pending.
-  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.3.0", generation: 8, ignored: false, check_failed: false })));
+  act(() => fixture.updateListeners.forEach(listener => listener({ kind: "available", version: "1.3.0", generation: 8, ignored: false, check_failed: false , notification_only: false, release_url: null })));
   await act(async () => resolveIgnore());
   expect(screen.getByRole("dialog", { name: "Software update" })).toBeTruthy();
   expect(screen.getByText("Koushi 1.3.0 is available.")).toBeTruthy();

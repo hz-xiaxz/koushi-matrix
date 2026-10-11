@@ -1306,10 +1306,18 @@ download, or restart-to-install intent. It must not fetch manifests, compare
 versions, verify signatures, retain update bytes, or replace an application.
 
 The projection is platform-neutral (`unsupported`, `idle`, `up_to_date`,
-`checking`, `available`, `downloading`, `ready`, `failed`, or `installing`). Only macOS arm64 is enabled
-for the first release. Windows and Linux report `unsupported` until a separate
-change provides signed artifacts and an approved install contract; their normal
-installer builds must not require the macOS updater signing secret.
+`checking`, `available`, `downloading`, `ready`, `failed`, or `installing`).
+macOS arm64 is install-capable. Windows builds with an embedded updater public
+key use signed NSIS updates; builds without it check public GitHub Releases
+and expose a notification-only release URL. Windows installation atomically
+transfers the verified artifact to the shutdown coordinator, stops and joins
+the updater, then requires successful Core shutdown before invoking Tauri's
+installer. Tauri terminates the process after launching NSIS; NSIS owns relaunch.
+Core shutdown failure or timeout suppresses installation. An installer failure
+after Core shutdown produces a coarse diagnostic and ordinary exit, requiring
+manual reopening. Linux remains `unsupported` until a separate
+change provides an install backend; normal installer builds must not require
+the macOS updater signing secret.
 
 When automatic checks are enabled, the adapter checks after startup and at most
 once per 24-hour interval, and checks once when the setting changes from off to
@@ -1358,11 +1366,12 @@ greatest-SemVer choice) compile on every desktop target and are tested on Linux
 CI with a fake backend. A backend supplies only capability, feed access and
 signature verification, artifact installation, and the native relaunch
 request, behind the `Backend` trait. The `koushi_updater_backend` cfg, set by
-the desktop `build.rs`, marks targets that ship a backend (macOS today). Other
-targets compile against an uninhabited placeholder, so they report
-`unsupported` and never start update work. A future Linux backend implements
-the same trait and enables that cfg. It reuses the engine unchanged and must
-first settle which distribution formats it owns.
+the desktop `build.rs`, marks targets that ship an update backend: macOS is
+install-capable and Windows capability depends on its embedded public key. Linux compiles
+against an uninhabited placeholder, so it reports `unsupported` and never
+starts update work. A future Linux backend implements the same trait and
+enables that cfg. It reuses the engine unchanged and must first settle which
+distribution formats it owns.
 
 `unsupported` carries a reason: `build` (no install backend or no updater trust
 material in this build) or `package_managed`. The packager opt-out (#1063) is a
@@ -1379,12 +1388,13 @@ other targets do not probe a marker.
 The update adapter owns one serialized lifecycle and one cancellable worker.
 Generation-fenced completions and candidate-specific download approval prevent
 overlapping triggers or channel changes from substituting an unapproved release.
-Successful installation requests an ordinary graceful shutdown first: join the
+On macOS, successful installation requests an ordinary graceful shutdown first: join the
 updater worker, settle Core shutdown, and only then issue the native relaunch.
 Core exposes an event-based, cancellation-safe shutdown completion after its
 account and lifecycle cleanup. A failed/timed-out Core shutdown forces an
 explicitly diagnosed ordinary exit, suppressing relaunch; the bounded Core wait
-starts only after any active native installer has settled.
+starts only after any active native installer has settled on macOS. On Windows,
+the Core deadline applies before native installation starts.
 
 ### Desktop Viewport Synchronization
 

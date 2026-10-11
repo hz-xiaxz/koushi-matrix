@@ -255,6 +255,7 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.proceed == 'true'
     runs-on: windows-2025
+    environment: release-windows
     timeout-minutes: 120
     defaults:
       run:
@@ -317,8 +318,12 @@ jobs:
       - name: Submodule sync guard
         run: node scripts/check-sdk-submodule.mjs
 
-      - name: Build unsigned Windows installer
-        run: npm --prefix apps/desktop run build:windows
+      - name: Build updater-signed Windows installer (Authenticode unsigned)
+        env:
+          KOUSHI_UPDATER_PUBLIC_KEY: ${{ vars.KOUSHI_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm --prefix apps/desktop run build:windows -- --updater
 
       - name: Stage unsigned installer and checksum
         run: |
@@ -327,6 +332,11 @@ jobs:
           New-Item -ItemType Directory -Force "release-assets" | Out-Null
           $asset = "Koushi-windows-x64-unsigned.exe"
           Copy-Item $installers[0].FullName "release-assets/$asset"
+          $signature = "$($installers[0].FullName).sig"
+          if (-not (Test-Path -LiteralPath $signature) -or (Get-Item -LiteralPath $signature).Length -eq 0) {
+            throw "Missing Windows updater signature"
+          }
+          Copy-Item -LiteralPath $signature "release-assets/$asset.sig"
           $hash = (Get-FileHash -Algorithm SHA256 -Path "release-assets/$asset").Hash.ToLower()
           $checksumPath = Join-Path "release-assets" "$asset.sha256"
           [System.IO.File]::WriteAllText(
@@ -484,6 +494,9 @@ jobs:
             --target darwin-aarch64 \
             --url "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/Koushi-macos-arm64.app.tar.gz" \
             --signature-file release-assets/Koushi-macos-arm64.app.tar.gz.sig \
+            --target windows-x86_64 \
+            --url "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/Koushi-windows-x64-unsigned.exe" \
+            --signature-file release-assets/Koushi-windows-x64-unsigned.exe.sig \
             --output release-assets/latest.json
 
       - name: Create beta updater manifest
@@ -493,6 +506,9 @@ jobs:
             --target darwin-aarch64 \
             --url "https://github.com/$GITHUB_REPOSITORY/releases/download/latest-beta/Koushi-macos-arm64.app.tar.gz" \
             --signature-file release-assets/Koushi-macos-arm64.app.tar.gz.sig \
+            --target windows-x86_64 \
+            --url "https://github.com/$GITHUB_REPOSITORY/releases/download/latest-beta/Koushi-windows-x64-unsigned.exe" \
+            --signature-file release-assets/Koushi-windows-x64-unsigned.exe.sig \
             --output release-assets/latest-beta.json
 
       - name: Create hidden draft with all assets
@@ -526,6 +542,8 @@ jobs:
               --clobber \
               release-assets/Koushi-macos-arm64.app.tar.gz \
               release-assets/Koushi-macos-arm64.app.tar.gz.sig \
+              release-assets/Koushi-windows-x64-unsigned.exe \
+              release-assets/Koushi-windows-x64-unsigned.exe.sig \
               release-assets/latest-beta.json
             gh release edit latest-beta \
               --repo "$GITHUB_REPOSITORY" \
@@ -539,5 +557,7 @@ jobs:
               --prerelease \
               release-assets/Koushi-macos-arm64.app.tar.gz \
               release-assets/Koushi-macos-arm64.app.tar.gz.sig \
+              release-assets/Koushi-windows-x64-unsigned.exe \
+              release-assets/Koushi-windows-x64-unsigned.exe.sig \
               release-assets/latest-beta.json
           fi

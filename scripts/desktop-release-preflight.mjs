@@ -50,7 +50,7 @@ requireCheck(Boolean(macOS.entitlements), "macOS.entitlements", "entitlements fi
 requireCheck(
   tauriMacosConfig.bundle?.createUpdaterArtifacts === true,
   "macOS.createUpdaterArtifacts",
-  "signed updater archives are enabled only for macOS"
+  "signed macOS updater archives are enabled"
 );
 requireCheck(
   tauriMacosConfig.plugins?.updater?.endpoints?.includes(
