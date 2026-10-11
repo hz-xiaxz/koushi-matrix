@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use koushi_state::{
-    AppAction, AvatarThumbnailState, ComposerDocument, ComposerInline, MentionIntent, MentionTarget,
+    AppAction, AvatarThumbnailState, ComposerDocument, ComposerFormattingOptions, ComposerInline,
+    MentionIntent, MentionTarget,
 };
 
 use matrix_sdk::room::reply::EnforceThread;
@@ -21,7 +22,6 @@ use super::super::navigation::TimelineActorGenerationGate;
 use super::super::outbound_send::{SubmissionAdmissionLedger, deliver_submission_terminal_action};
 use super::super::test_support::{room_key, thread_key};
 use super::{
-    build_room_message_content_from_composer_body,
     build_room_message_content_from_composer_body_with_options,
     build_room_message_content_from_composer_document,
 };
@@ -137,7 +137,7 @@ fn composer_document_builds_body_html_and_mentions_from_one_source() {
 
 #[test]
 fn composer_core_builds_markdown_send_content_with_mentions() {
-    let content = build_room_message_content_from_composer_body(
+    let content = build_room_message_content_from_composer_body_with_options(
         "hello **Alice**",
         MentionIntent {
             targets: vec![MentionTarget::User {
@@ -145,6 +145,7 @@ fn composer_core_builds_markdown_send_content_with_mentions() {
                 display_label: "Alice".to_owned(),
             }],
         },
+        ComposerFormattingOptions::default(),
     )
     .expect("content");
 
@@ -172,9 +173,10 @@ fn composer_core_builds_markdown_send_content_with_mentions() {
 
 #[test]
 fn composer_core_builds_me_slash_command_as_emote_content() {
-    let content = build_room_message_content_from_composer_body(
+    let content = build_room_message_content_from_composer_body_with_options(
         "/me waves **hello**",
         MentionIntent::default(),
+        ComposerFormattingOptions::default(),
     )
     .expect("content");
 
@@ -195,9 +197,10 @@ fn composer_core_builds_me_slash_command_as_emote_content() {
 
 #[test]
 fn composer_core_builds_spoiler_markdown_as_formatted_body() {
-    let content = build_room_message_content_from_composer_body(
+    let content = build_room_message_content_from_composer_body_with_options(
         "keep ||secret|| hidden",
         MentionIntent::default(),
+        ComposerFormattingOptions::default(),
     )
     .expect("content");
 
@@ -217,9 +220,12 @@ fn composer_core_builds_spoiler_markdown_as_formatted_body() {
 
 #[test]
 fn composer_core_builds_math_markdown_as_matrix_math_html() {
-    let content =
-        build_room_message_content_from_composer_body("Energy $E=mc^2$", MentionIntent::default())
-            .expect("content");
+    let content = build_room_message_content_from_composer_body_with_options(
+        "Energy $E=mc^2$",
+        MentionIntent::default(),
+        ComposerFormattingOptions::default(),
+    )
+    .expect("content");
 
     match &content.msgtype {
         MessageType::Text(text) => {
@@ -276,8 +282,12 @@ fn sender_profile_projects_display_name_and_avatar_mxc() {
 fn composer_core_sends_unknown_slash_text_literally() {
     // Issue #450: unknown leading-slash text is ordinary content.
     for body in ["/shrug nope", "/usr/local/bin", "/not-a-command", "/ 文章"] {
-        let content = build_room_message_content_from_composer_body(body, MentionIntent::default())
-            .expect("ordinary leading-slash text must send");
+        let content = build_room_message_content_from_composer_body_with_options(
+            body,
+            MentionIntent::default(),
+            ComposerFormattingOptions::default(),
+        )
+        .expect("ordinary leading-slash text must send");
         assert_eq!(content.body(), body);
     }
 }
@@ -287,16 +297,24 @@ fn composer_core_rejects_recognized_unavailable_commands_locally() {
     // Issue #450: /me is sent (emote); /join and /invite are recognized
     // but unavailable on this surface and rejected before any SDK send.
     assert!(
-        build_room_message_content_from_composer_body("/me waves", MentionIntent::default(),)
-            .is_ok()
+        build_room_message_content_from_composer_body_with_options(
+            "/me waves",
+            MentionIntent::default(),
+            ComposerFormattingOptions::default(),
+        )
+        .is_ok()
     );
     for body in [
         "/join #room:example.invalid",
         "/invite @alice:example.invalid",
     ] {
         assert_eq!(
-            build_room_message_content_from_composer_body(body, MentionIntent::default())
-                .expect_err("recognized-but-unavailable command should fail before SDK send"),
+            build_room_message_content_from_composer_body_with_options(
+                body,
+                MentionIntent::default(),
+                ComposerFormattingOptions::default(),
+            )
+            .expect_err("recognized-but-unavailable command should fail before SDK send"),
             TimelineFailureKind::UnsupportedSlashCommand
         );
     }

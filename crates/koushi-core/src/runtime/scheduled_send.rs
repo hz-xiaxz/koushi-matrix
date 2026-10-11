@@ -126,6 +126,9 @@ impl super::AppActor {
                 room_id: item.room_id,
                 thread_root_event_id: item.thread_root_event_id,
                 body: item.body,
+                // #1348: a local fallback dispatch is an ordinary room send, so it
+                // uses the composer formatting in force at dispatch time.
+                formatting_options: self.state.settings.values.composer.formatting_options(),
             })
             .await
         {
