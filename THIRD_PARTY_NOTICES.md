@@ -23,7 +23,7 @@ Notes:
 
 Project: matrix-rust-sdk
 Repository: https://github.com/matrix-org/matrix-rust-sdk
-Upstream commit: `7572e53c93d08b5ced009da7fd6257853d4a7642` (vendored submodule; the Koushi fork's `main`, which merges upstream `matrix-sdk-0.19.1` via the `chore/upstream-0.19.1` branch plus fork PR #21 (#1344 owner-side retention counters); bump this and the parent gitlink together when the fork commit changes)
+Upstream commit: `1a2bba19256c8de14eee1acaa543b965fb44f5eb` (vendored submodule; the Koushi fork branch `fix/1344-release-search-readers`, fork PR #22, on top of the fork `main` `7572e53c93d08b5ced009da7fd6257853d4a7642`, which merges upstream `matrix-sdk-0.19.1` via the `chore/upstream-0.19.1` branch plus fork PR #21 (#1344 owner-side retention counters); bump this and the parent gitlink together when the fork commit changes)
 Source path: `crates/` in the upstream repository
 Local path: `vendor/matrix-rust-sdk`
 License: Apache-2.0

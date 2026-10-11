@@ -11,8 +11,6 @@ use crate::MatrixClientSession;
 pub struct MatrixSearchIndexDiagnostics {
     /// Joined rooms with a `RoomIndex`.
     pub rooms_total: u64,
-    /// Of those, rooms with a cached `IndexReader`.
-    pub rooms_with_active_reader: u64,
     /// Lifetime `open_read`/`atomic_read` round trips since the index opened.
     pub opened_files_total: u64,
     /// Lifetime decrypted plaintext bytes read.
@@ -62,7 +60,6 @@ pub async fn retention_diagnostics(session: &MatrixClientSession) -> MatrixReten
     MatrixRetentionDiagnostics {
         search: MatrixSearchIndexDiagnostics {
             rooms_total: search.rooms_total,
-            rooms_with_active_reader: search.rooms_with_active_reader,
             opened_files_total: search.opened_files_total,
             decrypted_bytes_total: search.decrypted_bytes_total,
             live_decrypted_len_bytes: search.live_decrypted_len_bytes,

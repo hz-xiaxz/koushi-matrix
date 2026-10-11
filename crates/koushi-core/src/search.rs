@@ -458,7 +458,6 @@ struct CompletedHistoryCrawl {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SearchRetentionCounters {
     pub rooms_total: u64,
-    pub rooms_with_active_reader: u64,
     pub opened_files_total: u64,
     pub decrypted_bytes_total: u64,
     pub live_decrypted_len_bytes: u64,
@@ -1041,7 +1040,6 @@ impl SearchActor {
         AccountRetentionDiagnostics {
             search: SearchRetentionCounters {
                 rooms_total: sdk.search.rooms_total,
-                rooms_with_active_reader: sdk.search.rooms_with_active_reader,
                 opened_files_total: sdk.search.opened_files_total,
                 decrypted_bytes_total: sdk.search.decrypted_bytes_total,
                 live_decrypted_len_bytes: sdk.search.live_decrypted_len_bytes,

@@ -85,10 +85,6 @@ fn record_search_retention_summaries(
                     diagnostics.search.rooms_total,
                 ))
                 .field(DiagnosticField::count(
-                    "search_rooms_with_active_reader",
-                    diagnostics.search.rooms_with_active_reader,
-                ))
-                .field(DiagnosticField::count(
                     "search_opened_files_total",
                     diagnostics.search.opened_files_total,
                 ))
