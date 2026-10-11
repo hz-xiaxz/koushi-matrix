@@ -64,6 +64,7 @@ import { FilesView } from "./FilesView";
 import { ModalDialog } from "./ModalDialog";
 import { RoomInfoPanel, type RoomInfoRevealRequest } from "./RoomInfoPanel";
 import { sidebarRoomAccess } from "../domain/accessCondition";
+import { Tooltip } from "./Tooltip";
 import type { HistoryExportControls } from "./HistoryExportDialog";
 import { SpaceInfoPanel } from "./SpaceInfoPanel";
 import { ThreadsListView } from "./ThreadsListView";
@@ -1047,6 +1048,8 @@ export function ContextualRightPanel({
               density={snapshot.state.domain.settings.values.appearance.density}
               recentEmojis={composerSettings.recent_emojis}
               onRecentEmojisChange={onRecentEmojisChange}
+              mathModeEnabled={composerSettings.math_mode}
+              onMathModeChange={threadMathModeChangeStable}
               searchHighlightsByEventId={searchHighlightsByEventId}
               mediaDownloads={mediaDownloads}
               editMentionCandidates={focusedEditMentionCandidates}
@@ -1161,6 +1164,8 @@ export function ContextualRightPanel({
             density={snapshot.state.domain.settings.values.appearance.density}
             recentEmojis={composerSettings.recent_emojis}
             onRecentEmojisChange={onRecentEmojisChange}
+            mathModeEnabled={composerSettings.math_mode}
+            onMathModeChange={threadMathModeChangeStable}
             searchHighlightsByEventId={searchHighlightsByEventId}
             mediaDownloads={mediaDownloads}
             editMentionCandidates={threadEditMentionCandidates}
@@ -1299,9 +1304,23 @@ export function PanelHeader({
     <header className="thread-header">
       <div className="thread-title">{title}</div>
       {showClose ? (
-        <button className="icon-button" type="button" aria-label={t("action.close", { title })} onClick={onClose}>
-          <X size={ICON_SIZE.panel} />
-        </button>
+        <Tooltip
+          label={t("action.close", { title })}
+          placement="below"
+          align="end"
+        >
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("action.close", { title })}
+              onClick={onClose}
+              {...tooltipProps}
+            >
+              <X size={ICON_SIZE.panel} />
+            </button>
+          )}
+        </Tooltip>
       ) : null}
     </header>
   );

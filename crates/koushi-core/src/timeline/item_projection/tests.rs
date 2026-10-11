@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use koushi_state::{
-    ComposerDocument, ComposerInline, LiveEventReceipts, LiveReadReceipt, MentionIntent,
-    MentionTarget, ReplyQuoteState,
+    ComposerDocument, ComposerFormattingOptions, ComposerInline, LiveEventReceipts,
+    LiveReadReceipt, MentionIntent, MentionTarget, ReplyQuoteState,
 };
 
 use matrix_sdk::room::edit::EditedContent;
@@ -1180,9 +1180,11 @@ fn structured_edit_preserves_final_mentions_and_formats_text_and_media_captions(
         },
     ]);
     let text = MessageType::Text(TextMessageEventContent::plain("old"));
-    let EditedContent::RoomMessage(content) =
-        edited_document_content_for_edit_target(Some(&text), &document)
-    else {
+    let EditedContent::RoomMessage(content) = edited_document_content_for_edit_target(
+        Some(&text),
+        &document,
+        ComposerFormattingOptions::default(),
+    ) else {
         panic!("text edit must stay a room message")
     };
     let MessageType::Text(text) = content.msgtype else {
@@ -1200,7 +1202,11 @@ fn structured_edit_preserves_final_mentions_and_formats_text_and_media_captions(
         caption,
         formatted_caption,
         mentions,
-    } = edited_document_content_for_edit_target(Some(&media), &document)
+    } = edited_document_content_for_edit_target(
+        Some(&media),
+        &document,
+        ComposerFormattingOptions::default(),
+    )
     else {
         panic!("media edit must remain a caption edit")
     };

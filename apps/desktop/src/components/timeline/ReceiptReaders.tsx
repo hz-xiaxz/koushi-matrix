@@ -10,6 +10,7 @@ import {
 import { timelineKeyIdentity, type ReceiptSourceRef, type ReaderRow } from "../../domain/coreEvents";
 import { EntityAvatar } from "../Shell";
 import { api as defaultApi } from "../../backend/appRuntime";
+import { Tooltip } from "../Tooltip";
 import type { LiveReadReceipt } from "../../domain/types";
 import { cachedDateTimeFormat } from "../../domain/intlFormatCache";
 
@@ -487,14 +488,19 @@ export function ReceiptReaders({
               requestReaderWindowAt(readerStart + readerRows.length);
             }}
           >
-            <button
-              type="button"
-              className="receipt-reader-close"
-              aria-label={t("shortcut.closeDialogOrMenu")}
-              onClick={() => setOpen(false)}
-            >
-              ×
-            </button>
+            <Tooltip label={t("shortcut.closeDialogOrMenu")} placement="below" align="end">
+              {(tooltipProps) => (
+                <button
+                  type="button"
+                  className="receipt-reader-close"
+                  aria-label={t("shortcut.closeDialogOrMenu")}
+                  onClick={() => setOpen(false)}
+                  {...tooltipProps}
+                >
+                  ×
+                </button>
+              )}
+            </Tooltip>
             <span role="list" aria-label={receiptLabel}>
               {readerState === "loading" && readerRows.length === 0 ? (
                 <span role="status">{t("timeline.loading")}</span>

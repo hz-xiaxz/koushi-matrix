@@ -4,6 +4,7 @@ import { t } from "../../i18n/messages";
 import type { TimelineMegolmSessionReason, TimelineMessageSource } from "../../domain/coreEvents";
 import { writeClipboardText } from "./TimelineMessageBody";
 import { FloatingLayer } from "../floatingLayer";
+import { Tooltip } from "../Tooltip";
 
 export function MessageSourceDialog({
   source,
@@ -39,14 +40,19 @@ export function MessageSourceDialog({
     >
       <div className="message-source-dialog-header">
         <span>{t("timeline.messageSource")}</span>
-        <button
-          className="message-source-close"
-          type="button"
-          aria-label={t("timeline.closeMessageSource")}
-          onClick={onClose}
-        >
-          <XCircle size={15} aria-hidden="true" />
-        </button>
+        <Tooltip label={t("timeline.closeMessageSource")} placement="below" align="end">
+          {(tooltipProps) => (
+            <button
+              className="message-source-close"
+              type="button"
+              aria-label={t("timeline.closeMessageSource")}
+              onClick={onClose}
+              {...tooltipProps}
+            >
+              <XCircle size={15} aria-hidden="true" />
+            </button>
+          )}
+        </Tooltip>
       </div>
       <div className="message-source-event-id">
         <span>{t("timeline.sourceEventId")}</span>

@@ -3,6 +3,7 @@ import {
   type FocusEvent,
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -12,7 +13,9 @@ import {
   useState
 } from "react";
 
-import { FloatingLayer } from "./floatingLayer";
+import { FloatingLayer, resolveFloatingPlacement } from "./floatingLayer";
+
+export type TooltipPlacement = "right" | "above" | "below";
 
 export type TooltipTriggerProps = {
   "aria-describedby"?: string;
@@ -21,12 +24,21 @@ export type TooltipTriggerProps = {
   onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
   onMouseEnter: (event: MouseEvent<HTMLElement>) => void;
   onMouseLeave: (event: MouseEvent<HTMLElement>) => void;
+  onPointerDown: (event: PointerEvent<HTMLElement>) => void;
 };
 
 type TooltipProps = {
   children: (props: TooltipTriggerProps) => ReactNode;
   label: string;
-  placement?: "right";
+  /**
+   * `right` keeps the bubble beside the trigger. `above`/`below` anchor on the
+   * trigger itself, which is what a toolbar or a header row wants: the control
+   * keeps its own place in the row and a bubble near a pane or window edge
+   * cannot be mistaken for the neighbouring control.
+   */
+  placement?: TooltipPlacement;
+  /** Preferred inline alignment for above/below; flips when it would overflow. */
+  align?: "start" | "end";
   delayMs?: number;
   /**
    * #1327: extra host class. A row-level trigger needs a block-level host so the
@@ -51,6 +63,7 @@ export function Tooltip({
   children,
   label,
   placement = "right",
+  align = "start",
   delayMs = 250,
   className,
   resetKey
@@ -61,6 +74,15 @@ export function Tooltip({
   const hostRef = useRef<HTMLSpanElement>(null);
   const bubbleRef = useRef<HTMLSpanElement>(null);
   const [style, setStyle] = useState<CSSProperties>({ visibility: "hidden" });
+  // A press answers the question the tooltip was asking, and the pointer stays
+  // parked on the control afterwards. Chromium also focuses the pressed button,
+  // so without this the focus that follows the press re-opened the bubble and it
+  // stayed on screen — duplicating the label the action had just revealed and
+  // shadowing that text for anything matching it. Leaving the control re-arms
+  // the explanation, so the next hover still describes the button, and a
+  // keyboard visit re-arms it too: the suppression answers a pointer press, not
+  // a keyboard user.
+  const pressDismissed = useRef(false);
 
   function clearOpenTimer() {
     if (openTimer.current !== null) {
@@ -70,6 +92,9 @@ export function Tooltip({
   }
 
   function openAfterDelay() {
+    if (pressDismissed.current) {
+      return;
+    }
     clearOpenTimer();
     if (
       delayMs <= 0 ||
@@ -85,6 +110,9 @@ export function Tooltip({
   }
 
   function openNow() {
+    if (pressDismissed.current) {
+      return;
+    }
     clearOpenTimer();
     setIsOpen(true);
   }
@@ -92,6 +120,58 @@ export function Tooltip({
   function close() {
     clearOpenTimer();
     setIsOpen(false);
+  }
+
+  /**
+   * `:focus-visible` is the browser's own answer to "was this focus from the
+   * keyboard?", which is exactly the visit the press suppression must not
+   * swallow. A trigger that cannot be asked keeps the suppression.
+   */
+  function isKeyboardFocus(element: HTMLElement) {
+    try {
+      return element.matches(":focus-visible");
+    } catch {
+      return false;
+    }
+  }
+
+  function press(event: PointerEvent<HTMLElement>) {
+    // Only the primary button acts on the control, so a secondary press must not
+    // swallow the explanation. It still dismisses it: the bubble renders above
+    // the context menu layer, and a bubble left over a freshly opened menu would
+    // paint on top of that menu. Dismissing without arming keeps a later
+    // keyboard visit free to explain the control again.
+    if (event.button !== 0) {
+      close();
+      return;
+    }
+    pressDismissed.current = true;
+    close();
+  }
+
+  function focus(event: FocusEvent<HTMLElement>) {
+    // `target` rather than `currentTarget`: focus also arrives from a control
+    // nested inside the wrapped trigger, and that visit is still a keyboard one.
+    const focused = event.target;
+    if (
+      pressDismissed.current &&
+      focused instanceof HTMLElement &&
+      isKeyboardFocus(focused)
+    ) {
+      pressDismissed.current = false;
+    }
+    openNow();
+  }
+
+  /**
+   * Leaving the control re-arms the bubble. Suppression deliberately survives a
+   * blur: opening the pane a button controls can move focus off the button, and
+   * re-arming on that blur let a follow-up hover re-open the bubble over the
+   * label the action had just revealed.
+   */
+  function release() {
+    pressDismissed.current = false;
+    close();
   }
 
   useEffect(() => {
@@ -132,33 +212,66 @@ export function Tooltip({
     if (!host) {
       return;
     }
-    const anchor = host.getBoundingClientRect();
+    // The trigger is its own anchor. The measured placements keep the host out
+    // of layout (`display: contents`), so it has no box of its own and the first
+    // element child is the control the bubble explains.
+    const firstChild = host.firstElementChild;
+    const anchorElement = firstChild instanceof HTMLElement ? firstChild : host;
+    const anchor = anchorElement.getBoundingClientRect();
     const size = bubble?.getBoundingClientRect();
     const width = size?.width ?? 0;
     const height = size?.height ?? 0;
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
-    const wantsRight = placement === "right";
-    let left = wantsRight
-      ? anchor.right + TOOLTIP_ANCHOR_GAP_PX
-      : anchor.left - TOOLTIP_ANCHOR_GAP_PX - width;
-    if (left + width > viewportWidth - TOOLTIP_VIEWPORT_MARGIN_PX) {
-      const flipped = anchor.left - TOOLTIP_ANCHOR_GAP_PX - width;
-      left = flipped >= TOOLTIP_VIEWPORT_MARGIN_PX
-        ? flipped
-        : Math.max(TOOLTIP_VIEWPORT_MARGIN_PX, viewportWidth - TOOLTIP_VIEWPORT_MARGIN_PX - width);
-    }
-    if (left < TOOLTIP_VIEWPORT_MARGIN_PX) {
-      left = TOOLTIP_VIEWPORT_MARGIN_PX;
-    }
-    const centered = anchor.top + anchor.height / 2 - height / 2;
-    const top = Math.min(
-      Math.max(centered, TOOLTIP_VIEWPORT_MARGIN_PX),
-      Math.max(
-        TOOLTIP_VIEWPORT_MARGIN_PX,
-        viewportHeight - TOOLTIP_VIEWPORT_MARGIN_PX - height
-      )
+    const maxLeft = Math.max(
+      TOOLTIP_VIEWPORT_MARGIN_PX,
+      viewportWidth - TOOLTIP_VIEWPORT_MARGIN_PX - width
     );
+    let left: number;
+    let top: number;
+    if (placement === "right") {
+      left = anchor.right + TOOLTIP_ANCHOR_GAP_PX;
+      if (left + width > viewportWidth - TOOLTIP_VIEWPORT_MARGIN_PX) {
+        const flipped = anchor.left - TOOLTIP_ANCHOR_GAP_PX - width;
+        left = flipped >= TOOLTIP_VIEWPORT_MARGIN_PX ? flipped : maxLeft;
+      }
+      if (left < TOOLTIP_VIEWPORT_MARGIN_PX) {
+        left = TOOLTIP_VIEWPORT_MARGIN_PX;
+      }
+      const centered = anchor.top + anchor.height / 2 - height / 2;
+      top = Math.min(
+        Math.max(centered, TOOLTIP_VIEWPORT_MARGIN_PX),
+        Math.max(
+          TOOLTIP_VIEWPORT_MARGIN_PX,
+          viewportHeight - TOOLTIP_VIEWPORT_MARGIN_PX - height
+        )
+      );
+    } else {
+      // The shared resolver owns above/below geometry: it keeps `start`/`end`
+      // logical for an RTL root, flips the side that cannot fit, and clamps the
+      // result, so a bubble cannot drift from the other floating panels. The
+      // tooltip keeps its own tighter margins because a bubble sits next to
+      // text rather than over a pane.
+      const resolved = resolveFloatingPlacement({
+        align,
+        anchor: {
+          bottom: anchor.bottom,
+          left: anchor.left,
+          right: anchor.right,
+          top: anchor.top
+        },
+        blockSize: height,
+        // Root `dir` is Rust-owned locale profile output; the bubble only reads it.
+        direction: document.documentElement.dir === "rtl" ? "rtl" : "ltr",
+        gap: TOOLTIP_ANCHOR_GAP_PX,
+        inlineSize: width,
+        margin: TOOLTIP_VIEWPORT_MARGIN_PX,
+        placement,
+        viewport: { height: viewportHeight, width: viewportWidth }
+      });
+      left = resolved.left;
+      top = resolved.top;
+    }
     const next: CSSProperties = {
       position: "fixed",
       left: `${left}px`,
@@ -170,7 +283,7 @@ export function Tooltip({
     setStyle((previous) =>
       previous.left === next.left && previous.top === next.top ? previous : next
     );
-  }, []);
+  }, [placement, align]);
 
   useLayoutEffect(() => {
     if (!isOpen) {
@@ -178,7 +291,7 @@ export function Tooltip({
       return;
     }
     positionBubble();
-  }, [isOpen, label, placement, positionBubble]);
+  }, [isOpen, label, placement, align, positionBubble]);
 
   // A focused trigger can stay open while its pane scrolls or the window
   // resizes, so the bubble follows the anchor instead of staying behind.
@@ -198,14 +311,15 @@ export function Tooltip({
   const triggerProps: TooltipTriggerProps = {
     "aria-describedby": isOpen ? tooltipId : undefined,
     onBlur: close,
-    onFocus: openNow,
+    onFocus: focus,
     onKeyDown: (event) => {
       if (event.key === "Escape") {
         close();
       }
     },
     onMouseEnter: openAfterDelay,
-    onMouseLeave: close
+    onMouseLeave: release,
+    onPointerDown: press
   };
 
   const bubble = (
@@ -221,11 +335,16 @@ export function Tooltip({
     </span>
   );
 
+  const hostClassName = [
+    "tooltip-host",
+    placement === "right" ? null : "tooltip-host-anchored",
+    className
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <span
-      className={`tooltip-host tooltip-host-floating${className ? ` ${className}` : ""}`}
-      ref={hostRef}
-    >
+    <span className={hostClassName} ref={hostRef}>
       {children(triggerProps)}
       {isOpen ? <FloatingLayer>{bubble}</FloatingLayer> : null}
     </span>

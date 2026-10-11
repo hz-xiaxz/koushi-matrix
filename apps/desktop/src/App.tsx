@@ -1,5 +1,6 @@
 import { HelpDialog } from "./components/HelpDialog";
 import { DesktopUpdates } from "./components/DesktopUpdates";
+import { Tooltip } from "./components/Tooltip";
 import { ModalDialog, useModalFocusTracking } from "./components/ModalDialog";
 import { AddExistingRoomDialog } from "./components/AddExistingRoomDialog";
 import {
@@ -7144,16 +7145,21 @@ function AccountContent({
         {eventNavigation?.kind === "failed" ? (
           <div className="navigation-failure" role="alert">
             <p className="navigation-failure-text">{t("navigation.failed")}</p>
-            <button
-              className="icon-button"
-              type="button"
-              aria-label={t("navigation.failedDismiss")}
-              onClick={() => {
-                settleCommandInBackground(api.dismissEventNavigationFailure());
-              }}
-            >
-              <X size={ICON_SIZE.small} />
-            </button>
+            <Tooltip label={t("navigation.failedDismiss")} placement="below" align="end">
+              {(tooltipProps) => (
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label={t("navigation.failedDismiss")}
+                  onClick={() => {
+                    settleCommandInBackground(api.dismissEventNavigationFailure());
+                  }}
+                  {...tooltipProps}
+                >
+                  <X size={ICON_SIZE.small} />
+                </button>
+              )}
+            </Tooltip>
           </div>
         ) : null}
       <div

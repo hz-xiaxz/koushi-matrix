@@ -1,6 +1,7 @@
 import { createContext, useEffect, useLayoutEffect, useRef, type ComponentPropsWithRef, type ReactNode, type RefObject } from "react";
 import { X } from "lucide-react";
 import { t } from "../i18n/messages";
+import { Tooltip } from "./Tooltip";
 
 export const ModalPortalContext = createContext<RefObject<HTMLDialogElement | null> | null>(null);
 
@@ -119,9 +120,26 @@ export function ModalDialog({ title, className = "", dismissible = true, showClo
     <NativeModal className={`app-modal ${className}`} aria-label={title} dismissible={dismissible} onDismiss={onClose}>
       <header className="app-modal-header">
         <h2>{title}</h2>
-        {showCloseButton ? <button type="button" className="icon-button" aria-label={t("action.close", { title })} disabled={!dismissible} onClick={onClose}>
-          <X size={20} aria-hidden="true" />
-        </button> : null}
+        {showCloseButton ? (
+          <Tooltip
+            label={t("action.close", { title })}
+            placement="below"
+            align="end"
+          >
+            {(tooltipProps) => (
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={t("action.close", { title })}
+                disabled={!dismissible}
+                onClick={onClose}
+                {...tooltipProps}
+              >
+                <X size={20} aria-hidden="true" />
+              </button>
+            )}
+          </Tooltip>
+        ) : null}
       </header>
       {headerContent ? <div className="app-modal-header-content">{headerContent}</div> : null}
       {children}

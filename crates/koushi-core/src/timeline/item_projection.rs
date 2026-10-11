@@ -9,10 +9,10 @@ use koushi_sdk::MatrixUserProfile;
 use koushi_search::{AttachmentDocument, SensitiveString};
 use koushi_state::UserProfile;
 use koushi_state::{
-    AppAction, AttachmentKind, AvatarImage, AvatarThumbnailState, ComposerDocument, ComposerInline,
-    LiveEventReceiptSummaryUpdate, LiveEventReceipts, LiveReadReceipt, MentionIntent,
-    MentionTarget, ReceiptScope, ReplyQuote, ReplyQuoteCodeBlock, ReplyQuoteFormattedBody,
-    ReplyQuoteState,
+    AppAction, AttachmentKind, AvatarImage, AvatarThumbnailState, ComposerDocument,
+    ComposerFormattingOptions, ComposerInline, LiveEventReceiptSummaryUpdate, LiveEventReceipts,
+    LiveReadReceipt, MentionIntent, MentionTarget, ReceiptScope, ReplyQuote, ReplyQuoteCodeBlock,
+    ReplyQuoteFormattedBody, ReplyQuoteState,
 };
 
 use matrix_sdk::attachment::{AttachmentInfo, BaseFileInfo, BaseImageInfo, Thumbnail};
@@ -163,6 +163,7 @@ impl TimelineActor {
         request_id: RequestId,
         event_id: String,
         document: ComposerDocument,
+        formatting_options: ComposerFormattingOptions,
     ) {
         // Edits go through the SDK Timeline so the Set diff on the original
         // item is produced locally (send-queue local echo) instead of
@@ -208,7 +209,8 @@ impl TimelineActor {
                 None,
                 None,
             );
-            let content = edited_document_content_for_edit_target(target, &document);
+            let content =
+                edited_document_content_for_edit_target(target, &document, formatting_options);
             trace_message_edit_target(target, &content);
             let (final_mention_count, revision_mention_count) =
                 mention_counts_for_edit(target, &content);
@@ -4020,9 +4022,10 @@ fn edit_target_msgtype<'items>(
 fn edited_document_content_for_edit_target(
     msgtype: Option<&MessageType>,
     document: &ComposerDocument,
+    formatting_options: ComposerFormattingOptions,
 ) -> EditedContent {
     let body = document.plain_body();
-    let formatted_body = document.formatted_body();
+    let formatted_body = document.formatted_body_with_options(formatting_options);
     let mentions = document.mention_intent();
     if msgtype.is_some_and(msgtype_carries_editable_caption) {
         return EditedContent::MediaCaption {
@@ -4433,6 +4436,9 @@ fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFail
         _ => TimelineFailureKind::Sdk,
     }
 }
+
+#[cfg(test)]
+mod edit_formatting_tests;
 
 #[cfg(test)]
 mod tests;
