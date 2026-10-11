@@ -525,15 +525,34 @@ plus US English; it needs a Hunspell dictionary for each language, such as
 
 ### Windows users
 
-Just run the following commands.
+Close Koushi, then run the following commands from the repository root. The
+commands remove previous generated NSIS installers before building and select
+the installer matching the checked-out source version. PowerShell must check
+each external command's exit code so a failed build cannot install an old file.
 
 ```powershell
+$ErrorActionPreference = 'Stop'
 git submodule update --init --recursive vendor/matrix-rust-sdk
+if ($LASTEXITCODE -ne 0) { throw 'SDK submodule update failed' }
 node scripts/check-sdk-submodule.mjs
+if ($LASTEXITCODE -ne 0) { throw 'SDK submodule check failed' }
+npm --prefix apps/desktop audit --package-lock-only --audit-level=high
+if ($LASTEXITCODE -ne 0) { throw 'Dependency security audit failed' }
 npm --prefix apps/desktop ci
+if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+
+$nsisDir = Join-Path (Get-Location).Path 'target/x86_64-pc-windows-msvc/release/bundle/nsis'
+if (Test-Path -LiteralPath $nsisDir) {
+    Get-ChildItem -LiteralPath $nsisDir -Filter *.exe -File |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName }
+}
 npm --prefix apps/desktop run build:windows
-$installer = Get-ChildItem "target/x86_64-pc-windows-msvc/release/bundle/nsis" -Filter *.exe | Select-Object -First 1
-Start-Process $installer.FullName -ArgumentList '/S' -Wait
+if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
+
+$version = (Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+$installer = Get-Item -LiteralPath (Join-Path $nsisDir "Koushi_${version}_x64-setup.exe")
+$process = Start-Process $installer.FullName -ArgumentList '/S' -Wait -PassThru
+if ($process.ExitCode -ne 0) { throw "Installation failed: exit code $($process.ExitCode)" }
 ```
 
 ## Deterministic README screenshot
