@@ -956,7 +956,7 @@ impl<R: tauri::Runtime> ApplicationExit for tauri::AppHandle<R> {
 // Restart-after-shutdown barrier shared by every updater install backend. It
 // is compiled where a backend can request a relaunch and in the
 // platform-neutral restart-barrier tests (see app_updates.rs).
-#[cfg(any(koushi_updater_backend, test))]
+#[cfg(any(target_os = "macos", test))]
 fn request_application_restart_with(
     quit_stage: &AtomicU8,
     restart_after_shutdown: &AtomicBool,
@@ -975,7 +975,7 @@ fn request_application_restart_with(
     }
 }
 
-#[cfg(koushi_updater_backend)]
+#[cfg(target_os = "macos")]
 pub(crate) fn request_application_restart(app: &tauri::AppHandle) {
     let core_state = app.state::<CoreRuntimeState>();
     request_application_restart_with(
@@ -1088,6 +1088,64 @@ fn claim_core_shutdown(quit_stage: &AtomicU8) -> bool {
             Ordering::Acquire,
         )
         .is_ok()
+}
+
+#[cfg(test)]
+mod windows_update_shutdown_tests;
+
+#[cfg(any(windows, test))]
+async fn prepare_windows_update_install(
+    updater: impl std::future::Future<Output = ()>,
+    core: impl std::future::Future<Output = CoreExitOutcome>,
+    install: impl FnOnce()
+        -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ()>> + Send>>,
+) -> Result<(), ()> {
+    updater.await;
+    if core.await != CoreExitOutcome::Completed {
+        return Err(());
+    }
+    install().await
+}
+
+#[cfg(windows)]
+pub(crate) fn claim_windows_update_shutdown(app: &tauri::AppHandle) -> bool {
+    claim_core_shutdown(&app.state::<CoreRuntimeState>().quit_stage)
+}
+
+#[cfg(windows)]
+pub(crate) fn begin_windows_update_shutdown(
+    app: tauri::AppHandle,
+    updater: impl std::future::Future<Output = ()> + Send + 'static,
+    install: impl FnOnce() -> Result<(), ()> + Send + 'static,
+) -> tauri::async_runtime::JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
+        let core_state = app.state::<CoreRuntimeState>();
+        let result =
+            prepare_windows_update_install(updater, stop_core_state_for_exit(&core_state), || {
+                Box::pin(async move {
+                    tauri::async_runtime::spawn_blocking(install)
+                        .await
+                        .unwrap_or(Err(()))
+                })
+            })
+            .await;
+        // Successful installer launch exits within Tauri. Any return means the
+        // process must exit normally; Core has either stopped or failed cleanup.
+        if result.is_err() {
+            koushi_diagnostics::record(DiagnosticEvent::new(
+                DiagnosticLevel::Warn,
+                "desktop.lifecycle",
+                "windows_update_failed",
+            ));
+        }
+        core_state
+            .restart_after_shutdown
+            .store(false, Ordering::Release);
+        core_state
+            .quit_stage
+            .store(QuitStage::ForcedExit.repr(), Ordering::Release);
+        app.exit(0);
+    })
 }
 
 /// Hold the exit, shut the core runtime down, then exit for real.
@@ -1284,7 +1342,7 @@ pub fn run() {
         }));
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         builder = builder.plugin(
             tauri_plugin_updater::Builder::new()

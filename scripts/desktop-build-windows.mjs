@@ -8,7 +8,8 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,6 +34,8 @@ const args = new Set(process.argv.slice(2));
 const modes = ["--build-only", "--bundle-only"].filter((mode) => args.has(mode));
 const mode = modes[0] ?? "--trial";
 const signedInput = args.has("--signed-input");
+const updater = args.has("--updater");
+const updaterPublicKey = process.env.KOUSHI_UPDATER_PUBLIC_KEY?.trim();
 // Windows has no bare npm executable: route child processes through cmd.exe
 // (shell: true) so .cmd shims like npm.cmd resolve via PATHEXT. spawnSync
 // returns {error} on ENOENT instead of throwing, so surface it explicitly.
@@ -59,6 +62,11 @@ if (process.platform !== "win32" && !args.has("--print-command")) {
 
 printStorageNotice();
 
+if (updater && (!updaterPublicKey || !process.env.TAURI_SIGNING_PRIVATE_KEY?.trim())) {
+  console.error("desktop-build-windows: updater requires KOUSHI_UPDATER_PUBLIC_KEY and TAURI_SIGNING_PRIVATE_KEY");
+  process.exit(1);
+}
+
 const buildCommand = ["run", "tauri", "--"];
 if (mode === "--build-only") {
   buildCommand.push("build");
@@ -71,9 +79,25 @@ if (mode === "--build-only") {
   buildCommand.push("--bundles", "nsis");
 }
 buildCommand.push("--target", "x86_64-pc-windows-msvc");
+if (updater) {
+  buildCommand.push("--config", JSON.stringify({
+    bundle: { createUpdaterArtifacts: true },
+    plugins: { updater: { pubkey: updaterPublicKey } }
+  }));
+}
 if (args.has("--print-command")) {
   console.log(`desktop-build-windows: npm ${buildCommand.join(" ")}`);
   process.exit(0);
+}
+
+// cmd.exe consumes JSON quotes in shell arguments. Use a config file for real
+// Windows builds; the file contains only public configuration, never secrets.
+let configDirectory;
+if (updater) {
+  configDirectory = mkdtempSync(join(tmpdir(), "koushi-updater-config-"));
+  const configPath = join(configDirectory, "updater.json");
+  writeFileSync(configPath, buildCommand[buildCommand.length - 1], "utf8");
+  buildCommand[buildCommand.length - 1] = `"${configPath}"`;
 }
 
 if (!args.has("--skip-preflight")) {
@@ -85,6 +109,7 @@ if (mode === "--bundle-only" && signedInput) {
   validateFile(executable, "signed main executable");
 }
 run("npm", buildCommand, desktopDir);
+if (configDirectory) rmSync(configDirectory, { recursive: true, force: true });
 
 if (mode === "--build-only") {
   validateFile(executable, "main executable", buildStartMs);
@@ -104,6 +129,7 @@ if (installers.length !== 1) {
 
 const installer = installers[0];
 validateFile(installer, "NSIS installer", buildStartMs);
+if (updater) validateFile(`${installer}.sig`, "updater signature", buildStartMs);
 
 const sha256 = sha256Of(installer);
 console.log(
@@ -168,7 +194,7 @@ function printStorageNotice() {
 
 function printUsage() {
   console.log(
-    "Usage: npm --prefix apps/desktop run build:windows [-- --build-only|--bundle-only [--signed-input]|--print-command|--skip-preflight]"
+    "Usage: npm --prefix apps/desktop run build:windows [-- --build-only|--bundle-only [--signed-input]|--updater|--print-command|--skip-preflight]"
   );
   console.log("Builds or bundles the Windows x64 NSIS installer via Tauri.");
   printStorageNotice();

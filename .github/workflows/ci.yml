@@ -203,6 +203,8 @@ jobs:
         run: node scripts/check-sdk-submodule.mjs
       - name: Release version checker tests
         run: node --test scripts/desktop-release-version.test.mjs
+      - name: Updater manifest tests
+        run: node --test scripts/desktop-updater-manifest.test.mjs
       # Every PR, not only a release PR: a stale Cargo.lock version is rewritten
       # by the next `cargo` command on any branch, so the release bump would
       # otherwise land in an unrelated PR (observed after v0.11.1).

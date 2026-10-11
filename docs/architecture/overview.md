@@ -1241,10 +1241,15 @@ versions, verify signatures, retain update bytes, or replace an application.
 
 The projection is platform-neutral (`unsupported`, `idle`, `up_to_date`,
 `checking`, `available`, `downloading`, `ready`, `failed`, or `installing`).
-macOS arm64 is install-capable. Windows has a notification-only backend: it
-checks public GitHub Releases and exposes the selected release URL, but never
-downloads or installs an artifact until signed artifacts and an approved
-install contract are available. Linux remains `unsupported` until a separate
+macOS arm64 is install-capable. Windows builds with an embedded updater public
+key use signed NSIS updates; builds without it check public GitHub Releases
+and expose a notification-only release URL. Windows installation atomically
+transfers the verified artifact to the shutdown coordinator, stops and joins
+the updater, then requires successful Core shutdown before invoking Tauri's
+installer. Tauri terminates the process after launching NSIS; NSIS owns relaunch.
+Core shutdown failure or timeout suppresses installation. An installer failure
+after Core shutdown produces a coarse diagnostic and ordinary exit, requiring
+manual reopening. Linux remains `unsupported` until a separate
 change provides an install backend; normal installer builds must not require
 the macOS updater signing secret.
 
@@ -1276,7 +1281,7 @@ CI with a fake backend. A backend supplies only capability, feed access and
 signature verification, artifact installation, and the native relaunch
 request, behind the `Backend` trait. The `koushi_updater_backend` cfg, set by
 the desktop `build.rs`, marks targets that ship an update backend: macOS is
-install-capable and Windows is currently notification-only. Linux compiles
+install-capable and Windows capability depends on its embedded public key. Linux compiles
 against an uninhabited placeholder, so it reports `unsupported` and never
 starts update work. A future Linux backend implements the same trait and
 enables that cfg. It reuses the engine unchanged and must first settle which
@@ -1297,12 +1302,13 @@ other targets do not probe a marker.
 The update adapter owns one serialized lifecycle and one cancellable worker.
 Generation-fenced completions and candidate-specific download approval prevent
 overlapping triggers or channel changes from substituting an unapproved release.
-Successful installation requests an ordinary graceful shutdown first: join the
+On macOS, successful installation requests an ordinary graceful shutdown first: join the
 updater worker, settle Core shutdown, and only then issue the native relaunch.
 Core exposes an event-based, cancellation-safe shutdown completion after its
 account and lifecycle cleanup. A failed/timed-out Core shutdown forces an
 explicitly diagnosed ordinary exit, suppressing relaunch; the bounded Core wait
-starts only after any active native installer has settled.
+starts only after any active native installer has settled on macOS. On Windows,
+the Core deadline applies before native installation starts.
 
 ### Desktop Viewport Synchronization
 

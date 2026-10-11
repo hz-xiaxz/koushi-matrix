@@ -78,10 +78,13 @@ that release stays selected; the pre-release switch is disabled until the
 download/install flow ends. Turning automatic checks off does not remove an
 already offered release or stop a manually requested check.
 
-On Windows, the same check compares the installed version with public GitHub
-Releases. When a newer version is found, Koushi shows a notification-only
-result and opens that specific Release page; it does not download or install
-the update. Linux builds remain unsupported by the in-app updater.
+On Windows, release builds with updater trust material offer separate download
+and restart-to-install actions. Downloads are signature-verified before they
+become ready. Koushi closes its sessions before launching the installer, which
+reopens the updated app. Builds without updater trust material show a
+notification and open that specific Release page instead. Windows installers
+remain Authenticode-unsigned pending code-signing approval, so Windows may
+still show publisher warnings. Linux builds remain unsupported by the in-app updater.
 
 On macOS, dialogs and viewers leave space above their contents for the standard
 window buttons. Small windows scroll within the dialog. Escape closes the

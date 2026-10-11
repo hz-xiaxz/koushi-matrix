@@ -5571,9 +5571,16 @@ stateDiagram-v2
   also expose the selected public release URL; they cannot enter download or
   install. `ready` exposes the release version. `failed` exposes only a coarse
   stage/kind and is recoverable; it never blocks startup or login.
-- Installation and relaunch require explicit user intent. macOS is the only
-  install-capable platform in this phase. Windows may reach notification-only
-  `available` and opens the selected Release page; Linux remains `unsupported`.
+- Installation and relaunch require explicit user intent. Windows builds with
+  an embedded updater key use signed NSIS updates; no-key builds remain
+  notification-only. On Windows, `Ready` transfers its verified artifact once
+  to the shutdown coordinator while stopping updater admission. The coordinator
+  joins the updater and requires successful Core cleanup before invoking the
+  installer, which terminates the process and owns relaunch. Core failure or
+  timeout prevents installation. Installer failure after cleanup causes a
+  coarse diagnostic and ordinary exit, not a recoverable stopped-Core UI.
+  Concurrent install/quit requests share the atomic shutdown claim. Linux
+  remains `unsupported`.
 - `unsupported` carries a `reason`. `reason: build` means this target has no
   install backend or this build has no updater trust material; `reason:
   package_managed` means a distribution package that owns the installed files
@@ -5584,14 +5591,14 @@ stateDiagram-v2
   `unsupported` never transitions to `idle`, `checking`, or any other state at
   runtime: no trigger in it claims work, emits a feed request, or constructs an
   installer process (`pkexec`, `sudo`, `dpkg`, `rpm`).
-- A successful installation records relaunch intent and enters the ordinary
+- On macOS, a successful installation records relaunch intent and enters the ordinary
   graceful-shutdown barrier. The updater owner must finish and Core shutdown
   must settle before the final native restart request. A native restart event
   that cannot be prevented is not itself a shutdown barrier.
 - Core completion acknowledges AccountActor cleanup, not merely submission of
   its shutdown message. Waiters may cancel without losing the completion signal;
   abnormal owner termination is a failure, never a successful acknowledgement.
-- After the updater (including any active native installer) settles, Core command
+- On macOS, after the updater (including any active native installer) settles, Core command
   submission and acknowledged cleanup share a ten-second deadline. On timeout or
   failure, record a coarse forced-exit diagnostic and authorize ordinary exit,
   never automatic restart. This fallback does not assert persistence succeeded;
