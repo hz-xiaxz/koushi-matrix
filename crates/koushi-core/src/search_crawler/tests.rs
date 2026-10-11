@@ -256,6 +256,137 @@ async fn crawler_page_reads_persisted_history_without_hydrating_the_room_cache()
     );
 }
 
+/// Stage A acceptance: the decided history is on disk but outside the resident
+/// window, and indexing it adds nothing back to that window.
+///
+/// A crawl that also hydrated the chunks it read would pass the earlier
+/// store-only test, because that fixture was small enough to stay resident. This
+/// one spans several linked chunks (the SDK chunk capacity is 128), drops the
+/// older chunks from the resident window through the public subscriber-release
+/// path, and then requires the crawl to reach every stored document without the
+/// network and without growing the resident counters.
+#[tokio::test]
+async fn crawler_page_indexes_history_that_is_not_resident() {
+    const FETCHED_EVENTS: usize = 300;
+
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let room_id = room_id!("!nonresident:example.invalid");
+    let f = EventFactory::new()
+        .room(room_id)
+        .sender(user_id!("@crawler:test.invalid"));
+    client
+        .event_cache()
+        .subscribe()
+        .expect("event cache subscription");
+    let fetched = (0..FETCHED_EVENTS)
+        .map(|index| {
+            let id = matrix_sdk::ruma::OwnedEventId::try_from(format!(
+                "$nonresident{index}:example.invalid"
+            ))
+            .expect("event id");
+            f.text_msg(format!("history body {index}")).event_id(&id)
+        })
+        .collect::<Vec<_>>();
+    server
+        .mock_sync()
+        .ok_and_run(&client, |builder| {
+            builder.add_joined_room(
+                JoinedRoomBuilder::new(room_id)
+                    .set_timeline_limited()
+                    .set_timeline_prev_batch("nonresident-prev")
+                    .add_timeline_event(
+                        f.text_msg("newest")
+                            .event_id(event_id!("$nonresident-newest")),
+                    ),
+            );
+        })
+        .await;
+    // `mock_once`: the second crawl must reach every document from the store, so
+    // a second `/messages` request would fail it instead of completing.
+    server
+        .mock_room_messages()
+        .match_from("nonresident-prev")
+        .ok(RoomMessagesResponseTemplate::default().events(fetched))
+        .mock_once()
+        .mount()
+        .await;
+
+    let session = session_for(&client, &server);
+    let first = HistoryCrawlCheckpoint::new(
+        room_id.to_string(),
+        SearchCrawlerSettings::default(),
+        1,
+        true,
+    );
+    let (.., first_messages, first_completed) =
+        drain_crawl_pages(session.clone(), AccountWorkScheduler::default(), first, 4).await;
+    assert!(
+        first_completed,
+        "the backfill crawl should reach the start of the room"
+    );
+    assert_eq!(
+        upserted_ids(&first_messages).len(),
+        FETCHED_EVENTS + 1,
+        "the backfill indexes the persisted window and the paginated history"
+    );
+
+    // Release the room's resident window through the public subscriber path. The
+    // store keeps every chunk; only the in-memory window shrinks to the newest
+    // chunk, which is what makes the second crawl's evidence meaningful.
+    let room = client.get_room(room_id).expect("joined room");
+    let (cache, _drop_handles) = room.event_cache().await.expect("room event cache");
+    let (_events, subscriber) = cache.subscribe().await.expect("room subscription");
+    drop(subscriber);
+    let mut resident_after_release = client.event_cache().memory_diagnostics().await;
+    for _ in 0..100 {
+        if resident_after_release.events < (FETCHED_EVENTS + 1) as u64 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        resident_after_release = client.event_cache().memory_diagnostics().await;
+    }
+    assert!(
+        resident_after_release.events < (FETCHED_EVENTS + 1) as u64,
+        "the resident window should have shrunk below the stored history: {resident_after_release:?}"
+    );
+    let visible_before = cache.events().await.expect("cached timeline events").len();
+
+    let second = HistoryCrawlCheckpoint::new(
+        room_id.to_string(),
+        SearchCrawlerSettings::default(),
+        1,
+        true,
+    );
+    let (checkpoint, second_messages, second_completed) =
+        drain_crawl_pages(session, AccountWorkScheduler::default(), second, 4).await;
+    assert!(
+        second_completed,
+        "the stored chunks hold the whole history, so the walk reaches its start"
+    );
+    assert_eq!(
+        checkpoint.history_source,
+        CrawlHistorySource::Store,
+        "a complete local store must not need the network"
+    );
+    assert_eq!(
+        upserted_ids(&second_messages).len(),
+        FETCHED_EVENTS + 1,
+        "every stored document is reachable from the persisted walk"
+    );
+
+    let resident_after = client.event_cache().memory_diagnostics().await;
+    let visible_after = cache.events().await.expect("cached timeline events").len();
+    assert_eq!(
+        resident_after.events, resident_after_release.events,
+        "indexing must not add resident history to the room timeline"
+    );
+    assert_eq!(
+        visible_after, visible_before,
+        "indexing must not grow the resident room window"
+    );
+}
+
 fn session_for(client: &matrix_sdk::Client, server: &MatrixMockServer) -> Arc<MatrixClientSession> {
     let session_info = SessionInfo {
         homeserver: server.server().uri(),
